@@ -29,6 +29,22 @@ import os, json, re, tempfile
 MEMORY_DIR = os.path.expanduser("~/.claude/memory")
 GRAPH_FILE  = os.path.join(MEMORY_DIR, "graph.json")
 
+def parse_inline_list(val):
+    """Parse an inline YAML flow sequence like [a, b, "c"] into a list.
+
+    Strips the surrounding brackets, splits on commas, trims whitespace,
+    strips matching quotes on each item, and drops empty items so [] yields
+    an empty list rather than one empty string.
+    """
+    items = []
+    for raw in val[1:-1].split(','):
+        item = raw.strip()
+        if len(item) >= 2 and item[0] == item[-1] and item[0] in ('"', "'"):
+            item = item[1:-1]
+        if item:
+            items.append(item)
+    return items
+
 def parse_frontmatter(content):
     """Parse YAML frontmatter between --- delimiters. Returns dict."""
     m = re.match(r'^---[ \t]*\n(.*?)\n---[ \t]*\n', content, re.DOTALL)
@@ -37,11 +53,19 @@ def parse_frontmatter(content):
     fm, result = m.group(1), {}
     current_key = current_kind = None
     buf_list, buf_dict = [], {}
+    pending_key, pending_list = None, []
+
+    def flush_pending():
+        nonlocal pending_key, pending_list
+        if pending_key is not None:
+            buf_dict[pending_key] = pending_list[:]
+            pending_key, pending_list = None, []
 
     def flush():
         nonlocal current_key, current_kind, buf_list, buf_dict
         if current_key is None:
             return
+        flush_pending()
         if current_kind == 'list':
             result[current_key] = buf_list[:]
         elif current_kind == 'dict':
@@ -58,14 +82,26 @@ def parse_frontmatter(content):
             if val:
                 result[current_key] = val
                 current_key = None
+        # A block-list item under a dict sub-key, e.g. "relates_to:" followed
+        # by more deeply indented "- item" lines, belongs to that sub-key.
+        elif current_key and pending_key and re.match(r'^\s{2,}- ', line):
+            pending_list.append(re.sub(r'^\s+-\s+', '', line).strip())
         elif current_key and re.match(r'^\s{2,}- ', line):
             current_kind = 'list'
             buf_list.append(re.sub(r'^\s+-\s+', '', line).strip())
         elif current_key and re.match(r'^\s{2,}\w', line):
             kv = re.match(r'^\s+([A-Za-z_]\w*):\s*(.*)', line)
             if kv:
+                flush_pending()
                 current_kind = 'dict'
-                buf_dict[kv.group(1)] = kv.group(2).strip()
+                sub_key, sub_val = kv.group(1), kv.group(2).strip()
+                if sub_val.startswith('[') and sub_val.endswith(']'):
+                    buf_dict[sub_key] = parse_inline_list(sub_val)
+                elif sub_val:
+                    buf_dict[sub_key] = sub_val
+                else:
+                    # No value on this line: a nested block list may follow.
+                    pending_key, pending_list = sub_key, []
     flush()
     return result
 
@@ -115,13 +151,15 @@ for dirpath, dirnames, filenames in os.walk(MEMORY_DIR):
             n['project'] = proj
         nodes.append(n)
 
-        # links: → edges
+        # links: → edges (one edge per target; a target may be a list)
         links = fm.get('links', {})
         if isinstance(links, dict):
             for relation, target in links.items():
-                target_id = (f'global/{target}' if scope == 'global'
-                             else f'{proj}/{target}')
-                edges.append({'from': nid, 'to': target_id, 'relation': relation})
+                targets = target if isinstance(target, list) else [target]
+                for one_target in targets:
+                    target_id = (f'global/{one_target}' if scope == 'global'
+                                 else f'{proj}/{one_target}')
+                    edges.append({'from': nid, 'to': target_id, 'relation': relation})
 
         # anchors: → code nodes + edges
         for anchor in (fm.get('anchors') or []):
