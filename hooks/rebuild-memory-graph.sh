@@ -121,7 +121,7 @@ def node_id(rel, scope, project):
     tail = '/'.join(base.split('/')[2:])
     return f'{project}/{tail}'
 
-nodes, edges, seen_code = [], [], set()
+nodes, edges, seen_code, pending_links = [], [], set(), []
 
 for dirpath, dirnames, filenames in os.walk(MEMORY_DIR):
     dirnames[:] = [d for d in dirnames if not d.startswith('.')]
@@ -151,15 +151,14 @@ for dirpath, dirnames, filenames in os.walk(MEMORY_DIR):
             n['project'] = proj
         nodes.append(n)
 
-        # links: → edges (one edge per target; a target may be a list)
+        # links: buffered here, resolved in pass 2 once every node id is
+        # known (one edge per target; a target may be a list).
         links = fm.get('links', {})
         if isinstance(links, dict):
             for relation, target in links.items():
                 targets = target if isinstance(target, list) else [target]
                 for one_target in targets:
-                    target_id = (f'global/{one_target}' if scope == 'global'
-                                 else f'{proj}/{one_target}')
-                    edges.append({'from': nid, 'to': target_id, 'relation': relation})
+                    pending_links.append((nid, relation, one_target, scope, proj))
 
         # anchors: → code nodes + edges
         for anchor in (fm.get('anchors') or []):
@@ -171,6 +170,25 @@ for dirpath, dirnames, filenames in os.walk(MEMORY_DIR):
                 nodes.append(cn)
                 seen_code.add(cid)
             edges.append({'from': nid, 'to': cid, 'relation': 'anchors'})
+
+# Pass 2: resolve buffered links now that every node id is known. A
+# project-scoped source resolves in its own scope first, then falls back
+# to global. A target found nowhere still emits the same-scope id, so the
+# edge is written and reads as dangling instead of being silently dropped.
+node_ids = {n['id'] for n in nodes}
+for from_id, relation, raw_target, src_scope, src_project in pending_links:
+    if src_scope == 'global':
+        target_id = f'global/{raw_target}'
+    else:
+        same_scope_id = f'{src_project}/{raw_target}'
+        global_id = f'global/{raw_target}'
+        if same_scope_id in node_ids:
+            target_id = same_scope_id
+        elif global_id in node_ids:
+            target_id = global_id
+        else:
+            target_id = same_scope_id
+    edges.append({'from': from_id, 'to': target_id, 'relation': relation})
 
 graph = {'nodes': nodes, 'edges': edges}
 fd, tmp = tempfile.mkstemp(dir=MEMORY_DIR, suffix='.json')
