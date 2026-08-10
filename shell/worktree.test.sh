@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: MIT
 #
-# worktree.test.sh: hermetic tests for shell/worktree.sh.
+# worktree.test.sh: hermetic tests for shell/shared/worktree.sh.
 # Covers the base-dir resolver, helper functions (unit, via zsh when available),
 # and end-to-end worktree creation in both bash and zsh.
 #
@@ -11,7 +11,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENGINE="${SCRIPT_DIR}/worktree.sh"
+ENGINE="${SCRIPT_DIR}/shared/worktree.sh"
 PASS=0
 FAIL=0
 SKIP=0

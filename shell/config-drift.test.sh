@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: MIT
 #
-# config-drift.test.sh: wiring tests for shell/cc/config-drift.zsh after the
+# config-drift.test.sh: wiring tests for shell/zsh/config-drift.zsh after the
 # dedupe refactor. Runs as a bash harness driving zsh subprocesses, HOME-isolated
 # to a scratch .claude tree.
 #
@@ -27,7 +27,7 @@ if ! command -v shasum >/dev/null 2>&1; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DRIFT_ZSH="${SCRIPT_DIR}/cc/config-drift.zsh"
+DRIFT_ZSH="${SCRIPT_DIR}/zsh/config-drift.zsh"
 CONFIG_HASH_SH="${SCRIPT_DIR}/../hooks/lib/config-hash.sh"
 # shellcheck source=hooks/lib/config-hash.sh
 source "$CONFIG_HASH_SH"

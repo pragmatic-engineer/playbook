@@ -339,6 +339,44 @@ scenario_comment_none() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario E: new-path source line (shell/zsh/cc.zsh) is also stripped.
+# Pins that an install made after the shell/bash/zsh/shared layout move
+# (which sources the new path directly, no shim) is fully uninstallable.
+# ---------------------------------------------------------------------------
+scenario_new_path() {
+    local d ch h
+    d="$(mktemp -d "$WORK/new_path.XXXXXX")"
+    ch="$d/claude"
+    h="$d/home"
+    mkdir -p "$ch" "$h"
+
+    assert_hermetic "$d" "$ch" "$h"
+
+    create_shipped "$ch"
+    printf '# BEFORE_SENTINEL\n\n# playbook launchers (cc/ccd)\nsource "$HOME/.claude/shell/zsh/cc.zsh"\n# AFTER_SENTINEL\n' \
+        > "$h/.zshrc"
+    local orig_lines
+    orig_lines=$(wc -l < "$h/.zshrc" | tr -d ' ')
+
+    CLAUDE_HOME="$ch" HOME="$h" bash "$UNINSTALL" --yes >/dev/null 2>&1 || {
+        echo "  uninstall.sh exited non-zero"; return 1
+    }
+
+    grep -qF 'shell/zsh/cc.zsh' "$h/.zshrc" && { echo "  new-path cc.zsh still in .zshrc"; return 1; }
+    grep -qxF '# BEFORE_SENTINEL' "$h/.zshrc" || { echo "  BEFORE_SENTINEL missing"; return 1; }
+    grep -qxF '# AFTER_SENTINEL'  "$h/.zshrc" || { echo "  AFTER_SENTINEL missing"; return 1; }
+
+    local after_lines
+    after_lines=$(wc -l < "$h/.zshrc" | tr -d ' ')
+    [ "$after_lines" -eq $(( orig_lines - 3 )) ] || {
+        echo "  .zshrc line count $after_lines != $(( orig_lines - 3 )) (orig=$orig_lines)"
+        return 1
+    }
+
+    [ -d "$d" ] || { echo "  SAFETY: temp root removed"; exit 1; }
+}
+
+# ---------------------------------------------------------------------------
 # Run all scenarios
 # ---------------------------------------------------------------------------
 run_scenario "A: basic uninstall removes shipped entries, preserves runtime" scenario_basic
@@ -347,6 +385,7 @@ run_scenario "C: --purge also removes settings.json, .settings.base.json, backup
 run_scenario "D1: old comment variant (# claude-config launchers) removed" scenario_comment_old
 run_scenario "D2: new comment variant (# playbook launchers) removed" scenario_comment_new
 run_scenario "D3: no-comment case (bare source line) removed" scenario_comment_none
+run_scenario "E: new-path variant (shell/zsh/cc.zsh) removed" scenario_new_path
 
 TOTAL=$(( PASS + FAIL ))
 echo ""
