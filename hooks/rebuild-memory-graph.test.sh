@@ -296,6 +296,137 @@ check_true 'true' "$g" "malformed frontmatter: graph.json is valid JSON"
 check_true '.nodes | any(.id=="global/no-frontmatter" and .type=="reference" and .name=="no-frontmatter")' "$g" "malformed frontmatter: absent-frontmatter fact falls back to defaults"
 check_true '.nodes | any(.id=="global/malformed-frontmatter" and .type=="reference")' "$g" "malformed frontmatter: unclosed frontmatter falls back to defaults"
 
+# --- 12: project fact links to a global fact, resolves cross-scope ---
+new_store
+write_fact "acme/widget/local-fact.md" <<'EOF'
+---
+name: local-fact
+type: reference
+links:
+  relates_to: [global-thing]
+---
+
+Body text.
+EOF
+write_fact "global-thing.md" <<'EOF'
+---
+name: global-thing
+type: reference
+---
+
+Body text.
+EOF
+run_hook_for "acme/widget/local-fact.md"
+g="$(GRAPH)"
+check "1" "$(jq '.edges|length' "$g")" "cross-scope resolve: edge count"
+check_true '.edges | any(.from=="acme/widget/local-fact" and .to=="global/global-thing" and .relation=="relates_to")' "$g" "cross-scope resolve: project fact reaches global target"
+
+# --- 13: own scope wins over a same-named global fact ---
+new_store
+write_fact "acme/widget/proj-source.md" <<'EOF'
+---
+name: proj-source
+type: reference
+links:
+  relates_to: [dup]
+---
+
+Body text.
+EOF
+write_fact "acme/widget/dup.md" <<'EOF'
+---
+name: dup
+type: reference
+---
+
+Body text.
+EOF
+write_fact "dup.md" <<'EOF'
+---
+name: dup
+type: reference
+---
+
+Body text.
+EOF
+run_hook_for "acme/widget/proj-source.md"
+g="$(GRAPH)"
+check_true '.edges | any(.from=="acme/widget/proj-source" and .to=="acme/widget/dup" and .relation=="relates_to")' "$g" "own scope wins: edge targets project dup"
+check_true '(.edges | any(.from=="acme/widget/proj-source" and .to=="global/dup")) | not' "$g" "own scope wins: edge does not fall through to global dup"
+
+# --- 14: a project link to a target that exists nowhere still dangles ---
+new_store
+write_fact "acme/widget/missing-source.md" <<'EOF'
+---
+name: missing-source
+type: reference
+links:
+  relates_to: nope
+---
+
+Body text.
+EOF
+run_hook_for "acme/widget/missing-source.md"
+g="$(GRAPH)"
+check "1" "$(jq '.edges|length' "$g")" "project dangling: edge still emitted"
+check "acme/widget/nope" "$(jq -r '.edges[0].to' "$g")" "project dangling: same-scope id used"
+check_true '(.nodes | map(.id) | index("acme/widget/nope")) == null' "$g" "project dangling: target node genuinely absent"
+
+# --- 15: a global source resolves in global, unaffected by the two-pass rework ---
+new_store
+write_fact "global-source.md" <<'EOF'
+---
+name: global-source
+type: reference
+links:
+  relates_to: global-target
+---
+
+Body text.
+EOF
+write_fact "global-target.md" <<'EOF'
+---
+name: global-target
+type: reference
+---
+
+Body text.
+EOF
+run_hook_for "global-source.md"
+g="$(GRAPH)"
+check "1" "$(jq '.edges|length' "$g")" "global source unaffected: edge count"
+check "global/global-source" "$(jq -r '.edges[0].from' "$g")" "global source unaffected: from"
+check "global/global-target" "$(jq -r '.edges[0].to' "$g")" "global source unaffected: to"
+
+# --- 16: anchors are unchanged when the same fact also carries links ---
+new_store
+write_fact "acme/widget/combo-fact.md" <<'EOF'
+---
+name: combo-fact
+type: reference
+links:
+  relates_to: [combo-target]
+anchors:
+  - src/combo.ts
+---
+
+Body text.
+EOF
+write_fact "acme/widget/combo-target.md" <<'EOF'
+---
+name: combo-target
+type: reference
+---
+
+Body text.
+EOF
+run_hook_for "acme/widget/combo-fact.md"
+g="$(GRAPH)"
+check "2" "$(jq '.edges|length' "$g")" "anchors regression pin: edge count"
+check_true '.nodes | any(.id=="code:acme/widget/src/combo.ts" and .type=="code" and .project=="acme/widget")' "$g" "anchors regression pin: code node unaffected"
+check_true '.edges | any(.from=="acme/widget/combo-fact" and .to=="code:acme/widget/src/combo.ts" and .relation=="anchors")' "$g" "anchors regression pin: anchors edge unaffected"
+check_true '.edges | any(.from=="acme/widget/combo-fact" and .to=="acme/widget/combo-target" and .relation=="relates_to")' "$g" "anchors regression pin: link edge still resolves"
+
 TOTAL=$((PASS + FAIL))
 echo ""
 echo "${PASS}/${TOTAL} scenarios passed"
