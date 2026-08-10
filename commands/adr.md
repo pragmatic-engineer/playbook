@@ -1,5 +1,5 @@
 ---
-description: Use when recording a significant, hard-to-reverse architectural decision. Creates a fact-checked ADR with an optional execution blueprint and saves it to .claude/adr/.
+description: Use when recording a significant, hard-to-reverse architectural decision. Creates a fact-checked ADR with an optional execution blueprint and saves it to docs/adr/.
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
 argument-hint: "<topic> [--record-only] [--list] [--help]"
 model: opus
@@ -17,8 +17,8 @@ Invoked as `/adr`. The remaining arguments are the topic and flags.
 No external config; these are fixed:
 
 - **Document:** Architecture Decision Record (ADR).
-- **Directory:** `.claude/adr/`, git-ignored, created on first use (same pattern as memory and plans).
-- **Filename:** `NNNN-{YYYYMMDD}-{kebab-title}.md` (zero-padded sequence + today's date + kebab title).
+- **Directory:** `docs/adr/`, tracked in git, created on first use. A decision record is shared history, so it belongs in the repo, not in a git-ignored scratch dir.
+- **Filename:** `NNNN-{kebab-title}.md` (zero-padded sequence + kebab title). The date lives in the record's own front matter, not the filename.
 - **Companion files:** blueprint at `{base}-blueprint.md`, quality report at `{base}-quality.md`, same directory.
 
 ## Help
@@ -34,7 +34,7 @@ USAGE:
 OPTIONS:
   --help         Show this help
   --record-only  Write the decision record without an execution blueprint
-  --list         List existing ADRs in .claude/adr/
+  --list         List existing ADRs in docs/adr/
 
 NOTE: every ADR should have a companion execution blueprint. Use --record-only
 only when the blueprint comes in a follow-up session.
@@ -45,7 +45,7 @@ EXAMPLES:
   /adr --record-only "deprecate v1 API"
   /adr --list
 
-Records save to .claude/adr/ (git-ignored) as NNNN-{YYYYMMDD}-{kebab}.md.
+Records save to docs/adr/ (tracked) as NNNN-{kebab}.md.
 ```
 
 ## Execution Rules (MUST)
@@ -59,7 +59,7 @@ Records save to .claude/adr/ (git-ignored) as NNNN-{YYYYMMDD}-{kebab}.md.
 
 ## Flag Handling
 
-- `--list`: list existing records in `.claude/adr/` (filenames + titles). If none exist, say so. Then stop.
+- `--list`: list existing records in `docs/adr/` (filenames + titles). If none exist, say so. Then stop.
 - `--record-only`: run Stages 1-2 but skip the execution blueprint.
 
 If no flags match, run the full workflow with the remaining text as the topic.
@@ -75,7 +75,7 @@ Invoke the `writing-style` skill (voice, banned words, prose rules) and the `gro
 
 Build understanding before writing. Skipping this produces records that don't survive contact with the codebase.
 
-1. **Read existing records** in `.claude/adr/` (if it exists) for precedent and numbering.
+1. **Read existing records** in `docs/adr/` (if it exists) for precedent and numbering.
 2. **Explore the codebase** with Read/Glob/Grep: modules and services affected by the topic, database schemas and migration history (if relevant), test patterns, configuration and deployment.
 3. **Read memory stores if present** (optional enhancement, not required): if `~/.claude/memory/MEMORY.md` exists, read it for cross-project preferences, corrections, and conventions. If `~/.claude/memory/<owner>/<repo>/MEMORY.md` exists (`<owner>/<repo>` derived from `git remote get-url origin`), read it for project-level decisions, conventions, gotchas, and patterns. Load the relevant fact files from each store that is present. Use what you find to inform Considered Alternatives (reference a named pattern where one applies) and to avoid re-proposing something already rejected. If both stores are present: a project fact that contradicts a global one wins for this repo; surface any conflict bearing on the decision rather than silently choosing. If no memory store is present, skip this step silently and proceed on the codebase alone.
 4. **Summarise findings to the user:** what's relevant to the topic, which areas are affected, existing patterns/constraints, and applicable patterns from memory if a memory store was present (with brief rationale).
@@ -90,15 +90,14 @@ Wait for the user to acknowledge before Stage 2.
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
-DIR="$ROOT/.claude/adr"
+DIR="$ROOT/docs/adr"
 mkdir -p "$DIR"
-grep -qxF '.claude/adr/' "$ROOT/.gitignore" 2>/dev/null || printf '.claude/adr/\n' >> "$ROOT/.gitignore"
 N=$(ls "$DIR" 2>/dev/null | grep -oE '^[0-9]{4}' | sort -rn | head -1)
 NEXT=$(printf '%04d' $(( 10#${N:-0} + 1 )))
-echo "Next number: $NEXT   Date: $(date +%Y%m%d)"
+echo "Next number: $NEXT   Date: $(date +%Y-%m-%d)"
 ```
 
-Filename: `{NEXT}-{YYYYMMDD}-{kebab-title}.md` in `$DIR`. Write the record directly there (never to a temp/local scratch path).
+Filename: `{NEXT}-{kebab-title}.md` in `$DIR`. Write the record directly there (never to a temp/local scratch path).
 
 ### Decision Record
 

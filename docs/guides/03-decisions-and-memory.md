@@ -17,16 +17,16 @@ The practical split: `/adr` produces a decision record plus an optional executio
 
 ### File layout
 
-Records save to `.claude/adr/` at the repo root. `/adr` adds that directory to `.gitignore` on first use. Each record follows the naming convention `NNNN-YYYYMMDD-<kebab-title>.md`. The blueprint lands at the same base name with a `-blueprint.md` suffix, and the quality report at `-quality.md`.
+Records save to `docs/adr/` and are tracked in git, because a decision record is shared history. Each record follows the naming convention `NNNN-<kebab-title>.md`, with the date in the record's own front matter. The blueprint lands at the same base name with a `-blueprint.md` suffix, and the quality report at `-quality.md`.
 
 ```
-.claude/adr/
-  0001-20260101-replace-polling-with-websocket.md
-  0001-20260101-replace-polling-with-websocket-blueprint.md
-  0001-20260101-replace-polling-with-websocket-quality.md
+docs/adr/
+  0001-replace-polling-with-websocket.md
+  0001-replace-polling-with-websocket-blueprint.md
+  0001-replace-polling-with-websocket-quality.md
 ```
 
-The blueprint is self-contained. Run `/implement .claude/adr/0001-...-blueprint.md` to execute it.
+The blueprint is self-contained. Run `/implement docs/adr/0001-...-blueprint.md` to execute it.
 
 ### Flags
 
