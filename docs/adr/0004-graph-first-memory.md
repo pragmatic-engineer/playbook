@@ -1,6 +1,6 @@
 # ADR 0004: Graph-first memory retrieval and triggered capture
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date created:** 2026-08-10
 - **Date modified:** 2026-08-10
 
