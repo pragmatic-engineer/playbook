@@ -58,25 +58,44 @@ fi
 # ── Project memory ──
 # Project facts live in the central store at ~/.claude/memory/<owner>/<repo>/,
 # where <owner>/<repo> is derived from the repo's origin remote. The whole
-# store is git-ignored at the .claude level. Inject the index lines only; fact
-# bodies are read on demand. No-op outside a git repo, with no origin remote,
-# or when the repo has no project store yet.
+# store is git-ignored at the .claude level. No-op outside a git repo, with
+# no origin remote, or when the repo has no project store yet.
+#
+# Preferred source: shell/memory-context.sh renders a repo-scoped slice of
+# the graph-first store, facts in scope, their typed edges, and an anchor
+# index mapping code paths to the facts that describe them; fact bodies are
+# read on demand. Fall back to the legacy MEMORY.md index when that script
+# is missing (a partial install where shell/ was not copied) or produces no
+# output (no graph yet). This runs on every session start, so every path
+# here must degrade to no memory block rather than an error.
 _repo_root="$(git --no-optional-locks rev-parse --show-toplevel 2>/dev/null)"
 _mem_slug="$(git --no-optional-locks remote get-url origin 2>/dev/null \
   | sed -E 's#\.git/?$##; s#^[a-zA-Z]+://##; s#^[^@/]+@##; s#^[^/:]+[:/]##')"
-if [[ -n "$_repo_root" && -n "$_mem_slug" && -f "$HOME/.claude/memory/$_mem_slug/MEMORY.md" ]]; then
-  _mem_index="$HOME/.claude/memory/$_mem_slug/MEMORY.md"
-  _mem_body="$(head -c 16000 "$_mem_index" 2>/dev/null)"
+_mem_body=""
+_mem_preamble=""
+if [[ -n "$_repo_root" && -n "$_mem_slug" ]]; then
+  _mem_script="$(dirname "$0")/../shell/memory-context.sh"
+  if [[ -f "$_mem_script" ]]; then
+    _mem_body="$(bash "$_mem_script" --repo "$_mem_slug" 2>/dev/null)"
+  fi
   if [[ -n "$_mem_body" ]]; then
-    _mem_ctx="Project memory for this repo ($_mem_slug), stored in the central memory store at ~/.claude/memory/$_mem_slug/. These facts apply only in this repo; read the referenced fact files on demand. Index:
+    _mem_preamble="Project memory for this repo ($_mem_slug), stored in the central memory store at ~/.claude/memory/$_mem_slug/. A scoped slice: facts in scope, their typed edges, and an anchor index mapping code paths to the facts that describe them. Fact bodies are read on demand."
+  elif [[ -f "$HOME/.claude/memory/$_mem_slug/MEMORY.md" ]]; then
+    _mem_body="$(head -c 16000 "$HOME/.claude/memory/$_mem_slug/MEMORY.md" 2>/dev/null)"
+    if [[ -n "$_mem_body" ]]; then
+      _mem_preamble="Project memory for this repo ($_mem_slug), stored in the central memory store at ~/.claude/memory/$_mem_slug/. These facts apply only in this repo; read the referenced fact files on demand. Index:"
+    fi
+  fi
+fi
+if [[ -n "$_mem_body" ]]; then
+  _mem_ctx="$_mem_preamble
 $_mem_body"
-    if [[ -n "$extra_context" ]]; then
-      extra_context="$extra_context
+  if [[ -n "$extra_context" ]]; then
+    extra_context="$extra_context
 
 $_mem_ctx"
-    else
-      extra_context="$_mem_ctx"
-    fi
+  else
+    extra_context="$_mem_ctx"
   fi
 fi
 
