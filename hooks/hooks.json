@@ -86,6 +86,14 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-clean-exit.sh\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/memory-capture.sh\""
+          }
+        ]
       }
     ],
     "SessionEnd": [
