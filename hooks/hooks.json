@@ -32,6 +32,15 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/search-counter.sh\""
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/memory-anchors.sh\""
+          }
+        ]
       }
     ],
     "PostToolUse": [
