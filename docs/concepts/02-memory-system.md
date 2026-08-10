@@ -58,7 +58,7 @@ Facts link to each other via `links:` in frontmatter. Values are bare basenames 
 
 Edges are typed because each type carries a different action. `supersedes` says "ignore the old one." `depends_on` says "load this first." `relates_to` says "pull in the neighbor." `contradicts` says "surface the conflict." An untyped link would be ambiguous: should the system load the neighbor, replace it, or warn about it? The type resolves the ambiguity.
 
-Each edge is stored once on the authoring fact. Reverse links are inferred at load by scanning frontmatter, not stored explicitly. Traversal depth is 1 for all types except `supersedes`, which the system follows fully to the chain head. In contradictions between levels, the project fact wins for its repo. A dangling basename (the target isn't in the store) surfaces rather than fails silently.
+Each edge is stored once on the authoring fact. Reverse links are inferred at load by scanning frontmatter, not stored explicitly. Traversal depth is 1 for all types except `supersedes`, which the system follows fully to the chain head. Resolution checks the source's own scope first, then falls back to global, so a project fact can link to a global one and still resolve; a project fact shadows a global fact of the same basename. In contradictions between levels, the project fact wins for its repo. A basename missing from both scopes is dangling: it surfaces rather than fails silently.
 
 ## How Facts Are Created
 
@@ -80,7 +80,7 @@ At session end, a `SessionEnd` hook fires a last-chance prompt: if any durable f
 
 ## graph.json
 
-A single `graph.json` lives at `~/.claude/memory/graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It's a navigation aid: commands read it for orientation; nothing parses it automatically at session start.
+A single `graph.json` lives at `~/.claude/memory/graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It's a navigation aid: commands read it for orientation; nothing parses it automatically at session start. The graph is becoming the primary retrieval path rather than just a navigation aid; see [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision.
 
 The graph rebuilds automatically. A PostToolUse hook (`rebuild-memory-graph.sh`) fires whenever a file under `~/.claude/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
 
