@@ -27,7 +27,7 @@ USAGE:
 
 TASK SOURCES:
   Plan file      /implement .claude/plans/user-avatar-upload.md
-  ADR blueprint  /implement .claude/adr/0001-20260625-websocket-push-blueprint.md
+  ADR blueprint  /implement docs/adr/0001-websocket-push-blueprint.md
   GitHub issue   /implement #42   |   /implement https://github.com/org/repo/issues/42
   Jira ticket    /implement PROJ-123   (via Atlassian MCP/acli, when reachable)
   File spec      /implement ./tasks/feature-spec.md
@@ -78,7 +78,7 @@ review, before opening the PR set (or finishing, per the chosen boundary).
 ```bash
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 found=0
-for f in "$ROOT"/.claude/plans/*.md "$ROOT"/.claude/adr/*-blueprint.md; do
+for f in "$ROOT"/.claude/plans/*.md "$ROOT"/docs/adr/*-blueprint.md; do
   [ -f "$f" ] || continue
   case "$f" in *-quality.md) continue;; esac
   found=1
@@ -93,7 +93,7 @@ Present the rows as a numbered menu (index, status, title, path), listing unexec
 
 Otherwise, resolve `$ARGUMENTS` (minus flags) by format:
 
-- **Plan/blueprint file** (`.claude/plans/*.md` or `.claude/adr/*-blueprint.md`, or any path ending `.md`): Read it. This is the plan.
+- **Plan/blueprint file** (`.claude/plans/*.md` or `docs/adr/*-blueprint.md`, or any path ending `.md`): Read it. This is the plan.
 - **GitHub issue** (`#N`, or a github.com issue URL): `gh issue view <N> --json title,body,url,labels,state`.
 - **Jira ticket** (`ABC-123`): use `mcp__atlassian__*` tools if available, else `acli` if present, else ask the user to paste the ticket. (Same availability rule as `/learn-project`.)
 - **Other file path:** Read it.
