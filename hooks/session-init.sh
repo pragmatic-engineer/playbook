@@ -69,8 +69,7 @@ fi
 # output (no graph yet). This runs on every session start, so every path
 # here must degrade to no memory block rather than an error.
 _repo_root="$(git --no-optional-locks rev-parse --show-toplevel 2>/dev/null)"
-_mem_slug="$(git --no-optional-locks remote get-url origin 2>/dev/null \
-  | sed -E 's#\.git/?$##; s#^[a-zA-Z]+://##; s#^[^@/]+@##; s#^[^/:]+[:/]##')"
+_mem_slug="$(repo_slug)"
 _mem_body=""
 _mem_preamble=""
 if [[ -n "$_repo_root" && -n "$_mem_slug" ]]; then

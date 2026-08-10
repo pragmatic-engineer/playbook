@@ -48,8 +48,7 @@ idx="$dir/memory-anchor-index.tsv"
 # changes after this point is not picked up until the next session.
 if [[ ! -e "$idx" ]]; then
   graph="${HOME}/.claude/memory/graph.json"
-  repo="$(git --no-optional-locks remote get-url origin 2>/dev/null \
-    | sed -E 's#\.git/?$##; s#^[a-zA-Z]+://##; s#^[^@/]+@##; s#^[^/:]+[:/]##')"
+  repo="$(repo_slug)"
 
   tmp="$idx.tmp.$$"
   : > "$tmp" 2>/dev/null
