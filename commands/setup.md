@@ -1,7 +1,7 @@
 ---
 description: Interactive setup for pragmatic-engineer/playbook. Wires safety guards, seeds or merges settings.json, and asks whether to install the shell launchers and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
-argument-hint: "[--aliases] [--system-prompt] [--yes]"
+argument-hint: "[--install-aliases] [--use-system-prompt] [--yes]"
 model: sonnet
 effort: low
 ---
@@ -16,9 +16,13 @@ is idempotent; re-running /setup is safe and only changes what is missing.
 
 Parse `$ARGUMENTS`.
 
-If `$ARGUMENTS` contains any of `--aliases`, `--system-prompt`, or `--yes`,
-run non-interactively. Skip the questions in Step 2. Build the flag list from
-the arguments and go straight to Step 3.
+If `$ARGUMENTS` contains any of `--install-aliases`, `--use-system-prompt`, or
+`--yes`, run non-interactively. Skip the questions in Step 2. Build the flag
+list from the arguments and go straight to Step 3.
+
+Anything else in `$ARGUMENTS` is ignored with a one-line warning. Don't abort:
+a typo'd flag must not silently fall through to the interactive path, because
+the user asked for a non-interactive run.
 
 ## Step 2: Ask (interactive mode only)
 
@@ -47,12 +51,15 @@ with these two questions:
 
 ## Step 3: Build the flag list and run
 
-Build the flag list:
+Build the flag list. Note the names differ on purpose: this command takes
+`--install-aliases` and `--use-system-prompt`, while `setup-local.sh` takes
+`--aliases` and `--system-prompt`. Translate, don't pass through.
 
 - Add `--aliases` if Q1 answer is "Yes (Recommended)" OR Q2 answer is
-  "Yes (Recommended)" OR `--aliases` or `--system-prompt` was in `$ARGUMENTS`.
+  "Yes (Recommended)" OR `--install-aliases` or `--use-system-prompt` was in
+  `$ARGUMENTS`.
 - Add `--system-prompt` if Q2 answer is "Yes (Recommended)" OR
-  `--system-prompt` was in `$ARGUMENTS`.
+  `--use-system-prompt` was in `$ARGUMENTS`.
 
 The script always runs (guards and settings run regardless of the answers):
 
