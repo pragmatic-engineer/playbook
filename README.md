@@ -21,7 +21,7 @@ Playbook has four layers. Each is independent; stop at any level.
 |---|---|---|
 | 1. Plugin content | Always, after `claude plugin install` | Skills, commands, subagents, and functional hooks load from the plugin. No files written to `~/.claude`. |
 | 2. Safety guards and settings | Always, after `/setup` | Copies the three guard hooks into `~/.claude/hooks/` and seeds or merges `~/.claude/settings.json`. Runs regardless of the other choices. |
-| 3. Shell launchers | Opt-in (recommended) | Adds `cc` and `ccd` to `~/.bashrc` or `~/.zshrc`. `cc worktree` is zsh-only; other subcommands work in bash. |
+| 3. Shell launchers | Opt-in (recommended) | Adds `cc` and `ccd` to `~/.bashrc` or `~/.zshrc`. Both shells work; `cc clean` and `cc raw` are zsh-only (see Usage). |
 | 4. Custom system prompt | Opt-in (recommended) | Copies `prompts/SYSTEM_PROMPT.md` to `~/.claude/prompts/`; `cc` passes it via `--system-prompt-file`. Plugin content works without it. |
 
 ## Usage
@@ -31,15 +31,18 @@ cc                     # resume this directory's last session, or start fresh
 ccd                    # same, with --dangerously-skip-permissions
 cc fresh               # new session, no history
 cc list                # recent sessions for this directory
-cc clean               # resume with /model, /effort, /config, /output-style, /style stripped
-cc raw [id]            # resume verbatim, no fork or cleanup
-cc worktree <branch>   # create/enter a git worktree, then start a session there (zsh only)
-cc new <branch>        # alias for cc worktree (zsh only)
+cc worktree <branch>   # create/enter a git worktree, then start a session there
+cc new <branch>        # alias for cc worktree
+cc prune               # prune old transcripts now (bash only)
+cc clean               # resume with /model, /effort, /config, /output-style, /style stripped (zsh only)
+cc raw [id]            # resume verbatim, no fork or cleanup (zsh only)
 ```
 
 `cc` loads the system prompt (when installed), picks a model, and prunes old transcripts (keeps the newest 5; set `CCD_KEEP` to change, `CCD_KEEP=0` disables).
 
-`cc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. Only available via `cc`/`ccd` on zsh. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
+**Shell parity.** The two launchers are separate implementations, so they differ. `cc.zsh` loads modules from `shell/cc/`; `cc.sh` is a self-contained bash port. Both cover the default resume, `fresh`, `list`, and `worktree`. Only zsh has `clean`, `raw`, and the config-drift auto-fork. Only bash has the `prune` subcommand. On bash, `cc clean` and `cc raw` fall through to a plain resume without warning, so use zsh when you need them.
+
+`cc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine (`shell/worktree.sh`) is shared by both shells. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
 
 ## Commands
 
