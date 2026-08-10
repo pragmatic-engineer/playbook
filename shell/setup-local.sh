@@ -157,6 +157,14 @@ if [ "$SKIP_DEPS" -eq 0 ]; then
         warn "Homebrew not found; skipping deps. See https://brew.sh"
         warn "When Homebrew is available: brew bundle --file $SELF_ROOT/Brewfile"
     fi
+    # Node: detect an existing version and use it; install only if none is
+    # found. Kept out of the Brewfile so an existing nvm/fnm/system node is not
+    # shadowed by a duplicate brew install.
+    if [ -f "$SELF_ROOT/shell/ensure-node.sh" ]; then
+        # shellcheck source=shell/ensure-node.sh
+        . "$SELF_ROOT/shell/ensure-node.sh"
+        ensure_node || warn "node install reported errors"
+    fi
 fi
 
 # ---------------------------------------------------------------------------

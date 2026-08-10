@@ -15,7 +15,12 @@ brew "rtk"          # CLI proxy that a PreToolUse hook routes every Bash command
 
 # Statusline and PR/CI integration
 brew "gh"           # statusline PR and CI status (optional but recommended)
-brew "node"         # statusline shows the active Node version
+
+# Node is NOT force-installed here. setup-local.sh's ensure_node detects a node
+# already on PATH (nvm, fnm, volta, system, or a prior brew install) and uses
+# that version, installing via brew only when none is found. This avoids a
+# duplicate brew node shadowing the version you already run. The statusline
+# shows whatever node wins on PATH.
 
 # Browser automation (optional): agent-browser MCP, used by /brainstorm for web-only tickets and attachments
 brew "agent-browser"  # register: claude mcp add --scope user agent-browser -- agent-browser mcp --tools core
