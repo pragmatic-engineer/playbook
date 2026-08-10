@@ -136,3 +136,15 @@ _incr_counter() {
   rmdir "$lock" 2>/dev/null
   _INCR_RESULT="$n"
 }
+
+# repo_slug: print the <owner>/<repo> slug for the current git repo, derived
+# from the origin remote. Prints nothing outside a repo or with no origin.
+# Canonical definition: the memory store keys project facts on this exact
+# string, so every consumer must derive it identically or facts silently fail
+# to resolve. shell/memory-context.sh carries its own copy on purpose, because
+# it is a standalone CLI that must not depend on the hook library; keep the two
+# in step.
+repo_slug() {
+  git --no-optional-locks remote get-url origin 2>/dev/null \
+    | sed -E 's#\.git/?$##; s#^[a-zA-Z]+://##; s#^[^@/]+@##; s#^[^/:]+[:/]##'
+}
