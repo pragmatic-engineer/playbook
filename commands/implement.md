@@ -229,18 +229,18 @@ for d in .claude/implement/ .claude/worktrees/; do
 done
 ```
 
-**Model tiering (MUST, never omit `model`).** Implementer Tasks run `model: "sonnet"`. Mechanical bits (brief extraction, ledger writes) run `model: "haiku"`. Verification and the adversarial review (Step 9) run the capable tier. An omitted `model` silently inherits the priciest default, so always set it.
+**Model tiering (MUST, never omit `model`).** Implementer Tasks spawn the `implementer` agent, which pins `model: sonnet` itself, so you don't set the model on those calls. Mechanical bits (brief extraction, ledger writes) run `model: "haiku"`. Verification and the adversarial review (Step 9) run the capable tier. An omitted `model` on a non-typed call silently inherits the priciest default, so always set it there.
 
 **Test structure (from `engineering-standards`):** every test follows Arrange-Act-Assert with `// Arrange` / `// Act` / `// Assert` comments mapping to the scenario's Given/When/Then; one action per test; use parameterised tests (`test.each`, `pytest.mark.parametrize`, table-driven) when scenarios share AAA structure but differ in data.
 
 **With TDD (default).** For each cycle within a Work Unit (in dependency order):
 
-1. **RED** - Sonnet subagent: "Write ONLY the failing tests encoding this Gherkin scenario, AAA-structured. Don't touch production code." Then run the verify command: tests MUST fail (if they pass, the test proves nothing - fix it).
-2. **GREEN** - Sonnet subagent: "Write ONLY the minimal implementation to pass." Run verify: tests MUST pass (on failure, spawn a follow-up subagent with the error output).
-3. **REFACTOR** - Sonnet subagent: "Clean up without changing behaviour; tests stay green." Run verify.
+1. **RED** - `implementer` subagent (`subagent_type: implementer`): "Write ONLY the failing tests encoding this Gherkin scenario, AAA-structured. Don't touch production code." Then run the verify command: tests MUST fail (if they pass, the test proves nothing - fix it).
+2. **GREEN** - `implementer` subagent: "Write ONLY the minimal implementation to pass." Run verify: tests MUST pass (on failure, spawn a follow-up `implementer` with the error output).
+3. **REFACTOR** - `implementer` subagent: "Clean up without changing behaviour; tests stay green." Run verify.
 4. **Orchestrator review:** read the modified files; confirm changes match the plan, doc comments explain WHY, no unplanned side effects.
 
-**Without TDD (`--no-tdd`).** For each logical file group: one Sonnet subagent implements code + tests together (tests still encode the Gherkin scenarios); run verify; the orchestrator reviews as above.
+**Without TDD (`--no-tdd`).** For each logical file group: one `implementer` subagent (`subagent_type: implementer`) implements code + tests together (tests still encode the Gherkin scenarios); run verify; the orchestrator reviews as above.
 
 **Commit per Work Unit (MUST): small commits.** One coherent commit per WU.
 
@@ -277,7 +277,7 @@ Report the result: `Cycle check: PASS (N WUs resolve in topological order)` or h
 
 ## Step 7: Validate
 
-Run the project's checks (from Step 3 detection), e.g. type-check, lint, and tests. In `--auto`, run the full suite (not just affected) and, on failure, apply the `systematic-debugging` skill to find the root cause, then spawn a Sonnet subagent to fix the responsible WU on its Segment branch, then amend via `/commit-and-push -a` (max 3 attempts; if still failing, stop and do NOT open any PRs).
+Run the project's checks (from Step 3 detection), e.g. type-check, lint, and tests. In `--auto`, run the full suite (not just affected) and, on failure, apply the `systematic-debugging` skill to find the root cause, then spawn an `implementer` subagent (`subagent_type: implementer`) to fix the responsible WU on its Segment branch, then amend via `/commit-and-push -a` (max 3 attempts; if still failing, stop and do NOT open any PRs).
 
 - Fix and re-validate until green.
 - **Doc audit:** every new/modified function has a doc comment explaining WHY; add any that are missing.

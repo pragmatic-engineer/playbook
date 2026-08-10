@@ -163,6 +163,33 @@ You are a fixture agent used only for check-agents.sh test scenarios.
 EOF
 }
 
+# write_agent_write_capable <dir> <stem>: a write-capable agent (Edit, Write,
+# Bash) whose description claims neither read-only tier. Must PASS: an agent
+# that legitimately writes code is allowed to hold write tools. This pins that
+# the lint does not forbid write tools outright, only when a read-only claim
+# contradicts them. The implementer agent is the real example.
+write_agent_write_capable() {
+  local dir="$1" stem="$2"
+  mkdir -p "$dir"
+  cat > "$dir/${stem}.md" <<EOF
+---
+name: ${stem}
+description: A write-capable fixture executor used to test check-agents.sh. Holds Edit, Write, and Bash on purpose. Not for general-purpose work.
+tools: Read, Grep, Glob, Edit, Write, Bash, Skill
+model: sonnet
+effort: high
+---
+
+You are a fixture agent used only for check-agents.sh test scenarios.
+
+## Non-negotiable guardrails
+
+1. **No dashes in prose.** No em dashes or en dashes anywhere. Use commas, colons, or separate sentences.
+2. **Ground every claim.** Quote exact code with file:line citations.
+3. **Zero AI attribution.** No AI or Claude attribution anywhere.
+EOF
+}
+
 # write_agent_bad_model <dir> <stem>: model tier outside the allowed set.
 write_agent_bad_model() {
   local dir="$1" stem="$2"
@@ -509,6 +536,13 @@ VALID="${WORK}/valid"
 write_valid_agent "$VALID" "sample"
 # Act + Assert
 run_scenario pass "a valid new agent passes" "$VALID"
+
+# 2b: a write-capable agent (Edit/Write/Bash, no read-only claim) passes.
+# Arrange: scratch dir with a write-capable fixture.
+WRITEABLE="${WORK}/writeable"
+write_agent_write_capable "$WRITEABLE" "implementer-like"
+# Act + Assert
+run_scenario pass "a write-capable agent passes (no read-only claim)" "$WRITEABLE"
 
 # 3: missing frontmatter key fails.
 # Arrange: scratch dir with a fixture that has no model key.
