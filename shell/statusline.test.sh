@@ -99,6 +99,101 @@ assert_eq "compact_gap 30 (< 50, empty)" \
 assert_eq "compact_gap 80 (gap=10, trigger=90)" \
     "$(CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90 compact_gap 80)" '10'
 
+# ── telemetry (WU-4) ──────────────────────────────────────────────────────────
+# The telemetry write lives inside the run-guard, right after the stdin parse,
+# so it only fires when the script is executed, not sourced. These scenarios
+# run statusline.sh as a subprocess with an isolated HOME (never the real
+# ~/.claude/runtime/) and inspect what it wrote and whether it still rendered.
+
+# Build the minimal stdin payload statusline.sh expects. cwd points at the
+# fake HOME (never a real git repo) so the run stays fast and offline.
+_telemetry_payload() {
+    local sid="$1" used="$2" cost="$3" cwd="$4"
+    if [[ -n "$sid" ]]; then
+        printf '{"session_id":"%s","cwd":"%s","cost":{"total_cost_usd":%s},"context_window":{"used_percentage":%s}}' \
+            "$sid" "$cwd" "$cost" "$used"
+    else
+        printf '{"cwd":"%s","cost":{"total_cost_usd":%s},"context_window":{"used_percentage":%s}}' \
+            "$cwd" "$cost" "$used"
+    fi
+}
+
+# yes/no so results compose with assert_eq like every other scenario here.
+_file_exists() { [[ -f "$1" ]] && echo yes || echo no; }
+_file_has_both() {
+    local file="$1" needle1="$2" needle2="$3"
+    [[ -f "$file" ]] || { echo no; return; }
+    if grep -q "$needle1" "$file" 2>/dev/null && grep -q "$needle2" "$file" 2>/dev/null; then
+        echo yes
+    else
+        echo no
+    fi
+}
+
+# 1. Sample appended: cost and usage both land in one telemetry.jsonl line.
+t1_home=$(mktemp -d)
+t1_sid="sess-sample"
+t1_payload=$(_telemetry_payload "$t1_sid" 42 1.5 "$t1_home")
+HOME="$t1_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t1_payload" >/dev/null 2>&1
+assert_eq "telemetry sample has cost and usage" \
+    "$(_file_has_both "$t1_home/.claude/runtime/$t1_sid/telemetry.jsonl" '"cost_usd":1.5' '"used_pct":42')" \
+    "yes"
+rm -rf "$t1_home"
+
+# 2. Threshold sets the marker: 75 with the default threshold (70).
+t2_home=$(mktemp -d)
+t2_sid="sess-over"
+t2_payload=$(_telemetry_payload "$t2_sid" 75 0.1 "$t2_home")
+HOME="$t2_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t2_payload" >/dev/null 2>&1
+assert_eq "capture-due set at 75 percent (default threshold)" \
+    "$(_file_exists "$t2_home/.claude/runtime/$t2_sid/capture-due")" "yes"
+rm -rf "$t2_home"
+
+# 3. Below threshold: 40 leaves no marker.
+t3_home=$(mktemp -d)
+t3_sid="sess-under"
+t3_payload=$(_telemetry_payload "$t3_sid" 40 0.1 "$t3_home")
+HOME="$t3_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t3_payload" >/dev/null 2>&1
+assert_eq "capture-due absent at 40 percent" \
+    "$(_file_exists "$t3_home/.claude/runtime/$t3_sid/capture-due")" "no"
+rm -rf "$t3_home"
+
+# 4. Threshold is overridable: CC_CAPTURE_AT=30 with usage of 40.
+t4_home=$(mktemp -d)
+t4_sid="sess-override"
+t4_payload=$(_telemetry_payload "$t4_sid" 40 0.1 "$t4_home")
+CC_CAPTURE_AT=30 HOME="$t4_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4_payload" >/dev/null 2>&1
+assert_eq "capture-due honours CC_CAPTURE_AT override" \
+    "$(_file_exists "$t4_home/.claude/runtime/$t4_sid/capture-due")" "yes"
+rm -rf "$t4_home"
+
+# 5. Render survives an unwritable session dir (the ADR's safety pin).
+t5_home=$(mktemp -d)
+t5_sid="sess-unwritable"
+t5_dir="$t5_home/.claude/runtime/$t5_sid"
+mkdir -p "$t5_dir"
+chmod 500 "$t5_dir"
+t5_payload=$(_telemetry_payload "$t5_sid" 80 2.0 "$t5_home")
+t5_out=$(HOME="$t5_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t5_payload" 2>&1)
+t5_status=$?
+assert_eq "render exits 0 with an unwritable session dir" "$t5_status" "0"
+assert_eq "render still prints with an unwritable session dir" \
+    "$( [[ -n "$t5_out" ]] && echo yes || echo no )" "yes"
+chmod 700 "$t5_dir"
+rm -rf "$t5_home"
+
+# 6. Missing session_id is harmless: no write attempted, render still succeeds.
+t6_home=$(mktemp -d)
+t6_payload=$(_telemetry_payload "" 55 0.5 "$t6_home")
+t6_out=$(HOME="$t6_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t6_payload" 2>&1)
+t6_status=$?
+assert_eq "render exits 0 with no session_id" "$t6_status" "0"
+assert_eq "render still prints with no session_id" \
+    "$( [[ -n "$t6_out" ]] && echo yes || echo no )" "yes"
+assert_eq "no runtime dir created with no session_id" \
+    "$( [[ -d "$t6_home/.claude/runtime" ]] && echo yes || echo no )" "no"
+rm -rf "$t6_home"
+
 TOTAL=$(( PASS + FAIL ))
 echo ""
 echo "${PASS}/${TOTAL} scenarios passed"

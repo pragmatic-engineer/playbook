@@ -309,6 +309,32 @@ fi
 
 cwd="${cwd:-$PWD}"
 
+# ┌──────────────────────────────────────────────────────────────────────────────┐
+# │  Telemetry: context usage and cost                                          │
+# │                                                                              │
+# │  statusline.sh is the only component whose stdin payload carries used       │
+# │  percentage and cost, so it persists one sample per render for the memory   │
+# │  capture pipeline and marks when usage crosses the capture threshold.       │
+# │  Every write is guarded: a missing session_id, an unwritable directory, or  │
+# │  a failed write must still leave the status line printing and exiting 0.    │
+# └──────────────────────────────────────────────────────────────────────────────┘
+
+if [[ -n "${session_id:-}" ]]; then
+    telemetry_dir="$HOME/.claude/runtime/${session_id}"
+    mkdir -p "$telemetry_dir" 2>/dev/null
+    if [[ -d "$telemetry_dir" && -w "$telemetry_dir" ]]; then
+        printf '{"ts":%s,"cost_usd":%s,"used_pct":%s}\n' \
+            "$(date +%s)" "${cost_usd:-0}" "${used:-0}" \
+            >> "$telemetry_dir/telemetry.jsonl" 2>/dev/null || true
+
+        capture_at="${CC_CAPTURE_AT:-70}"
+        used_int="${used%%.*}"
+        if [[ "${used_int:-0}" -ge "$capture_at" ]] 2>/dev/null; then
+            : > "$telemetry_dir/capture-due" 2>/dev/null || true
+        fi
+    fi
+fi
+
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  LINE 1: Working directory, git info, PR status                              ║
 # ╠══════════════════════════════════════════════════════════════════════════════╣
