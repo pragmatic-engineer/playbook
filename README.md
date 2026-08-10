@@ -33,14 +33,14 @@ cc fresh               # new session, no history
 cc list                # recent sessions for this directory
 cc worktree <branch>   # create/enter a git worktree, then start a session there
 cc new <branch>        # alias for cc worktree
-cc prune               # prune old transcripts now (bash only)
-cc clean               # resume with /model, /effort, /config, /output-style, /style stripped (zsh only)
-cc raw [id]            # resume verbatim, no fork or cleanup (zsh only)
+cc prune               # prune old transcripts now
+cc clean               # resume with /model, /effort, /config, /output-style, /style stripped
+cc raw [id]            # resume verbatim, no fork or cleanup
 ```
 
 `cc` loads the system prompt (when installed), picks a model, and prunes old transcripts (keeps the newest 5; set `CCD_KEEP` to change, `CCD_KEEP=0` disables).
 
-**Shell parity.** The two launchers are separate implementations, so they differ. `cc.zsh` (under `shell/zsh/`) loads modules from the same directory; `cc.sh` (under `shell/bash/`) is a self-contained bash port. Both cover the default resume, `fresh`, `list`, and `worktree`. Only zsh has `clean`, `raw`, and the config-drift auto-fork. Only bash has the `prune` subcommand. On bash, `cc clean` and `cc raw` fall through to a plain resume without warning, so use zsh when you need them.
+**One launcher, both shells.** `shell/zsh/cc.zsh` and `shell/bash/cc.sh` are thin entry points that both source the same modules under `shell/shared/`. So bash and zsh behave identically: every subcommand above, the config-drift auto-fork on the default resume, and retention all work the same in either shell. Source the entry for your shell (`cc.zsh` from `~/.zshrc`, `cc.sh` from `~/.bashrc`); `/setup --install-aliases` wires the right one.
 
 `cc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine (`shell/shared/worktree.sh`) is shared by both shells. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
 

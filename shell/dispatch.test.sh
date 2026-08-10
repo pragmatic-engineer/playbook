@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # dispatch.test.sh: flag-parser and subcommand-routing tests for
-# shell/zsh/dispatch.zsh (_claude). Covers value-taking flag consumption,
+# shell/shared/dispatch.sh (_claude). Covers value-taking flag consumption,
 # --opt=value self-contained form, subcommand dispatch, and residual arg
 # forwarding.
 #
@@ -12,7 +12,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENGINE="${SCRIPT_DIR}/zsh/dispatch.zsh"
+ENGINE="${SCRIPT_DIR}/shared/dispatch.sh"
 PASS=0
 FAIL=0
 TOTAL=4
