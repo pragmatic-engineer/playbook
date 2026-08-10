@@ -204,12 +204,14 @@ if [ "$OPT_ALIASES" -eq 1 ]; then
             # shellcheck disable=SC2016
             SOURCE_LINE='source "$HOME/.claude/shell/zsh/cc.zsh"'
             GREP_PAT='shell/zsh/cc.zsh'
+            OLD_GREP_PAT='shell/cc.zsh'
             ;;
         bash)
             RC_FILE="$HOME/.bashrc"
             # shellcheck disable=SC2016
             SOURCE_LINE='source "$HOME/.claude/shell/bash/cc.sh"'
             GREP_PAT='shell/bash/cc.sh'
+            OLD_GREP_PAT='shell/cc.sh'
             ;;
         *)
             warn "Shell '$_SHELL_BIN' not recognised; source the launcher manually."
@@ -220,6 +222,36 @@ if [ "$OPT_ALIASES" -eq 1 ]; then
     esac
 
     if [ -n "$_SHELL_BIN" ]; then
+        # Migrate a pre-reorganisation source line to the current path. The
+        # new-path guard below cannot see the old form, because shell/cc.zsh is
+        # not a substring of shell/zsh/cc.zsh (nor shell/cc.sh of
+        # shell/bash/cc.sh). Without this step a re-run appends a second line
+        # and the launcher gets sourced twice: once through the transitional
+        # shim at the old path, once directly.
+        if [ -f "$RC_FILE" ] && grep -qF "$OLD_GREP_PAT" "$RC_FILE" 2>/dev/null; then
+            cp "$RC_FILE" "${RC_FILE}.bak-${STAMP}"
+            RC_TMP="$(mktemp "${RC_FILE}.tmp.XXXXXX")"
+            # Drop the old source line and absorb the launchers comment that
+            # immediately precedes it, then squeeze the doubled blank line the
+            # removal leaves behind. Same shape as uninstall.sh's remover.
+            # has: an explicit "prev holds a line" flag. Using prev != "" as the
+            # sentinel instead would treat a buffered blank line as nothing
+            # buffered and silently eat the user's blank lines around the block.
+            awk -v pat="$OLD_GREP_PAT" '
+              index($0, pat) {
+                if (has && prev ~ /launchers \(cc\/ccd\)/) has = 0
+                if (has) print prev
+                has = 0; next
+              }
+              { if (has) print prev; prev = $0; has = 1 }
+              END { if (has) print prev }
+            ' "$RC_FILE" | awk '
+              /^[[:space:]]*$/ { blank++; if (blank <= 1) print; next }
+              { blank = 0; print }
+            ' > "$RC_TMP"
+            mv -f "$RC_TMP" "$RC_FILE"
+            log "Migrated the old launcher line in $RC_FILE (backup: ${RC_FILE}.bak-${STAMP})"
+        fi
         if grep -qF "$GREP_PAT" "$RC_FILE" 2>/dev/null; then
             log "$RC_FILE already sources the launcher ... already up to date"
         else
