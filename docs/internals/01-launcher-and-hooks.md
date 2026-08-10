@@ -4,7 +4,7 @@ The `cc` launcher is the entry point for every session. It wraps `claude` with a
 
 ## The `cc`/`ccd` Launcher
 
-Defined in `shell/zsh/cc.zsh`, the launcher sources six module files from `shell/zsh/` and `shell/shared/worktree.sh`, then defines two public shell functions. Both call the internal `_claude` dispatcher. `ccd` is `cc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
+The launcher has two thin entry points, `shell/zsh/cc.zsh` and `shell/bash/cc.sh`, one per shell. Each sources the same module files from `shell/shared/` (bust-cache, worktree, config-drift, retention, sessions, clean-resume, dispatch), which define the internal `_claude` dispatcher and the two public functions `cc` and `ccd`. The implementation is shared, so bash and zsh behave identically. `ccd` is `cc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
 
 On every invocation, `cc` passes `--system-prompt-file ~/.claude/prompts/SYSTEM_PROMPT.md` to `claude`. After `claude` exits, it runs `_cc_prune` to keep only the newest `CCD_KEEP` transcripts (default 5, floor 2) per project. Older transcripts plus their sidecars and runtime state are deleted.
 

@@ -87,6 +87,10 @@ _claude() {
             _cc_list_sessions "$project_dir"
             return $?
             ;;
+        prune|--prune)
+            _cc_prune
+            return $?
+            ;;
         worktree|--worktree|new|--new)
             shift
             _cc_worktree --ai-resolve "$@" || return $?
@@ -123,4 +127,22 @@ _claude() {
         _cc_config_stamp
         command claude "${flags[@]}" -n "$name" "$@"
     fi
+}
+
+# ── Public wrappers ──
+# cc/ccd both dispatch through _claude. Each carries the custom system prompt
+# when it exists; ccd adds --dangerously-skip-permissions. After every run,
+# prune old transcripts. Defined here (not per shell) so both entry points get
+# them by sourcing, and there is one implementation to keep honest.
+cc() {
+    local -a _cc_sys=()
+    [ -f "$HOME/.claude/prompts/SYSTEM_PROMPT.md" ] \
+        && _cc_sys=(--system-prompt-file "$HOME/.claude/prompts/SYSTEM_PROMPT.md")
+    _claude "${_cc_sys[@]}" "$@"; local rc=$?; _cc_prune; return $rc
+}
+ccd() {
+    local -a _cc_sys=()
+    [ -f "$HOME/.claude/prompts/SYSTEM_PROMPT.md" ] \
+        && _cc_sys=(--system-prompt-file "$HOME/.claude/prompts/SYSTEM_PROMPT.md")
+    _claude --dangerously-skip-permissions "${_cc_sys[@]}" "$@"; local rc=$?; _cc_prune; return $rc
 }
