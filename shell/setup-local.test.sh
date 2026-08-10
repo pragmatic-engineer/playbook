@@ -102,14 +102,14 @@ scenario_b_aliases_bash() {
     SHELL=/bin/bash run_setup "$home" "$claude_home" --aliases; rc=$?
     [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
 
-    # cc.sh must be in CLAUDE_HOME/shell/.
-    [ -f "$claude_home/shell/cc.sh" ] \
-        || { echo "  cc.sh not copied to CLAUDE_HOME/shell"; return 1; }
+    # cc.sh must be in CLAUDE_HOME/shell/bash/.
+    [ -f "$claude_home/shell/bash/cc.sh" ] \
+        || { echo "  cc.sh not copied to CLAUDE_HOME/shell/bash"; return 1; }
 
     # .bashrc must contain the cc.sh source line.
     [ -f "$home/.bashrc" ] \
         || { echo "  .bashrc not created"; return 1; }
-    grep -qF 'shell/cc.sh' "$home/.bashrc" \
+    grep -qF 'shell/bash/cc.sh' "$home/.bashrc" \
         || { echo "  cc.sh source line not in .bashrc"; return 1; }
 
     # .zshrc must NOT have been written.
@@ -131,14 +131,14 @@ scenario_c_aliases_zsh() {
     SHELL=/bin/zsh run_setup "$home" "$claude_home" --aliases; rc=$?
     [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
 
-    # cc.zsh must be in CLAUDE_HOME/shell/.
-    [ -f "$claude_home/shell/cc.zsh" ] \
-        || { echo "  cc.zsh not copied to CLAUDE_HOME/shell"; return 1; }
+    # cc.zsh must be in CLAUDE_HOME/shell/zsh/.
+    [ -f "$claude_home/shell/zsh/cc.zsh" ] \
+        || { echo "  cc.zsh not copied to CLAUDE_HOME/shell/zsh"; return 1; }
 
     # .zshrc must contain the cc.zsh source line.
     [ -f "$home/.zshrc" ] \
         || { echo "  .zshrc not created"; return 1; }
-    grep -qF 'shell/cc.zsh' "$home/.zshrc" \
+    grep -qF 'shell/zsh/cc.zsh' "$home/.zshrc" \
         || { echo "  cc.zsh source line not in .zshrc"; return 1; }
 
     # .bashrc must NOT have been written.
@@ -161,7 +161,7 @@ scenario_d_system_prompt() {
     [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
 
     # Implies --aliases: launcher files must be present.
-    [ -f "$claude_home/shell/cc.sh" ] \
+    [ -f "$claude_home/shell/bash/cc.sh" ] \
         || { echo "  cc.sh not copied (--system-prompt implies --aliases)"; return 1; }
 
     # SYSTEM_PROMPT.md must be in CLAUDE_HOME/prompts/.
@@ -196,7 +196,7 @@ scenario_e_idempotent_aliases() {
         || { echo "  .bashrc changed on idempotent re-run"; return 1; }
 
     # Double-check: source line appears exactly once.
-    count="$(grep -cF 'shell/cc.sh' "$home/.bashrc" 2>/dev/null || echo 0)"
+    count="$(grep -cF 'shell/bash/cc.sh' "$home/.bashrc" 2>/dev/null || echo 0)"
     [ "$count" -eq 1 ] \
         || { echo "  cc.sh source line count=$count (expected 1)"; return 1; }
 }

@@ -165,8 +165,8 @@ fi
 #    Uses an -ef self-copy guard per file. For regular files also checks
 #    content equality (cmp -s) to report "already up to date" without re-copy.
 #    Detects the user's shell from $SHELL (basename):
-#      zsh  -> ~/.zshrc   sources $HOME/.claude/shell/cc.zsh
-#      bash -> ~/.bashrc  sources $HOME/.claude/shell/cc.sh
+#      zsh  -> ~/.zshrc   sources $HOME/.claude/shell/zsh/cc.zsh
+#      bash -> ~/.bashrc  sources $HOME/.claude/shell/bash/cc.sh
 #    Idempotent: grep -qF guard before appending to the rc file.
 # ---------------------------------------------------------------------------
 if [ "$OPT_ALIASES" -eq 1 ]; then
@@ -202,19 +202,19 @@ if [ "$OPT_ALIASES" -eq 1 ]; then
         zsh)
             RC_FILE="$HOME/.zshrc"
             # shellcheck disable=SC2016
-            SOURCE_LINE='source "$HOME/.claude/shell/cc.zsh"'
-            GREP_PAT='shell/cc.zsh'
+            SOURCE_LINE='source "$HOME/.claude/shell/zsh/cc.zsh"'
+            GREP_PAT='shell/zsh/cc.zsh'
             ;;
         bash)
             RC_FILE="$HOME/.bashrc"
             # shellcheck disable=SC2016
-            SOURCE_LINE='source "$HOME/.claude/shell/cc.sh"'
-            GREP_PAT='shell/cc.sh'
+            SOURCE_LINE='source "$HOME/.claude/shell/bash/cc.sh"'
+            GREP_PAT='shell/bash/cc.sh'
             ;;
         *)
             warn "Shell '$_SHELL_BIN' not recognised; source the launcher manually."
-            warn "For zsh:  source \"\$HOME/.claude/shell/cc.zsh\" in ~/.zshrc"
-            warn "For bash: source \"\$HOME/.claude/shell/cc.sh\" in ~/.bashrc"
+            warn "For zsh:  source \"\$HOME/.claude/shell/zsh/cc.zsh\" in ~/.zshrc"
+            warn "For bash: source \"\$HOME/.claude/shell/bash/cc.sh\" in ~/.bashrc"
             _SHELL_BIN=""
             ;;
     esac

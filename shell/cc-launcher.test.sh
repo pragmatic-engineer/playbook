@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: MIT
-# cc-launcher.test.sh: smoke-tests for shell/cc.sh and the system-prompt guard.
+# cc-launcher.test.sh: smoke-tests for shell/bash/cc.sh and the system-prompt guard.
 #
 # Hermetic: uses mktemp HOME and a stub claude on a temp PATH.  Nothing real
 # launches.  Run: bash shell/cc-launcher.test.sh
 #
 # Tests:
-#   (a) sourcing shell/cc.sh in bash defines cc and ccd
+#   (a) sourcing shell/bash/cc.sh in bash defines cc and ccd
 #   (b) without SYSTEM_PROMPT.md, --system-prompt-file is NOT passed
 #   (c) with    SYSTEM_PROMPT.md, --system-prompt-file IS  passed
 #   (d) cc worktree is available in bash: _cc_worktree is defined and prints no zsh-only stub
-#   (e-g) same guard tests (b-c) for shell/cc.zsh in zsh, if zsh is on PATH
+#   (e-g) same guard tests (b-c) for shell/zsh/cc.zsh in zsh, if zsh is on PATH
 
 set -uo pipefail
 
@@ -45,17 +45,17 @@ printf '\n=== bash tests ===\n'
 
 # (a) sourcing defines cc and ccd
 if HOME="$TESTHOME" PATH="$TMPBIN:$PATH" bash -c \
-    "source '$REPO_DIR/shell/cc.sh' && type cc > /dev/null && type ccd > /dev/null" \
+    "source '$REPO_DIR/shell/bash/cc.sh' && type cc > /dev/null && type ccd > /dev/null" \
     >/dev/null 2>&1; then
-    pass "(a) bash: sourcing cc.sh defines cc and ccd"
+    pass "(a) bash: sourcing shell/bash/cc.sh defines cc and ccd"
 else
-    fail "(a) bash: sourcing cc.sh defines cc and ccd"
+    fail "(a) bash: sourcing shell/bash/cc.sh defines cc and ccd"
 fi
 
 # (b) no SYSTEM_PROMPT.md → --system-prompt-file must NOT appear in args
 ARGS_B=$(mktemp)
 HOME="$TESTHOME" PATH="$TMPBIN:$PATH" CC_TEST_ARGS_FILE="$ARGS_B" \
-    bash -c "source '$REPO_DIR/shell/cc.sh'; cc fresh" >/dev/null 2>&1 || true
+    bash -c "source '$REPO_DIR/shell/bash/cc.sh'; cc fresh" >/dev/null 2>&1 || true
 if grep -q -- '--system-prompt-file' "$ARGS_B"; then
     fail "(b) bash: without SYSTEM_PROMPT.md should NOT pass --system-prompt-file"
 else
@@ -68,7 +68,7 @@ mkdir -p "$TESTHOME/.claude/prompts"
 printf '# test system prompt\n' > "$TESTHOME/.claude/prompts/SYSTEM_PROMPT.md"
 ARGS_C=$(mktemp)
 HOME="$TESTHOME" PATH="$TMPBIN:$PATH" CC_TEST_ARGS_FILE="$ARGS_C" \
-    bash -c "source '$REPO_DIR/shell/cc.sh'; cc fresh" >/dev/null 2>&1 || true
+    bash -c "source '$REPO_DIR/shell/bash/cc.sh'; cc fresh" >/dev/null 2>&1 || true
 if grep -q -- '--system-prompt-file' "$ARGS_C"; then
     pass "(c) bash: with SYSTEM_PROMPT.md passes --system-prompt-file"
 else
@@ -78,20 +78,20 @@ rm -f "$ARGS_C"
 rm -f "$TESTHOME/.claude/prompts/SYSTEM_PROMPT.md"
 
 # (d) cc worktree is now available in bash (_cc_worktree defined, no zsh-only stub)
-# cc.sh sources worktree.sh via $HOME/.claude/shell/worktree.sh; stage it.
-mkdir -p "$TESTHOME/.claude/shell"
-cp "$REPO_DIR/shell/worktree.sh" "$TESTHOME/.claude/shell/worktree.sh"
+# cc.sh sources worktree.sh via $HOME/.claude/shell/shared/worktree.sh; stage it.
+mkdir -p "$TESTHOME/.claude/shell/shared"
+cp "$REPO_DIR/shell/shared/worktree.sh" "$TESTHOME/.claude/shell/shared/worktree.sh"
 
 WORKTREE_D_DEFINED=0
 HOME="$TESTHOME" PATH="$TMPBIN:$PATH" \
-    bash -c "source '$REPO_DIR/shell/cc.sh'; type _cc_worktree >/dev/null 2>&1" \
+    bash -c "source '$REPO_DIR/shell/bash/cc.sh'; type _cc_worktree >/dev/null 2>&1" \
     && WORKTREE_D_DEFINED=1 || true
 
 # Call cc worktree with no branch: fails early ("not a git repository") but
 # must NOT print the old zsh-only message.
 WORKTREE_D_OUT=$(
     HOME="$TESTHOME" PATH="$TMPBIN:$PATH" \
-    bash -c "source '$REPO_DIR/shell/cc.sh'; cc worktree 2>&1" || true
+    bash -c "source '$REPO_DIR/shell/bash/cc.sh'; cc worktree 2>&1" || true
 )
 
 if [[ "$WORKTREE_D_DEFINED" -eq 1 ]] && ! printf '%s' "$WORKTREE_D_OUT" | grep -q "zsh-only"; then
@@ -100,7 +100,7 @@ else
     fail "(d) bash: cc worktree should be available (defined=$WORKTREE_D_DEFINED, out=$WORKTREE_D_OUT)"
 fi
 
-rm -f "$TESTHOME/.claude/shell/worktree.sh"
+rm -f "$TESTHOME/.claude/shell/shared/worktree.sh"
 
 # ─── zsh tests (guard only; skip gracefully if zsh absent) ───────────────────
 printf '\n=== zsh tests ===\n'
@@ -113,27 +113,28 @@ else
     # Build a minimal HOME structure so cc.zsh can source its modules.
     ZSH_HOME=$(mktemp -d)
 
-    mkdir -p "$ZSH_HOME/.claude/shell/cc"
+    mkdir -p "$ZSH_HOME/.claude/shell/zsh"
+    mkdir -p "$ZSH_HOME/.claude/shell/shared"
     mkdir -p "$ZSH_HOME/.claude/hooks/lib"
 
     # Copy the real modules.
-    cp "$REPO_DIR/shell/bust-cache.zsh"          "$ZSH_HOME/.claude/shell/"
-    cp "$REPO_DIR/shell/cc/config-drift.zsh"     "$ZSH_HOME/.claude/shell/cc/"
-    cp "$REPO_DIR/shell/cc/retention.zsh"        "$ZSH_HOME/.claude/shell/cc/"
-    cp "$REPO_DIR/shell/cc/sessions.zsh"         "$ZSH_HOME/.claude/shell/cc/"
-    cp "$REPO_DIR/shell/cc/clean-resume.zsh"     "$ZSH_HOME/.claude/shell/cc/"
-    cp "$REPO_DIR/shell/cc/dispatch.zsh"         "$ZSH_HOME/.claude/shell/cc/"
-    cp "$REPO_DIR/shell/cc.zsh"                  "$ZSH_HOME/.claude/shell/"
+    cp "$REPO_DIR/shell/zsh/bust-cache.zsh"      "$ZSH_HOME/.claude/shell/zsh/"
+    cp "$REPO_DIR/shell/zsh/config-drift.zsh"    "$ZSH_HOME/.claude/shell/zsh/"
+    cp "$REPO_DIR/shell/zsh/retention.zsh"       "$ZSH_HOME/.claude/shell/zsh/"
+    cp "$REPO_DIR/shell/zsh/sessions.zsh"        "$ZSH_HOME/.claude/shell/zsh/"
+    cp "$REPO_DIR/shell/zsh/clean-resume.zsh"    "$ZSH_HOME/.claude/shell/zsh/"
+    cp "$REPO_DIR/shell/zsh/dispatch.zsh"        "$ZSH_HOME/.claude/shell/zsh/"
+    cp "$REPO_DIR/shell/zsh/cc.zsh"              "$ZSH_HOME/.claude/shell/zsh/"
 
     # Stub worktree.sh: complex + not needed for guard tests.
     printf '# stub\n_cc_worktree() { printf "worktree stub\\n" >&2; return 1; }\n' \
-        > "$ZSH_HOME/.claude/shell/worktree.sh"
+        > "$ZSH_HOME/.claude/shell/shared/worktree.sh"
 
     # Stub config-hash.sh (sourced by config-drift.zsh).
     printf 'config_hash() { printf "testhash\\n"; }\n' \
         > "$ZSH_HOME/.claude/hooks/lib/config-hash.sh"
 
-    ZSH_SRC="$ZSH_HOME/.claude/shell/cc.zsh"
+    ZSH_SRC="$ZSH_HOME/.claude/shell/zsh/cc.zsh"
 
     # (e) no SYSTEM_PROMPT.md → --system-prompt-file must NOT appear
     ARGS_E=$(mktemp)

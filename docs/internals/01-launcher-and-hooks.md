@@ -4,7 +4,7 @@ The `cc` launcher is the entry point for every session. It wraps `claude` with a
 
 ## The `cc`/`ccd` Launcher
 
-Defined in `shell/cc.zsh`, the launcher sources six module files from `shell/cc/` and `shell/worktree.zsh`, then defines two public shell functions. Both call the internal `_claude` dispatcher. `ccd` is `cc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
+Defined in `shell/zsh/cc.zsh`, the launcher sources six module files from `shell/zsh/` and `shell/shared/worktree.sh`, then defines two public shell functions. Both call the internal `_claude` dispatcher. `ccd` is `cc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
 
 On every invocation, `cc` passes `--system-prompt-file ~/.claude/prompts/SYSTEM_PROMPT.md` to `claude`. After `claude` exits, it runs `_cc_prune` to keep only the newest `CCD_KEEP` transcripts (default 5, floor 2) per project. Older transcripts plus their sidecars and runtime state are deleted.
 
@@ -27,7 +27,7 @@ The `session-init.sh` hook mirrors this: on `source=resume`, it recomputes the h
 
 ## The Worktree Engine
 
-`cc worktree <branch>` delegates to `_cc_worktree` in `shell/worktree.zsh`. It's only accessible through `cc`/`ccd`, not as a standalone command.
+`cc worktree <branch>` delegates to `_cc_worktree` in `shell/shared/worktree.sh`. It's only accessible through `cc`/`ccd`, not as a standalone command.
 
 What it does, in order:
 

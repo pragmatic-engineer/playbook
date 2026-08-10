@@ -4,7 +4,7 @@
 
 ## How it loads
 
-The `cc` launcher (`shell/cc.zsh`) passes the file to `claude` via `--system-prompt-file`:
+The `cc` launcher (`shell/zsh/cc.zsh`) passes the file to `claude` via `--system-prompt-file`:
 
 ```zsh
 cc()  { _claude --system-prompt-file "$HOME/.claude/prompts/SYSTEM_PROMPT.md" "$@"; ... }

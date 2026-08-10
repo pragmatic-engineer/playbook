@@ -40,9 +40,9 @@ cc raw [id]            # resume verbatim, no fork or cleanup (zsh only)
 
 `cc` loads the system prompt (when installed), picks a model, and prunes old transcripts (keeps the newest 5; set `CCD_KEEP` to change, `CCD_KEEP=0` disables).
 
-**Shell parity.** The two launchers are separate implementations, so they differ. `cc.zsh` loads modules from `shell/cc/`; `cc.sh` is a self-contained bash port. Both cover the default resume, `fresh`, `list`, and `worktree`. Only zsh has `clean`, `raw`, and the config-drift auto-fork. Only bash has the `prune` subcommand. On bash, `cc clean` and `cc raw` fall through to a plain resume without warning, so use zsh when you need them.
+**Shell parity.** The two launchers are separate implementations, so they differ. `cc.zsh` (under `shell/zsh/`) loads modules from the same directory; `cc.sh` (under `shell/bash/`) is a self-contained bash port. Both cover the default resume, `fresh`, `list`, and `worktree`. Only zsh has `clean`, `raw`, and the config-drift auto-fork. Only bash has the `prune` subcommand. On bash, `cc clean` and `cc raw` fall through to a plain resume without warning, so use zsh when you need them.
 
-`cc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine (`shell/worktree.sh`) is shared by both shells. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
+`cc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine (`shell/shared/worktree.sh`) is shared by both shells. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
 
 ## Commands
 

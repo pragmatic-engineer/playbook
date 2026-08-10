@@ -159,8 +159,11 @@ fi
 # --- Remove .zshrc launcher block ---
 # Uses a same-directory tempfile to avoid a cross-filesystem EXDEV rename
 # error that would silently leave the file unchanged.
+# Matches both the pre-layout-move path (shell/cc.zsh) and the current path
+# (shell/zsh/cc.zsh) so an install made before the shell/bash/zsh/shared
+# reorganisation doesn't get left with a dead source line.
 ZSHRC="$HOME/.zshrc"
-if [ -f "$ZSHRC" ] && grep -qF 'shell/cc.zsh' "$ZSHRC"; then
+if [ -f "$ZSHRC" ] && grep -qE 'shell/(zsh/)?cc\.zsh' "$ZSHRC"; then
     STAMP="$(date +%Y%m%d-%H%M%S)"
     cp "$ZSHRC" "${ZSHRC}.bak-${STAMP}"
     ZSHRC_TMP="$(mktemp "${HOME}/.zshrc.tmp.XXXXXX")"
@@ -171,7 +174,7 @@ if [ -f "$ZSHRC" ] && grep -qF 'shell/cc.zsh' "$ZSHRC"; then
     # source line.  Handles multiple occurrences and the no-comment case.
     # A second awk pass squeezes any resulting doubled blank line.
     awk '
-      /source.*\/shell\/cc\.zsh/ {
+      /source.*\/shell\/(zsh\/)?cc\.zsh/ {
         if (prev ~ /launchers \(cc\/ccd\)/) prev = ""
         if (prev != "") print prev
         prev = ""; next
