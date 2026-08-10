@@ -2,9 +2,10 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: MIT
 #
-# uninstall.sh: remove shipped files from ~/.claude and clean the .zshrc
-# launcher block.  Runtime state (sessions, history, credentials) is
-# preserved by default.  Use --purge to also remove user config.
+# uninstall.sh: remove shipped files from ~/.claude and clean the launcher
+# block from .zshrc and .bashrc.  Runtime state (sessions, history,
+# credentials) is preserved by default.  Use --purge to also remove user
+# config.
 #
 # Usage:
 #   bash ~/.claude/uninstall.sh [--yes] [--force] [--purge]
@@ -35,7 +36,8 @@ die()  { printf '%serror:%s %s\n' "$C_R" "$C_0" "$*" >&2; exit 1; }
 
 print_help() {
     cat <<'EOF'
-Remove shipped files from ~/.claude and clean the .zshrc launcher block.
+Remove shipped files from ~/.claude and clean the launcher block from
+.zshrc and .bashrc.
 
 Usage:
   bash ~/.claude/uninstall.sh [--yes] [--force] [--purge]
@@ -156,39 +158,53 @@ if [ "$PURGE" -eq 1 ]; then
     done
 fi
 
-# --- Remove .zshrc launcher block ---
+# --- Remove launcher source lines from rc files ---
+# Shared helper: strips one shell's launcher source line, and the
+# "launchers (cc/ccd)" comment immediately preceding it, from the given rc
+# file.  Called once for .zshrc and once for .bashrc so the removal logic
+# lives in exactly one place instead of two drifting copies.
+#
 # Uses a same-directory tempfile to avoid a cross-filesystem EXDEV rename
 # error that would silently leave the file unchanged.
-# Matches both the pre-layout-move path (shell/cc.zsh) and the current path
-# (shell/zsh/cc.zsh) so an install made before the shell/bash/zsh/shared
-# reorganisation doesn't get left with a dead source line.
-ZSHRC="$HOME/.zshrc"
-if [ -f "$ZSHRC" ] && grep -qE 'shell/(zsh/)?cc\.zsh' "$ZSHRC"; then
-    STAMP="$(date +%Y%m%d-%H%M%S)"
-    cp "$ZSHRC" "${ZSHRC}.bak-${STAMP}"
-    ZSHRC_TMP="$(mktemp "${HOME}/.zshrc.tmp.XXXXXX")"
-    # Drop the source line and absorb the preceding launchers comment of
-    # any variant (matches "launchers (cc/ccd)" broadly so it handles all
-    # historical and current comment forms).  Only removes a comment when it
-    # both matches launchers (cc/ccd) AND is immediately followed by the
-    # source line.  Handles multiple occurrences and the no-comment case.
-    # A second awk pass squeezes any resulting doubled blank line.
-    awk '
-      /source.*\/shell\/(zsh\/)?cc\.zsh/ {
-        if (prev ~ /launchers \(cc\/ccd\)/) prev = ""
-        if (prev != "") print prev
-        prev = ""; next
-      }
-      { if (prev != "") print prev; prev = $0 }
-      END { if (prev != "") print prev }
-    ' "$ZSHRC" | awk '
-      /^[[:space:]]*$/ { blank++; if (blank <= 1) print; next }
-      { blank = 0; print }
-    ' > "$ZSHRC_TMP"
-    mv "$ZSHRC_TMP" "$ZSHRC"
-    log "Removed cc.zsh launcher from .zshrc (backup: ${ZSHRC}.bak-${STAMP})"
-else
-    log ".zshrc: cc.zsh source line not found; nothing to remove"
-fi
+# path_pat matches both the pre-layout-move path (e.g. shell/cc.zsh) and the
+# current path (e.g. shell/zsh/cc.zsh) so an install made before the
+# shell/bash/zsh/shared reorganisation doesn't get left with a dead source
+# line.  Only removes a comment when it both matches launchers (cc/ccd) AND
+# is immediately followed by the source line.  Handles multiple occurrences
+# and the no-comment case.  A second awk pass squeezes any resulting doubled
+# blank line.
+#
+# has: an explicit "a line is buffered" flag.  Using prev != "" as the
+# sentinel instead cannot tell "nothing buffered" apart from "buffered a
+# blank line", and silently eats the user's blank lines around the block.
+strip_rc_launcher() {
+    local rc="$1" path_pat="$2" label="$3"
+    local stamp rc_tmp
+
+    if [ -f "$rc" ] && grep -qE "$path_pat" "$rc"; then
+        stamp="$(date +%Y%m%d-%H%M%S)"
+        cp "$rc" "${rc}.bak-${stamp}"
+        rc_tmp="$(mktemp "${rc}.tmp.XXXXXX")"
+        awk -v pat="source.*${path_pat}" '
+          $0 ~ pat {
+            if (has && prev ~ /launchers \(cc\/ccd\)/) has = 0
+            if (has) print prev
+            has = 0; next
+          }
+          { if (has) print prev; prev = $0; has = 1 }
+          END { if (has) print prev }
+        ' "$rc" | awk '
+          /^[[:space:]]*$/ { blank++; if (blank <= 1) print; next }
+          { blank = 0; print }
+        ' > "$rc_tmp"
+        mv "$rc_tmp" "$rc"
+        log "Removed $label launcher from $(basename "$rc") (backup: ${rc}.bak-${stamp})"
+    else
+        log "$(basename "$rc"): $label source line not found; nothing to remove"
+    fi
+}
+
+strip_rc_launcher "$HOME/.zshrc"  'shell/(zsh/)?cc\.zsh'   'cc.zsh'
+strip_rc_launcher "$HOME/.bashrc" 'shell/(bash/)?cc\.sh'   'cc.sh'
 
 log "Done. Reload your shell or open a new terminal to apply changes."
