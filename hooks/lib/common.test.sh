@@ -242,6 +242,16 @@ PYEOF
 )"
 check "emit_system_message: exact JSON output" "$out" '{"systemMessage":"system msg"}'
 
+# Non-ASCII must stay raw UTF-8 (ensure_ascii=False), matching jq -cn, not \uXXXX.
+out="$(HOOK_INPUT='{}' PYLIB="$LIBDIR" python3 - <<'PYEOF'
+import sys, os
+sys.path.insert(0, os.environ['PYLIB'])
+import common
+common.emit_system_message('⚠ warn')
+PYEOF
+)"
+check "emit_system_message: non-ASCII stays raw UTF-8" "$out" "$(printf '{"systemMessage":"\xe2\x9a\xa0 warn"}')"
+
 # ── Helper 10: incr_counter() ────────────────────────────────────────────────
 
 counter_file="$SCRATCH/counter/cnt"

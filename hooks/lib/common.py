@@ -73,7 +73,7 @@ def field(path: str) -> str:
             if isinstance(value, float) and value == int(value):
                 return str(int(value))
             return str(value)
-        return json.dumps(value, separators=(",", ":"))
+        return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     except Exception:
         return ""
 
@@ -160,7 +160,7 @@ def emit_pre_context(event: str, msg: str) -> None:
     """Print a PreToolUse additionalContext JSON object to stdout."""
     print(json.dumps(
         {"hookSpecificOutput": {"hookEventName": event, "additionalContext": msg}},
-        separators=(",", ":"),
+        separators=(",", ":"), ensure_ascii=False,
     ))
 
 
@@ -172,7 +172,7 @@ def emit_pre_deny(reason: str) -> None:
             "permissionDecision": "deny",
             "permissionDecisionReason": reason,
         }},
-        separators=(",", ":"),
+        separators=(",", ":"), ensure_ascii=False,
     ))
 
 
@@ -180,13 +180,13 @@ def emit_prompt_context(msg: str) -> None:
     """Print a UserPromptSubmit additionalContext JSON object to stdout."""
     print(json.dumps(
         {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": msg}},
-        separators=(",", ":"),
+        separators=(",", ":"), ensure_ascii=False,
     ))
 
 
 def emit_system_message(msg: str) -> None:
     """Print a systemMessage JSON object to stdout."""
-    print(json.dumps({"systemMessage": msg}, separators=(",", ":")))
+    print(json.dumps({"systemMessage": msg}, separators=(",", ":"), ensure_ascii=False))
 
 
 def incr_counter(file: str) -> int:

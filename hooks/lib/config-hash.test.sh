@@ -34,6 +34,8 @@ printf '{"model":"claude-opus-4-5"}\n' > "$SCRATCH/.claude/settings.json"
 printf '#!/bin/sh\n# hook a\n'         > "$SCRATCH/.claude/hooks/a.sh"
 printf '#!/bin/sh\n# hook b\n'         > "$SCRATCH/.claude/hooks/b.sh"
 printf '# test only\n'                 > "$SCRATCH/.claude/hooks/a.test.sh"
+printf '#!/usr/bin/env python3\n# hook c\n' > "$SCRATCH/.claude/hooks/c.py"
+printf '# python test only\n'          > "$SCRATCH/.claude/hooks/c.test.py"
 
 export HOME="$SCRATCH"
 
@@ -95,6 +97,26 @@ else
   else
     fail "sources and runs cleanly under zsh"
   fi
+fi
+
+# 7. Editing a python hook (c.py) CHANGES the hash (post-migration coverage).
+before="$(config_hash)"
+printf '# py new line\n' >> "$SCRATCH/.claude/hooks/c.py"
+after="$(config_hash)"
+if [[ "$before" != "$after" ]]; then
+  ok "python hook edit changes hash"
+else
+  fail "python hook edit changes hash (before='$before' after='$after')"
+fi
+
+# 8. Editing a python test file (c.test.py) leaves the hash UNCHANGED.
+before="$(config_hash)"
+printf '# py test - modified\n' >> "$SCRATCH/.claude/hooks/c.test.py"
+after="$(config_hash)"
+if [[ "$before" == "$after" ]]; then
+  ok "python test file edit leaves hash unchanged"
+else
+  fail "python test file edit leaves hash unchanged (before='$before' after='$after')"
 fi
 
 TOTAL=$(( PASS + FAIL ))
