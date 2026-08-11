@@ -2,7 +2,14 @@
 # SPDX-License-Identifier: MIT
 #
 # Dependencies for this ~/.claude config (hooks, shell/, statusline).
-# Install with:  brew bundle --file ~/.claude/Brewfile
+#
+# The canonical dependency list. `/setup` reads the `brew "X"` formula names
+# from here and runs a per-dependency check-then-install (shell/ensure-deps.sh):
+# for each one it uses the version already on PATH (brew, nvm, pyenv, system, a
+# manual install) and installs via brew only when the tool is missing, so an
+# existing tool is never shadowed by a duplicate brew install. You can still run
+# `brew bundle --file ~/.claude/Brewfile` directly, which installs the brew
+# formula for each regardless of a non-brew copy.
 #
 # Not available via Homebrew, install separately:
 #   - claude  (Claude Code)  https://docs.claude.com/en/docs/claude-code  (npm i -g @anthropic-ai/claude-code, or the native installer)
@@ -15,12 +22,7 @@ brew "rtk"          # CLI proxy that a PreToolUse hook routes every Bash command
 
 # Statusline and PR/CI integration
 brew "gh"           # statusline PR and CI status (optional but recommended)
-
-# Node is NOT force-installed here. setup-local.sh's ensure_node detects a node
-# already on PATH (nvm, fnm, volta, system, or a prior brew install) and uses
-# that version, installing via brew only when none is found. This avoids a
-# duplicate brew node shadowing the version you already run. The statusline
-# shows whatever node wins on PATH.
+brew "node"         # statusline shows the active Node version (installed only if no node is on PATH)
 
 # Browser automation (optional): agent-browser MCP, used by /brainstorm for web-only tickets and attachments
 brew "agent-browser"  # register: claude mcp add --scope user agent-browser -- agent-browser mcp --tools core
