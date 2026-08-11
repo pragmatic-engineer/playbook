@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # gen-shared-settings.test.sh: tests for the settings.shared.json generator in
-# shell/gen-shared-settings.sh. Covers the happy-path transform (canned
+# shell/gen-shared-settings.py. Covers the happy-path transform (canned
 # permissions, forced model/skipAutoPermissionPrompt, deleted personal keys,
 # product-key passthrough) plus every input guard (bad JSON, missing files,
 # degenerate permissions, no args).
@@ -13,7 +13,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GEN="${SCRIPT_DIR}/gen-shared-settings.sh"
+GEN="${SCRIPT_DIR}/gen-shared-settings.py"
 PASS=0
 FAIL=0
 

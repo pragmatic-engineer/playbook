@@ -116,7 +116,7 @@ out="$(printf '{"tool_input":{"command":"rm -rf /etc/hosts"}}' | bash "$REPO/hoo
 
 hdr "H. Repo validators and behavioral suites"
 ( cd "$REPO" && bash shell/check-manifest.sh >/dev/null 2>&1 ) && ok "check-manifest" || bad "check-manifest"
-( cd "$REPO" && bash shell/check-shared-settings.sh settings.shared.json permissions.shared.json . >/dev/null 2>&1 ) \
+( cd "$REPO" && python3 shell/check-shared-settings.py settings.shared.json permissions.shared.json . >/dev/null 2>&1 ) \
   && ok "check-shared-settings" || bad "check-shared-settings"
 tp=0; tf=0
 while IFS= read -r t; do

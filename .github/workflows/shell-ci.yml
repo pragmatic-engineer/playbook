@@ -6,7 +6,7 @@
 #   - ShellCheck static analysis on all tracked .sh files (Linux only, lint once)
 #   - Bash syntax (bash -n) on all tracked .sh files
 #   - Zsh syntax (zsh -n) on all tracked .zsh files
-#   - Shared settings template shape (shell/check-shared-settings.sh)
+#   - Shared settings template shape (shell/check-shared-settings.py)
 #   - Tracked-file allowlist, no leaked runtime state (shell/check-manifest.sh)
 #   - Agent definitions in agents/*.md (shell/check-agents.sh)
 #   - Every behavioral suite discovered via `git ls-files '*.test.sh'`
@@ -72,7 +72,7 @@ jobs:
 
       - name: Validate shared settings, tracked-file manifest, and agent definitions
         run: |
-          bash shell/check-shared-settings.sh settings.shared.json permissions.shared.json .
+          python3 shell/check-shared-settings.py settings.shared.json permissions.shared.json .
           bash shell/check-manifest.sh
           bash shell/check-agents.sh
 

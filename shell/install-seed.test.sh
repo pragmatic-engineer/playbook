@@ -29,13 +29,13 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 
 # Run the real installer against a local source, fully hermetic: the seam skips
 # the network path and --no-setup skips brew/zshrc/shell-reload.
-# setup-local.sh and merge-settings.sh are injected into every test src so
+# setup-local.sh and merge-settings.py are injected into every test src so
 # that install.sh can call setup-local.sh after the file-copy loop (WU-2.1).
 run_install() {
   local src="$1" home="$2"
   mkdir -p "$src/shell"
   [ -f "$src/shell/setup-local.sh" ]    || cp "$SCRIPT_DIR/setup-local.sh"    "$src/shell/setup-local.sh"
-  [ -f "$src/shell/merge-settings.sh" ] || cp "$SCRIPT_DIR/merge-settings.sh" "$src/shell/merge-settings.sh"
+  [ -f "$src/shell/merge-settings.py" ] || cp "$SCRIPT_DIR/merge-settings.py" "$src/shell/merge-settings.py"
   PLAYBOOK_SRC="$src" CLAUDE_HOME="$home" HOME="$home" \
     bash "$INSTALL" --no-setup >/dev/null 2>&1
 }
@@ -116,7 +116,7 @@ run_scenario "D: copy loop skips a shipped settings.json"        scenario_skip_s
 # ---------------------------------------------------------------------------
 # Helpers for the merge scenarios (WU-2)
 # ---------------------------------------------------------------------------
-MERGE="${SCRIPT_DIR}/merge-settings.sh"
+MERGE="${SCRIPT_DIR}/merge-settings.py"
 
 # run_install_rc: run install, capture stderr to a file, return exit code via rc.
 # Sets _INSTALL_RC and _INSTALL_ERR_FILE.
@@ -124,19 +124,19 @@ run_install_full() {
   local src="$1" home="$2" errfile="$3"
   mkdir -p "$src/shell"
   [ -f "$src/shell/setup-local.sh" ]    || cp "$SCRIPT_DIR/setup-local.sh"    "$src/shell/setup-local.sh"
-  [ -f "$src/shell/merge-settings.sh" ] || cp "$SCRIPT_DIR/merge-settings.sh" "$src/shell/merge-settings.sh"
+  [ -f "$src/shell/merge-settings.py" ] || cp "$SCRIPT_DIR/merge-settings.py" "$src/shell/merge-settings.py"
   PLAYBOOK_SRC="$src" CLAUDE_HOME="$home" HOME="$home" \
     bash "$INSTALL" --no-setup >/dev/null 2>"$errfile"
   _INSTALL_RC=$?
 }
 
-# make_merge_src: create a minimal src dir that includes merge-settings.sh so
-# install.sh can find it at $CLAUDE_HOME/shell/merge-settings.sh after the copy
+# make_merge_src: create a minimal src dir that includes merge-settings.py so
+# install.sh can find it at $CLAUDE_HOME/shell/merge-settings.py after the copy
 # loop runs.
 make_merge_src() {
   local src="$1"
   mkdir -p "$src/shell"
-  cp "$MERGE" "$src/shell/merge-settings.sh"
+  cp "$MERGE" "$src/shell/merge-settings.py"
 }
 
 # (a) Fresh install: settings.json seeded AND .settings.base.json written == template.
