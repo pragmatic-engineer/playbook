@@ -65,13 +65,55 @@ else
     fail "dep absent+no brew (out=[$out3], rc=$rc3)"
 fi
 
-# --- 4: _dep_command_for maps python@X to python3, others unchanged ---
-py="$(/bin/sh -c '. "$1"; _dep_command_for "python@3.13"' _ "$ENSURE" 2>&1)"
-git_="$(/bin/sh -c '. "$1"; _dep_command_for "git"' _ "$ENSURE" 2>&1)"
-if [ "$py" = "python3" ] && [ "$git_" = "git" ]; then
-    pass "_dep_command_for maps python@3.13 to python3, git to git"
+# write_python_stub <dir> <version> <meets>: a fake python3 that prints <version>
+# for the "print version" call and exits <meets> (0 = satisfies the floor) for
+# the "sys.exit" version-check call.
+write_python_stub() {
+    local dir="$1" ver="$2" meets="$3"
+    mkdir -p "$dir"
+    cat > "$dir/python3" <<STUB
+#!/bin/sh
+case "\$*" in
+  *sys.exit*) exit $meets ;;
+  *) echo "$ver" ;;
+esac
+STUB
+    chmod +x "$dir/python3"
+}
+
+# --- 4a: python3 present and new enough -> keep it, do NOT install ---
+S4A="$WORK/s4a"
+write_python_stub "$S4A" "3.13.0" 0
+BREW4A="$WORK/brew4a.log"
+write_stub "$S4A" brew "echo \"\$@\" >> '$BREW4A'"
+out4a="$(PATH="$S4A" /bin/sh -c '. "$1"; ensure_python python@3.13' _ "$ENSURE" 2>&1)"
+if printf '%s' "$out4a" | grep -q 'python3 3.13.0 already installed' && [ ! -s "$BREW4A" ]; then
+    pass "python present and >= 3.9: kept, not installed"
 else
-    fail "_dep_command_for (python=[$py] git=[$git_])"
+    fail "python present new (out=[$out4a], brew=[$(cat "$BREW4A" 2>/dev/null)])"
+fi
+
+# --- 4b: python3 present but too old -> install the formula ---
+S4B="$WORK/s4b"
+write_python_stub "$S4B" "3.8.0" 1
+BREW4B="$WORK/brew4b.log"
+write_stub "$S4B" brew "echo \"\$@\" >> '$BREW4B'"
+out4b="$(PATH="$S4B" /bin/sh -c '. "$1"; ensure_python python@3.13' _ "$ENSURE" 2>&1)"
+if printf '%s' "$out4b" | grep -q 'python3 3.8.0 is older than 3.9' && grep -q 'install python@3.13' "$BREW4B" 2>/dev/null; then
+    pass "python present but < 3.9: installs the pinned formula"
+else
+    fail "python present old (out=[$out4b], brew=[$(cat "$BREW4B" 2>/dev/null)])"
+fi
+
+# --- 4c: python3 absent -> install the formula ---
+S4C="$WORK/s4c"
+BREW4C="$WORK/brew4c.log"
+write_stub "$S4C" brew "echo \"\$@\" >> '$BREW4C'"
+out4c="$(PATH="$S4C" /bin/sh -c '. "$1"; ensure_python python@3.13' _ "$ENSURE" 2>&1)"
+if printf '%s' "$out4c" | grep -q 'python3 not found; installing' && grep -q 'install python@3.13' "$BREW4C" 2>/dev/null; then
+    pass "python absent: installs the pinned formula"
+else
+    fail "python absent (out=[$out4c], brew=[$(cat "$BREW4C" 2>/dev/null)])"
 fi
 
 # --- 5: ensure_all_deps installs ONLY the missing formulae ---
@@ -80,10 +122,14 @@ S5="$WORK/s5"
 BREW5="$WORK/brew5.log"
 write_stub "$S5" brew "echo \"\$@\" >> '$BREW5'"
 write_stub "$S5" playbook_faketool_present 'echo present'
+# A controlled python3 (new enough) so the python@X route is deterministic
+# regardless of the real python3 in the environment.
+write_python_stub "$S5" "3.13.0" 0
 BF="$WORK/Brewfile.fake"
 cat > "$BF" <<'BREWFILE'
 # a comment, not a formula
 brew "playbook_faketool_present"  # already installed via the stub
+brew "python@3.13"                # routes to the version-aware check
 brew "playbook_faketool_absent1"
 brew "playbook_faketool_absent2"
 BREWFILE
@@ -93,8 +139,10 @@ installed="$(cat "$BREW5" 2>/dev/null)"
 if printf '%s' "$installed" | grep -q 'install playbook_faketool_absent1' \
    && printf '%s' "$installed" | grep -q 'install playbook_faketool_absent2' \
    && ! printf '%s' "$installed" | grep -q 'install playbook_faketool_present' \
-   && printf '%s' "$out5" | grep -q 'playbook_faketool_present already installed'; then
-    pass "ensure_all_deps installs only the missing formulae"
+   && ! printf '%s' "$installed" | grep -q 'install python@3.13' \
+   && printf '%s' "$out5" | grep -q 'playbook_faketool_present already installed' \
+   && printf '%s' "$out5" | grep -q 'python3 3.13.0 already installed'; then
+    pass "ensure_all_deps installs only missing formulae; python routes to the version check"
 else
     fail "ensure_all_deps (installed=[$installed], out=[$out5])"
 fi

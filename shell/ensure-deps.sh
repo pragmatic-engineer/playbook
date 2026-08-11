@@ -14,14 +14,36 @@
 # in sync). Uses only shell builtins plus grep, sed, and brew, so it is unit
 # tested in isolation with stubbed tools.
 
-# _dep_command_for <formula>: the command that proves <formula> is installed.
-# The command name equals the formula name except where they differ, e.g. the
-# python@<version> formula is proven by python3.
-_dep_command_for() {
-    case "$1" in
-        python@*) printf 'python3' ;;
-        *)        printf '%s' "$1" ;;
-    esac
+# Minimum Python the hooks need (no-dash-guard.sh, rebuild-memory-graph.sh use
+# python3 features that require >= 3.9).
+PY_MIN_MAJOR=3
+PY_MIN_MINOR=9
+
+# ensure_python <formula>: ensure a python3 of at least PY_MIN on PATH. A python3
+# that is present but too old does not satisfy the hooks, so it is treated like
+# absent and <formula> is installed via Homebrew. Returns non-zero only when an
+# attempted install fails. Kept separate from ensure_dep because only Python
+# carries a version floor: presence alone is not enough.
+ensure_python() {
+    local formula="$1" ver=""
+    if command -v python3 >/dev/null 2>&1; then
+        ver="$(python3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null)"
+        if python3 -c "import sys; sys.exit(0 if sys.version_info[:2] >= (${PY_MIN_MAJOR}, ${PY_MIN_MINOR}) else 1)" 2>/dev/null; then
+            printf 'ensure-deps: python3 %s already installed (%s)\n' "$ver" "$(command -v python3)"
+            return 0
+        fi
+        printf 'ensure-deps: python3 %s is older than %d.%d; installing %s via Homebrew\n' \
+            "$ver" "$PY_MIN_MAJOR" "$PY_MIN_MINOR" "$formula"
+    else
+        printf 'ensure-deps: python3 not found; installing %s via Homebrew\n' "$formula"
+    fi
+    if command -v brew >/dev/null 2>&1; then
+        brew install "$formula" </dev/null
+        return $?
+    fi
+    printf 'ensure-deps: cannot install %s: Homebrew is unavailable; install Python %d.%d+ manually\n' \
+        "$formula" "$PY_MIN_MAJOR" "$PY_MIN_MINOR" >&2
+    return 0
 }
 
 # ensure_dep <command> <formula> [label]: keep <command> if it is on PATH,
@@ -52,11 +74,14 @@ ensure_all_deps() {
         return 0
     fi
     # The while runs in the current shell (heredoc redirect, not a pipe), so rc
-    # persists. Formula names come from the `brew "X"` lines only.
+    # persists. Formula names come from the `brew "X"` lines only. Python routes
+    # to the version-aware check; every other formula's command equals its name.
     while IFS= read -r formula; do
         [ -n "$formula" ] || continue
-        cmd="$(_dep_command_for "$formula")"
-        ensure_dep "$cmd" "$formula" || rc=1
+        case "$formula" in
+            python@*) ensure_python "$formula" || rc=1 ;;
+            *)        ensure_dep "$formula" "$formula" || rc=1 ;;
+        esac
     done <<EOF
 $(grep -oE '^brew "[^"]+"' "$brewfile" 2>/dev/null | sed -E 's/^brew "([^"]+)"$/\1/')
 EOF
