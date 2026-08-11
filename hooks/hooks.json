@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/search-counter.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/search-counter.py\""
           }
         ]
       },
@@ -63,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/auto-model-detect.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/auto-model-detect.py\""
           }
         ]
       }
@@ -73,7 +73,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/precompact-warn.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/precompact-warn.py\""
           }
         ]
       }
@@ -83,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-clean-exit.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-clean-exit.py\""
           }
         ]
       },
@@ -101,7 +101,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-clean-exit.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-clean-exit.py\""
           }
         ]
       }
