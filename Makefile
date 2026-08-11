@@ -11,11 +11,11 @@
 
 SHELL := /bin/bash
 SRC   ?= $(HOME)/.claude/settings.json
-GEN   := shell/gen-shared-settings.sh
+GEN   := shell/gen-shared-settings.py
 PERMS := permissions.shared.json
 
 .PHONY: settings.shared.json
 settings.shared.json:
 	@test -r "$(SRC)" || { echo "make: source settings not readable: $(SRC); nothing regenerated" >&2; exit 1; }
-	@bash "$(GEN)" "$(SRC)" "$(PERMS)" > "$@.tmp" && mv "$@.tmp" "$@"
+	@python3 "$(GEN)" "$(SRC)" "$(PERMS)" > "$@.tmp" && mv "$@.tmp" "$@"
 	@echo "make: regenerated $@ from $(SRC)"
