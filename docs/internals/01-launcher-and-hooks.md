@@ -23,7 +23,7 @@ On every invocation, `cc` passes `--system-prompt-file ~/.claude/prompts/SYSTEM_
 
 On every default resume, `cc` computes a SHA-256 hash of `settings.json` and every hook script, then compares it to the hash stored at session start (in `~/.claude/cc-state/<project-slug>`). When they differ, `cc` forks a new transcript so the fresh copy loads the current config. A plain resume fires only when nothing changed.
 
-The `session-init.sh` hook mirrors this: on `source=resume`, it recomputes the hash and emits a user-visible warning when the resumed session is running on the old config. The README states this directly: config or hook edits take effect on a fresh session, not a resumed one. Use `cc fresh` or `cc clean` after editing `settings.json` or any hook.
+The `session-init.py` hook mirrors this: on `source=resume`, it recomputes the hash and emits a user-visible warning when the resumed session is running on the old config. The README states this directly: config or hook edits take effect on a fresh session, not a resumed one. Use `cc fresh` or `cc clean` after editing `settings.json` or any hook.
 
 ## The Worktree Engine
 
@@ -50,36 +50,36 @@ Per-session state lives in `~/.claude/runtime/<session_id>/`. The session dir ho
 
 | Script | Purpose |
 |---|---|
-| `session-init.sh` | Creates the per-session runtime dir and zeros its counters. Clears the statusline PR/CI cache for the current branch. Checks the config hash and warns on drift. Derives `<owner>/<repo>` from the git remote and injects `~/.claude/memory/<owner>/<repo>/MEMORY.md` as additional context when present. |
+| `session-init.py` | Creates the per-session runtime dir and zeros its counters. Clears the statusline PR/CI cache for the current branch. Checks the config hash and warns on drift. Derives `<owner>/<repo>` from the git remote and injects `~/.claude/memory/<owner>/<repo>/MEMORY.md` as additional context when present. |
 
 ### PreToolUse
 
 | Matcher | Script | Purpose |
 |---|---|---|
 | `Bash` (`rm` only) | `rm-workspace-guard.sh` | Blocks `rm` on any path outside `~/Workspace/` and `~/.claude/`. |
-| `Read` | `preread-edit-check.sh` | When the target file was edited by this session in the last 30 minutes, injects a reminder that the post-edit state is already in context. Info only; never blocks. |
-| `Read` | `preread-size-check.sh` | Blocks full-file reads on files over 1,000 lines or 200 KB when no `offset`/`limit` is set. Pushes toward grep-first, then targeted read. Allowlists common small configs (`package.json`, `CLAUDE.md`, `README.md`, etc.). |
-| `Read`, `Grep`, `Glob`, `Edit`, `Write`, `NotebookEdit` | `search-counter.sh` | Tracks exploration breadth. Nudges Claude toward the Explore subagent at thresholds 4, 8, and 12 unique file reads or searches. Also increments the global tool counter that the statusline reads. |
+| `Read` | `preread-edit-check.py` | When the target file was edited by this session in the last 30 minutes, injects a reminder that the post-edit state is already in context. Info only; never blocks. |
+| `Read` | `preread-size-check.py` | Blocks full-file reads on files over 1,000 lines or 200 KB when no `offset`/`limit` is set. Pushes toward grep-first, then targeted read. Allowlists common small configs (`package.json`, `CLAUDE.md`, `README.md`, etc.). |
+| `Read`, `Grep`, `Glob`, `Edit`, `Write`, `NotebookEdit` | `search-counter.py` | Tracks exploration breadth. Nudges Claude toward the Explore subagent at thresholds 4, 8, and 12 unique file reads or searches. Also increments the global tool counter that the statusline reads. |
 | `Bash` | `rtk hook claude` | Routes every Bash command through `rtk` to cut token use. |
 
 ### PostToolUse
 
 | Matcher | Script | Purpose |
 |---|---|---|
-| `Edit`, `Write`, `NotebookEdit` | `post-edit-track.sh` | Appends the edited file's absolute path and timestamp to `edits.jsonl` in the session runtime dir. Increments the edit counter for the statusline. |
-| `Edit`, `Write`, `NotebookEdit` | `rebuild-memory-graph.sh` | Rebuilds `~/.claude/memory/graph.json` after memory edits. |
+| `Edit`, `Write`, `NotebookEdit` | `post-edit-track.py` | Appends the edited file's absolute path and timestamp to `edits.jsonl` in the session runtime dir. Increments the edit counter for the statusline. |
+| `Edit`, `Write`, `NotebookEdit` | `rebuild-memory-graph.py` | Rebuilds `~/.claude/memory/graph.json` after memory edits. |
 
 ### UserPromptSubmit
 
 | Script | Purpose |
 |---|---|
-| `auto-model-detect.sh` | Matches design and architecture intent in the prompt (ADR, schema, tradeoff, alternatives, etc.) via regex. When matched, injects context nudging Claude to delegate to an Opus subagent rather than reasoning inline on Sonnet. Skips slash commands and prompts under 20 characters. |
+| `auto-model-detect.py` | Matches design and architecture intent in the prompt (ADR, schema, tradeoff, alternatives, etc.) via regex. When matched, injects context nudging Claude to delegate to an Opus subagent rather than reasoning inline on Sonnet. Skips slash commands and prompts under 20 characters. |
 
 ### PreCompact
 
 | Script | Purpose |
 |---|---|
-| `precompact-warn.sh` | Fires when Claude Code is about to auto-compact. Emits a user-visible warning and a Claude-facing instruction to finish the current sub-task, persist unsaved memory, and suggest a clean restart. Logs the event to `~/.claude/runtime/compactions.log`. |
+| `precompact-warn.py` | Fires when Claude Code is about to auto-compact. Emits a user-visible warning and a Claude-facing instruction to finish the current sub-task, persist unsaved memory, and suggest a clean restart. Logs the event to `~/.claude/runtime/compactions.log`. |
 
 ### Stop / SessionEnd
 
@@ -87,7 +87,7 @@ Both events wire to the same script.
 
 | Script | Purpose |
 |---|---|
-| `session-clean-exit.sh` | On `Stop` (after every assistant turn), refreshes `last-clean-ts`. On `SessionEnd`, writes a clean-exit marker and emits a memory-flush reminder to Claude so durable facts get persisted before the session closes. |
+| `session-clean-exit.py` | On `Stop` (after every assistant turn), refreshes `last-clean-ts`. On `SessionEnd`, writes a clean-exit marker and emits a memory-flush reminder to Claude so durable facts get persisted before the session closes. |
 
 ## See also
 
