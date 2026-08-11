@@ -12,7 +12,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MERGE="${SCRIPT_DIR}/merge-settings.sh"
+MERGE="${SCRIPT_DIR}/merge-settings.py"
 PASS=0
 FAIL=0
 
@@ -34,7 +34,7 @@ run_merge() {
     skip="$(mktemp "$WORK/skip.XXXXXX")"
     _RUN_NEWBASE="$newbase"
     _RUN_SKIP="$skip"
-    _RUN_OUT="$(bash "$MERGE" "$base" "$tmpl" "$usr" "$newbase" "$skip" 2>/tmp/merge-test-stderr)"
+    _RUN_OUT="$(python3 "$MERGE" "$base" "$tmpl" "$usr" "$newbase" "$skip" 2>/tmp/merge-test-stderr)"
     rc=$?
     _RUN_ERR="$(cat /tmp/merge-test-stderr)"
 }
@@ -155,7 +155,7 @@ s7() {
     printf '{ not valid json ' > "$d/tmpl.json"
     printf '{"k":"v"}' > "$d/user.json"
     local out rc
-    out="$(bash "$MERGE" "/no/base" "$d/tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
+    out="$(python3 "$MERGE" "/no/base" "$d/tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
     [ "$rc" -ne 0 ] || { fail "s7" "expected non-zero exit, got 0"; return 1; }
     [ -z "$out" ]   || { fail "s7" "expected empty stdout, got: $out"; return 1; }
     pass "s7: corrupt TEMPLATE -> non-zero exit, empty stdout"
@@ -168,7 +168,7 @@ s8() {
     local d; d="$(mktemp -d "$WORK/s8.XXXXXX")"
     printf '{"k":"v"}' > "$d/user.json"
     local out rc
-    out="$(bash "$MERGE" "/no/base" "$d/no_tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
+    out="$(python3 "$MERGE" "/no/base" "$d/no_tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
     [ "$rc" -ne 0 ] || { fail "s8" "expected non-zero exit"; return 1; }
     [ -z "$out" ]   || { fail "s8" "expected empty stdout"; return 1; }
     pass "s8: missing TEMPLATE -> non-zero exit, empty stdout"
@@ -182,7 +182,7 @@ s9() {
     printf '{"k":"v"}' > "$d/tmpl.json"
     printf '{ not valid json ' > "$d/user.json"
     local out rc
-    out="$(bash "$MERGE" "/no/base" "$d/tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
+    out="$(python3 "$MERGE" "/no/base" "$d/tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
     [ "$rc" -ne 0 ] || { fail "s9" "expected non-zero exit"; return 1; }
     [ -z "$out" ]   || { fail "s9" "expected empty stdout"; return 1; }
     pass "s9: corrupt USER -> non-zero exit, empty stdout"
@@ -196,7 +196,7 @@ s10() {
     printf '{"k":"v"}' > "$d/tmpl.json"
     printf '[1,2,3]' > "$d/user.json"
     local out rc
-    out="$(bash "$MERGE" "/no/base" "$d/tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
+    out="$(python3 "$MERGE" "/no/base" "$d/tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
     [ "$rc" -ne 0 ] || { fail "s10" "expected non-zero exit for array USER"; return 1; }
     [ -z "$out" ]   || { fail "s10" "expected empty stdout"; return 1; }
     pass "s10: USER is top-level array -> non-zero exit (N2)"
@@ -210,7 +210,7 @@ s11() {
     printf '{"k":"v"}' > "$d/tmpl.json"
     printf '"just a string"' > "$d/user.json"
     local out rc
-    out="$(bash "$MERGE" "/no/base" "$d/tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
+    out="$(python3 "$MERGE" "/no/base" "$d/tmpl.json" "$d/user.json" "$d/nb" 2>/dev/null)"; rc=$?
     [ "$rc" -ne 0 ] || { fail "s11" "expected non-zero exit for scalar USER"; return 1; }
     [ -z "$out" ]   || { fail "s11" "expected empty stdout"; return 1; }
     pass "s11: USER is scalar -> non-zero exit (N2)"
@@ -243,7 +243,7 @@ s13() {
     local out stderr_out rc newbase skip
     newbase="$(mktemp "$d/nb.XXXXXX")"
     skip="$(mktemp "$d/skip.XXXXXX")"
-    out="$(bash "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$newbase" "$skip" 2>"$d/err.txt")"; rc=$?
+    out="$(python3 "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$newbase" "$skip" 2>"$d/err.txt")"; rc=$?
     stderr_out="$(cat "$d/err.txt")"
     [ "$rc" -eq 0 ] || { fail "s13" "expected exit 0 on bad base, got $rc"; return 1; }
     # should warn on stderr
@@ -281,7 +281,7 @@ s15() {
     printf '{"k":"user_custom"}' > "$d/user.json"
     local out rc newbase
     newbase="$(mktemp "$d/nb.XXXXXX")"
-    out="$(bash "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$newbase" 2>/dev/null)"; rc=$?
+    out="$(python3 "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$newbase" 2>/dev/null)"; rc=$?
     [ "$rc" -eq 0 ] || { fail "s15" "exit $rc"; return 1; }
     # merged: user value
     jq -e '.k == "user_custom"' <(printf '%s' "$out") >/dev/null 2>&1 || { fail "s15" "user value not in merged"; return 1; }
@@ -308,7 +308,7 @@ s16() {
     printf '{"k":"tmpl_v2"}' > "$d/tmpl1.json"
     local nb1; nb1="$(mktemp "$d/nb1.XXXXXX")"
     local merged1
-    merged1="$(bash "$MERGE" "$d/base0.json" "$d/tmpl1.json" "$d/user.json" "$nb1" 2>/dev/null)"
+    merged1="$(python3 "$MERGE" "$d/base0.json" "$d/tmpl1.json" "$d/user.json" "$nb1" 2>/dev/null)"
     # merged: user kept
     jq -e '.k == "my_custom"' <(printf '%s' "$merged1") >/dev/null 2>&1 \
         || { fail "s16" "cycle1 user value lost: $merged1"; return 1; }
@@ -320,7 +320,7 @@ s16() {
     printf '{"k":"my_custom"}' > "$d/tmpl2.json"   # template now matches user!
     local nb2; nb2="$(mktemp "$d/nb2.XXXXXX")"
     local merged2
-    merged2="$(bash "$MERGE" "$nb1" "$d/tmpl2.json" "$d/user.json" "$nb2" 2>/dev/null)"
+    merged2="$(python3 "$MERGE" "$nb1" "$d/tmpl2.json" "$d/user.json" "$nb2" 2>/dev/null)"
     # C2 fix: base is frozen "original", user is "my_custom" -> still contested -> user kept
     jq -e '.k == "my_custom"' <(printf '%s' "$merged2") >/dev/null 2>&1 \
         || { fail "s16" "cycle2 C2 fail: k should be user value, got: $merged2"; return 1; }
@@ -341,7 +341,7 @@ s17() {
     printf '{"k":"user_val","u":"bu"}' > "$d/user.json"   # k contested, u unchanged
     local skip rc
     skip="$(mktemp "$d/skip.XXXXXX")"
-    bash "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$d/nb" "$skip" >/dev/null 2>/dev/null; rc=$?
+    python3 "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$d/nb" "$skip" >/dev/null 2>/dev/null; rc=$?
     [ "$rc" -eq 0 ] || { fail "s17" "exit $rc"; return 1; }
     jq 'type == "array"' "$skip" >/dev/null 2>&1 || { fail "s17" "skip file not an array: $(cat "$skip")"; return 1; }
     jq empty "$skip" >/dev/null 2>&1 || { fail "s17" "skip file invalid JSON"; return 1; }
@@ -358,7 +358,7 @@ s18() {
     printf '{"a":"custom","b":"3"}' > "$d/user.json"
     local out rc nb
     nb="$(mktemp "$d/nb.XXXXXX")"
-    out="$(bash "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$nb" 2>/dev/null)"; rc=$?
+    out="$(python3 "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$nb" 2>/dev/null)"; rc=$?
     [ "$rc" -eq 0 ] || { fail "s18" "exit $rc"; return 1; }
     jq empty <(printf '%s' "$out") >/dev/null 2>&1 || { fail "s18" "merged stdout not valid JSON"; return 1; }
     jq empty "$nb" >/dev/null 2>&1 || { fail "s18" "NEWBASE not valid JSON"; return 1; }
@@ -375,7 +375,7 @@ s19() {
     printf '{"k":"v"}' > "$d/user.json"   # user unchanged -> template update, no conflict
     local skip rc
     skip="$(mktemp "$d/skip.XXXXXX")"
-    bash "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$d/nb" "$skip" >/dev/null 2>/dev/null; rc=$?
+    python3 "$MERGE" "$d/base.json" "$d/tmpl.json" "$d/user.json" "$d/nb" "$skip" >/dev/null 2>/dev/null; rc=$?
     [ "$rc" -eq 0 ] || { fail "s19" "exit $rc"; return 1; }
     jq -e '. == []' "$skip" >/dev/null 2>&1 || { fail "s19" "skip not [] when no conflict: $(cat "$skip")"; return 1; }
     pass "s19: zero withheld keys -> skip file is []"

@@ -102,9 +102,9 @@ if [ -f "$SELF_ROOT/settings.shared.json" ]; then
         log "Seeded default settings.json from settings.shared.json"
     else
         # Existing install: 3-way merge.
-        MERGE_BIN="$SELF_ROOT/shell/merge-settings.sh"
+        MERGE_BIN="$SELF_ROOT/shell/merge-settings.py"
         MERGE_SKIP_TMP="$MERGE_TMP/settings-merge-skipped.json"
-        if merged="$(bash "$MERGE_BIN" \
+        if merged="$(python3 "$MERGE_BIN" \
                 "$CLAUDE_HOME/.settings.base.json" \
                 "$SELF_ROOT/settings.shared.json" \
                 "$CLAUDE_HOME/settings.json" \
