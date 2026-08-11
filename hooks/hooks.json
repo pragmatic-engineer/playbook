@@ -16,11 +16,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/preread-edit-check.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/preread-edit-check.py\""
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/preread-size-check.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/preread-size-check.py\""
           }
         ]
       },
@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-track.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-track.py\""
           },
           {
             "type": "command",
