@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 Pass `--yes` to accept every default without prompting. Pin a version:
 
 ```bash
-PLAYBOOK_REF=v0.7.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+PLAYBOOK_REF=v0.8.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
 
 Install files only (no plugin, no local wiring):
