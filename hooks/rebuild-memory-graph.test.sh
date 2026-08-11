@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: MIT
 #
-# rebuild-memory-graph.test.sh: scenarios for hooks/rebuild-memory-graph.sh.
+# rebuild-memory-graph.test.sh: scenarios for hooks/rebuild-memory-graph.py.
 # Each scenario builds its own isolated fake memory store under a scratch
 # HOME, runs the hook against it, then asserts on the generated graph.json
 # with jq. Never touches the real ~/.claude/memory store.
@@ -12,8 +12,7 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOK="${HERE}/rebuild-memory-graph.sh"
-RUN_BASH="${BASH:-bash}"
+HOOK="${HERE}/rebuild-memory-graph.py"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "SKIP: jq not available"
@@ -54,7 +53,7 @@ run_hook_for() {
     /*) fp="$target" ;;
     *)  fp="${HOME}/.claude/memory/${target}" ;;
   esac
-  printf '{"tool_input":{"file_path":"%s"}}' "$fp" | "$RUN_BASH" "$HOOK" >/dev/null 2>&1
+  printf '{"tool_input":{"file_path":"%s"}}' "$fp" | python3 "$HOOK" >/dev/null 2>&1
 }
 
 GRAPH() { printf '%s' "${HOME}/.claude/memory/graph.json"; }
