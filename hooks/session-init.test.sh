@@ -14,7 +14,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-HOOK="$HERE/session-init.sh"
+HOOK="$HERE/session-init.py"
 
 PASS=0
 FAIL=0
@@ -48,7 +48,7 @@ mkdir -p "$NONREPO_DIR"
 # run_hook <cwd> <home>: run the hook as SessionStart would, stdin '{}'
 # (matches the real-run verification), stderr discarded. Sets OUT and RC.
 run_hook() {
-  OUT="$(cd "$1" && HOME="$2" bash "$HOOK" <<<'{}' 2>/dev/null)"
+  OUT="$(cd "$1" && HOME="$2" python3 "$HOOK" <<<'{}' 2>/dev/null)"
   RC=$?
 }
 

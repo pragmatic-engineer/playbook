@@ -15,8 +15,8 @@
 #
 # Run:  shell/memory-context.sh [--repo <owner/repo>] [--graph <path>]
 #   --repo   defaults to the origin remote slug, derived the same way as
-#            hooks/session-init.sh: strip protocol, user, host, and the
-#            trailing .git suffix from `git remote get-url origin`.
+#            the hook library repo_slug (hooks/lib/common.py): strip protocol,
+#            user, host, and the trailing .git suffix from `git remote get-url origin`.
 #   --graph  defaults to $HOME/.claude/memory/graph.json
 set -u
 
