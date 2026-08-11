@@ -72,7 +72,7 @@ jobs:
 
       - name: Validate shared settings, tracked-file manifest, and agent definitions
         run: |
-          bash shell/check-shared-settings.sh settings.shared.json permissions.shared.json .
+          python3 shell/check-shared-settings.py settings.shared.json permissions.shared.json .
           bash shell/check-manifest.sh
           bash shell/check-agents.sh
 

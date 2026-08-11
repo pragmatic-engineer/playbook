@@ -13,7 +13,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GUARD="${SCRIPT_DIR}/check-shared-settings.sh"
+GUARD="${SCRIPT_DIR}/check-shared-settings.py"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "SKIP: jq not available"
@@ -94,7 +94,7 @@ jq '.hooks = {"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","comman
 
 expect_pass() {  # <name> <template>
   local name="$1" tmpl="$2"
-  if bash "$GUARD" "$tmpl" "$PERMS" "$REPO" >/dev/null 2>&1; then
+  if python3 "$GUARD" "$tmpl" "$PERMS" "$REPO" >/dev/null 2>&1; then
     echo "PASS: $name"; (( PASS++ )) || true
   else
     echo "FAIL: $name (expected exit 0, got non-zero)"; (( FAIL++ )) || true
@@ -103,7 +103,7 @@ expect_pass() {  # <name> <template>
 
 expect_fail() {  # <name> <template>
   local name="$1" tmpl="$2"
-  if bash "$GUARD" "$tmpl" "$PERMS" "$REPO" >/dev/null 2>&1; then
+  if python3 "$GUARD" "$tmpl" "$PERMS" "$REPO" >/dev/null 2>&1; then
     echo "FAIL: $name (expected non-zero, got exit 0)"; (( FAIL++ )) || true
   else
     echo "PASS: $name"; (( PASS++ )) || true
@@ -126,20 +126,21 @@ done
 expect_pass "rtk hook command is skipped, not failed"  "$RTK_ONLY"
 expect_pass "dual-prefix hook paths both resolve"      "$DUAL"
 
-# jq-absent: run the guard with an empty PATH; it must error out non-zero.
-scenario_jq_absent() {
-  local bashbin rc
-  bashbin="$(command -v bash)"
-  env -i PATH=/nonexistent HOME="$HOME" "$bashbin" "$GUARD" "$GOOD" "$PERMS" "$REPO" \
+# no-external-deps: the python guard uses only stdlib, so it must succeed even
+# when PATH is stripped and jq is unavailable.
+scenario_no_external_deps() {
+  local pythonbin rc
+  pythonbin="$(command -v python3)"
+  env -i PATH=/nonexistent HOME="$HOME" "$pythonbin" "$GUARD" "$GOOD" "$PERMS" "$REPO" \
     >/dev/null 2>&1
   rc=$?
-  if [[ $rc -ne 0 ]]; then
-    echo "PASS: jq absent errors non-zero"; (( PASS++ )) || true
+  if [[ $rc -eq 0 ]]; then
+    echo "PASS: no external deps, guard succeeds in stripped env"; (( PASS++ )) || true
   else
-    echo "FAIL: jq absent should error but exited 0"; (( FAIL++ )) || true
+    echo "FAIL: guard should succeed in stripped env but exited $rc"; (( FAIL++ )) || true
   fi
 }
-scenario_jq_absent
+scenario_no_external_deps
 
 TOTAL=$(( PASS + FAIL ))
 echo ""
