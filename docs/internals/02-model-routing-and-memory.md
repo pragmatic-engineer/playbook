@@ -16,9 +16,9 @@ The policy lives in `prompts/SYSTEM_PROMPT.md`. Three tiers:
 
 The system prompt directs: enter plan mode first for design work (new features, non-trivial refactors, architecture decisions). `settings.json` sets `"useAutoModeDuringPlan": true`, which puts auto mode in effect during plan mode. The system prompt states this combination routes plan mode to Opus and execution to Sonnet.
 
-### auto-model-detect.sh
+### auto-model-detect.py
 
-`hooks/auto-model-detect.sh` runs on every `UserPromptSubmit` event, wired in `settings.json` under the `UserPromptSubmit` hook list. It can't flip the session model mid-stream (Claude Code doesn't support that). Instead it detects design intent and injects a context message nudging Claude toward an Opus subagent.
+`hooks/auto-model-detect.py` runs on every `UserPromptSubmit` event, wired in `settings.json` under the `UserPromptSubmit` hook list. It can't flip the session model mid-stream (Claude Code doesn't support that). Instead it detects design intent and injects a context message nudging Claude toward an Opus subagent.
 
 The script skips slash commands and prompts under 20 characters. For natural-prose prompts it applies an extended-regex pattern (case-insensitive) that matches:
 
@@ -88,7 +88,7 @@ Traversal depth is 1 for all edge types except `supersedes`, which is followed f
 
 ### graph.json
 
-`~/.claude/memory/graph.json` is the single navigable export of the full memory graph: nodes are facts and referenced code locations, edges are `links:` between facts plus `anchors:` from facts to code. It covers all scopes, global and project. The `rebuild-memory-graph.sh` PostToolUse hook rebuilds it automatically after any fact file is saved. See [Decisions and Memory](../guides/03-decisions-and-memory.md) for how to query and use it day-to-day.
+`~/.claude/memory/graph.json` is the single navigable export of the full memory graph: nodes are facts and referenced code locations, edges are `links:` between facts plus `anchors:` from facts to code. It covers all scopes, global and project. The `rebuild-memory-graph.py` PostToolUse hook rebuilds it automatically after any fact file is saved. See [Decisions and Memory](../guides/03-decisions-and-memory.md) for how to query and use it day-to-day.
 
 ## See also
 

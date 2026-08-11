@@ -72,7 +72,7 @@ Both paths produce the same file format and land in the right scope of the store
 
 ## How Facts Are Loaded
 
-At session start, `session-init.sh` derives the repo's `<owner>/<repo>` from its git remote and reads that project's `MEMORY.md` index at `~/.claude/memory/<owner>/<repo>/` (capped at 16KB), injecting it as context. Fact bodies are not injected upfront; they're read on demand when you or a command needs them. The global index is also read on demand, not at session start. This keeps the initial context lean.
+At session start, `session-init.py` derives the repo's `<owner>/<repo>` from its git remote and reads that project's `MEMORY.md` index at `~/.claude/memory/<owner>/<repo>/` (capped at 16KB), injecting it as context. Fact bodies are not injected upfront; they're read on demand when you or a command needs them. The global index is also read on demand, not at session start. This keeps the initial context lean.
 
 The planning and execution commands (`/scope`, `/adr`, `/implement`) read both scopes before planning or executing. Project facts override global for that repo. Conflicts between the two scopes surface rather than resolve silently. The commit and review commands (`/commit-and-push`, `/quick-review`, `/address-pr-comments`) don't touch memory.
 
@@ -82,11 +82,11 @@ At session end, a `SessionEnd` hook fires a last-chance prompt: if any durable f
 
 A single `graph.json` lives at `~/.claude/memory/graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It's a navigation aid: commands read it for orientation; nothing parses it automatically at session start. The graph is becoming the primary retrieval path rather than just a navigation aid; see [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision.
 
-The graph rebuilds automatically. A PostToolUse hook (`rebuild-memory-graph.sh`) fires whenever a file under `~/.claude/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
+The graph rebuilds automatically. A PostToolUse hook (`rebuild-memory-graph.py`) fires whenever a file under `~/.claude/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
 
 ## The Auto-Learn Loop
 
-When a session ends after making at least five edits in a repo, the `session-clean-exit.sh` hook drops a flag in `~/.claude/runtime/to-learn/`. The next time you open a session in that repo, `session-init.sh` reads the flag and surfaces a nudge: consider running `/learn-project` to refresh project memory, or `/learn-project --stage` to queue candidate facts for review.
+When a session ends after making at least five edits in a repo, the `session-clean-exit.py` hook drops a flag in `~/.claude/runtime/to-learn/`. The next time you open a session in that repo, `session-init.py` reads the flag and surfaces a nudge: consider running `/learn-project` to refresh project memory, or `/learn-project --stage` to queue candidate facts for review.
 
 `--stage` collects candidates into `~/.claude/memory/<owner>/<repo>/staging/` without touching the live store. `--from-staged` reviews them and promotes confirmed facts through the normal write flow.
 
