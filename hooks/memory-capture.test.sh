@@ -12,7 +12,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-HOOK="$HERE/memory-capture.sh"
+HOOK="$HERE/memory-capture.py"
 
 PASS=0
 FAIL=0
@@ -26,7 +26,7 @@ SID="test-session-abc"
 # field, which is all this hook reads from a Stop payload. Stderr discarded.
 # Sets OUT and RC.
 run_hook() {
-  OUT="$(HOME="$1" bash "$HOOK" <<<"{\"session_id\":\"${SID}\"}" 2>/dev/null)"
+  OUT="$(HOME="$1" python3 "$HOOK" <<<"{\"session_id\":\"${SID}\"}" 2>/dev/null)"
   RC=$?
 }
 

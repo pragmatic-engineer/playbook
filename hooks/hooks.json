@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/memory-anchors.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/memory-anchors.py\""
           }
         ]
       }
@@ -91,7 +91,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/memory-capture.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/memory-capture.py\""
           }
         ]
       }

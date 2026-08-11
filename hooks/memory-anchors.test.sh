@@ -12,8 +12,7 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOK="${HERE}/memory-anchors.sh"
-RUN_BASH="${BASH:-bash}"
+HOOK="${HERE}/memory-anchors.py"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "SKIP: jq not available"
@@ -60,7 +59,7 @@ edit_path() {
 run_hook() {
   local fp="$1" sid="$2"
   printf '{"session_id":"%s","tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$sid" "$fp" \
-    | "$RUN_BASH" "$HOOK"
+    | python3 "$HOOK"
 }
 
 check() {  # <expect> <actual> <label>
@@ -127,12 +126,12 @@ check "" "$out4" "scenario 4: unanchored path emits nothing"
 # --- 5: never blocks (malformed payload, missing file_path, missing graph) ---
 new_store
 printf '%s' "$BASE_GRAPH" | write_graph
-out5a="$(printf 'not-json-at-all' | "$RUN_BASH" "$HOOK")"
+out5a="$(printf 'not-json-at-all' | python3 "$HOOK")"
 rc5a=$?
 check "0" "$rc5a" "scenario 5: malformed payload exits 0"
 check "" "$out5a" "scenario 5: malformed payload emits nothing"
 
-out5b="$(printf '{"session_id":"s5b","tool_name":"Edit","tool_input":{}}' | "$RUN_BASH" "$HOOK")"
+out5b="$(printf '{"session_id":"s5b","tool_name":"Edit","tool_input":{}}' | python3 "$HOOK")"
 rc5b=$?
 check "0" "$rc5b" "scenario 5: missing file_path exits 0"
 check "" "$out5b" "scenario 5: missing file_path emits nothing"
