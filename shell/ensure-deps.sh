@@ -14,8 +14,8 @@
 # in sync). Uses only shell builtins plus grep, sed, and brew, so it is unit
 # tested in isolation with stubbed tools.
 
-# Minimum Python the hooks need (no-dash-guard.sh, rebuild-memory-graph.sh use
-# python3 features that require >= 3.9).
+# Minimum Python the hooks need (the migrated python hooks and rebuild-memory-graph.py
+# use python3 features that require >= 3.9).
 PY_MIN_MAJOR=3
 PY_MIN_MINOR=9
 
