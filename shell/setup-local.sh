@@ -144,26 +144,26 @@ if [ -f "$SELF_ROOT/settings.shared.json" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Install dependencies via Homebrew (unless --skip-deps).
+# 3. Install dependencies (unless --skip-deps).
+#    Per-dependency check-then-install: for each formula in the Brewfile, use
+#    the version already on PATH (from any source: brew, nvm, pyenv, system, a
+#    manual install) and install via brew only when the tool is missing. This
+#    replaces a blanket `brew bundle`, which would force a brew formula even
+#    when the tool is already installed from somewhere else.
 # ---------------------------------------------------------------------------
 if [ "$SKIP_DEPS" -eq 0 ]; then
-    if command -v brew >/dev/null 2>&1; then
-        if [ -f "$SELF_ROOT/Brewfile" ]; then
-            log "Installing dependencies (brew bundle)"
-            brew bundle --file "$SELF_ROOT/Brewfile" </dev/null \
-                || warn "brew bundle reported errors"
-        fi
+    if [ -f "$SELF_ROOT/shell/ensure-deps.sh" ]; then
+        # shellcheck source=shell/ensure-deps.sh
+        . "$SELF_ROOT/shell/ensure-deps.sh"
+        log "Checking dependencies (install only what is missing)"
+        ensure_all_deps "$SELF_ROOT/Brewfile" || warn "one or more dependency installs reported errors"
+    elif command -v brew >/dev/null 2>&1 && [ -f "$SELF_ROOT/Brewfile" ]; then
+        # Fallback for a partial checkout without ensure-deps.sh.
+        log "Installing dependencies (brew bundle)"
+        brew bundle --file "$SELF_ROOT/Brewfile" </dev/null \
+            || warn "brew bundle reported errors"
     else
-        warn "Homebrew not found; skipping deps. See https://brew.sh"
-        warn "When Homebrew is available: brew bundle --file $SELF_ROOT/Brewfile"
-    fi
-    # Node: detect an existing version and use it; install only if none is
-    # found. Kept out of the Brewfile so an existing nvm/fnm/system node is not
-    # shadowed by a duplicate brew install.
-    if [ -f "$SELF_ROOT/shell/ensure-node.sh" ]; then
-        # shellcheck source=shell/ensure-node.sh
-        . "$SELF_ROOT/shell/ensure-node.sh"
-        ensure_node || warn "node install reported errors"
+        warn "Cannot resolve dependencies (no ensure-deps.sh and no brew). See https://brew.sh"
     fi
 fi
 
