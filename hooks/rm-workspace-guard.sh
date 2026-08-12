@@ -2,10 +2,12 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: MIT
 # PreToolUse(Bash) guard: block `rm` targets outside ~/Workspace/** and ~/.claude/**.
-# Best-effort protection against an accidental rm, NOT a security boundary: it can't
-# parse `rm` hidden in command substitution, and it only guards `rm` (not find -delete,
-# unlink, or `>` truncation). A `cd` in the command makes relative targets
-# unresolvable, so those are blocked conservatively.
+# Best-effort protection against an accidental rm, NOT a security boundary: it only
+# guards `rm` (not find -delete, unlink, or `>` truncation), and `rm` reached through
+# `$(...)` or a backtick is blocked conservatively rather than evaluated. A `cd` in
+# the command makes relative targets unresolvable, so those are blocked
+# conservatively too. A quoted path containing a space still splits into two
+# tokens and is evaluated as two separate paths (pre-existing gap, fails closed).
 set -u  # not -e: a parse failure must not exit non-zero and let the rm through
 
 CMD=$(jq -r '.tool_input.command // ""' -)
@@ -47,8 +49,15 @@ is_allowed() {
 
 in_rm=false
 saw_cd=false
+saw_rm=false
 outside=()
-IFS=' ' read -ra tokens <<< "$CMD"
+
+# `read` only tokenizes one line; normalise newlines and tabs to spaces first
+# so an rm on any line of a multi-line command is still seen. A newline maps
+# to a standalone `;` so it resets in_rm the same as a real command separator.
+CMD_NORM="${CMD//$'\n'/ ; }"
+CMD_NORM="${CMD_NORM//$'\t'/ }"
+IFS=' ' read -ra tokens <<< "$CMD_NORM"
 
 # ${tokens[@]+...}: a whitespace-only command splits to an empty array, which
 # would error under set -u on bash 3.2 and fail the guard open. Safe-expand it.
@@ -59,7 +68,7 @@ for token in ${tokens[@]+"${tokens[@]}"}; do
     saw_cd=true; continue
   fi
   if [[ "$token" == "rm" || "$token" == */rm ]]; then
-    in_rm=true; continue
+    in_rm=true; saw_rm=true; continue
   fi
   if [[ "$token" == ";" || "$token" == "&&" || "$token" == "||" || "$token" == "|" || "$token" == "&" ]]; then
     in_rm=false; continue
@@ -73,6 +82,12 @@ for token in ${tokens[@]+"${tokens[@]}"}; do
     fi
   fi
 done
+
+# rm reached through $(...) or a backtick: the tokenizer cannot evaluate what
+# the substitution expands to, so block conservatively, same posture as saw_cd.
+if [[ "$saw_rm" == true && ( "$CMD_NORM" == *'$('* || "$CMD_NORM" == *'`'* ) ]]; then
+  outside+=("<command substitution>")
+fi
 
 if (( ${#outside[@]} > 0 )); then
   joined=$(IFS=', '; echo "${outside[*]}")
