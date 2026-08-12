@@ -76,6 +76,13 @@ jobs:
         if: runner.os == 'Linux'
         run: git ls-files '*.py' | xargs -r -n1 python3 -m py_compile
 
+      - name: Python lint
+        # Lint once, on Linux only: static checks are platform-independent,
+        # no need to burn the macOS leg. Config (line-length ignore) lives
+        # in ruff.toml.
+        if: runner.os == 'Linux'
+        run: pipx run ruff check $(git ls-files '*.py')
+
       - name: Validate shared settings, tracked-file manifest, and agent definitions
         run: |
           python3 shell/check-shared-settings.py settings.shared.json permissions.shared.json .
