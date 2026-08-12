@@ -81,8 +81,13 @@ claude plugin list 2>/dev/null | grep -q 'enabled' && ok "plugin shows enabled" 
 printf '%s' "$det" | grep -q 'playbook' && ok "details contain playbook" || bad "details missing playbook"
 ag="$(echo "$det" | awk -F'[()]' '/Agents \(/{print $2}')"
 hk="$(echo "$det" | awk -F'[()]' '/Hooks \(/{print $2}')"
-[ "${ag:-0}" = "3" ] && ok "inventory Agents=3" || bad "inventory Agents=$ag (expected 3)"
-[ "${hk:-0}" = "7" ] && ok "inventory Hooks=7 event types" || bad "inventory Hooks=$hk (expected 7)"
+ag_expected=0
+for f in "$REPO"/agents/*.md; do
+  [ "$(basename "$f")" = "_TEMPLATE.md" ] || ag_expected=$((ag_expected+1))
+done
+hk_expected="$(jq '.hooks | keys | length' "$REPO/hooks/hooks.json")"
+[ "${ag:-0}" = "$ag_expected" ] && ok "inventory Agents=$ag_expected" || bad "inventory Agents=$ag (expected $ag_expected)"
+[ "${hk:-0}" = "$hk_expected" ] && ok "inventory Hooks=$hk_expected event types" || bad "inventory Hooks=$hk (expected $hk_expected)"
 for a in reviewer auditor git; do
   echo "$det" | grep -qw "$a" && ok "agent present: $a" || bad "agent missing: $a"
 done

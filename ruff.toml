@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: MIT
+#
+# line-length is left at ruff's default (88) on purpose; the repo has no
+# line-length convention of its own (the longest tracked shell line is 556
+# chars), so there is nothing to converge on.
+
+[lint]
+select = ["E", "F", "W"]
+# E501 (line too long) is ignored: every violation is prose inside a string
+# literal injected verbatim into the model's context (hooks/auto-model-detect.py,
+# hooks/session-init.py). Rewrapping it would change hook behaviour, which is
+# out of scope for a lint gate.
+ignore = ["E501"]

@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: MIT
-# PreToolUse(Bash) guard: block `rm` targets outside ~/Workspace/** and ~/.claude/**.
-# Best-effort protection against an accidental rm, NOT a security boundary: it can't
-# parse `rm` hidden in command substitution, and it only guards `rm` (not find -delete,
-# unlink, or `>` truncation). A `cd` in the command makes relative targets
-# unresolvable, so those are blocked conservatively.
+# PreToolUse(Bash) guard: block `rm` targets outside PLAYBOOK_SAFE_ROOTS/** and
+# ~/.claude/**. PLAYBOOK_SAFE_ROOTS is a colon-separated allowlist of root
+# directories, like $PATH. Unset or empty defaults to the git repo root of
+# this guard's own cwd, falling back to the cwd itself outside a repo: a
+# fresh checkout needs no configuration, work inside your own project is
+# allowed, and ~/.ssh and ~/.aws stay blocked exactly as before ($HOME itself
+# is deliberately NOT the default: that would unblock them). $HOME/.claude is
+# always allowed, regardless of PLAYBOOK_SAFE_ROOTS.
+# Best-effort protection against an accidental rm, NOT a security boundary: it only
+# guards `rm` (not find -delete, unlink, or `>` truncation), and `rm` reached through
+# `$(...)` or a backtick is blocked conservatively rather than evaluated. A `cd` in
+# the command makes relative targets unresolvable, so those are blocked
+# conservatively too. A quoted path containing a space still splits into two
+# tokens and is evaluated as two separate paths (pre-existing gap, fails closed).
 set -u  # not -e: a parse failure must not exit non-zero and let the rm through
 
 CMD=$(jq -r '.tool_input.command // ""' -)
 [[ -z "$CMD" ]] && exit 0
 
-WORKSPACE="$HOME/Workspace"
 CLAUDE_DIR="$HOME/.claude"
 
 # Lexically resolve . and .. without touching the filesystem (the rm target may
@@ -37,18 +45,46 @@ canon() {
   printf '%s' "${res:-/}"
 }
 
+# PLAYBOOK_SAFE_ROOTS: colon-separated allowlist of root directories, like
+# $PATH. Unset or empty defaults to the git repo root of this guard's cwd,
+# falling back to the cwd itself outside a repo. The git call runs at most
+# once per invocation, is guarded with 2>/dev/null, and never fails the
+# guard open: no repo just falls through to $(pwd).
+PLAYBOOK_SAFE_ROOTS="${PLAYBOOK_SAFE_ROOTS:-}"
+if [[ -z "$PLAYBOOK_SAFE_ROOTS" ]]; then
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+  PLAYBOOK_SAFE_ROOTS="${repo_root:-$(pwd)}"
+fi
+
+SAFE_ROOTS=()
+IFS=':' read -ra raw_roots <<< "$PLAYBOOK_SAFE_ROOTS"
+for root in ${raw_roots[@]+"${raw_roots[@]}"}; do
+  [[ -z "$root" ]] && continue
+  SAFE_ROOTS+=("$(canon "$root")")
+done
+
 is_allowed() {
   local path="${1/#\~/$HOME}"
   path="$(canon "$path")"
-  [[ "$path" == "$WORKSPACE" || "$path" == "$WORKSPACE/"* ]] && return 0
   [[ "$path" == "$CLAUDE_DIR" || "$path" == "$CLAUDE_DIR/"* ]] && return 0
+  local root
+  for root in ${SAFE_ROOTS[@]+"${SAFE_ROOTS[@]}"}; do
+    [[ "$path" == "$root" || "$path" == "$root/"* ]] && return 0
+  done
   return 1
 }
 
 in_rm=false
 saw_cd=false
+saw_rm=false
 outside=()
-IFS=' ' read -ra tokens <<< "$CMD"
+
+# `read` only tokenizes one line; normalise newlines and tabs to spaces first
+# so an rm on any line of a multi-line command is still seen. A newline maps
+# to a standalone `;` so it resets in_rm the same as a real command separator.
+CMD_NORM="${CMD//$'\n'/ ; }"
+CMD_NORM="${CMD_NORM//$'\t'/ }"
+IFS=' ' read -ra tokens <<< "$CMD_NORM"
 
 # ${tokens[@]+...}: a whitespace-only command splits to an empty array, which
 # would error under set -u on bash 3.2 and fail the guard open. Safe-expand it.
@@ -59,7 +95,7 @@ for token in ${tokens[@]+"${tokens[@]}"}; do
     saw_cd=true; continue
   fi
   if [[ "$token" == "rm" || "$token" == */rm ]]; then
-    in_rm=true; continue
+    in_rm=true; saw_rm=true; continue
   fi
   if [[ "$token" == ";" || "$token" == "&&" || "$token" == "||" || "$token" == "|" || "$token" == "&" ]]; then
     in_rm=false; continue
@@ -74,8 +110,20 @@ for token in ${tokens[@]+"${tokens[@]}"}; do
   fi
 done
 
+# rm reached through $(...) or a backtick: the tokenizer cannot evaluate what
+# the substitution expands to, so block conservatively, same posture as saw_cd.
+if [[ "$saw_rm" == true && ( "$CMD_NORM" == *'$('* || "$CMD_NORM" == *'`'* ) ]]; then
+  outside+=("<command substitution>")
+fi
+
 if (( ${#outside[@]} > 0 )); then
   joined=$(IFS=', '; echo "${outside[*]}")
-  jq -n --arg r "rm blocked: $joined is outside ~/Workspace/** and ~/.claude/**" \
+  roots_joined=""
+  for root in ${SAFE_ROOTS[@]+"${SAFE_ROOTS[@]}"}; do
+    [[ -n "$roots_joined" ]] && roots_joined+=", "
+    roots_joined+="$root/**"
+  done
+  [[ -z "$roots_joined" ]] && roots_joined="(no safe roots configured)"
+  jq -n --arg r "rm blocked: $joined is outside $roots_joined and ~/.claude/**" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
 fi
