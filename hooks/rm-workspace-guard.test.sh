@@ -130,17 +130,17 @@ mkdir -p "$repo_dir/sub" "$rel_base/relroot"
 # 1 & 2: unset, cwd inside a git repo -> the repo root is the default root;
 # a sibling outside it is not.
 unset PLAYBOOK_SAFE_ROOTS
-cd "$repo_dir"
+cd "$repo_dir" || exit 1
 run allow "rm -rf $repo_dir/sub/file"
 run block "rm -rf $repo_sibling/file"
-cd "$ORIG_DIR"
+cd "$ORIG_DIR" || exit 1
 
 # 3: unset, cwd NOT inside a git repo -> cwd itself is the default root.
 unset PLAYBOOK_SAFE_ROOTS
-cd "$plain_dir"
+cd "$plain_dir" || exit 1
 run allow "rm -rf $plain_dir/file"
 run block "rm -rf $plain_sibling/file"
-cd "$ORIG_DIR"
+cd "$ORIG_DIR" || exit 1
 
 # 4: two colon-separated roots; a target in the second is allowed.
 export PLAYBOOK_SAFE_ROOTS="$root_a:$root_b"
@@ -160,12 +160,12 @@ unset PLAYBOOK_SAFE_ROOTS
 
 # 7: a relative root is canon-ed against the guard's own cwd; it must resolve
 # to the intended directory and must not produce a false allow elsewhere.
-cd "$rel_base"
+cd "$rel_base" || exit 1
 export PLAYBOOK_SAFE_ROOTS="relroot"
 run allow "rm -rf $rel_base/relroot/file"
 run block "rm -rf /etc/passwd"
 unset PLAYBOOK_SAFE_ROOTS
-cd "$ORIG_DIR"
+cd "$ORIG_DIR" || exit 1
 
 # 8: a nonexistent directory in PLAYBOOK_SAFE_ROOTS must not error or grant a
 # blanket allow.
