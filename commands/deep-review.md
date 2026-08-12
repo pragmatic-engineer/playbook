@@ -125,15 +125,18 @@ if [[ "$LOCAL_HEAD" == "$HEAD_SHA" && -z "$DIRTY" ]]; then
   WT_CREATED=false
   echo "Mode: in-place (HEAD matches, tree clean)"
 else
-  if [[ ! -x "$HOME/.claude/shell/review-worktree.sh" ]]; then
+  if [[ ! -r "$HOME/.claude/shell/review-worktree.sh" ]]; then
     echo "error: review-worktree.sh not found under \$HOME/.claude/shell/; install the repo's shell/ directory" >&2
     exit 1
   fi
-  WT="$(bash "$HOME/.claude/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>&1)"
-  if [[ $? -ne 0 ]]; then
-    echo "error: worktree setup failed: $WT" >&2
+  WT_ERR="$(mktemp)"
+  WT="$(bash "$HOME/.claude/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
+  if [[ $? -ne 0 || -z "$WT" ]]; then
+    echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
+    rm -f "$WT_ERR"
     exit 1
   fi
+  rm -f "$WT_ERR"
   WT_CREATED=true
   echo "Mode: worktree at $WT"
 fi

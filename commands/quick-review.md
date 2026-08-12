@@ -39,11 +39,20 @@ In self-review mode (no argument), the in-place predicate runs the same check. I
 **Worktree mode** (all other cases): set up an isolated worktree:
 
 ```bash
-[ -x "$HOME/.claude/shell/review-worktree.sh" ] || { echo "error: review-worktree.sh not found under \$HOME/.claude/shell/; install the repo's shell/ directory" >&2; exit 1; }
-WT="$(bash "$HOME/.claude/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>&1)"
+[ -r "$HOME/.claude/shell/review-worktree.sh" ] || { echo "error: review-worktree.sh not found under \$HOME/.claude/shell/; install the repo's shell/ directory" >&2; exit 1; }
+WT_ERR="$(mktemp)"
+WT="$(bash "$HOME/.claude/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
+if [[ $? -ne 0 || -z "$WT" ]]; then
+  echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
+  rm -f "$WT_ERR"
+  exit 1
+fi
+rm -f "$WT_ERR"
 ```
 
-If this exits non-zero, the content of `$WT` is an error message. Print it, stop. No fallback, no degraded mode.
+On failure this prints the script's stderr and stops. No fallback, no degraded mode.
+Capture stdout only: `review-worktree.sh` prints the worktree path on stdout and sends
+git's progress to stderr on purpose, so folding them together corrupts the path.
 
 When in worktree mode, read and grep all files under `$WT` instead of the local working tree. Store `WT_CREATED=true` for the teardown step.
 
@@ -118,11 +127,14 @@ if [[ "$LOCAL_HEAD" == "$HEAD_SHA" && -z "$DIRTY" ]]; then
   WT_CREATED=false
   echo "Mode: in-place (HEAD matches, tree clean)"
 else
-  WT="$(bash "$HOME/.claude/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>&1)"
-  if [[ $? -ne 0 ]]; then
-    echo "error: worktree setup failed: $WT" >&2
+  WT_ERR="$(mktemp)"
+  WT="$(bash "$HOME/.claude/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
+  if [[ $? -ne 0 || -z "$WT" ]]; then
+    echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
+    rm -f "$WT_ERR"
     exit 1
   fi
+  rm -f "$WT_ERR"
   WT_CREATED=true
   echo "Mode: worktree at $WT"
 fi
