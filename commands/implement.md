@@ -3,7 +3,7 @@ description: Execute an approved plan or ADR blueprint (from /scope or /adr) on 
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
 argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--no-tdd] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause>] [--help]"
 model: sonnet
-effort: xhigh
+effort: high
 ---
 
 # Implement: Execute a Verified Plan
