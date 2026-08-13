@@ -28,6 +28,11 @@
 !/output-styles/
 !/.github/
 !/.claude-plugin/
+# Rust binary scaffold (ADR 0007): Cargo.lock is committed per the repo's
+# pinned-dependency convention. target/ stays ignored via the default /* rule.
+!/Cargo.toml
+!/Cargo.lock
+!/src/
 
 # Override the global excludesfile (~/.gitignore.global), which ignores
 # docs/superpowers/ (we want our specs tracked here).
