@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 //! Library root for the `playbook` binary. Exposes the CLI shape that
-//! `main.rs` parses and dispatches on.
+//! `main.rs` parses and dispatches on, plus the `common` helpers and `hooks`
+//! stubs every hook module builds on.
 
-use clap::{Parser, Subcommand};
+pub mod common;
+pub mod hooks;
+
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// The `playbook` command-line entry point.
 #[derive(Parser, Debug)]
@@ -14,18 +18,68 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// Top-level subcommand groups. Each is a stub until its own Work Unit
-/// implements the behaviour.
+/// Top-level subcommand groups.
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Run a named hook.
-    Hook { name: String },
+    Hook {
+        /// Which hook to run, matching the name Claude Code passes from
+        /// hooks.json.
+        name: HookName,
+    },
     /// Launcher subcommands (session, worktree, retention, and so on).
-    Cc { sub: String },
+    Cc {
+        #[command(subcommand)]
+        sub: Option<CcCommand>,
+    },
     /// Print the Claude Code status line.
     Statusline,
     /// Install or repair the local Claude Code configuration.
     Init,
+}
+
+/// Every hook Claude Code can invoke, one per entry in hooks.json. Kebab-case
+/// on the CLI (clap's default `ValueEnum` casing) so a typo in hooks.json
+/// surfaces immediately via clap's possible-value error rather than the hook
+/// silently doing nothing.
+#[derive(ValueEnum, Debug, Clone, Copy)]
+pub enum HookName {
+    SessionInit,
+    PrereadEditCheck,
+    PrereadSizeCheck,
+    SearchCounter,
+    MemoryAnchors,
+    PostEditTrack,
+    RebuildMemoryGraph,
+    AutoModelDetect,
+    PrecompactWarn,
+    SessionCleanExit,
+    MemoryCapture,
+    RmWorkspaceGuard,
+    BgAwaitGuard,
+    NoDashGuard,
+    PrecommitCheck,
+}
+
+/// `cc` launcher subcommands, matching `shell/shared/dispatch.sh:59-100`. No
+/// subcommand at all (`Cc { sub: None }`) replicates the default path there:
+/// resume the most recent session for this project by its custom title.
+#[derive(Subcommand, Debug)]
+pub enum CcCommand {
+    /// Clean and resume the most recent matching session.
+    Clean,
+    /// Start a fresh session; no resume, settings.json re-applied.
+    Fresh,
+    /// Resume raw, optionally by session id; no fork, overrides preserved.
+    Raw { sid: Option<String> },
+    /// List sessions for the current project.
+    #[command(alias = "ls")]
+    List,
+    /// Prune stale runtime state.
+    Prune,
+    /// Create a worktree and resume into it.
+    #[command(alias = "new")]
+    Worktree { branch: String },
 }
 
 #[cfg(test)]
@@ -45,5 +99,60 @@ mod tests {
         let err =
             result.expect_err("--version should short-circuit parsing with a version message");
         assert!(err.to_string().contains(expected));
+    }
+
+    #[test]
+    fn hook_help_lists_all_fifteen_hook_names() {
+        // Arrange
+        let names = [
+            "session-init",
+            "preread-edit-check",
+            "preread-size-check",
+            "search-counter",
+            "memory-anchors",
+            "post-edit-track",
+            "rebuild-memory-graph",
+            "auto-model-detect",
+            "precompact-warn",
+            "session-clean-exit",
+            "memory-capture",
+            "rm-workspace-guard",
+            "bg-await-guard",
+            "no-dash-guard",
+            "precommit-check",
+        ];
+
+        // Act
+        let result = Cli::command().try_get_matches_from(["playbook", "hook", "--help"]);
+
+        // Assert
+        let err = result.expect_err("--help should short-circuit parsing with a help message");
+        let help = err.to_string();
+        for name in names {
+            assert!(help.contains(name), "hook --help is missing '{name}'");
+        }
+    }
+
+    #[test]
+    fn cc_subcommands_parse_including_aliases() {
+        // Arrange, Act
+        let list = Cli::command().try_get_matches_from(["playbook", "cc", "list"]);
+        let ls = Cli::command().try_get_matches_from(["playbook", "cc", "ls"]);
+        let worktree =
+            Cli::command().try_get_matches_from(["playbook", "cc", "worktree", "my-branch"]);
+        let new = Cli::command().try_get_matches_from(["playbook", "cc", "new", "my-branch"]);
+        let raw_no_sid = Cli::command().try_get_matches_from(["playbook", "cc", "raw"]);
+        let raw_with_sid =
+            Cli::command().try_get_matches_from(["playbook", "cc", "raw", "sid-123"]);
+        let default = Cli::command().try_get_matches_from(["playbook", "cc"]);
+
+        // Assert
+        assert!(list.is_ok(), "cc list should parse");
+        assert!(ls.is_ok(), "cc ls alias should parse");
+        assert!(worktree.is_ok(), "cc worktree BRANCH should parse");
+        assert!(new.is_ok(), "cc new alias should parse");
+        assert!(raw_no_sid.is_ok(), "cc raw with no sid should parse");
+        assert!(raw_with_sid.is_ok(), "cc raw SID should parse");
+        assert!(default.is_ok(), "cc with no subcommand should parse");
     }
 }
