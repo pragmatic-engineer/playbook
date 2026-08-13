@@ -57,8 +57,16 @@ ensure_dep() {
     fi
     if command -v brew >/dev/null 2>&1; then
         printf 'ensure-deps: %s not found; installing %s via Homebrew\n' "$label" "$formula"
-        brew install "$formula" </dev/null
-        return $?
+        if brew install "$formula" </dev/null; then
+            return 0
+        fi
+        # Homebrew refuses formulae from an untrusted third-party tap. Trusting a
+        # tap grants it code execution, so print the command rather than running
+        # it: that decision belongs to the user, not to a setup script.
+        case "$formula" in
+            */*) printf 'ensure-deps: if this failed as an untrusted tap, review it and run: brew trust %s\n' "${formula%/*}" >&2 ;;
+        esac
+        return 1
     fi
     printf 'ensure-deps: %s not found and Homebrew is unavailable; install %s manually\n' "$label" "$formula" >&2
     return 0
@@ -76,11 +84,29 @@ ensure_all_deps() {
     # The while runs in the current shell (heredoc redirect, not a pipe), so rc
     # persists. Formula names come from the `brew "X"` lines only. Python routes
     # to the version-aware check; every other formula's command equals its name.
+    # Taps first: a formula from a third-party tap cannot install until its tap
+    # is added, so `tap "owner/repo"` lines have to be processed before the
+    # `brew "X"` loop below. Tapping is read-only (a git clone); it does not by
+    # itself let the tap run code, which still needs an explicit `brew trust`.
+    if command -v brew >/dev/null 2>&1; then
+        while IFS= read -r tapname; do
+            [ -n "$tapname" ] || continue
+            if brew tap | grep -qxF "$tapname"; then
+                printf 'ensure-deps: tap %s already present\n' "$tapname"
+            else
+                printf 'ensure-deps: adding tap %s\n' "$tapname"
+                brew tap "$tapname" </dev/null || rc=1
+            fi
+        done <<EOF
+$(grep -oE '^tap "[^"]+"' "$brewfile" 2>/dev/null | sed -E 's/^tap "([^"]+)"$/\1/')
+EOF
+    fi
+
     while IFS= read -r formula; do
         [ -n "$formula" ] || continue
         case "$formula" in
             python@*) ensure_python "$formula" || rc=1 ;;
-            *)        ensure_dep "$formula" "$formula" || rc=1 ;;
+            *)        ensure_dep "${formula##*/}" "$formula" || rc=1 ;;
         esac
     done <<EOF
 $(grep -oE '^brew "[^"]+"' "$brewfile" 2>/dev/null | sed -E 's/^brew "([^"]+)"$/\1/')
