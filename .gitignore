@@ -33,6 +33,7 @@
 !/Cargo.toml
 !/Cargo.lock
 !/src/
+!/tests/
 
 # Override the global excludesfile (~/.gitignore.global), which ignores
 # docs/superpowers/ (we want our specs tracked here).

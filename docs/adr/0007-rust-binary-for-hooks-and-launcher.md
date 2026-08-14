@@ -43,7 +43,7 @@ Aggregate latency available, over 2.1 days and 13 projects of heavy use, using r
 
 About 5.5 minutes, roughly 2.6 minutes a day. Inside turns the model dominates, that is close to 1% of felt wall clock. Latency is a supporting benefit here, not the case for the work.
 
-**Scope.** 15 hooks and the launcher, about 3,148 lines: 11 Python hooks (1,391) plus `common.py` (263), 4 bash guards (319) plus `common.sh` (150), and the launcher (~1,025). Against that sit 14,632 lines of markdown in `commands/`, `agents/`, `skills/`, `prompts/` and `docs/` that no rewrite touches. The product is prose; this changes only its runtime.
+**Scope.** 15 hooks and the launcher, about 3,148 lines: 11 Python hooks (1,391) plus `common.py` (263), 4 bash guards (319) plus `common.sh` (150), and the launcher (~1,025). Against that sit 8,169 lines of markdown in `commands/`, `agents/`, `skills/`, `prompts/` and `docs/` that no rewrite touches. The product is prose; this changes only its runtime.
 
 **The launcher is not permanently shell.** ADR 0005 states "you cannot source a Python or Node file to define a shell function, so the launcher and its modules are permanently shell." That conflates the function definition with the function body. Only two statements need the parent process: `cd "$worktree_path"` (`shell/shared/worktree.sh:354`) and `disown` (`:383`). The heavy part of that flow already runs out-of-process in a `( ... ) &` subshell (`worktree.sh:369-383`), and the launcher never `exec`s into `claude`; every launch is a foreground call with control returning afterward (`shell/shared/dispatch.sh:141,147`). A shell function that calls a binary and `cd`s to the path it prints satisfies the constraint.
 
@@ -53,7 +53,7 @@ About 5.5 minutes, roughly 2.6 minutes a day. Inside turns the model dominates, 
 - Gatekeeper does not block. `rtk`, already a dependency (`Brewfile:21`), is `Signature=adhoc` with `TeamIdentifier=not set` and runs. A curl download sets `com.apple.provenance`, never `com.apple.quarantine`.
 - `rustc` and `cargo` are already installed.
 - A release procedure exists and is documented, contrary to an earlier reading: set `.claude-plugin/plugin.json` `version` to match, signed annotated tag, push through the admin bypass actor on rulesets 18083544 and 18083561, then `gh release create --target main`. The manifest version is user-visible via `claude plugin details` and must match the tag. Only the binary build-and-upload step is missing.
-- `.github/workflows/betterleaks.yml:136-142` already fetches a pinned, SHA256-verified prebuilt binary, so the pattern exists in-repo.
+- `.github/workflows/betterleaks.yml:40,61` already fetches a pinned, SHA256-verified prebuilt binary, so the pattern exists in-repo.
 
 **Constraints from the Claude Code plugin documentation** (checked 2026-08-13). Documentation-sourced, distinct from the machine measurements above, and two of them override what the spike suggested:
 
@@ -67,7 +67,7 @@ About 5.5 minutes, roughly 2.6 minutes a day. Inside turns the model dominates, 
 
 **Precedent that cuts the other way.** ADR 0001:50 excludes `rtk` from `hooks.json` because it is "a personal external tool with no script in this repo", and lists `rtk` portability under Risks at `:73`. This ADR makes the plugin depend on exactly such a binary, which is a reversal that needs stating plainly.
 
-**Failure evidence.** `hook-rename-lockstep-settings` predicted the failure mode on 2026-08-11. It recurred twice since. Between 2026-08-11T06:47Z and 2026-08-12T10:42Z, stale `.sh` paths in the user's `settings.json` produced about 110 `No such file or directory` errors, 100 of them `search-counter.sh`. Hooks silently stopped running for roughly 28 hours and nobody noticed. Separately, the ADR 0006 relocation removed `~/.claude/statusline.sh` while `settings.shared.json:127-131` still pointed at it; two clean `/setup` runs and a four-layer `/doctor` pass all reported healthy while the status line rendered nothing. **A missing binary fails exactly this way, and this repo has now demonstrated twice that silent hook failure is not noticed.**
+**Failure evidence.** `hook-rename-lockstep-settings` predicted the failure mode on 2026-08-11. It recurred twice since. Between 2026-08-11T06:47Z and 2026-08-12T10:42Z, stale `.sh` paths in the user's `settings.json` produced about 110 `No such file or directory` errors, 100 of them `search-counter.sh`. Hooks silently stopped running for roughly 28 hours and nobody noticed. Separately, the ADR 0006 relocation removed `~/.claude/statusline.sh` while `settings.shared.json:133-137` still pointed at it; two clean `/setup` runs and a four-layer `/doctor` pass all reported healthy while the status line rendered nothing. **A missing binary fails exactly this way, and this repo has now demonstrated twice that silent hook failure is not noticed.**
 
 ## Decision Drivers
 
@@ -79,7 +79,7 @@ About 5.5 minutes, roughly 2.6 minutes a day. Inside turns the model dominates, 
 - Two registries point at the same hooks today, and that duality is the structural cause of both outages.
 - A static binary removes `jq` and `python3` from the user runtime, which closes the brew-less install path that currently produces working config with non-functional hooks.
 - Plugins cannot reference files outside their own directory, so hook wiring has to leave `hooks.json` regardless of the rest of this decision.
-- 14,632 lines of markdown, the actual product, are untouched by any option here.
+- 8,169 lines of markdown, the actual product, are untouched by any option here.
 
 ## Considered Alternatives
 
@@ -156,7 +156,7 @@ This reverses the design's earlier non-goal, which excluded the installer. Two t
 
 **All hooks wire through `settings.json`, written by `playbook init`. The plugin's `hooks/hooks.json` is retired.** The documented restriction that a plugin cannot reference files outside its own directory rules out calling a PATH-resolved binary from `hooks.json`, and committing per-platform binaries into the plugin tree to work around it costs several MB per release in git history forever.
 
-Retiring `hooks.json` also fixes the root cause of the outages in the Context above. Today two registries point at the same hooks, and it was exactly that duality, `settings.json` holding stale absolute paths after the files moved, that produced 110 silent errors over 28 hours. One registry with one owner cannot drift against itself. The plugin keeps doing what it is good at: shipping the 14,632 lines of markdown.
+Retiring `hooks.json` also fixes the root cause of the outages in the Context above. Today two registries point at the same hooks, and it was exactly that duality, `settings.json` holding stale absolute paths after the files moved, that produced 110 silent errors over 28 hours. One registry with one owner cannot drift against itself. The plugin keeps doing what it is good at: shipping the 8,169 lines of markdown.
 
 ### Three install channels, matching the `rtk` model
 
@@ -231,7 +231,7 @@ flowchart LR
 
   subgraph Launcher["shell/ (sourced into the user's shell)"]
     SHARED["shared/*.sh<br/>~916 lines"]
-    ENTRY["bash/cc.sh + zsh/cc.zsh<br/>92 lines"]
+    ENTRY["bash/cc.sh + zsh/cc.zsh<br/>68 lines"]
   end
 
   CC --> HJ --> PY --> CPY

@@ -12,7 +12,7 @@ Real paths this plan touches, all confirmed present.
 
 **Existing test coverage to port.** One `*.test.sh` per hook (15), plus `hooks/lib/common.test.sh`, `hooks/incr-counter.test.sh`, `hooks/lib/config-hash.test.sh`.
 
-**Registries.** `hooks/hooks.json` (plugin, retired by this work) and `settings.shared.json:99-133` (the seed that wires guards, extended to wire everything).
+**Registries.** `hooks/hooks.json` (plugin, retired by this work) and `settings.shared.json:99-129` (the seed that wires guards, extended to wire everything).
 
 **Installer to absorb.** `shell/setup-local.sh` (301), `shell/merge-settings.py` (160). `install.sh` (262) shrinks to a bootstrap. `shell/ensure-deps.sh` (89) loses `jq` and `python@3.13` from `Brewfile`.
 
@@ -20,7 +20,7 @@ Real paths this plan touches, all confirmed present.
 
 **Validators that must change.** `shell/check-manifest.sh:31-33` (`ALLOW_FILES` needs `Cargo.toml`, `Cargo.lock`; `ALLOW_DIRS` needs `src`), `shell/plugin-e2e.sh:51-54` (runs `bash -n` on any non-`.py` hook command), `commands/doctor.md` (4 layers today, gains 2).
 
-**CI.** `.github/workflows/shell-ci.yml` lints shell and python on an ubuntu plus macos matrix. No Rust lane exists. `.github/workflows/license.yml:1290` already covers `*.rs`.
+**CI.** `.github/workflows/shell-ci.yml` lints shell and python on an ubuntu plus macos matrix. No Rust lane exists. `.github/workflows/license.yml:76` already covers `*.rs`.
 
 ## Work Units
 
@@ -80,7 +80,7 @@ Real paths this plan touches, all confirmed present.
   - `src/hooks/preread_size_check.rs` | create | port of `hooks/preread-size-check.py`
   - `tests/hooks_preread.rs` | create | integration tests
 - Verification: `cargo test --test hooks_preread`
-- Tests: port `hooks/preread-edit-check.test.sh` and `hooks/preread-size-check.test.sh`. Boundaries to pin: the 1800s window (`preread-edit-check.py:18`), the 1000-line and 200KB thresholds and the 25-pattern allowlist (`preread-size-check.py:20-27`). This is the only hook that returns `permissionDecision: deny`, so assert the deny shape exactly.
+- Tests: port `hooks/preread-edit-check.test.sh` and `hooks/preread-size-check.test.sh`. Boundaries to pin: the 1800s window (`preread-edit-check.py:18`), the 1000-line and 200KB thresholds (`preread-size-check.py:16-17`) and the 25-pattern allowlist (`:20-27`). This is the only hook that returns `permissionDecision: deny`, so assert the deny shape exactly.
 - Done When:
   - [ ] Deny fires on the same inputs as the python version, never on allowlisted basenames
   - [ ] Offset or limit present suppresses the deny, as today
@@ -101,7 +101,7 @@ Real paths this plan touches, all confirmed present.
 
 ### WU-5: memory graph pair
 - Requires: WU-1
-- Goal: `memory-anchors` and `rebuild-memory-graph` ported together, with `graph.json` byte-identical to what the python writer produces.
+- Goal: `memory-anchors` and `rebuild-memory-graph` ported together, with `graph.json` semantically equal to what the python writer produces: same nodes, same edges, compared after canonical sorting. Byte equality is the wrong bar, because `os.walk` and `fs::read_dir` return directory entries in unspecified order and the two serialisers format differently.
 - Files:
   - `src/hooks/rebuild_memory_graph.rs` | create | port of `hooks/rebuild-memory-graph.py`, including the hand-rolled YAML-subset frontmatter parser (`:63-121`) and the two-pass edge resolver with same-scope-then-global fallback (`:193-210`)
   - `src/hooks/memory_anchors.rs` | create | port of `hooks/memory-anchors.py`, including the per-session TSV cache (`:121-182`)
@@ -111,7 +111,7 @@ Real paths this plan touches, all confirmed present.
 
   **Mandatory fixture matrix for the frontmatter parser**, all six required: (1) top-level scalars, (2) block lists, (3) nested dict sub-keys, (4) inline `[a,b,"c"]` sequences, (5) a dangling edge target, (6) a `supersedes` chain two links long. Comparison against the python writer only proves agreement on inputs someone thought to write, so the matrix is the coverage guarantee, not the comparison.
 - Done When:
-  - [ ] Rust and python `graph.json` are byte-identical over a fixture tree with all four frontmatter shapes
+  - [ ] Rust and python `graph.json` carry the same nodes and edges, compared after canonical sorting, over a fixture tree with all four frontmatter shapes
   - [ ] `memory-anchors` resolves the same facts for the same edited path
   - [ ] Ported together in one commit, since one writes what the other reads
 
@@ -123,7 +123,7 @@ Real paths this plan touches, all confirmed present.
   - `src/hooks/session_clean_exit.rs` | create | port of `hooks/session-clean-exit.py`
   - `tests/hooks_session.rs` | create | integration tests
 - Verification: `cargo test --test hooks_session`
-- Tests: port `hooks/session-init.test.sh` and `hooks/session-clean-exit.test.sh`. Pin the counter zeroing set (`session-init.py:86-98`), the resume-only drift warning (`:115-152`), and the reason-is-set-and-not-other rule that distinguishes SessionEnd from Stop (`session-clean-exit.py:35-36`).
+- Tests: port `hooks/session-init.test.sh` and `hooks/session-clean-exit.test.sh`. Pin the counter zeroing set (`session-init.py:86-98`), the resume-only drift warning (`:124-145`), and the reason-is-set-and-not-other rule that distinguishes SessionEnd from Stop (`session-clean-exit.py:35-36`).
 - Done When:
   - [ ] Both shell-outs still resolve and their output is folded into `additionalContext` unchanged
   - [ ] `to-learn/<slug>.json` is written on the same threshold as today
