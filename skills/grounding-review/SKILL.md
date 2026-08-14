@@ -7,7 +7,7 @@ description: Use when reviewing a pull request or code change, whether a quick s
 
 Discipline for reviewing pull requests. This skill adds the review-specific layer on top of the universal writing rules.
 
-MUST load the `writing-style` skill alongside this one. Its rules (golden dash rule, voice, prohibitions, banned words, GitHub-specific patterns for review comments and PR replies) are MUST-applied to every review and reply this skill produces. The review-specific sections below ("Voice for Reviews", "Review Report Format", etc.) layer on top; where they repeat a `writing-style` rule, it's for emphasis on the most-violated points, not a replacement.
+MUST load the `playbook:writing-style` skill alongside this one. Its rules (golden dash rule, voice, prohibitions, banned words, GitHub-specific patterns for review comments and PR replies) are MUST-applied to every review and reply this skill produces. The review-specific sections below ("Voice for Reviews", "Review Report Format", etc.) layer on top; where they repeat a `writing-style` rule, it's for emphasis on the most-violated points, not a replacement.
 
 **Register precedence.** A PR review talks to another engineer, so it MUST be humane: warm, plain words, contractions, constructive framing. That comes from `writing-style`. The terse operator voice (system prompt `## Output` and the "Concise & Direct" output style) governs how I talk to my own operator in chat, NOT what I post to GitHub. For any review content, reply, or comment body, `writing-style` wins over that operator voice. Don't strip the contractions and warmth to sound concise.
 
@@ -21,7 +21,7 @@ You're a senior engineer leaving a review for a teammate. Simple, direct sentenc
 - **MUST use contractions.** "wouldn't" not "would not", "it's" not "it is".
 - For blocking issues, be clear and direct. For suggestions, frame as ideas: "one option here..." or "worth considering...".
 
-Full voice rules in `writing-style` skill.
+Full voice rules in `playbook:writing-style` skill.
 
 
 ## Evidence Rules
@@ -49,7 +49,7 @@ Claims without supporting proof MUST be tagged `[unverified]`.
 
 ## Review Report Format
 
-Both `/quick-review` and `/deep-review` render this exact structure. The only difference: `/deep-review` includes the `### Reviewers` line; `/quick-review` omits it. The `·` separators are the middle dot U+00B7, not a dash.
+Both `/playbook:quick-review` and `/playbook:deep-review` render this exact structure. The only difference: `/playbook:deep-review` includes the `### Reviewers` line; `/playbook:quick-review` omits it. The `·` separators are the middle dot U+00B7, not a dash.
 
 ### Report skeleton
 

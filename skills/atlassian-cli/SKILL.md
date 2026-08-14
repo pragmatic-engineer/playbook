@@ -1,6 +1,6 @@
 ---
 name: atlassian-cli
-description: Use when reading or writing Jira work items or Confluence pages from the command line with acli, especially during /learn-project when no Atlassian MCP server is connected. Covers the Confluence page-discovery workaround, since acli has no page search.
+description: Use when reading or writing Jira work items or Confluence pages from the command line with acli, especially during /playbook:learn-project when no Atlassian MCP server is connected. Covers the Confluence page-discovery workaround, since acli has no page search.
 ---
 
 # Atlassian CLI (acli)
@@ -86,7 +86,7 @@ than walking anything.
 
 ## Read-only versus write
 
-`/learn-project` and any research flow are read-only on the remote. Safe:
+`/playbook:learn-project` and any research flow are read-only on the remote. Safe:
 `*/auth status`, `space list`, `space view`, `page view`, `blog list`,
 `blog view`, `jira workitem search`, `jira workitem view`, and the `board`,
 `project`, `sprint`, `filter`, `dashboard` read commands.
@@ -95,7 +95,7 @@ Never run these during research, they mutate Atlassian state: `space create`,
 `space update`, `space archive`, `space restore`, `blog create`, and every
 `jira workitem` verb other than `search` and `view`.
 
-## Using it in /learn-project
+## Using it in /playbook:learn-project
 
 The confluence collector wants pages on setup, onboarding, architecture,
 runbooks, and decisions. Given no page search, the practical sequence is:
