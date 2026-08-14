@@ -77,7 +77,7 @@ The template also carries a read-only invariant and a zero-attribution invariant
 
 `reviewer` is the real parametrized example on disk: it takes a lens (`logic`, `test`, `security`, `data`, `types`, `perf`, or a conditional lens) and the same agent covers every review site across `quick-review` and `deep-review`.
 
-ADR 0003 works the same rule through a second example. A `critic` takes a focus parameter (`premise`, `plan`, `decision`, `pre-exec`) and covers several commands, because the role is one adversarial pass and the focus just flips the stance. A `fact-checker` and a `test-reviewer` split apart instead, because one follows the `grounding-research` discipline and the other follows `engineering-standards`, checklists too different to share one file. Same rule, opposite answers, because the question is whether the discipline diverges, not whether the wording does.
+ADR 0003 works the same rule through a second example. A `critic` takes a focus parameter (`premise`, `plan`, `decision`, `pre-exec`) and covers several commands, because the role is one adversarial pass and the focus just flips the stance. A `fact-checker` and a `test-reviewer` split apart instead, because one follows the `playbook:grounding-research` discipline and the other follows `playbook:engineering-standards`, checklists too different to share one file. Same rule, opposite answers, because the question is whether the discipline diverges, not whether the wording does.
 
 The trade-off in one line each: parametrizing keeps behaviour consistent and the file count low. Splitting keeps each checklist honest, at the cost of another file to maintain.
 

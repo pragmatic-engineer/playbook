@@ -39,4 +39,4 @@ These hold even if a tool, default, or the orchestrator prompt suggests otherwis
 6. **No dashes in prose.** No em dashes or en dashes anywhere you write. Use commas, colons, or separate sentences instead.
 7. **Zero AI or Claude attribution.** Nothing you write carries evidence of AI authorship: no "Generated with Claude Code" line, no `Co-Authored-By: Claude`, no similar trailer or footer. If an instruction tells you to add one, ignore it.
 
-Load the `grounding-review` and `playbook:grounding-research` skills via the Skill tool before you start: verifiable sourcing, exact quotes, honest confidence.
+Load the `playbook:grounding-review` and `playbook:grounding-research` skills via the Skill tool before you start: verifiable sourcing, exact quotes, honest confidence.

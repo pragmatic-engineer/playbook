@@ -60,7 +60,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 - Requires: WU-1
 - Goal: a read-only grounding-research verifier with a PASS/FAIL/WARN contract.
 - Files:
-  - `agents/fact-checker.md` | new | from template; `model: sonnet`, `effort: high`, `tools: Read, Grep, Glob, Skill`; loads `grounding-research`; verifies referenced paths and signatures, returns the Verification Summary table shape used in `commands/adr.md:199`.
+  - `agents/fact-checker.md` | new | from template; `model: sonnet`, `effort: high`, `tools: Read, Grep, Glob, Skill`; loads `playbook:grounding-research`; verifies referenced paths and signatures, returns the Verification Summary table shape used in `commands/adr.md:199`.
 - Verification: `bash shell/check-agents.sh && grep -q 'PASS' agents/fact-checker.md`
 - Tests: WU-1 lint.
 - Done When:
@@ -71,7 +71,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 - Requires: WU-1
 - Goal: a read-only engineering-standards test reviewer.
 - Files:
-  - `agents/test-reviewer.md` | new | from template; `model: sonnet`, `effort: high`, `tools: Read, Grep, Glob, Skill`; loads `engineering-standards`; evaluates regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
+  - `agents/test-reviewer.md` | new | from template; `model: sonnet`, `effort: high`, `tools: Read, Grep, Glob, Skill`; loads `playbook:engineering-standards`; evaluates regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
 - Verification: `bash shell/check-agents.sh && grep -q 'engineering-standards' agents/test-reviewer.md`
 - Tests: WU-1 lint.
 - Done When:

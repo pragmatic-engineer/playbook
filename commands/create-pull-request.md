@@ -8,7 +8,7 @@ agent: git
 
 # Create Pull Request
 
-Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `engineering-standards` (readiness, size) and `writing-style` (voice, banned words, no dashes). The PR opens as a **draft** by default; pass `--ready` to publish it for review.
+Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `playbook:engineering-standards` (readiness, size) and `playbook:writing-style` (voice, banned words, no dashes). The PR opens as a **draft** by default; pass `--ready` to publish it for review.
 
 This creates a **new** PR. If one already exists for the branch, this stops and points you at `/playbook:address-pr-comments` or `/playbook:quick-review`.
 
@@ -46,10 +46,10 @@ There is no confirmation flag or gate: the command always runs end to end, auto-
 
 Invoke both via the Skill tool before writing any prose:
 
-- `writing-style`: voice, banned words, the "PR descriptions" guidance, and the golden rule (no em or en dashes). Every line of the title and body MUST follow it.
-- `engineering-standards`: PR readiness criteria and size limits, enforced in Step 2.
+- `playbook:writing-style`: voice, banned words, the "PR descriptions" guidance, and the golden rule (no em or en dashes). Every line of the title and body MUST follow it.
+- `playbook:engineering-standards`: PR readiness criteria and size limits, enforced in Step 2.
 
-The PR title and body are read by another engineer, so they use the humane `writing-style` register (warm, contractions, active voice), NOT the terse operator voice. Where they conflict, `writing-style` wins for anything posted to GitHub.
+The PR title and body are read by another engineer, so they use the humane `playbook:writing-style` register (warm, contractions, active voice), NOT the terse operator voice. Where they conflict, `playbook:writing-style` wins for anything posted to GitHub.
 
 ## Step 1: Parse flags, establish context, resolve the base branch
 
@@ -149,7 +149,7 @@ if [ "${CHANGED:-0}" -gt 1500 ]; then
 fi
 ```
 
-Evaluate against `engineering-standards`, then decide (the two hard stops above have already exited; these are the non-blocking ones):
+Evaluate against `playbook:engineering-standards`, then decide (the two hard stops above have already exited; these are the non-blocking ones):
 
 - **`DIRTY` > 0** → print a warning: those changes are uncommitted and won't be in the PR. Continue.
 - **`CHANGED` > 1000** → print a prominent warning that it is over the enforced limit and needs explicit justification. Continue.
@@ -208,7 +208,7 @@ Derive the title from the diff and commit log gathered in Step 3.
 
 ## Step 6: Generate the body (MANDATORY template)
 
-Fill this template exactly. Keep the section order. Follow `writing-style` throughout: active voice, contractions, no banned words, no em or en dashes, no "This PR..." filler.
+Fill this template exactly. Keep the section order. Follow `playbook:writing-style` throughout: active voice, contractions, no banned words, no em or en dashes, no "This PR..." filler.
 
 ```markdown
 Ticket: PROJECT-1234

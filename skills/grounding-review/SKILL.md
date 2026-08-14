@@ -7,9 +7,9 @@ description: Use when reviewing a pull request or code change, whether a quick s
 
 Discipline for reviewing pull requests. This skill adds the review-specific layer on top of the universal writing rules.
 
-MUST load the `playbook:writing-style` skill alongside this one. Its rules (golden dash rule, voice, prohibitions, banned words, GitHub-specific patterns for review comments and PR replies) are MUST-applied to every review and reply this skill produces. The review-specific sections below ("Voice for Reviews", "Review Report Format", etc.) layer on top; where they repeat a `writing-style` rule, it's for emphasis on the most-violated points, not a replacement.
+MUST load the `playbook:writing-style` skill alongside this one. Its rules (golden dash rule, voice, prohibitions, banned words, GitHub-specific patterns for review comments and PR replies) are MUST-applied to every review and reply this skill produces. The review-specific sections below ("Voice for Reviews", "Review Report Format", etc.) layer on top; where they repeat a `playbook:writing-style` rule, it's for emphasis on the most-violated points, not a replacement.
 
-**Register precedence.** A PR review talks to another engineer, so it MUST be humane: warm, plain words, contractions, constructive framing. That comes from `writing-style`. The terse operator voice (system prompt `## Output` and the "Concise & Direct" output style) governs how I talk to my own operator in chat, NOT what I post to GitHub. For any review content, reply, or comment body, `writing-style` wins over that operator voice. Don't strip the contractions and warmth to sound concise.
+**Register precedence.** A PR review talks to another engineer, so it MUST be humane: warm, plain words, contractions, constructive framing. That comes from `playbook:writing-style`. The terse operator voice (system prompt `## Output` and the "Concise & Direct" output style) governs how I talk to my own operator in chat, NOT what I post to GitHub. For any review content, reply, or comment body, `playbook:writing-style` wins over that operator voice. Don't strip the contractions and warmth to sound concise.
 
 ## Voice for Reviews
 

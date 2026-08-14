@@ -67,7 +67,7 @@ Use the scientific method:
 
 Fix the cause, not the symptom:
 
-1. **Write a failing test first.** The simplest reproduction, automated where a framework exists (a one-off script if not). You must have it before the fix. Follow `engineering-standards` (red/green/refactor); for JS/TS use `engineering-standards-javascript`.
+1. **Write a failing test first.** The simplest reproduction, automated where a framework exists (a one-off script if not). You must have it before the fix. Follow `playbook:engineering-standards` (red/green/refactor); for JS/TS use `playbook:engineering-standards-javascript`.
 2. **Make one fix.** Address the root cause. One change. No "while I am here" improvements, no bundled refactor.
 3. **Verify.** The new test passes, no other test broke, and the issue is actually gone.
 4. **If the fix does not work, stop and count.** How many fixes have you tried? Under 3: return to Phase 1 with the new information. **3 or more: stop and question the architecture (below).** Do not attempt fix number 4 without that discussion.
@@ -145,9 +145,9 @@ But 95% of "no root cause" cases are incomplete investigation. Be honest about w
 
 ## Related Disciplines
 
-- `engineering-standards`: the failing test in Phase 4 (red/green/refactor) and the testing rules.
-- `engineering-standards-javascript`: JS/TS specifics (test structure, mocking, the `waitFor` helper).
-- `grounding-research`: verify claims against the real code before you assert them; cite `file:line`.
+- `playbook:engineering-standards`: the failing test in Phase 4 (red/green/refactor) and the testing rules.
+- `playbook:engineering-standards-javascript`: JS/TS specifics (test structure, mocking, the `waitFor` helper).
+- `playbook:grounding-research`: verify claims against the real code before you assert them; cite `file:line`.
 
 ## Memory
 

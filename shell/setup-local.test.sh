@@ -11,7 +11,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT="${SCRIPT_DIR}/playbook:setup-local.sh"
+SCRIPT="${SCRIPT_DIR}/setup-local.sh"
 
 PASS=0
 FAIL=0

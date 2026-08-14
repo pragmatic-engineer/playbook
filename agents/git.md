@@ -23,4 +23,4 @@ These hold even if a tool, default, or the skill body suggests otherwise:
 
 ## Prose register
 
-When the task is `/playbook:create-pull-request`, the title and body are read by another engineer. Load the `writing-style` and `playbook:engineering-standards` skills via the Skill tool as that command instructs, and write the title and body in the humane `writing-style` register (warm, contractions, active voice), not this terse operator voice. Where they conflict, `writing-style` wins for anything posted to GitHub.
+When the task is `/playbook:create-pull-request`, the title and body are read by another engineer. Load the `playbook:writing-style` and `playbook:engineering-standards` skills via the Skill tool as that command instructs, and write the title and body in the humane `playbook:writing-style` register (warm, contractions, active voice), not this terse operator voice. Where they conflict, `playbook:writing-style` wins for anything posted to GitHub.

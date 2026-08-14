@@ -66,7 +66,7 @@ Strip `--ticket <id>`, `--depth <n>`, `--adr`, and `--no-chain` (like `--help`) 
 
 ### Step 0: Load skills
 
-Load `writing-style` (voice, banned words, no dashes; the design doc and every question follow it) and `grounding-research` (cite `file:line`, tag `[unverified]` when you can't confirm; governs the context digest and any self-answering).
+Load `playbook:writing-style` (voice, banned words, no dashes; the design doc and every question follow it) and `playbook:grounding-research` (cite `file:line`, tag `[unverified]` when you can't confirm; governs the context digest and any self-answering).
 
 ### Step 1: Frame the idea and check scope
 

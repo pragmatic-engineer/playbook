@@ -8,7 +8,7 @@ effort: xhigh
 
 # Deep Review: Multi-Agent PR Review
 
-Review a pull request with a swarm of specialist reviewer subagents run in parallel, each a focused `reviewer` subagent under the `grounding-review` and `grounding-research` discipline. The orchestrating session consolidates, dedups, and fact-checks their findings, then posts them as a **pending** GitHub review (same posting flow as `/playbook:quick-review`). This is heavier and slower than `/playbook:quick-review`; use it for substantial, risky, or cross-cutting PRs.
+Review a pull request with a swarm of specialist reviewer subagents run in parallel, each a focused `reviewer` subagent under the `playbook:grounding-review` and `playbook:grounding-research` discipline. The orchestrating session consolidates, dedups, and fact-checks their findings, then posts them as a **pending** GitHub review (same posting flow as `/playbook:quick-review`). This is heavier and slower than `/playbook:quick-review`; use it for substantial, risky, or cross-cutting PRs.
 
 Invoked as `/playbook:deep-review`. The remaining arguments are an optional PR number and flags.
 
@@ -79,7 +79,7 @@ EXAMPLES:
 
 ## Voice rules
 
-Invoke the `grounding-review` and `playbook:writing-style` skills before drafting any finding (same discipline as `/playbook:quick-review`). Non-negotiables for anything posted to GitHub: Conventional Comments label in **plain text** and bare (`issue:`, `suggestion:`, `nitpick:`, `question:`, never bold, no `(blocking)`/`(non-blocking)` decoration on the posted body; that split stays in the local summary); plain, jargon-free language; findings kept short (two sentences by default, the problem then what breaks, a third only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
+Invoke the `playbook:grounding-review` and `playbook:writing-style` skills before drafting any finding (same discipline as `/playbook:quick-review`). Non-negotiables for anything posted to GitHub: Conventional Comments label in **plain text** and bare (`issue:`, `suggestion:`, `nitpick:`, `question:`, never bold, no `(blocking)`/`(non-blocking)` decoration on the posted body; that split stays in the local summary); plain, jargon-free language; findings kept short (two sentences by default, the problem then what breaks, a third only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
 
 ## Step 1: Resolve PR and gather context
 
@@ -185,7 +185,7 @@ If install or run fails, log the error in `CHECK_OUTPUT` and continue: never blo
 
 ## Step 3: Spawn the reviewer swarm (parallel reviewer subagents)
 
-Spawn the selected reviewers **in parallel** (one message, multiple `Agent` calls), each as a `reviewer` subagent (`subagent_type: reviewer`). The `reviewer` agent is structurally read-only (Read/Grep/Glob only, no Edit/Write/Bash) and pins its own model tier and the `grounding-review` + `grounding-research` discipline, so the orchestrator no longer sets `model` per call. Each reviewer prompt MUST include: its focus area (from the table), the PR diff and `HEAD_SHA`, the `grounding-review` + `grounding-research` discipline, the absolute `$WT` path (or a note that the tree is in-place if `WT` is empty) with the instruction "Read and grep files under <WT>; do not install or build anything.", and the `CHECK_OUTPUT` captured in Step 2b verbatim under a heading "Check suite output (from orchestrator)".
+Spawn the selected reviewers **in parallel** (one message, multiple `Agent` calls), each as a `reviewer` subagent (`subagent_type: reviewer`). The `reviewer` agent is structurally read-only (Read/Grep/Glob only, no Edit/Write/Bash) and pins its own model tier and the `playbook:grounding-review` + `playbook:grounding-research` discipline, so the orchestrator no longer sets `model` per call. Each reviewer prompt MUST include: its focus area (from the table), the PR diff and `HEAD_SHA`, the `playbook:grounding-review` + `playbook:grounding-research` discipline, the absolute `$WT` path (or a note that the tree is in-place if `WT` is empty) with the instruction "Read and grep files under <WT>; do not install or build anything.", and the `CHECK_OUTPUT` captured in Step 2b verbatim under a heading "Check suite output (from orchestrator)".
 
 In worktree mode, each reviewer prompt includes the absolute `$WT` path with the instruction "read and grep files under $WT; do not install or build." Subagents are read-only. The orchestrator has already run the checks once in Step 2b; subagents use the captured output as context, not as a trigger to re-run.
 
@@ -218,7 +218,7 @@ Merge all findings, then (this is where removals happen):
 
 ## Step 5: Present the consolidated report
 
-Present ALL surviving findings (rule 7). Render the `grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line (which reviewers ran, findings per reviewer, e.g. "security 2 · logic 1 · perf 0"). Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
+Present ALL surviving findings (rule 7). Render the `playbook:grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line (which reviewers ran, findings per reviewer, e.g. "security 2 · logic 1 · perf 0"). Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
 
 ## Step 6: Orchestrate posting
 

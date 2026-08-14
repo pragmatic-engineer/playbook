@@ -225,11 +225,11 @@ For each WU, in dependency order:
 
 The Testing Strategy MUST follow the `playbook:engineering-standards` skill (test types, isolation, TDD red/green/refactor, no coverage decrease).
 
-**Work Unit sizing (MUST).** Each WU is one coherent commit: small enough to review on its own, following the `engineering-standards` size limits and incremental-delivery guidance. Prefer more, smaller WUs over a few large ones; `/playbook:implement` commits each separately. The `Files` column lists production and test files. The `Requires` column is the dependency edge `/playbook:implement` topologically orders and cycle-checks. The `Segment` column names the PR-sized group each WU belongs to (see below).
+**Work Unit sizing (MUST).** Each WU is one coherent commit: small enough to review on its own, following the `playbook:engineering-standards` size limits and incremental-delivery guidance. Prefer more, smaller WUs over a few large ones; `/playbook:implement` commits each separately. The `Files` column lists production and test files. The `Requires` column is the dependency edge `/playbook:implement` topologically orders and cycle-checks. The `Segment` column names the PR-sized group each WU belongs to (see below).
 
 **Segment sizing (MUST).** A Segment groups Work Units into one PR-sized, reviewable increment. Each Segment becomes one pull request, so:
-1. **One concern per Segment.** Data layer, service layer, wire-up, and docs are separate Segments, not one, per `engineering-standards` "one concern per PR".
-2. **Budget (three tiers, from `engineering-standards`).** Target under 500 changed lines per Segment (soft). A Segment estimated over 1000 (enforced) needs explicit justification in the plan; prefer to split it. Never plan a Segment estimated over 1500 (hard). `/playbook:implement` re-splits at the 1500 hard limit if reality exceeds the estimate.
+1. **One concern per Segment.** Data layer, service layer, wire-up, and docs are separate Segments, not one, per `playbook:engineering-standards` "one concern per PR".
+2. **Budget (three tiers, from `playbook:engineering-standards`).** Target under 500 changed lines per Segment (soft). A Segment estimated over 1000 (enforced) needs explicit justification in the plan; prefer to split it. Never plan a Segment estimated over 1500 (hard). `/playbook:implement` re-splits at the 1500 hard limit if reality exceeds the estimate.
 3. **Ordering respects WU dependencies.** A Segment's WUs may only `Require` WUs in the same or an earlier Segment; no forward cross-Segment dependency. Default to a **linear** Segment chain (`S1 -> S2 -> S3`), which `/playbook:implement` maps to stacked PRs.
 4. **Coverage.** Every WU belongs to exactly one Segment; no WU is left out and none appears in two.
 5. **Suggestions, not law.** These are `/playbook:implement`'s starting point; note in the plan that it may re-split a Segment whose real diff blows the budget. Mark two Segments as parallel-safe only when their file sets are disjoint and neither `Requires` the other.
@@ -257,7 +257,7 @@ Spawn a `fact-checker` agent (`subagent_type: fact-checker`) with the full plan 
 - The Work Unit dependency graph is acyclic, and each Parallel group's WUs have disjoint files with no dependency on each other (the parallel-safe flags are accurate).
 - **Segments are well-formed:** every WU maps to exactly one Segment (full coverage, no WU in two); Segment order respects WU `Requires` (no forward cross-Segment dependency); each Segment's estimate is within budget (FAIL if a planned Segment exceeds the 1500 hard limit, WARN if it exceeds 1000 without justification or exceeds the 500 soft limit); any parallel-marked Segments have disjoint files and no mutual `Requires`.
 
-Returns a structured PASS / FAIL / WARN report. Phase 1 folds a Verification Summary into the report, reusing the `grounding-review` table shape:
+Returns a structured PASS / FAIL / WARN report. Phase 1 folds a Verification Summary into the report, reusing the `playbook:grounding-review` table shape:
 
 ```markdown
 ## Verification Summary
@@ -285,7 +285,7 @@ Returns a structured report. Spawn it with a stable `name`; the moment it return
 
 #### Phase 3: Test Review
 
-Spawn a `test-reviewer` agent (`subagent_type: test-reviewer`) with the plan's Testing Strategy and the Phase 1 report (it runs in parallel with Phase 2, so it doesn't wait on the adversarial findings). It evaluates the proposed tests against `engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
+Spawn a `test-reviewer` agent (`subagent_type: test-reviewer`) with the plan's Testing Strategy and the Phase 1 report (it runs in parallel with Phase 2, so it doesn't wait on the adversarial findings). It evaluates the proposed tests against `playbook:engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
 
 Returns a structured report. Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **After it returns**, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist any durable test-quality pattern as a memory fact; otherwise skip. **If any FAILs:** revise the test plan and re-run Phase 3 (max 3 iterations).
 

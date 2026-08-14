@@ -43,7 +43,7 @@ Above the Work Units, `/playbook:scope` groups them into ordered **Segments**: P
 | Seg | Title | Work Units | Requires | Concern | Est. lines |
 ```
 
-A Segment targets under 500 changed lines (a Segment over 1000 needs justification, and none may exceed the 1500 hard limit), following `engineering-standards` ("one concern per PR", "ship a sequence of small PRs"). Segments are ordered so a Segment's Work Units only depend on the same or earlier Segments; the default is a linear chain, which maps to stacked PRs. These are suggestions: `/playbook:implement` honors them but re-splits any Segment whose real diff exceeds the 1500 hard limit. The quality gate's fact-check phase validates that every Work Unit maps to exactly one Segment, the ordering respects dependencies, and no Segment is over budget.
+A Segment targets under 500 changed lines (a Segment over 1000 needs justification, and none may exceed the 1500 hard limit), following `playbook:engineering-standards` ("one concern per PR", "ship a sequence of small PRs"). Segments are ordered so a Segment's Work Units only depend on the same or earlier Segments; the default is a linear chain, which maps to stacked PRs. These are suggestions: `/playbook:implement` honors them but re-splits any Segment whose real diff exceeds the 1500 hard limit. The quality gate's fact-check phase validates that every Work Unit maps to exactly one Segment, the ordering respects dependencies, and no Segment is over budget.
 
 ### Autonomous mode (--auto)
 
