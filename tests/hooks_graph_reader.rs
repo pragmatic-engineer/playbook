@@ -99,13 +99,33 @@ fn edit_path(relpath: &str) -> String {
 }
 
 fn run_anchors_hook(home: &Path, file_path: &str, session_id: &str) -> Output {
-    let hook_input = json!({
+    let hook_input = anchors_hook_input(file_path, session_id);
+    run_playbook(home, &["hook", "memory-anchors"], &hook_input)
+}
+
+fn anchors_hook_input(file_path: &str, session_id: &str) -> String {
+    json!({
         "session_id": session_id,
         "tool_name": "Edit",
         "tool_input": {"file_path": file_path}
     })
-    .to_string();
-    run_playbook(home, &["hook", "memory-anchors"], &hook_input)
+    .to_string()
+}
+
+/// Run the python `hooks/memory-anchors.py` original the same way
+/// `run_playbook` runs the compiled binary, for cross-implementation
+/// comparison.
+fn run_python_anchors(home: &Path, file_path: &str, session_id: &str) -> Output {
+    let hook = concat!(env!("CARGO_MANIFEST_DIR"), "/hooks/memory-anchors.py");
+    let hook_input = anchors_hook_input(file_path, session_id);
+    Command::new("python3")
+        .arg(hook)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("HOME", home)
+        .env("HOOK_INPUT", hook_input)
+        .stdin(Stdio::null())
+        .output()
+        .expect("python3 should run memory-anchors.py")
 }
 
 /// hooks/memory-anchors.test.sh scenarios 1 and 3: an exactly anchored file
@@ -119,15 +139,13 @@ fn anchored_file_names_matching_fact_and_depends_on_neighbour() {
     // Act
     let output = run_anchors_hook(&home, &edit_path("src/a.py"), "s1");
 
-    // Assert
+    // Assert: the exact line, not a substring, so a column reorder or a
+    // garbled "(relation:name)" format is caught. "src/" is also a
+    // directory anchor of src/a.py, so fact-dir's line is expected too.
     let out = stdout_of(&output);
-    assert!(
-        out.contains("fact-a"),
-        "expected fact-a in output, got: {out}"
-    );
-    assert!(
-        out.contains("fact-neighbour"),
-        "expected depends_on neighbour fact-neighbour, got: {out}"
+    assert_eq!(
+        out,
+        r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"Memory facts anchored to src/a.py:\n- fact-a: Fact A describes src/a.py (depends_on:fact-neighbour)\n- fact-dir: Fact dir describes everything under src/"}}"#
     );
 
     let _ = fs::remove_dir_all(&home);
@@ -144,11 +162,11 @@ fn directory_anchor_names_the_containing_directory_fact() {
     // Act
     let output = run_anchors_hook(&home, &edit_path("src/deep/b.py"), "s2");
 
-    // Assert
+    // Assert: the exact line, not a substring.
     let out = stdout_of(&output);
-    assert!(
-        out.contains("fact-dir"),
-        "expected fact-dir in output, got: {out}"
+    assert_eq!(
+        out,
+        r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"Memory facts anchored to src/deep/b.py:\n- fact-dir: Fact dir describes everything under src/"}}"#
     );
 
     let _ = fs::remove_dir_all(&home);
@@ -318,10 +336,49 @@ fn additional_context_output_is_valid_json_with_pretooluse_event_name() {
     // Act
     let output = run_anchors_hook(&home, &edit_path("src/a.py"), "s8");
 
-    // Assert
+    // Assert: the shape AND the message body, so a garbled or truncated
+    // additionalContext would fail here rather than only a hookEventName
+    // check that stays green as long as the envelope is right.
     let out = stdout_of(&output);
     let parsed: Value = serde_json::from_str(&out).expect("output should be valid JSON");
     assert_eq!(parsed["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+    assert_eq!(
+        parsed["hookSpecificOutput"]["additionalContext"],
+        "Memory facts anchored to src/a.py:\n- fact-a: Fact A describes src/a.py (depends_on:fact-neighbour)\n- fact-dir: Fact dir describes everything under src/"
+    );
 
     let _ = fs::remove_dir_all(&home);
+}
+
+/// No shell equivalent for this hook (unlike rebuild-memory-graph, which
+/// hooks/graph_writer's tests compare against hooks/rebuild-memory-graph.py);
+/// this is the equivalent cross-implementation comparison against
+/// hooks/memory-anchors.py, feeding both implementations the same
+/// graph.json fixture and the same edit.
+#[test]
+fn python_and_rust_readers_agree_on_the_same_fixture() {
+    // Arrange
+    let home_py = scratch_home("cross-impl-py");
+    let home_rs = scratch_home("cross-impl-rs");
+    write_graph(&home_py, BASE_GRAPH);
+    write_graph(&home_rs, BASE_GRAPH);
+    let target = edit_path("src/a.py");
+
+    // Act
+    let out_py = run_python_anchors(&home_py, &target, "cross1");
+    let out_rs = run_anchors_hook(&home_rs, &target, "cross1");
+
+    // Assert
+    assert!(
+        out_py.status.success(),
+        "python memory-anchors.py exited non-zero"
+    );
+    assert_eq!(
+        stdout_of(&out_py),
+        stdout_of(&out_rs),
+        "python and rust memory-anchors outputs differ"
+    );
+
+    let _ = fs::remove_dir_all(&home_py);
+    let _ = fs::remove_dir_all(&home_rs);
 }

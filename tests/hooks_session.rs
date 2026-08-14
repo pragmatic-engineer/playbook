@@ -436,6 +436,42 @@ fn session_init_drift_warning_fires_only_on_resume() {
     );
 }
 
+#[test]
+fn session_init_resume_with_matching_hash_emits_no_drift_warning() {
+    // Arrange: the session's stored config-hash is seeded with the CURRENT
+    // hash for this empty scratch HOME, so there is no drift at all. An
+    // inverted `!=` in the drift check would still warn here.
+    let home = scratch_dir("drift-resume-match");
+    let repo_dir = scratch_dir("drift-resume-match-repo");
+    let session_id = "sid-resume-match";
+    let session_dir = home.join(".claude").join("runtime").join(session_id);
+    fs::create_dir_all(&session_dir).unwrap();
+    let current_hash = empty_config_hash(&home);
+    fs::write(session_dir.join("config-hash"), &current_hash).unwrap();
+
+    // Act: resume, with the stored hash already matching.
+    let resumed = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        &format!(r#"{{"session_id":"{session_id}","source":"resume"}}"#),
+        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
+    );
+
+    // Assert: no drift warning anywhere in the output.
+    assert_eq!(resumed.exit_code, 0, "hook should exit 0 on resume");
+    let message = system_message(&resumed.stdout);
+    assert!(
+        !message.contains("drifted"),
+        "resume with a matching hash should not warn: {message}"
+    );
+    let context = additional_context(&resumed.stdout);
+    assert!(
+        !context.contains("config hash has changed"),
+        "resume additionalContext should not mention drift when the hash matches: {context}"
+    );
+}
+
 // ---------------------------------------------------------------------
 // session-init: shell-out failure degrades quietly
 // ---------------------------------------------------------------------
@@ -566,13 +602,47 @@ fn session_clean_exit_real_reason_writes_the_marker() {
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     let marker = fs::read_to_string(session_dir.join("clean-exit")).unwrap();
-    assert_eq!(marker.trim(), "logout");
+    assert_eq!(
+        marker, "logout\n",
+        "marker should hold the reason plus a trailing newline, byte for byte"
+    );
 }
 
 // ---------------------------------------------------------------------
 // session-clean-exit: auto-learn queueing
 // (hooks/session-clean-exit.test.sh cases 3-5)
 // ---------------------------------------------------------------------
+
+/// The real git worktree root for `dir`, resolved via `git rev-parse
+/// --show-toplevel`, so a test can predict the auto-learn queue's slugified
+/// filename without hard-coding a path that may differ once the OS resolves
+/// symlinks (e.g. macOS's `/tmp` -> `/private/tmp`).
+fn git_toplevel(dir: &Path) -> String {
+    let output = Command::new("git")
+        .args(["-C", dir.to_str().unwrap(), "rev-parse", "--show-toplevel"])
+        .output()
+        .expect("git should be available");
+    assert!(
+        output.status.success(),
+        "git rev-parse --show-toplevel failed"
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
+/// Mirrors `session_clean_exit::slugify`: replace every character outside
+/// `[A-Za-z0-9_.-]` with `_`, matching the regex in
+/// hooks/session-clean-exit.py:71.
+fn slugify(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
 
 #[test]
 fn session_clean_exit_queues_auto_learn_flag_with_expected_shape() {
@@ -582,6 +652,7 @@ fn session_clean_exit_queues_auto_learn_flag_with_expected_shape() {
     fs::write(session_dir.join("edit-count"), "9").unwrap();
     let repo_dir = scratch_dir("auto-learn-flag-repo");
     init_repo_with_origin(&repo_dir, "https://github.com/acme/widget.git");
+    let expected_filename = format!("{}.json", slugify(&git_toplevel(&repo_dir)));
 
     // Act
     let outcome = run_hook(
@@ -600,6 +671,11 @@ fn session_clean_exit_queues_auto_learn_flag_with_expected_shape() {
         .flatten()
         .collect();
     assert_eq!(entries.len(), 1, "exactly one flag should be queued");
+    assert_eq!(
+        entries[0].file_name().to_string_lossy(),
+        expected_filename,
+        "queued flag filename should be the slugified repo root"
+    );
     let contents = fs::read_to_string(entries[0].path()).unwrap();
     let flag: serde_json::Value = serde_json::from_str(&contents).unwrap();
     let object = flag.as_object().unwrap();
@@ -608,6 +684,40 @@ fn session_clean_exit_queues_auto_learn_flag_with_expected_shape() {
     assert_eq!(keys, vec!["edits", "repo_root", "session_id", "ts"]);
     assert_eq!(flag["edits"], 9);
     assert_eq!(flag["session_id"], "sid-flag");
+}
+
+#[test]
+fn session_clean_exit_at_default_threshold_queues_a_flag() {
+    // Arrange: edit-count sits exactly at the default threshold of 5,
+    // pinning the `<` comparison `queue_auto_learn` uses against a `<=`
+    // mutation that would wrongly skip queuing right at the boundary.
+    let home = scratch_dir("at-threshold");
+    let session_dir = seeded_session_dir(&home, "sid-at-threshold");
+    fs::write(session_dir.join("edit-count"), "5").unwrap();
+    let repo_dir = scratch_dir("at-threshold-repo");
+    init_repo_with_origin(&repo_dir, "https://github.com/acme/widget.git");
+
+    // Act
+    let outcome = run_hook(
+        "session-clean-exit",
+        &repo_dir,
+        &home,
+        r#"{"session_id":"sid-at-threshold","reason":"logout"}"#,
+        &[],
+    );
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    let to_learn_dir = home.join(".claude").join("runtime").join("to-learn");
+    let entries: Vec<_> = fs::read_dir(&to_learn_dir)
+        .expect("to-learn dir should exist")
+        .flatten()
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "exactly at the default threshold of 5 edits should still queue a flag"
+    );
 }
 
 #[test]

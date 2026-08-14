@@ -56,6 +56,17 @@ run '{"trigger":"manual"}' >/dev/null
 n="$(wc -l < "$big" | tr -d ' ')"
 [ "$n" -le 500 ] && ok "log capped at 500 lines (now $n)" || bad "log capped at 500 lines (now $n)"
 
+# 6. The cap keeps the newest window, not the oldest: a mutation that kept
+# lines 1-500 instead of 101-600 (plus the freshly appended entry) would
+# still pass case 5 above, since the line count would still be 500.
+first_line="$(head -1 "$big")"
+last_line="$(tail -1 "$big")"
+if [ "$first_line" = "old line 102" ] && printf '%s' "$last_line" | grep -q 'trigger=manual'; then
+  ok "log cap keeps the newest window, not the oldest"
+else
+  bad "log cap keeps the newest window, not the oldest (first: $first_line, last: $last_line)"
+fi
+
 TOTAL=$((PASS+FAIL))
 echo ""
 echo "${PASS}/${TOTAL} cases passed"
