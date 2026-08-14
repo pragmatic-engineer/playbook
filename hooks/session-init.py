@@ -201,7 +201,7 @@ def main() -> int:
                 edits = "some"
             nudge = (
                 "A previous session in this repo made %s edits, so project memory may be "
-                "stale. Consider running /learn-project to refresh it, or /learn-project "
+                "stale. Consider running /playbook:learn-project to refresh it, or /playbook:learn-project "
                 "--stage to queue candidate facts for review." % edits
             )
             extra_context = extra_context + "\n\n" + nudge if extra_context else nudge
@@ -217,10 +217,10 @@ def main() -> int:
         if skill_lines or cmd_lines:
             toolkit = (
                 "Your toolkit. Before substantive work, check whether one of these fits "
-                "and use it instead of ad-hoc steps: plan a feature with /scope, execute a "
-                "ready plan with /implement, record a decision with /adr, commit and push "
-                "with /commit-and-push, open a PR with /create-pull-request, review a PR "
-                "with /quick-review or /deep-review, debug a failure with the "
+                "and use it instead of ad-hoc steps: plan a feature with /playbook:scope, execute a "
+                "ready plan with /playbook:implement, record a decision with /playbook:adr, commit and push "
+                "with /playbook:commit-and-push, open a PR with /playbook:create-pull-request, review a PR "
+                "with /playbook:quick-review or /playbook:deep-review, debug a failure with the "
                 "systematic-debugging skill. Invoke skills via the Skill tool, commands as "
                 "slash commands. Full catalog (name: what it is for):"
             )

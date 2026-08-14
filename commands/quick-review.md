@@ -58,9 +58,9 @@ When in worktree mode, read and grep all files under `$WT` instead of the local 
 
 ## Voice rules (mandatory)
 
-Invoke the `grounding-review` skill before drafting any finding, and load the `writing-style` skill alongside it (grounding-review depends on it for voice, banned words, and GitHub comment patterns). The full discipline lives in those two skills.
+Invoke the `playbook:grounding-review` skill before drafting any finding, and load the `playbook:writing-style` skill alongside it (grounding-review depends on it for voice, banned words, and GitHub comment patterns). The full discipline lives in those two skills.
 
-Comment bodies are read by another engineer, so they use the humane `writing-style` register (warm, contractions, constructive), NOT the terse operator voice from the "Concise & Direct" output style or system prompt `## Output`. Where those would conflict, `writing-style` wins for anything posted to GitHub. The non-negotiable points for inline comments posted to GitHub:
+Comment bodies are read by another engineer, so they use the humane `playbook:writing-style` register (warm, contractions, constructive), NOT the terse operator voice from the "Concise & Direct" output style or system prompt `## Output`. Where those would conflict, `playbook:writing-style` wins for anything posted to GitHub. The non-negotiable points for inline comments posted to GitHub:
 
 - **Conventional Comments label on every finding, PLAIN TEXT (no bold), bare.** Start the body with the bare label: `issue:`, `suggestion:`, `nitpick:`, `question:`. NEVER wrap in `**...**`. Per writing-style: "a human typing fast doesn't wrap labels in `**`." Valid labels: `issue`, `suggestion`, `nitpick`, `question`. The `(blocking)`/`(non-blocking)` split stays in the local review summary (it orders the findings); posted comments never carry the decoration.
 - **Two sentences by default: the problem, then what breaks.** State the defect and its failure, then stop. Earn a third sentence only when the mechanism is genuinely non-obvious. A finding that argues a real decision can run a little longer. Avoid jargon; plainest words available. Don't teach the author what they already know or recap the diff.
@@ -72,7 +72,7 @@ Comment bodies are read by another engineer, so they use the humane `writing-sty
 - **No hedging.** Ban: "may actually be", "I'd lean toward", "that said", "worth noting", "it's worth mentioning", "one could argue".
 - **No meta-justification.** "since X is a foot-gun" is reviewer-reasoning, not actionable info.
 - **Casual register.** Fragments OK. Lowercase verbs fine.
-- **No em dashes or en dashes.** Use commas, colons, or periods. Hard rule, also enforced in the system prompt and `writing-style`.
+- **No em dashes or en dashes.** Use commas, colons, or periods. Hard rule, also enforced in the system prompt and `playbook:writing-style`.
 
 ## Execution rules
 
@@ -163,7 +163,7 @@ The subagent prompt MUST include:
 
 - The PR diff and `HEAD_SHA`.
 - How to read files: **worktree mode** → the absolute `$WT` path with "read and grep files under $WT; do not install or build"; **in-place mode** (`WT` empty) → "read the local working tree, which is at HEAD_SHA".
-- The full **Voice rules (mandatory)** and **Anti-patterns to refuse** sections from this command, verbatim, plus the instruction to load `grounding-review` and `writing-style` for the rest of the discipline.
+- The full **Voice rules (mandatory)** and **Anti-patterns to refuse** sections from this command, verbatim, plus the instruction to load `playbook:grounding-review` and `playbook:writing-style` for the rest of the discipline.
 - The output contract in Step 3: it MUST return exactly that report, one `Post:` block per finding.
 - Read every cited file at `HEAD_SHA` before drafting; quote exact evidence; tag anything unconfirmed `[unverified]`.
 
@@ -171,7 +171,7 @@ Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`); the moment it returns its
 
 ## Step 3: Review report contract
 
-The `reviewer` subagent returns a report rendered in the `grounding-review` Review Report Format. `/quick-review` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
+The `reviewer` subagent returns a report rendered in the `playbook:grounding-review` Review Report Format. `/playbook:quick-review` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
 
 Relay the returned report to the user unchanged, then proceed to posting. Post findings verbatim from their `Post:` blocks; the orchestrator does NOT re-read source files (the subagent already grounded every citation), which is what keeps main context lean.
 

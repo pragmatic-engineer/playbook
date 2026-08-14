@@ -1,6 +1,6 @@
 # Install
 
-This page covers requirements, the full local install path with the curl one-liner, the settings merge behaviour, and uninstall. For the primary path (the Claude Code plugin plus `/setup`), see the [README](../../README.md).
+This page covers requirements, the full local install path with the curl one-liner, the settings merge behaviour, and uninstall. For the primary path (the Claude Code plugin plus `/playbook:setup`), see the [README](../../README.md).
 
 ## Requirements
 
@@ -13,7 +13,7 @@ This page covers requirements, the full local install path with the curl one-lin
 | `python3` 3.9+ | required | used by two bash hooks (path resolution and the memory-graph rebuild); the hooks themselves are bash |
 | `rtk` (Rust Token Killer) | required | a PreToolUse hook routes every Bash command through it to cut token use |
 | `gh` | optional | statusline PR and CI status |
-| `agent-browser` | optional | browser automation MCP used by `/brainstorm` for web-only tickets and attachments |
+| `agent-browser` | optional | browser automation MCP used by `/playbook:brainstorm` for web-only tickets and attachments |
 
 ## Full local install with curl
 
@@ -63,7 +63,7 @@ git fetch origin
 git checkout -f main
 ```
 
-After cloning or adopting, run `/setup` inside a Claude Code session to wire the local layers.
+After cloning or adopting, run `/playbook:setup` inside a Claude Code session to wire the local layers.
 
 ## Settings merge
 
@@ -103,6 +103,6 @@ Config edits (`settings.json` or hooks) take effect on a fresh session only. Aft
 
 ## See also
 
-- [Launcher and hooks](../internals/01-launcher-and-hooks.md): what `/setup` wires and how the `cc` launcher runs.
-- [The system prompt](../concepts/01-system-prompt.md): the optional persona `/setup` can install.
+- [Launcher and hooks](../internals/01-launcher-and-hooks.md): what `/playbook:setup` wires and how the `cc` launcher runs.
+- [The system prompt](../concepts/01-system-prompt.md): the optional persona `/playbook:setup` can install.
 - [Docs index](../index.md)

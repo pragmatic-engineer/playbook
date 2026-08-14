@@ -10,7 +10,7 @@ effort: low
 
 Wire the always-on safety guards and seed or merge settings.json. Optionally
 install the shell launchers (cc/ccd) and the custom system prompt. Each step
-is idempotent; re-running /setup is safe and only changes what is missing.
+is idempotent; re-running /playbook:setup is safe and only changes what is missing.
 
 ## Step 1: Parse arguments
 
@@ -74,5 +74,5 @@ its status (for example, "already up to date" when nothing changed).
 
 End your report with:
 
-"Re-running /setup is safe and only changes what is missing. Run /doctor to
+"Re-running /playbook:setup is safe and only changes what is missing. Run /playbook:doctor to
 verify the full status."

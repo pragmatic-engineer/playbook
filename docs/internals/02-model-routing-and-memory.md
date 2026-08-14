@@ -92,6 +92,6 @@ Traversal depth is 1 for all edge types except `supersedes`, which is followed f
 
 ## See also
 
-- [Decisions and Memory](../guides/03-decisions-and-memory.md): using memory day-to-day and the `/learn-project` command.
+- [Decisions and Memory](../guides/03-decisions-and-memory.md): using memory day-to-day and the `/playbook:learn-project` command.
 - [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `cc` launcher that sets the session model.
 - [Docs index](../index.md)

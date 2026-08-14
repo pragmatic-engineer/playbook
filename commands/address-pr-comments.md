@@ -8,7 +8,7 @@ effort: max
 
 # Address PR Comments
 
-Iterate through unresolved review-thread comments and PR-level comments on a pull request. For each one: read the code, propose a fix or reply, get user approval, apply the edit (or post the reply), and move on. At the end, hand off to `/commit-and-push -A` and then post any queued thread replies that cite the resulting commit SHA.
+Iterate through unresolved review-thread comments and PR-level comments on a pull request. For each one: read the code, propose a fix or reply, get user approval, apply the edit (or post the reply), and move on. At the end, hand off to `/playbook:commit-and-push -A` and then post any queued thread replies that cite the resulting commit SHA.
 
 ## Discipline: receiving review feedback
 
@@ -254,4 +254,4 @@ If approved (or `AUTO_COMMIT=true`):
 - **Threads with multiple comments.** A thread can have a back-and-forth. Display all comments in chronological order but treat the latest non-author comment as the prompt. If the latest comment is from `$ME` (you replied earlier), surface that and let the user decide if there's anything still pending.
 - **No silent edits.** Every file change must be visible to the user before the next iteration. If you `Edit` a file, print the resulting hunk.
 - **Failure handling.** If a reply POST fails (404 on the thread, 403 if you're not a collaborator), don't retry blindly. Print the error, leave the reply in the queue, and continue with the rest. Surface the failures in the final summary so the user can post them manually.
-- **Resuming after Quit.** If the user quits mid-iteration, print the remaining indexed items with their URLs so they can re-run `/address-pr-comments` later (the resolved/unresolved state on GitHub is still the source of truth).
+- **Resuming after Quit.** If the user quits mid-iteration, print the remaining indexed items with their URLs so they can re-run `/playbook:address-pr-comments` later (the resolved/unresolved state on GitHub is still the source of truth).

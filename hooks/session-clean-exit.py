@@ -47,7 +47,7 @@ def main() -> int:
         pass
 
     # Auto-learn queue: if this session did substantive work in a repo, drop a
-    # per-repo flag so the next session there nudges a /learn-project run. This
+    # per-repo flag so the next session there nudges a /playbook:learn-project run. This
     # writes a flag file only; nothing is written to memory here. Disable with
     # AUTO_LEARN_NUDGE=0; tune the threshold with AUTO_LEARN_MIN_EDITS (default 5).
     if os.environ.get("AUTO_LEARN_NUDGE", "1") == "0":

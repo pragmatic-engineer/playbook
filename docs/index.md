@@ -16,9 +16,9 @@ Why the foundations work the way they do.
 Task-oriented workflows.
 
 - [Install](guides/00-install.md): requirements, the full local curl install, settings merge, and uninstall.
-- [Plan and implement](guides/01-plan-and-implement.md): design with `/scope`, build with `/implement`.
+- [Plan and implement](guides/01-plan-and-implement.md): design with `/playbook:scope`, build with `/playbook:implement`.
 - [Review and PR flow](guides/02-review-and-pr-flow.md): commit, review, and work through feedback.
-- [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/adr`, build project knowledge with `/learn-project`.
+- [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/playbook:adr`, build project knowledge with `/playbook:learn-project`.
 
 ## Authoring
 

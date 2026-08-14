@@ -57,7 +57,7 @@ Three parts, each using plumbing that already exists:
 
 - **Retrieval, base case.** A helper reads `graph.json`, filters to global plus the current repo, and emits a compact block: each fact's id, description, and typed edges, plus an anchor index of file to facts. `session-init.sh` injects it at `SessionStart` in place of the raw `MEMORY.md` dump. Measured at 8.8 KB for this repo.
 - **Retrieval, just in time.** A `PreToolUse` hook on `Edit` and `Write` looks up the target path in the anchor index and injects the facts anchored to it, plus their `depends_on` and `contradicts` neighbours. Turns that edit nothing pay nothing. `hooks/preread-edit-check.sh` is the existing precedent for a `PreToolUse` hook that emits `additionalContext` and never blocks.
-- **Capture.** `statusline.sh` already parses `.context_window.used_percentage`; it writes a capture-due flag to the session dir when usage crosses a threshold well below the 90% auto-compact point. A `Stop` hook reads the flag and returns `decision: block` with a reason instructing capture of durable facts from this session. `/implement` additionally captures deterministically before and after a run, where it can spawn an agent rather than rely on a prompt.
+- **Capture.** `statusline.sh` already parses `.context_window.used_percentage`; it writes a capture-due flag to the session dir when usage crosses a threshold well below the 90% auto-compact point. A `Stop` hook reads the flag and returns `decision: block` with a reason instructing capture of durable facts from this session. `/playbook:implement` additionally captures deterministically before and after a run, where it can spawn an agent rather than rely on a prompt.
 - **Resolver.** Two-pass edge resolution: collect all nodes, then resolve each link target in the source's own scope first and fall back to global. Recovers the 3 cross-scope edges.
 
 - Trade-offs: uses existing signals, costs nothing on turns that do not edit, and the threshold fires while the model can still act. But it spreads logic across four touch points (statusline, a Stop hook, a PreToolUse hook, session-init), and capture at the threshold is a prompt the model must obey, not an enforced write. Coupling a capture signal to `statusline.sh` is unusual, justified only because it is the sole component that receives context usage.
@@ -88,7 +88,7 @@ Why the others lost:
 
 The cross-scope resolver change is adopted as part of B: a project fact resolves a link in its own scope first, then global. This contradicts `SYSTEM_PROMPT.md:53`, which states same-store resolution. The spec is treated as the defect, because 3 of 4 live dangling edges are authors writing exactly this link and expecting it to resolve. The system prompt is updated with the decision.
 
-Cost instrumentation rides along rather than getting its own decision: `statusline.sh` is already the only component receiving `.cost.total_cost_usd`, and it is already being modified to write a context-usage flag, so it appends cost samples to the same per-session file. `/implement` and `/learn-project` read the delta between their start and end. This is coarser than per-agent token accounting, which no hook payload exposes.
+Cost instrumentation rides along rather than getting its own decision: `statusline.sh` is already the only component receiving `.cost.total_cost_usd`, and it is already being modified to write a context-usage flag, so it appends cost samples to the same per-session file. `/playbook:implement` and `/playbook:learn-project` read the delta between their start and end. This is coarser than per-agent token accounting, which no hook payload exposes.
 
 ## Consequences
 
@@ -102,12 +102,12 @@ Positive:
 
 Negative and follow-up:
 
-- **Capture at the threshold is a prompt, not an enforcement.** A `Stop` hook can instruct, and the model can still do a poor job of it. Only the `/implement` path is deterministic, because a command can spawn an agent. This is a real limit of the hook surface, not a shortcut.
+- **Capture at the threshold is a prompt, not an enforcement.** A `Stop` hook can instruct, and the model can still do a poor job of it. Only the `/playbook:implement` path is deterministic, because a command can spawn an agent. This is a real limit of the hook surface, not a shortcut.
 - **`statusline.sh` gains a side effect.** A display component now writes session state. It is the only component that receives context usage and cost, so the alternative is not having the signal at all. The write must be small, atomic, and failure-tolerant, because a broken statusline is highly visible.
 - **Four touch points** (`session-init.sh`, a new `PreToolUse` hook, a new `Stop` hook, `statusline.sh`) must stay consistent about the graph's shape. A schema change to `graph.json` now breaks readers, where before it broke nothing.
 - **Threshold tuning is unknown.** Too low and capture nags; too high and it races auto-compact at 90%. The starting value is a guess and needs revision against real sessions.
 - **The system prompt changes meaning.** Same-store resolution becomes scope-then-global. Existing facts are unaffected in content, but 3 edges that read as dangling will start resolving, which changes what gets loaded.
-- Success is measured, not asserted: dangling edges from cross-scope links driven to zero; anchor hits per editing session above zero; facts captured per session at the threshold; session-start injection staying within roughly 10 KB; and a recorded cost figure for a `/learn-project` run.
+- Success is measured, not asserted: dangling edges from cross-scope links driven to zero; anchor hits per editing session above zero; facts captured per session at the threshold; session-start injection staying within roughly 10 KB; and a recorded cost figure for a `/playbook:learn-project` run.
 
 ## Architecture Diagrams
 
@@ -151,7 +151,7 @@ flowchart LR
   SL["statusline.sh, writes usage and cost samples"]
   TEL[("session telemetry")]
   STOP["memory-capture.sh (Stop), fires on threshold"]
-  IMPL["/implement, captures before and after"]
+  IMPL["/playbook:implement, captures before and after"]
 
   FACT --> RG --> GJ
   GJ --> MC --> SI --> CLAUDE

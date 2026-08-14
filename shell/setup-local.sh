@@ -8,7 +8,7 @@
 # launchers (cc.sh/cc.zsh), and the system prompt.
 #
 # Self-locates its own source tree so it works when called from install.sh
-# (after the file-copy loop) or directly from the /setup plugin command.
+# (after the file-copy loop) or directly from the /playbook:setup plugin command.
 #
 # Usage:  bash shell/setup-local.sh [--aliases] [--system-prompt] [--skip-deps] [--yes]
 # Env:    CLAUDE_HOME  target directory (default: $HOME/.claude)

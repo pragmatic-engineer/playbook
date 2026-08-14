@@ -49,9 +49,9 @@ const DRIFT_EXTRA_CONTEXT: &str = "The user resumed this session, but the config
     a new `claude` invocation.";
 
 const TOOLKIT_PREAMBLE: &str = "Your toolkit. Before substantive work, check whether one of \
-    these fits and use it instead of ad-hoc steps: plan a feature with /scope, execute a ready \
-    plan with /implement, record a decision with /adr, commit and push with /commit-and-push, \
-    open a PR with /create-pull-request, review a PR with /quick-review or /deep-review, debug \
+    these fits and use it instead of ad-hoc steps: plan a feature with /playbook:scope, execute a ready \
+    plan with /playbook:implement, record a decision with /playbook:adr, commit and push with /playbook:commit-and-push, \
+    open a PR with /playbook:create-pull-request, review a PR with /playbook:quick-review or /playbook:deep-review, debug \
     a failure with the systematic-debugging skill. Invoke skills via the Skill tool, commands \
     as slash commands. Full catalog (name: what it is for):";
 
@@ -301,7 +301,7 @@ fn append_auto_learn_nudge(extra_context: &mut String, home: &str, repo_root: &s
     let edits = learn_flag_edits(&learn_flag);
     let nudge = format!(
         "A previous session in this repo made {edits} edits, so project memory may be stale. \
-        Consider running /learn-project to refresh it, or /learn-project --stage to queue \
+        Consider running /playbook:learn-project to refresh it, or /playbook:learn-project --stage to queue \
         candidate facts for review."
     );
     push_context(extra_context, &nudge);
