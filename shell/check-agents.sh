@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: MIT
 #
-# check-agents.sh: validate every agents/*.md definition against the house
-# agent contract: real frontmatter,
+# check-agents.sh: validate every agents/*.md definition (excluding the
+# _TEMPLATE.md skeleton) against the house agent contract: real frontmatter,
 # the required keys, a name that matches the filename, an allowed model
 # tier and effort level, a known tool name allowlist, a read-only tool
 # allowlist, and the non-negotiable guardrail invariants every agent must
@@ -224,6 +224,8 @@ check_agent() {
 count=0
 for file in "$AGENTS_DIR"/*.md; do
   [[ -e "$file" ]] || continue
+  base="$(basename "$file")"
+  [[ "$base" == "_TEMPLATE.md" ]] && continue
   count=$(( count + 1 ))
   check_agent "$file"
 done

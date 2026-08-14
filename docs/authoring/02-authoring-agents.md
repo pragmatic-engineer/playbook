@@ -83,7 +83,7 @@ The trade-off in one line each: parametrizing keeps behaviour consistent and the
 
 ## The check
 
-`shell/check-agents.sh` validates every `agents/*.md` and runs as part of `shell-ci` (`.github/workflows/shell-ci.yml`). The template needs no exclusion, since it lives under `docs/authoring/` and never matches `agents/*.md`.
+`shell/check-agents.sh` validates every `agents/*.md` and runs as part of `shell-ci` (`.github/workflows/shell-ci.yml`). The template lives under `docs/authoring/`, so it isn't scanned at all. The validator still skips a file named `_TEMPLATE.md` inside `agents/`, which keeps a stray copy from failing the lint.
 
 It enforces, per file:
 
