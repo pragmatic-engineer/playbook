@@ -83,7 +83,7 @@ ag="$(echo "$det" | awk -F'[()]' '/Agents \(/{print $2}')"
 hk="$(echo "$det" | awk -F'[()]' '/Hooks \(/{print $2}')"
 ag_expected=0
 for f in "$REPO"/agents/*.md; do
-  [ "$(basename "$f")" = "_TEMPLATE.md" ] || ag_expected=$((ag_expected+1))
+  [ -e "$f" ] && ag_expected=$((ag_expected+1))
 done
 hk_expected="$(jq '.hooks | keys | length' "$REPO/hooks/hooks.json")"
 [ "${ag:-0}" = "$ag_expected" ] && ok "inventory Agents=$ag_expected" || bad "inventory Agents=$ag (expected $ag_expected)"

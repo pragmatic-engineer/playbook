@@ -82,7 +82,7 @@ Events wired in this config: `SessionStart`, `PreToolUse`, `PostToolUse`, `UserP
 The `hooks/` directory is deliberately mixed-language (ADR 0005):
 
 - **The eleven non-guard hooks are python** (`hooks/*.py`), sharing `hooks/lib/common.py`. Python is the default for any new hook: the data-shaping hooks (memory graph rebuild, anchor lookup, frontmatter parsing) were carrying jq and awk that are far clearer as stdlib python, and one language for that work is easier to maintain.
-- **The three safety guards stay bash** (`hooks/rm-workspace-guard.sh`, `hooks/no-dash-guard.sh`, `hooks/bg-await-guard.sh`). They fire on the `Bash`/`Edit` fast path and must fail safe. `bg-await-guard.sh` and `no-dash-guard.sh` source `hooks/lib/common.sh`; `rm-workspace-guard.sh` deliberately does not, so a guard that blocks `rm` keeps working even if the shared library is broken or missing.
+- **The four safety guards stay bash** (`hooks/rm-workspace-guard.sh`, `hooks/no-dash-guard.sh`, `hooks/bg-await-guard.sh`, `hooks/precommit-check.sh`). They fire on the `Bash`/`Edit` fast path and must fail safe. `bg-await-guard.sh`, `no-dash-guard.sh` and `precommit-check.sh` source `hooks/lib/common.sh`; `rm-workspace-guard.sh` deliberately does not, so a guard that blocks `rm` keeps working even if the shared library is broken or missing.
 
 Both `common.py` and `common.sh` exist on purpose and expose the same helpers (payload field extraction, session dir, atomic append, the `emit_*` JSON shapes). Edit the one your hook's language uses; keep the two in step when you change a shared behaviour.
 

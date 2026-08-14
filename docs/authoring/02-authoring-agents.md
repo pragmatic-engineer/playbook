@@ -60,7 +60,7 @@ A **write-capable** agent claims neither tier and holds `Edit`, `Write`, and `Ba
 
 ## The guardrail template
 
-Copy `agents/_TEMPLATE.md` into `agents/<name>.md` rather than copying an existing agent. The template is fenced on purpose so it never registers as a live agent itself, and copying a real one risks carrying over guardrails or scope that don't fit the new role.
+Copy `docs/authoring/agent-template.md.tmpl` into `agents/<name>.md` rather than copying an existing agent. The template lives outside `agents/` on purpose so it never registers as a live agent itself, and copying a real one risks carrying over guardrails or scope that don't fit the new role.
 
 Every agent carries these invariants from the template:
 
@@ -83,7 +83,7 @@ The trade-off in one line each: parametrizing keeps behaviour consistent and the
 
 ## The check
 
-`shell/check-agents.sh` validates every `agents/*.md` and runs as part of `shell-ci` (`.github/workflows/shell-ci.yml`). `agents/_TEMPLATE.md` is excluded, since it's a skeleton, not a live agent.
+`shell/check-agents.sh` validates every `agents/*.md` and runs as part of `shell-ci` (`.github/workflows/shell-ci.yml`). The template needs no exclusion, since it lives under `docs/authoring/` and never matches `agents/*.md`.
 
 It enforces, per file:
 
