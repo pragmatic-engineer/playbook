@@ -42,6 +42,10 @@ pub fn run(payload: &Payload) {
         if !path.is_empty() {
             let abs_path = abspath(&path);
             if !seen(&seen_file, &abs_path) {
+                // hooks/search-counter.py appends to seen_file with a plain
+                // unlocked `open(..., "a")`. The bytes written here are
+                // identical; only the synchronisation differs, a deliberate
+                // difference rather than a divergence in behaviour.
                 atomic_append(&seen_file, &abs_path);
                 bump_search = true;
             }

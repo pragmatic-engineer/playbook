@@ -87,6 +87,15 @@ mod preread_edit_check {
         .unwrap()
     }
 
+    /// Write raw `edits.jsonl` content for `session_id` under `home`, for
+    /// scenarios that need more than one record or a non-integer `ts`,
+    /// which `seed_edits` above cannot express.
+    fn seed_edits_raw(home: &Path, session_id: &str, content: &str) {
+        let dir = home.join(".claude").join("runtime").join(session_id);
+        fs::create_dir_all(&dir).expect("session dir should be creatable");
+        fs::write(dir.join("edits.jsonl"), content).expect("edits.jsonl should be writable");
+    }
+
     #[test]
     fn recent_edit_nudges_with_age() {
         // Arrange: this exact file was edited 2 minutes ago.
@@ -261,6 +270,66 @@ mod preread_edit_check {
             stdout_string(&output),
             "",
             "the window boundary itself should not nudge"
+        );
+    }
+
+    #[test]
+    fn float_ts_inside_window_still_nudges() {
+        // Arrange: a JSON float ts, the same as python's plain arithmetic
+        // (`now - rec.get("ts", 0)`) would accept, since python does not
+        // care whether the number is an int or a float.
+        let home = scratch_dir("edit-float-ts");
+        let ts = now() as f64 - 120.5;
+        seed_edits_raw(
+            &home,
+            "pec",
+            &format!(r#"{{"path":"/tmp/x/file.py","ts":{ts}}}"#),
+        );
+
+        // Act
+        let output = run_hook(
+            "preread-edit-check",
+            &home,
+            &payload("pec", "/tmp/x/file.py"),
+        );
+
+        // Assert
+        let out = stdout_string(&output);
+        assert!(
+            out.contains("Edit/Write"),
+            "a float ts inside the window should still nudge, got: {out}"
+        );
+    }
+
+    #[test]
+    fn string_ts_record_does_not_abandon_a_later_match() {
+        // Arrange: the first record for this path carries a non-numeric
+        // "ts". In python that makes `now - rec.get("ts", 0)` raise and
+        // abandon the whole scan via the outer except, silently missing the
+        // later, genuinely matching record. This port must keep scanning
+        // instead and still nudge on that later record.
+        let home = scratch_dir("edit-string-ts");
+        let recent = now() - 90;
+        seed_edits_raw(
+            &home,
+            "pec",
+            &format!(
+                "{{\"path\":\"/tmp/x/file.py\",\"ts\":\"garbage\"}}\n{{\"path\":\"/tmp/x/file.py\",\"ts\":{recent}}}\n"
+            ),
+        );
+
+        // Act
+        let output = run_hook(
+            "preread-edit-check",
+            &home,
+            &payload("pec", "/tmp/x/file.py"),
+        );
+
+        // Assert
+        let out = stdout_string(&output);
+        assert!(
+            out.contains("Edit/Write"),
+            "a later valid record should still nudge despite an earlier malformed ts, got: {out}"
         );
     }
 }
@@ -601,6 +670,48 @@ mod preread_size_check {
             stdout_string(&output),
             "",
             "an unreadable small file should not be denied"
+        );
+
+        // Cleanup: restore permissions so the scratch dir can be removed.
+        let mut perms = fs::metadata(&fixture).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o644);
+        let _ = fs::set_permissions(&fixture, perms);
+    }
+
+    #[test]
+    fn large_and_unreadable_file_is_still_denied_on_byte_size() {
+        // Arrange: the file is both too large and unreadable (mode 0000).
+        // `fs::metadata` is a separate stat call that still succeeds for an
+        // existing, unreadable file, so the byte-size check alone must
+        // still deny it even though the content read fails and defaults
+        // the line count to 0.
+        let home = scratch_dir("size-large-unreadable");
+        let fixture = home.join("locked-big.log");
+        write_bytes_no_newlines(&fixture, 204_801);
+        let mut perms = fs::metadata(&fixture).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o000);
+        fs::set_permissions(&fixture, perms).expect("chmod should succeed");
+
+        // Act
+        let output = run_hook(
+            "preread-size-check",
+            &home,
+            &payload(fixture.to_str().unwrap(), ""),
+        );
+
+        // Assert
+        let out = stdout_string(&output);
+        assert!(
+            out.contains(r#""permissionDecision":"deny""#),
+            "a large unreadable file should still be denied on byte size, got: {out}"
+        );
+        assert!(
+            out.contains("204801 bytes"),
+            "should report the byte count from stat, got: {out}"
+        );
+        assert!(
+            out.contains("0 lines"),
+            "the unreadable content should default the line count to 0, got: {out}"
         );
 
         // Cleanup: restore permissions so the scratch dir can be removed.

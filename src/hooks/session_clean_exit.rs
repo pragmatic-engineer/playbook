@@ -78,9 +78,12 @@ fn queue_auto_learn(payload: &Payload, dir: &str) {
     }
 
     let edits = read_int(&Path::new(dir).join("edit-count"));
+    // Trim before parsing: python's `int(...)` strips surrounding whitespace,
+    // so a padded value like " 3" must still mean 3 here rather than falling
+    // back to the default. Matches hooks/session-clean-exit.py:61-64.
     let threshold = std::env::var("AUTO_LEARN_MIN_EDITS")
         .ok()
-        .and_then(|v| v.parse::<i64>().ok())
+        .and_then(|v| v.trim().parse::<i64>().ok())
         .unwrap_or(DEFAULT_AUTO_LEARN_MIN_EDITS);
     if edits < threshold {
         return;

@@ -638,6 +638,41 @@ fn session_clean_exit_below_threshold_queues_no_flag() {
 }
 
 #[test]
+fn session_clean_exit_padded_min_edits_env_var_still_parses() {
+    // Arrange: AUTO_LEARN_MIN_EDITS carries leading whitespace, the same way
+    // python's `int(...)` would still accept it and parse 3. edit-count sits
+    // exactly at that padded threshold, so a Rust parse that instead fell
+    // back to the default of 5 would wrongly skip the queue.
+    let home = scratch_dir("padded-min-edits");
+    let session_dir = seeded_session_dir(&home, "sid-padded");
+    fs::write(session_dir.join("edit-count"), "3").unwrap();
+    let repo_dir = scratch_dir("padded-min-edits-repo");
+    init_repo_with_origin(&repo_dir, "https://github.com/acme/widget.git");
+
+    // Act
+    let outcome = run_hook(
+        "session-clean-exit",
+        &repo_dir,
+        &home,
+        r#"{"session_id":"sid-padded","reason":"logout"}"#,
+        &[("AUTO_LEARN_MIN_EDITS", " 3")],
+    );
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    let to_learn_dir = home.join(".claude").join("runtime").join("to-learn");
+    let entries: Vec<_> = fs::read_dir(&to_learn_dir)
+        .expect("to-learn dir should exist")
+        .flatten()
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "a padded threshold should still parse to 3, so 3 edits should queue a flag"
+    );
+}
+
+#[test]
 fn session_clean_exit_auto_learn_nudge_disabled_skips_queue() {
     // Arrange: enough edits, but AUTO_LEARN_NUDGE=0.
     let home = scratch_dir("nudge-disabled");

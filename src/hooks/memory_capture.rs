@@ -9,14 +9,29 @@
 //! reason text is even built, so a run that fails partway through still
 //! leaves the marker gone rather than stuck blocking every future turn.
 //!
-//! One divergence from the python source, driven by the "never panic" rule
-//! in SEGMENT-B-RULES.md rather than a behaviour choice: python's
-//! `rec.get("path")` appends whatever JSON value sits at `"path"`,
-//! including a non-string one, and only breaks later (an uncaught
-//! `TypeError`) when the reason text is assembled with `"- " + p`. This
-//! port instead only accepts a string `"path"` field and silently skips
-//! anything else, so a malformed `edits.jsonl` line can never crash the
-//! Stop hook.
+//! Two divergences from the python source, both driven by the "never panic"
+//! rule in SEGMENT-B-RULES.md rather than a behaviour choice:
+//!
+//! 1. python's `rec.get("path")` appends whatever JSON value sits at
+//!    `"path"`, including a non-string one, and only breaks later (an
+//!    uncaught `TypeError`) when the reason text is assembled with
+//!    `"- " + p`. This port instead only accepts a string `"path"` field and
+//!    silently skips anything else, so a malformed `edits.jsonl` line can
+//!    never crash the Stop hook.
+//!
+//! 2. python wraps the whole per-line scan in one outer `try`, with only
+//!    `json.loads` inside an inner `try`. A line that parses as valid JSON
+//!    but is not an object (a bare number, string, array, bool, or null)
+//!    makes `rec.get("path")` raise `AttributeError`, which only the outer
+//!    `try` catches, so the function returns an EMPTY list, discarding
+//!    every path already collected and skipping every later line too. This
+//!    port's `serde_json::Value::get` returns `None` for a non-object value
+//!    instead of raising, so it skips just that one line and keeps
+//!    scanning. This is deliberate, not merely tolerated: a hook must never
+//!    lose data it already has (paths gathered from earlier, valid lines)
+//!    because one line further down the log happens to be malformed. Note
+//!    that a corrupted `edits.jsonl` only happens if something other than
+//!    this toolkit's own trusted writer touches the file.
 
 use crate::common::payload::Payload;
 use crate::common::{emit_block, session_dir};

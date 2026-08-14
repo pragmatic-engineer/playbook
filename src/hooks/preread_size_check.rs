@@ -75,9 +75,11 @@ pub fn run(payload: &Payload) {
     }
 
     // Line count = newline count (matches `wc -l`); byte size from stat.
-    // Two independent reads, matching the python port; a read failure
-    // (missing or unreadable target) never panics and defaults to 0, which
-    // stays under both limits, so it never denies.
+    // Two independent reads, matching the python port: a read failure
+    // (an unreadable target) never panics and defaults the line count to 0,
+    // but `fs::metadata` is a separate call that still succeeds for an
+    // existing, unreadable file, so a large unreadable file is still
+    // correctly denied on byte size, matching python.
     let lines = count_newlines(file_path);
     let num_bytes = fs::metadata(file_path).map(|meta| meta.len()).unwrap_or(0);
 

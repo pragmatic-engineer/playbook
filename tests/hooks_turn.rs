@@ -218,6 +218,46 @@ mod auto_model_detect {
         assert_eq!(code, 0);
         assert_eq!(stdout, "");
     }
+
+    #[test]
+    fn keyword_glued_to_cjk_text_does_not_trigger() {
+        // Arrange: "schema" sits directly against CJK characters with no
+        // spaces on either side. CJK has no word separators, so a keyword
+        // embedded in it has no ASCII word boundary either, but python's
+        // Unicode-aware `\b` still treats the adjacent ideographs as word
+        // characters and stays silent; this word-boundary scan must agree.
+        let home = scratch_home("amd-cjk-glued");
+        let payload = serde_json::json!({
+            "prompt": "这个项目的核心schema结构非常复杂而且难以理解"
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+    }
+
+    #[test]
+    fn keyword_glued_to_accented_text_does_not_trigger() {
+        // Arrange: "schema" sits directly against an accented Latin word
+        // ("café") with no space, so the character immediately before it is
+        // a Unicode letter, not a word boundary.
+        let home = scratch_home("amd-accented-glued");
+        let payload = serde_json::json!({
+            "prompt": "We reviewed the caféschema quickly during our lunch meeting today"
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -443,6 +483,35 @@ mod memory_capture {
             reason.contains("more"),
             "expected a note about additional paths, got: {reason}"
         );
+    }
+
+    #[test]
+    fn malformed_non_object_line_does_not_discard_the_other_paths() {
+        // Arrange: a valid record, then a bare non-object line (a lone JSON
+        // number), then another valid record. Python's `rec.get("path")`
+        // would raise on the middle line and abandon the whole scan; this
+        // port must instead skip only that line and still report both
+        // valid paths, deliberately diverging from python here.
+        let home = scratch_home("mc-non-object-line");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(
+            dir.join("edits.jsonl"),
+            "{\"path\":\"/repo/src/one.sh\",\"ts\":1}\n42\n{\"path\":\"/repo/src/two.sh\",\"ts\":2}\n",
+        )
+        .unwrap();
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("/repo/src/one.sh"), "reason: {reason}");
+        assert!(reason.contains("/repo/src/two.sh"), "reason: {reason}");
     }
 
     #[test]
