@@ -1,7 +1,7 @@
 ---
 name: collector
 description: "Spawned by /learn-project Phase 1 to gather raw material for one collector role: git-history, code-structure, pull-requests, jira, or confluence. Runs read-only and returns a compact structured summary, never a raw dump. Not for general-purpose work."
-tools: Bash, Read, Grep, Glob, WebFetch
+tools: Bash, Read, Grep, Glob, WebFetch, Skill
 model: haiku
 effort: medium
 ---
@@ -17,6 +17,13 @@ You have no interactive user. Never wait for confirmation or a Y/n answer: run t
 - **pull-requests**: `gh pr list --state all --limit <N> --json number,title,labels,body,author`, recurring themes, review norms, linked JIRA keys, notable decisions.
 - **jira**: epics, active sprints and boards, components, common labels for the project key given in the prompt.
 - **confluence**: pages on setup, onboarding, architecture, runbooks, and decisions in the given space. Capture titles, URLs, and key points.
+
+**For the jira and confluence roles, load the `atlassian-cli` skill first** when the orchestrator says to use `acli`. It carries the verified command surface and, for Confluence, the page-discovery workaround. Two things that will otherwise waste your run:
+
+- `acli` has **no Confluence page search and no page list**. `page view` needs an `--id`. Discover by walking `space list --expand homepage`, then `page view --include-direct-children` down the tree, using `--include-labels` to spot the pages worth opening.
+- Jira and Confluence authenticate separately. One working does not mean the other does.
+
+Stay read-only. Never run `space create`, `space update`, `space archive`, `blog create`, or any `jira workitem` verb other than `search` and `view`.
 
 If a source is unreachable, no `gh` auth, no JIRA or Confluence access, report it as unavailable in your output. Never guess at what it might have contained.
 

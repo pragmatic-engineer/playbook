@@ -147,6 +147,73 @@ else
     fail "ensure_all_deps (installed=[$installed], out=[$out5])"
 fi
 
+# --- 7: tap lines are processed, and BEFORE the formulae that need them ---
+# A formula from a third-party tap cannot install until its tap is added, so the
+# tap must be tapped first. The stub logs every brew call in order.
+S7="$WORK/s7"
+BREW7="$WORK/brew7.log"
+# `brew tap` with no args lists taps; here it lists one unrelated tap, so the
+# Brewfile's tap counts as absent and must be added.
+write_stub "$S7" brew "if [ \"\$1\" = tap ] && [ \$# -eq 1 ]; then echo other/tap; fi; echo \"\$@\" >> '$BREW7'"
+BF7="$WORK/Brewfile.tap"
+cat > "$BF7" <<'BREWFILE'
+tap "playbook_faketap/thing"
+brew "playbook_faketool_tapped"
+BREWFILE
+out7="$(PATH="$S7:$PATH" /bin/sh -c '. "$1"; ensure_all_deps "$2"' _ "$ENSURE" "$BF7" 2>&1)"
+log7="$(cat "$BREW7" 2>/dev/null)"
+tap_line="$(printf '%s\n' "$log7" | grep -n '^tap playbook_faketap/thing$' | head -1 | cut -d: -f1)"
+inst_line="$(printf '%s\n' "$log7" | grep -n '^install playbook_faketool_tapped$' | head -1 | cut -d: -f1)"
+if [ -n "$tap_line" ] && [ -n "$inst_line" ] && [ "$tap_line" -lt "$inst_line" ] \
+   && printf '%s' "$out7" | grep -q 'adding tap playbook_faketap/thing'; then
+    pass "ensure_all_deps taps before installing a tapped formula"
+else
+    fail "tap ordering (log=[$log7], out=[$out7])"
+fi
+
+# --- 8: an already-present tap is not re-tapped ---
+S8="$WORK/s8"
+BREW8="$WORK/brew8.log"
+write_stub "$S8" brew "if [ \"\$1\" = tap ] && [ \$# -eq 1 ]; then echo playbook_faketap/thing; fi; echo \"\$@\" >> '$BREW8'"
+out8="$(PATH="$S8:$PATH" /bin/sh -c '. "$1"; ensure_all_deps "$2"' _ "$ENSURE" "$BF7" 2>&1)"
+if printf '%s' "$out8" | grep -q 'tap playbook_faketap/thing already present' \
+   && ! grep -q '^tap playbook_faketap/thing$' "$BREW8" 2>/dev/null; then
+    pass "ensure_all_deps skips a tap that is already present"
+else
+    fail "tap idempotence (log=[$(cat "$BREW8" 2>/dev/null)], out=[$out8])"
+fi
+
+# --- 9: a tapped formula checks PATH for its LAST path segment ---
+# `atlassian/acli/acli` provides the command `acli`, so a present `acli` must
+# stop the install even though the formula name is fully qualified.
+S9="$WORK/s9"
+BREW9="$WORK/brew9.log"
+write_stub "$S9" brew "echo \"\$@\" >> '$BREW9'"
+write_stub "$S9" playbook_faketool_qualified 'echo present'
+BF9="$WORK/Brewfile.qualified"
+cat > "$BF9" <<'BREWFILE'
+brew "playbook_faketap/thing/playbook_faketool_qualified"
+BREWFILE
+out9="$(PATH="$S9:$PATH" /bin/sh -c '. "$1"; ensure_all_deps "$2"' _ "$ENSURE" "$BF9" 2>&1)"
+if printf '%s' "$out9" | grep -q 'playbook_faketool_qualified already installed' \
+   && ! grep -q 'install playbook_faketap/thing/playbook_faketool_qualified' "$BREW9" 2>/dev/null; then
+    pass "tapped formula resolves its command from the last path segment"
+else
+    fail "qualified formula command name (log=[$(cat "$BREW9" 2>/dev/null)], out=[$out9])"
+fi
+
+# --- 10: a failed install of a tapped formula points at brew trust ---
+# Homebrew refuses formulae from an untrusted tap. The script must surface the
+# trust command rather than running it, and must report the failure.
+S10="$WORK/s10"; mkdir -p "$S10"
+write_stub "$S10" brew 'if [ "$1" = install ]; then exit 1; fi; exit 0'
+out10="$(PATH="$S10:$PATH" /bin/sh -c '. "$1"; ensure_dep thing playbook_faketap/thing' _ "$ENSURE" 2>&1)"; rc10=$?
+if printf '%s' "$out10" | grep -q 'brew trust playbook_faketap' && [ "$rc10" -ne 0 ]; then
+    pass "failed tapped install surfaces brew trust and reports failure"
+else
+    fail "trust hint (out=[$out10], rc=$rc10)"
+fi
+
 # --- 6: ensure_all_deps with a missing Brewfile is a clean no-op ---
 out6="$(/bin/sh -c '. "$1"; ensure_all_deps "$2"' _ "$ENSURE" "$WORK/does-not-exist" 2>&1)"; rc6=$?
 if printf '%s' "$out6" | grep -q 'no Brewfile at' && [ "$rc6" -eq 0 ]; then

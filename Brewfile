@@ -27,6 +27,15 @@ brew "node"         # statusline shows the active Node version (installed only i
 # Browser automation (optional): agent-browser MCP, used by /brainstorm for web-only tickets and attachments
 brew "agent-browser"  # register: claude mcp add --scope user agent-browser -- agent-browser mcp --tools core
 
+# Atlassian CLI (optional): Jira and Confluence from the terminal, used by
+# /learn-project when no Atlassian MCP server is connected. Ships from
+# Atlassian's own tap, so the tap line below is required before the formula
+# resolves. Homebrew also refuses formulae from an untrusted third-party tap:
+# review it, then run `brew trust atlassian/acli` once. That step is left to you
+# on purpose, since trusting a tap grants it code execution.
+tap "atlassian/acli"
+brew "acli"           # see skills/atlassian-cli/SKILL.md; auth per product with `acli confluence auth login`
+
 # zsh ships with macOS; the `cc` launcher is zsh-only. Uncomment to pin a Homebrew zsh.
 # brew "zsh"
 

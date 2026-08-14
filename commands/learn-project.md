@@ -47,7 +47,13 @@ echo "Commits: $COMMITS"
 
 # capability probes
 command -v gh   >/dev/null && gh auth status >/dev/null 2>&1 && echo "gh:   ok" || echo "gh:   UNAVAILABLE (PRs skipped)"
-command -v acli >/dev/null && echo "acli: present" || echo "acli: absent"
+if command -v acli >/dev/null; then
+  echo "acli: present ($(acli --version 2>/dev/null | head -1))"
+  acli jira auth status       >/dev/null 2>&1 && echo "acli jira:       authed" || echo "acli jira:       NOT authed"
+  acli confluence auth status >/dev/null 2>&1 && echo "acli confluence: authed" || echo "acli confluence: NOT authed"
+else
+  echo "acli: absent"
+fi
 
 # JIRA project keys referenced in history (histogram)
 echo "JIRA keys in history:"
@@ -56,7 +62,7 @@ git log --oneline -500 2>/dev/null | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | sed -E '
 
 Then, before collecting:
 
-- **Atlassian access:** if `mcp__atlassian__*` tools are available in this session, use them. Else if `acli` is present and authenticated, use it. Else mark JIRA/Confluence **unavailable** and record it for the report.
+- **Atlassian access:** if `mcp__atlassian__*` tools are available in this session, use them. Else if `acli` is present and authenticated, **use it, and load the `atlassian-cli` skill first**: it carries the real command surface and the Confluence page-discovery workaround. Jira and Confluence authenticate separately, so treat the two probes above independently: Jira reachable and Confluence not is a normal state, not an error. Else mark JIRA/Confluence **unavailable** and record it for the report.
 - **Targets:** resolve the JIRA project key(s) from the histogram and the Confluence space from README/links. If ambiguous, ask the user once.
 - **Capture:** `REPO`, `ROOT`, scope caps, and which sources are reachable. You need these in every later phase.
 
