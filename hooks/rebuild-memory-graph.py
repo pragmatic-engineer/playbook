@@ -95,7 +95,10 @@ def parse_frontmatter(content):
             current_key = top.group(1)
             val = top.group(2).strip()
             if val:
-                result[current_key] = val
+                if val.startswith('[') and val.endswith(']'):
+                    result[current_key] = parse_inline_list(val)
+                else:
+                    result[current_key] = val
                 current_key = None
         # A block-list item under a dict sub-key, e.g. "relates_to:" followed
         # by more deeply indented "- item" lines, belongs to that sub-key.

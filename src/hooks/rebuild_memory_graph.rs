@@ -63,15 +63,48 @@ fn memory_dir() -> PathBuf {
 
 // --- Frontmatter parsing (hand-rolled YAML subset, no yaml crate) ---------
 
-/// A single top-level frontmatter value: a bare scalar, a block list, or a
-/// dict of sub-keys (each of which is itself a scalar or a list). Mirrors
-/// the three shapes `hooks/rebuild-memory-graph.py:parse_frontmatter` can
-/// produce for a python dict value.
+/// A single top-level frontmatter value: a bare scalar, a block or inline
+/// list, or a dict of sub-keys (each of which is itself a scalar or a
+/// list). Mirrors the three shapes `hooks/rebuild-memory-graph.py:
+/// parse_frontmatter` can produce for a python dict value.
+#[derive(Debug, Clone)]
+enum TopValue {
+    Scalar(String),
+    List(Vec<String>),
+    Dict(HashMap<String, SubValue>),
+}
+
+/// All top-level frontmatter values, keyed by name. Kept in one map, rather
+/// than one map per shape, so a later top-level redeclaration of a key
+/// evicts whatever shape the earlier declaration held, regardless of shape:
+/// python's `parse_frontmatter` keeps a single `result` dict and gets this
+/// for free, since a later `result[current_key] = ...` simply overwrites.
 #[derive(Debug, Default, Clone)]
 struct Frontmatter {
-    scalars: HashMap<String, String>,
-    lists: HashMap<String, Vec<String>>,
-    dicts: HashMap<String, HashMap<String, SubValue>>,
+    values: HashMap<String, TopValue>,
+}
+
+impl Frontmatter {
+    fn scalar(&self, key: &str) -> Option<&String> {
+        match self.values.get(key) {
+            Some(TopValue::Scalar(s)) => Some(s),
+            _ => None,
+        }
+    }
+
+    fn list(&self, key: &str) -> Option<&Vec<String>> {
+        match self.values.get(key) {
+            Some(TopValue::List(l)) => Some(l),
+            _ => None,
+        }
+    }
+
+    fn dict(&self, key: &str) -> Option<&HashMap<String, SubValue>> {
+        match self.values.get(key) {
+            Some(TopValue::Dict(d)) => Some(d),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -126,7 +159,9 @@ impl ParserState {
     /// Finalize whatever is buffered for `current_key`. A key that was
     /// opened but never accumulated a list or dict value (kind stayed
     /// `None`) is silently dropped, matching python: `flush()` only writes
-    /// to `result` in the list/dict branches.
+    /// to `result` in the list/dict branches. The insert below evicts
+    /// whatever value (of any shape) an earlier declaration of the same key
+    /// left behind, matching python's single-dict overwrite semantics.
     fn flush(&mut self) {
         let Some(key) = self.current_key.take() else {
             return;
@@ -135,13 +170,13 @@ impl ParserState {
         match self.current_kind {
             Kind::List => {
                 self.result
-                    .lists
-                    .insert(key, std::mem::take(&mut self.buf_list));
+                    .values
+                    .insert(key, TopValue::List(std::mem::take(&mut self.buf_list)));
             }
             Kind::Dict => {
                 self.result
-                    .dicts
-                    .insert(key, std::mem::take(&mut self.buf_dict));
+                    .values
+                    .insert(key, TopValue::Dict(std::mem::take(&mut self.buf_dict)));
             }
             Kind::None => {}
         }
@@ -158,6 +193,7 @@ fn parse_frontmatter(content: &str) -> Frontmatter {
     let Some(fm) = extract_frontmatter_block(content) else {
         return state.result;
     };
+    let fm = normalize_line_endings(&fm);
 
     for line in fm.split('\n') {
         if let Some((key, rest)) = match_top_level(line) {
@@ -165,10 +201,12 @@ fn parse_frontmatter(content: &str) -> Frontmatter {
             state.current_key = Some(key.to_string());
             let val = rest.trim();
             if !val.is_empty() {
-                state
-                    .result
-                    .scalars
-                    .insert(key.to_string(), val.to_string());
+                let value = if val.starts_with('[') && val.ends_with(']') {
+                    TopValue::List(parse_inline_list(val))
+                } else {
+                    TopValue::Scalar(val.to_string())
+                };
+                state.result.values.insert(key.to_string(), value);
                 state.current_key = None;
             }
         } else if state.current_key.is_some() && state.pending_key.is_some() && is_block_item(line)
@@ -226,6 +264,20 @@ fn extract_frontmatter_block(content: &str) -> Option<String> {
         fm_lines.push(line);
     }
     None
+}
+
+/// Normalize `\r\n` and a lone `\r` to `\n` before the frontmatter body is
+/// split into lines, so a stray carriage return cannot corrupt a scalar
+/// value. Mirrors python's `str.splitlines()`, which treats a bare `\r` as
+/// a line break, closely enough for this parser: the handful of exotic
+/// Unicode line separators `splitlines()` also recognizes (`\v`, `\f`,
+/// `\x1c`-`\x1e`, `\x85`, `U+2028`, `U+2029`) are not chased here, since
+/// carriage-return coverage is the only gap that shows up in real fact
+/// files. Applied only to the already-extracted frontmatter body, not to
+/// the raw file content, so a whole-file-CRLF fact still fails to match the
+/// opening delimiter the same way in both implementations.
+fn normalize_line_endings(fm: &str) -> String {
+    fm.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn is_delimiter_line(line: &str) -> bool {
@@ -427,12 +479,11 @@ fn rebuild() {
             .to_string();
 
         let node_type = fm
-            .scalars
-            .get("type")
+            .scalar("type")
             .cloned()
             .unwrap_or_else(|| "reference".to_string());
-        let name = fm.scalars.get("name").cloned().unwrap_or(default_name);
-        let description = fm.scalars.get("description").cloned().unwrap_or_default();
+        let name = fm.scalar("name").cloned().unwrap_or(default_name);
+        let description = fm.scalar("description").cloned().unwrap_or_default();
 
         nodes.push(Node {
             id: nid.clone(),
@@ -444,7 +495,7 @@ fn rebuild() {
             project: proj.clone(),
         });
 
-        if let Some(links) = fm.dicts.get("links") {
+        if let Some(links) = fm.dict("links") {
             for (relation, target) in links {
                 let targets = match target {
                     SubValue::List(items) => items.clone(),
@@ -462,7 +513,7 @@ fn rebuild() {
             }
         }
 
-        if let Some(anchors) = fm.lists.get("anchors") {
+        if let Some(anchors) = fm.list("anchors") {
             for anchor in anchors {
                 let cid = match &proj {
                     Some(p) => format!("code:{p}/{anchor}"),

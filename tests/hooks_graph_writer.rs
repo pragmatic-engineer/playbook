@@ -339,6 +339,99 @@ fn anchors_produce_code_nodes_and_anchors_edges() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// Shape (2) inline variant, WU-5 item 1: a top-level inline flow sequence
+/// (`anchors: [a, b]`) must produce code nodes and `anchors` edges exactly
+/// like the block-style form above. Before the fix, the top-level branch of
+/// the frontmatter parser stored the raw bracketed string instead of
+/// routing it through the inline-list parser: python then iterated that
+/// string one character at a time (junk nodes), and Rust looked the value
+/// up in its list map, found nothing, and silently emitted no anchors.
+#[test]
+fn inline_top_level_anchors_produce_code_nodes_and_anchors_edges() {
+    // Arrange
+    let home = scratch_home("anchors-inline-list");
+    write_fact(
+        &home,
+        "inline-anchor-fact.md",
+        "---\nname: inline-anchor-fact\ntype: reference\nanchors: [src/index.ts, src/other.ts]\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "inline-anchor-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert_eq!(edges(&graph).len(), 2);
+    assert!(nodes(&graph)
+        .iter()
+        .any(|n| n["id"] == "code:src/index.ts" && n["type"] == "code"));
+    assert!(nodes(&graph)
+        .iter()
+        .any(|n| n["id"] == "code:src/other.ts" && n["type"] == "code"));
+    assert!(has_edge(
+        &graph,
+        "global/inline-anchor-fact",
+        "code:src/index.ts",
+        "anchors"
+    ));
+    assert!(has_edge(
+        &graph,
+        "global/inline-anchor-fact",
+        "code:src/other.ts",
+        "anchors"
+    ));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// WU-5 item 1, the property that was silently broken: an inline-style
+/// top-level `anchors:` fact and a block-style top-level `anchors:` fact
+/// naming the same paths must produce the identical set of code nodes and
+/// `anchors` edges, differing only in which fact each edge originates from.
+#[test]
+fn inline_and_block_style_anchors_produce_the_same_code_nodes_and_edges() {
+    // Arrange
+    let home = scratch_home("anchors-inline-vs-block");
+    write_fact(
+        &home,
+        "inline-style-fact.md",
+        "---\nname: inline-style-fact\ntype: reference\nanchors: [src/shared.ts, src/other.ts]\n---\n\nBody text.\n",
+    );
+    write_fact(
+        &home,
+        "block-style-fact.md",
+        "---\nname: block-style-fact\ntype: reference\nanchors:\n  - src/shared.ts\n  - src/other.ts\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "inline-style-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    // Both facts anchor the same two paths, so the code nodes are shared
+    // (deduplicated by id) and each fact contributes one anchors edge per
+    // path: four edges total, but only two code nodes.
+    assert_eq!(edges(&graph).len(), 4);
+    for path in ["src/shared.ts", "src/other.ts"] {
+        let cid = format!("code:{path}");
+        assert_eq!(
+            nodes(&graph).iter().filter(|n| n["id"] == cid).count(),
+            1,
+            "code node for {path} should be deduplicated across both facts"
+        );
+        assert!(
+            has_edge(&graph, "global/inline-style-fact", &cid, "anchors"),
+            "inline-style fact should anchor {path}"
+        );
+        assert!(
+            has_edge(&graph, "global/block-style-fact", &cid, "anchors"),
+            "block-style fact should anchor {path}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// Shape (5): a dangling target is surfaced as an edge, not dropped.
 /// hooks/rebuild-memory-graph.test.sh scenario 8.
 #[test]
@@ -705,6 +798,64 @@ fn supersedes_chain_two_links_long_resolves_both_hops() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// WU-5 item 2: a later top-level redeclaration of a key evicts whatever
+/// shape (scalar, list, or dict) the earlier declaration held. Here
+/// `links.relates_to: a` builds a dict, then the plain scalar `links:
+/// not-a-dict` redeclares the same top-level key and must fully replace it,
+/// so no edges come from the evicted dict.
+#[test]
+fn later_top_level_key_redeclaration_evicts_the_earlier_shape() {
+    // Arrange
+    let home = scratch_home("duplicate-key-shape-change");
+    write_fact(
+        &home,
+        "duplicate-key-fact.md",
+        "---\nname: duplicate-key-fact\ntype: reference\nlinks:\n  relates_to: a\nlinks: not-a-dict\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "duplicate-key-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert_eq!(
+        edges(&graph).len(),
+        0,
+        "the later scalar links: redeclaration should evict the earlier dict, leaving zero edges"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// WU-5 item 3: a bare `\r` (not part of a `\r\n` pair) inside a
+/// frontmatter scalar value must not corrupt it. The parser treats the bare
+/// `\r` as a line break, matching python's `str.splitlines()`, so the
+/// description ends at the `\r` and the trailing text after it is silently
+/// ignored, exactly as python's frontmatter parser already does.
+#[test]
+fn bare_carriage_return_does_not_corrupt_a_scalar_value() {
+    // Arrange
+    let home = scratch_home("bare-cr-mid-frontmatter");
+    write_fact(
+        &home,
+        "cr-fact.md",
+        "---\nname: cr-fact\ntype: reference\ndescription: before\rafter\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "cr-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    let node = nodes(&graph)
+        .iter()
+        .find(|n| n["id"] == "global/cr-fact")
+        .expect("node should exist");
+    assert_eq!(node["description"], "before");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// Done-when: the graph write is atomic, so a write that cannot complete
 /// (stood in for a crash mid-write by making the memory dir read-only right
 /// before the rebuild, so the temp file this hook writes before any rename
@@ -768,7 +919,11 @@ fn permission_checks_are_enforced(dir: &Path) -> bool {
 // --- Cross-implementation check --------------------------------------------
 
 /// Populate an identical fixture memory tree, covering all six mandatory
-/// frontmatter shapes plus project scoping, under `home`.
+/// frontmatter shapes plus project scoping, under `home`. Also covers the
+/// three WU-5 regressions: an inline top-level `anchors:` naming the same
+/// paths as the existing block-style `anchor-fact.md` (item 1), a duplicate
+/// top-level key that changes shape (item 2), and a bare `\r` embedded
+/// mid-frontmatter (item 3).
 fn populate_fixture_tree(home: &Path) {
     write_fact(
         home,
@@ -814,6 +969,21 @@ fn populate_fixture_tree(home: &Path) {
         home,
         "no-frontmatter.md",
         "Just a note with no frontmatter at all.\n",
+    );
+    write_fact(
+        home,
+        "inline-anchor-fact.md",
+        "---\nname: inline-anchor-fact\ntype: reference\nanchors: [src/index.ts, src/other.ts]\n---\n\nBody text.\n",
+    );
+    write_fact(
+        home,
+        "duplicate-key-fact.md",
+        "---\nname: duplicate-key-fact\ntype: reference\nlinks:\n  relates_to: a\nlinks: not-a-dict\n---\n\nBody text.\n",
+    );
+    write_fact(
+        home,
+        "cr-fact.md",
+        "---\nname: cr-fact\ntype: reference\ndescription: before\rafter\n---\n\nBody text.\n",
     );
 }
 

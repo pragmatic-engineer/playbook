@@ -426,6 +426,79 @@ check_true '.nodes | any(.id=="code:acme/widget/src/combo.ts" and .type=="code" 
 check_true '.edges | any(.from=="acme/widget/combo-fact" and .to=="code:acme/widget/src/combo.ts" and .relation=="anchors")' "$g" "anchors regression pin: anchors edge unaffected"
 check_true '.edges | any(.from=="acme/widget/combo-fact" and .to=="acme/widget/combo-target" and .relation=="relates_to")' "$g" "anchors regression pin: link edge still resolves"
 
+# --- 17: inline top-level anchors [a, b] produce code nodes and anchors edges ---
+new_store
+write_fact "inline-anchor-fact.md" <<'EOF'
+---
+name: inline-anchor-fact
+type: reference
+anchors: [src/index.ts, src/other.ts]
+---
+
+Body text.
+EOF
+run_hook_for "inline-anchor-fact.md"
+g="$(GRAPH)"
+check "2" "$(jq '.edges|length' "$g")" "inline top-level anchors: edge count"
+check_true '.nodes | any(.id=="code:src/index.ts" and .type=="code")' "$g" "inline top-level anchors: code node for src/index.ts"
+check_true '.nodes | any(.id=="code:src/other.ts" and .type=="code")' "$g" "inline top-level anchors: code node for src/other.ts"
+check_true '.edges | any(.from=="global/inline-anchor-fact" and .to=="code:src/index.ts" and .relation=="anchors")' "$g" "inline top-level anchors: edge to src/index.ts"
+check_true '.edges | any(.from=="global/inline-anchor-fact" and .to=="code:src/other.ts" and .relation=="anchors")' "$g" "inline top-level anchors: edge to src/other.ts"
+
+# --- 18: inline-style and block-style anchors naming the same paths produce the same code nodes/edges ---
+new_store
+write_fact "inline-style-fact.md" <<'EOF'
+---
+name: inline-style-fact
+type: reference
+anchors: [src/shared.ts, src/other.ts]
+---
+
+Body text.
+EOF
+write_fact "block-style-fact.md" <<'EOF'
+---
+name: block-style-fact
+type: reference
+anchors:
+  - src/shared.ts
+  - src/other.ts
+---
+
+Body text.
+EOF
+run_hook_for "inline-style-fact.md"
+g="$(GRAPH)"
+check "4" "$(jq '.edges|length' "$g")" "inline vs block anchors: edge count"
+check "1" "$(jq '[.nodes[] | select(.id=="code:src/shared.ts")] | length' "$g")" "inline vs block anchors: shared.ts code node deduplicated"
+check "1" "$(jq '[.nodes[] | select(.id=="code:src/other.ts")] | length' "$g")" "inline vs block anchors: other.ts code node deduplicated"
+check_true '.edges | any(.from=="global/inline-style-fact" and .to=="code:src/shared.ts" and .relation=="anchors")' "$g" "inline vs block anchors: inline fact anchors shared.ts"
+check_true '.edges | any(.from=="global/block-style-fact" and .to=="code:src/shared.ts" and .relation=="anchors")' "$g" "inline vs block anchors: block fact anchors shared.ts"
+
+# --- 19: a later top-level key redeclaration evicts the earlier shape ---
+new_store
+write_fact "duplicate-key-fact.md" <<'EOF'
+---
+name: duplicate-key-fact
+type: reference
+links:
+  relates_to: a
+links: not-a-dict
+---
+
+Body text.
+EOF
+run_hook_for "duplicate-key-fact.md"
+g="$(GRAPH)"
+check "0" "$(jq '.edges|length' "$g")" "duplicate top-level key: later scalar evicts earlier dict, zero edges"
+
+# --- 20: a bare CR mid-frontmatter does not corrupt a scalar value ---
+new_store
+printf -- '---\nname: cr-fact\ntype: reference\ndescription: before\rafter\n---\n\nBody text.\n' | write_fact "cr-fact.md"
+run_hook_for "cr-fact.md"
+g="$(GRAPH)"
+check "before" "$(jq -r '.nodes[] | select(.id=="global/cr-fact") | .description' "$g")" "bare CR: scalar not corrupted"
+
 TOTAL=$((PASS + FAIL))
 echo ""
 echo "${PASS}/${TOTAL} scenarios passed"
