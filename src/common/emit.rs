@@ -260,17 +260,106 @@ mod tests {
         assert_eq!(got, expected);
     }
 
+    /// Re-invoke this test binary as a child process to run `emit_probe`
+    /// below with `EMIT_PROBE` naming one emitter, so that emitter's own
+    /// real stdout can be captured the same way `shell_stdout`/`python_stdout`
+    /// above capture a subprocess's output. This process's own stdout is
+    /// shared with every other test thread, so it cannot be read directly;
+    /// a fresh child process is the only way to observe just one call's
+    /// output.
+    fn capture_emitter_stdout(probe: &str) -> String {
+        let exe = std::env::current_exe().expect("test binary path should be available");
+        let output = Command::new(exe)
+            .arg("common::emit::tests::emit_probe")
+            .args(["--exact", "--nocapture"])
+            .env("EMIT_PROBE", probe)
+            .output()
+            .expect("re-invoking the test binary should succeed");
+        assert!(output.status.success(), "emit_probe child process failed");
+        let stdout = String::from_utf8(output.stdout).expect("probe stdout should be valid UTF-8");
+        stdout
+            .lines()
+            .find(|line| line.starts_with('{'))
+            .unwrap_or_else(|| panic!("no JSON line in probe output for {probe}: {stdout}"))
+            .to_string()
+    }
+
+    /// Prints exactly one emitter's real stdout when `EMIT_PROBE` names it.
+    /// A no-op otherwise, so this still runs harmlessly as part of the
+    /// normal suite; only `capture_emitter_stdout` above invokes it with
+    /// the env var set.
+    #[test]
+    fn emit_probe() {
+        match std::env::var("EMIT_PROBE").as_deref() {
+            Ok("pre_context") => emit_pre_context("PreToolUse", "hello"),
+            Ok("pre_deny") => emit_pre_deny("not allowed"),
+            Ok("prompt_context") => emit_prompt_context("context text"),
+            Ok("system_message") => emit_system_message("system msg"),
+            Ok("block") => emit_block("reason text"),
+            _ => {}
+        }
+    }
+
     #[test]
     fn public_emitters_print_the_same_json_as_the_struct_builders() {
-        // Arrange, Act: exercise every public emit_* once so the printed
-        // form is compiled and linked, guarding against the private
-        // json_of()-based tests above drifting from what emit_* prints.
-        // Assert: none of these panic, which is the whole contract for a
-        // stdout side-effecting function.
-        emit_pre_context("PreToolUse", "hello");
-        emit_pre_deny("not allowed");
-        emit_prompt_context("context text");
-        emit_system_message("system msg");
-        emit_block("reason text");
+        // Arrange: the exact JSON each emit_* call's own struct implies,
+        // paired with the probe name that makes emit_probe call it for
+        // real.
+        let cases: [(&str, String); 5] = [
+            (
+                "pre_context",
+                json_of(&AdditionalContextOutput {
+                    hook_specific_output: AdditionalContextInner {
+                        hook_event_name: "PreToolUse",
+                        additional_context: "hello",
+                    },
+                }),
+            ),
+            (
+                "pre_deny",
+                json_of(&PreDenyOutput {
+                    hook_specific_output: PreDenyInner {
+                        hook_event_name: "PreToolUse",
+                        permission_decision: "deny",
+                        permission_decision_reason: "not allowed",
+                    },
+                }),
+            ),
+            (
+                "prompt_context",
+                json_of(&AdditionalContextOutput {
+                    hook_specific_output: AdditionalContextInner {
+                        hook_event_name: "UserPromptSubmit",
+                        additional_context: "context text",
+                    },
+                }),
+            ),
+            (
+                "system_message",
+                json_of(&SystemMessageOutput {
+                    system_message: "system msg",
+                }),
+            ),
+            (
+                "block",
+                json_of(&BlockOutput {
+                    decision: "block",
+                    reason: "reason text",
+                }),
+            ),
+        ];
+
+        // Act, Assert: each emitter's real, captured stdout must equal the
+        // JSON its own struct builder produces. A mutation that printed a
+        // different shape, dropped a field, or wrote to stderr instead of
+        // stdout now fails here instead of only being checked for "does
+        // not panic".
+        for (probe, expected) in cases {
+            assert_eq!(
+                capture_emitter_stdout(probe),
+                expected,
+                "{probe} emitter's real stdout should match its struct builder's JSON"
+            );
+        }
     }
 }

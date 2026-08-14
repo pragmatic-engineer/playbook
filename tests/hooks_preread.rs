@@ -332,6 +332,43 @@ mod preread_edit_check {
             "a later valid record should still nudge despite an earlier malformed ts, got: {out}"
         );
     }
+
+    /// hooks/preread-edit-check.py:60-66 renders the age as seconds below
+    /// 60, minutes below 3600, hours otherwise. Confirmed against the
+    /// python original's own formula for these values rather than assumed
+    /// from the Rust formula alone: `python3 -c "for d in (59,60): print('%ds
+    /// ago' % d if d < 60 else '%dm ago' % (d // 60))"` prints `59s ago`,
+    /// `1m ago`.
+    ///
+    /// Only the seconds-to-minutes transition (59/60) is reachable here: the
+    /// nudge only fires for a match inside `WINDOW` (1800s, 30 minutes,
+    /// hooks/preread-edit-check.py:18), so `format_ago`'s minutes-to-hours
+    /// transition at 3600s can never actually be hit by this hook in either
+    /// language and cannot be pinned through its black-box behaviour.
+    #[test]
+    fn format_ago_scale_transitions_match_the_python_original() {
+        let cases: [(i64, &str); 2] = [(59, "59s ago"), (60, "1m ago")];
+
+        for (delta, expected) in cases {
+            // Arrange
+            let home = scratch_dir(&format!("edit-format-ago-{delta}"));
+            seed_edits(&home, "pec", "/tmp/x/file.py", now() - delta);
+
+            // Act
+            let output = run_hook(
+                "preread-edit-check",
+                &home,
+                &payload("pec", "/tmp/x/file.py"),
+            );
+
+            // Assert
+            let out = stdout_string(&output);
+            assert!(
+                out.contains(expected),
+                "delta {delta}s should render as '{expected}', got: {out}"
+            );
+        }
+    }
 }
 
 mod preread_size_check {

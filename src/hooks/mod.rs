@@ -63,13 +63,14 @@ mod tests {
     #[test]
     fn every_hook_survives_malformed_stdin() {
         // Arrange
-        let raw_inputs: [(&str, &str); 3] = [
+        let raw_inputs: [(&str, &str); 4] = [
             ("truncated JSON", r#"{"session_id":"abc","tool_input":{"#),
             ("empty input", ""),
             (
                 "valid JSON missing expected field",
                 r#"{"unexpected":"value"}"#,
             ),
+            ("valid JSON that is not an object", "[1,2,3]"),
         ];
         let mut failures = Vec::new();
 

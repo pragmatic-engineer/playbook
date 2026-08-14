@@ -94,6 +94,7 @@ fn split_dir_base(p: &str) -> (&str, &str) {
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn session_id_extracts_value() {
@@ -145,6 +146,11 @@ mod tests {
         let expected = root.join("testsid");
         assert_eq!(got, expected.to_string_lossy());
         assert!(expected.is_dir());
+        let mode = fs::metadata(&expected).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o700,
+            "session dir should be created with mode 0700, got {mode:o}"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -216,5 +222,44 @@ mod tests {
         assert_eq!(got, format!("{}/leaf.txt", expected_dir.to_string_lossy()));
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn abspath_leaf_symlink_stays_unresolved() {
+        // Arrange: a symlink whose target is a real file in the same
+        // directory. The doc comment on `abspath` claims a leaf symlink is
+        // returned as itself, not resolved to what it points at.
+        let root = scratch_dir("abspath-symlink");
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("target.txt");
+        fs::write(&target, "hello").unwrap();
+        let link = root.join("link.txt");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let expected_dir = fs::canonicalize(&root).unwrap();
+
+        // Act
+        let got = abspath(link.to_str().unwrap());
+
+        // Assert: the symlink's own basename survives, "target.txt" does not
+        // appear anywhere in the result.
+        assert_eq!(got, format!("{}/link.txt", expected_dir.to_string_lossy()));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn abspath_missing_parent_falls_back_to_input_unchanged() {
+        // Arrange: neither `p` nor its parent directory exists, so both the
+        // `Path::new(p).is_dir()` and `Path::new(dir).is_dir()` checks fail
+        // and the function must fall through to the final `p.to_string()`
+        // arm.
+        let root = scratch_dir("abspath-missing-parent");
+        let missing = root.join("does-not-exist").join("leaf.txt");
+
+        // Act
+        let got = abspath(missing.to_str().unwrap());
+
+        // Assert
+        assert_eq!(got, missing.to_string_lossy());
     }
 }

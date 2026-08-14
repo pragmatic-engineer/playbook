@@ -338,7 +338,11 @@ mod precompact_warn {
 
     #[test]
     fn log_is_capped_at_500_lines() {
-        // Arrange
+        // Arrange: 600 distinguishable, numbered lines, so the surviving
+        // window can be checked for content, not just count. A mutation
+        // that kept the oldest 500 lines instead of the newest 500 would
+        // still pass a bare `line_count <= 500` check, so this also pins
+        // which lines survive and in what order.
         let home = scratch_home("pcw-cap");
         let log = compactions_log(&home);
         fs::create_dir_all(log.parent().expect("log path should have a parent")).unwrap();
@@ -354,10 +358,25 @@ mod precompact_warn {
         // Assert
         assert_eq!(code, 0);
         let contents = fs::read_to_string(&log).unwrap();
-        let line_count = contents.lines().count();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(
+            lines.len(),
+            500,
+            "expected exactly 500 lines after capping, got {}",
+            lines.len()
+        );
+        assert_eq!(
+            lines[0], "old line 102",
+            "the oldest surviving line should be the start of the newest window, not line 1"
+        );
+        assert_eq!(
+            lines[498], "old line 600",
+            "the newest seeded line should be the second to last, right before the freshly appended entry"
+        );
         assert!(
-            line_count <= 500,
-            "expected at most 500 lines, got {line_count}"
+            lines[499].contains("trigger=manual"),
+            "the last line should be the entry this run just appended, got: {}",
+            lines[499]
         );
     }
 }
@@ -447,12 +466,87 @@ mod memory_capture {
         // Act
         let (stdout, _code) = run_hook("memory-capture", &home, &payload());
 
-        // Assert
+        // Assert: both paths are present, and the more recently edited
+        // path (two.sh, ts=2) is listed before the earlier one (one.sh,
+        // ts=1), pinning the documented "most recent first" order rather
+        // than plain append order.
         let value: serde_json::Value =
             serde_json::from_str(&stdout).expect("output should be valid JSON");
         let reason = value["reason"].as_str().unwrap_or_default();
         assert!(reason.contains("/repo/src/one.sh"), "reason: {reason}");
         assert!(reason.contains("/repo/src/two.sh"), "reason: {reason}");
+        let two_pos = reason
+            .find("/repo/src/two.sh")
+            .expect("two.sh should be listed");
+        let one_pos = reason
+            .find("/repo/src/one.sh")
+            .expect("one.sh should be listed");
+        assert!(
+            two_pos < one_pos,
+            "the more recently edited path should be listed first, got: {reason}"
+        );
+    }
+
+    #[test]
+    fn path_list_with_exactly_five_paths_has_no_more_note() {
+        // Arrange: exactly at the five-path cap, so no "more" note should
+        // appear.
+        let home = scratch_home("mc-cap-five");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        let mut edits = String::new();
+        for i in 1..=5 {
+            edits.push_str(&format!(
+                "{{\"path\":\"/repo/src/file{i}.sh\",\"ts\":{i}}}\n"
+            ));
+        }
+        fs::write(dir.join("edits.jsonl"), edits).unwrap();
+
+        // Act
+        let (stdout, _code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        let listed = reason.lines().filter(|line| line.starts_with("- ")).count();
+        assert_eq!(listed, 5, "expected exactly 5 listed paths, got {listed}");
+        assert!(
+            !reason.contains("more"),
+            "expected no 'more' note at exactly 5 paths, got: {reason}"
+        );
+    }
+
+    #[test]
+    fn path_list_with_exactly_six_paths_notes_one_more() {
+        // Arrange: one path past the cap, so the note should read exactly
+        // "1 more", not a generic plural.
+        let home = scratch_home("mc-cap-six");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        let mut edits = String::new();
+        for i in 1..=6 {
+            edits.push_str(&format!(
+                "{{\"path\":\"/repo/src/file{i}.sh\",\"ts\":{i}}}\n"
+            ));
+        }
+        fs::write(dir.join("edits.jsonl"), edits).unwrap();
+
+        // Act
+        let (stdout, _code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        let listed = reason.lines().filter(|line| line.starts_with("- ")).count();
+        assert_eq!(listed, 5, "expected at most 5 listed paths, got {listed}");
+        assert!(
+            reason.contains("1 more"),
+            "expected a note about exactly 1 more path, got: {reason}"
+        );
     }
 
     #[test]
