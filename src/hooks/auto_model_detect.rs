@@ -1,10 +1,163 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Stub for the `auto-model-detect` hook (ports hooks/auto-model-detect.py).
-//! Real behaviour lands in a later Work Unit; only this file's body changes
-//! when it does.
+//! Ports hooks/auto-model-detect.py: a UserPromptSubmit hook that nudges the
+//! main session toward delegating design/architecture-shaped prompts to an
+//! Opus subagent, rather than reasoning inline on the default model.
+//!
+//! The python hook matches the prompt against one large case-insensitive,
+//! word-boundary regex. SEGMENT-B-RULES.md forbids adding a `regex`
+//! dependency for this port, so the alternation is expanded by hand into a
+//! list of literal phrases plus one wildcard phrase, matched with an
+//! explicit ASCII word-boundary scan that mirrors `\bphrase\b` semantics.
+//!
+//! One python oddity worth flagging: in the source regex, the `decompos`
+//! alternative sits inside `\b(...|decompos|...)\b`, so the trailing `\b`
+//! applies to it too. That means `decompos` never actually matches
+//! "decompose" or "decomposition" (there is no word boundary between the
+//! "s" and the following "e"/"i"); it only matches the literal standalone
+//! token "decompos". That quirk is preserved here rather than fixed.
 
+use crate::common::emit_prompt_context;
 use crate::common::payload::Payload;
 
-pub fn run(_payload: &Payload) {}
+const MSG: &str = r#"This prompt looks like design / architecture work. Your main session runs on the default model. Before reasoning inline, consider delegating to an Opus subagent, its full deliberation stays in the subagent's context, only the conclusion returns to yours.
+
+Recommended for design-heavy prompts:
+  - Plan (Agent tool, `model: "opus"`), implementation planning and architecture with codebase grounding
+  - superpowers:brainstorming (Skill tool), ideation / requirements before any code
+
+If the prompt is actually small-scope (e.g. quick choice between two named options), staying on Sonnet inline is fine. Use judgment.
+
+Routing policy: Opus only when Sonnet wasn't enough, keep Opus under 20% of total usage. Routine/mechanical/formatting/search subagents default to Haiku (3x cheaper); escalate to Sonnet for real coding."#;
+
+/// Literal phrases the python regex's alternation expands to, once every
+/// `?` optional group and `(a|b|c)` nested alternation is enumerated. Every
+/// entry here is matched with a word boundary at its start and end, never
+/// as a bare substring. Lowercase, since matching is case-insensitive.
+const PHRASES: &[&str] = &[
+    // Design/architecture nouns.
+    "design",
+    "architect",
+    "architecture",
+    "adr",
+    "tradeoff",
+    "tradeoffs",
+    "alternative",
+    "alternatives",
+    "approach",
+    "strategy",
+    "paradigm",
+    "pattern",
+    "abstraction",
+    "refactor plan",
+    "migration",
+    "decompos",
+    "schema",
+    "modeling",
+    "data model",
+    "contract",
+    "interface design",
+    // Decision verbs.
+    "evaluate",
+    "compare",
+    "brainstorm",
+    "propose",
+    "recommend",
+    "critique",
+    "review the approach",
+    "review the design",
+    // Design-shaped questions, excluding "what.?s the best" which needs a
+    // wildcard character and is handled by `matches_whats_the_best`.
+    "should we",
+    "how would we",
+    "how would you",
+    "how would i",
+    "how should we",
+    "how should you",
+    "how should i",
+    "which approach",
+    "which design",
+    "which pattern",
+    "trade off",
+    "pros and cons",
+];
+
+/// UserPromptSubmit entry point. Never panics: a missing prompt, a slash
+/// command, a short prompt, or plain prose all fall through silently.
+pub fn run(payload: &Payload) {
+    let prompt = payload.field(".prompt");
+    if prompt.is_empty() || prompt.starts_with('/') || prompt.chars().count() < 20 {
+        return;
+    }
+    if !has_design_intent(&prompt) {
+        return;
+    }
+    emit_prompt_context(MSG);
+}
+
+fn has_design_intent(prompt: &str) -> bool {
+    let lower: Vec<char> = prompt.to_lowercase().chars().collect();
+    let phrase_hit = PHRASES.iter().any(|phrase| {
+        let needle: Vec<char> = phrase.chars().collect();
+        word_boundary_contains(&lower, &needle)
+    });
+    phrase_hit || matches_whats_the_best(&lower)
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// True if `needle` occurs anywhere in `haystack` with a word boundary
+/// immediately before and immediately after the match, mirroring
+/// `\bneedle\b`. Internal characters of `needle` (including spaces for
+/// multi-word phrases) are matched literally.
+fn word_boundary_contains(haystack: &[char], needle: &[char]) -> bool {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    haystack
+        .windows(needle.len())
+        .enumerate()
+        .any(|(start, window)| {
+            if window != needle {
+                return false;
+            }
+            let before_ok = start == 0 || !is_word_char(haystack[start - 1]);
+            let end = start + needle.len();
+            let after_ok = end == haystack.len() || !is_word_char(haystack[end]);
+            before_ok && after_ok
+        })
+}
+
+/// True for a word-bounded occurrence of "what.?s the best", where `.?`
+/// means zero or one arbitrary character, mirroring the python regex's
+/// `what.?s the best`.
+fn matches_whats_the_best(haystack: &[char]) -> bool {
+    let prefix: Vec<char> = "what".chars().collect();
+    let suffix: Vec<char> = "s the best".chars().collect();
+    let n = haystack.len();
+    if n < prefix.len() {
+        return false;
+    }
+    haystack
+        .windows(prefix.len())
+        .enumerate()
+        .any(|(start, window)| {
+            if window != prefix.as_slice() {
+                return false;
+            }
+            if start != 0 && is_word_char(haystack[start - 1]) {
+                return false;
+            }
+            let after_prefix = start + prefix.len();
+            (0..=1usize).any(|wildcard_len| {
+                let suffix_start = after_prefix + wildcard_len;
+                let end = suffix_start + suffix.len();
+                end <= n
+                    && haystack[suffix_start..end] == suffix[..]
+                    && (end == n || !is_word_char(haystack[end]))
+            })
+        })
+}
