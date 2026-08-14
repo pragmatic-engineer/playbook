@@ -2,8 +2,8 @@
 description: Use for substantial, risky, or cross-cutting PRs. A swarm of specialist reviewer subagents (logic, test, security, data, types, perf, plus conditional) run in parallel, consolidated and fact-checked, then posted as a pending GitHub review. Heavier than /quick-review.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
 argument-hint: "[PR number] [--all] [--quick] [--preset <name>] [--self] [--help]"
-model: sonnet
-effort: max
+model: opus
+effort: xhigh
 ---
 
 # Deep Review: Multi-Agent PR Review

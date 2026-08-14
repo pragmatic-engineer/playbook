@@ -116,6 +116,12 @@
             "type": "command",
             "command": "~/.claude/hooks/no-dash-guard.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/precommit-check.sh",
+            "if": "Bash(git commit:*)",
+            "timeout": 10
           }
         ]
       }
