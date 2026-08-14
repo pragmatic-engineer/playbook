@@ -30,7 +30,7 @@ git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
 ALLOW_FILES=(.gitignore README.md LICENSE Brewfile Makefile install.sh uninstall.sh \
   settings.shared.json permissions.shared.json statusline.sh ruff.toml \
   CODE_OF_CONDUCT.md CONTRIBUTING.md SECURITY.md Cargo.toml Cargo.lock)
-ALLOW_DIRS=(prompts skills commands agents hooks shell docs output-styles .github .claude-plugin src)
+ALLOW_DIRS=(prompts skills commands agents hooks shell docs output-styles .github .claude-plugin src tests)
 
 in_list() {
   local needle="$1"; shift
