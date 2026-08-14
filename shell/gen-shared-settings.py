@@ -7,7 +7,9 @@
 # permissions object, forces skipAutoPermissionPrompt:false, strips any pinned
 # model (the harness or the user's own settings.json chooses it), drops the
 # owner's personal keys, and reduces .hooks to the always-on safety guards only
-# (rm-workspace-guard, bg-await-guard, no-dash-guard). The functional hooks ship
+# (rm-workspace-guard, bg-await-guard, no-dash-guard, precommit-check). Keep this
+# list in step with SAFETY_RE below: a guard missing from it is silently dropped
+# from the seed on the next regeneration. The functional hooks ship
 # with the plugin instead, so the seed wires only the guards to avoid
 # double-firing. Other product config (env, statusLine, worktree, plugins, ...)
 # passes through unchanged. Merged JSON goes to stdout.
@@ -31,7 +33,9 @@ REPO_ROOT = SCRIPT_DIR.parent
 PERSONAL_KEYS = frozenset(
     {"model", "effortLevel", "theme", "preferredNotifChannel", "prefersReducedMotion"}
 )
-SAFETY_RE = re.compile(r"(rm-workspace-guard|bg-await-guard|no-dash-guard)\.sh")
+SAFETY_RE = re.compile(
+    r"(rm-workspace-guard|bg-await-guard|no-dash-guard|precommit-check)\.sh"
+)
 
 
 def die(msg: str, code: int = 1) -> None:

@@ -82,13 +82,29 @@ Events wired in this config: `SessionStart`, `PreToolUse`, `PostToolUse`, `UserP
 The `hooks/` directory is deliberately mixed-language (ADR 0005):
 
 - **The eleven non-guard hooks are python** (`hooks/*.py`), sharing `hooks/lib/common.py`. Python is the default for any new hook: the data-shaping hooks (memory graph rebuild, anchor lookup, frontmatter parsing) were carrying jq and awk that are far clearer as stdlib python, and one language for that work is easier to maintain.
-- **The three safety guards stay bash** (`hooks/rm-workspace-guard.sh`, `hooks/no-dash-guard.sh`, `hooks/bg-await-guard.sh`), sharing `hooks/lib/common.sh`. They fire on the `Bash`/`Edit` fast path and must fail safe with the lowest possible startup cost.
+- **The three safety guards stay bash** (`hooks/rm-workspace-guard.sh`, `hooks/no-dash-guard.sh`, `hooks/bg-await-guard.sh`). They fire on the `Bash`/`Edit` fast path and must fail safe. `bg-await-guard.sh` and `no-dash-guard.sh` source `hooks/lib/common.sh`; `rm-workspace-guard.sh` deliberately does not, so a guard that blocks `rm` keeps working even if the shared library is broken or missing.
 
 Both `common.py` and `common.sh` exist on purpose and expose the same helpers (payload field extraction, session dir, atomic append, the `emit_*` JSON shapes). Edit the one your hook's language uses; keep the two in step when you change a shared behaviour.
 
-**Which language for a new hook?** Default to python on `common.py`. Choose bash on `common.sh` only for a guard that runs on every single tool call and blocks on a hot path, where the interpreter startup cost matters (see the timing note below).
+**Which language for a new hook?** Default to python on `common.py`. Choose bash only for a guard that must block on the `Bash` or `Edit` path and fail safe with the fewest dependencies. Do not choose bash for speed: see the timing note below, where a real guard measures 26 ms against python's 29 ms cold start.
 
-**Timing (measured 2026-08-11, macOS, average of 40 fires):** a python hook costs roughly 35 to 41 ms per fire versus 7 ms for the equivalent bash, almost entirely python interpreter startup. That ~30 ms is acceptable for the advisory non-guard hooks (they inject context, they do not block), and it is exactly why the guards stay bash: a guard pays that cost on the critical path of every `Bash` and `Edit`.
+**Timing (re-measured 2026-08-12, macOS arm64, average of 10 fires each).** An earlier note here claimed bash costs 7 ms against python's 35 to 41 ms. That understated bash by roughly 4x. Real per-fire cost:
+
+| | ms |
+|---|---:|
+| `bash -c true` (floor) | 10 |
+| `bg-await-guard.sh` | 26 |
+| `python3` cold start | 29 |
+| `rebuild-memory-graph.py` | 41 |
+| `post-edit-track.py` | 46 |
+| `search-counter.py` | 46 |
+| `memory-anchors.py` | 53 |
+
+A real bash guard costs 26 ms, within 3 ms of a bare python cold start, because it shells out to `jq` per field through `common.sh`. The python-versus-bash gap is 15 to 27 ms, not the ~30 ms claimed before.
+
+**Hooks for one event run in parallel**, so an event costs about as much as its slowest hook, not the sum. Measured against live transcripts: `PreToolUse:Read` has a p50 of 57 ms over 731 recorded events while each of its three python hooks measures 46 to 53 ms alone. Serial would be ~145 ms.
+
+So "choose bash for speed" is weaker than it looks. Pick bash for a guard when you want it to fail safe with the fewest moving parts, not because it is meaningfully faster.
 
 **Registering a hook in `settings.json`:**
 
