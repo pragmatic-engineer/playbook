@@ -8,7 +8,7 @@ effort: xhigh
 
 # Scope: Interactive Design Interview
 
-Interview the user relentlessly about every aspect of this plan until you reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one by one. The output is a verified, self-contained implementation plan, ready to run with `/implement` (or the `superpowers:executing-plans` skill while it's in use).
+Interview the user relentlessly about every aspect of this plan until you reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one by one. The output is a verified, self-contained implementation plan, ready to run with `/playbook:implement`.
 
 Invoked as `/scope`. The remaining arguments are an optional topic seed or file path.
 
@@ -41,8 +41,7 @@ and the memory store (`~/.claude/memory/` for global facts, `~/.claude/memory/<o
 questions itself before asking you. Memory is optional: when neither store is present, it relies on the codebase alone. Walks decision trees, runs a 3-phase
 quality gate, and produces a verified, self-contained plan broken into small
 Work Units (some flagged parallel-safe), grouped into ordered PR-sized Segments
-(one concern each, one PR each) that you can run with /implement (or the
-superpowers:executing-plans skill).
+(one concern each, one PR each) that you can run with /playbook:implement.
 ```
 
 ## Core Rules (MUST)
@@ -165,7 +164,7 @@ Ask: **"Does this capture everything? Anything to change?"** Do NOT proceed unti
 
 ### Step 4: Generate Implementation Plan
 
-Produce a self-contained plan that `/implement` (or the `superpowers:executing-plans` skill) can consume directly:
+Produce a self-contained plan that `/playbook:implement` can consume directly:
 
 ```
 ## Implementation Plan
@@ -337,7 +336,7 @@ Then:
 2. If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the plan's accepted key decisions as project memory facts (`type: project`, `anchors:` to the files they touch), and update `~/.claude/memory/<owner>/<repo>/MEMORY.md`. The graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip.
 3. Tell the user:
    - "Saved to `.claude/plans/<topic-slug>.md`"
-   - "Implement it when ready: `/implement .claude/plans/<topic-slug>.md` (or the `superpowers:executing-plans` skill)."
+   - "Implement it when ready: `/playbook:implement .claude/plans/<topic-slug>.md`."
    - "Want to capture the key decisions in an ADR (`/adr`)?" (if architectural)
    - **In `--auto`:** also list the **Assumptions** made (especially any `OPEN` ones) so the user can audit the autonomous choices before running `/implement`.
 

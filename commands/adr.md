@@ -256,7 +256,7 @@ Lowercase all words, replace spaces and special characters with hyphens, collaps
 
 ## Implementing the Blueprint
 
-The blueprint is a self-contained implementation plan. Implement it with `/implement {DIR}/{base}-blueprint.md` (or the `superpowers:executing-plans` skill while it's in use).
+The blueprint is a self-contained implementation plan. Implement it with `/playbook:implement {DIR}/{base}-blueprint.md`.
 
 ## Teardown (MUST run, even on failure or abort)
 

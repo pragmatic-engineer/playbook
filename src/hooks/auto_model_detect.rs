@@ -25,7 +25,7 @@ const MSG: &str = r#"This prompt looks like design / architecture work. Your mai
 
 Recommended for design-heavy prompts:
   - Plan (Agent tool, `model: "opus"`), implementation planning and architecture with codebase grounding
-  - superpowers:brainstorming (Skill tool), ideation / requirements before any code
+  - /playbook:brainstorm, ideation / requirements before any code
 
 If the prompt is actually small-scope (e.g. quick choice between two named options), staying on Sonnet inline is fine. Use judgment.
 

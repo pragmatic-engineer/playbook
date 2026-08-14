@@ -11,7 +11,7 @@ Team engineering standards for pull requests, testing, design, and deployment. R
 
 ### Self-review before committing
 
-Read the staged diff before you commit it. `/commit-and-push` runs in a forked
+Read the staged diff before you commit it. `/playbook:commit-and-push` runs in a forked
 context on the `git` agent, so it stages, writes a message, and pushes without
 ever judging the change. You are the only reader who sees it first.
 

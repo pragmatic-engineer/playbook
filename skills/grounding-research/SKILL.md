@@ -7,7 +7,7 @@ description: Use when exploring or investigating a codebase, tracing execution p
 
 Discipline for code exploration, investigation, and producing findings reports. This skill adds the research-specific layer on top of the universal writing rules and the system prompt's `## Code` discipline (verify, don't guess; self-review), which stay in scope.
 
-MUST load the `writing-style` skill alongside this one for voice, banned words, and prose rules; every finding and digest this skill produces is written in that register.
+MUST load the `playbook:writing-style` skill alongside this one for voice, banned words, and prose rules; every finding and digest this skill produces is written in that register.
 
 ## Citation Rules
 
@@ -77,4 +77,4 @@ After reporting individual findings, produce a summary digest:
 
 ## Voice
 
-Write like a senior engineer sharing findings with their team: clear, well-sourced, to the point. Frame risks in terms of real-world impact, not abstract principles. Full voice rules in the `writing-style` skill.
+Write like a senior engineer sharing findings with their team: clear, well-sourced, to the point. Frame risks in terms of real-world impact, not abstract principles. Full voice rules in the `playbook:writing-style` skill.
