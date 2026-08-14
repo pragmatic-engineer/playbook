@@ -10,6 +10,7 @@
 //! `memory-anchors.rs` (the sole reader of the file this hook writes) must
 //! change in lockstep with this one; they ship in the same commit on purpose.
 
+use crate::common::home_dir;
 use crate::common::payload::Payload;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -51,14 +52,13 @@ fn should_skip(payload: &Payload) -> bool {
 
 fn expand_tilde(path: &str) -> String {
     match path.strip_prefix('~') {
-        Some(rest) => format!("{}{rest}", std::env::var("HOME").unwrap_or_default()),
+        Some(rest) => format!("{}{rest}", home_dir().to_string_lossy()),
         None => path.to_string(),
     }
 }
 
 fn memory_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    Path::new(&home).join(".claude").join("memory")
+    home_dir().join(".claude").join("memory")
 }
 
 // --- Frontmatter parsing (hand-rolled YAML subset, no yaml crate) ---------

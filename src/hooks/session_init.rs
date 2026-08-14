@@ -14,12 +14,16 @@
 //! shelling out itself, or the script it calls, failing degrades quietly
 //! rather than breaking the hook.
 
-use crate::common::{repo_slug, session_dir, Payload};
+use crate::common::{home_dir, repo_slug, run_with_timeout, session_dir, Payload};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// How long to wait for a shelled-out `bash` or `git` call before giving up.
+/// Matches hooks/session-init.py:29's `timeout=15`.
+const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The five per-session counter/state files zeroed at the start of every
 /// session. Matches hooks/session-init.py:88 exactly; anything else in the
@@ -66,7 +70,7 @@ const ASYNC_DISCIPLINE_TEXT: &str = "Async and deferred-tool discipline. (1) Def
 /// applies. Never panics; every failure along the way degrades to "say
 /// nothing" rather than breaking the session.
 pub fn run(payload: &Payload) {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = home_dir().to_string_lossy().into_owned();
     let plugin_root = std::env::var("CLAUDE_PLUGIN_ROOT").unwrap_or_default();
     let dir = session_dir(payload);
     let repo_root = git_toplevel();
@@ -110,7 +114,7 @@ fn zero_session_state(dir: &str) {
 /// the first render of a new session fetches fresh data. Matches
 /// hooks/session-init.py:100-113.
 fn clear_statusline_cache() {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = home_dir().to_string_lossy().into_owned();
     let sl_cache = std::env::var("STATUSLINE_CACHE_DIR").unwrap_or_else(|_| {
         let xdg = std::env::var("XDG_CACHE_HOME").unwrap_or_else(|_| format!("{home}/.cache"));
         format!("{xdg}/statusline")
@@ -174,14 +178,14 @@ fn config_hash(plugin_root: &str) -> String {
         .join("hooks")
         .join("lib")
         .join("config-hash.sh");
-    let output = Command::new("bash")
+    let mut command = Command::new("bash");
+    command
         .arg("-c")
         .arg(". \"$1\"; config_hash")
         .arg("_")
-        .arg(&script)
-        .output();
-    match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        .arg(&script);
+    match run_with_timeout(&mut command, SUBPROCESS_TIMEOUT) {
+        Some(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => String::new(),
     }
 }
@@ -245,13 +249,10 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, home: &str
 /// stdout with surrounding newlines trimmed, or `None` on any failure
 /// (missing bash, non-zero exit, ...). Never panics.
 fn run_memory_context(script: &Path, mem_slug: &str) -> Option<String> {
-    let output = Command::new("bash")
-        .arg(script)
-        .arg("--repo")
-        .arg(mem_slug)
-        .output();
-    match output {
-        Ok(o) if o.status.success() => Some(
+    let mut command = Command::new("bash");
+    command.arg(script).arg("--repo").arg(mem_slug);
+    match run_with_timeout(&mut command, SUBPROCESS_TIMEOUT) {
+        Some(o) if o.status.success() => Some(
             String::from_utf8_lossy(&o.stdout)
                 .trim_matches('\n')
                 .to_string(),
@@ -548,8 +549,10 @@ fn git_branch() -> String {
 }
 
 fn run_git(args: &[&str]) -> String {
-    match Command::new("git").args(args).output() {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+    let mut command = Command::new("git");
+    command.args(args);
+    match run_with_timeout(&mut command, SUBPROCESS_TIMEOUT) {
+        Some(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => String::new(),
     }
 }

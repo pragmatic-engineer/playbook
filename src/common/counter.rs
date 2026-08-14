@@ -18,15 +18,25 @@ use std::time::Duration;
 pub fn incr_counter(file: &str) -> i64 {
     let path = Path::new(file);
     let lock_path = Path::new(&format!("{file}.lock")).to_path_buf();
-    with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
+    let (_, next) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
         let current = fs::read_to_string(path)
             .ok()
             .and_then(|contents| contents.trim().parse::<i64>().ok())
             .unwrap_or(0);
-        let next = current + 1;
+        // Python's int is arbitrary precision; i64 is not. Saturate rather
+        // than silently wrapping to a negative counter when a corrupted or
+        // hand-edited counter file holds a value at or near i64::MAX.
+        let next = current.saturating_add(1);
         write_atomically(path, &next.to_string());
         next
-    })
+    });
+    // Deliberately unconditional, even though the lock may not have been
+    // acquired: matches hooks/lib/common.py's and hooks/lib/common.sh's
+    // incr_counter, which both remove the lock directory even after
+    // exhausting every retry. See atomic.rs's module comment for the full
+    // rationale; do not change this to a conditional removal.
+    let _ = fs::remove_dir(&lock_path);
+    next
 }
 
 /// Write `contents` to `path` via a temp file in the same directory plus a
@@ -123,6 +133,24 @@ mod tests {
         // Assert
         assert_eq!(got, 42);
         assert_eq!(fs::read_to_string(&file).unwrap(), "42");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn counter_at_i64_max_saturates_instead_of_wrapping() {
+        // Arrange
+        let root = scratch_dir("counter-overflow");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("cnt");
+        fs::write(&file, i64::MAX.to_string()).unwrap();
+
+        // Act
+        let got = incr_counter(file.to_str().unwrap());
+
+        // Assert: a wrapping add would go negative here.
+        assert_eq!(got, i64::MAX);
+        assert_eq!(fs::read_to_string(&file).unwrap(), i64::MAX.to_string());
 
         let _ = fs::remove_dir_all(&root);
     }

@@ -24,13 +24,19 @@
 //! has no timezone database to do this without shelling out.
 
 use crate::common::payload::Payload;
-use crate::common::{atomic_append, emit_system_message, session_id};
+use crate::common::{atomic_append, emit_system_message, home_dir, run_with_timeout, session_id};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 const LOG_LINE_CAP: usize = 500;
+
+/// How long to wait for the `date` command before giving up. Matches the
+/// same `timeout=5` used for every other shelled-out call in
+/// hooks/lib/common.py.
+const DATE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// PreCompact entry point. Never panics: a failed log write or a failed
 /// timestamp lookup still emits the user-facing warning.
@@ -68,15 +74,16 @@ wrap up (a session handoff), then /clear for a fresh session."
 /// `$HOME/.claude/runtime`, matching `RUNTIME_ROOT` in hooks/lib/common.py
 /// and the private `runtime_root` in `src/common/session.rs`.
 fn runtime_root() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    Path::new(&home).join(".claude").join("runtime")
+    home_dir().join(".claude").join("runtime")
 }
 
 /// Current local time as `%Y-%m-%d %H:%M:%S`. Empty on any failure; never
 /// panics.
 fn current_timestamp() -> String {
-    match Command::new("date").arg("+%Y-%m-%d %H:%M:%S").output() {
-        Ok(output) if output.status.success() => {
+    let mut command = Command::new("date");
+    command.arg("+%Y-%m-%d %H:%M:%S");
+    match run_with_timeout(&mut command, DATE_TIMEOUT) {
+        Some(output) if output.status.success() => {
             String::from_utf8_lossy(&output.stdout).trim().to_string()
         }
         _ => String::new(),
