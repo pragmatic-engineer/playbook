@@ -64,7 +64,17 @@ fn stringify_number(n: &serde_json::Number) -> String {
     }
     if let Some(f) = n.as_f64() {
         if f.is_finite() && f.fract() == 0.0 {
-            return (f as i64).to_string();
+            // `f as i64` saturates to i64::MAX/MIN, rather than wrapping,
+            // once `f` is outside i64's range: a whole number too big for
+            // i64/u64 above would otherwise be silently misreported as
+            // i64::MAX. Only trust the cast when it round-trips back to the
+            // same float; otherwise fall back to serde_json's own
+            // JSON-faithful rendering of the number.
+            let as_i64 = f as i64;
+            if as_i64 as f64 == f {
+                return as_i64.to_string();
+            }
+            return n.to_string();
         }
         return f.to_string();
     }
@@ -145,6 +155,34 @@ mod tests {
 
         // Assert
         assert_eq!(got, r#"{"k":"v"}"#);
+    }
+
+    #[test]
+    fn field_object_preserves_insertion_order_not_alphabetical() {
+        // Arrange: without the `preserve_order` feature, serde_json::Value
+        // sorts object keys alphabetically, unlike python's dict (and
+        // json.dumps), which preserves insertion order.
+        let payload =
+            Payload::parse(r#"{"tool_input":{"new_string":"a","file_path":"b","zeta":"c"}}"#);
+
+        // Act
+        let got = payload.field(".tool_input");
+
+        // Assert
+        assert_eq!(got, r#"{"new_string":"a","file_path":"b","zeta":"c"}"#);
+    }
+
+    #[test]
+    fn field_whole_number_beyond_i64_max_does_not_saturate() {
+        // Arrange: too big for i64/u64, so serde_json parses it as f64.
+        let payload = Payload::parse(r#"{"n":99999999999999999999}"#);
+
+        // Act
+        let got = payload.field(".n");
+
+        // Assert: must not silently clamp to i64::MAX.
+        assert_ne!(got, i64::MAX.to_string());
+        assert_eq!(got, "1e+20");
     }
 
     #[test]

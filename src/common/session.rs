@@ -14,6 +14,18 @@ pub fn session_id(payload: &Payload) -> String {
     payload.field(".session_id")
 }
 
+/// Resolve the current user's home directory, falling back to the system
+/// passwd database when `$HOME` is unset (`std::env::home_dir`'s Unix
+/// behaviour), matching python's `os.path.expanduser("~")`
+/// (hooks/lib/common.py:22). `std::env::var("HOME").unwrap_or_default()`
+/// silently yields an empty string when `HOME` is unset, and joining a path
+/// onto that produces a path relative to the process's current directory
+/// instead of the real home. Empty only when even the passwd lookup fails.
+/// Never panics.
+pub fn home_dir() -> PathBuf {
+    std::env::home_dir().unwrap_or_default()
+}
+
 /// Return the per-session state directory under `$HOME/.claude/runtime`,
 /// creating it on demand with mode 0700. Empty when no session id is
 /// present. Never panics; a directory that cannot be created is reported as
@@ -23,8 +35,7 @@ pub fn session_dir(payload: &Payload) -> String {
 }
 
 fn runtime_root() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    Path::new(&home).join(".claude").join("runtime")
+    home_dir().join(".claude").join("runtime")
 }
 
 /// Core of `session_dir`, taking the runtime root explicitly so tests can

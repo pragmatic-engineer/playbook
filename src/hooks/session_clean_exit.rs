@@ -15,14 +15,18 @@
 //! auto-learn nudge; that presence-and-not-other check is how the two
 //! events are told apart from inside one script.
 
-use crate::common::{session_dir, session_id, Payload};
+use crate::common::{home_dir, run_with_timeout, session_dir, session_id, Payload};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_AUTO_LEARN_MIN_EDITS: i64 = 5;
+
+/// How long to wait for `git rev-parse --show-toplevel` before giving up.
+/// Matches hooks/session-clean-exit.py:92's `timeout=5`.
+const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Run the session-clean-exit hook. Never panics; every failure along the
 /// way is swallowed, matching hooks/session-clean-exit.py's fail-soft
@@ -82,11 +86,7 @@ fn queue_auto_learn(payload: &Payload, dir: &str) {
         return;
     }
 
-    let home = std::env::var("HOME").unwrap_or_default();
-    let qdir = Path::new(&home)
-        .join(".claude")
-        .join("runtime")
-        .join("to-learn");
+    let qdir = home_dir().join(".claude").join("runtime").join("to-learn");
     if fs::create_dir_all(&qdir).is_err() {
         return;
     }
@@ -126,11 +126,10 @@ struct AutoLearnFlag<'a> {
 /// `git rev-parse --show-toplevel`, trimmed. Empty outside a repo or on any
 /// failure. Never panics.
 fn git_toplevel() -> String {
-    match Command::new("git")
-        .args(["--no-optional-locks", "rev-parse", "--show-toplevel"])
-        .output()
-    {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+    let mut command = Command::new("git");
+    command.args(["--no-optional-locks", "rev-parse", "--show-toplevel"]);
+    match run_with_timeout(&mut command, GIT_TIMEOUT) {
+        Some(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => String::new(),
     }
 }

@@ -7,16 +7,21 @@
 //! derive it identically or facts silently fail to resolve (see
 //! hooks/lib/common.sh:140-146).
 
+use crate::common::proc::run_with_timeout;
 use std::process::Command;
+use std::time::Duration;
+
+/// How long to wait for `git remote get-url origin` before giving up.
+/// Matches hooks/lib/common.py:252's `timeout=5`.
+const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Return the `<owner>/<repo>` slug for the current git repo's origin
-/// remote. Empty outside a repo or when no origin remote is configured.
-/// Never panics.
+/// remote. Empty outside a repo, when no origin remote is configured, or
+/// when `git` does not finish within `GIT_TIMEOUT`. Never panics.
 pub fn repo_slug() -> String {
-    let output = Command::new("git")
-        .args(["--no-optional-locks", "remote", "get-url", "origin"])
-        .output();
-    let Ok(output) = output else {
+    let mut command = Command::new("git");
+    command.args(["--no-optional-locks", "remote", "get-url", "origin"]);
+    let Some(output) = run_with_timeout(&mut command, GIT_TIMEOUT) else {
         return String::new();
     };
     if !output.status.success() {

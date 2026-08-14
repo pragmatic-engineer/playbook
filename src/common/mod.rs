@@ -9,6 +9,7 @@ pub mod atomic;
 pub mod counter;
 pub mod emit;
 pub mod payload;
+pub mod proc;
 pub mod repo;
 pub mod session;
 
@@ -18,8 +19,9 @@ pub use emit::{
     emit_block, emit_pre_context, emit_pre_deny, emit_prompt_context, emit_system_message,
 };
 pub use payload::Payload;
+pub use proc::run_with_timeout;
 pub use repo::repo_slug;
-pub use session::{abspath, session_dir, session_id};
+pub use session::{abspath, home_dir, session_dir, session_id};
 
 /// Test-only filesystem scratch space, shared by every `common` submodule's
 /// tests that need a real directory on disk. Not created by this call;

@@ -21,12 +21,17 @@
 //! for the full rationale.
 
 use crate::common::payload::Payload;
-use crate::common::{emit_pre_context, repo_slug, session_dir};
+use crate::common::{emit_pre_context, home_dir, repo_slug, run_with_timeout, session_dir};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
+
+/// How long to wait for `git rev-parse --show-toplevel` before giving up.
+/// Matches hooks/memory-anchors.py:114's `timeout=5`.
+const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn run(payload: &Payload) {
     let dir = session_dir(payload);
@@ -83,11 +88,12 @@ fn repo_relative_path(raw_path: &str) -> String {
 }
 
 fn git_toplevel() -> String {
-    let output = Command::new("git")
-        .args(["--no-optional-locks", "rev-parse", "--show-toplevel"])
-        .output();
-    match output {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+    let mut command = Command::new("git");
+    command.args(["--no-optional-locks", "rev-parse", "--show-toplevel"]);
+    match run_with_timeout(&mut command, GIT_TIMEOUT) {
+        Some(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
         _ => String::new(),
     }
 }
@@ -157,11 +163,7 @@ fn build_index(idx_path: &Path) {
 }
 
 fn memory_graph_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    Path::new(&home)
-        .join(".claude")
-        .join("memory")
-        .join("graph.json")
+    home_dir().join(".claude").join("memory").join("graph.json")
 }
 
 fn compute_index_rows(graph_path: &Path, repo: &str) -> Vec<String> {
