@@ -64,9 +64,9 @@ Each edge is stored once on the authoring fact. Reverse links are inferred at lo
 
 Facts get written two ways.
 
-**Ad-hoc during work.** When `/scope`, `/adr`, or `/implement` encounters a durable convention, a decision, a rejected alternative, or an error fix, it writes a fact immediately. `/deep-review` writes findings from a review pass. These are narrow, targeted writes tied to the work at hand.
+**Ad-hoc during work.** When `/playbook:scope`, `/playbook:adr`, or `/playbook:implement` encounters a durable convention, a decision, a rejected alternative, or an error fix, it writes a fact immediately. `/playbook:deep-review` writes findings from a review pass. These are narrow, targeted writes tied to the work at hand.
 
-**Bulk analysis via `/learn-project`.** This command reads the repo broadly (git history, code structure, PRs, and JIRA/Confluence when reachable), clusters what it finds into topics, and writes one fact file per topic. Before writing anything, it shows you a candidate table and asks once. It won't write without your confirmation.
+**Bulk analysis via `/playbook:learn-project`.** This command reads the repo broadly (git history, code structure, PRs, and JIRA/Confluence when reachable), clusters what it finds into topics, and writes one fact file per topic. Before writing anything, it shows you a candidate table and asks once. It won't write without your confirmation.
 
 Both paths produce the same file format and land in the right scope of the store.
 
@@ -74,7 +74,7 @@ Both paths produce the same file format and land in the right scope of the store
 
 At session start, `session-init.py` derives the repo's `<owner>/<repo>` from its git remote and reads that project's `MEMORY.md` index at `~/.claude/memory/<owner>/<repo>/` (capped at 16KB), injecting it as context. Fact bodies are not injected upfront; they're read on demand when you or a command needs them. The global index is also read on demand, not at session start. This keeps the initial context lean.
 
-The planning and execution commands (`/scope`, `/adr`, `/implement`) read both scopes before planning or executing. Project facts override global for that repo. Conflicts between the two scopes surface rather than resolve silently. The commit and review commands (`/commit-and-push`, `/quick-review`, `/address-pr-comments`) don't touch memory.
+The planning and execution commands (`/playbook:scope`, `/playbook:adr`, `/playbook:implement`) read both scopes before planning or executing. Project facts override global for that repo. Conflicts between the two scopes surface rather than resolve silently. The commit and review commands (`/playbook:commit-and-push`, `/playbook:quick-review`, `/playbook:address-pr-comments`) don't touch memory.
 
 At session end, a `SessionEnd` hook fires a last-chance prompt: if any durable facts from the session haven't been written yet, persist them now. This pairs with the auto-learn nudge on the next session start to close the loop.
 
@@ -86,7 +86,7 @@ The graph rebuilds automatically. A PostToolUse hook (`rebuild-memory-graph.py`)
 
 ## The Auto-Learn Loop
 
-When a session ends after making at least five edits in a repo, the `session-clean-exit.py` hook drops a flag in `~/.claude/runtime/to-learn/`. The next time you open a session in that repo, `session-init.py` reads the flag and surfaces a nudge: consider running `/learn-project` to refresh project memory, or `/learn-project --stage` to queue candidate facts for review.
+When a session ends after making at least five edits in a repo, the `session-clean-exit.py` hook drops a flag in `~/.claude/runtime/to-learn/`. The next time you open a session in that repo, `session-init.py` reads the flag and surfaces a nudge: consider running `/playbook:learn-project` to refresh project memory, or `/playbook:learn-project --stage` to queue candidate facts for review.
 
 `--stage` collects candidates into `~/.claude/memory/<owner>/<repo>/staging/` without touching the live store. `--from-staged` reviews them and promotes confirmed facts through the normal write flow.
 

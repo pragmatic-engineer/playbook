@@ -23,14 +23,14 @@ Mechanism note: the fact-check ran deterministically through the shell (path exi
 | `docs/authoring/01-*.md`, `docs/index.md`, `docs/internals/02-*.md` | Yes (test -f) | WU-12, model policy |
 | 5 `general-purpose` sites (brainstorm:108, scope:277, adr:215, implement:128, implement:306) | Yes (grep, content match) | WU-7..10 |
 | 6 `Explore` sites (scope:251,289; adr:199,219; implement:127,129) | Yes (grep) | WU-8..10 |
-| `/learn-project` untyped dispatch | Yes (grep, no subagent_type) | WU-11 |
+| `/playbook:learn-project` untyped dispatch | Yes (grep, no subagent_type) | WU-11 |
 | 9 new files (agents, lint, docs) | Absent, as expected | P1, WU-1, WU-12 |
 
 Dependency graph acyclic (WU-0, WU-1, then P1, then P2); P1 file set (5 new agent files) and P2 file set (5 command files + 2 docs files) are disjoint. Confidence: HIGH.
 
 ## WARNs (informational, not blocking)
 
-- Adversarial: the re-point WUs (WU-8, WU-9, WU-10) swap the agent name but leave the command's inline task instructions in place, which now overlap the new agent's baked-in system prompt. The lint checks agent files, not this cross-file overlap, so part of the maintainability goal is deferred to `/implement`. Recorded as a blueprint open item (decide the source of truth).
+- Adversarial: the re-point WUs (WU-8, WU-9, WU-10) swap the agent name but leave the command's inline task instructions in place, which now overlap the new agent's baked-in system prompt. The lint checks agent files, not this cross-file overlap, so part of the maintainability goal is deferred to `/playbook:implement`. Recorded as a blueprint open item (decide the source of truth).
 - Test: add an `effort` out-of-range boundary case and a positive new-agent fixture to `shell/check-agents.test.sh`. Recorded as a blueprint open item.
 
 ## Structural Checks

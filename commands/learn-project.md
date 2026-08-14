@@ -62,7 +62,7 @@ git log --oneline -500 2>/dev/null | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | sed -E '
 
 Then, before collecting:
 
-- **Atlassian access:** if `mcp__atlassian__*` tools are available in this session, use them. Else if `acli` is present and authenticated, **use it, and load the `atlassian-cli` skill first**: it carries the real command surface and the Confluence page-discovery workaround. Jira and Confluence authenticate separately, so treat the two probes above independently: Jira reachable and Confluence not is a normal state, not an error. Else mark JIRA/Confluence **unavailable** and record it for the report.
+- **Atlassian access:** if `mcp__atlassian__*` tools are available in this session, use them. Else if `acli` is present and authenticated, **use it, and load the `playbook:atlassian-cli` skill first**: it carries the real command surface and the Confluence page-discovery workaround. Jira and Confluence authenticate separately, so treat the two probes above independently: Jira reachable and Confluence not is a normal state, not an error. Else mark JIRA/Confluence **unavailable** and record it for the report.
 - **Targets:** resolve the JIRA project key(s) from the histogram and the Confluence space from README/links. If ambiguous, ask the user once.
 - **Capture:** `REPO`, `ROOT`, scope caps, and which sources are reachable. You need these in every later phase.
 
@@ -140,7 +140,7 @@ These split collection from the write decision, so a run can happen unattended (
 2. Skip Phase 3's confirmation and Phase 4's live writes. Create `$STORE/staging/`, then write each candidate to `$STORE/staging/<kebab>.md` in the normal fact format, plus two extra frontmatter fields: `status: pending` and `staged: <date +%F>`, a `scope:` (`repo` | `global`), and, when it would update an existing fact, a `supersedes:` note.
 3. Write or refresh `$STORE/staging/STAGED.md` with one `- [Title](file.md): one-line hook` line per candidate.
 4. Do NOT touch the live `MEMORY.md` or `graph.json`.
-5. Report the count staged, the staging path, and: "Review with `/learn-project --from-staged`."
+5. Report the count staged, the staging path, and: "Review with `/playbook:learn-project --from-staged`."
 
 **`--from-staged`** (review and promote):
 

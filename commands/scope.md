@@ -10,20 +10,20 @@ effort: xhigh
 
 Interview the user relentlessly about every aspect of this plan until you reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one by one. The output is a verified, self-contained implementation plan, ready to run with `/playbook:implement`.
 
-Invoked as `/scope`. The remaining arguments are an optional topic seed or file path.
+Invoked as `/playbook:scope`. The remaining arguments are an optional topic seed or file path.
 
 ## Help
 
 If the arguments contain `--help`, print this and stop:
 
 ```
-/scope - Interview-driven planning that produces an implementation plan
+/playbook:scope - Interview-driven planning that produces an implementation plan
 
 USAGE:
-  /scope [topic]              Start interactive planning
-  /scope "user auth system"   Start with a topic seed
-  /scope ./prompt.md          Load topic seed from a file
-  /scope .claude/designs/x.md Plan from a /brainstorm design doc
+  /playbook:scope [topic]              Start interactive planning
+  /playbook:scope "user auth system"   Start with a topic seed
+  /playbook:scope ./prompt.md          Load topic seed from a file
+  /playbook:scope .claude/designs/x.md Plan from a /playbook:brainstorm design doc
 
 ARGUMENTS:
   If the argument is a file path (starts with ./ or / and the file exists),
@@ -33,7 +33,7 @@ ARGUMENTS:
 OPTIONS:
   --auto   Autonomous: skip the interview, self-answer every decision with the
            recommended answer (recorded as assumptions), run the quality gate,
-           and save the plan without pauses. Stops after saving; run /implement.
+           and save the plan without pauses. Stops after saving; run /playbook:implement.
   --help   Show this help
 
 Asks one question at a time with a recommended answer. Explores the codebase
@@ -52,7 +52,7 @@ Work Units (some flagged parallel-safe), grouped into ordered PR-sized Segments
 2. **Provide your recommended answer with every question.** Format: "Question? **I'd recommend X** because Y." The user can accept, reject, or modify. This keeps the conversation moving instead of stalling on open-ended questions.
 3. **If a question can be answered by exploring the codebase, explore instead of asking.** Read the files, grep for patterns, check the config and the project memory store if one is present. Only ask the user about decisions, preferences, and constraints that aren't in the code.
 4. **Walk the decision tree.** Each answer may open new branches. Track which branches are resolved and which are still open. Don't jump to unrelated topics while a branch has unresolved dependencies.
-5. **Do NOT produce the implementation plan until all branches are resolved.** The user invoked `/scope` because they want thorough design, not a quick answer.
+5. **Do NOT produce the implementation plan until all branches are resolved.** The user invoked `/playbook:scope` because they want thorough design, not a quick answer.
 6. **Do NOT write any code.** This is a planning session. The output is a plan file, not implementation.
 
 ## Argument Resolution
@@ -70,17 +70,17 @@ This happens before Step 1. The loaded content replaces the raw argument as the 
 
 ## Autonomous Mode (`--auto`)
 
-Enable when `--auto` appears in the arguments; strip it (like `--help`) before resolving the topic seed. `--auto` runs the entire scope without the interview, then stops after saving the plan. It never writes code (run `/implement` to build it). Concretely:
+Enable when `--auto` appears in the arguments; strip it (like `--help`) before resolving the topic seed. `--auto` runs the entire scope without the interview, then stops after saving the plan. It never writes code (run `/playbook:implement` to build it). Concretely:
 
 - **No questions.** For every decision Step 2 would ask, take the answer you would have recommended ("I'd recommend X because Y") and proceed. Still do the Step 1 research first: explore the codebase and, if a memory store is present, read it too, since a preference or convention there may override your default choice. When no memory store exists, skip that step silently.
 - **Record assumptions.** Every self-made decision goes into an **Assumptions** list with its rationale, so the user can audit what was chosen for them. When you're genuinely split on a decision, record it as an `OPEN` assumption (with the leading option and why) rather than silently picking.
 - **Skip the confirmation gates.** Do not pause at Step 3 ("Does this capture everything?") or Step 6 ("Does this plan look right?"). Fold the Design Summary and the Assumptions list into the saved plan instead.
 - **Quality gate still runs (Step 5).** It needs no user input. If a phase still FAILs after its 3 iterations, STOP: do not save; report the failing checks and the assumptions made. No user is present to override a FAIL in `--auto`.
-- **Save and report (Step 7).** On a passing gate, save the plan and quality report, then tell the user the paths, the assumptions made (flag any `OPEN` ones), and to run `/implement` when ready. If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the accepted decisions there; otherwise skip.
+- **Save and report (Step 7).** On a passing gate, save the plan and quality report, then tell the user the paths, the assumptions made (flag any `OPEN` ones), and to run `/playbook:implement` when ready. If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the accepted decisions there; otherwise skip.
 
-## Design Doc Handoff (from `/brainstorm`)
+## Design Doc Handoff (from `/playbook:brainstorm`)
 
-`/brainstorm` produces a design doc under `.claude/designs/` and can chain straight into `/scope`. Before Step 1, check for one:
+`/playbook:brainstorm` produces a design doc under `.claude/designs/` and can chain straight into `/playbook:scope`. Before Step 1, check for one:
 
 - **Explicit:** if the argument resolves (per Argument Resolution) to a file under `.claude/designs/`, that file IS the design doc.
 - **Implicit:** if no topic or file argument was given and `.claude/designs/` has entries, take the newest and ask once: "Base this plan on the design doc `<path>` (from `<date>`)? **I'd recommend yes** because it captures the agreed direction." If the user declines, proceed with a normal topic seed.
@@ -92,7 +92,7 @@ When a design doc is in play, it's the authoritative context, not a raw seed:
 - Still gather the codebase context you need and explore whatever the plan requires. Still run the Step 5 quality gate and the Step 6 approval.
 - Reference the design doc path in the saved plan's Architecture section so the lineage is traceable.
 
-With no design doc, `/scope` behaves exactly as before.
+With no design doc, `/playbook:scope` behaves exactly as before.
 
 ## How It Works
 
@@ -122,7 +122,7 @@ First question: [question]? **I'd recommend [X]** because [reason from codebase]
 
 ### Step 2: Decision Tree Interview
 
-If a `/brainstorm` design doc with a "Confidence + open items" trailer exists for this work, read its open items and aim the interview at them first; those are the premises brainstorm couldn't fully verify.
+If a `/playbook:brainstorm` design doc with a "Confidence + open items" trailer exists for this work, read its open items and aim the interview at them first; those are the premises brainstorm couldn't fully verify.
 
 Ask questions one at a time. Each question should follow from the previous answer (don't jump topics), include your recommended answer with reasoning, and resolve a specific branch.
 
@@ -182,7 +182,7 @@ Produce a self-contained plan that `/playbook:implement` can consume directly:
 
 ### Segments (suggested PRs)
 Ordered, PR-sized groups of Work Units. One concern each; each Segment becomes one pull request.
-`/implement` honors these but may re-split a Segment whose real diff exceeds the 1500-line hard limit.
+`/playbook:implement` honors these but may re-split a Segment whose real diff exceeds the 1500-line hard limit.
 | Seg | Title | Work Units | Requires | Concern | Est. lines |
 |-----|-------|-----------|----------|---------|-----------|
 | S1 | [title] | WU-0, WU-1, WU-2 | none | [schema + types] | ~180 |
@@ -220,26 +220,26 @@ For each WU, in dependency order:
 
 - Confidence: HIGH | MEDIUM | LOW, <one line on what makes it that>
 - Open items (verify downstream):
-  - <blind spot or LOW-confidence premise>, <who verifies: /scope interview, /implement watch>
+  - <blind spot or LOW-confidence premise>, <who verifies: /playbook:scope interview, /playbook:implement watch>
 ```
 
-The Testing Strategy MUST follow the `engineering-standards` skill (test types, isolation, TDD red/green/refactor, no coverage decrease).
+The Testing Strategy MUST follow the `playbook:engineering-standards` skill (test types, isolation, TDD red/green/refactor, no coverage decrease).
 
-**Work Unit sizing (MUST).** Each WU is one coherent commit: small enough to review on its own, following the `engineering-standards` size limits and incremental-delivery guidance. Prefer more, smaller WUs over a few large ones; `/implement` commits each separately. The `Files` column lists production and test files. The `Requires` column is the dependency edge `/implement` topologically orders and cycle-checks. The `Segment` column names the PR-sized group each WU belongs to (see below).
+**Work Unit sizing (MUST).** Each WU is one coherent commit: small enough to review on its own, following the `engineering-standards` size limits and incremental-delivery guidance. Prefer more, smaller WUs over a few large ones; `/playbook:implement` commits each separately. The `Files` column lists production and test files. The `Requires` column is the dependency edge `/playbook:implement` topologically orders and cycle-checks. The `Segment` column names the PR-sized group each WU belongs to (see below).
 
 **Segment sizing (MUST).** A Segment groups Work Units into one PR-sized, reviewable increment. Each Segment becomes one pull request, so:
 1. **One concern per Segment.** Data layer, service layer, wire-up, and docs are separate Segments, not one, per `engineering-standards` "one concern per PR".
-2. **Budget (three tiers, from `engineering-standards`).** Target under 500 changed lines per Segment (soft). A Segment estimated over 1000 (enforced) needs explicit justification in the plan; prefer to split it. Never plan a Segment estimated over 1500 (hard). `/implement` re-splits at the 1500 hard limit if reality exceeds the estimate.
-3. **Ordering respects WU dependencies.** A Segment's WUs may only `Require` WUs in the same or an earlier Segment; no forward cross-Segment dependency. Default to a **linear** Segment chain (`S1 -> S2 -> S3`), which `/implement` maps to stacked PRs.
+2. **Budget (three tiers, from `engineering-standards`).** Target under 500 changed lines per Segment (soft). A Segment estimated over 1000 (enforced) needs explicit justification in the plan; prefer to split it. Never plan a Segment estimated over 1500 (hard). `/playbook:implement` re-splits at the 1500 hard limit if reality exceeds the estimate.
+3. **Ordering respects WU dependencies.** A Segment's WUs may only `Require` WUs in the same or an earlier Segment; no forward cross-Segment dependency. Default to a **linear** Segment chain (`S1 -> S2 -> S3`), which `/playbook:implement` maps to stacked PRs.
 4. **Coverage.** Every WU belongs to exactly one Segment; no WU is left out and none appears in two.
-5. **Suggestions, not law.** These are `/implement`'s starting point; note in the plan that it may re-split a Segment whose real diff blows the budget. Mark two Segments as parallel-safe only when their file sets are disjoint and neither `Requires` the other.
+5. **Suggestions, not law.** These are `/playbook:implement`'s starting point; note in the plan that it may re-split a Segment whose real diff blows the budget. Mark two Segments as parallel-safe only when their file sets are disjoint and neither `Requires` the other.
 
 **Parallel-safety (MUST mark explicitly).** Assign a shared `Parallel group` label only when every member of the group:
 1. has no dependency on another member (none appears in another's `Requires`),
 2. touches a disjoint set of files (no file in two members), and
 3. shares no mutable runtime state and no ordering-sensitive step (e.g. sequential DB migrations).
 
-If any condition fails, leave the WUs ungrouped (they run sequentially). When unsure, leave sequential: a wrong parallel flag makes `/implement` run concurrent agents over the same files and corrupt the working tree. `/implement` re-verifies the flags before dispatching, but the plan should not assert parallelism it can't justify.
+If any condition fails, leave the WUs ungrouped (they run sequentially). When unsure, leave sequential: a wrong parallel flag makes `/playbook:implement` run concurrent agents over the same files and corrupt the working tree. `/playbook:implement` re-verifies the flags before dispatching, but the plan should not assert parallelism it can't justify.
 
 ### Step 5: Quality Gate (MUST)
 
@@ -337,8 +337,8 @@ Then:
 3. Tell the user:
    - "Saved to `.claude/plans/<topic-slug>.md`"
    - "Implement it when ready: `/playbook:implement .claude/plans/<topic-slug>.md`."
-   - "Want to capture the key decisions in an ADR (`/adr`)?" (if architectural)
-   - **In `--auto`:** also list the **Assumptions** made (especially any `OPEN` ones) so the user can audit the autonomous choices before running `/implement`.
+   - "Want to capture the key decisions in an ADR (`/playbook:adr`)?" (if architectural)
+   - **In `--auto`:** also list the **Assumptions** made (especially any `OPEN` ones) so the user can audit the autonomous choices before running `/playbook:implement`.
 
 ### Step 8: Teardown (MUST run, even on failure or abort)
 

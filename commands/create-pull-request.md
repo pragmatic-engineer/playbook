@@ -10,7 +10,7 @@ agent: git
 
 Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `engineering-standards` (readiness, size) and `writing-style` (voice, banned words, no dashes). The PR opens as a **draft** by default; pass `--ready` to publish it for review.
 
-This creates a **new** PR. If one already exists for the branch, this stops and points you at `/address-pr-comments` or `/quick-review`.
+This creates a **new** PR. If one already exists for the branch, this stops and points you at `/playbook:address-pr-comments` or `/playbook:quick-review`.
 
 ## Run this now
 
@@ -69,7 +69,7 @@ echo "TMP: $PR_TMP"
 EXISTING=$(gh pr view "$CURRENT_BRANCH" --json url,state -q 'select(.state=="OPEN") | .url' 2>/dev/null || true)
 if [ -n "$EXISTING" ]; then
   echo "A PR already exists: $EXISTING"
-  echo "Use /address-pr-comments or /quick-review instead."
+  echo "Use /playbook:address-pr-comments or /playbook:quick-review instead."
   exit 0
 fi
 ```

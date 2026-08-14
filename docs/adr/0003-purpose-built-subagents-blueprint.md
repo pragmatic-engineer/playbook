@@ -79,7 +79,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 
 ### WU-5: `collector` agent
 - Requires: WU-1
-- Goal: a cheap mechanical gatherer for `/learn-project` Phase 1.
+- Goal: a cheap mechanical gatherer for `/playbook:learn-project` Phase 1.
 - Files:
   - `agents/collector.md` | new | from template; `model: haiku`, `effort: medium`, `tools: Bash, Read, Grep, Glob, WebFetch`; gathers repo structure, git history, PRs, and tracker data, returns a compact cited summary (never raw dumps).
 - Verification: `bash shell/check-agents.sh && grep -q 'haiku' agents/collector.md`
@@ -89,7 +89,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 
 ### WU-6: `analyst` agent
 - Requires: WU-1
-- Goal: distills Phase 1 findings into candidate memory facts for `/learn-project` Phase 2.
+- Goal: distills Phase 1 findings into candidate memory facts for `/playbook:learn-project` Phase 2.
 - Files:
   - `agents/analyst.md` | new | from template; `model: sonnet`, `tools: Read, Grep, Glob, Skill`; emits candidate facts in the shape `commands/learn-project.md:75` describes (title, body, type, scope, links, anchors).
 - Verification: `bash shell/check-agents.sh && grep -q 'anchors' agents/analyst.md`
@@ -207,10 +207,10 @@ flowchart TD
 
 - Confidence: HIGH on the structure (real paths, disjoint file plans, literal verification commands, the shell-ci pattern to follow). MEDIUM on the exact re-point line numbers, they drift as the command files change, so each WU greps for content rather than trusting a line number.
 - Open items (verify downstream):
-  - Lint strictness: required-invariants matching versus exact-block match for the guardrail. Chosen required-invariants here; confirm in `/implement` that it catches real drift without false positives.
-  - `critic` premise-versus-convergent stance separation: verify in `/implement` review that the focus param keeps them distinct.
+  - Lint strictness: required-invariants matching versus exact-block match for the guardrail. Chosen required-invariants here; confirm in `/playbook:implement` that it catches real drift without false positives.
+  - `critic` premise-versus-convergent stance separation: verify in `/playbook:implement` review that the focus param keeps them distinct.
   - `fact-checker` and `test-reviewer` are consistency bets over the already-read-only `Explore`. Capture the before baseline (fact-check catch rate) so the gain is provable.
-  - Cost baseline: measure `/learn-project` and the `/implement` refinement swarm token cost before WU-5 and WU-10 land.
+  - Cost baseline: measure `/playbook:learn-project` and the `/playbook:implement` refinement swarm token cost before WU-5 and WU-10 land.
   - `_TEMPLATE.md` must not be picked up as a live agent; confirm the discovery rule ignores the leading underscore, else move the template under `docs/`.
-  - Inline-versus-system-prompt duplication: the re-point WUs (WU-8, WU-9, WU-10) swap the agent name but leave the command's inline task instructions in place, which now overlap the agent's baked-in system prompt. Decide the source of truth in `/implement`: thin the inline prompt, or keep it authoritative and thin the agent body. The lint does not catch this cross-file overlap.
+  - Inline-versus-system-prompt duplication: the re-point WUs (WU-8, WU-9, WU-10) swap the agent name but leave the command's inline task instructions in place, which now overlap the agent's baked-in system prompt. Decide the source of truth in `/playbook:implement`: thin the inline prompt, or keep it authoritative and thin the agent body. The lint does not catch this cross-file overlap.
   - Lint coverage: add an `effort` out-of-range boundary case and a positive new-agent fixture to `shell/check-agents.test.sh`.

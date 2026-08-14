@@ -67,7 +67,7 @@ About 5.5 minutes, roughly 2.6 minutes a day. Inside turns the model dominates, 
 
 **Precedent that cuts the other way.** ADR 0001:50 excludes `rtk` from `hooks.json` because it is "a personal external tool with no script in this repo", and lists `rtk` portability under Risks at `:73`. This ADR makes the plugin depend on exactly such a binary, which is a reversal that needs stating plainly.
 
-**Failure evidence.** `hook-rename-lockstep-settings` predicted the failure mode on 2026-08-11. It recurred twice since. Between 2026-08-11T06:47Z and 2026-08-12T10:42Z, stale `.sh` paths in the user's `settings.json` produced about 110 `No such file or directory` errors, 100 of them `search-counter.sh`. Hooks silently stopped running for roughly 28 hours and nobody noticed. Separately, the ADR 0006 relocation removed `~/.claude/statusline.sh` while `settings.shared.json:133-137` still pointed at it; two clean `/setup` runs and a four-layer `/doctor` pass all reported healthy while the status line rendered nothing. **A missing binary fails exactly this way, and this repo has now demonstrated twice that silent hook failure is not noticed.**
+**Failure evidence.** `hook-rename-lockstep-settings` predicted the failure mode on 2026-08-11. It recurred twice since. Between 2026-08-11T06:47Z and 2026-08-12T10:42Z, stale `.sh` paths in the user's `settings.json` produced about 110 `No such file or directory` errors, 100 of them `search-counter.sh`. Hooks silently stopped running for roughly 28 hours and nobody noticed. Separately, the ADR 0006 relocation removed `~/.claude/statusline.sh` while `settings.shared.json:133-137` still pointed at it; two clean `/playbook:setup` runs and a four-layer `/playbook:doctor` pass all reported healthy while the status line rendered nothing. **A missing binary fails exactly this way, and this repo has now demonstrated twice that silent hook failure is not noticed.**
 
 ## Decision Drivers
 
@@ -174,7 +174,7 @@ Each ends with the user running `playbook init`, the same two-step shape `rtk` u
 
 `install.sh` and `playbook init` MUST fail loudly and refuse to complete when the binary cannot be fetched, verified, or executed. Neither may degrade quietly to a partial install. `playbook init` MUST verify its own binary runs before writing any hook entry, and MUST `chmod +x` defensively rather than assuming the mode survived. `/playbook:doctor` gains a layer that runs `playbook --version` and reports a hard failure when it does not resolve, plus a layer that resolves the `statusLine` command.
 
-The reasoning is evidential. This repo has twice shipped a state where hooks silently stopped firing, once for 28 hours across about 110 errors, and neither `/setup` nor `/doctor` caught it. A guard that fails open is worse than no guard, because it reports success. The four bash guards stay bash until the binary is proven in place, and are ported last.
+The reasoning is evidential. This repo has twice shipped a state where hooks silently stopped firing, once for 28 hours across about 110 errors, and neither `/playbook:setup` nor `/playbook:doctor` caught it. A guard that fails open is worse than no guard, because it reports success. The four bash guards stay bash until the binary is proven in place, and are ported last.
 
 Rejections. **E** is the closest call and is rejected only on the four points above: it leaves `python3` and `jq` required, keeps the 29ms interpreter floor, keeps installation shell-dependent, and forecloses Windows. If the runtime dependency is not a problem you care about, E is the better decision and this ADR should be reopened. **Status quo** is rejected because the two-library drift risk is real and its justification is a wrong number; correcting the docs alone leaves the structural problem. **B** is rejected because three languages and three shared libraries is a worse end state than the two it replaces, and partial porting risks schema drift between `rebuild-memory-graph` (sole writer of `~/.claude/memory/graph.json`) and `memory-anchors` (sole reader). **C** is rejected because maintaining two implementations of every hook permanently is the exact failure this ADR exists to end, and it pays bash startup on every fire besides. **D** is rejected on repo weight, several MB per release in git history forever; note its original appeal rested on the executable bit surviving, which the documentation says not to rely on.
 
@@ -280,7 +280,7 @@ sequenceDiagram
   participant U as User
   participant I as install.sh
   participant R as GitHub Releases
-  participant D as /doctor
+  participant D as /playbook:doctor
 
   participant N as playbook init
 
@@ -301,7 +301,7 @@ sequenceDiagram
       N-->>U: installed and wired
     end
   end
-  U->>D: /doctor
+  U->>D: /playbook:doctor
   D->>D: layer 5, playbook --version resolves
   D->>D: layer 6, statusLine command resolves
   D-->>U: hard FAIL if either is absent, never a silent pass

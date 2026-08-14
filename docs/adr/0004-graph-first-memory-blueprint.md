@@ -113,7 +113,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 - Done When:
   - [ ] Capture fires once per threshold crossing and never on a quiet turn.
 
-### WU-6: `/implement` captures around a run, and records cost
+### WU-6: `/playbook:implement` captures around a run, and records cost
 - Requires: WU-4
 - Goal: the one deterministic capture path, plus the cost figure the ADR asks for.
 - Files:
@@ -121,7 +121,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 - Verification: `grep -q 'telemetry' commands/implement.md`
 - Tests: none. This is command prose, covered by the WU-4 suite underneath it.
 - Done When:
-  - [ ] `/implement` captures facts before and after a run and reports its cost delta.
+  - [ ] `/playbook:implement` captures facts before and after a run and reports its cost delta.
 
 ### WU-7: Update the spec and the docs
 - Requires: WU-0
@@ -171,7 +171,7 @@ flowchart TD
 - Confidence: HIGH on WU-0, WU-1, WU-2, WU-3 and WU-7. Real paths, a measured 8.8 KB slice, and `worktree.sh` already proves a shared shell module works. MEDIUM on WU-4 and WU-5: giving a display component a side effect is unusual, and the threshold value is a guess.
 - Open items (verify downstream):
   - The 70 percent threshold is unvalidated. Too low nags, too high races auto-compact at 90. Tune against real sessions after WU-5 lands.
-  - `Stop` returning `decision: block` interrupts the turn end. Confirm during `/implement` that it reads as a useful prompt and not as a stuck session, and that clearing the marker really does stop it re-firing.
+  - `Stop` returning `decision: block` interrupts the turn end. Confirm during `/playbook:implement` that it reads as a useful prompt and not as a stuck session, and that clearing the marker really does stop it re-firing.
   - Capture at the threshold is a prompt, not an enforcement. Only WU-6 is deterministic. If the prompted path proves unreliable in practice, the fallback is to lean harder on WU-6 and drop WU-5.
   - The statusline write must never break the render. Verify the guard by pointing the session dir somewhere unwritable.
   - WU-2 changes what every session loads. Watch for the slice being noisier than the old 2.5 KB index; if so, trim descriptions rather than reverting.

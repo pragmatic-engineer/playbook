@@ -31,7 +31,7 @@ jq '[.hooks.PreToolUse[]?.hooks[]?.command]
 
 Pass if the result is 3 or more.
 
-Remediation hint on miss: "run /setup to seed settings.json with the guard hooks"
+Remediation hint on miss: "run /playbook:setup to seed settings.json with the guard hooks"
 
 ## Layer 3: Launcher (opt-in)
 
@@ -51,10 +51,10 @@ For bash: pass if BOTH conditions hold:
 
 For any other shell: report "shell not detected" and skip this check.
 
-This layer is opt-in. Report "not installed (opt-in; run /setup)" rather than
+This layer is opt-in. Report "not installed (opt-in; run /playbook:setup)" rather than
 a hard fail when either condition is false.
 
-Remediation hint when not installed: "run /setup and choose Yes for the launcher question"
+Remediation hint when not installed: "run /playbook:setup and choose Yes for the launcher question"
 
 ## Layer 4: System prompt (opt-in)
 
@@ -65,7 +65,7 @@ test -f ~/.claude/prompts/SYSTEM_PROMPT.md
 This layer is opt-in. Report "not installed (opt-in, recommended)" rather than
 a hard fail when the file is absent.
 
-Remediation hint when not installed: "run /setup and choose Yes for the system prompt question"
+Remediation hint when not installed: "run /playbook:setup and choose Yes for the system prompt question"
 
 ## Output format
 
@@ -77,10 +77,10 @@ one-line remediation hint. Example shape:
 ```
 PASS  plugin enabled
 PASS  safety guards wired (3 of 3)
-INFO  launcher not installed (opt-in; run /setup)    -- run /setup and choose Yes for the launcher question
-INFO  system prompt not installed (opt-in, recommended) -- run /setup and choose Yes for the system prompt question
+INFO  launcher not installed (opt-in; run /playbook:setup)    -- run /playbook:setup and choose Yes for the launcher question
+INFO  system prompt not installed (opt-in, recommended) -- run /playbook:setup and choose Yes for the system prompt question
 ```
 
 If all required layers pass and optional layers are installed, say so in one
-line. If any required layer fails, end with: "Run /setup to fix the items
+line. If any required layer fails, end with: "Run /playbook:setup to fix the items
 above."

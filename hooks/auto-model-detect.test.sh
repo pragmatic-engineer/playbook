@@ -28,7 +28,7 @@ else
 fi
 
 # 2. Slash command -> silent.
-emits '{"prompt":"/implement do the whole thing now for me please and thanks"}' && bad "slash command stays silent" || ok "slash command stays silent"
+emits '{"prompt":"/playbook:implement do the whole thing now for me please and thanks"}' && bad "slash command stays silent" || ok "slash command stays silent"
 
 # 3. Very short prompt -> silent.
 emits '{"prompt":"design?"}' && bad "short prompt stays silent" || ok "short prompt stays silent"

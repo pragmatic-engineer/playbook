@@ -1,5 +1,5 @@
 ---
-description: Use for substantial, risky, or cross-cutting PRs. A swarm of specialist reviewer subagents (logic, test, security, data, types, perf, plus conditional) run in parallel, consolidated and fact-checked, then posted as a pending GitHub review. Heavier than /quick-review.
+description: Use for substantial, risky, or cross-cutting PRs. A swarm of specialist reviewer subagents (logic, test, security, data, types, perf, plus conditional) run in parallel, consolidated and fact-checked, then posted as a pending GitHub review. Heavier than /playbook:quick-review.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
 argument-hint: "[PR number] [--all] [--quick] [--preset <name>] [--self] [--help]"
 model: opus
@@ -8,21 +8,21 @@ effort: xhigh
 
 # Deep Review: Multi-Agent PR Review
 
-Review a pull request with a swarm of specialist reviewer subagents run in parallel, each a focused `reviewer` subagent under the `grounding-review` and `grounding-research` discipline. The orchestrating session consolidates, dedups, and fact-checks their findings, then posts them as a **pending** GitHub review (same posting flow as `/quick-review`). This is heavier and slower than `/quick-review`; use it for substantial, risky, or cross-cutting PRs.
+Review a pull request with a swarm of specialist reviewer subagents run in parallel, each a focused `reviewer` subagent under the `grounding-review` and `grounding-research` discipline. The orchestrating session consolidates, dedups, and fact-checks their findings, then posts them as a **pending** GitHub review (same posting flow as `/playbook:quick-review`). This is heavier and slower than `/playbook:quick-review`; use it for substantial, risky, or cross-cutting PRs.
 
-Invoked as `/deep-review`. The remaining arguments are an optional PR number and flags.
+Invoked as `/playbook:deep-review`. The remaining arguments are an optional PR number and flags.
 
-> **Security caveat:** running `/deep-review` on an explicit PR installs and runs the PR's code in your local environment: npm preinstall/postinstall hooks, build scripts, test suites. This exposes you to supply-chain attacks and code execution with your credentials in reach. Only run it on PRs you trust to execute locally.
+> **Security caveat:** running `/playbook:deep-review` on an explicit PR installs and runs the PR's code in your local environment: npm preinstall/postinstall hooks, build scripts, test suites. This exposes you to supply-chain attacks and code execution with your credentials in reach. Only run it on PRs you trust to execute locally.
 
 ## Help
 
 If the arguments contain `--help`, print this and stop:
 
 ```
-/deep-review - Multi-agent PR review with a specialist reviewer swarm
+/playbook:deep-review - Multi-agent PR review with a specialist reviewer swarm
 
 USAGE:
-  /deep-review [PR_NUMBER] [options]
+  /playbook:deep-review [PR_NUMBER] [options]
 
 OPTIONS:
   --help            Show this help
@@ -32,10 +32,10 @@ OPTIONS:
   --self            Local self-review (never posts to GitHub)
 
 EXAMPLES:
-  /deep-review               Review the current branch's PR (auto-selects reviewers)
-  /deep-review 123           Review PR #123
-  /deep-review 123 --all     PR #123 with every reviewer
-  /deep-review --self        Self-review the current branch, no posting
+  /playbook:deep-review               Review the current branch's PR (auto-selects reviewers)
+  /playbook:deep-review 123           Review PR #123
+  /playbook:deep-review 123 --all     PR #123 with every reviewer
+  /playbook:deep-review --self        Self-review the current branch, no posting
 ```
 
 ## Reviewer Swarm
@@ -75,11 +75,11 @@ EXAMPLES:
 5. Follow the command's gates, not your own.
 6. Show real data: tables and reports come from actual output, never placeholders.
 7. **No selective filtering at presentation.** After consolidation (Step 4) you present EVERY surviving finding; the user decides what to post in Step 6. (Consolidation's dedup/drop rules are the only removals, and they happen in Step 4, not by hiding findings in Step 5.)
-8. **Never ask whether to run.** Invoking `/deep-review` IS the instruction to run; start immediately.
+8. **Never ask whether to run.** Invoking `/playbook:deep-review` IS the instruction to run; start immediately.
 
 ## Voice rules
 
-Invoke the `grounding-review` and `writing-style` skills before drafting any finding (same discipline as `/quick-review`). Non-negotiables for anything posted to GitHub: Conventional Comments label in **plain text** and bare (`issue:`, `suggestion:`, `nitpick:`, `question:`, never bold, no `(blocking)`/`(non-blocking)` decoration on the posted body; that split stays in the local summary); plain, jargon-free language; findings kept short (two sentences by default, the problem then what breaks, a third only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
+Invoke the `grounding-review` and `playbook:writing-style` skills before drafting any finding (same discipline as `/playbook:quick-review`). Non-negotiables for anything posted to GitHub: Conventional Comments label in **plain text** and bare (`issue:`, `suggestion:`, `nitpick:`, `question:`, never bold, no `(blocking)`/`(non-blocking)` decoration on the posted body; that split stays in the local summary); plain, jargon-free language; findings kept short (two sentences by default, the problem then what breaks, a third only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
 
 ## Step 1: Resolve PR and gather context
 
@@ -245,7 +245,7 @@ Never fabricate URLs; use the `html_url` the API returns.
 ## Step 7: Capture and wrap up
 
 - If a project store is present at `~/.claude/memory/<owner>/<repo>/` (derive `<owner>/<repo>` from `git remote get-url origin`), persist each POSTED blocking/non-blocking finding as a project memory fact (`type: project`, tag it a review gotcha, `anchors:` to the file), deduping against existing memory first. Skip suggestions/nitpicks and anything not posted; if there's no project store, skip silently.
-- If non-self-review and the PR has unaddressed review threads, offer to run `/address-pr-comments $PR_NUMBER`.
+- If non-self-review and the PR has unaddressed review threads, offer to run `/playbook:address-pr-comments $PR_NUMBER`.
 - Final message: one line per outcome (pending review id + count, or submitted verb + timestamp).
 
 ## Step 8: Teardown (MUST run, even on failure, abort, or skip)

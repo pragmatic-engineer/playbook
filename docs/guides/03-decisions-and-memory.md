@@ -1,12 +1,12 @@
 # Decisions and Memory
 
-Two commands handle durable knowledge. `/adr` records architectural decisions with an optional execution blueprint. `/learn-project` analyses the repo and stores what it learns as memory facts. Both read from the same memory system, and both write only to git-ignored directories.
+Two commands handle durable knowledge. `/playbook:adr` records architectural decisions with an optional execution blueprint. `/playbook:learn-project` analyses the repo and stores what it learns as memory facts. Both read from the same memory system, and both write only to git-ignored directories.
 
-## /adr: Recording a Decision
+## /playbook:adr: Recording a Decision
 
-Use `/adr` when you're making a real architectural choice and want a durable record: what you chose, why, and why the alternatives lost. Use `/scope` when a decision's already made and you need an implementation plan only.
+Use `/playbook:adr` when you're making a real architectural choice and want a durable record: what you chose, why, and why the alternatives lost. Use `/playbook:scope` when a decision's already made and you need an implementation plan only.
 
-The practical split: `/adr` produces a decision record plus an optional execution blueprint. `/scope` produces a plan with no decision record attached.
+The practical split: `/playbook:adr` produces a decision record plus an optional execution blueprint. `/playbook:scope` produces a plan with no decision record attached.
 
 ### The flow
 
@@ -26,20 +26,20 @@ docs/adr/
   0001-replace-polling-with-websocket-quality.md
 ```
 
-The blueprint is self-contained. Run `/implement docs/adr/0001-...-blueprint.md` to execute it.
+The blueprint is self-contained. Run `/playbook:implement docs/adr/0001-...-blueprint.md` to execute it.
 
 ### Flags
 
 - `--record-only`: skips the blueprint. Use this when the implementation plan comes in a follow-up session.
 - `--list`: lists existing records, then stops.
 
-### What /adr writes to memory
+### What /playbook:adr writes to memory
 
-During investigation, any durable conventions or gotchas discovered get written as project memory facts. After the gate passes, the decision itself and each rejected alternative (with reasoning) land in memory so future `/scope` and `/adr` runs don't re-propose them.
+During investigation, any durable conventions or gotchas discovered get written as project memory facts. After the gate passes, the decision itself and each rejected alternative (with reasoning) land in memory so future `/playbook:scope` and `/playbook:adr` runs don't re-propose them.
 
-## /learn-project: Building Project Knowledge
+## /playbook:learn-project: Building Project Knowledge
 
-`/learn-project` reads the repo broadly, distils what it finds into atomic facts, and writes them to memory. It's read-only on the project: the only writes are fact files under `~/.claude/memory/`.
+`/playbook:learn-project` reads the repo broadly, distils what it finds into atomic facts, and writes them to memory. It's read-only on the project: the only writes are fact files under `~/.claude/memory/`.
 
 Sources it reads (when available):
 - Git history: churn hotspots, commit conventions, contributors.

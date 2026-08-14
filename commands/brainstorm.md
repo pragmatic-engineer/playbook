@@ -1,5 +1,5 @@
 ---
-description: Divergent discovery session that explores a raw idea, weighs approaches, and produces an approved design doc that hands off to /scope.
+description: Divergent discovery session that explores a raw idea, weighs approaches, and produces an approved design doc that hands off to /playbook:scope.
 allowed-tools: Agent, Read, Bash, Grep, Glob, Skill, Write, Edit, WebFetch
 argument-hint: "[idea | PROJ-123 | ./prompt.md] [--ticket <id>] [--depth 0-2] [--adr] [--no-chain] [--help]"
 model: opus
@@ -8,44 +8,44 @@ effort: xhigh
 
 # Brainstorm: Divergent Discovery
 
-Turn a raw idea into an approved design doc. Explore the problem, challenge the premise, weigh 2-3 approaches, and capture the "why" before any planning starts. This is the divergent counterpart to `/scope`: `/scope` converges a settled direction into a plan, `/brainstorm` finds the direction first.
+Turn a raw idea into an approved design doc. Explore the problem, challenge the premise, weigh 2-3 approaches, and capture the "why" before any planning starts. This is the divergent counterpart to `/playbook:scope`: `/playbook:scope` converges a settled direction into a plan, `/playbook:brainstorm` finds the direction first.
 
-Invoked as `/brainstorm`. The remaining arguments are an optional idea seed, ticket id, or file path.
+Invoked as `/playbook:brainstorm`. The remaining arguments are an optional idea seed, ticket id, or file path.
 
-The terminal state is a design doc plus an offer to run `/scope`. Do NOT write code, scaffold anything, or produce an implementation plan here. That's `/scope` and `/implement`.
+The terminal state is a design doc plus an offer to run `/playbook:scope`. Do NOT write code, scaffold anything, or produce an implementation plan here. That's `/playbook:scope` and `/playbook:implement`.
 
 ## Help
 
 If the arguments contain `--help`, print this and stop:
 
 ```
-/brainstorm - Divergent discovery that produces a design doc
+/playbook:brainstorm - Divergent discovery that produces a design doc
 
 USAGE:
-  /brainstorm [idea]              Start an interactive discovery session
-  /brainstorm "offline mode"      Start with an idea seed
-  /brainstorm PROJ-123            Pull a ticket and discover from it
-  /brainstorm ./notes.md          Load the idea seed from a file
+  /playbook:brainstorm [idea]              Start an interactive discovery session
+  /playbook:brainstorm "offline mode"      Start with an idea seed
+  /playbook:brainstorm PROJ-123            Pull a ticket and discover from it
+  /playbook:brainstorm ./notes.md          Load the idea seed from a file
 
 OPTIONS:
   --ticket <id>  Force ticket mode for <id> (skip seed/file detection).
   --depth <0-2>  How far to crawl ticket links: 0 ticket only, 1 direct
                  links (default), 2 one more hop. Always bounded.
-  --adr        Route to /adr at the end instead of /scope (the direction
+  --adr        Route to /playbook:adr at the end instead of /playbook:scope (the direction
                carries a weighty architectural decision worth a formal record).
-  --no-chain   Write the design doc and stop. Don't offer to run /scope.
+  --no-chain   Write the design doc and stop. Don't offer to run /playbook:scope.
   --help       Show this help
 
 Asks one question at a time with a recommended answer. Given a ticket id, pulls the
 ticket (description, comments, attachments, linked items) via a connected MCP or a
 configured provider command, then explores the codebase in parallel before asking
 you. Proposes 2-3 approaches, captures the decision in .claude/designs/<date>-<slug>.md,
-then offers to chain into /scope (which reads the doc and skips what it already settled).
+then offers to chain into /playbook:scope (which reads the doc and skips what it already settled).
 ```
 
 ## Core Rules (MUST)
 
-1. **Do NOT write code or an implementation plan.** The output is a design doc. Detailed file lists, Work Units, and test strategy belong to `/scope`.
+1. **Do NOT write code or an implementation plan.** The output is a design doc. Detailed file lists, Work Units, and test strategy belong to `/playbook:scope`.
 2. **Ask ONE question at a time.** One question, a recommended answer, wait, then the next. The only exception is the first message, where you present context and the first question together.
 3. **Explore before asking.** If the codebase settles a question, resolve it yourself and report what you found. Only ask about intent, constraints, and preferences the code can't answer.
 4. **Challenge the premise.** Don't accept the framing at face value. Ask whether this is the right problem, whether a simpler direction meets the goal, and what "done" actually looks like.
@@ -109,7 +109,7 @@ Alongside the `Explore` agents, dispatch one independent `critic` agent (`subage
 
 Consolidate the returns into a short cited digest (a few bullets, each with `file:line`). This grounds the questions that follow so you ask about intent, not about facts the code already holds. In ticket mode, fold the Step 1.5 ticket findings into the same digest, citing the source id or url for those. Assign each `Explore` agent a stable `name` at spawn and `TaskStop` it as soon as it returns. A spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps a subagent running in the background.
 
-**Verify the load-bearing premises before diverging.** From the digest, list the load-bearing citations: the premises the design will rest on (for example "the code already does X", "there is no existing helper for Y"). Re-read each cited `file:line`. Drop or tag `[unverified]` any that don't hold, and tag each surviving context bullet HIGH / MEDIUM / LOW (the `grounding-review` skill defines the levels). Spot-check the load-bearing claims only; don't audit every citation, or the divergent phase drags. Dropped or LOW-confidence premises become open items in the Step 7 handoff trailer.
+**Verify the load-bearing premises before diverging.** From the digest, list the load-bearing citations: the premises the design will rest on (for example "the code already does X", "there is no existing helper for Y"). Re-read each cited `file:line`. Drop or tag `[unverified]` any that don't hold, and tag each surviving context bullet HIGH / MEDIUM / LOW (the `playbook:grounding-review` skill defines the levels). Spot-check the load-bearing claims only; don't audit every citation, or the divergent phase drags. Dropped or LOW-confidence premises become open items in the Step 7 handoff trailer.
 
 ### Step 3: Interactive discovery
 
@@ -130,7 +130,7 @@ Present 2-3 distinct approaches with their trade-offs. Lead with your recommenda
 
 ### Step 5: Route check
 
-Look at the chosen direction. If it hides a weighty, hard-to-reverse architectural decision (a data model, a public contract, a cross-cutting dependency), flag it and offer `/adr` for the deep record: **"This carries an architectural call worth a formal record. Route to /adr for that decision? I'd recommend yes because it's hard to reverse."** Otherwise the handoff target is `/scope`. `--adr` forces the `/adr` route.
+Look at the chosen direction. If it hides a weighty, hard-to-reverse architectural decision (a data model, a public contract, a cross-cutting dependency), flag it and offer `/playbook:adr` for the deep record: **"This carries an architectural call worth a formal record. Route to /playbook:adr for that decision? I'd recommend yes because it's hard to reverse."** Otherwise the handoff target is `/playbook:scope`. `--adr` forces the `/playbook:adr` route.
 
 ### Step 6: Present the design
 
@@ -138,7 +138,7 @@ Present the design in sections scaled to complexity: a few sentences where it's 
 
 ### Step 7: Write the design doc
 
-On approval, save to `.claude/designs/<YYYY-MM-DD>-<slug>.md`. First time in this repo, create the dir and ignore it (same pattern as `/scope`'s plans):
+On approval, save to `.claude/designs/<YYYY-MM-DD>-<slug>.md`. First time in this repo, create the dir and ignore it (same pattern as `/playbook:scope`'s plans):
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
@@ -168,19 +168,19 @@ Ticket: <id and link, if ticket mode; omit otherwise>
 <the chosen approach and why, with rejection notes for the others>
 
 ## Components and boundaries
-<the units and their interfaces, kept light; /scope does the detailed Work Units>
+<the units and their interfaces, kept light; /playbook:scope does the detailed Work Units>
 
 ## Risks and open questions
-<what's flagged but accepted, and what /scope still needs to decide>
+<what's flagged but accepted, and what /playbook:scope still needs to decide>
 
 ## Routing note
-<route to /adr for a decision, or to /scope>
+<route to /playbook:adr for a decision, or to /playbook:scope>
 
 ## Confidence + open items
 
 - Confidence: HIGH | MEDIUM | LOW, <one line on what makes it that>
 - Open items (verify downstream):
-  - <blind spot or LOW-confidence premise>, <who verifies: /scope interview, /implement watch>
+  - <blind spot or LOW-confidence premise>, <who verifies: /playbook:scope interview, /playbook:implement watch>
 ```
 
 Save the file. Don't auto-commit.
@@ -207,7 +207,7 @@ Tell the user: **"Design doc written to `<path>`. Give it a read and tell me if 
 
 Once approved, unless `--no-chain`:
 
-- **`/scope` route:** ask **"Run `/scope` now? It'll read the design doc and skip what we already settled."** On yes, invoke `/scope` pointed at the doc path.
-- **`/adr` route** (from Step 5 or `--adr`): ask **"Run `/adr` now to record that decision?"** On yes, invoke `/adr` with the doc as context.
+- **`/playbook:scope` route:** ask **"Run `/playbook:scope` now? It'll read the design doc and skip what we already settled."** On yes, invoke `/playbook:scope` pointed at the doc path.
+- **`/playbook:adr` route** (from Step 5 or `--adr`): ask **"Run `/playbook:adr` now to record that decision?"** On yes, invoke `/playbook:adr` with the doc as context.
 
 With `--no-chain`, print the doc path and the suggested next command, then stop.

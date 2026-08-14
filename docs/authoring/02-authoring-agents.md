@@ -56,7 +56,7 @@ Grant the smallest `tools` allowlist the role needs, and say so in the `descript
 
 Pick the strict wording whenever the role genuinely needs no shell. `shell/check-agents.sh` reads the tier off the `description` and checks the `tools` list against it, so the claim and the allowlist cannot drift apart.
 
-A **write-capable** agent claims neither tier and holds `Edit`, `Write`, and `Bash` because writing code is its job. `implementer` is the example: `/implement` spawns it for the RED, GREEN, and REFACTOR steps and the `--no-tdd` path. The lint does not forbid write tools, it only forbids them when a read-only claim contradicts them, so a write-capable agent passes as long as its description does not say read-only.
+A **write-capable** agent claims neither tier and holds `Edit`, `Write`, and `Bash` because writing code is its job. `implementer` is the example: `/playbook:implement` spawns it for the RED, GREEN, and REFACTOR steps and the `--no-tdd` path. The lint does not forbid write tools, it only forbids them when a read-only claim contradicts them, so a write-capable agent passes as long as its description does not say read-only.
 
 ## The guardrail template
 

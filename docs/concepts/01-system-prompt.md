@@ -21,7 +21,7 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions inhe
 
 **Output rules.** Spartan: no filler words, no pleasantries, no hedging, no trailing summaries. No em or en dashes. Expansion is reserved for security warnings or multi-step sequences where order matters. One clarifying question only, and only when the request is ambiguous on a design decision with lasting effects.
 
-**Writing voice.** A separate section governs human-facing prose (PR descriptions, review comments, tickets, Slack). It's deliberately warmer than the output rules and defers to the `writing-style` skill for the full rule set. The two voices are kept distinct on purpose: the output rules are for replies to you; the writing rules are for content other humans read.
+**Writing voice.** A separate section governs human-facing prose (PR descriptions, review comments, tickets, Slack). It's deliberately warmer than the output rules and defers to the `playbook:writing-style` skill for the full rule set. The two voices are kept distinct on purpose: the output rules are for replies to you; the writing rules are for content other humans read.
 
 **CLI environment.** RTK (Rust Token Killer) runs as a PreToolUse hook and rewrites Bash commands to cut token use. The prompt names the available meta-commands (`rtk gain`, `rtk discover`, `rtk proxy`) so Claude knows what's wired in without needing to discover it each session.
 

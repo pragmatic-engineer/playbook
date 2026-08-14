@@ -72,7 +72,7 @@ WU-11 rewrote `install.sh` and deleted both `setup-local.sh` and `merge-settings
 
 ### MINOR 5: three unhandled error paths
 
-**Resolved.** Consequences now cover version skew between the binary and the plugin (with a `/doctor` warning requirement), preservation of hand-edited `settings.json` entries, and a rollback story pinning a previous version by tag.
+**Resolved.** Consequences now cover version skew between the binary and the plugin (with a `/playbook:doctor` warning requirement), preservation of hand-edited `settings.json` entries, and a rollback story pinning a previous version by tag.
 
 ## Phase 3: Test Review, WARN then PASS after revision
 

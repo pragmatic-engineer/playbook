@@ -58,7 +58,7 @@ When in worktree mode, read and grep all files under `$WT` instead of the local 
 
 ## Voice rules (mandatory)
 
-Invoke the `grounding-review` skill before drafting any finding, and load the `writing-style` skill alongside it (grounding-review depends on it for voice, banned words, and GitHub comment patterns). The full discipline lives in those two skills.
+Invoke the `playbook:grounding-review` skill before drafting any finding, and load the `playbook:writing-style` skill alongside it (grounding-review depends on it for voice, banned words, and GitHub comment patterns). The full discipline lives in those two skills.
 
 Comment bodies are read by another engineer, so they use the humane `writing-style` register (warm, contractions, constructive), NOT the terse operator voice from the "Concise & Direct" output style or system prompt `## Output`. Where those would conflict, `writing-style` wins for anything posted to GitHub. The non-negotiable points for inline comments posted to GitHub:
 
@@ -151,7 +151,7 @@ gh pr view "$PR_NUMBER"
 gh pr diff "$PR_NUMBER"
 ```
 
-Capture: `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `REVIEW_JSON`. You'll need them for the API calls in Step 4. `REVIEW_JSON` resolves to `/tmp/<org>/<repo>/quick-review-<number>.json`, and its directory is created here so the Step 4 write succeeds.
+Capture: `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `REVIEW_JSON`. You'll need them for the API calls in Step 4. `REVIEW_JSON` resolves to `/tmp/<org>/<repo>/playbook:quick-review-<number>.json`, and its directory is created here so the Step 4 write succeeds.
 
 ## Step 2: Delegate the review pass (isolated reviewer subagent)
 
@@ -171,7 +171,7 @@ Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`); the moment it returns its
 
 ## Step 3: Review report contract
 
-The `reviewer` subagent returns a report rendered in the `grounding-review` Review Report Format. `/quick-review` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
+The `reviewer` subagent returns a report rendered in the `grounding-review` Review Report Format. `/playbook:quick-review` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
 
 Relay the returned report to the user unchanged, then proceed to posting. Post findings verbatim from their `Post:` blocks; the orchestrator does NOT re-read source files (the subagent already grounded every citation), which is what keeps main context lean.
 
@@ -185,7 +185,7 @@ Wait for response. If `none` or `skip`, stop here.
 
 Build each inline comment from that finding's `Post:` block verbatim as the comment `body`, anchored to the finding's `file:line`. What the user read in the report is exactly what posts. Skip any finding marked `Report-only`.
 
-Build a JSON payload at `$REVIEW_JSON` (`/tmp/<org>/<repo>/quick-review-<number>.json`; the directory was created in Step 1):
+Build a JSON payload at `$REVIEW_JSON` (`/tmp/<org>/<repo>/playbook:quick-review-<number>.json`; the directory was created in Step 1):
 
 ```json
 {

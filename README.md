@@ -9,9 +9,9 @@ claude plugin marketplace add pragmatic-engineer/marketplace
 claude plugin install playbook@pragmatic-engineer
 ```
 
-Then open a Claude Code session and run `/setup --install-aliases --use-system-prompt`. Those flags install the shell launchers and the custom system prompt without asking; drop them and `/setup` asks two yes/no questions instead (both default to yes). Run `/doctor` afterwards to verify.
+Then open a Claude Code session and run `/playbook:setup --install-aliases --use-system-prompt`. Those flags install the shell launchers and the custom system prompt without asking; drop them and `/playbook:setup` asks two yes/no questions instead (both default to yes). Run `/playbook:doctor` afterwards to verify.
 
-That is the primary path. The plugin content (skills, commands, agents, hooks) is available immediately after install; `/setup` adds the local layers on top. For the full local install (curl one-liner, requirements, uninstall), see [docs/guides/00-install.md](docs/guides/00-install.md).
+That is the primary path. The plugin content (skills, commands, agents, hooks) is available immediately after install; `/playbook:setup` adds the local layers on top. For the full local install (curl one-liner, requirements, uninstall), see [docs/guides/00-install.md](docs/guides/00-install.md).
 
 ## Layers
 
@@ -20,7 +20,7 @@ Playbook has four layers. Each is independent; stop at any level.
 | Layer | When | What it does |
 |---|---|---|
 | 1. Plugin content | Always, after `claude plugin install` | Skills, commands, subagents, and functional hooks load from the plugin. No files written to `~/.claude`. |
-| 2. Safety guards and settings | Always, after `/setup` | Copies the three guard hooks into `~/.claude/hooks/` and seeds or merges `~/.claude/settings.json`. Runs regardless of the other choices. |
+| 2. Safety guards and settings | Always, after `/playbook:setup` | Copies the three guard hooks into `~/.claude/hooks/` and seeds or merges `~/.claude/settings.json`. Runs regardless of the other choices. |
 | 3. Shell launchers | Opt-in (recommended) | Adds `cc` and `ccd` to `~/.bashrc` or `~/.zshrc`. Both shells work; `cc clean` and `cc raw` are zsh-only (see Usage). |
 | 4. Custom system prompt | Opt-in (recommended) | Copies `prompts/SYSTEM_PROMPT.md` to `~/.claude/prompts/`; `cc` passes it via `--system-prompt-file`. Plugin content works without it. |
 
@@ -40,7 +40,7 @@ cc raw [id]            # resume verbatim, no fork or cleanup
 
 `cc` loads the system prompt (when installed), picks a model, and prunes old transcripts (keeps the newest 5; set `CCD_KEEP` to change, `CCD_KEEP=0` disables).
 
-**One launcher, both shells.** `shell/zsh/cc.zsh` and `shell/bash/cc.sh` are thin entry points that both source the same modules under `shell/shared/`. So bash and zsh behave identically: every subcommand above, the config-drift auto-fork on the default resume, and retention all work the same in either shell. Source the entry for your shell (`cc.zsh` from `~/.zshrc`, `cc.sh` from `~/.bashrc`); `/setup --install-aliases` wires the right one.
+**One launcher, both shells.** `shell/zsh/cc.zsh` and `shell/bash/cc.sh` are thin entry points that both source the same modules under `shell/shared/`. So bash and zsh behave identically: every subcommand above, the config-drift auto-fork on the default resume, and retention all work the same in either shell. Source the entry for your shell (`cc.zsh` from `~/.zshrc`, `cc.sh` from `~/.bashrc`); `/playbook:setup --install-aliases` wires the right one.
 
 `cc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine (`shell/shared/worktree.sh`) is shared by both shells. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
 
@@ -50,19 +50,19 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 
 | Command | What it does |
 |---|---|
-| `/setup` | Wires the guards, seeds `settings.json`, and installs what you choose. Safe to run repeatedly. |
-| `/doctor` | Checks the four layers and prints a pass/info table with a remediation hint for each miss. |
-| `/brainstorm` | Divergent discovery session; explores a raw idea and produces an approved design doc for `/scope`. |
-| `/scope` | Interview-driven planning; saves a verified, parallel-safe plan to `.claude/plans/` for `/implement`. |
-| `/implement` | Executes a `/scope` plan or `/adr` blueprint with subagents and TDD, committing each work unit. `--auto` opens a PR. |
-| `/adr` | Creates an Architecture Decision Record through investigate, draft, quality-gate, finalise. Saves to `.claude/adr/`. |
-| `/commit-and-push` | Writes a commit message from the staged diff, commits signed, optionally rebases, then pushes. |
-| `/create-pull-request` | Opens a PR with pre-flight checks, a conventional-commit title, and the team PR template. |
-| `/quick-review` | Single-pass PR review using the `grounding-review` discipline, posted as a pending GitHub review. |
-| `/deep-review` | Multi-agent PR review; spawns specialist subagents in parallel, consolidates findings, posts a pending review. |
-| `/address-pr-comments` | Walks unresolved PR comments, applies fixes or drafts replies, then pushes and posts replies. |
-| `/learn-project` | Analyses the repo (git history, code, PRs, JIRA/Confluence) and writes distilled facts to memory. Read-only; confirms before writing. |
-| `/repo-audit` | Read-only four-phase repository audit (discovery, findings, strategy, task plan). |
+| `/playbook:setup` | Wires the guards, seeds `settings.json`, and installs what you choose. Safe to run repeatedly. |
+| `/playbook:doctor` | Checks the four layers and prints a pass/info table with a remediation hint for each miss. |
+| `/playbook:brainstorm` | Divergent discovery session; explores a raw idea and produces an approved design doc for `/playbook:scope`. |
+| `/playbook:scope` | Interview-driven planning; saves a verified, parallel-safe plan to `.claude/plans/` for `/playbook:implement`. |
+| `/playbook:implement` | Executes a `/playbook:scope` plan or `/playbook:adr` blueprint with subagents and TDD, committing each work unit. `--auto` opens a PR. |
+| `/playbook:adr` | Creates an Architecture Decision Record through investigate, draft, quality-gate, finalise. Saves to `.claude/adr/`. |
+| `/playbook:commit-and-push` | Writes a commit message from the staged diff, commits signed, optionally rebases, then pushes. |
+| `/playbook:create-pull-request` | Opens a PR with pre-flight checks, a conventional-commit title, and the team PR template. |
+| `/playbook:quick-review` | Single-pass PR review using the `grounding-review` discipline, posted as a pending GitHub review. |
+| `/playbook:deep-review` | Multi-agent PR review; spawns specialist subagents in parallel, consolidates findings, posts a pending review. |
+| `/playbook:address-pr-comments` | Walks unresolved PR comments, applies fixes or drafts replies, then pushes and posts replies. |
+| `/playbook:learn-project` | Analyses the repo (git history, code, PRs, JIRA/Confluence) and writes distilled facts to memory. Read-only; confirms before writing. |
+| `/playbook:repo-audit` | Read-only four-phase repository audit (discovery, findings, strategy, task plan). |
 
 ## Skills
 

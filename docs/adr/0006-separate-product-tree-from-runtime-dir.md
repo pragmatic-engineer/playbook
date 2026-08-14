@@ -32,7 +32,7 @@ audit, which named it finding A1 and traced S1, S2, S3, S5, S8, D1 and D2 back t
   session immediately, at working-tree-delete time rather than merge time. This is recorded
   as the `hook-rename-lockstep-settings` gotcha and was hit again on 2026-08-11 during the
   ADR 0005 migration.
-- **The documented install path was never exercised.** `install.sh` and `/setup` have never
+- **The documented install path was never exercised.** `install.sh` and `/playbook:setup` have never
   run on a machine where the repo did not already sit at `~/.claude`. Two defects survive
   precisely because of that blind spot: the skills primer reads `$HOME/.claude/skills`,
   which the plugin path never creates (audit C1), and `install.sh` copies inert `.py`
@@ -58,7 +58,7 @@ under `shell/`, and `prompts/SYSTEM_PROMPT.md`).
 
 **The maintainer consumes the toolkit the same way a stranger does**: via
 `claude plugin marketplace add` and `claude plugin install playbook@pragmatic-engineer`,
-then `/setup`. Development happens in the new location; the installed plugin is what runs.
+then `/playbook:setup`. Development happens in the new location; the installed plugin is what runs.
 
 ## Decision drivers
 
@@ -107,7 +107,7 @@ extra indirection, and `-ef` self-copy guards would still be required.
 **Negative / costs**
 
 - A one-time migration with a real breakage window: 13 paths in the live `settings.json`
-  dangle between moving the files and re-running `/setup`. Mitigated by an idempotent
+  dangle between moving the files and re-running `/playbook:setup`. Mitigated by an idempotent
   `migrate.sh` with a dry-run mode and a backup, run from a shell that is not inside a
   Claude Code session.
 - The maintainer now runs the *installed* plugin, so a local edit needs a plugin reinstall

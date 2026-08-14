@@ -10,7 +10,7 @@ effort: xhigh
 
 Create a formal Architecture Decision Record (ADR) with an optional execution blueprint: an archivable decision record paired with an actionable implementation plan. The blueprint is its implementation plan.
 
-Invoked as `/adr`. The remaining arguments are the topic and flags.
+Invoked as `/playbook:adr`. The remaining arguments are the topic and flags.
 
 ## Defaults
 
@@ -26,10 +26,10 @@ No external config; these are fixed:
 If the arguments contain `--help`, print this and stop:
 
 ```
-/adr - Architecture Decision Records with execution blueprints
+/playbook:adr - Architecture Decision Records with execution blueprints
 
 USAGE:
-  /adr <topic> [options]
+  /playbook:adr <topic> [options]
 
 OPTIONS:
   --help         Show this help
@@ -40,10 +40,10 @@ NOTE: every ADR should have a companion execution blueprint. Use --record-only
 only when the blueprint comes in a follow-up session.
 
 EXAMPLES:
-  /adr "replace polling with WebSocket push"
-  /adr "split monolith order service"
-  /adr --record-only "deprecate v1 API"
-  /adr --list
+  /playbook:adr "replace polling with WebSocket push"
+  /playbook:adr "split monolith order service"
+  /playbook:adr --record-only "deprecate v1 API"
+  /playbook:adr --list
 
 Records save to docs/adr/ (tracked) as NNNN-{kebab}.md.
 ```
@@ -66,7 +66,7 @@ If no flags match, run the full workflow with the remaining text as the topic.
 
 ## Step 0: Load Writing Discipline (MUST, before any drafting)
 
-Invoke the `writing-style` skill (voice, banned words, prose rules) and the `grounding-research` skill (evidence and citations). Every ADR title, context line, alternative, and rejection note MUST follow them. ADR-specific rules on top:
+Invoke the `playbook:writing-style` skill (voice, banned words, prose rules) and the `playbook:grounding-research` skill (evidence and citations). Every ADR title, context line, alternative, and rejection note MUST follow them. ADR-specific rules on top:
 
 - **Data over opinion.** Support claims with file paths, metrics, query counts, or concrete scenarios.
 - **Spartan and informative.** Every sentence adds information. Cut sentences that only add emphasis.
@@ -138,7 +138,7 @@ Requirements:
 - The Decision section gives the reasoning for rejecting each alternative.
 - **Diagrams:** keep them readable, label nodes meaningfully, pick the right type (flowchart for components, sequence for interactions, state for lifecycles, ER for schemas). Always include current-state and proposed-state.
 
-**Knowledge capture:** if a project store is present at `~/.claude/memory/<owner>/<repo>/`, record the decision and each rejected alternative as memory facts (so future planning, including `/scope`, doesn't re-propose them). If no project store is present, skip this step silently.
+**Knowledge capture:** if a project store is present at `~/.claude/memory/<owner>/<repo>/`, record the decision and each rejected alternative as memory facts (so future planning, including `/playbook:scope`, doesn't re-propose them). If no project store is present, skip this step silently.
 
 Present the draft. Revise in place on feedback. Repeat until the user explicitly approves.
 
@@ -182,10 +182,10 @@ After the record is approved, write `{DIR}/{base}-blueprint.md` (`{base}` = file
 
 - Confidence: HIGH | MEDIUM | LOW, <one line on what makes it that>
 - Open items (verify downstream):
-  - <blind spot or LOW-confidence premise>, <who verifies: /scope interview, /implement watch>
+  - <blind spot or LOW-confidence premise>, <who verifies: /playbook:scope interview, /playbook:implement watch>
 ```
 
-Requirements: each work unit independently verifiable and committable as one small unit; file plans reference real existing paths; verification commands are literal (no placeholders); the Ordering table shows each WU's `Requires` and `Parallel group`; the test plan follows `engineering-standards`. Mark a shared `Parallel group` only when its members have no dependency on each other, touch disjoint files, and share no mutable state or ordering-sensitive step; otherwise leave them sequential. `/implement` consumes this blueprint exactly like a `/scope` plan: one small commit per WU, parallel-safe WUs dispatched to concurrent agents.
+Requirements: each work unit independently verifiable and committable as one small unit; file plans reference real existing paths; verification commands are literal (no placeholders); the Ordering table shows each WU's `Requires` and `Parallel group`; the test plan follows `engineering-standards`. Mark a shared `Parallel group` only when its members have no dependency on each other, touch disjoint files, and share no mutable state or ordering-sensitive step; otherwise leave them sequential. `/playbook:implement` consumes this blueprint exactly like a `/playbook:scope` plan: one small commit per WU, parallel-safe WUs dispatched to concurrent agents.
 
 Present the blueprint. Revise in place until the user explicitly approves.
 

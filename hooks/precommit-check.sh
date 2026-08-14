@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 # PreToolUse(Bash) guard: mechanical sanity check on the staged diff before a commit.
 #
-# /commit-and-push runs `context: fork` on the `git` agent, so nothing in that
+# /playbook:commit-and-push runs `context: fork` on the `git` agent, so nothing in that
 # flow ever looks at the diff it is about to commit. This guard is the mechanical
 # half of that gap: it reads the staged diff and flags the obvious problems that
 # do not need judgement (debug leftovers, secret-shaped files, an oversized
