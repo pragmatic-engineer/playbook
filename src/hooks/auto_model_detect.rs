@@ -105,8 +105,13 @@ fn has_design_intent(prompt: &str) -> bool {
     phrase_hit || matches_whats_the_best(&lower)
 }
 
+/// Matches python's `\w` under `re.IGNORECASE` with no `re.ASCII` flag: any
+/// Unicode letter or digit counts as a word character, not only ASCII ones.
+/// An ASCII-only check here would make Rust see a word boundary where
+/// python does not (CJK text has no spaces, and accented Latin is common),
+/// so Rust could fire where python stays silent.
 fn is_word_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
+    c.is_alphanumeric() || c == '_'
 }
 
 /// True if `needle` occurs anywhere in `haystack` with a word boundary

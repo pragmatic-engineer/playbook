@@ -284,9 +284,13 @@ fn append_auto_learn_nudge(extra_context: &mut String, home: &str, repo_root: &s
         .join(".claude")
         .join("runtime")
         .join("to-learn");
+    // Trim before parsing: python's `int(...)` strips surrounding
+    // whitespace, so a padded value must parse the same way here rather
+    // than silently falling back to the default. Matches
+    // hooks/session-init.py:193.
     let max_age_days = std::env::var("AUTO_LEARN_MAX_AGE_DAYS")
         .ok()
-        .and_then(|v| v.parse().ok())
+        .and_then(|v| v.trim().parse().ok())
         .unwrap_or(DEFAULT_AUTO_LEARN_MAX_AGE_DAYS);
     prune_old(&qdir, max_age_days);
 
