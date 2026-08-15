@@ -258,6 +258,39 @@ Real paths this plan touches, all confirmed present.
   - [ ] `docs/adr/0007-test-mapping.md` has a new-test counterpart for every row, none blank
   - [ ] A container built `FROM debian:stable-slim` with only `git` and the binary installed runs every hook successfully, asserted by a CI job, not by inspection
 
+### WU-20: port the settings seed generator
+- Requires: WU-8
+- Goal: `shell/gen-shared-settings.py` moves into the binary as `playbook settings gen`, with byte-identical output.
+- Files:
+  - `src/settings/gen.rs` | create | port of `shell/gen-shared-settings.py`: canned permissions block, `skipAutoPermissionPrompt: false`, strip any pinned model, drop personal keys
+  - `src/settings/mod.rs` | create | module wiring, shared with WU-21
+  - `src/main.rs` | edit | add the `settings gen` subcommand
+  - `Makefile` | edit | `GEN` points at the binary instead of the script
+  - `tests/settings_gen.rs` | create | ported cases plus the differential comparison
+- Verification: `cargo test --test settings_gen`
+- Tests: port every case in `shell/gen-shared-settings.test.sh`. Regression-pinning comes first: run the python generator and the Rust generator over the same input `settings.json` and assert **byte-identical** output. Byte equality is the right bar here, unlike `graph.json`, because both write one JSON document from an ordered input with no directory walk involved.
+- Done When:
+  - [ ] `shell/gen-shared-settings.py` is NOT deleted yet, so the comparison keeps working
+  - [ ] Regenerating `settings.shared.json` with the Rust generator produces no diff against the committed file
+  - [ ] The generator's own filter still refuses to reintroduce functional hooks into the seed
+
+### WU-21: port the settings seed validator, and move its CI lane
+- Requires: WU-20
+- Goal: `shell/check-shared-settings.py` moves into the binary as `playbook settings check`, and its CI check moves from `shell-ci` to `rust-ci`.
+- Files:
+  - `src/settings/check.rs` | create | port of `shell/check-shared-settings.py`: permissions block matches, no pinned model, prompt defaults set, no personal keys leaked, every hook command resolves inside the repo
+  - `src/main.rs` | edit | add the `settings check` subcommand
+  - `.github/workflows/shell-ci.yml` | edit | drop the `python3 shell/check-shared-settings.py` step
+  - `.github/workflows/rust-ci.yml` | edit | add `playbook settings check` after the build
+  - `shell/plugin-e2e.sh` | edit | call the binary instead of the script
+  - `tests/settings_check.rs` | create | ported cases
+- Verification: `cargo test --test settings_check && ./target/debug/playbook settings check settings.shared.json permissions.shared.json .`
+- Tests: port every case in `shell/check-shared-settings.test.sh`, including each rejection case. A validator whose failure paths are untested is worse than none, so every "must fail" case must be shown failing.
+- Done When:
+  - [ ] Both `shell/gen-shared-settings.py` and `shell/check-shared-settings.py` are deleted, along with their `*.test.sh` suites, with rows added to `docs/adr/0007-test-mapping.md`
+  - [ ] `shell-ci` no longer invokes `python3` anywhere
+  - [ ] `find . -name "*.py" -not -path "./target/*"` returns nothing
+
 ### WU-15: Homebrew tap
 - Requires: WU-10
 - Goal: `brew install pragmatic-engineer/tap/playbook` works.
@@ -345,6 +378,8 @@ Real paths this plan touches, all confirmed present.
 | WU-17 | WU-16 | none |
 | WU-18 | WU-17 | none |
 | WU-19 | WU-18 | none |
+| WU-20 | WU-8 | none |
+| WU-21 | WU-20 | none |
 
 ## Parallel Groups
 
@@ -364,6 +399,7 @@ PR-sized delivery boundaries, stacked.
 | D | WU-10, WU-11, WU-12, WU-15 | Distribution, three channels, doctor layers |
 | E | WU-13, WU-14 | Guards last, then delete the old runtime |
 | F | WU-16, WU-17, WU-18, WU-19 | Release 2: launcher and Windows |
+| G | WU-20, WU-21 | Rust only: port the remaining build tooling |
 
 Segments A through E are release 1 and deliver the whole justification: single-language hooks, both shared libraries gone, `jq` and `python3` out of the runtime, one registry. Segment F is separable.
 
@@ -402,6 +438,8 @@ graph TD
   WU16 --> WU17[WU-17 cc worktree]
   WU17 --> WU18[WU-18 bash + zsh shim]
   WU18 --> WU19[WU-19 PowerShell + Windows]
+  WU8 --> WU20[WU-20 settings gen port]
+  WU20 --> WU21[WU-21 settings check port]
 ```
 
 ## Confidence + open items
@@ -413,4 +451,4 @@ graph TD
   - **`graph.json` byte-identity between the python and Rust writers** may prove impractical if python dict ordering leaks into the output. If so, WU-5 falls back to semantic equality on parsed JSON, which is weaker. Verify in WU-5's first test.
   - **Windows launcher semantics are unproven.** No Windows machine or CI leg exists in this repo today, so WU-19's `cd` behaviour in PowerShell is asserted from documentation, not observation. `[unverified]`
   - **Notarisation deferred.** Channel 3 on macOS relies on a documented `xattr` workaround. If it generates support load, a follow-up ADR covers Developer ID and `notarytool`.
-  - **The settings-seed allowlist inversion is deliberately NOT fixed here.** `shell/gen-shared-settings.py` builds the shipped seed by denylisting five personal keys from the maintainer's live `settings.json`, so personal config leaks by construction; the agreed fix is an allowlist in a shared `shell/settings_keys.py` (memory fact `settings-seed-allowlist-inversion`). WU-7 and WU-8 touch that generator, which makes it a tempting place to fix, and fixing it there would be scope creep on an already-XL plan. Flagged so the choice is deliberate rather than an oversight. `/playbook:implement` watch.
+  - **The settings-seed allowlist inversion is deliberately NOT fixed here.** `shell/gen-shared-settings.py` builds the shipped seed by denylisting five personal keys from the maintainer's live `settings.json`, so personal config leaks by construction; the agreed fix is an allowlist in the shared Rust settings module (WU-20) (memory fact `settings-seed-allowlist-inversion`). WU-7 and WU-8 touch that generator, which makes it a tempting place to fix, and fixing it there would be scope creep on an already-XL plan. Flagged so the choice is deliberate rather than an oversight. `/playbook:implement` watch.

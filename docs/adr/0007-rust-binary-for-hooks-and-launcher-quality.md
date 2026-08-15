@@ -93,6 +93,12 @@ Assessed against `skills/engineering-standards/SKILL.md`. Regression pinning was
 - [x] All verification commands are literal, no placeholders
 - [x] No unresolved questions remain, or each is explicitly deferred to a named open item
 
+## Amendment, 2026-08-15: WU-20 and WU-21 were not gated
+
+This report records the gate that ran on 2026-08-13 against a 20 work unit blueprint. The blueprint now has 22: the "Rust unless it is not possible" amendment to the parent ADR added WU-20 (port `shell/gen-shared-settings.py`) and WU-21 (port `shell/check-shared-settings.py`, and move its CI lane off `shell-ci`).
+
+The counts above are left as they were on purpose, because rewriting them would misrepresent what was actually checked. **Neither new unit has been through fact-check, adversarial review, or test review.** Gate them before executing, or accept the gap knowingly. The two carry a real design question the original gate never saw: moving the settings validator into the binary makes `shell-ci` depend on a compiled artifact, which is a coupling the current CI split deliberately avoids.
+
 ## Open items carried forward
 
 - The parallel-execution assumption is inferred from transcript p50s and measured directly only in WU-12.
