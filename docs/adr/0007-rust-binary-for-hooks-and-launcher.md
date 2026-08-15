@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date created:** 2026-08-13
-- **Date modified:** 2026-08-13
+- **Date modified:** 2026-08-15
 - **Amends:** ADR 0005 (migrate the hooks and the config scripts from shell to Python), ADR 0001 (package the toolkit as a plugin), ADR 0002 (plugin based install with always-on safety hooks)
 
 ## Context
@@ -177,6 +177,24 @@ Each ends with the user running `playbook init`, the same two-step shape `rtk` u
 The reasoning is evidential. This repo has twice shipped a state where hooks silently stopped firing, once for 28 hours across about 110 errors, and neither `/playbook:setup` nor `/playbook:doctor` caught it. A guard that fails open is worse than no guard, because it reports success. The four bash guards stay bash until the binary is proven in place, and are ported last.
 
 Rejections. **E** is the closest call and is rejected only on the four points above: it leaves `python3` and `jq` required, keeps the 29ms interpreter floor, keeps installation shell-dependent, and forecloses Windows. If the runtime dependency is not a problem you care about, E is the better decision and this ADR should be reopened. **Status quo** is rejected because the two-library drift risk is real and its justification is a wrong number; correcting the docs alone leaves the structural problem. **B** is rejected because three languages and three shared libraries is a worse end state than the two it replaces, and partial porting risks schema drift between `rebuild-memory-graph` (sole writer of `~/.claude/memory/graph.json`) and `memory-anchors` (sole reader). **C** is rejected because maintaining two implementations of every hook permanently is the exact failure this ADR exists to end, and it pays bash startup on every fire besides. **D** is rejected on repo weight, several MB per release in git history forever; note its original appeal rested on the executable bit surviving, which the documentation says not to rely on.
+
+### Rust unless it is not possible
+
+Added 2026-08-15 at the maintainer's direction, extending the scope above. The standing rule for this repo is now that new and ported code is Rust, and another language is reached for only where Rust cannot do the job.
+
+This closes a gap the original scope left open. Removing the interpreter from the **runtime**, point 3 above, does not remove Python from the **repo**. Three Python files sit outside the runtime path:
+
+| File | Lines | Status before this amendment |
+|---|---:|---|
+| `shell/merge-settings.py` | 160 | already in scope: WU-7 ports it, WU-14 deletes it |
+| `shell/gen-shared-settings.py` | 110 | edited by WU-8, never ported |
+| `shell/check-shared-settings.py` | 114 | not in scope at all; runs in `shell-ci` and `plugin-e2e.sh` |
+
+The last two come into scope and get their own work units. That is 224 lines of build and CI tooling, small beside the 3,148 already committed.
+
+**The cost is a CI coupling, and it deserves naming.** `shell-ci` needs no toolchain today: it lints and runs shell and Python directly. A Rust `check-shared-settings` makes that lane depend on a compiled binary, so either the check moves to `rust-ci` or `shell-ci` gains a `cargo build`. Moving it is cleaner, and the blueprint takes that route.
+
+**Python does not leave the test suite yet, and must not be forced out early.** The ports are trusted because they are compared against the originals: `src/common/emit.rs` shells out to the real `common.sh`, and the graph writer tests run the real `hooks/rebuild-memory-graph.py` and diff the result. Those oracles are the strongest evidence the ports are faithful. They disappear on their own at WU-14, when the originals are deleted. Deleting them sooner to satisfy this policy would trade real evidence for a tidier file listing.
 
 ## Consequences
 
