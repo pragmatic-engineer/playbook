@@ -1,12 +1,26 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Wires every hook Claude Code can invoke straight into `settings.json` as a
-//! bare `playbook hook <name>` command, retiring `hooks/hooks.json` as the
-//! source of truth. Before this module lands, `hooks/hooks.json` points all
-//! 15 hooks at python scripts under `${CLAUDE_PLUGIN_ROOT}/hooks/`, so the
-//! Rust binary this crate builds dispatches nothing in production; `wire` is
-//! the pivot that makes it live.
+//! Wires the 11 hooks Claude Code can invoke that are already ported to
+//! Rust straight into `settings.json` as a bare `playbook hook <name>`
+//! command, retiring `hooks/hooks.json` as the source of truth for them.
+//! Before this module lands, `hooks/hooks.json` points all 15 hooks at
+//! python scripts under `${CLAUDE_PLUGIN_ROOT}/hooks/`, so the Rust binary
+//! this crate builds dispatches nothing in production; `wire` is the pivot
+//! that makes the 11 ported hooks live.
+//!
+//! The remaining four hooks (`rm-workspace-guard`, `bg-await-guard`,
+//! `no-dash-guard`, `precommit-check`) are deliberately NOT rewired here.
+//! Their Rust modules (`src/hooks/*_guard.rs`) are still empty stubs
+//! (`pub fn run(_payload: &Payload) {}`) until WU-13 ports them, two
+//! Segments later; pointing `settings.json` at `playbook hook <name>` for
+//! one of them before then would silently disable a live safety guard,
+//! since the stub runs, emits no permission decision, and exits 0. This is
+//! the exact defect the 2026-08-16 ADR amendment to WU-8 records, and this
+//! module now avoids it: `wire` keeps writing their existing
+//! `~/.claude/hooks/<name>.sh` command instead. WU-13 is the only unit that
+//! should flip `GUARD_SPECS`'s `ported` field to `true`; do not "tidy" this
+//! ahead of that unit landing.
 //!
 //! `wire` is an upsert into whatever `settings.json` already has, never a
 //! wholesale replace: a hand-added hook entry a user placed alongside one of
@@ -30,23 +44,25 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// One hook registration `wire` ensures exists in `settings.json`: which
 /// event it fires on, the matcher grouping it belongs to (`None` for events
-/// hooks.json never gave a matcher, such as `SessionStart`), the bare hook
-/// name to invoke, and any `if` guard or `timeout` carried over unchanged
-/// from the entry it replaces.
+/// hooks.json never gave a matcher, such as `SessionStart`), the hook name
+/// to invoke, any `if` guard or `timeout` carried over unchanged from the
+/// entry it replaces, and whether its Rust port is real (`ported`), which
+/// decides whether `wire` may target the compiled binary for it at all.
 struct HookSpec {
     event: &'static str,
     matcher: Option<&'static str>,
     name: &'static str,
     if_cond: Option<&'static str>,
     timeout: Option<u64>,
+    ported: bool,
 }
 
-/// The full set of hook registrations `wire` maintains: the 11 functional
-/// hooks `hooks/hooks.json` used to register (one event/matcher shape each,
-/// ported line for line from that file, 12 entries since `session-clean-exit`
-/// fires on both `Stop` and `SessionEnd`), plus the 4 always-on safety guards
-/// `settings.json` already wires directly today. Together these are exactly
-/// the 15 `HookName` variants `src/lib.rs` declares.
+/// The 11 functional hooks `hooks/hooks.json` used to register, already
+/// ported to Rust, rewired here to the bare `playbook hook <name>` form
+/// (one event/matcher shape each, ported line for line from that file, 12
+/// entries since `session-clean-exit` fires on both `Stop` and
+/// `SessionEnd`). Together with `GUARD_SPECS` below these are exactly the
+/// 15 `HookName` variants `src/lib.rs` declares.
 ///
 /// Divergence from `hooks/hooks.json`'s literal shape: that file ships
 /// `Stop`'s two hooks (`session-clean-exit`, `memory-capture`) as two
@@ -56,13 +72,14 @@ struct HookSpec {
 /// matcher only selects which tool invocations a hook fires on, and `Stop`
 /// entries have no matcher to select by, so two groups versus one dispatches
 /// identically.
-const HOOK_SPECS: &[HookSpec] = &[
+const PORTED_HOOK_SPECS: &[HookSpec] = &[
     HookSpec {
         event: "SessionStart",
         matcher: None,
         name: "session-init",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "PreToolUse",
@@ -70,6 +87,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "preread-edit-check",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "PreToolUse",
@@ -77,6 +95,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "preread-size-check",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "PreToolUse",
@@ -84,6 +103,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "search-counter",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "PreToolUse",
@@ -91,6 +111,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "memory-anchors",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "PostToolUse",
@@ -98,6 +119,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "post-edit-track",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "PostToolUse",
@@ -105,6 +127,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "rebuild-memory-graph",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "UserPromptSubmit",
@@ -112,6 +135,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "auto-model-detect",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "PreCompact",
@@ -119,6 +143,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "precompact-warn",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "Stop",
@@ -126,6 +151,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "session-clean-exit",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "Stop",
@@ -133,6 +159,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "memory-capture",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
     HookSpec {
         event: "SessionEnd",
@@ -140,13 +167,30 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "session-clean-exit",
         if_cond: None,
         timeout: None,
+        ported: true,
     },
+];
+
+/// The 4 always-on safety guards `settings.json` already wires directly
+/// today, deliberately kept off the binary form `PORTED_HOOK_SPECS` gets.
+/// Their Rust modules (`src/hooks/rm_workspace_guard.rs` and the three
+/// siblings beside it) are still the empty stub
+/// `pub fn run(_payload: &Payload) {}`; WU-13, two Segments later, is the
+/// unit that fills them in, and is the only unit that should flip `ported`
+/// to `true` here. Until then `wire` keeps these four pointed at their
+/// working `~/.claude/hooks/<name>.sh` script, self-healing the entry back
+/// to that form even if a prior run (or a hand edit) left it on the binary
+/// form instead. See the 2026-08-16 amendment to this Work Unit in
+/// `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`: wiring
+/// a guard to a stub silently disables it.
+const GUARD_SPECS: &[HookSpec] = &[
     HookSpec {
         event: "PreToolUse",
         matcher: Some("Bash"),
         name: "rm-workspace-guard",
         if_cond: Some("Bash(rm:*)"),
         timeout: Some(10),
+        ported: false,
     },
     HookSpec {
         event: "PreToolUse",
@@ -154,6 +198,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "bg-await-guard",
         if_cond: None,
         timeout: Some(10),
+        ported: false,
     },
     HookSpec {
         event: "PreToolUse",
@@ -161,6 +206,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "no-dash-guard",
         if_cond: None,
         timeout: Some(10),
+        ported: false,
     },
     HookSpec {
         event: "PreToolUse",
@@ -168,6 +214,7 @@ const HOOK_SPECS: &[HookSpec] = &[
         name: "precommit-check",
         if_cond: Some("Bash(git commit:*)"),
         timeout: Some(10),
+        ported: false,
     },
 ];
 
@@ -227,8 +274,9 @@ pub struct WireOutcome {
     pub backup_path: Option<PathBuf>,
 }
 
-/// Writes every hook in `HOOK_SPECS` into `settings_path` as a bare
-/// `playbook hook <name>` command, creating `.hooks` and any event or
+/// Writes every hook in `PORTED_HOOK_SPECS` to its bare `playbook hook
+/// <name>` command and every hook in `GUARD_SPECS` to its legacy
+/// `~/.claude/hooks/<name>.sh` command, creating `.hooks` and any event or
 /// matcher group it needs from scratch, and leaving every other key in the
 /// file, and every hook entry not managed here, untouched. Idempotent:
 /// calling this twice in a row writes nothing the second time, since the
@@ -254,7 +302,7 @@ pub fn wire(settings_path: &Path) -> Result<WireOutcome, WireError> {
                 settings_path.display()
             ))
         })?;
-        for spec in HOOK_SPECS {
+        for spec in PORTED_HOOK_SPECS.iter().chain(GUARD_SPECS.iter()) {
             upsert_hook(hooks, spec, settings_path)?;
         }
     }
@@ -307,9 +355,9 @@ fn load_settings(path: &Path) -> Result<(Map<String, Value>, String), WireError>
 
 /// Ensures `hooks[spec.event]` contains one group whose matcher equals
 /// `spec.matcher`, and that group's `hooks` array contains exactly one entry
-/// for `spec.name`, rewritten to the bare `playbook hook <name>` form. Every
-/// other entry already in that group, and every other group on the same
-/// event, is left exactly as found: this upserts into the existing
+/// for `spec.name`, rewritten to its canonical form (see `target_command`).
+/// Every other entry already in that group, and every other group on the
+/// same event, is left exactly as found: this upserts into the existing
 /// structure, it never replaces it wholesale.
 fn upsert_hook(
     hooks: &mut Map<String, Value>,
@@ -411,24 +459,45 @@ fn is_legacy_command(cmd: &str, name: &str) -> bool {
     file_name == format!("{name}.py") || file_name == format!("{name}.sh")
 }
 
-/// The bare command `wire` writes for hook `name`: no path, resolved on
-/// `PATH` the same way a hand-written `rtk hook claude` entry already is.
+/// The bare command `wire` writes for an already-ported hook named `name`:
+/// no path, resolved on `PATH` the same way a hand-written `rtk hook claude`
+/// entry already is. Callers building a `HookSpec`'s entry should go through
+/// `target_command`, which also handles the still-unported guards; this is
+/// exposed separately only because `entry_targets` needs to recognise the
+/// bare form on its own.
 fn bare_command(name: &str) -> String {
     format!("playbook hook {name}")
+}
+
+/// The pre-Rust shell command `wire` keeps an unported hook pointed at:
+/// `~/.claude/hooks/<name>.sh`, the same path `settings.json` already wires
+/// directly today for each of the four guards in `GUARD_SPECS`.
+fn legacy_shell_command(name: &str) -> String {
+    format!("~/.claude/hooks/{name}.sh")
+}
+
+/// The command `wire` writes for `spec`: the bare `playbook hook <name>`
+/// binary form when its Rust port is real (`spec.ported`), or the legacy
+/// `~/.claude/hooks/<name>.sh` script when it is not, so an unported hook
+/// (today, the four guards in `GUARD_SPECS`) never gets pointed at a stub.
+fn target_command(spec: &HookSpec) -> String {
+    if spec.ported {
+        bare_command(spec.name)
+    } else {
+        legacy_shell_command(spec.name)
+    }
 }
 
 /// The exact JSON object `wire` writes for one `HookSpec`: `type` and
 /// `command` always, `if` and `timeout` only when the spec carries them, in
 /// that fixed key order every time, so re-running `wire` against its own
 /// prior output reproduces the identical object rather than merely an
-/// equivalent one.
+/// equivalent one. `command` comes from `target_command`, so it is only the
+/// bare binary form when the spec is actually ported.
 fn canonical_entry(spec: &HookSpec) -> Value {
     let mut entry = Map::new();
     entry.insert("type".to_string(), Value::String("command".to_string()));
-    entry.insert(
-        "command".to_string(),
-        Value::String(bare_command(spec.name)),
-    );
+    entry.insert("command".to_string(), Value::String(target_command(spec)));
     if let Some(if_cond) = spec.if_cond {
         entry.insert("if".to_string(), Value::String(if_cond.to_string()));
     }

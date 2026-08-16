@@ -14,17 +14,23 @@
 //! traceable to one place below:
 //! - Idempotence (assert on file bytes, not a return value):
 //!   `running_wire_twice_writes_nothing_the_second_time`
-//! - Every written command resolves to a real `HookName`, and is a bare
-//!   name rather than a path (the "bare-name assumption"):
-//!   `every_written_command_is_a_bare_playbook_hook_invocation_that_resolves`
+//! - Every written command for a ported hook resolves to a real `HookName`,
+//!   and is a bare name rather than a path (the "bare-name assumption"),
+//!   and the 11 ported hooks are exactly the ones wired that way:
+//!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
 //!   `pre_existing_user_hook_entry_is_preserved_not_clobbered`
-//! - Regression pin: no entry points under `~/.claude/hooks/` after wiring:
-//!   `no_entry_points_under_claude_hooks_dir_after_wiring`
+//! - Regression pin, scoped per the 2026-08-16 ADR amendment: only the four
+//!   guards may still point under `~/.claude/hooks/` after wiring, since
+//!   their Rust ports are still stubs until WU-13:
+//!   `only_the_four_guards_still_point_under_claude_hooks_dir_after_wiring`
 //! - The bare-name form survives a write-then-read round trip:
 //!   `bare_name_form_survives_write_then_read_round_trip`
 //! - Backup is timestamped and taken only when a change actually lands:
 //!   `settings_json_is_backed_up_before_a_real_change_and_not_on_a_no_op`
+//! - Regression pin for the defect itself: every hook name wired in binary
+//!   form has a real (non-stub) Rust implementation behind it:
+//!   `every_hook_wired_in_binary_form_has_a_non_stub_implementation`
 
 #![allow(dead_code)]
 
@@ -178,7 +184,7 @@ fn running_wire_twice_from_a_fresh_install_writes_nothing_the_second_time() {
 }
 
 #[test]
-fn every_written_command_is_a_bare_playbook_hook_invocation_that_resolves() {
+fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() {
     // Arrange
     let path = scratch_settings_path("resolves");
     write_json(&path, &unwired_fixture());
@@ -188,15 +194,18 @@ fn every_written_command_is_a_bare_playbook_hook_invocation_that_resolves() {
     let settings = read_json(&path);
     let commands = all_hook_commands(&settings);
 
-    // Assert: every command is bare (no path separator, no absolute path,
-    // no legacy python/shell script suffix), and its hook name resolves to
-    // a real HookName the same way clap would parse `playbook hook <name>`.
+    // Assert: every command that takes the bare form is bare (no path
+    // separator, no absolute path, no legacy python/shell script suffix)
+    // and its hook name resolves to a real HookName the same way clap would
+    // parse `playbook hook <name>`. The four guards deliberately do NOT
+    // take this form yet; they are covered separately in
+    // `only_the_four_guards_still_point_under_claude_hooks_dir_after_wiring`.
     assert!(!commands.is_empty(), "wiring should write hook commands");
     let mut resolved_names = std::collections::HashSet::new();
     for cmd in &commands {
-        let name = cmd
-            .strip_prefix("playbook hook ")
-            .unwrap_or_else(|| panic!("command should be a bare 'playbook hook <name>': {cmd}"));
+        let Some(name) = cmd.strip_prefix("playbook hook ") else {
+            continue;
+        };
         assert!(
             !name.contains('/') && !name.contains('\\'),
             "hook name segment should carry no path separators: {cmd}"
@@ -206,9 +215,13 @@ fn every_written_command_is_a_bare_playbook_hook_invocation_that_resolves() {
         resolved_names.insert(name.to_string());
     }
 
-    // All 15 HookName variants should be wired at least once: this is the
-    // pivot the whole Work Unit exists for, so pin it directly rather than
-    // only checking the commands that happen to be present.
+    // The 11 already-ported HookName variants should be wired in binary
+    // form at least once: this is the pivot the whole Work Unit exists for,
+    // so pin it directly rather than only checking the commands that happen
+    // to be present. The four guards are excluded on purpose: their Rust
+    // ports are still stubs until WU-13, so wiring them here would silently
+    // disable them, which is exactly the defect the 2026-08-16 ADR
+    // amendment records.
     let expected: std::collections::HashSet<&str> = [
         "session-init",
         "preread-edit-check",
@@ -221,10 +234,6 @@ fn every_written_command_is_a_bare_playbook_hook_invocation_that_resolves() {
         "precompact-warn",
         "session-clean-exit",
         "memory-capture",
-        "rm-workspace-guard",
-        "bg-await-guard",
-        "no-dash-guard",
-        "precommit-check",
     ]
     .into_iter()
     .collect();
@@ -232,7 +241,7 @@ fn every_written_command_is_a_bare_playbook_hook_invocation_that_resolves() {
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly the 15 declared HookName variants"
+        "wiring should register exactly the 11 ported HookName variants in binary form"
     );
 }
 
@@ -280,7 +289,7 @@ fn pre_existing_user_hook_entry_is_preserved_not_clobbered() {
 }
 
 #[test]
-fn no_entry_points_under_claude_hooks_dir_after_wiring() {
+fn only_the_four_guards_still_point_under_claude_hooks_dir_after_wiring() {
     // Arrange: today's real shape, all four guards under ~/.claude/hooks/.
     let path = scratch_settings_path("no-hooks-dir-paths");
     write_json(&path, &unwired_fixture());
@@ -290,11 +299,33 @@ fn no_entry_points_under_claude_hooks_dir_after_wiring() {
     let settings = read_json(&path);
     let commands = all_hook_commands(&settings);
 
-    // Assert: the exact failure this Work Unit fixes, pinned directly.
+    // Assert: the 2026-08-16 ADR amendment moved the original "no command
+    // may point under ~/.claude/hooks/" pin to WU-13, the unit where it
+    // becomes true for every hook. Until then it holds for the 11 ported
+    // hooks, and the four guards are the sole, explicit exception, since
+    // their Rust ports are still stubs.
+    let expected_guard_paths: std::collections::HashSet<String> = [
+        "rm-workspace-guard",
+        "bg-await-guard",
+        "no-dash-guard",
+        "precommit-check",
+    ]
+    .into_iter()
+    .map(|name| format!("~/.claude/hooks/{name}.sh"))
+    .collect();
+
     for cmd in &commands {
+        if cmd.contains("/.claude/hooks/") {
+            assert!(
+                expected_guard_paths.contains(cmd),
+                "only the four unported guards may still point under ~/.claude/hooks/: {cmd}"
+            );
+        }
+    }
+    for expected in &expected_guard_paths {
         assert!(
-            !cmd.contains("/.claude/hooks/"),
-            "no settings.json hook command may point under ~/.claude/hooks/ after wiring: {cmd}"
+            commands.contains(expected),
+            "each guard should still be wired to its working shell script: {expected}"
         );
     }
 }
@@ -362,5 +393,65 @@ fn settings_json_is_backed_up_before_a_real_change_and_not_on_a_no_op() {
     assert_eq!(
         entries_before, entries_after,
         "a no-op wire() call should not create a second backup file"
+    );
+}
+
+/// The literal body every stub hook module in `src/hooks/` starts life
+/// with, per `src/hooks/mod.rs`'s own description of the pre-port shape
+/// ("takes the parsed payload and does nothing"). A module whose source
+/// still contains this exact line has not been ported yet, regardless of
+/// what `wire()` claims to route it to.
+const STUB_HOOK_BODY: &str = "pub fn run(_payload: &Payload) {}";
+
+/// Regression pin for the defect this fix addresses: WU-8 wired every hook,
+/// guards included, to the bare `playbook hook <name>` binary form while
+/// the four guards' Rust modules were still empty stubs, which silently
+/// disabled them (a shell guard denies a dangerous command; the Rust stub
+/// prints nothing and exits 0). A test asserting only the command STRING
+/// that was written would not have caught this, since the string was
+/// correct; only the module behind it was not. This test instead reads
+/// wire()'s own output back and checks each hook it wired in binary form
+/// against its actual Rust source, so it keeps working unmodified once
+/// WU-13 ports the guards and `GUARD_SPECS` starts wiring them the same
+/// way: the moment a `HookSpec` flips to `ported: true`, this test starts
+/// checking it too, with no hardcoded hook-name list to update by hand.
+#[test]
+fn every_hook_wired_in_binary_form_has_a_non_stub_implementation() {
+    // Arrange: wire a fresh install, so every hook wire() currently wires
+    // in binary form shows up in the output, without hardcoding which
+    // those are.
+    let path = scratch_settings_path("non-stub-binary-form");
+
+    // Act
+    wire(&path).expect("wire should succeed on a fresh install");
+    let settings = read_json(&path);
+    let commands = all_hook_commands(&settings);
+
+    // Assert
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut checked = 0;
+    for cmd in &commands {
+        let Some(name) = cmd.strip_prefix("playbook hook ") else {
+            continue; // not wired in binary form, e.g. a guard still on its .sh script
+        };
+        checked += 1;
+        let module_path = manifest_dir
+            .join("src/hooks")
+            .join(format!("{}.rs", name.replace('-', "_")));
+        let source = fs::read_to_string(&module_path).unwrap_or_else(|err| {
+            panic!("hook module for '{name}' should exist at {module_path:?}: {err}")
+        });
+        assert!(
+            !source.contains(STUB_HOOK_BODY),
+            "'{name}' is wired to `playbook hook {name}` in settings.json, but \
+             {module_path:?} is still the empty stub. Wiring a hook to its binary \
+             form before its Rust port lands silently disables it: this is the \
+             exact WU-8 defect the 2026-08-16 ADR amendment records. Either port \
+             the hook first, or leave it on its legacy command until the port lands."
+        );
+    }
+    assert!(
+        checked > 0,
+        "wiring a fresh install should write at least one hook in binary form"
     );
 }
