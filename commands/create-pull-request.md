@@ -136,7 +136,12 @@ CHANGED=$(echo "$SHORTSTAT" | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep
 # Uncommitted work that would be left out of the PR
 DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
 # Does the diff touch any test files?
-TESTS=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" | grep -ciE '(\.test\.|\.spec\.|_test\.|test_|/tests?/|/__tests__/)' || true)
+# Anchor the directory patterns with (^|/): git returns repo-relative paths with
+# no leading slash, so a bare `/tests?/` never matches a top-level `tests/` dir
+# and every Rust PR reads as "no tests". Also count Rust inline `#[cfg(test)]`.
+TESTS=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" | grep -ciE '(\.test\.|\.spec\.|_test\.|test_|(^|/)tests?/|(^|/)__tests__/)' || true)
+INLINE_TESTS=$(git diff -U0 "origin/$BASE_BRANCH...HEAD" -- '*.rs' | grep -c '^+.*#\[cfg(test)\]' || true)
+TESTS=$((TESTS + INLINE_TESTS))
 
 echo "commits_ahead=$AHEAD changed_lines=${CHANGED:-0} dirty_files=$DIRTY test_files_touched=$TESTS"
 
@@ -273,7 +278,22 @@ DRAFT_ARG="--draft"
 
 echo "Creating PR: $CURRENT_BRANCH -> $BASE_BRANCH (draft: $([ -n "$DRAFT_ARG" ] && echo yes || echo no))"
 
-git push -u origin "HEAD:refs/heads/$CURRENT_BRANCH"
+# The push MUST gate the create. This block has no `set -e`, so without the
+# explicit check a rejected push (non-fast-forward, network, no write access)
+# falls straight through and `gh pr create` opens a PR against whatever the
+# remote branch held before, silently missing the local commits.
+if ! git push -u origin "HEAD:refs/heads/$CURRENT_BRANCH"; then
+  echo "ABORT: push of $CURRENT_BRANCH failed; not creating a PR (it would be missing your local commits)" >&2
+  exit 1
+fi
+
+# Confirm the remote actually carries this HEAD before opening the PR.
+LOCAL_SHA=$(git rev-parse HEAD)
+REMOTE_SHA=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" | cut -f1)
+if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+  echo "ABORT: origin/$CURRENT_BRANCH is at ${REMOTE_SHA:-<missing>}, local HEAD is $LOCAL_SHA; the push did not land" >&2
+  exit 1
+fi
 
 gh pr create \
   --title "$TITLE" \
