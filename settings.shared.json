@@ -103,23 +103,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "playbook hook rm-workspace-guard",
+            "command": "~/.claude/hooks/rm-workspace-guard.sh",
             "if": "Bash(rm:*)",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "playbook hook bg-await-guard",
+            "command": "~/.claude/hooks/bg-await-guard.sh",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "playbook hook no-dash-guard",
+            "command": "~/.claude/hooks/no-dash-guard.sh",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "playbook hook precommit-check",
+            "command": "~/.claude/hooks/precommit-check.sh",
             "if": "Bash(git commit:*)",
             "timeout": 10
           }
