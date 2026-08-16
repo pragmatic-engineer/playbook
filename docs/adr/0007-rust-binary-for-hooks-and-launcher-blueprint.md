@@ -145,19 +145,45 @@ Real paths this plan touches, all confirmed present.
 
 ### WU-8: `playbook init`, hook wiring and registry consolidation
 - Requires: WU-2, WU-3, WU-4, WU-5, WU-6, WU-7
-- Goal: `playbook init` writes every hook entry into `settings.json` and the plugin's `hooks.json` is retired.
+- Goal: `playbook init` writes the ported hook entries into `settings.json` and the plugin's `hooks.json` is retired.
 - Files:
-  - `src/init/wire.rs` | create | writes all 15 hook entries as `playbook hook <name>`, idempotent, backs up before change
-  - `settings.shared.json` | edit | seed carries binary-invoked entries for every hook, not only the guards
-  - `shell/gen-shared-settings.py` | edit | `SAFETY_RE` no longer filters to guards only, since the seed now legitimately carries all hooks
+  - `src/init/wire.rs` | create | writes the 11 PORTED hook entries as `playbook hook <name>`, idempotent, backs up before change. The four guards keep their existing `~/.claude/hooks/*.sh` commands until WU-13; see the amendment below
+  - `settings.shared.json` | edit | seed carries binary-invoked entries for the 11 ported hooks, plus the four guards still as `.sh` paths
+  - `shell/gen-shared-settings.py` | edit | `SAFETY_RE` accepts both a bare `playbook hook <name>` and the four guard `.sh` filenames, since during the transition the seed legitimately carries both shapes
   - `hooks/hooks.json` | delete | registry retired
   - `tests/init_wire.rs` | create | integration tests
 - Verification: `cargo test --test init_wire && python3 shell/check-shared-settings.py settings.shared.json permissions.shared.json .`
-- Tests: assert idempotence (running init twice changes nothing the second time), assert every written command resolves, assert a pre-existing user hook entry is preserved not clobbered. Regression-pin the failure this fixes: after wiring, no `settings.json` entry may point at a path under `~/.claude/hooks/`.
+- Tests: assert idempotence (running init twice changes nothing the second time), assert every written command resolves, assert a pre-existing user hook entry is preserved not clobbered. **Assert that no hook wired in binary form is still an empty stub**, deriving the list from what `wire()` actually writes rather than from a hardcoded copy.
 - Done When:
   - [ ] `hooks/hooks.json` is gone and no hook is registered twice
   - [ ] `playbook init` run twice is a no-op the second time
   - [ ] `check-shared-settings.py` passes on the regenerated seed
+  - [ ] No hook wired as `playbook hook <name>` resolves to a stub implementation
+
+### Amendment 2026-08-16: WU-8 must not rewire the guards
+
+The original text said "writes every hook entry" and regression-pinned "after
+wiring, no `settings.json` entry may point at a path under `~/.claude/hooks/`".
+Executing that faithfully **silently disables four live safety guards**, because
+`rm_workspace_guard`, `bg_await_guard`, `no_dash_guard` and `precommit_check` are
+empty stubs (`pub fn run(_payload: &Payload) {}`) until WU-13, which sits two
+Segments later in Segment E.
+
+Verified by running both implementations against the same `rm -rf ~/Documents`
+payload: the shell guard returns `permissionDecision: "deny"` naming the path,
+the Rust stub prints nothing and exits 0, allowing the command through.
+
+This was invisible to WU-8's own tests. All seven passed and the seed validator
+passed, because the wiring is correct and the stubs are legitimately empty. The
+defect lives in the gap between two units that are each individually right.
+
+**The `~/.claude/hooks/` criterion moves to WU-13**, which is the first unit
+where it can be true without disabling a guard. Reordering WU-13 ahead of WU-8
+would also work but drags the guard port two Segments earlier for no benefit.
+
+The general lesson, worth applying to the remaining units: when an acceptance
+criterion asserts a global property ("no entry anywhere does X"), it ranges over
+every item, not only the ones the unit touches. Check the whole range.
 
 ### WU-9: `playbook init`, shim and statusline placement
 - Requires: WU-7
@@ -225,13 +251,20 @@ Real paths this plan touches, all confirmed present.
   - `src/hooks/no_dash_guard.rs` | create | port of `hooks/no-dash-guard.sh`; the embedded python heredoc disappears, since Rust handles UTF-8 codepoints natively
   - `src/hooks/bg_await_guard.rs` | create | port of `hooks/bg-await-guard.sh`
   - `src/hooks/precommit_check.rs` | create | port of `hooks/precommit-check.sh`
+  - `src/init/wire.rs` | edit | flip the four guard entries from their `.sh` paths to `playbook hook <name>`, now that the Rust bodies exist. WU-8 deliberately left them alone; see its 2026-08-16 amendment
+  - `settings.shared.json` | edit | regenerate so the seed carries the guards in binary-invoked form too
+  - `shell/gen-shared-settings.py` | edit | `SAFETY_RE` drops the `.sh` filename branch, since no hook ships as a path any more
   - `tests/hooks_guards.rs` | create | integration tests
 - Verification: `cargo test --test hooks_guards`
 - Tests: port all four `*.test.sh` suites, 12 cases for `precommit-check` alone. Safety-critical, so assert both directions: every blocked case still blocks, and every allowed case still passes. Pin the conservative blocks in `rm-workspace-guard` on `cd` and on `$(...)`, and the full em and en dash codepoint range U+2012 to U+2015 in `no-dash-guard`.
+
+  **Differential, not just ported.** Run each Rust guard and its `.sh` original against the same payloads and assert they agree on the decision. A ported suite passes happily against an empty stub, which is exactly the WU-8 defect; the only thing that catches it is comparing against the thing being replaced.
 - Done When:
   - [ ] Every case in the four ported suites passes
   - [ ] `rm-workspace-guard` still blocks a path outside the safe roots, verified by a real invocation
   - [ ] No guard depends on `jq`
+  - [ ] **No `settings.json` entry points at a path under `~/.claude/hooks/`.** Moved here from WU-8 on 2026-08-16: this is the first unit where it can be true without disabling a guard
+  - [ ] Each guard denies at least one payload its `.sh` original denies, asserted by invoking the binary, not by inspecting the written command string
 
 ### WU-14: delete the old runtime
 - Requires: WU-13
