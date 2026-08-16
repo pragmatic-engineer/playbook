@@ -103,25 +103,125 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/rm-workspace-guard.sh",
+            "command": "playbook hook rm-workspace-guard",
             "if": "Bash(rm:*)",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/bg-await-guard.sh",
+            "command": "playbook hook bg-await-guard",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/no-dash-guard.sh",
+            "command": "playbook hook no-dash-guard",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/precommit-check.sh",
+            "command": "playbook hook precommit-check",
             "if": "Bash(git commit:*)",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook preread-edit-check"
+          },
+          {
+            "type": "command",
+            "command": "playbook hook preread-size-check"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob|Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook search-counter"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook memory-anchors"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook session-init"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook post-edit-track"
+          },
+          {
+            "type": "command",
+            "command": "playbook hook rebuild-memory-graph"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook auto-model-detect"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook precompact-warn"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook session-clean-exit"
+          },
+          {
+            "type": "command",
+            "command": "playbook hook memory-capture"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook session-clean-exit"
           }
         ]
       }
