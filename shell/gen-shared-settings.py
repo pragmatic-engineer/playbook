@@ -6,13 +6,22 @@
 # template from a live settings.json. Replaces .permissions with a canned
 # permissions object, forces skipAutoPermissionPrompt:false, strips any pinned
 # model (the harness or the user's own settings.json chooses it), drops the
-# owner's personal keys, and reduces .hooks to the always-on safety guards only
-# (rm-workspace-guard, bg-await-guard, no-dash-guard, precommit-check). Keep this
-# list in step with SAFETY_RE below: a guard missing from it is silently dropped
-# from the seed on the next regeneration. The functional hooks ship
-# with the plugin instead, so the seed wires only the guards to avoid
-# double-firing. Other product config (env, statusLine, worktree, plugins, ...)
-# passes through unchanged. Merged JSON goes to stdout.
+# owner's personal keys, and keeps only the .hooks entries whose command is a
+# bare `playbook hook <name>` invocation (SAFETY_RE). Since `playbook init`
+# (src/init/wire.rs) now wires all 15 hooks straight into settings.json itself,
+# none through the retired hooks/hooks.json registry, every one of them is
+# legitimate to ship in the seed; SAFETY_RE is still a real filter, not a
+# formality, since it stops a maintainer's own ad hoc hook command, or
+# anything not shaped like a `playbook hook` call, from leaking into the
+# public template. Other product config (env, statusLine, worktree, plugins,
+# ...) passes through unchanged. Merged JSON goes to stdout.
+#
+# Regeneration order: this script derives the seed from the maintainer's live
+# settings.json (SRC), so SRC must already carry whatever the seed is meant to
+# ship. Wire SRC first (run `playbook init`, or otherwise bring it up to date)
+# and only then regenerate the seed from it, never the other way round:
+# regenerating first would read SRC's old state and silently drop whatever the
+# newer wiring was about to add.
 #
 # Usage: gen-shared-settings.py SRC [PERMS]
 #   SRC    path to the live settings.json (required)
@@ -33,9 +42,7 @@ REPO_ROOT = SCRIPT_DIR.parent
 PERSONAL_KEYS = frozenset(
     {"model", "effortLevel", "theme", "preferredNotifChannel", "prefersReducedMotion"}
 )
-SAFETY_RE = re.compile(
-    r"(rm-workspace-guard|bg-await-guard|no-dash-guard|precommit-check)\.sh"
-)
+SAFETY_RE = re.compile(r"^playbook hook [a-z][a-z0-9-]*$")
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -61,7 +68,7 @@ def filter_hooks(hooks: dict) -> dict:
         for group in groups:
             safe = [
                 h for h in group.get("hooks", [])
-                if SAFETY_RE.search(h.get("command", ""))
+                if SAFETY_RE.fullmatch(h.get("command", ""))
             ]
             if safe:
                 new_group = dict(group)
