@@ -91,8 +91,9 @@ def main():
                 # Strip an optional "bash " wrapper.
                 if cmd.startswith("bash "):
                     cmd = cmd[5:]
-                # rtk is an external tool wrapper, not a repo file.
-                if cmd.startswith("rtk"):
+                # rtk and playbook are external tool wrappers resolved on
+                # PATH, not repo files.
+                if cmd.startswith("rtk") or cmd.startswith("playbook"):
                     continue
                 # Resolve either ~/.claude/ or literal $HOME/.claude/ to a repo-relative path.
                 rel = cmd
