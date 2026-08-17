@@ -482,6 +482,56 @@ the expected VALUE instead. Two further traps: `common.test.sh`'s helper contain
 `check` grep will find, so it reads as 6 against a real 7. Both were caught by
 reconciling against the suites' own summary lines.
 
+## Deletion pre-flight: what still EXECUTES these files
+
+The rows above answer "is the coverage preserved". They do not answer "does
+anything still call this", and that is the other half of WU-14's risk. A stale
+reference is exactly the shape that produced roughly 110 silent errors over 28
+hours on 2026-08-11 (`hook-rename-lockstep-settings`).
+
+Measured 2026-08-18 by separating references that EXECUTE a script from those
+that merely name it in a comment. Grep alone conflates the two: of the 15 python
+files, every one has references, but most `src/**.rs` hits are doc comments citing
+the python as the port's specification and are harmless.
+
+### Rust that runs python as a test oracle (6 files)
+
+Deleting the script breaks `cargo test`, so these must change in the SAME unit
+that deletes it.
+
+| File | Executes |
+|---|---|
+| `tests/hooks_graph_reader.rs` | `memory-anchors.py`, `rebuild-memory-graph.py` |
+| `tests/hooks_graph_writer.rs` | `rebuild-memory-graph.py` |
+| `tests/hooks_preread.rs` | `preread-edit-check.py`, `preread-size-check.py` |
+| `tests/init_merge.rs` | `merge-settings.py` |
+| `tests/settings_gen.rs` | `gen-shared-settings.py` |
+| `src/common/emit.rs` | `memory-capture.py`, in a `#[cfg(test)]` oracle |
+
+### Runtime, installer and CI (5 files)
+
+| File | Why it matters |
+|---|---|
+| `hooks/hooks.json` | Routes 11 functional hooks at their `.py` files. **Runtime.** Deleting the scripts without retiring this registry breaks every hook for every user |
+| `shell/setup-local.sh:105` | Assigns `MERGE_BIN="$SELF_ROOT/shell/merge-settings.py"` and runs it during install. **Installer.** WU-11 replaces this path |
+| `.github/workflows/shell-ci.yml:88` | Runs `check-shared-settings.py`. WU-21 removes this step |
+| `Makefile:20` | Runs `$(GEN)`, which is `gen-shared-settings.py`. WU-20 repoints it at the binary |
+| `shell/plugin-e2e.sh:128` | Runs `check-shared-settings.py`. WU-21 removes the check from this harness |
+
+### Confirmed harmless
+
+`shell/memory-context.sh:18`, `shell/ensure-deps.sh:17` and `statusline.sh:332`
+each name a python file in a COMMENT only. `tests/hooks_session.rs` likewise
+mentions `session-clean-exit.py` without executing it. `ruff.toml` names two hooks
+in a config comment and becomes orphaned once no `.py` remains.
+
+**Method note.** A first pass grepped for `python3 <file>.py` and missed
+variable indirection: `setup-local.sh` assigns the path to
+`MERGE_BIN` first and runs it later, so the exec scan reported it clean. It was
+caught by going back through every file the plain-grep inventory listed and
+checking each one by hand. When a scan and a broader grep disagree, the scan is
+usually the one that is wrong.
+
 ## How to fill a per-scenario row
 
 One row per assertion in the old suite:
