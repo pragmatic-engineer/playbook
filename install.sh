@@ -270,6 +270,19 @@ fi
 
 # --- summary ---------------------------------------------------------------
 
+# Prune install backup dirs older than the newest 5, matching what
+# setup-local.sh already does for its own setup-* dirs.
+#
+# Re-running install.sh is the documented upgrade path, and every re-run past
+# the first copies the entire previous tree into backups/install-<stamp>/.
+# Nothing removed them, so the directory grew without bound: measured
+# 2026-08-18, nine installs left eight backups totalling 13M, roughly 1.6M
+# each, and each one holds a full copy of src/, tests/ and docs/ as well.
+find "$CLAUDE_HOME/backups" -maxdepth 1 -type d -name 'install-*' \
+    2>/dev/null | sort -r | tail -n +6 \
+    | while IFS= read -r _old; do [ -n "$_old" ] && rm -rf "$_old"; done \
+    || true
+
 log "Done."
 printf '\n'
 printf 'Installed to: %s\n' "$CLAUDE_HOME"
