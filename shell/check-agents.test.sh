@@ -50,6 +50,58 @@ You are a fixture agent used only for check-agents.sh test scenarios.
 EOF
 }
 
+# write_agent_unquoted_colon <dir> <stem>: a description holding an unquoted
+# colon-space. YAML reads "prompt: a lens" as a nested mapping and rejects the
+# whole document, so at runtime every frontmatter field is dropped, including
+# the tools allowlist. This is the exact shape that shipped in 0.9.0 and 0.9.1.
+write_agent_unquoted_colon() {
+  local dir="$1" stem="$2"
+  mkdir -p "$dir"
+  cat > "$dir/${stem}.md" <<EOF
+---
+name: ${stem}
+description: A structurally read-only fixture agent. Each spawn takes a focus from the orchestrator's prompt: a single named lens. Not for general-purpose work.
+tools: Read, Grep, Glob
+model: sonnet
+effort: medium
+---
+
+You are a fixture agent used only for check-agents.sh test scenarios.
+
+## Non-negotiable guardrails
+
+1. **No dashes in prose.** No em dashes or en dashes anywhere. Use commas, colons, or separate sentences.
+2. **Ground every claim.** Quote exact code with file:line citations.
+3. **Zero AI attribution.** No AI or Claude attribution anywhere.
+EOF
+}
+
+# write_agent_quoted_colon <dir> <stem>: the same description, quoted. A colon
+# inside a quoted scalar is inert, so this must PASS. Without this pair the
+# rule could be satisfied by banning colons outright, which would reject every
+# legitimate "/playbook:deep-review" reference.
+write_agent_quoted_colon() {
+  local dir="$1" stem="$2"
+  mkdir -p "$dir"
+  cat > "$dir/${stem}.md" <<EOF
+---
+name: ${stem}
+description: "A structurally read-only fixture agent. Each spawn takes a focus from the orchestrator's prompt: a single named lens. Not for general-purpose work."
+tools: Read, Grep, Glob
+model: sonnet
+effort: medium
+---
+
+You are a fixture agent used only for check-agents.sh test scenarios.
+
+## Non-negotiable guardrails
+
+1. **No dashes in prose.** No em dashes or en dashes anywhere. Use commas, colons, or separate sentences.
+2. **Ground every claim.** Quote exact code with file:line citations.
+3. **Zero AI attribution.** No AI or Claude attribution anywhere.
+EOF
+}
+
 # write_agent_no_model <dir> <stem>: valid frontmatter minus the model key.
 write_agent_no_model() {
   local dir="$1" stem="$2"
@@ -687,6 +739,26 @@ NO_DASH_OUTSIDE="${WORK}/no-dash-outside-guardrails"
 write_agent_no_dash_outside_guardrails "$NO_DASH_OUTSIDE" "sample"
 # Act + Assert
 run_scenario fail "no-dash clause outside guardrails section fails" "$NO_DASH_OUTSIDE" "missing no-dash guardrail clause"
+
+# 23: an unquoted colon-space in a frontmatter value fails.
+# Arrange: scratch dir whose description holds "prompt: a single named lens".
+# YAML parses that as a nested mapping and rejects the document, so every
+# field including tools is dropped at runtime. Four real agents shipped this
+# way in 0.9.0 and 0.9.1 while this validator reported "all valid".
+UNQUOTED_COLON="${WORK}/unquoted-colon"
+write_agent_unquoted_colon "$UNQUOTED_COLON" "sample"
+# Act + Assert
+run_scenario fail "unquoted colon-space in frontmatter fails" "$UNQUOTED_COLON" "colon-space"
+
+# 24: the same colon-space inside a QUOTED value passes.
+# Arrange: identical description, wrapped in double quotes.
+# Without this the rule could be satisfied by banning colons outright, which
+# would reject every legitimate "/playbook:deep-review" mention in a
+# description and make the validator useless.
+QUOTED_COLON="${WORK}/quoted-colon"
+write_agent_quoted_colon "$QUOTED_COLON" "sample"
+# Act + Assert
+run_scenario pass "quoted colon-space in frontmatter passes" "$QUOTED_COLON"
 
 TOTAL=$(( PASS + FAIL ))
 echo ""

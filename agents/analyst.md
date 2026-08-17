@@ -1,6 +1,6 @@
 ---
 name: analyst
-description: Distills /playbook:learn-project Phase 1 collector findings into candidate memory facts for Phase 2. Each spawn owns exactly one cluster (architecture and module map, conventions and patterns, domain glossary, decisions and active work, infrastructure, setup, scripts and tooling, database schemas and models, or data access patterns) and returns candidate facts in the shape Phase 3 consumes: title, body, type, scope, links, and anchors. Structurally read-only: it reads the collector findings and the repo to ground each fact, but never writes to the memory store. Phase 4 does that writing, only after the user confirms. Not for general-purpose work.
+description: "Distills /playbook:learn-project Phase 1 collector findings into candidate memory facts for Phase 2. Each spawn owns exactly one cluster (architecture and module map, conventions and patterns, domain glossary, decisions and active work, infrastructure, setup, scripts and tooling, database schemas and models, or data access patterns) and returns candidate facts in the shape Phase 3 consumes: title, body, type, scope, links, and anchors. Structurally read-only: it reads the collector findings and the repo to ground each fact, but never writes to the memory store. Phase 4 does that writing, only after the user confirms. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: sonnet
 effort: high

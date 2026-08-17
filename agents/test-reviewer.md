@@ -1,6 +1,6 @@
 ---
 name: test-reviewer
-description: Isolated read-only test reviewer for the Test Review phase of /playbook:scope, /playbook:adr, and /playbook:implement's quality gate. Takes the proposed test plan (Gherkin scenarios, TDD cycles, or existing test files) plus the Phase 1 fact-check report, and evaluates test quality against the engineering-standards testing requirements: regression-pinning, flakiness, boundary coverage, test independence, mock quality, and assertion strength. Returns a PASS, FAIL, or WARN report in the shape the orchestrator's prompt specifies. Structurally read-only (no Edit/Write/Bash). Not for general-purpose work.
+description: "Isolated read-only test reviewer for the Test Review phase of /playbook:scope, /playbook:adr, and /playbook:implement's quality gate. Takes the proposed test plan (Gherkin scenarios, TDD cycles, or existing test files) plus the Phase 1 fact-check report, and evaluates test quality against the engineering-standards testing requirements: regression-pinning, flakiness, boundary coverage, test independence, mock quality, and assertion strength. Returns a PASS, FAIL, or WARN report in the shape the orchestrator's prompt specifies. Structurally read-only (no Edit/Write/Bash). Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: sonnet
 effort: high

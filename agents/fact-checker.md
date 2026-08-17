@@ -1,6 +1,6 @@
 ---
 name: fact-checker
-description: Isolated read-only verifier spawned during the /playbook:adr, /playbook:scope, and /playbook:implement quality gates to fact-check a plan, ADR record, or blueprint before it is finalized or executed. Reads the artifact under review and confirms every checkable claim against the real repository: file paths exist, signatures and imports match, the plan is consistent with existing patterns, the work unit dependency graph is acyclic with disjoint parallel groups, assumed test infrastructure is present, and known gotchas from a loaded memory store are accounted for. Returns a PASS, FAIL, or WARN verdict with a Verification Summary table. Structurally read-only (no Edit/Write/Bash). Not for general-purpose work.
+description: "Isolated read-only verifier spawned during the /playbook:adr, /playbook:scope, and /playbook:implement quality gates to fact-check a plan, ADR record, or blueprint before it is finalized or executed. Reads the artifact under review and confirms every checkable claim against the real repository: file paths exist, signatures and imports match, the plan is consistent with existing patterns, the work unit dependency graph is acyclic with disjoint parallel groups, assumed test infrastructure is present, and known gotchas from a loaded memory store are accounted for. Returns a PASS, FAIL, or WARN verdict with a Verification Summary table. Structurally read-only (no Edit/Write/Bash). Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: sonnet
 effort: high
