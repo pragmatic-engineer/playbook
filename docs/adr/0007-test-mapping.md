@@ -4,9 +4,9 @@
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
 - **Status: PARTIAL. Suite-level mapping is done and measured for all 15 suites.
-  Per-scenario rows are COMPLETE for 1 of 15 (`rebuild-memory-graph`, the highest
-  risk one) and outstanding for the other 14. WU-14 must not delete a file whose
-  rows are blank, so today it may delete exactly one suite.**
+  Per-scenario rows are COMPLETE for 2 of 15 (`rebuild-memory-graph` and
+  `memory-anchors`) and outstanding for the other 13. WU-14 must not delete a file
+  whose rows are blank, so today it may delete exactly those two suites.**
 
 ## What this file is for
 
@@ -54,7 +54,7 @@ counts come from `cargo test --test <name>`.
 | `hooks/precompact-warn.test.sh` | 7 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
 | `hooks/memory-capture.test.sh` | 19 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
 | `hooks/rebuild-memory-graph.test.sh` | 61 | `tests/hooks_graph_writer.rs` | 24 | **DONE, see below** |
-| `hooks/memory-anchors.test.sh` | 15 | `tests/hooks_graph_reader.rs` | 8 | TODO |
+| `hooks/memory-anchors.test.sh` | 15 | `tests/hooks_graph_reader.rs` | 8 | **DONE, see below** |
 | `hooks/session-init.test.sh` | 13 | `tests/hooks_session.rs` | 16 (shared) | TODO |
 | `hooks/session-clean-exit.test.sh` | 6 | `tests/hooks_session.rs` | 16 (shared) | TODO |
 | `hooks/lib/common.test.sh` | 25 | `src/common/*` unit tests | 50 (shared) | TODO |
@@ -132,6 +132,49 @@ the row covers, and they sum to 61.
 So 61 old scenarios map onto 20 Rust tests, and 4 further Rust tests add coverage
 that never existed. That is the whole 24. This is why counting test functions
 misleads: 61 to 24 looks like a loss and is actually a gain.
+
+## Per-scenario rows: `hooks/memory-anchors.test.sh`
+
+**COMPLETE. All 15 old scenarios accounted for, zero blank rows, so WU-14 may delete this suite.**
+
+| Old scenarios | New test in `tests/hooks_graph_reader.rs` | How it is covered |
+|---|---|---|
+| scenario 1: anchored file names the matching fact / scenario 3: depends_on neighbour is named (2) | `anchored_file_names_matching_fact_and_depends_on_neighbour` | one test covering both, as its name says |
+| scenario 2: directory anchor names the containing-directory fact (1) | `directory_anchor_names_the_containing_directory_fact` | direct |
+| scenario 4: unanchored path emits nothing (1) | `unanchored_path_emits_nothing` | direct |
+| scenario 5: malformed payload / missing file_path / missing graph, each asserting exits 0 and emits nothing (6) | `never_blocks_on_malformed_payload_missing_file_path_or_missing_graph` | three labelled sub-blocks 5a, 5b, 5c with 2 assertions each, 6 in total. Verified by reading the test |
+| scenario 6: index file was built on first edit / index was rebuilt on the second edit instead of reused (2) | `anchor_index_is_built_once_and_reused_on_second_edit` | **read the condition, not the label.** Both old labels are inline FAILURE messages, so the second one describes the failure; the passing condition is that a planted marker SURVIVES, meaning the index was reused. It matches the Rust test rather than contradicting it |
+| scenario 7: fact added after cache build is not surfaced this session (1) | `stale_cache_does_not_surface_a_fact_added_after_it_was_built` | direct, pinned staleness |
+| scenario 8: additionalContext output is valid JSON / hookEventName is PreToolUse (2) | `additional_context_output_is_valid_json_with_pretooluse_event_name` | one test covering both |
+
+Extraction note, because it nearly produced a wrong mapping: this suite uses
+THREE assertion helpers (`check`, `check_contains`, `check_true`) plus two
+inline `PASS=$((PASS + 1))` sites. Grepping only `check` finds 9 of 15 and
+silently drops 6. Always reconcile the extracted label count against the
+suite's own summary line before mapping anything.
+
+### Rust tests with no old counterpart
+
+| New test | What it adds |
+|---|---|
+| `python_and_rust_readers_agree_on_the_same_fixture` | Differential against the real python reader |
+
+So 15 old scenarios map onto 7 Rust tests, plus 1 differential test, which is
+the whole 8.
+
+### Suites whose labels resist clean extraction
+
+`hooks/search-counter.test.sh` and `hooks/post-edit-track.test.sh` were attempted
+and deliberately NOT mapped, so nobody repeats the dead ends. Their assertions use
+`ok "..."` / `bad "..."` helper pairs at varying indentation, with the label text
+interpolated (`"tool-count (got $(tcount))"`), so there is no clean list to lift:
+grepping the pair yields roughly double the real scenario count, and grepping only
+`ok` at line start yields almost nothing. Their Rust counterparts in
+`tests/hooks_counter.rs` also sit inside per-hook `mod` blocks, so the `#[test]`
+functions are indented and a `^fn ` grep misses all of them.
+
+Map those two by reading both files case by case rather than by extraction. The
+measured targets are 6 and 7 old scenarios against 7 Rust tests across two mods.
 
 ## How to fill a per-scenario row
 
