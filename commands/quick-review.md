@@ -171,9 +171,17 @@ Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`); the moment it returns its
 
 ## Step 3: Review report contract
 
-The `reviewer` subagent returns a report rendered in the `playbook:grounding-review` Review Report Format. `/playbook:quick-review` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
+**The `reviewer` agent has only one channel, and it is unreliable. Plan for that** (`playbook:delegating-subagents`). It is structurally read-only (Read, Grep, Glob, Skill), so it cannot write its report to a file: `shell/check-agents.sh` forbids `Write` and `Bash` for that tier by design, and granting them would fail CI. Its return value is therefore the only route, and Agent-tool return values have failed outright in measured use.
 
-Relay the returned report to the user unchanged, then proceed to posting. Post findings verbatim from their `Post:` blocks; the orchestrator does NOT re-read source files (the subagent already grounded every citation), which is what keeps main context lean.
+So:
+
+- **Run your own grounding pass on the diff in parallel**, starting as soon as the subagent is dispatched rather than after it goes quiet. That way a silent reviewer costs latency, not coverage.
+- **A silent reviewer is NOT a clean review.** If nothing comes back, say the review did not run. Do not report zero findings, and do not post a pending review implying the diff was reviewed. Those are different outcomes and only one is safe to act on.
+- After the idle notification fires, one `SendMessage` asking for partial results is worth a single try; it sometimes works. Do not spend more than one round on it.
+
+The report is rendered in the `playbook:grounding-review` Review Report Format. `/playbook:quick-review` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
+
+Relay the report to the user unchanged, then proceed to posting. Post findings verbatim from their `Post:` blocks; the orchestrator does NOT re-read source files (the subagent already grounded every citation), which is what keeps main context lean.
 
 ## Step 4: Orchestrate posting
 
