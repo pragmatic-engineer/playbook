@@ -4,11 +4,10 @@
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
 - **Status: PARTIAL. Suite-level mapping is done and measured for all 15 suites.
-  Per-scenario rows are COMPLETE for 8 of 15 and outstanding for the other 7. Done:
-  `rebuild-memory-graph`, `memory-anchors`, `session-init`, `session-clean-exit`,
-  `search-counter`, `post-edit-track`, `preread-edit-check`, `preread-size-check`.
-  WU-14 must not delete a file whose rows are blank, so today it may delete exactly
-  those eight suites.**
+  Per-scenario rows are COMPLETE for 11 of 15 and outstanding for the other 4. The
+  four remaining are `lib/common`, `incr-counter`, `merge-settings` and
+  `gen-shared-settings`. WU-14 must not delete a file whose rows are blank, so
+  today it may delete the other eleven.**
 
 ## What this file is for
 
@@ -52,9 +51,9 @@ counts come from `cargo test --test <name>`.
 | `hooks/post-edit-track.test.sh` | 7 | `tests/hooks_counter.rs` | 7 (shared) | **DONE, see below** |
 | `hooks/preread-edit-check.test.sh` | 6 | `tests/hooks_preread.rs` | 26 (shared) | **DONE, see below** |
 | `hooks/preread-size-check.test.sh` | 7 | `tests/hooks_preread.rs` | 26 (shared) | **DONE, see below** |
-| `hooks/auto-model-detect.test.sh` | 6 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
-| `hooks/precompact-warn.test.sh` | 7 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
-| `hooks/memory-capture.test.sh` | 19 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
+| `hooks/auto-model-detect.test.sh` | 6 | `tests/hooks_turn.rs` | 24 (shared) | **DONE, see below** |
+| `hooks/precompact-warn.test.sh` | 7 | `tests/hooks_turn.rs` | 24 (shared) | **DONE, see below** |
+| `hooks/memory-capture.test.sh` | 19 | `tests/hooks_turn.rs` | 24 (shared) | **DONE, see below** |
 | `hooks/rebuild-memory-graph.test.sh` | 61 | `tests/hooks_graph_writer.rs` | 24 | **DONE, see below** |
 | `hooks/memory-anchors.test.sh` | 15 | `tests/hooks_graph_reader.rs` | 8 | **DONE, see below** |
 | `hooks/session-init.test.sh` | 13 | `tests/hooks_session.rs` | 16 (shared) | **DONE, see below** |
@@ -306,6 +305,69 @@ Adds, with no old counterpart:
 
 So 13 old scenarios map onto 13 Rust tests one for one, and 13 further tests
 add the mandated boundary coverage. That is the whole 26.
+
+## Per-scenario rows: the turn trio
+
+**COMPLETE for all three. 6 + 7 + 19 = 32 old scenarios accounted for, zero blank
+rows, so WU-14 may delete all three suites.** They map into `tests/hooks_turn.rs`
+across three mods, 24 tests in total: 17 carry old scenarios and 7 are new.
+
+### `hooks/auto-model-detect.test.sh` (6) into `mod auto_model_detect` (10)
+
+| Old scenarios | New test | How it is covered |
+|---|---|---|
+| nudges on design intent with a UserPromptSubmit object (1) | `design_intent_nudges_with_user_prompt_submit_object` | direct |
+| slash command stays silent (1) | `slash_command_stays_silent` | direct |
+| short prompt stays silent (1) | `short_prompt_stays_silent` | direct |
+| plain prose stays silent (1) | `plain_prose_stays_silent` | direct |
+| empty prompt silent, exit 0 (1) | `empty_prompt_stays_silent_and_exits_zero` | direct |
+| architecture/migration keywords trigger (1) | `architecture_and_migration_keywords_trigger` | direct |
+
+Adds, with no old counterpart:
+
+| New test | What it adds |
+|---|---|
+| `representative_sample_of_regex_branches_all_trigger` | Every regex branch, not just two keywords |
+| `word_boundary_near_miss_does_not_trigger` | The negative side of the word boundary |
+| `keyword_glued_to_cjk_text_does_not_trigger` | CJK text, the Unicode word-boundary defect fixed in #117-#122 |
+| `keyword_glued_to_accented_text_does_not_trigger` | Accented text, same defect |
+
+### `hooks/precompact-warn.test.sh` (7) into `mod precompact_warn` (5)
+
+| Old scenarios | New test | How it is covered |
+|---|---|---|
+| emits a valid systemMessage object (1) | `emits_a_valid_system_message_object` | direct |
+| interpolates the trigger (1) | `interpolates_the_trigger` | direct |
+| missing trigger defaults to auto in message / log records trigger=unknown when absent (2) | `missing_trigger_defaults_to_auto_in_message_and_unknown_in_log` | one test covering both halves of the documented divergence, auto in the message but unknown in the log |
+| exit 0 on empty payload (1) | `exits_zero_on_empty_payload` | direct |
+| log capped at 500 lines / log cap keeps the newest window, not the oldest (2) | `log_is_capped_at_500_lines` | asserts the cap AND the direction, that the oldest surviving line starts the newest window. Verified by reading the assertions |
+
+No new-coverage tests in this mod; the 7 old scenarios consolidate into 5.
+
+### `hooks/memory-capture.test.sh` (19) into `mod memory_capture` (9)
+
+| Old scenarios | New test | How it is covered |
+|---|---|---|
+| marker present: exits 0 / valid JSON / decision is block / reason non empty / marker cleared (5) | `marker_present_fires_once_and_clears_the_marker` | fires once and clears, all five asserted |
+| second call: exits 0 / no output (2) | `second_call_with_marker_already_consumed_is_silent` | direct |
+| no marker: exits 0 / no output (2) | `no_marker_at_all_is_silent` | direct |
+| edited paths: valid JSON / names first path / names second path (3) | `edited_paths_are_named_in_the_reason` | direct |
+| capped list: valid JSON / at most a handful listed / notes more not shown (3) | `path_list_is_capped_at_five_with_a_more_note` | the cap and the more-note |
+| missing edits log: exits 0 / valid JSON / decision still block / reason still non empty (4) | `missing_edits_log_still_blocks_with_a_reason` | all four asserted |
+
+Adds, with no old counterpart:
+
+| New test | What it adds |
+|---|---|
+| `path_list_with_exactly_five_paths_has_no_more_note` | The cap boundary, at five |
+| `path_list_with_exactly_six_paths_notes_one_more` | The cap boundary, one over |
+| `malformed_non_object_line_does_not_discard_the_other_paths` | A bad line in edits.jsonl must not lose the good ones |
+
+Extraction note: `memory-capture.test.sh` puts the LABEL LAST, as the third
+argument to `assert_eq` and `assert_contains` and the second to
+`assert_valid_json`. Grabbing the first quoted string on the line returns
+interpolated values instead and yields 25 hits against a real 19. Take the last
+quoted token per call site.
 
 ## How to fill a per-scenario row
 
