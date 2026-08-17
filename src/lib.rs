@@ -8,8 +8,10 @@
 pub mod common;
 pub mod hooks;
 pub mod init;
+pub mod settings;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
 
 /// The `playbook` command-line entry point.
 #[derive(Parser, Debug)]
@@ -37,6 +39,24 @@ pub enum Command {
     Statusline,
     /// Install or repair the local Claude Code configuration.
     Init,
+    /// Shared-settings seed subcommands (`gen` today; `check` from WU-21).
+    Settings {
+        #[command(subcommand)]
+        sub: SettingsCommand,
+    },
+}
+
+/// `playbook settings` subcommands, backing `src/settings/`.
+#[derive(Subcommand, Debug)]
+pub enum SettingsCommand {
+    /// Derive the tracked settings.shared.json seed from a live settings.json,
+    /// ported from `shell/gen-shared-settings.py`.
+    Gen {
+        /// Path to the live settings.json to derive the seed from.
+        src: PathBuf,
+        /// Path to the canned permissions object.
+        perms: PathBuf,
+    },
 }
 
 /// Every hook Claude Code can invoke, one per entry in hooks.json. Kebab-case
