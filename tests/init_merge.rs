@@ -11,8 +11,9 @@
 //! traceable to one place below:
 //! - Mandatory fixture 1 (user key absent from base): `FIXTURES`, "user key
 //!   absent from base"
-//! - Mandatory fixture 2 (user key modified from base) / s6 / s15 (NEWBASE
-//!   freeze): `FIXTURES`, "user key modified from base"
+//! - Mandatory fixture 2 (user key modified from base) / s2 (user-changed key
+//!   is preserved) / s6 / s15 (NEWBASE freeze): `FIXTURES`, "user key modified
+//!   from base"
 //! - Mandatory fixture 3 (template key removed) / s4: `FIXTURES`,
 //!   "template key removed"
 //! - Mandatory fixture 4 (malformed user JSON) / s9: `INVALID_INPUT_CASES`,

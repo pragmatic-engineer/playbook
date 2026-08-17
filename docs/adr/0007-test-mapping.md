@@ -4,10 +4,10 @@
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
 - **Status: PARTIAL. Suite-level mapping is done and measured for all 15 suites.
-  Per-scenario rows are COMPLETE for 11 of 15 and outstanding for the other 4. The
-  four remaining are `lib/common`, `incr-counter`, `merge-settings` and
-  `gen-shared-settings`. WU-14 must not delete a file whose rows are blank, so
-  today it may delete the other eleven.**
+  Per-scenario rows are COMPLETE for 13 of 15. Only `lib/common` and `incr-counter`
+  remain, and both map to `src/` unit tests rather than an integration file. WU-14
+  must not delete a file whose rows are blank, so today it may delete the other
+  thirteen, including both python scripts under `shell/`.**
 
 ## What this file is for
 
@@ -60,8 +60,8 @@ counts come from `cargo test --test <name>`.
 | `hooks/session-clean-exit.test.sh` | 6 | `tests/hooks_session.rs` | 16 (shared) | **DONE, see below** |
 | `hooks/lib/common.test.sh` | 25 | `src/common/*` unit tests | 50 (shared) | TODO |
 | `hooks/incr-counter.test.sh` | 7 | `src/common/counter.rs` unit tests | 50 (shared) | TODO |
-| `shell/merge-settings.test.sh` | 19 | `tests/init_merge.rs` | 8 | TODO |
-| `shell/gen-shared-settings.test.sh` | 10 | `tests/settings_gen.rs` | 10 | TODO |
+| `shell/merge-settings.test.sh` | 19 | `tests/init_merge.rs` | 8 | **DONE, see below** |
+| `shell/gen-shared-settings.test.sh` | 10 | `tests/settings_gen.rs` | 10 | **DONE, see below** |
 
 **Totals: 214 old scenarios. 141 Rust integration tests plus 50 unit tests, 191
 in all.** Again, these totals prove nothing on their own; see the caveat above.
@@ -368,6 +368,61 @@ argument to `assert_eq` and `assert_contains` and the second to
 `assert_valid_json`. Grabbing the first quoted string on the line returns
 interpolated values instead and yields 25 hits against a real 19. Take the last
 quoted token per call site.
+
+## Per-scenario rows: the two oracle suites
+
+**COMPLETE for both. 19 + 10 = 29 old scenarios accounted for, zero blank rows.**
+These two matter most for sequencing: their python scripts are the live
+differential oracles, so these rows are what let WU-14 delete the scripts as well
+as the suites.
+
+### `shell/merge-settings.test.sh` (19) into `tests/init_merge.rs` (8 tests)
+
+`tests/init_merge.rs` carries its own coverage map in the file header, which is
+the source of truth. Transcribed here, and while checking it I found it named 18
+of the 19 scenarios: **s2 was absent**. The coverage existed all along, since the
+`FIXTURES` entry it cites for s6 and s15 IS s2's scenario, but an auditor
+following WU-14's rule would rightly have blocked on a scenario with no row. The
+test file's map now names s2 too.
+
+| Old scenarios | New test or fixture | How it is covered |
+|---|---|---|
+| s1 user-unchanged key gets template value (1) | `FIXTURES` "s1" | in the table-driven differential loop |
+| s2 user-changed key is preserved / s6 conflict keeps user with one skip entry / s15 contested key frozen to OLD base in NEWBASE (3) | `FIXTURES` "user key modified from base" | one fixture carrying all three, plus a direct assertion that NEWBASE holds the OLD base value. **s2 was missing from the test file's own coverage map and is added in this change** |
+| s3 new template key added to output (1) | `FIXTURES` "s3" | direct |
+| s4 template-dropped unchanged key absent (1) | `FIXTURES` "template key removed" | direct |
+| s5 absent base gives additive fallback (1) | `n4_missing_base_becomes_empty_object_with_warning_not_hard_fail` | N4 soft-fail |
+| s7 corrupt TEMPLATE / s8 missing TEMPLATE / s9 corrupt USER / s10 USER is array / s11 USER is scalar, all N2 fail closed (5) | `INVALID_INPUT_CASES` | an 8-case table asserting non-zero exit and empty stdout on both engines |
+| s12 USER == {} gives output equal to template (1) | `FIXTURES` "s12" | direct |
+| s13 corrupt BASE gives additive fallback plus warning (1) | `n4_invalid_base_becomes_empty_object_with_warning_not_hard_fail` | N4, invalid rather than missing |
+| s14 type-mismatch on a contested key keeps the user value (1) | `FIXTURES` "s14" | direct |
+| s16 C2 coincidence across three cycles (1) | `c2_coincidence_keeps_user_value_frozen_through_a_matching_template_cycle` | chained through two real merge calls per engine |
+| s17 skip file is a valid JSON array / s18 merged stdout and NEWBASE are valid JSON (2) | asserted inline in the `FIXTURES` loop | every case producing a skip entry checks both |
+| s19 zero withheld keys gives an empty skip array (1) | `n3_zero_withheld_keys_writes_empty_skip_array` | N3 |
+
+### `shell/gen-shared-settings.test.sh` (10) into `tests/settings_gen.rs` (10 tests)
+
+| Old scenarios | New test or fixture | How it is covered |
+|---|---|---|
+| happy path: canned perms, model stripped, personal keys dropped, passthrough (1) | `happy_path_canned_perms_model_stripped_personal_keys_dropped_passthrough` | direct |
+| model absent stays absent (1) | `model_absent_in_source_stays_absent` | direct |
+| model in source is stripped (1) | `model_in_source_is_stripped` | direct |
+| malformed source / missing source / missing permissions, all non-zero exit with empty stdout (3) | `malformed_or_missing_inputs_guard_rejects_with_no_output` | a table covering all three input-guard shapes |
+| degenerate permissions {} rejected / empty allow array rejected (2) | `malformed_or_missing_inputs_guard_rejects_with_no_output` | the same table's permissions-guard cases |
+| no arguments rejected (1) | `no_arguments_guard_rejects_on_both_sides` | asserted against both engines |
+| hooks reduced to the safety guards only (1) | `hooks_reduced_to_safety_guards_only_functional_hooks_dropped` | the SAFETY_RE filter |
+
+Adds, with no old counterpart:
+
+| New test | What it adds |
+|---|---|
+| `non_ascii_value_diverges_from_python_named_direction` | The ensure_ascii divergence, asserted in a named direction rather than left as a comment |
+| `regression_pin_rust_matches_python_oracle_and_mutation_diverges` | Byte-match against the python oracle, plus a mutation that must produce a diff |
+| `settings_gen_works_from_the_cli` | The subcommand end to end, not just the library function |
+| `malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout` | A malformed .hooks shape must fail loudly, not emit a hooks-less seed |
+
+So 10 old scenarios map onto 6 Rust tests and 4 more are new, which is the whole
+10. Two of those four exist because of defects found during the port itself.
 
 ## How to fill a per-scenario row
 
