@@ -27,9 +27,10 @@ Parse `$ARGUMENTS`:
 2. Read files before asserting facts about them (grounding).
 3. Combine independent bash calls into a single tool call.
 4. Never edit project code or config. Writes are limited to `~/.claude/memory/` files.
-5. Dispatch subagents for collection and analysis with the Agent tool, `collector` for Phase 1 and `analyst` for Phase 2: issue the independent Agent calls in a single message so they run in parallel. Subagents return distilled structured findings, never raw dumps.
-6. No silent truncation. If you cap commits/PRs or skip a source, the final report says so.
-7. Never persist secrets. Tokens, keys, or credentials seen in configs/CI must never enter a memory fact.
+5. Dispatch subagents for collection and analysis with the Agent tool, `collector` for Phase 1 and `analyst` for Phase 2: issue the independent Agent calls in a single message so they run in parallel. Subagents produce distilled structured findings, never raw dumps.
+6. **Delivery differs per agent tier, per `playbook:delegating-subagents` (invoke it before dispatching).** `collector` holds `Bash`, so it MUST write its findings to a named absolute path under `/tmp/learn-project/<owner>-<repo>/` (`mkdir -p` it first) and return only a one-line count; read those files after each collector finishes, goes idle, or is given up on, because an Agent-tool spawn often completes and returns nothing. `analyst` is structurally read-only and cannot write a file, so its candidate facts come back only by return value, which may not arrive. Either way, an agent that delivered nothing did NOT run: name it as missing rather than proceeding with a partial picture, since a fact written from a half-collected repo is worse than a missing one and much harder to notice later.
+7. No silent truncation. If you cap commits/PRs or skip a source, the final report says so.
+8. Never persist secrets. Tokens, keys, or credentials seen in configs/CI must never enter a memory fact.
 
 ## Phase 0: Preflight and scope
 

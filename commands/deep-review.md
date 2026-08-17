@@ -200,9 +200,25 @@ Instruct each to:
  "category": "security", "confidence": "HIGH", "evidence": "<exact code>", "body": "<short plain finding; the problem then what breaks, 2 sentences by default, a third only when the mechanism is non-obvious>"}
 ```
 
-Collect every reviewer's JSON. If a reviewer returns nothing, record it ran with zero findings (not a failure).
+**A silent reviewer is NOT a reviewer with zero findings.** This is the single most important rule in this command (`playbook:delegating-subagents`).
 
-**Close each reviewer the moment it returns (MUST).** Spawn each with a stable `name` (e.g. `dr-<focus>`: `dr-security`, `dr-logic`). As soon as a reviewer returns its JSON, `TaskStop` it. The swarm is one-shot, so a returned reviewer is never reused; a spawned agent stays idle-alive for `SendMessage` follow-ups, so leaving it unstopped keeps a subagent running in the background. Track the spawned names so Step 8 can sweep any that didn't return.
+The `reviewer` agent is structurally read-only (Read, Grep, Glob, Skill), so it cannot write its findings to a file. `shell/check-agents.sh` forbids `Write` and `Bash` for that tier by design, and granting them would fail CI, so the return value is the only channel there is. In measured use, Agent-tool return values have failed outright. Treat a swarm as likely to lose lenses.
+
+Track three outcomes per focus and carry them into Step 4's verdict:
+
+| Outcome | Meaning |
+|---|---|
+| Returned findings | Ran, use them. |
+| Returned an explicit empty array | Ran, found nothing. Safe. |
+| Returned nothing | **NOT RUN. Not a clean lens.** |
+
+Never fold "returned nothing" into "zero findings", and **never let a swarm with missing lenses produce an APPROVE.** Step 4 already requires INCONCLUSIVE when the swarm failed to run, and a missing security or logic lens is exactly that case. Name the missing lenses in the report and to the user.
+
+**Cover the gap while the swarm runs.** Start your own grounding pass on the highest-risk part of the diff as soon as the swarm is dispatched, rather than waiting to see what comes back. A lost swarm then costs latency instead of coverage, which is the difference between a slow review and a review that only looked thorough.
+
+After a reviewer's idle notification fires, one `SendMessage` asking for partial results is worth a single attempt. Do not spend more than one round per lens.
+
+**Close each reviewer once you have its findings or have given up (MUST).** Spawn each with a stable `name` (e.g. `dr-<focus>`: `dr-security`, `dr-logic`). The swarm is one-shot, so a finished reviewer is never reused; a spawned agent stays idle-alive for `SendMessage` follow-ups, so leaving it unstopped keeps a subagent running in the background. Track the spawned names so Step 8 can sweep any that never delivered. `TaskStop` is destructive and unrecoverable for a read-only agent, so do not use it until you have either taken the findings or made the one recovery attempt.
 
 ## Step 4: Consolidate and fact-check
 

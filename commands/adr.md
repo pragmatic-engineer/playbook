@@ -191,7 +191,15 @@ Present the blueprint. Revise in place until the user explicitly approves.
 
 ## Stage 3: Quality Gate (MUST)
 
-After the user approves all drafts, run the three-phase gate before finalising. Don't skip it; don't finalise until it passes or the user explicitly overrides. Criteria are inline. Run Phase 1 first (Phases 2 and 3 read its report), then dispatch Phase 2 and Phase 3 in parallel: issue both Agent calls in a single message so they run at once. Phase 2 and Phase 3 are independent, so they never run one at a time; the 1-before-(2,3) order is the only real dependency. Spawn each agent with a stable `name`. The moment an agent returns its result, `TaskStop` it; a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background.
+After the user approves all drafts, run the three-phase gate before finalising. Don't skip it; don't finalise until it passes or the user explicitly overrides. Criteria are inline. Run Phase 1 first (Phases 2 and 3 read its report), then dispatch Phase 2 and Phase 3 in parallel: issue both Agent calls in a single message so they run at once. Phase 2 and Phase 3 are independent, so they never run one at a time; the 1-before-(2,3) order is the only real dependency.
+
+**All three phase agents are structurally read-only, so their only channel is the return value, and it is unreliable** (`playbook:delegating-subagents`; invoke it before dispatching). `fact-checker`, `critic` and `test-reviewer` hold Read, Grep, Glob and Skill only. They cannot write a report file: `shell/check-agents.sh` forbids `Write` and `Bash` for that tier by design, and granting them would fail CI.
+
+**Run Phase 1 inline. It is faster and it actually finishes.** Its checks are mechanical (do these paths exist, do the claimed line numbers match, is the dependency graph acyclic, do the Ordering table and the mermaid graph agree, are the parallel groups file-disjoint). That is a handful of shell and python commands, about two minutes, with re-runnable output. Delegating it has produced nothing across repeated attempts on this repo, while the inline version caught three wrong line citations and two unhonoured memory facts.
+
+**A phase that returned nothing is INCONCLUSIVE, never PASS.** On two separate gates for ADR 0007, every dispatched phase agent went idle without returning; recording those as passes would have published a gate that checked nothing. INCONCLUSIVE blocks finalisation exactly like FAIL. Either redo that phase inline or record the gap explicitly in the quality report, naming which phase did not run.
+
+Spawn each delegated agent with a stable `name`. `TaskStop` it only once you have its verdict or have made one post-idle `SendMessage` attempt; stopping is destructive and unrecoverable for a read-only agent. A spawned agent stays idle-alive for follow-ups and this flow never reuses a finished one, so an unstopped agent lingers as a background process.
 
 ### Phase 1: Fact-Check
 
