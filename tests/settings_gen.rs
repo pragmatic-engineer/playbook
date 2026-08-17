@@ -535,3 +535,61 @@ fn settings_gen_works_from_the_cli() {
         "CLI stdout should match the library function's output exactly"
     );
 }
+
+/// A malformed `.hooks` shape must FAIL, not quietly yield a hooks-less seed.
+///
+/// This is a regression pin with a specific history. The first revision of this
+/// port treated a malformed shape as "contributes no hooks" and exited 0,
+/// reasoning that a shape it could not parse could not leak an unsafe command.
+/// That is backwards in the only pipeline that consumes this output:
+/// `Makefile`'s recipe is `gen ... > "$@.tmp" && mv "$@.tmp" "$@"`, so a
+/// nonzero exit leaves the committed seed untouched, while an exit 0 carrying a
+/// hooks-less seed REPLACES it with one that wires nothing.
+///
+/// Asserted against the real python generator in both directions, so the two
+/// agree on rejecting rather than merely on some error appearing.
+#[test]
+fn malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout() {
+    // Arrange
+    let dir = scratch_dir("malformed-hooks");
+    let perms_path = dir.join("perms.json");
+    write_file(&perms_path, CANNED_PERMS);
+
+    let cases = [
+        (".hooks is a string", r#"{"hooks": "not-an-object"}"#),
+        (".hooks is an array", r#"{"hooks": []}"#),
+        (
+            ".hooks event is not an array",
+            r#"{"hooks": {"PreToolUse": {"not": "an array"}}}"#,
+        ),
+        (
+            ".hooks group is not an object",
+            r#"{"hooks": {"PreToolUse": ["not-an-object"]}}"#,
+        ),
+    ];
+
+    for (label, src_json) in cases {
+        let src_path = dir.join(format!("src-{}.json", label.replace(['.', ' '], "-")));
+        write_file(&src_path, src_json);
+
+        // Act
+        let py = run_python_gen(&src_path, &perms_path);
+        let rust = generate(&src_path, &perms_path);
+
+        // Assert
+        assert_ne!(
+            py.exit_code, 0,
+            "{label}: python should reject this shape, not emit a seed"
+        );
+        assert!(
+            py.stdout.is_empty(),
+            "{label}: python should write nothing to stdout on rejection"
+        );
+        assert!(
+            rust.is_err(),
+            "{label}: the Rust port must reject it too. Emitting a hooks-less \
+             seed on exit 0 would let the Makefile replace the committed seed \
+             with one wiring no hooks"
+        );
+    }
+}

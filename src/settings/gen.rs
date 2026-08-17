@@ -119,12 +119,12 @@ fn is_valid_hook_name(name: &str) -> bool {
 /// safe entries left.
 ///
 /// An event's groups not being a JSON array, or a group not being a JSON
-/// object, has no real-world `settings.json` instance and is not exercised
-/// by any ported scenario; python's `filter_hooks` would raise on either
-/// shape and crash the whole process (nonzero exit, nothing on stdout, since
-/// `print` never runs). This port fails safe instead: a malformed shape
-/// contributes no hooks rather than crashing, so a shape this filter cannot
-/// make sense of can never leak an unfiltered command into the seed.
+/// object, cannot reach here: `validate_hooks_shape` rejects every malformed
+/// shape before `build` runs, matching python's crash. The `continue` arms
+/// below are therefore unreachable belt-and-braces rather than a fallback
+/// policy. An earlier revision of this port did treat them as a policy and
+/// emitted a hooks-less seed on exit 0, which is strictly worse than crashing
+/// here; see `validate_hooks_shape` for why.
 fn filter_hooks(hooks: &Map<String, Value>) -> Map<String, Value> {
     let mut result = Map::new();
     for (event, groups_value) in hooks {
@@ -193,6 +193,43 @@ fn build(mut src: Map<String, Value>, perms: Value) -> Map<String, Value> {
     src
 }
 
+/// Reject a malformed `.hooks` shape loudly, matching python's crash rather
+/// than quietly emitting a seed with no hooks.
+///
+/// The tempting reading is that dropping hooks "fails safe", since a shape the
+/// filter cannot parse then cannot leak an unfiltered command. In this
+/// pipeline that is backwards. `Makefile`'s recipe is
+/// `gen ... > "$@.tmp" && mv "$@.tmp" "$@"`: python exits nonzero on a
+/// malformed shape, so `mv` never runs and the committed seed survives. An
+/// exit 0 carrying a hooks-less seed instead REPLACES the committed seed with
+/// one that wires nothing, which is the failure this whole file exists to
+/// prevent. Loud beats silent when the output is a committed artefact.
+fn validate_hooks_shape(src: &Map<String, Value>, src_path: &Path) -> Result<(), GenError> {
+    let Some(hooks) = src.get("hooks") else {
+        return Ok(());
+    };
+    let bad = |what: &str| {
+        Err(GenError(format!(
+            "{what} in {}; refusing to emit a seed that would silently wire no hooks",
+            src_path.display()
+        )))
+    };
+    let Some(events) = hooks.as_object() else {
+        return bad(".hooks is present but is not an object");
+    };
+    for (event, groups) in events {
+        let Some(groups) = groups.as_array() else {
+            return bad(&format!(".hooks.{event} is not an array"));
+        };
+        for (i, group) in groups.iter().enumerate() {
+            if !group.is_object() {
+                return bad(&format!(".hooks.{event}[{i}] is not an object"));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Load `src_path` and `perms_path`, validate PERMS the way
 /// `shell/gen-shared-settings.py`'s guard does (a JSON object with a
 /// non-empty `allow` array), then run `build` and serialise the result as
@@ -233,6 +270,8 @@ pub fn generate(src_path: &Path, perms_path: &Path) -> Result<String, GenError> 
             )))
         }
     };
+
+    validate_hooks_shape(&src, src_path)?;
 
     let result = build(src, perms_value);
     let json = serde_json::to_string_pretty(&Value::Object(result))
