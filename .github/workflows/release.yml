@@ -1,0 +1,205 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: MIT
+#
+# WU-10 of ADR 0007. Attaches verified binaries to a release that already
+# exists: releases are cut by pushing a signed annotated tag and then running
+# `gh release create --target main`. This workflow does NOT create the release,
+# it only builds, signs and uploads the artefacts plus SHA256SUMS.
+#
+# Five targets, built on the host that matches them:
+#   aarch64-apple-darwin        macos-latest, native
+#   x86_64-apple-darwin         macos-latest, cross
+#   x86_64-unknown-linux-musl   ubuntu-latest, static via rust-lld
+#   aarch64-unknown-linux-musl  ubuntu-latest, static via rust-lld
+#   x86_64-pc-windows-msvc      windows-latest
+#
+# Why `rust-lld` for the musl legs: the crate graph is pure Rust (clap, serde,
+# serde_json), so nothing needs a C toolchain, and rust-lld ships with the
+# toolchain. That removes any need for musl-tools or an aarch64 cross-gcc.
+# Verified locally: both musl targets link with rust-lld and `file` reports
+# them static (x86_64 as static-pie, aarch64 as statically linked).
+#
+# Why `codesign --force`: on Apple Silicon the linker already ad-hoc signs the
+# native binary, while the cross-built x86_64 one comes out "not signed at
+# all". `--force` covers both cases in one step.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Fail before spending five build legs on a version mismatch. The manifest
+  # version is user-visible through `claude plugin details`, so a binary whose
+  # version contradicts the manifest must never publish.
+  verify-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Tag, Cargo.toml and plugin.json must agree
+        id: check
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          tag_version="${tag#v}"
+          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          plugin_version="$(python3 -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
+
+          echo "tag:         $tag (version $tag_version)"
+          echo "Cargo.toml:  $cargo_version"
+          echo "plugin.json: $plugin_version"
+
+          if [ "$tag_version" != "$cargo_version" ] || [ "$tag_version" != "$plugin_version" ]; then
+            echo "::error::version mismatch: tag=$tag_version Cargo.toml=$cargo_version plugin.json=$plugin_version. All three must agree before publishing." >&2
+            exit 1
+          fi
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: verify-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            linker: rust-lld
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            linker: rust-lld
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        # Linux-only action; it self-skips elsewhere with a confusing warning
+        # (same convention as rust-ci.yml and shell-ci.yml).
+        if: runner.os == 'Linux'
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+            uploads.github.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build
+        shell: bash
+        env:
+          RELEASE_LINKER: ${{ matrix.linker }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RELEASE_LINKER:-}" ]; then
+            # Uppercase the target and swap dashes, per cargo's env var naming.
+            tu="$(echo '${{ matrix.target }}' | tr 'a-z-' 'A-Z_')"
+            export "CARGO_TARGET_${tu}_LINKER=${RELEASE_LINKER}"
+          fi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Ad-hoc sign the macOS binaries
+        if: runner.os == 'macOS'
+        run: codesign --sign - --force target/${{ matrix.target }}/release/playbook
+
+      - name: Confirm the macOS signature is adhoc
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          codesign -dvv target/${{ matrix.target }}/release/playbook 2>&1 | tee /tmp/cs.txt
+          grep -q 'Signature=adhoc' /tmp/cs.txt
+
+      - name: Confirm the linux binaries are static
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          file -b target/${{ matrix.target }}/release/playbook | tee /tmp/f.txt
+          grep -qE 'static-pie linked|statically linked' /tmp/f.txt
+
+      - name: Name and upload the artefact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          asset="playbook-${VERSION}-${{ matrix.target }}${{ matrix.ext }}"
+          cp "target/${{ matrix.target }}/release/playbook${{ matrix.ext }}" "$asset"
+          # The release is created by the maintainer before this runs; see the
+          # header. A missing release is a procedure error, not a build error,
+          # so say so rather than failing on an opaque upload error.
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || {
+            echo "::error::release ${GITHUB_REF_NAME} does not exist. Create it first with: gh release create ${GITHUB_REF_NAME} --target main" >&2
+            exit 1
+          }
+          gh release upload "${GITHUB_REF_NAME}" "$asset" --clobber
+
+  checksums:
+    needs: [verify-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+            uploads.github.com:443
+
+      - name: Build SHA256SUMS from the uploaded assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist && cd dist
+          # Download exactly the five binaries, never a previous SHA256SUMS.
+          gh release download "${GITHUB_REF_NAME}" --pattern "playbook-${VERSION}-*" --clobber
+          count="$(find . -type f | wc -l | tr -d ' ')"
+          if [ "$count" -ne 5 ]; then
+            echo "::error::expected 5 artefacts, found $count. Refusing to publish a partial SHA256SUMS." >&2
+            find . -type f
+            exit 1
+          fi
+          shasum -a 256 playbook-* > SHA256SUMS
+          shasum -a 256 -c SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "${GITHUB_REF_NAME}" SHA256SUMS --clobber
