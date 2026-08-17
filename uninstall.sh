@@ -52,10 +52,11 @@ Flags:
   -h,--help show this help
 
 What is removed (allowlist only):
-  .gitignore  agents  Brewfile  CODE_OF_CONDUCT.md  commands  CONTRIBUTING.md
-  docs  hooks  install.sh  LICENSE  Makefile  output-styles  permissions.shared.json
-  prompts  README.md  SECURITY.md  settings.shared.json  shell  skills
-  statusline.sh  uninstall.sh
+  .claude-plugin  .gitignore  agents  Brewfile  Cargo.lock  Cargo.toml
+  CODE_OF_CONDUCT.md  commands  CONTRIBUTING.md  docs  hooks  install.sh
+  LICENSE  Makefile  output-styles  permissions.shared.json  prompts
+  README.md  ruff.toml  SECURITY.md  settings.shared.json  shell  skills
+  src  statusline.sh  tests  uninstall.sh
 
 What is preserved by default:
   settings.json  .settings.base.json  backups/  sessions/  projects/
@@ -99,10 +100,26 @@ fi
 
 # --- Shipped-entry allowlist ---
 # Only these entries are ever removed.  CLAUDE_HOME itself is never touched.
+# Everything install.sh copies into CLAUDE_HOME must appear here, or an
+# uninstall leaves it behind. install.sh builds its copy set dynamically (every
+# top-level entry except a short skip list), while this list is hardcoded, so
+# the two drift apart every time a file is added to the repo root and nobody
+# thinks about uninstall. That is exactly what happened: .claude-plugin,
+# Cargo.lock, Cargo.toml, ruff.toml, src and tests all arrived after this array
+# was written and all six survived an uninstall. shell/install-uninstall-roundtrip.test.sh
+# now performs a real install and uninstall and fails if anything is stranded,
+# so the next addition is caught rather than discovered years later.
+#
+# agents, commands and skills are deliberately still here even though install.sh
+# no longer copies them: they are plugin-owned now, and this clears the residue
+# of older direct installs.
 SHIPPED=(
+    .claude-plugin
     .gitignore
     agents
     Brewfile
+    Cargo.lock
+    Cargo.toml
     CODE_OF_CONDUCT.md
     commands
     CONTRIBUTING.md
@@ -115,11 +132,14 @@ SHIPPED=(
     permissions.shared.json
     prompts
     README.md
+    ruff.toml
     SECURITY.md
     settings.shared.json
     shell
     skills
+    src
     statusline.sh
+    tests
     uninstall.sh
 )
 
