@@ -167,6 +167,40 @@ assert_eq "capture-due honours CC_CAPTURE_AT override" \
     "$(_file_exists "$t4_home/.claude/runtime/$t4_sid/capture-due")" "yes"
 rm -rf "$t4_home"
 
+# 4b. REGRESSION: staying above the threshold fires exactly ONCE, not per render.
+#
+# The marker used to be re-dropped on every render while usage sat at or above
+# the threshold, while hooks/memory-capture.py consumes it every Stop. Past 70%
+# that cost a turn every turn for the rest of the session, and the hook's own
+# message claims it "fires once per threshold crossing". Observed firing four
+# times in a row with a byte identical edited-files list.
+t4b_home=$(mktemp -d)
+t4b_sid="sess-latch"
+t4b_dir="$t4b_home/.claude/runtime/$t4b_sid"
+t4b_payload=$(_telemetry_payload "$t4b_sid" 75 0.1 "$t4b_home")
+
+HOME="$t4b_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4b_payload" >/dev/null 2>&1
+assert_eq "first render above threshold drops capture-due" \
+    "$(_file_exists "$t4b_dir/capture-due")" "yes"
+
+# Consume it the way the Stop hook does, then render again while still above.
+rm -f "$t4b_dir/capture-due"
+HOME="$t4b_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4b_payload" >/dev/null 2>&1
+assert_eq "second render above threshold does NOT re-drop capture-due" \
+    "$(_file_exists "$t4b_dir/capture-due")" "no"
+
+HOME="$t4b_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4b_payload" >/dev/null 2>&1
+assert_eq "third render above threshold still does NOT re-drop capture-due" \
+    "$(_file_exists "$t4b_dir/capture-due")" "no"
+
+# Dropping back under the line re-arms, so a genuine second crossing still fires.
+t4b_low=$(_telemetry_payload "$t4b_sid" 40 0.1 "$t4b_home")
+HOME="$t4b_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4b_low" >/dev/null 2>&1
+HOME="$t4b_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4b_payload" >/dev/null 2>&1
+assert_eq "crossing again after dropping under the line fires once more" \
+    "$(_file_exists "$t4b_dir/capture-due")" "yes"
+rm -rf "$t4b_home"
+
 # 5. Render survives an unwritable session dir (the ADR's safety pin).
 t5_home=$(mktemp -d)
 t5_sid="sess-unwritable"
