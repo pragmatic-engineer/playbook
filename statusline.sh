@@ -367,10 +367,13 @@ fi
 
 # ── Left side: path + git branch + dirty indicator + node version ──
 
-# Replace $HOME with ~ for readability
+# Replace $HOME with ~ for readability. $HOME is quoted inside the ${..#..}
+# because the strip pattern is a glob, not a literal: an unquoted $HOME
+# containing [, * or ? matches as a pattern and silently strips nothing, so a
+# home directory like /tmp/a[b]c renders the full path instead of ~.
 display_path="$cwd"
 if [[ "$display_path" == "$HOME"* ]]; then
-    display_path="~${display_path#$HOME}"
+    display_path="~${display_path#"$HOME"}"
 fi
 
 left="${GREEN}${display_path}${RESET}"
