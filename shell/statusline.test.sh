@@ -228,6 +228,22 @@ assert_eq "no runtime dir created with no session_id" \
     "$( [[ -d "$t6_home/.claude/runtime" ]] && echo yes || echo no )" "no"
 rm -rf "$t6_home"
 
+# 7. A HOME holding glob metacharacters still collapses to ~ in the rendered
+#    path. The strip pattern in ${display_path#"$HOME"} has to be quoted: left
+#    bare, a HOME like /tmp/xxx/a[b]c is read as a PATTERN, matches the literal
+#    "abc" rather than itself, strips nothing, and the status line renders the
+#    whole absolute path. Scenarios 1 to 6 all use mktemp -d names, which never
+#    contain [, * or ?, so none of them can see this.
+t7_base=$(mktemp -d)
+t7_home="$t7_base/a[b]c"
+mkdir -p "$t7_home"
+t7_payload=$(_telemetry_payload "sess-glob-home" 40 0.1 "$t7_home")
+t7_out=$(HOME="$t7_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t7_payload" 2>&1)
+assert_eq "glob-metachar HOME collapses to ~ in the rendered path" \
+    "$( [[ "$t7_out" == *"$t7_home"* ]] && echo leaked || echo collapsed )" \
+    "collapsed"
+rm -rf "$t7_base"
+
 TOTAL=$(( PASS + FAIL ))
 echo ""
 echo "${PASS}/${TOTAL} scenarios passed"

@@ -23,7 +23,10 @@
 
 # Default prompt sent to claude when auto-resolving rebase conflicts.
 # Override before sourcing: _WT_AI_RESOLVE_PROMPT="your prompt"
-: ${_WT_AI_RESOLVE_PROMPT:="Resolve the current git rebase conflicts. Run 'git diff --name-only --diff-filter=U' to find conflicted files, read each, fix the markers, 'git add' them, then 'git rebase --continue'. Keep both sides where intent is clear; if ambiguous, prefer the incoming (origin/\$BASE_REF) version."}
+# Quoted so an override containing * or ? is not glob-expanded against the cwd
+# before : discards it. The assigned value is correct either way, so this is
+# wasted work rather than a wrong prompt, but the cwd here is a repo checkout.
+: "${_WT_AI_RESOLVE_PROMPT:="Resolve the current git rebase conflicts. Run 'git diff --name-only --diff-filter=U' to find conflicted files, read each, fix the markers, 'git add' them, then 'git rebase --continue'. Keep both sides where intent is clear; if ambiguous, prefer the incoming (origin/\$BASE_REF) version."}"
 
 _wt_die() { printf '%s\n' "worktree: $1" >&2; return "${2:-1}"; }
 

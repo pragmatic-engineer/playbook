@@ -57,8 +57,17 @@ jobs:
       - name: ShellCheck (.sh files)
         # Lint once, on Linux only: shellcheck is not preinstalled on macOS
         # runners and static analysis is platform-independent.
-        # --severity=warning: baseline is clean with 2 minor style hints;
-        # can be tightened to --severity=style once those are addressed.
+        # --severity=warning: the baseline is clean at error and warning.
+        # Dropping to --severity=style is NOT two fixes away, despite what this
+        # comment used to claim. Measured 2026-08-18: 87 findings appear below
+        # warning, and they are mostly not defects. 56 are SC2015 (A && B || C)
+        # from the pass/fail idiom in the .test.sh files, 18 are SC2016 (single
+        # quotes not expanding) which is the point of the quoting, and 7 are
+        # SC1091 (cannot follow a sourced path), which survives even with
+        # shellcheck -x, so no amount of source fixing clears it.
+        # Tightening therefore means adding disable directives, not fixing bugs.
+        # The findings that WERE real got fixed instead: SC2295 in statusline.sh
+        # (unquoted $HOME read as a glob) and SC2223 in shell/shared/worktree.sh.
         if: runner.os == 'Linux'
         run: git ls-files '*.sh' | xargs shellcheck --severity=warning
 
