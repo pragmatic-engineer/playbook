@@ -1,5 +1,5 @@
 ---
-description: Check the four playbook layers and print a status table with a remediation hint for each miss.
+description: Check the five playbook layers and print a status table with a remediation hint for each miss.
 allowed-tools: Bash, Read
 argument-hint: ""
 model: sonnet
@@ -8,7 +8,7 @@ effort: low
 
 # Doctor
 
-Run all four checks below. Do not stop early if one fails. Then print a
+Run all five checks below. Do not stop early if one fails. Then print a
 status table with one row per layer.
 
 ## Layer 1: Plugin enabled
@@ -67,6 +67,54 @@ a hard fail when the file is absent.
 
 Remediation hint when not installed: "run /playbook:setup and choose Yes for the system prompt question"
 
+## Layer 5: Status line matches the shipped copy
+
+The status line is the one product file `/playbook:setup` cannot install or
+repair (see the `statusline-install-and-doctor-gap` note), and it is **not
+plugin-versioned**, so a plugin update does not refresh it. That combination
+means the installed copy can sit silently out of step with the shipped one for
+as long as nobody looks.
+
+```bash
+sl_cmd=$(jq -r '.statusLine.command // ""' ~/.claude/settings.json 2>/dev/null)
+if [ -z "$sl_cmd" ]; then
+  echo "NOT_CONFIGURED"
+else
+  sl_path=$(printf '%s\n' "$sl_cmd" | awk '{print $NF}')
+  sl_path=${sl_path/#\~/$HOME}; sl_path=${sl_path//\$HOME/$HOME}
+  shipped="${CLAUDE_PLUGIN_ROOT:-}/statusline.sh"
+  if [ ! -f "$shipped" ]; then
+    shipped=$(ls -d "$HOME"/.claude/plugins/cache/*/playbook/*/statusline.sh 2>/dev/null | sort -V | tail -1)
+  fi
+  if [ ! -f "$sl_path" ]; then echo "MISSING $sl_path"
+  elif [ ! -f "$shipped" ]; then echo "PRESENT_NO_BASELINE $sl_path"
+  elif cmp -s "$sl_path" "$shipped"; then echo "MATCH"
+  else echo "DIFFERS $sl_path vs $shipped"
+  fi
+fi
+```
+
+Report:
+
+- `MATCH` → PASS.
+- `MISSING` → **FAIL.** The status line renders nothing. Remediation: copy it
+  from the plugin, `cp "$shipped" "$sl_path"`, since `/playbook:setup` cannot.
+- `DIFFERS` → **INFO, not FAIL, and say which direction is unknown.** A
+  difference has two causes and this check cannot tell them apart: the installed
+  copy is stale, or it is a local fix that is AHEAD of the released plugin. Both
+  are worth knowing. Say so, and give the hint for both: if stale, copy the
+  shipped one over it; if it is a deliberate local fix, note that the next
+  plugin install will overwrite it, so the fix needs releasing to survive.
+- `NOT_CONFIGURED` → INFO, opt-in, no status line is configured.
+- `PRESENT_NO_BASELINE` → INFO, the file is there but no plugin copy was found
+  to compare against, so drift cannot be judged.
+
+**Do not label a difference "stale" without checking direction.** Verified on
+2026-08-18: a locally fixed `statusline.sh` reported as differing from the 0.9.1
+plugin cache while the older, buggy backup reported `MATCH`, because the baseline
+is the RELEASED copy. Calling that "stale" would have told the user to overwrite
+a good file with a broken one.
+
 ## Output format
 
 Print a table with one row per layer. Use a clear status marker and a brief
@@ -79,6 +127,7 @@ PASS  plugin enabled
 PASS  safety guards wired (3 of 3)
 INFO  launcher not installed (opt-in; run /playbook:setup)    -- run /playbook:setup and choose Yes for the launcher question
 INFO  system prompt not installed (opt-in, recommended) -- run /playbook:setup and choose Yes for the system prompt question
+INFO  status line differs from the shipped copy -- stale, or a local fix ahead of the release; a plugin install will overwrite it either way
 ```
 
 If all required layers pass and optional layers are installed, say so in one
