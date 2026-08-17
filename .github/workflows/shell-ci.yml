@@ -80,8 +80,12 @@ jobs:
         # Lint once, on Linux only: static checks are platform-independent,
         # no need to burn the macOS leg. Config (line-length ignore) lives
         # in ruff.toml.
+        # Piped through `xargs -r` (not `ruff check $(...)`) so an empty file
+        # list runs nothing. Bare `ruff check` lints the whole tree recursively,
+        # so the substitution form silently widens to the entire repo the moment
+        # the last tracked .py goes away, which WU-14 does on purpose.
         if: runner.os == 'Linux'
-        run: pipx run ruff check $(git ls-files '*.py')
+        run: git ls-files '*.py' | xargs -r pipx run ruff check
 
       - name: Validate shared settings, tracked-file manifest, and agent definitions
         run: |
