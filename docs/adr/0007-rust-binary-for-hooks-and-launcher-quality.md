@@ -97,7 +97,48 @@ Assessed against `skills/engineering-standards/SKILL.md`. Regression pinning was
 
 This report records the gate that ran on 2026-08-13 against a 20 work unit blueprint. The blueprint now has 22: the "Rust unless it is not possible" amendment to the parent ADR added WU-20 (port `shell/gen-shared-settings.py`) and WU-21 (port `shell/check-shared-settings.py`, and move its CI lane off `shell-ci`).
 
-The counts above are left as they were on purpose, because rewriting them would misrepresent what was actually checked. **Neither new unit has been through fact-check, adversarial review, or test review.** Gate them before executing, or accept the gap knowingly. The two carry a real design question the original gate never saw: moving the settings validator into the binary makes `shell-ci` depend on a compiled artifact, which is a coupling the current CI split deliberately avoids.
+The counts above are left as they were on purpose, because rewriting them would misrepresent what was actually checked. Gate them before executing, or accept the gap knowingly. The two carry a real design question the original gate never saw: moving the settings validator into the binary makes `shell-ci` depend on a compiled artifact, which is a coupling the current CI split deliberately avoids.
+
+## Gate on WU-20 and WU-21, 2026-08-16: FAIL
+
+```
+Fact-Check:         FAIL          (4 defects, each reproduced by running a command)
+Adversarial Review: INCONCLUSIVE  (agents delivered nothing)
+Test Review:        INCONCLUSIVE  (agents delivered nothing)
+```
+
+**Do not execute WU-20 or WU-21 until the blueprint is amended.** Three of the four defects are in WU-21's acceptance criteria, which cannot pass as written.
+
+### Phase 1: Fact-Check, FAIL
+
+Run inline in the orchestrating session as commands whose output is re-runnable. Same independence caveat as the 2026-08-13 gate above.
+
+| # | Defect | Evidence |
+|---|---|---|
+| 1 | WU-21's Done When demands `find . -name "*.py" -not -path "./target/*"` return nothing. It returns 15 files: 12 under `hooks/`, plus all three under `shell/`. Only WU-14 deletes the 12 hook scripts, and **nothing in the dependency graph makes WU-21 depend on WU-14**. WU-21 requires WU-20, which requires WU-8, so the graph permits an order where this criterion is unsatisfiable through no fault of the unit. | `find` output; the Ordering rows for WU-20 and WU-21 |
+| 2 | WU-21's Done When says "`shell-ci` no longer invokes `python3` anywhere", but its file plan drops only one of two steps. | `.github/workflows/shell-ci.yml:88` is the `check-shared-settings.py` step WU-21 removes; `:77` is `git ls-files '*.py' \| xargs -r -n1 python3 -m py_compile`, which WU-21 never mentions |
+| 3 | WU-20 plans to repoint the `GEN` variable at the binary, but the recipe hardcodes the interpreter, so repointing alone yields `python3 target/debug/playbook settings gen`. | `Makefile:14` `GEN := shell/gen-shared-settings.py`; `Makefile:20` `@python3 "$(GEN)" ...` |
+| 4 | WU-21 plans to make `plugin-e2e.sh` call the binary instead of the script, but that script never invokes `cargo`, so no built binary exists at that point in the run. | `shell/plugin-e2e.sh:128` calls the python validator; no `cargo` anywhere in the file |
+
+Noted, not a defect on its own: `.github/workflows/rust-ci.yml` runs fmt, clippy, test and audit with no explicit `cargo build`, while WU-21's verification command is `./target/debug/playbook settings check ...`.
+
+### Phases 2 and 3: INCONCLUSIVE, not PASS
+
+Four agents were dispatched across two rounds: the `critic` and `test-reviewer` plugin agents, then two built-in `general-purpose` agents after the first pair failed. Every one went idle without delivering, including after a direct request for partial results and an explicit instruction to deliver via `SendMessage`.
+
+Recorded as INCONCLUSIVE rather than PASS because they checked nothing. A gate that did not run must never read as a pass. This is the second gate on this ADR where the review agents failed to return, so the next attempt should budget for running these phases inline.
+
+### What must change before these units execute
+
+1. Add `WU-14` to WU-21's `Requires`, or rewrite its "no `.py` files remain" criterion to name only the two files WU-21 actually deletes.
+2. Extend WU-21's file plan to cover `shell-ci.yml:77`, or drop the "python3 nowhere" claim.
+3. Add `Makefile:20` to WU-20's file plan.
+4. Resolve `plugin-e2e.sh`: either it builds the binary, or it keeps calling a script, or the check moves out of that harness.
+5. Re-run the adversarial and test-review phases, inline if the agents fail again.
+
+### One finding from Segment C that these units should inherit
+
+WU-8 shipped a criterion asserting a global property ("no `settings.json` entry may point under `~/.claude/hooks/`") that ranged over all 15 hooks while the unit's own tests only proved the 11 it touched. Executing it silently disabled four safety guards. WU-20's "produces no diff against the committed file" and WU-21's "returns nothing" have the same shape: both assert over a whole repository rather than over what the unit changes. Check the whole range before accepting either.
 
 ## Open items carried forward
 
