@@ -3,7 +3,7 @@
 
 use clap::Parser;
 use playbook::common::payload::Payload;
-use playbook::{hooks, Cli, Command};
+use playbook::{hooks, settings, Cli, Command, SettingsCommand};
 use std::io::{IsTerminal, Read};
 
 fn main() {
@@ -27,6 +27,15 @@ fn main() {
         // atomic switchover: any two without the third leaves users with no
         // functional hooks, or hooks pointing at a binary that is not installed.
         Command::Init => {}
+        Command::Settings { sub } => match sub {
+            SettingsCommand::Gen { src, perms } => match settings::gen::generate(&src, &perms) {
+                Ok(output) => print!("{output}"),
+                Err(err) => {
+                    eprintln!("gen-shared-settings: {err}");
+                    std::process::exit(2);
+                }
+            },
+        },
     }
 }
 
