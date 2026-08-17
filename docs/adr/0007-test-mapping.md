@@ -4,10 +4,10 @@
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
 - **Status: PARTIAL. Suite-level mapping is done and measured for all 15 suites.
-  Per-scenario rows are COMPLETE for 4 of 15 (`rebuild-memory-graph`,
-  `memory-anchors`, `session-init`, `session-clean-exit`) and outstanding for the
-  other 11. WU-14 must not delete a file whose rows are blank, so today it may
-  delete exactly those four suites.**
+  Per-scenario rows are COMPLETE for 6 of 15 (`rebuild-memory-graph`,
+  `memory-anchors`, `session-init`, `session-clean-exit`, `search-counter`,
+  `post-edit-track`) and outstanding for the other 9. WU-14 must not delete a file
+  whose rows are blank, so today it may delete exactly those six suites.**
 
 ## What this file is for
 
@@ -47,8 +47,8 @@ counts come from `cargo test --test <name>`.
 
 | Old suite | Old cases | New Rust home | New tests | Per-scenario rows |
 |---|---|---|---|---|
-| `hooks/search-counter.test.sh` | 6 | `tests/hooks_counter.rs` | 7 (shared) | TODO |
-| `hooks/post-edit-track.test.sh` | 7 | `tests/hooks_counter.rs` | 7 (shared) | TODO |
+| `hooks/search-counter.test.sh` | 6 | `tests/hooks_counter.rs` | 7 (shared) | **DONE, see below** |
+| `hooks/post-edit-track.test.sh` | 7 | `tests/hooks_counter.rs` | 7 (shared) | **DONE, see below** |
 | `hooks/preread-edit-check.test.sh` | 6 | `tests/hooks_preread.rs` | 26 (shared) | TODO |
 | `hooks/preread-size-check.test.sh` | 7 | `tests/hooks_preread.rs` | 26 (shared) | TODO |
 | `hooks/auto-model-detect.test.sh` | 6 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
@@ -163,20 +163,6 @@ suite's own summary line before mapping anything.
 So 15 old scenarios map onto 7 Rust tests, plus 1 differential test, which is
 the whole 8.
 
-### Suites whose labels resist clean extraction
-
-`hooks/search-counter.test.sh` and `hooks/post-edit-track.test.sh` were attempted
-and deliberately NOT mapped, so nobody repeats the dead ends. Their assertions use
-`ok "..."` / `bad "..."` helper pairs at varying indentation, with the label text
-interpolated (`"tool-count (got $(tcount))"`), so there is no clean list to lift:
-grepping the pair yields roughly double the real scenario count, and grepping only
-`ok` at line start yields almost nothing. Their Rust counterparts in
-`tests/hooks_counter.rs` also sit inside per-hook `mod` blocks, so the `#[test]`
-functions are indented and a `^fn ` grep misses all of them.
-
-Map those two by reading both files case by case rather than by extraction. The
-measured targets are 6 and 7 old scenarios against 7 Rust tests across two mods.
-
 ## Per-scenario rows: the session pair
 
 **COMPLETE for both. 13 + 6 = 19 old scenarios accounted for, zero blank rows, so
@@ -222,6 +208,41 @@ style that defeated a previous attempt on other suites; what works is grepping
 the CALL SITES with line numbers and reading them, rather than trying to
 regex-extract the quoted strings. Use that on `search-counter` and
 `post-edit-track`.
+
+## Per-scenario rows: the counter pair
+
+**COMPLETE for both. 6 + 7 = 13 old scenarios accounted for, zero blank rows, so
+WU-14 may delete both suites.** Both map into `tests/hooks_counter.rs`, which
+splits them across `mod search_counter` and `mod post_edit_track`.
+
+Unlike the earlier suites, **every one of the 7 Rust tests here maps to old
+scenarios**, so there is no separate new-coverage table. The added coverage is
+inside existing tests instead, noted per row.
+
+### `hooks/search-counter.test.sh` (6) into `mod search_counter` (4 tests)
+
+| Old scenarios | New test | How it is covered |
+|---|---|---|
+| Grep bumps search-count to 4 / tool-count tracks every call (2) | `grep_bumps_search_count_and_tool_count` | one test asserting both counters, as its name says |
+| threshold nudge fires at 4 / no nudge on count 5 (2) | `threshold_nudges_fire_at_four_eight_twelve_and_then_fall_silent` | a 5-case table, (4, fires), (5, silent), (8, fires), (12, fires), (13, silent). Carries both old labels AND adds the 8, 12 and 13 thresholds the shell suite never tested |
+| Read of same path counts once (1) | `read_of_same_path_counts_once` | the dedup rule |
+| no session id is a silent no-op (1) | `no_session_id_is_a_silent_noop` | in `mod search_counter` |
+
+### `hooks/post-edit-track.test.sh` (7) into `mod post_edit_track` (3 tests)
+
+| Old scenarios | New test | How it is covered |
+|---|---|---|
+| Edit records a path/ts line / edit-count bumped to 1 / Write appends a second line / edit-count now 2 / NotebookEdit honours notebook_path (5) | `edit_write_notebookedit_accumulate_in_session` | 7 assertions covering all three tool shapes, the `edit-count` file, `edits.jsonl` and the `notebook_path` fallback |
+| Read is a no-op (1) | `non_edit_tool_is_a_noop` | direct |
+| no session id is a silent no-op (1) | `no_session_id_is_a_silent_noop` | in `mod post_edit_track`, a separate test from the search-counter one of the same name |
+
+Extraction note: these are the two suites an earlier attempt gave up on. The
+technique that works is the one recorded for `session-clean-exit`, grep the
+`ok "` and `bad "` CALL SITES with line numbers and read them. Regex-extracting
+the quoted strings fails here because each scenario has an `ok` and a `bad`
+variant with interpolated text, so a naive extract returns roughly double the
+real count. Their Rust counterparts also sit inside per-hook `mod` blocks, so
+the `#[test]` functions are indented and an unindented `^fn ` grep finds none.
 
 ## How to fill a per-scenario row
 
