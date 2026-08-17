@@ -239,9 +239,17 @@ t7_home="$t7_base/a[b]c"
 mkdir -p "$t7_home"
 t7_payload=$(_telemetry_payload "sess-glob-home" 40 0.1 "$t7_home")
 t7_out=$(HOME="$t7_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t7_payload" 2>&1)
+# Three claims, not one. "The absolute path is absent" on its own is satisfied
+# by a render that printed nothing at all, so a crash here would read as a pass.
+# Check that it rendered, that the path did not leak, and that the ~ collapse
+# actually happened, and name each failure mode so a red suite says which.
+if   [[ -z "$t7_out" ]];              then t7_verdict="empty-render"
+elif [[ "$t7_out" == *"$t7_home"* ]]; then t7_verdict="leaked"
+elif [[ "$t7_out" != *"~"* ]];        then t7_verdict="no-tilde"
+else                                       t7_verdict="collapsed"
+fi
 assert_eq "glob-metachar HOME collapses to ~ in the rendered path" \
-    "$( [[ "$t7_out" == *"$t7_home"* ]] && echo leaked || echo collapsed )" \
-    "collapsed"
+    "$t7_verdict" "collapsed"
 rm -rf "$t7_base"
 
 TOTAL=$(( PASS + FAIL ))
