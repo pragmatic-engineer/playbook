@@ -3,11 +3,10 @@
 - **Parent ADR:** `docs/adr/0007-rust-binary-for-hooks-and-launcher.md`
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
-- **Status: PARTIAL. Suite-level mapping is done and measured for all 15 suites.
-  Per-scenario rows are COMPLETE for 13 of 15. Only `lib/common` and `incr-counter`
-  remain, and both map to `src/` unit tests rather than an integration file. WU-14
-  must not delete a file whose rows are blank, so today it may delete the other
-  thirteen, including both python scripts under `shell/`.**
+- **Status: COMPLETE. Suite-level mapping is done and measured for all 15 suites.
+  Per-scenario rows are COMPLETE for all 15 of 15 suites, covering all 214 old
+  scenarios with zero blank rows. WU-14's acceptance rule is satisfied for every
+  suite and both `shell/` python scripts it deletes.**
 
 ## What this file is for
 
@@ -58,8 +57,8 @@ counts come from `cargo test --test <name>`.
 | `hooks/memory-anchors.test.sh` | 15 | `tests/hooks_graph_reader.rs` | 8 | **DONE, see below** |
 | `hooks/session-init.test.sh` | 13 | `tests/hooks_session.rs` | 16 (shared) | **DONE, see below** |
 | `hooks/session-clean-exit.test.sh` | 6 | `tests/hooks_session.rs` | 16 (shared) | **DONE, see below** |
-| `hooks/lib/common.test.sh` | 25 | `src/common/*` unit tests | 50 (shared) | TODO |
-| `hooks/incr-counter.test.sh` | 7 | `src/common/counter.rs` unit tests | 50 (shared) | TODO |
+| `hooks/lib/common.test.sh` | 25 | `src/common/*` unit tests | 50 (shared) | **DONE, see below** |
+| `hooks/incr-counter.test.sh` | 7 | `src/common/counter.rs` unit tests | 50 (shared) | **DONE, see below** |
 | `shell/merge-settings.test.sh` | 19 | `tests/init_merge.rs` | 8 | **DONE, see below** |
 | `shell/gen-shared-settings.test.sh` | 10 | `tests/settings_gen.rs` | 10 | **DONE, see below** |
 
@@ -423,6 +422,65 @@ Adds, with no old counterpart:
 
 So 10 old scenarios map onto 6 Rust tests and 4 more are new, which is the whole
 10. Two of those four exist because of defects found during the port itself.
+
+## Per-scenario rows: the two `src/` unit-test suites
+
+**COMPLETE for both. 25 + 7 = 32 old scenarios accounted for, zero blank rows.**
+These are the last two, so with them the mapping is finished and WU-14's
+acceptance rule is satisfied for every suite it deletes.
+
+Unlike the other thirteen, these map to unit tests inside `src/` rather than to a
+file under `tests/`. `cargo test --lib` reports 50: 46 live in `src/common/` and
+4 elsewhere, `src/hooks/mod.rs` (1, malformed-stdin survival) and `src/lib.rs`
+(3, the CLI surface), which belong to WU-0 and WU-1 and have no shell ancestor.
+
+### `hooks/lib/common.test.sh` (25)
+
+| Old scenarios | New home | How it is covered |
+|---|---|---|
+| field: string value / nested path / missing key returns empty / boolean true / integer number / object returns compact JSON (6) | `src/common/payload.rs` | six tests, one per label: `field_string_value`, `field_nested_path`, `field_missing_key_returns_empty_string`, `field_boolean_true`, `field_integer_number`, `field_object_returns_compact_json` |
+| session_id: extracts / empty when missing (2) | `src/common/session.rs` | `session_id_extracts_value`, `session_id_empty_when_missing` |
+| session_dir: empty when no session_id / returns expected path / created on demand (3) | `src/common/session.rs` | `session_dir_in_empty_when_no_session_id` plus `session_dir_in_creates_and_returns_expected_path`, which asserts both the path and the on-demand creation |
+| abspath: empty input / directory resolves realpath / non-existent resolves parent plus basename (3) | `src/common/session.rs` | `abspath_empty_input_returns_empty`, `abspath_directory_resolves_realpath`, `abspath_nonexistent_file_resolves_parent_and_basename` |
+| atomic_append: two lines written / first line content (2) | `src/common/atomic.rs` | `appends_two_lines_in_order` asserts order and content together |
+| emit_pre_context / emit_pre_deny / emit_prompt_context / emit_system_message exact JSON (4) | `src/common/emit.rs` | the four `*_matches_shell` tests, each diffed against the shell original |
+| emit_system_message: non-ASCII stays raw UTF-8 (1) | `src/common/emit.rs` | `emit_system_message_non_ascii_matches_shell` |
+| incr_counter: missing file starts at 1 / second call returns 2 / lock directory removed (3) | `src/common/counter.rs` | `missing_file_starts_at_one`, `second_call_returns_two`, `lock_directory_removed_after_call` |
+| repo_slug: returns owner/repo slug (1) | `src/common/repo.rs` | `repo_slug_returns_owner_repo_format_in_this_checkout` |
+
+### `hooks/incr-counter.test.sh` (7)
+
+| Old scenarios | New home | How it is covered |
+|---|---|---|
+| missing-file: file content / _INCR_RESULT (2) | `src/common/counter.rs` | `missing_file_starts_at_one` asserts both the file and the returned value |
+| second-call: file content / _INCR_RESULT (2) | `src/common/counter.rs` | `second_call_returns_two` |
+| pre-seeded: file content / _INCR_RESULT (2) | `src/common/counter.rs` | `pre_seeded_file_increments_from_existing_value` |
+| lock-dir-absent (1) | `src/common/counter.rs` | `lock_directory_removed_after_call`. This label comes from an INLINE pass site, not a `check` call |
+
+### Substantial new coverage in `src/common/` (22 tests, no old counterpart)
+
+| Area | What it adds |
+|---|---|
+| `src/common/proc.rs` (3) | The whole module is new: subprocess timeouts, added after review found no shell-out was bounded |
+| `src/common/counter.rs` concurrency and saturation (2) | `concurrent_increments_do_not_lose_a_count`, `counter_at_i64_max_saturates_instead_of_wrapping` |
+| `src/common/atomic.rs` (2) | `creates_missing_parent_directories`, `concurrent_appends_do_not_lose_or_interleave_a_line` |
+| `src/common/payload.rs` (5) | Insertion-order preservation, whole numbers beyond i64 max, and three parse-robustness tests including truncated JSON never panicking |
+| `src/common/session.rs` (5) | Real HOME handling, leaf symlinks left unresolved, missing parent falling back unchanged |
+| `src/common/emit.rs` (3) | The `decision: block` shape, an emit probe, and public emitters matching the struct builders |
+| `src/common/repo.rs` (4) | URL normalisation across https, ssh shorthand, ssh scheme with trailing slash, and no-suffix |
+
+So 32 old scenarios map onto 24 unit tests, and 22 more add coverage the shell
+suites never had, which is the 46 in `src/common/`. The largest single addition,
+`proc.rs`, exists because a review found that no shell-out anywhere had a
+timeout while the python bounded every one.
+
+Extraction note, the sixth convention in this file: both suites put the LABEL
+FIRST, as `check "<label>" "$got" "$want"`. Taking the last quoted token returns
+the expected VALUE instead. Two further traps: `common.test.sh`'s helper contains
+`ok "$label"`, which a naive scan counts as a 26th case, and
+`incr-counter.test.sh` has one INLINE pass site (`lock-dir-absent`) that no
+`check` grep will find, so it reads as 6 against a real 7. Both were caught by
+reconciling against the suites' own summary lines.
 
 ## How to fill a per-scenario row
 
