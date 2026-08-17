@@ -18,7 +18,7 @@ Real paths this plan touches, all confirmed present.
 
 **Launcher (release 2).** `shell/shared/`: `worktree.sh` (493), `dispatch.sh` (148), `clean-resume.sh` (91), `sessions.sh` (69), `retention.sh` (46), `config-drift.sh` (42), `bust-cache.sh` (27). Entry points `shell/bash/cc.sh` (36), `shell/zsh/cc.zsh` (32).
 
-**Validators that must change.** `shell/check-manifest.sh:31-33` (`ALLOW_FILES` needs `Cargo.toml`, `Cargo.lock`; `ALLOW_DIRS` needs `src`), `shell/plugin-e2e.sh:51-54` (runs `bash -n` on any non-`.py` hook command), `commands/doctor.md` (4 layers today, gains 2).
+**Validators that must change.** `shell/check-manifest.sh:31-33` (`ALLOW_FILES` needs `Cargo.toml`, `Cargo.lock`; `ALLOW_DIRS` needs `src`), `shell/plugin-e2e.sh:51-54` (runs `bash -n` on any non-`.py` hook command), `commands/doctor.md` (5 layers today, gains 2; Layer 5 checks the status line against the shipped copy and shipped ahead of WU-12).
 
 **CI.** `.github/workflows/shell-ci.yml` lints shell and python on an ubuntu plus macos matrix. No Rust lane exists. `.github/workflows/license.yml:76` already covers `*.rs`.
 
