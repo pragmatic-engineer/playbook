@@ -4,10 +4,11 @@
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
 - **Status: PARTIAL. Suite-level mapping is done and measured for all 15 suites.
-  Per-scenario rows are COMPLETE for 6 of 15 (`rebuild-memory-graph`,
-  `memory-anchors`, `session-init`, `session-clean-exit`, `search-counter`,
-  `post-edit-track`) and outstanding for the other 9. WU-14 must not delete a file
-  whose rows are blank, so today it may delete exactly those six suites.**
+  Per-scenario rows are COMPLETE for 8 of 15 and outstanding for the other 7. Done:
+  `rebuild-memory-graph`, `memory-anchors`, `session-init`, `session-clean-exit`,
+  `search-counter`, `post-edit-track`, `preread-edit-check`, `preread-size-check`.
+  WU-14 must not delete a file whose rows are blank, so today it may delete exactly
+  those eight suites.**
 
 ## What this file is for
 
@@ -49,8 +50,8 @@ counts come from `cargo test --test <name>`.
 |---|---|---|---|---|
 | `hooks/search-counter.test.sh` | 6 | `tests/hooks_counter.rs` | 7 (shared) | **DONE, see below** |
 | `hooks/post-edit-track.test.sh` | 7 | `tests/hooks_counter.rs` | 7 (shared) | **DONE, see below** |
-| `hooks/preread-edit-check.test.sh` | 6 | `tests/hooks_preread.rs` | 26 (shared) | TODO |
-| `hooks/preread-size-check.test.sh` | 7 | `tests/hooks_preread.rs` | 26 (shared) | TODO |
+| `hooks/preread-edit-check.test.sh` | 6 | `tests/hooks_preread.rs` | 26 (shared) | **DONE, see below** |
+| `hooks/preread-size-check.test.sh` | 7 | `tests/hooks_preread.rs` | 26 (shared) | **DONE, see below** |
 | `hooks/auto-model-detect.test.sh` | 6 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
 | `hooks/precompact-warn.test.sh` | 7 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
 | `hooks/memory-capture.test.sh` | 19 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
@@ -243,6 +244,68 @@ the quoted strings fails here because each scenario has an `ok` and a `bad`
 variant with interpolated text, so a naive extract returns roughly double the
 real count. Their Rust counterparts also sit inside per-hook `mod` blocks, so
 the `#[test]` functions are indented and an unindented `^fn ` grep finds none.
+
+## Per-scenario rows: the preread pair
+
+**COMPLETE for both. 6 + 7 = 13 old scenarios accounted for, zero blank rows, so
+WU-14 may delete both suites.** Both map into `tests/hooks_preread.rs`, split
+across `mod preread_edit_check` (11 tests) and `mod preread_size_check` (15).
+
+**This pair inverts the usual warning.** Elsewhere in this file a LOWER Rust
+count looked like lost coverage; here 13 old scenarios become 26 Rust tests. The
+13 extra are not padding: they are exactly the boundary pinning WU-3 mandated,
+the 1800s window, the 1000-line and 200KB thresholds, the 25-pattern allowlist,
+and asserting the deny shape exactly. Counting tests misleads in both directions;
+only the rows below settle it.
+
+### `hooks/preread-edit-check.test.sh` (6) into `mod preread_edit_check`
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| recent edit nudges with age (1) | `recent_edit_nudges_with_age` | direct |
+| emits a valid PreToolUse object (1) | `nudge_emits_a_valid_pretooluse_additional_context_object` | direct |
+| edit outside window stays silent (1) | `edit_older_than_the_window_stays_silent` | direct |
+| unrelated path stays silent (1) | `unrelated_path_stays_silent` | direct |
+| seconds-scale age renders (1) | `seconds_scale_age_renders_as_n_seconds_ago` | direct |
+| no edits file is a silent no-op (1) | `no_edits_file_is_a_silent_no_op` | direct |
+
+Adds, with no old counterpart:
+
+| New test | What it adds |
+|---|---|
+| `edit_just_inside_the_1800s_window_still_nudges` | 1800s window, inside |
+| `edit_at_the_1800s_window_boundary_stays_silent` | 1800s window, exactly at the boundary |
+| `float_ts_inside_window_still_nudges` | Float timestamp records |
+| `string_ts_record_does_not_abandon_a_later_match` | A malformed record must not stop the scan |
+| `format_ago_scale_transitions_match_the_python_original` | Every age-rendering scale transition |
+
+### `hooks/preread-size-check.test.sh` (7) into `mod preread_size_check`
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| large file denied with counts (1) | `large_non_allowlisted_file_is_denied_with_counts` | direct |
+| small file passes (1) | `small_file_passes` | direct |
+| allowlisted large file passes (1) | `allowlisted_large_file_passes` | direct |
+| explicit offset bypasses the guard (1) | `explicit_offset_bypasses_the_guard` | direct |
+| explicit limit bypasses the guard (1) | `explicit_limit_bypasses_the_guard` | direct |
+| missing file is a silent no-op (1) | `missing_file_is_a_silent_no_op` | direct |
+| tsconfig.*.json glob allowlisted (1) | `tsconfig_glob_allowlist_matches` | direct |
+
+Adds, with no old counterpart:
+
+| New test | What it adds |
+|---|---|
+| `allowlisted_basenames_never_deny` | The 25-pattern allowlist as a whole |
+| `exactly_1000_lines_passes` | 1000-line threshold, at |
+| `exactly_1001_lines_denies` | 1000-line threshold, one over |
+| `exactly_200kb_passes` | 200KB threshold, at |
+| `one_byte_over_200kb_denies_even_with_few_lines` | 200KB threshold, one byte over, with line count low |
+| `unreadable_small_file_is_a_silent_no_op` | Unreadable file, small |
+| `large_and_unreadable_file_is_still_denied_on_byte_size` | Unreadable file, large, still denied on bytes |
+| `deny_output_matches_the_python_reference_byte_for_byte` | The deny shape, byte for byte against python |
+
+So 13 old scenarios map onto 13 Rust tests one for one, and 13 further tests
+add the mandated boundary coverage. That is the whole 26.
 
 ## How to fill a per-scenario row
 
