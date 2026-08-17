@@ -7,6 +7,7 @@
 
 pub mod common;
 pub mod hooks;
+pub mod init;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
