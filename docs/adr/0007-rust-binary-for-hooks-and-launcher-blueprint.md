@@ -332,11 +332,11 @@ remove the old wiring before the new wiring works. It applies here too.
   - [ ] `grep -rl "common.sh\|common.py" hooks/ shell/` returns nothing
   - [ ] `docs/adr/0007-test-mapping.md` has a new-test counterpart for every row, none blank
   - [ ] A container built `FROM debian:stable-slim` with only `git` and the binary installed runs every hook successfully, asserted by a CI job, not by inspection
-  - [ ] **`find . -name "*.py" -not -path "./target/*"` returns nothing.** Moved here from WU-21 on 2026-08-17: this is the first unit where it can be true, since WU-14 owns deleting the 12 hook scripts that make it false
+  - [ ] **`git ls-files '*.py'` returns nothing.** Moved here from WU-21 on 2026-08-17: this is the first unit where it can be true, since WU-14 owns deleting the 12 hook scripts that make it false. Use `git ls-files`, NOT `find`: `find` does not read `.gitignore`, so it also walks `.claude/worktrees/`, which `/playbook:implement` fills with full repo checkouts. Measured on 2026-08-16 with two worktrees live, `find` returned 45 while `git ls-files` returned 15. An acceptance command whose result depends on the executor's own scratch directories is not an acceptance command. `.github/workflows/shell-ci.yml:77` and `:84` already use `git ls-files '*.py'`
   - [ ] **`shell-ci` invokes no python tooling anywhere.** Also moved from WU-21. Delete BOTH remaining steps: `.github/workflows/shell-ci.yml:77` (`py_compile`) and `:85` (`pipx run ruff`). Line 85 must be deleted rather than left with an empty file list, because `ruff check` treats `[FILES]...` as optional and falls back to linting `.`. Line 77 is safe either way, since `xargs -r` no-ops on empty input, but it is dead once no `.py` remains
 
 ### WU-20: port the settings seed generator
-- Requires: WU-8
+- Requires: WU-8, **WU-13** (added 2026-08-17: WU-13 edits `shell/gen-shared-settings.py`'s `SAFETY_RE`, which is the file WU-20 ports and diffs against. Without this edge the graph allows either order, and Segment G first would port a generator whose filter WU-13 then changes only in python, leaving the Rust and the oracle silently out of step)
 - Goal: `shell/gen-shared-settings.py` moves into the binary as `playbook settings gen`, with byte-identical output.
 - Files:
   - `src/settings/gen.rs` | create | port of `shell/gen-shared-settings.py`: canned permissions block, `skipAutoPermissionPrompt: false`, strip any pinned model, drop personal keys
@@ -355,7 +355,7 @@ remove the old wiring before the new wiring works. It applies here too.
   - [ ] `shell/gen-shared-settings.py` is NOT deleted yet, so the comparison keeps working
   - [ ] The Rust generator's output byte-matches the **python generator's** output from the same `SRC`. **Not** "produces no diff against the committed file", which passes trivially once that file was itself produced by the code under test
   - [ ] A deliberately mutated input produces a diff, proving the check can fail
-  - [ ] The generator's own filter still refuses to reintroduce functional hooks into the seed
+  - [ ] The generator's filter admits exactly the shapes WU-8 left it accepting: a bare `playbook hook <name>` with `<name>` matching `[a-z][a-z0-9-]*`, or one of the four guard `.sh` filenames. Nothing else. **This criterion previously read "still refuses to reintroduce functional hooks into the seed", which WU-8 made false**: WU-8 deliberately widened `SAFETY_RE` so the seed can carry binary-invoked functional hooks. An implementer taking the old wording at face value would have re-tightened the filter to the four guards and stripped all 11 functional hooks out of the shipped seed, which `shell/setup-local.sh` then copies to both `settings.json` and the merge base. Verified 2026-08-17 that the delivered port did NOT do this: it accepts both shapes and is byte-identical to python on a mixed input
   - [ ] `grep -c python3 Makefile` is 0, and a missing binary produces a clear error
 
 ### WU-21: port the settings seed validator, and move its CI lane
@@ -376,7 +376,7 @@ remove the old wiring before the new wiring works. It applies here too.
   **Both directions of the hook-resolution branch.** A command that legitimately resolves inside the repo must PASS, not only an unresolvable one failing. A validator tested only on its rejections can reject everything and still look correct.
 - Done When:
   - [ ] All 12 ported scenarios pass, and all 14 rejection branches are shown failing
-  - [ ] Both `shell/gen-shared-settings.py` and `shell/check-shared-settings.py` are deleted, along with their `*.test.sh` suites, with rows added to `docs/adr/0007-test-mapping.md`
+  - [ ] `shell/check-shared-settings.py` is NOT deleted here, and neither is `shell/gen-shared-settings.py`. **Both deletions, and their `*.test.sh` suites, move to WU-14** (amended 2026-08-17, see amendment four). Two reasons. The parent ADR is emphatic that python must not be forced out of the test suite early, because the differential oracles are the strongest evidence the ports are faithful and they "disappear on their own at WU-14". And the `docs/adr/0007-test-mapping.md` row this deletion requires is a file WU-14 CREATES, while WU-21 requires only WU-20 and has no path to WU-14, so a Segment G that runs before Segment E would have to append to a file that does not exist
   - [ ] `shell-ci` no longer runs the seed check (line 88). The repo-wide "no python3 anywhere" and "no `.py` files remain" assertions belong to WU-14, not here
 
 ### Amendment 2026-08-17: what the Segment G gate got wrong, and who owns each fix
@@ -431,6 +431,23 @@ Plus their `*.test.sh` suites, and `install.sh`, which the plan shrinks to a boo
 - **shell: 63 to roughly 20**, mostly by deleting the 15 hook test suites in WU-14.
 
 The two real gaps to settle are `statusline.sh` and `gh-remote.sh`. Either add a Work Unit that ports `Command::Statusline` and absorbs `gh-remote.sh` with it, or change `src/main.rs:21`'s comment to say the subcommand is reserved and not planned, so the next reader is not misled the way this one was.
+
+### Amendment 2026-08-17 (fourth): findings from the Segment G gate reviews, which arrived late
+
+The adversarial and test-plan reviews recorded as INCONCLUSIVE on 2026-08-16 **did eventually deliver**, hours after being written off. They found six things the inline gate missed. Recorded here with what was verified and what was not, because two of them turned out to be conditional and one turned out to be already-correct in shipped code.
+
+**Confirmed and fixed in this amendment:**
+
+1. **`find` is the wrong tool for the `.py` criterion.** `find` ignores `.gitignore`, so it walks `.claude/worktrees/`, which `/playbook:implement` fills with full repo checkouts. Measured with two worktrees live: `find` returned 45, `git ls-files` returned 15. Now uses `git ls-files`, matching what `shell-ci.yml:77` and `:84` already do. Note this reproduces only while worktrees exist on disk; it returned 15 = 15 after they were cleaned up, which is exactly what makes it a trap.
+2. **WU-20's hook-filter criterion was false.** It read "the generator's filter still refuses to reintroduce functional hooks into the seed", an invariant WU-8 deliberately abolished. An implementer taking it at face value would re-tighten `SAFETY_RE` to the four guards and strip all 11 functional hooks from the shipped seed, which `shell/setup-local.sh` copies to both `settings.json` and the merge base. Replaced with a positive statement of what the filter now admits. **Verified the delivered port did NOT fall into this**: it accepts both shapes and is byte-identical to python on a mixed input containing a guard, a valid `playbook hook` name, a random path and an invalid hook name.
+3. **WU-20 needed a `WU-13` edge.** WU-13 edits `gen-shared-settings.py`'s `SAFETY_RE`, the very file WU-20 ports and diffs against, and no edge existed. Added to `Requires`, the Ordering table and the mermaid graph.
+4. **Both `.py` deletions move to WU-14.** WU-21 deleting them contradicted the parent ADR's explicit protection of the differential oracles until WU-14, and required appending to `docs/adr/0007-test-mapping.md`, a file WU-14 creates and WU-21 has no dependency path to.
+
+**Already addressed before the reviews landed:** the unsatisfiable `.py` criterion, the non-CI-reproducible "no diff against the committed file" Done When, the missing non-ASCII fixture, and the 14-branch validator coverage. All four were fixed in the second and third amendments.
+
+**The strategic finding, left for the maintainer.** Both reviewers independently argued Segment G scores zero against the parent ADR's four stated justifications (`0007-...launcher.md:130-133`), because neither script is on any end user's path: `gen-shared-settings.py` runs from `make` on the maintainer's machine, and `check-shared-settings.py` runs in CI, both environments having python unconditionally. They also note the "one language" framing is already false regardless, since `jq`, `bash`, `zsh`, `shellcheck`, `pipx`/`ruff` and the `claude` CLI all survive, and `config-hash.sh` plus `memory-context.sh` stay in the runtime path by design. The cheapest alternative they name is one Brewfile line moved into a build-tooling block with a comment, which satisfies all four justifications and drops most of Segment G's defects at a stroke. WU-20 has shipped; **WU-21 is the open question.**
+
+**One genuine conflict neither amendment resolves.** `blueprint`'s open items name WU-20 as the agreed home for replacing the generator's leaking five-key denylist with an allowlist, but an allowlist by construction produces different output, which WU-20's byte-identity bar forbids. WU-20 shipped as a faithful port with the denylist intact and byte-identity held, so the allowlist fix now has no owning unit at all. It needs one, or the open item needs closing as declined.
 
 ### WU-15: Homebrew tap
 - Requires: WU-10
@@ -519,7 +536,7 @@ The two real gaps to settle are `statusline.sh` and `gh-remote.sh`. Either add a
 | WU-17 | WU-16 | none |
 | WU-18 | WU-17 | none |
 | WU-19 | WU-18 | none |
-| WU-20 | WU-8 | none |
+| WU-20 | WU-8, WU-13 | none |
 | WU-21 | WU-20 | none |
 
 ## Parallel Groups
@@ -580,6 +597,7 @@ graph TD
   WU17 --> WU18[WU-18 bash + zsh shim]
   WU18 --> WU19[WU-19 PowerShell + Windows]
   WU8 --> WU20[WU-20 settings gen port]
+  WU13 --> WU20
   WU20 --> WU21[WU-21 settings check port]
 ```
 
