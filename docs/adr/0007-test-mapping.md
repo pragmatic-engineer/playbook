@@ -3,9 +3,10 @@
 - **Parent ADR:** `docs/adr/0007-rust-binary-for-hooks-and-launcher.md`
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
-- **Status: INCOMPLETE. Suite-level mapping is done and measured. Per-scenario
-  rows are still outstanding for most suites, and WU-14 must not delete a file
-  whose rows are blank.**
+- **Status: PARTIAL. Suite-level mapping is done and measured for all 15 suites.
+  Per-scenario rows are COMPLETE for 1 of 15 (`rebuild-memory-graph`, the highest
+  risk one) and outstanding for the other 14. WU-14 must not delete a file whose
+  rows are blank, so today it may delete exactly one suite.**
 
 ## What this file is for
 
@@ -52,7 +53,7 @@ counts come from `cargo test --test <name>`.
 | `hooks/auto-model-detect.test.sh` | 6 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
 | `hooks/precompact-warn.test.sh` | 7 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
 | `hooks/memory-capture.test.sh` | 19 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
-| `hooks/rebuild-memory-graph.test.sh` | 61 | `tests/hooks_graph_writer.rs` | 24 | **TODO, highest risk** |
+| `hooks/rebuild-memory-graph.test.sh` | 61 | `tests/hooks_graph_writer.rs` | 24 | **DONE, see below** |
 | `hooks/memory-anchors.test.sh` | 15 | `tests/hooks_graph_reader.rs` | 8 | TODO |
 | `hooks/session-init.test.sh` | 13 | `tests/hooks_session.rs` | 16 (shared) | TODO |
 | `hooks/session-clean-exit.test.sh` | 6 | `tests/hooks_session.rs` | 16 (shared) | TODO |
@@ -87,6 +88,50 @@ New behaviour, so nothing to map, and nothing blocks on them:
 - Every `hooks/*.test.sh` above: the python hook it tests is still live, because
   `hooks/hooks.json` still routes all 11 functional hooks at python. Deleting a
   suite while its subject is in production removes the only check on it.
+
+## Per-scenario rows: `hooks/rebuild-memory-graph.test.sh`
+
+**COMPLETE. All 61 old scenarios accounted for, zero blank rows, so WU-14 may delete this suite.**
+
+Old labels are grouped by the suite's own naming (`scalar link: ...`), because each
+group maps to exactly one Rust test. The count in brackets is how many old labels
+the row covers, and they sum to 61.
+
+| Old scenarios | New test in `tests/hooks_graph_writer.rs` | How it is covered |
+|---|---|---|
+| scalar link: edge count / from / to / relation (4) | `scalar_link_produces_one_edge` | one edge asserted with from, to and relation checked in the same test |
+| inline list: edge count / alpha / beta / gamma edge (4) | `inline_list_produces_one_edge_per_target` | asserts one edge per target across the three named targets |
+| single-element list: edge count / target id has no brackets (2) | `single_element_inline_list_has_no_brackets_in_target_id` | pins the bracket-stripping bug directly |
+| quoted items: edge count / double-quoted clean / single-quoted clean (3) | `quoted_inline_items_parse_to_clean_names` | both quote styles asserted clean |
+| empty list: no edges / node still written, no crash (2) | `empty_inline_list_produces_no_edges` | asserts zero edges and that the node survives |
+| nested block list: edge count / item-one / item-two (3) | `nested_block_list_produces_one_edge_per_item` | one edge per block item |
+| anchors: edge count / 2 code nodes / 2 edges (5) | `anchors_produce_code_nodes_and_anchors_edges` | 5 assertions, one per old label |
+| dangling target: edge emitted / to id / target absent (3) | `dangling_target_still_emits_its_edge` | edge emitted, id checked, target node asserted absent |
+| project scope: node id and project / global scope: node id / project target keeps prefix (3) | `project_scoped_and_global_facts_get_distinct_ids` | both scopes and the prefix asserted together |
+| outside write: baseline one node / graph untouched (2) | `outside_memory_dir_write_is_a_no_op` | baseline then no-op asserted |
+| malformed frontmatter: exits cleanly / valid JSON / absent falls back / unclosed falls back (4) | `malformed_or_absent_frontmatter_falls_back_to_defaults` | two fixtures, no-frontmatter and unclosed; exit 0 asserted; valid JSON implied by read_graph failing otherwise. Verified by reading the test, not by name |
+| cross-scope resolve: edge count / project reaches global (2) | `project_fact_resolves_a_link_to_a_global_target` | both asserted |
+| own scope wins: targets project dup / does not fall through (2) | `own_scope_wins_over_a_same_named_global_fact` | both directions asserted |
+| project dangling: edge emitted / same-scope id / target absent (3) | `project_scoped_dangling_target_uses_same_scope_id` | all three asserted |
+| global source unaffected: edge count / from / to (3) | `global_source_is_unaffected_by_project_scope_resolution` | all three asserted |
+| anchors regression pin: edge count / code node / anchors edge / link edge (4) | `anchors_and_links_on_the_same_fact_are_independent` | independence of anchors and links on one fact |
+| inline top-level anchors: edge count / 2 code nodes / 2 edges (5) | `inline_top_level_anchors_produce_code_nodes_and_anchors_edges` | the inline-anchors defect this suite exists to pin |
+| inline vs block anchors: edge count / 2 dedup / 2 anchor edges (5) | `inline_and_block_style_anchors_produce_the_same_code_nodes_and_edges` | dedup asserted across both styles |
+| duplicate top-level key: later scalar evicts earlier dict (1) | `later_top_level_key_redeclaration_evicts_the_earlier_shape` | direct |
+| bare CR: scalar not corrupted (1) | `bare_carriage_return_does_not_corrupt_a_scalar_value` | direct |
+
+### Rust tests with no old counterpart (coverage the shell suite never had)
+
+| New test | What it adds |
+|---|---|
+| `top_level_scalar_description_flows_into_the_node` | Node payload, not just edges |
+| `supersedes_chain_two_links_long_resolves_both_hops` | Multi-hop `supersedes` resolution |
+| `graph_write_is_atomic_a_failed_write_cannot_truncate_the_existing_file` | Atomicity, untested in shell |
+| `python_and_rust_writers_agree_on_the_same_fixture_tree` | Differential against the real python writer |
+
+So 61 old scenarios map onto 20 Rust tests, and 4 further Rust tests add coverage
+that never existed. That is the whole 24. This is why counting test functions
+misleads: 61 to 24 looks like a loss and is actually a gain.
 
 ## How to fill a per-scenario row
 
