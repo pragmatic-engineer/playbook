@@ -113,21 +113,56 @@ done
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v tar  >/dev/null 2>&1 || die "tar is required"
 
+# Resolve which tarball to install from.
+#
+# Telling "this repo published no release" apart from "I could not ask" is the
+# whole job here. The first is a real state (a fresh fork), and main is a
+# reasonable answer to it. The second means we do not know what the latest
+# release is, and quietly installing main instead silently swaps a tagged
+# release for whatever is on the branch, which is where in-progress work lands.
+# That is the more dangerous default, not the safer one.
+#
+# The old code could not tell them apart. `curl -f ... || true` discards the
+# exit code and -f empties the body on any HTTP error, so a 403, a 404 and a
+# dead network all arrived as the same empty string and all three fell through
+# to main while reporting "no GitHub release found" (true for exactly one of
+# them). The 403 is not hypothetical: the unauthenticated GitHub API allows 60
+# requests per hour per IP, which a corporate NAT or a CI runner reaches easily.
+#
+# So drop -f, keep the status code, and branch on it. Verified 2026-08-18:
+# a repo with releases answers 200, one without answers 404, and a transport
+# failure trips the `if !` instead of returning a code at all.
 resolve_tarball_url() {
     if [ -n "$REF" ]; then
         printf 'https://codeload.github.com/%s/tar.gz/%s\n' "$PLUGIN_REPO" "$REF"
         return
     fi
-    local api tag
-    api="$(curl -fsSL "https://api.github.com/repos/$PLUGIN_REPO/releases/latest" 2>/dev/null || true)"
-    tag="$(printf '%s' "$api" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-    tag="${tag%%$'\n'*}"
-    if [ -n "$tag" ]; then
-        printf 'https://codeload.github.com/%s/tar.gz/refs/tags/%s\n' "$PLUGIN_REPO" "$tag"
-    else
-        warn "no GitHub release found; falling back to the main branch"
-        printf 'https://codeload.github.com/%s/tar.gz/refs/heads/main\n' "$PLUGIN_REPO"
+    local body code tag
+    body="$(mktemp)"
+    if ! code="$(curl -sSL -o "$body" -w '%{http_code}' \
+        "https://api.github.com/repos/$PLUGIN_REPO/releases/latest" 2>/dev/null)"; then
+        code="000"
     fi
+    tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$body" 2>/dev/null || true)"
+    tag="${tag%%$'\n'*}"
+    rm -f "$body"
+
+    # die runs in this command substitution's subshell, so its exit only ends
+    # the subshell. That still aborts the install, because `set -e` makes the
+    # enclosing assignment inherit the non-zero status.
+    case "$code" in
+        200)
+            [ -n "$tag" ] || die "the release API returned 200 with no tag_name; refusing to guess a version"
+            printf 'https://codeload.github.com/%s/tar.gz/refs/tags/%s\n' "$PLUGIN_REPO" "$tag"
+            ;;
+        404)
+            warn "$PLUGIN_REPO has published no release; installing from the main branch"
+            printf 'https://codeload.github.com/%s/tar.gz/refs/heads/main\n' "$PLUGIN_REPO"
+            ;;
+        *)
+            die "could not read the release API (HTTP $code); retry, or pin a version with PLAYBOOK_REF=vX.Y.Z"
+            ;;
+    esac
 }
 
 # PLAYBOOK_SRC is a test seam: when set, install straight from a local
