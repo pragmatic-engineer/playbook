@@ -4,9 +4,10 @@
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
 - **Status: PARTIAL. Suite-level mapping is done and measured for all 15 suites.
-  Per-scenario rows are COMPLETE for 2 of 15 (`rebuild-memory-graph` and
-  `memory-anchors`) and outstanding for the other 13. WU-14 must not delete a file
-  whose rows are blank, so today it may delete exactly those two suites.**
+  Per-scenario rows are COMPLETE for 4 of 15 (`rebuild-memory-graph`,
+  `memory-anchors`, `session-init`, `session-clean-exit`) and outstanding for the
+  other 11. WU-14 must not delete a file whose rows are blank, so today it may
+  delete exactly those four suites.**
 
 ## What this file is for
 
@@ -55,8 +56,8 @@ counts come from `cargo test --test <name>`.
 | `hooks/memory-capture.test.sh` | 19 | `tests/hooks_turn.rs` | 24 (shared) | TODO |
 | `hooks/rebuild-memory-graph.test.sh` | 61 | `tests/hooks_graph_writer.rs` | 24 | **DONE, see below** |
 | `hooks/memory-anchors.test.sh` | 15 | `tests/hooks_graph_reader.rs` | 8 | **DONE, see below** |
-| `hooks/session-init.test.sh` | 13 | `tests/hooks_session.rs` | 16 (shared) | TODO |
-| `hooks/session-clean-exit.test.sh` | 6 | `tests/hooks_session.rs` | 16 (shared) | TODO |
+| `hooks/session-init.test.sh` | 13 | `tests/hooks_session.rs` | 16 (shared) | **DONE, see below** |
+| `hooks/session-clean-exit.test.sh` | 6 | `tests/hooks_session.rs` | 16 (shared) | **DONE, see below** |
 | `hooks/lib/common.test.sh` | 25 | `src/common/*` unit tests | 50 (shared) | TODO |
 | `hooks/incr-counter.test.sh` | 7 | `src/common/counter.rs` unit tests | 50 (shared) | TODO |
 | `shell/merge-settings.test.sh` | 19 | `tests/init_merge.rs` | 8 | TODO |
@@ -175,6 +176,52 @@ functions are indented and a `^fn ` grep misses all of them.
 
 Map those two by reading both files case by case rather than by extraction. The
 measured targets are 6 and 7 old scenarios against 7 Rust tests across two mods.
+
+## Per-scenario rows: the session pair
+
+**COMPLETE for both. 13 + 6 = 19 old scenarios accounted for, zero blank rows, so
+WU-14 may delete both suites.** Both map into `tests/hooks_session.rs`.
+
+### `hooks/session-init.test.sh` (13)
+
+| Old scenarios | New test | How it is covered |
+|---|---|---|
+| slice injected: exits 0 / valid JSON / additionalContext contains the fact name (3) | `session_init_injects_the_graph_backed_slice` | the graph-backed slice path |
+| fallback to index: exits 0 / valid JSON / contains the index line (3) | `session_init_falls_back_to_the_legacy_memory_index` | the legacy MEMORY.md fallback |
+| no store: exits 0 / valid JSON / no memory block emitted (3) | `session_init_no_memory_store_emits_no_memory_block` | absent store |
+| not a git repo: exits 0 / valid JSON / no memory block / slice fact absent (4) | `session_init_outside_a_git_repo_emits_no_memory_block` | no repo slug, so no slice |
+
+### `hooks/session-clean-exit.test.sh` (6)
+
+| Old scenarios | New test | How it is covered |
+|---|---|---|
+| last-clean-ts refreshed / reason 'other' writes no clean-exit marker (2) | `session_clean_exit_reason_other_refreshes_ts_without_marker` | both assertions sit in the suite's reason-'other' block, verified by reading lines 44-48, so they map here and NOT to the reason-absent test |
+| clean-exit marker holds the reason (1) | `session_clean_exit_real_reason_writes_the_marker` | direct |
+| auto-learn flag queued with repo_root/edits/session_id/ts (1) | `session_clean_exit_queues_auto_learn_flag_with_expected_shape` | flag shape asserted |
+| below threshold queues no flag (1) | `session_clean_exit_below_threshold_queues_no_flag` | direct |
+| AUTO_LEARN_NUDGE=0 disables the queue (1) | `session_clean_exit_auto_learn_nudge_disabled_skips_queue` | direct |
+
+### Rust tests with no old counterpart (7)
+
+| New test | What it adds |
+|---|---|
+| `session_init_zeroes_exactly_the_five_counter_files` | Counter reset, and that it is exactly five files |
+| `session_init_drift_warning_fires_only_on_resume` | Config-drift warning gated on resume |
+| `session_init_resume_with_matching_hash_emits_no_drift_warning` | The negative case for that gate |
+| `session_init_degrades_quietly_when_both_shell_outs_are_unreachable` | Both shell-outs failing must not break the hook |
+| `session_clean_exit_reason_absent_refreshes_ts_without_marker` | A missing `reason` field, distinct from `other` |
+| `session_clean_exit_at_default_threshold_queues_a_flag` | The boundary itself, not just below it |
+| `session_clean_exit_padded_min_edits_env_var_still_parses` | Whitespace-padded env var parsing |
+
+So 19 old scenarios map onto 9 Rust tests, and 7 more add coverage the shell
+suites never had. That is the whole 16.
+
+Extraction note: `session-init.test.sh` uses FOUR `assert_*` helpers and all 13
+labels come out cleanly. `session-clean-exit.test.sh` uses the `ok`/`bad` pair
+style that defeated a previous attempt on other suites; what works is grepping
+the CALL SITES with line numbers and reading them, rather than trying to
+regex-extract the quoted strings. Use that on `search-counter` and
+`post-edit-track`.
 
 ## How to fill a per-scenario row
 
