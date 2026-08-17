@@ -401,6 +401,37 @@ The gate's `grep python` missed line 85 because `ruff` invoked through `pipx` do
 
 **5. The gate's `die()` count was off by one.** It said "about 13"; there are 14 call sites. WU-21 now lists them by line.
 
+### Amendment 2026-08-17 (third): `Command::Statusline` has no owning Work Unit, and the shell residue is larger than the record implies
+
+**This is the `Command::Init` defect again, in the same file.** `src/main.rs:21` reads `Command::Statusline => {}` with the comment "Statusline rendering lands in a later Work Unit". Searching this blueprint for `Statusline`, `statusline rendering` or `playbook statusline` returns **nothing**. No unit ever wires it. WU-9 only *places* `statusline.sh` at the path `settings.json` names; it never ports it.
+
+That is twice now that a declared CLI subcommand carried a comment promising a later unit that the plan does not contain. The first cost a near-miss that would have stripped every functional hook from every user. **Before relying on any `=> {}` arm in `src/main.rs`, grep this blueprint for the unit that fills it.** `Cc` is the third such arm; it is genuinely covered, by WU-16 through WU-19.
+
+### What the migration actually removes, measured
+
+Python reaches zero. All 15 tracked `.py` files are named in this plan for deletion (12 under `hooks/` including `lib/common.py`, plus all three under `shell/`). Verified by checking each filename against this document.
+
+Shell does NOT reach zero, and the record should stop implying otherwise. Seven non-test scripts survive a fully completed ADR 0007, in three groups:
+
+| Script | Why it survives |
+|---|---|
+| `hooks/lib/config-hash.sh` | Deliberate. The parent ADR states the binary keeps shelling out rather than absorbing it |
+| `shell/memory-context.sh` | Deliberate, same decision. `src/hooks/session_init.rs` invokes it under `CLAUDE_PLUGIN_ROOT` today |
+| `statusline.sh` | **Gap.** Never ported, no owning Work Unit |
+| `shell/gh-remote.sh` | **Gap.** Not mentioned anywhere in this plan; its only consumer is `statusline.sh` |
+| `shell/check-agents.sh` | Not in the plan. Sibling of `check-manifest.sh`, which the plan edits but never ports |
+| `shell/review-worktree.sh` | Not in the plan. Used by `/playbook:quick-review` and `/playbook:deep-review` |
+| `uninstall.sh` | Not in the plan |
+
+Plus their `*.test.sh` suites, and `install.sh`, which the plan shrinks to a bootstrap rather than removing.
+
+**None of this is an argument to port them now.** The first two are a settled decision, and the last three are ordinary shell tooling that a Rust rewrite would not obviously improve. The point is that "single language" was never achievable for `hooks/` plus `shell/` together, only for `hooks/`, and the honest target is:
+
+- **python: 15 to 0**, fully planned.
+- **shell: 63 to roughly 20**, mostly by deleting the 15 hook test suites in WU-14.
+
+The two real gaps to settle are `statusline.sh` and `gh-remote.sh`. Either add a Work Unit that ports `Command::Statusline` and absorbs `gh-remote.sh` with it, or change `src/main.rs:21`'s comment to say the subcommand is reserved and not planned, so the next reader is not misled the way this one was.
+
 ### WU-15: Homebrew tap
 - Requires: WU-10
 - Goal: `brew install pragmatic-engineer/tap/playbook` works.

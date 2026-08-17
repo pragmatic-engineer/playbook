@@ -17,9 +17,15 @@ fn main() {
         }
         // Launcher subcommands land in a later Work Unit; stub for now.
         Command::Cc { sub: _ } => {}
-        // Statusline rendering lands in a later Work Unit; stub for now.
+        // RESERVED, not planned. No ADR 0007 Work Unit ports this: `statusline.sh`
+        // stays a shell script and WU-9 only places it where `settings.json`
+        // points. Do not read this arm as work in flight; see the blueprint's
+        // third 2026-08-17 amendment.
         Command::Statusline => {}
-        // Installer/repair flow lands in a later Work Unit; stub for now.
+        // Installer/repair flow is wired by WU-11, together with retiring
+        // `hooks/hooks.json` and regenerating the seed. Those three are one
+        // atomic switchover: any two without the third leaves users with no
+        // functional hooks, or hooks pointing at a binary that is not installed.
         Command::Init => {}
     }
 }
