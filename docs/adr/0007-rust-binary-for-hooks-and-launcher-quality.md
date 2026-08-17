@@ -99,7 +99,27 @@ This report records the gate that ran on 2026-08-13 against a 20 work unit bluep
 
 The counts above are left as they were on purpose, because rewriting them would misrepresent what was actually checked. Gate them before executing, or accept the gap knowingly. The two carry a real design question the original gate never saw: moving the settings validator into the binary makes `shell-ci` depend on a compiled artifact, which is a coupling the current CI split deliberately avoids.
 
-## Gate on WU-20 and WU-21, 2026-08-16: FAIL
+## Gate on WU-20 and WU-21: CLEARED 2026-08-17
+
+The FAIL below stands as the record of what was found. All four defects are now fixed in the blueprint (see "Amendment 2026-08-17" there), so **WU-20 and WU-21 are unblocked**. Each defect names the unit that owns it:
+
+| # | Defect | Resolution |
+|---|---|---|
+| 1 | `.py` criterion unsatisfiable in the order the graph allows | Narrowed WU-21 to the two files it deletes; the repo-wide assertion moved to WU-14. Not fixed by adding a dependency, which would have blocked build tooling behind the whole old-runtime deletion |
+| 2 | `shell-ci` python steps under-counted | WU-21 drops line 88 only; lines 77 and 85 moved to WU-14 |
+| 3 | `Makefile:20` hardcodes the interpreter | Added to WU-20's file plan |
+| 4 | `plugin-e2e.sh` has no binary to call | WU-21 removes the check entirely rather than repointing it |
+
+**Fixing the gate exposed two errors in the gate itself**, both now recorded in the blueprint rather than quietly corrected:
+
+- `shell-ci` has **three** python steps, not two. The gate's `grep python` missed `pipx run ruff` at line 85, because that string does not contain "python". That line also cannot be left with an empty file list: `ruff check` falls back to linting `.`.
+- `check-shared-settings.py` has **14** `die()` call sites, not "about 13". Two share a usage message but fire on different conditions, so counting messages understates branches.
+
+One finding from the FAIL gate did NOT survive scrutiny and is withdrawn: the concern that WU-20's byte-identical bar repeated the `graph.json` mistake. It does not. `gen-shared-settings.py:127` is `print(json.dumps(result, indent=2))`, and `src/init/merge.rs` already proves `serde_json::to_string_pretty` byte-matches that across 9 fixtures on main. The bar stays, now guarded by a mandatory non-ASCII fixture, since neither input carries a non-ASCII byte today and that is exactly what makes the divergence invisible.
+
+Full planning detail, including the Segment split and the self-answered assumptions, is in `.claude/plans/adr-0007-segment-g-fix.md` (gitignored, local).
+
+## The FAIL gate as recorded on 2026-08-16
 
 ```
 Fact-Check:         FAIL          (4 defects, each reproduced by running a command)
@@ -107,7 +127,7 @@ Adversarial Review: INCONCLUSIVE  (agents delivered nothing)
 Test Review:        INCONCLUSIVE  (agents delivered nothing)
 ```
 
-**Do not execute WU-20 or WU-21 until the blueprint is amended.** Three of the four defects are in WU-21's acceptance criteria, which cannot pass as written.
+**The verdict as it stood on 2026-08-16, since superseded by the CLEARED section above:** do not execute WU-20 or WU-21 until the blueprint is amended. Three of the four defects were in WU-21's acceptance criteria, which could not pass as written. All four were amended on 2026-08-17.
 
 ### Phase 1: Fact-Check, FAIL
 

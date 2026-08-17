@@ -332,6 +332,8 @@ remove the old wiring before the new wiring works. It applies here too.
   - [ ] `grep -rl "common.sh\|common.py" hooks/ shell/` returns nothing
   - [ ] `docs/adr/0007-test-mapping.md` has a new-test counterpart for every row, none blank
   - [ ] A container built `FROM debian:stable-slim` with only `git` and the binary installed runs every hook successfully, asserted by a CI job, not by inspection
+  - [ ] **`find . -name "*.py" -not -path "./target/*"` returns nothing.** Moved here from WU-21 on 2026-08-17: this is the first unit where it can be true, since WU-14 owns deleting the 12 hook scripts that make it false
+  - [ ] **`shell-ci` invokes no python tooling anywhere.** Also moved from WU-21. Delete BOTH remaining steps: `.github/workflows/shell-ci.yml:77` (`py_compile`) and `:85` (`pipx run ruff`). Line 85 must be deleted rather than left with an empty file list, because `ruff check` treats `[FILES]...` as optional and falls back to linting `.`. Line 77 is safe either way, since `xargs -r` no-ops on empty input, but it is dead once no `.py` remains
 
 ### WU-20: port the settings seed generator
 - Requires: WU-8
@@ -340,14 +342,21 @@ remove the old wiring before the new wiring works. It applies here too.
   - `src/settings/gen.rs` | create | port of `shell/gen-shared-settings.py`: canned permissions block, `skipAutoPermissionPrompt: false`, strip any pinned model, drop personal keys
   - `src/settings/mod.rs` | create | module wiring, shared with WU-21
   - `src/main.rs` | edit | add the `settings gen` subcommand
-  - `Makefile` | edit | `GEN` points at the binary instead of the script
+  - `Makefile` | edit | **line 14** `GEN` points at the binary, AND **line 20** drops its hardcoded `python3` prefix. Repointing `GEN` alone yields `python3 target/debug/playbook settings gen`. The target also needs the binary built first, since `GEN` is no longer an interpreted script
   - `tests/settings_gen.rs` | create | ported cases plus the differential comparison
 - Verification: `cargo test --test settings_gen`
-- Tests: port every case in `shell/gen-shared-settings.test.sh`. Regression-pinning comes first: run the python generator and the Rust generator over the same input `settings.json` and assert **byte-identical** output. Byte equality is the right bar here, unlike `graph.json`, because both write one JSON document from an ordered input with no directory walk involved.
+- Tests: port **all 10 scenarios** in `shell/gen-shared-settings.test.sh` (measured by running it). Regression-pinning comes first: run the python generator and the Rust generator over the same input `settings.json` and assert **byte-identical** output.
+
+  **Byte equality is achievable here, and that is now evidenced rather than asserted.** `gen-shared-settings.py:127` is `print(json.dumps(result, indent=2))`, and reconstructing that from the parsed object plus a trailing newline reproduces the generator's stdout exactly. `src/init/merge.rs` already uses `serde_json::to_string_pretty` and WU-7's differential tests assert byte equality against python across 9 fixtures, including a three-deep nested object; those pass on main. So this is not the `graph.json` mistake repeated.
+
+  **Mandatory non-ASCII fixture.** python's `json.dumps` defaults to `ensure_ascii=True` and escapes to `\uXXXX`; `serde_json` writes raw UTF-8. Neither `settings.shared.json` nor `permissions.shared.json` contains a single non-ASCII byte today, which is exactly why a code comment is not enough: the divergence is invisible until real data changes. Add a fixture that asserts the divergence in a named direction, so the suite speaks up rather than the diff shifting silently. WU-7 shipped this same gap with only a comment.
 - Done When:
+  - [ ] All 10 ported scenarios pass
   - [ ] `shell/gen-shared-settings.py` is NOT deleted yet, so the comparison keeps working
-  - [ ] Regenerating `settings.shared.json` with the Rust generator produces no diff against the committed file
+  - [ ] The Rust generator's output byte-matches the **python generator's** output from the same `SRC`. **Not** "produces no diff against the committed file", which passes trivially once that file was itself produced by the code under test
+  - [ ] A deliberately mutated input produces a diff, proving the check can fail
   - [ ] The generator's own filter still refuses to reintroduce functional hooks into the seed
+  - [ ] `grep -c python3 Makefile` is 0, and a missing binary produces a clear error
 
 ### WU-21: port the settings seed validator, and move its CI lane
 - Requires: WU-20
@@ -355,16 +364,42 @@ remove the old wiring before the new wiring works. It applies here too.
 - Files:
   - `src/settings/check.rs` | create | port of `shell/check-shared-settings.py`: permissions block matches, no pinned model, prompt defaults set, no personal keys leaked, every hook command resolves inside the repo
   - `src/main.rs` | edit | add the `settings check` subcommand
-  - `.github/workflows/shell-ci.yml` | edit | drop the `python3 shell/check-shared-settings.py` step
-  - `.github/workflows/rust-ci.yml` | edit | add `playbook settings check` after the build
-  - `shell/plugin-e2e.sh` | edit | call the binary instead of the script
+  - `.github/workflows/shell-ci.yml` | edit | drop **line 88 only**, the `python3 shell/check-shared-settings.py` step. Lines 77 and 85 belong to WU-14; see the amendment below
+  - `.github/workflows/rust-ci.yml` | edit | add an explicit `cargo build`, THEN `playbook settings check`. rust-ci currently runs fmt, clippy, test and audit with no build step, so `./target/debug/playbook` is not guaranteed to exist
+  - `shell/plugin-e2e.sh` | edit | **remove the seed check entirely**, do not repoint it at the binary; see the amendment below
   - `tests/settings_check.rs` | create | ported cases
 - Verification: `cargo test --test settings_check && ./target/debug/playbook settings check settings.shared.json permissions.shared.json .`
-- Tests: port every case in `shell/check-shared-settings.test.sh`, including each rejection case. A validator whose failure paths are untested is worse than none, so every "must fail" case must be shown failing.
+- Tests: port **all 12 scenarios** in `shell/check-shared-settings.test.sh` (measured by running it), including each rejection case. A validator whose failure paths are untested is worse than none, so every "must fail" case must be shown failing.
+
+  **All 14 `die()` call sites, one case each**, enumerated by line so the claim is checkable: `:25` usage (argc), `:32` usage (second form), `:35` template unreadable, `:37` permissions unreadable, `:39` repo root not a directory, `:45` template invalid JSON, `:51` permissions invalid JSON, `:55` permissions not a JSON object, `:59` `.permissions` missing or not an object, `:62` `.permissions` not deep-equal, `:66` `.model` present, `:70` `.skipAutoPermissionPrompt` not false, `:75` a personal key present, `:106` an unresolvable hook command. Note `:25` and `:32` share one usage message but fire on different conditions, so counting distinct messages (13) understates the branches by one.
+
+  **Both directions of the hook-resolution branch.** A command that legitimately resolves inside the repo must PASS, not only an unresolvable one failing. A validator tested only on its rejections can reject everything and still look correct.
 - Done When:
+  - [ ] All 12 ported scenarios pass, and all 14 rejection branches are shown failing
   - [ ] Both `shell/gen-shared-settings.py` and `shell/check-shared-settings.py` are deleted, along with their `*.test.sh` suites, with rows added to `docs/adr/0007-test-mapping.md`
-  - [ ] `shell-ci` no longer invokes `python3` anywhere
-  - [ ] `find . -name "*.py" -not -path "./target/*"` returns nothing
+  - [ ] `shell-ci` no longer runs the seed check (line 88). The repo-wide "no python3 anywhere" and "no `.py` files remain" assertions belong to WU-14, not here
+
+### Amendment 2026-08-17: what the Segment G gate got wrong, and who owns each fix
+
+The 2026-08-16 gate on WU-20 and WU-21 returned FAIL with four defects. Fixing them turned up two errors in the gate itself, so both are recorded here rather than quietly corrected.
+
+**1. The `.py` criterion was unsatisfiable, and has moved.** WU-21's Done When demanded `find . -name "*.py" -not -path "./target/*"` return nothing. It returns 15 files: 12 under `hooks/` plus all three under `shell/`. Only WU-14 deletes the 12 hook scripts, and nothing made WU-21 depend on WU-14, so the graph permitted an order where the criterion could not hold through no fault of the unit. **Resolved by narrowing, not by adding a dependency:** WU-21 now asserts only the two files it actually deletes, and the repo-wide assertion moves to WU-14. Adding `WU-14` to WU-21's `Requires` would have blocked independent build tooling behind the entire old-runtime deletion.
+
+**2. `shell-ci` has THREE python steps, not two.** The gate said two. Real state:
+
+| Line | Step | Owner |
+|---|---|---|
+| 77 | `git ls-files '*.py' \| xargs -r -n1 python3 -m py_compile` | WU-14 |
+| 85 | `pipx run ruff check $(git ls-files '*.py')` | WU-14 |
+| 88 | `python3 shell/check-shared-settings.py ...` | WU-21 |
+
+The gate's `grep python` missed line 85 because `ruff` invoked through `pipx` does not contain the string "python". That line carries a trap for WU-14: `ruff check` takes `[FILES]...` as optional and falls back to linting `.`, so it must be **deleted**, not left to receive an empty list. Line 77 is safe by comparison, since `xargs -r` genuinely no-ops on empty input.
+
+**3. `Makefile:20` hardcodes the interpreter.** Now in WU-20's file plan.
+
+**4. `plugin-e2e.sh` has no binary to call, so the check leaves.** That harness never invokes `cargo`. Rather than teach a packaging test to build a Rust toolchain, WU-21 removes the seed check from it entirely. **No coverage is lost, verified:** `plugin-e2e.sh:72` copies only `commands`, `skills`, `agents`, `hooks` and `.claude-plugin` into the packaged plugin and never packages `settings.shared.json`, and its check at `:128` runs `cd "$REPO"` against the repo's own file, under a section headed "Repo validators and behavioral suites". It was always a repo validator sitting inside a packaging harness. Moving it to `rust-ci` removes the coupling the quality report flagged instead of relocating it.
+
+**5. The gate's `die()` count was off by one.** It said "about 13"; there are 14 call sites. WU-21 now lists them by line.
 
 ### WU-15: Homebrew tap
 - Requires: WU-10
