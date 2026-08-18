@@ -1579,3 +1579,379 @@ mod create_worktree_ladder {
         });
     }
 }
+
+/// Unit tests on the off-by-one guard in isolation, against synthetic
+/// `git worktree list --porcelain` text, no real git involved.
+///
+/// This exists as its own module because [`cleanup_stale_execution`]'s
+/// real-git "main worktree survives" test, despite being the most obviously
+/// important one to read, cannot actually distinguish correct code from the
+/// off-by-one bug: `git worktree remove` already refuses to remove the main
+/// working tree by itself, so a live-git test observes the identical outcome
+/// either way. This module is the one that actually fails if the skip is
+/// ever dropped or miscounted.
+mod cleanup_candidate_paths {
+    use super::*;
+
+    const PORCELAIN: &str = "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\
+                             \nworktree /repo/.worktrees/a\nHEAD def\n\
+                             branch refs/heads/a\n\
+                             \nworktree /repo/.worktrees/b\nHEAD ghi\n\
+                             branch refs/heads/b\n";
+
+    #[test]
+    fn drops_only_the_first_worktree_entry() {
+        assert_eq!(
+            worktree::cleanup_candidates(PORCELAIN),
+            vec![
+                "/repo/.worktrees/a".to_string(),
+                "/repo/.worktrees/b".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_single_worktree_yields_no_candidates() {
+        assert!(
+            worktree::cleanup_candidates("worktree /repo\nHEAD abc\nbranch refs/heads/main\n")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn empty_input_yields_no_candidates() {
+        assert!(worktree::cleanup_candidates("").is_empty());
+    }
+}
+
+/// Integration tests for `cleanup_stale_with`, the imperative driver of
+/// `_wt_cleanup_stale` (worktree.sh:201-242), against real temp git repos
+/// with real `git worktree add`.
+///
+/// `cleanup_stale` (the outer entry point that additionally gathers a real
+/// `/tmp/.git-wt-cleanup-*` marker path and a real `gh pr list`) is
+/// deliberately NOT exercised here: doing so would either touch this
+/// machine's actual marker file or depend on `gh` being installed and
+/// authenticated, exactly what this module must not do. Every test below
+/// injects its own scratch marker and PR list into `cleanup_stale_with`
+/// instead.
+mod cleanup_stale_execution {
+    use super::*;
+    use playbook::cc::worktree::cleanup_stale_with;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    const NOW: i64 = 1_800_000_000;
+
+    /// Disables the machine's global/system git config for the duration of
+    /// `f`. Duplicated rather than shared with `create_worktree_ladder`, per
+    /// this file's own convention that each module owns its harness.
+    fn with_isolated_git_env<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = lock_env();
+        let prev_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+        let prev_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+        let out = f();
+        match prev_global {
+            Some(v) => std::env::set_var("GIT_CONFIG_GLOBAL", v),
+            None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
+        }
+        match prev_system {
+            Some(v) => std::env::set_var("GIT_CONFIG_SYSTEM", v),
+            None => std::env::remove_var("GIT_CONFIG_SYSTEM"),
+        }
+        out
+    }
+
+    fn git(repo_path: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .output()
+            .expect("git command should spawn")
+    }
+
+    fn git_ok(repo_path: &Path, args: &[&str]) {
+        let out = git(repo_path, args);
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn git_stdout(repo_path: &Path, args: &[&str]) -> String {
+        let output = git(repo_path, args);
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn branch_exists(repo_root: &Path, branch: &str) -> bool {
+        git(
+            repo_root,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ],
+        )
+        .status
+        .success()
+    }
+
+    /// A repo with one commit on `main`, and a hand-built
+    /// `refs/remotes/origin/*` (no real remote, no network) so `base_branch`
+    /// resolves to `origin/main` the same way it would against a real clone.
+    ///
+    /// Canonicalized before returning: macOS resolves `/tmp` through
+    /// `/private/tmp`, and `git worktree list` reports the resolved path, so
+    /// every path comparison in these tests needs to start from a canonical
+    /// root or it fails for a reason that has nothing to do with the port.
+    fn seeded_repo(tag: &str) -> PathBuf {
+        let dir = scratch(tag);
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "t@t"],
+            vec!["config", "user.name", "T"],
+        ] {
+            git_ok(&dir, &args);
+        }
+        fs::write(dir.join("README.md"), "seed\n").expect("write");
+        git_ok(&dir, &["add", "."]);
+        git_ok(&dir, &["commit", "-q", "-m", "seed"]);
+        let sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
+        git_ok(&dir, &["update-ref", "refs/remotes/origin/main", &sha]);
+        git_ok(
+            &dir,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        dir.canonicalize().expect("seeded repo should resolve")
+    }
+
+    /// Adds a linked worktree on a new branch created from `main`, so it
+    /// starts out merged into `origin/main`, i.e. it would look stale by
+    /// default unless something else spares it. Returns its canonical path.
+    fn add_worktree(repo_root: &Path, branch: &str) -> PathBuf {
+        let dest = repo_root.join(format!("wt-{branch}"));
+        git_ok(
+            repo_root,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                branch,
+                dest.to_str().expect("utf8 path"),
+                "main",
+            ],
+        );
+        dest.canonicalize().expect("worktree should resolve")
+    }
+
+    /// A marker path under the repo's own scratch dir, absent by default (so
+    /// `cleanup_due` reads it as due), never the shared `/tmp` path a real
+    /// run would use.
+    fn due_marker(repo_root: &Path) -> PathBuf {
+        repo_root.join(".cleanup-marker-test")
+    }
+
+    fn real_now_epoch() -> i64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after the epoch")
+            .as_secs() as i64
+    }
+
+    /// The behavioural guarantee that matters most to a user, proven against
+    /// real git: even a main worktree that LOOKS stale (merged into base,
+    /// nothing else sparing it) survives a cleanup run. Backstopped twice
+    /// over: by `cleanup_candidates` (see the sibling module, which is what
+    /// actually fails if that skip regresses) and, independently, by git
+    /// itself refusing to remove a main working tree.
+    #[test]
+    fn the_main_worktree_is_never_removed_even_when_it_would_otherwise_look_stale() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("main-survives");
+            let target = repo_root.join("does-not-exist");
+            let marker = due_marker(&repo_root);
+
+            let removed = cleanup_stale_with(&repo_root, &target, &marker, &[], NOW);
+
+            assert_eq!(removed, 0);
+            assert!(
+                repo_root.is_dir(),
+                "the main worktree's directory must survive"
+            );
+            assert!(branch_exists(&repo_root, "main"));
+        });
+    }
+
+    #[test]
+    fn the_target_worktree_is_never_removed() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("target-never-removed");
+            // Merged into base and otherwise unprotected: it would be
+            // removed if it were not the run's own target.
+            let target = add_worktree(&repo_root, "being-created");
+            let marker = due_marker(&repo_root);
+
+            let removed = cleanup_stale_with(&repo_root, &target, &marker, &[], NOW);
+
+            assert_eq!(removed, 0);
+            assert!(target.is_dir());
+            assert!(branch_exists(&repo_root, "being-created"));
+        });
+    }
+
+    #[test]
+    fn a_branch_with_an_open_pr_is_kept() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("open-pr-kept");
+            let wt = add_worktree(&repo_root, "reviewed");
+            let target = repo_root.join("does-not-exist");
+            let marker = due_marker(&repo_root);
+            let open_prs = vec!["reviewed".to_string()];
+
+            let removed = cleanup_stale_with(&repo_root, &target, &marker, &open_prs, NOW);
+
+            assert_eq!(removed, 0);
+            assert!(wt.is_dir());
+            assert!(branch_exists(&repo_root, "reviewed"));
+        });
+    }
+
+    /// `grep -qxF` is whole-line, so an open-PR entry of `feat-two` must not
+    /// spare a branch named `feat` merely because `feat` is a substring of it.
+    #[test]
+    fn an_open_pr_entry_does_not_spare_a_branch_it_is_a_superstring_of() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("whole-line-superstring");
+            let wt = add_worktree(&repo_root, "feat");
+            let target = repo_root.join("does-not-exist");
+            let marker = due_marker(&repo_root);
+            let open_prs = vec!["feat-two".to_string()];
+
+            let removed = cleanup_stale_with(&repo_root, &target, &marker, &open_prs, NOW);
+
+            assert_eq!(
+                removed, 1,
+                "'feat-two' must not spare 'feat' via a substring match"
+            );
+            assert!(!wt.exists());
+            assert!(!branch_exists(&repo_root, "feat"));
+        });
+    }
+
+    /// The reverse direction: an open-PR entry of `feat` must not spare a
+    /// branch named `feat-two` merely because `feat` is a substring of it.
+    #[test]
+    fn an_open_pr_entry_does_not_spare_a_branch_it_is_a_substring_of() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("whole-line-substring");
+            let wt = add_worktree(&repo_root, "feat-two");
+            let target = repo_root.join("does-not-exist");
+            let marker = due_marker(&repo_root);
+            let open_prs = vec!["feat".to_string()];
+
+            let removed = cleanup_stale_with(&repo_root, &target, &marker, &open_prs, NOW);
+
+            assert_eq!(
+                removed, 1,
+                "'feat' must not spare 'feat-two' via a substring match"
+            );
+            assert!(!wt.exists());
+            assert!(!branch_exists(&repo_root, "feat-two"));
+        });
+    }
+
+    #[test]
+    fn a_merged_worktree_is_removed_and_its_branch_deleted() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("merged-removed");
+            let wt = add_worktree(&repo_root, "done");
+            let target = repo_root.join("does-not-exist");
+            let marker = due_marker(&repo_root);
+
+            let removed = cleanup_stale_with(&repo_root, &target, &marker, &[], NOW);
+
+            assert_eq!(removed, 1);
+            assert!(!wt.exists());
+            assert!(!branch_exists(&repo_root, "done"));
+        });
+    }
+
+    /// `git worktree lock` makes a single `--force` remove fail
+    /// deterministically (`fatal: cannot remove a locked working tree`),
+    /// standing in for any real-world removal failure. The branch must
+    /// survive: deleting it while its worktree still exists on disk would
+    /// leave that worktree pointing at a gone branch.
+    #[test]
+    fn a_worktree_whose_removal_fails_keeps_its_branch() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("remove-fails");
+            let wt = add_worktree(&repo_root, "locked");
+            git_ok(
+                &repo_root,
+                &["worktree", "lock", wt.to_str().expect("utf8 path")],
+            );
+            let target = repo_root.join("does-not-exist");
+            let marker = due_marker(&repo_root);
+
+            let removed = cleanup_stale_with(&repo_root, &target, &marker, &[], NOW);
+
+            assert_eq!(removed, 0, "a failed remove must not be counted");
+            assert!(branch_exists(&repo_root, "locked"));
+        });
+    }
+
+    #[test]
+    fn a_not_due_marker_returns_zero_and_removes_nothing() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("not-due");
+            let wt = add_worktree(&repo_root, "would-be-stale");
+            let target = repo_root.join("does-not-exist");
+            let marker = due_marker(&repo_root);
+            let now = real_now_epoch();
+            fs::write(&marker, now.to_string()).expect("seed a fresh marker");
+
+            let removed = cleanup_stale_with(&repo_root, &target, &marker, &[], now);
+
+            assert_eq!(removed, 0);
+            assert!(
+                wt.is_dir(),
+                "not due means nothing gets touched, even a mergeable worktree"
+            );
+            assert!(branch_exists(&repo_root, "would-be-stale"));
+        });
+    }
+
+    /// The marker is written BEFORE any git work, not after, so a run that
+    /// fails partway through still rate-limits the next one. Pinned by
+    /// forcing an early failure (a `repo_root` that is not a git repository
+    /// at all, so `git worktree list --porcelain` fails and the function
+    /// returns before ever reaching its loop) and checking that the marker
+    /// was still written.
+    #[test]
+    fn the_marker_is_touched_before_any_work_even_when_the_run_fails_early() {
+        with_isolated_git_env(|| {
+            let repo_root = scratch("touch-before-work"); // not a git repo
+            let target = repo_root.join("does-not-exist");
+            let marker = due_marker(&repo_root);
+            assert!(!marker.exists(), "marker must start absent");
+
+            let removed = cleanup_stale_with(&repo_root, &target, &marker, &[], NOW);
+
+            assert_eq!(removed, 0, "a non-repo root has nothing valid to clean");
+            assert!(
+                marker.exists(),
+                "the marker must be written before the failing git work, not after, \
+                 so a crash partway through still rate-limits the next run"
+            );
+        });
+    }
+}
