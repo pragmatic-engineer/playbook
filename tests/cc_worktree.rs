@@ -2025,3 +2025,322 @@ mod make_source_selection {
         assert_eq!(plan.reference, "refs/remotes/fork/b");
     }
 }
+
+/// Tests for the execution half of `_wt_maybe_rebase` (worktree.sh:424-458):
+/// `rebase_args`, `rebase_onto`, `abort_rebase`, and `recover_detached_head`.
+///
+/// Every scenario below `rebase_args_ordering` runs against real git repos
+/// with a local bare repo standing in for `origin`, so `git fetch`/`git push`
+/// exercise the real plumbing without ever touching the network.
+mod rebase_execution {
+    use super::*;
+    use playbook::cc::worktree::{
+        abort_rebase, rebase_args, rebase_onto, recover_detached_head, RebaseOutcome,
+    };
+
+    /// Disables the machine's global/system git config for the duration of
+    /// `f`. Duplicated rather than shared, per this file's convention that
+    /// each module owns its harness.
+    fn with_isolated_git_env<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = lock_env();
+        let prev_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+        let prev_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+        let out = f();
+        match prev_global {
+            Some(v) => std::env::set_var("GIT_CONFIG_GLOBAL", v),
+            None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
+        }
+        match prev_system {
+            Some(v) => std::env::set_var("GIT_CONFIG_SYSTEM", v),
+            None => std::env::remove_var("GIT_CONFIG_SYSTEM"),
+        }
+        out
+    }
+
+    fn git(repo_path: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .output()
+            .expect("git command should spawn")
+    }
+
+    fn git_ok(repo_path: &Path, args: &[&str]) {
+        let out = git(repo_path, args);
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn git_stdout(repo_path: &Path, args: &[&str]) -> String {
+        let output = git(repo_path, args);
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn commit(repo_path: &Path, file: &str, contents: &str, message: &str) {
+        fs::write(repo_path.join(file), contents).expect("write");
+        git_ok(repo_path, &["add", "."]);
+        git_ok(repo_path, &["commit", "-q", "-m", message]);
+    }
+
+    /// A bare repo standing in for `origin`. `git fetch`/`git push` against a
+    /// local filesystem path need no network, unlike a real remote.
+    fn bare_remote(tag: &str) -> PathBuf {
+        let dir = scratch(tag);
+        git_ok(&dir, &["init", "-q", "--bare", "-b", "main"]);
+        dir.canonicalize().expect("bare remote should resolve")
+    }
+
+    /// A repo with `origin` pointed at a local bare repo, and one commit
+    /// already pushed to `main` on both sides.
+    fn repo_with_remote(tag: &str) -> (PathBuf, PathBuf) {
+        let remote = bare_remote(&format!("{tag}-remote"));
+        let dir = scratch(tag);
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "t@t"],
+            vec!["config", "user.name", "T"],
+            vec![
+                "remote",
+                "add",
+                "origin",
+                remote.to_str().expect("utf8 path"),
+            ],
+        ] {
+            git_ok(&dir, &args);
+        }
+        commit(&dir, "README.md", "seed\n", "seed");
+        git_ok(&dir, &["push", "-q", "origin", "main"]);
+        (dir.canonicalize().expect("repo should resolve"), remote)
+    }
+
+    /// A second, throwaway clone of `remote` that advances `main` with one
+    /// commit, simulating someone else pushing while `dir` was left behind.
+    /// Writes to `file` so callers control whether the advance later
+    /// conflicts with a local change to the same file.
+    fn advance_remote(remote: &Path, tag: &str, file: &str, contents: &str) {
+        let advancer = scratch(tag);
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "adv@t"],
+            vec!["config", "user.name", "Advancer"],
+            vec![
+                "remote",
+                "add",
+                "origin",
+                remote.to_str().expect("utf8 path"),
+            ],
+        ] {
+            git_ok(&advancer, &args);
+        }
+        git_ok(&advancer, &["fetch", "-q", "origin", "main"]);
+        git_ok(&advancer, &["checkout", "-q", "-b", "main", "origin/main"]);
+        commit(&advancer, file, contents, "remote-advance");
+        git_ok(&advancer, &["push", "-q", "origin", "main"]);
+    }
+
+    /// Whether a rebase is currently in progress on disk, resolved through
+    /// `git rev-parse --git-path` rather than hardcoding `.git/rebase-merge`,
+    /// since which of the two backends (`rebase-merge`/`rebase-apply`) git
+    /// picks is an implementation detail this test should not assume.
+    fn rebase_in_progress(repo_path: &Path) -> bool {
+        ["rebase-merge", "rebase-apply"].iter().any(|marker| {
+            let relative = git_stdout(repo_path, &["rev-parse", "--git-path", marker]);
+            repo_path.join(relative).exists()
+        })
+    }
+
+    mod rebase_args_ordering {
+        use super::*;
+
+        #[test]
+        fn without_merge_commits_only_upstream_and_quiet_are_present() {
+            assert_eq!(
+                rebase_args("origin/main", false),
+                vec!["origin/main", "--quiet"]
+            );
+        }
+
+        #[test]
+        fn with_merge_commits_rebase_merges_is_appended_last() {
+            assert_eq!(
+                rebase_args("origin/main", true),
+                vec!["origin/main", "--quiet", "--rebase-merges"]
+            );
+        }
+    }
+
+    #[test]
+    fn already_up_to_date_returns_up_to_date_and_does_not_rebase() {
+        with_isolated_git_env(|| {
+            let (dir, _remote) = repo_with_remote("up-to-date");
+            let before = git_stdout(&dir, &["rev-parse", "HEAD"]);
+
+            let outcome = rebase_onto(&dir, "origin", "main");
+
+            assert_eq!(outcome, RebaseOutcome::UpToDate);
+            assert_eq!(
+                git_stdout(&dir, &["rev-parse", "HEAD"]),
+                before,
+                "an up-to-date branch must not be touched"
+            );
+        });
+    }
+
+    #[test]
+    fn a_clean_divergence_is_rebased_and_history_moves() {
+        with_isolated_git_env(|| {
+            let (dir, remote) = repo_with_remote("clean-divergence");
+            advance_remote(
+                &remote,
+                "clean-divergence-advancer",
+                "remote-only.txt",
+                "remote\n",
+            );
+            commit(&dir, "local-only.txt", "local\n", "local-diverge");
+            let before = git_stdout(&dir, &["rev-parse", "HEAD"]);
+
+            let outcome = rebase_onto(&dir, "origin", "main");
+
+            assert_eq!(outcome, RebaseOutcome::Rebased);
+            let after = git_stdout(&dir, &["rev-parse", "HEAD"]);
+            assert_ne!(after, before, "the rebase must actually move history");
+            let log = git_stdout(&dir, &["log", "--oneline"]);
+            assert!(
+                log.contains("remote-advance"),
+                "the rebased branch must sit on top of the remote's commit:\n{log}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_genuine_conflict_returns_conflicted_and_leaves_the_rebase_in_progress() {
+        with_isolated_git_env(|| {
+            let (dir, remote) = repo_with_remote("conflict");
+            advance_remote(
+                &remote,
+                "conflict-advancer",
+                "shared.txt",
+                "remote-change\n",
+            );
+            commit(&dir, "shared.txt", "local-change\n", "local-conflict");
+
+            let outcome = rebase_onto(&dir, "origin", "main");
+
+            assert_eq!(outcome, RebaseOutcome::Conflicted);
+            assert!(
+                rebase_in_progress(&dir),
+                "a Conflicted outcome must leave the rebase in progress on disk, \
+                 since a caller still needs to resolve or abort it"
+            );
+        });
+    }
+
+    #[test]
+    fn abort_rebase_clears_an_in_progress_rebase() {
+        with_isolated_git_env(|| {
+            let (dir, remote) = repo_with_remote("abort");
+            advance_remote(&remote, "abort-advancer", "shared.txt", "remote-change\n");
+            commit(&dir, "shared.txt", "local-change\n", "local-conflict");
+            let outcome = rebase_onto(&dir, "origin", "main");
+            assert_eq!(outcome, RebaseOutcome::Conflicted);
+            assert!(rebase_in_progress(&dir), "fixture should start mid-rebase");
+
+            abort_rebase(&dir);
+
+            assert!(
+                !rebase_in_progress(&dir),
+                "abort_rebase must clear the in-progress rebase"
+            );
+        });
+    }
+
+    #[test]
+    fn recover_detached_head_restores_the_branch_from_a_genuinely_detached_head() {
+        with_isolated_git_env(|| {
+            let (dir, _remote) = repo_with_remote("detached-recovery");
+            let sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
+            git_ok(&dir, &["checkout", &sha]);
+            assert_eq!(
+                git_stdout(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]),
+                "HEAD",
+                "fixture should start detached"
+            );
+
+            let acted = recover_detached_head(&dir, "main", "main");
+
+            assert!(acted);
+            assert_eq!(
+                git_stdout(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]),
+                "main"
+            );
+        });
+    }
+
+    #[test]
+    fn recover_detached_head_does_nothing_when_head_is_attached() {
+        with_isolated_git_env(|| {
+            let (dir, _remote) = repo_with_remote("attached-noop");
+            let before = git_stdout(&dir, &["rev-parse", "HEAD"]);
+
+            let acted = recover_detached_head(&dir, "main", "main");
+
+            assert!(!acted, "an attached HEAD is nothing to recover from");
+            assert_eq!(
+                git_stdout(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]),
+                "main"
+            );
+            assert_eq!(git_stdout(&dir, &["rev-parse", "HEAD"]), before);
+        });
+    }
+
+    /// The fallback order, half one: when `current_branch` no longer exists,
+    /// recovery falls back to `wanted_branch`. This alone cannot tell a
+    /// correct fallback from a swapped order, since only one candidate exists
+    /// here; see the sibling test below for the half that can.
+    #[test]
+    fn falls_back_to_wanted_branch_when_current_branch_no_longer_exists() {
+        with_isolated_git_env(|| {
+            let (dir, _remote) = repo_with_remote("fallback-order");
+            let sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
+            git_ok(&dir, &["checkout", &sha]);
+
+            let acted = recover_detached_head(&dir, "does-not-exist", "main");
+
+            assert!(acted);
+            assert_eq!(
+                git_stdout(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]),
+                "main",
+                "current_branch does not exist, so recovery must fall back to wanted_branch"
+            );
+        });
+    }
+
+    /// The fallback order, half two: when BOTH branches exist, `current_branch`
+    /// wins. The shell's `||` chain fixes that order (current branch first,
+    /// wanted branch second), and this is the test that fails if the two ever
+    /// get swapped.
+    #[test]
+    fn current_branch_wins_over_wanted_branch_when_both_exist() {
+        with_isolated_git_env(|| {
+            let (dir, _remote) = repo_with_remote("fallback-order-both-exist");
+            git_ok(&dir, &["checkout", "-q", "-b", "other"]);
+            let sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
+            git_ok(&dir, &["checkout", &sha]);
+
+            let acted = recover_detached_head(&dir, "other", "main");
+
+            assert!(acted);
+            assert_eq!(
+                git_stdout(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]),
+                "other",
+                "current_branch must be tried before wanted_branch"
+            );
+        });
+    }
+}
