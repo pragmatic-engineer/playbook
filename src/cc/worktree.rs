@@ -835,6 +835,100 @@ pub fn create_worktree(
     CreateOutcome::Failed
 }
 
+/// What a new worktree checks out, and whether that means creating a branch.
+#[derive(Debug, PartialEq)]
+pub struct MakePlan {
+    /// The ref `git worktree add` checks out.
+    pub reference: String,
+    /// `Some` when the branch does not exist yet and `-b` must create it.
+    pub new_branch: Option<String>,
+    /// Whether to clear the new branch's inherited upstream afterwards.
+    pub unset_upstream: bool,
+}
+
+/// Ports the branch-source choice in `_wt_make` (worktree.sh:390-401): check
+/// out an existing local branch, else start one from its remote counterpart,
+/// else start one from the base ref.
+///
+/// Only the third case unsets the upstream (worktree.sh:398). Branching off
+/// the base ref makes git inherit the BASE's tracking, so without this a later
+/// bare `git push` on the new branch would target the base branch. The other
+/// two cases already have correct tracking, so clearing it there would break
+/// them.
+pub fn make_plan(
+    branch: &str,
+    remote: &str,
+    base: &str,
+    local_exists: bool,
+    remote_exists: bool,
+) -> MakePlan {
+    if local_exists {
+        return MakePlan {
+            reference: branch.to_string(),
+            new_branch: None,
+            unset_upstream: false,
+        };
+    }
+    if remote_exists {
+        return MakePlan {
+            reference: format!("refs/remotes/{remote}/{branch}"),
+            new_branch: Some(branch.to_string()),
+            unset_upstream: false,
+        };
+    }
+    MakePlan {
+        reference: base.to_string(),
+        new_branch: Some(branch.to_string()),
+        unset_upstream: true,
+    }
+}
+
+/// Creates the worktree for `branch`, choosing its source via [`make_plan`].
+///
+/// The two `show-ref --verify` probes use fully qualified refs so a tag or a
+/// remote ref sharing the branch's name cannot be mistaken for a local branch.
+pub fn make_worktree(repo_root: &Path, target: &Path, branch: &str, remote: &str) -> CreateOutcome {
+    let local_exists = git_ok(
+        repo_root,
+        &[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+    );
+    let remote_exists = git_ok(
+        repo_root,
+        &[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/remotes/{remote}/{branch}"),
+        ],
+    );
+    let plan = make_plan(
+        branch,
+        remote,
+        &base_branch(repo_root),
+        local_exists,
+        remote_exists,
+    );
+
+    let outcome = create_worktree(
+        repo_root,
+        target,
+        &plan.reference,
+        plan.new_branch.as_deref(),
+    );
+
+    // Only after a successful create, since the shell's `|| return $?` means a
+    // failed create never reaches the unset.
+    if plan.unset_upstream && !matches!(outcome, CreateOutcome::Failed) {
+        let _ = git_ok(repo_root, &["branch", "--unset-upstream", branch]);
+    }
+    outcome
+}
+
 /// Runs `git worktree add` with [`worktree_add_args`], reporting only success.
 fn run_worktree_add(
     repo_root: &Path,

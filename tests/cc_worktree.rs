@@ -1955,3 +1955,73 @@ mod cleanup_stale_execution {
         });
     }
 }
+
+/// `make_plan`: which ref a new worktree checks out, and whether that means
+/// creating a branch. Pure, so covered exhaustively over the three cases.
+mod make_source_selection {
+    use playbook::cc::worktree::{make_plan, MakePlan};
+
+    #[test]
+    fn an_existing_local_branch_is_checked_out_directly() {
+        assert_eq!(
+            make_plan("feat/x", "origin", "origin/main", true, false),
+            MakePlan {
+                reference: "feat/x".to_string(),
+                new_branch: None,
+                unset_upstream: false,
+            }
+        );
+    }
+
+    /// A local branch wins even when the remote also has one, matching the
+    /// shell's if/elif order.
+    #[test]
+    fn a_local_branch_outranks_its_remote_counterpart() {
+        let plan = make_plan("feat/x", "origin", "origin/main", true, true);
+        assert_eq!(plan.new_branch, None, "nothing to create, it exists");
+        assert_eq!(plan.reference, "feat/x");
+    }
+
+    #[test]
+    fn a_remote_only_branch_is_started_from_its_remote_ref() {
+        assert_eq!(
+            make_plan("feat/x", "upstream", "origin/main", false, true),
+            MakePlan {
+                reference: "refs/remotes/upstream/feat/x".to_string(),
+                new_branch: Some("feat/x".to_string()),
+                unset_upstream: false,
+            }
+        );
+    }
+
+    #[test]
+    fn a_brand_new_branch_is_started_from_the_base_ref() {
+        assert_eq!(
+            make_plan("feat/x", "origin", "origin/trunk", false, false),
+            MakePlan {
+                reference: "origin/trunk".to_string(),
+                new_branch: Some("feat/x".to_string()),
+                unset_upstream: true,
+            }
+        );
+    }
+
+    /// The upstream is cleared in exactly one case. Branching off the base ref
+    /// inherits the BASE's tracking, so a later bare `git push` would target
+    /// the base branch; the other two already track correctly and clearing
+    /// them would break that.
+    #[test]
+    fn only_a_branch_cut_from_base_has_its_upstream_cleared() {
+        assert!(!make_plan("b", "origin", "origin/main", true, false).unset_upstream);
+        assert!(!make_plan("b", "origin", "origin/main", false, true).unset_upstream);
+        assert!(make_plan("b", "origin", "origin/main", false, false).unset_upstream);
+    }
+
+    /// The remote name is interpolated rather than assumed to be `origin`, so
+    /// a fork workflow resolves against the right remote.
+    #[test]
+    fn the_remote_name_is_not_hardcoded() {
+        let plan = make_plan("b", "fork", "origin/main", false, true);
+        assert_eq!(plan.reference, "refs/remotes/fork/b");
+    }
+}
