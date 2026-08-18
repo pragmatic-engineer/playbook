@@ -297,6 +297,153 @@ pub fn node_modules_reusable(worktree: &Path, repo_root: &Path) -> bool {
     }
 }
 
+/// A `node_modules` tree can hold tens of thousands of files, and the copy
+/// ladder's last resort (`cp -R`, once copy-on-write and reflink both fail)
+/// walks every one of them. Generous on purpose: a short timeout here would
+/// abort a real, still-progressing copy rather than a stuck one.
+const NODE_MODULES_COPY_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Bounds the best-effort `npm install --prefer-offline` refresh after
+/// cloning. It only has to reconcile an already-installed tree rather than
+/// fetch one from scratch, so this is far shorter than the copy timeout: a
+/// machine with no network should fail fast instead of stalling worktree
+/// setup.
+const NPM_INSTALL_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Ports the imperative half of `_wt_node_modules` (worktree.sh:174-197):
+/// once [`node_modules_reusable`] says the reuse is safe, this performs it.
+///
+/// Order mirrors the shell with one deliberate exception. The shell seeds a
+/// missing worktree lockfile BEFORE its hash comparison runs (worktree.sh:184);
+/// this instead decides first and seeds only when the decision is `true`.
+/// The two orders are provably equivalent: `node_modules_reusable` already
+/// re-checks every precondition the shell checks before its own seed line, so
+/// a `false` decision means the shell would never have reached that line
+/// either, and a `true` decision comes only from a lockfile that already
+/// matches (nothing to seed) or one that is missing (seeded now, and a copy
+/// of an identical file always matches). Deciding first also means a
+/// worktree that fails a precondition is never touched, which a literal
+/// seed-first port would get wrong for a worktree with no `package.json` at
+/// all: the shell returns before ever reaching its seed line, but seeding
+/// unconditionally here would still write a lockfile into a non-node
+/// worktree.
+///
+/// The shell's diagnostic ("Cloned node_modules (copy-on-write)") is left to
+/// the caller, since printing is not this module's job; that message also
+/// claims copy-on-write unconditionally even when the ladder below fell
+/// through to the plain `cp -R`, a pre-existing inaccuracy this port does not
+/// fix. The best-effort `npm install --prefer-offline --no-audit --no-fund`
+/// refresh that follows it is kept, since it changes what ends up on disk
+/// rather than just announcing it, and the shell runs it regardless of
+/// whether the copy ladder actually succeeded.
+pub fn reuse_node_modules(worktree: &Path, repo_root: &Path) -> bool {
+    if !node_modules_reusable(worktree, repo_root) {
+        return false;
+    }
+
+    let worktree_lock = worktree.join("package-lock.json");
+    if !worktree_lock.is_file() {
+        // Best-effort, matching the shell's `2>/dev/null || true`: a failed
+        // copy must not undo a reuse that was otherwise judged safe.
+        let _ = std::fs::copy(repo_root.join("package-lock.json"), &worktree_lock);
+    }
+
+    let source = repo_root.join("node_modules");
+    let dest = worktree.join("node_modules");
+    // `-e`, not `-d` (worktree.sh:191): a plain FILE named `node_modules` is
+    // removed too, not just a stray directory.
+    remove_node_modules(&dest);
+
+    let copied = clone_node_modules(&source, &dest);
+
+    if command_exists("npm") {
+        let mut command = Command::new("npm");
+        command.current_dir(worktree).args([
+            "install",
+            "--prefer-offline",
+            "--no-audit",
+            "--no-fund",
+        ]);
+        let _ = run_with_timeout(&mut command, NPM_INSTALL_TIMEOUT);
+    }
+
+    copied
+}
+
+/// The shell's three-tier `cp` fallback (worktree.sh:192-194): a macOS
+/// copy-on-write clone, then a GNU reflink copy, then a plain recursive copy.
+/// Each retry removes whatever the previous attempt left behind first, since
+/// the shell repeats `rm -rf node_modules` before every retry, not just once:
+/// a `cp` that fails partway can still leave a partial destination that would
+/// make the next attempt fail on "already exists" instead of actually
+/// retrying.
+fn clone_node_modules(source: &Path, dest: &Path) -> bool {
+    if run_cp(&["-cR"], source, dest) {
+        return true;
+    }
+    remove_node_modules(dest);
+    if run_cp(&["-R", "--reflink=auto"], source, dest) {
+        return true;
+    }
+    remove_node_modules(dest);
+    run_cp(&["-R"], source, dest)
+}
+
+/// One `cp` attempt from the ladder above.
+///
+/// The shell suppresses stderr on the first two tiers and lets the third
+/// flow to the terminal, so a real failure is visible only once the cheaper
+/// fallbacks are exhausted. This port has no output channel of its own here
+/// (`run_with_timeout` always captures both streams and nothing forwards
+/// them), so that distinction has no observable effect in this function;
+/// noted rather than silently dropped.
+fn run_cp(args: &[&str], source: &Path, dest: &Path) -> bool {
+    let mut command = Command::new("cp");
+    command.args(args).arg(source).arg(dest);
+    matches!(
+        run_with_timeout(&mut command, NODE_MODULES_COPY_TIMEOUT),
+        Some(o) if o.status.success()
+    )
+}
+
+/// Removes whatever is at `path`, mirroring `rm -rf`: a no-op when nothing is
+/// there, and correct for either a directory or a plain file.
+fn remove_node_modules(path: &Path) {
+    if path.is_dir() {
+        let _ = std::fs::remove_dir_all(path);
+    } else if path.exists() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// A stand-in for the shell's `command -v name`: true when spawning `name
+/// --version` succeeds at all. `--version` is near-universal and returns
+/// almost instantly, so this shares the install's timeout rather than
+/// needing its own.
+fn command_exists(name: &str) -> bool {
+    let mut command = Command::new(name);
+    command.arg("--version");
+    run_with_timeout(&mut command, NPM_INSTALL_TIMEOUT).is_some()
+}
+
+/// Ports `_wt_restore_stash` (worktree.sh:248-251): pops the auto-stash taken
+/// on the main worktree before this run began, best-effort. `stash_applied`
+/// stands in for the shell's `STASH_APPLIED` global, passed in explicitly
+/// rather than read from process state.
+pub fn restore_stash(main_worktree: &Path, stash_applied: bool) {
+    if !stash_applied {
+        return;
+    }
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(main_worktree)
+        .args(["stash", "pop", "--quiet"]);
+    // The shell's `|| true`: a failed pop (nothing to pop, a conflict) is not
+    // this function's problem to report.
+    let _ = run_with_timeout(&mut command, GIT_TIMEOUT);
+}
+
 /// The worktree path already checked out on `branch`, from
 /// `git worktree list --porcelain`.
 ///
