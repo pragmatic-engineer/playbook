@@ -798,3 +798,167 @@ mod folder_naming {
         );
     }
 }
+
+mod rebase_eligibility {
+    use playbook::cc::worktree::{should_rebase, RebaseContext};
+
+    fn mine(branch: &str) -> RebaseContext<'_> {
+        RebaseContext {
+            current_branch: branch,
+            git_user: "Igor",
+            branch_author: "Igor",
+            gh_user: "igorjs",
+            wanted_branch: branch,
+            base_ref: "main",
+        }
+    }
+
+    #[test]
+    fn a_branch_i_authored_may_be_rebased() {
+        assert!(should_rebase(&mine("feature/x")));
+    }
+
+    /// The hole this list closes: without it, authoring the last commit on
+    /// `develop` would make the heuristic treat shared history as personal and
+    /// rebase it onto base.
+    #[test]
+    fn protected_branches_are_never_rebased_even_when_i_authored_them() {
+        for branch in [
+            "main",
+            "master",
+            "trunk",
+            "develop",
+            "dev",
+            "staging",
+            "release",
+            "hotfix",
+            "release/2.0",
+            "hotfix/urgent",
+        ] {
+            assert!(
+                !should_rebase(&mine(branch)),
+                "{branch} is shared history and must never auto-rebase"
+            );
+        }
+    }
+
+    /// Protection is checked before ownership, so every ownership signal being
+    /// true cannot override it.
+    #[test]
+    fn protection_outranks_every_ownership_signal() {
+        let ctx = RebaseContext {
+            current_branch: "release/1.0",
+            git_user: "Igor",
+            branch_author: "Igor",
+            gh_user: "igorjs",
+            wanted_branch: "feature/igorjs/release/1.0",
+            base_ref: "main",
+        };
+        assert!(!should_rebase(&ctx));
+    }
+
+    #[test]
+    fn someone_elses_branch_is_left_alone() {
+        let ctx = RebaseContext {
+            branch_author: "Someone Else",
+            gh_user: "igorjs",
+            wanted_branch: "feature/theirs",
+            ..mine("feature/theirs")
+        };
+        assert!(
+            !should_rebase(&ctx),
+            "rebasing rewrites history, so decline"
+        );
+    }
+
+    /// A login embedded in the branch name is the second ownership signal, for
+    /// branches created by tooling that does not set the commit author.
+    #[test]
+    fn a_login_in_the_branch_name_counts_as_ownership() {
+        let ctx = RebaseContext {
+            branch_author: "Someone Else",
+            wanted_branch: "feature/igorjs/thing",
+            ..mine("feature/igorjs/thing")
+        };
+        assert!(should_rebase(&ctx));
+    }
+
+    /// An empty signal must never match. With an unset git user, an empty
+    /// author would otherwise compare equal and claim every branch.
+    #[test]
+    fn empty_identity_signals_never_match() {
+        let no_git_user = RebaseContext {
+            git_user: "",
+            branch_author: "",
+            gh_user: "",
+            ..mine("feature/x")
+        };
+        assert!(!should_rebase(&no_git_user));
+
+        let no_gh_user = RebaseContext {
+            git_user: "Igor",
+            branch_author: "Someone Else",
+            gh_user: "",
+            ..mine("feature/x")
+        };
+        assert!(
+            !should_rebase(&no_gh_user),
+            "an empty login is in every string"
+        );
+    }
+
+    #[test]
+    fn base_and_detached_head_are_skipped() {
+        assert!(!should_rebase(&mine("main")));
+        let detached = RebaseContext {
+            current_branch: "HEAD",
+            ..mine("feature/x")
+        };
+        assert!(!should_rebase(&detached));
+    }
+}
+
+mod upstream {
+    use playbook::cc::worktree::{upstream_action, UpstreamAction};
+
+    #[test]
+    fn correct_tracking_is_left_alone() {
+        assert_eq!(
+            upstream_action(Some("origin/feat"), "origin/feat", true, false),
+            UpstreamAction::None
+        );
+    }
+
+    #[test]
+    fn an_existing_remote_branch_is_tracked_without_pushing() {
+        assert_eq!(
+            upstream_action(None, "origin/feat", true, false),
+            UpstreamAction::SetTracking
+        );
+        assert_eq!(
+            upstream_action(Some("origin/wrong"), "origin/feat", true, false),
+            UpstreamAction::SetTracking
+        );
+    }
+
+    #[test]
+    fn an_absent_remote_branch_is_pushed_unless_no_push() {
+        assert_eq!(
+            upstream_action(None, "origin/feat", false, false),
+            UpstreamAction::PushAndTrack
+        );
+        assert_eq!(
+            upstream_action(None, "origin/feat", false, true),
+            UpstreamAction::SkipNoPush
+        );
+    }
+
+    /// no_push must not suppress plain tracking, which touches nothing remote.
+    #[test]
+    fn no_push_only_suppresses_the_push() {
+        assert_eq!(
+            upstream_action(None, "origin/feat", true, true),
+            UpstreamAction::SetTracking
+        );
+    }
+}
