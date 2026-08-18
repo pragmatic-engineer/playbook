@@ -1131,6 +1131,129 @@ pub fn should_rebase(ctx: &RebaseContext) -> bool {
     authored_by_me || named_for_me
 }
 
+/// The `git rebase` argument list, worktree.sh:427-429.
+///
+/// `--rebase-merges` is appended only when the branch actually carries merge
+/// commits against upstream: rewriting merge topology a linear history
+/// doesn't have would be pointless churn. Argument ORDER matches the shell's
+/// array construction exactly.
+pub fn rebase_args(upstream: &str, has_merge_commits: bool) -> Vec<&str> {
+    let mut args = vec![upstream, "--quiet"];
+    if has_merge_commits {
+        args.push("--rebase-merges");
+    }
+    args
+}
+
+/// How long `git fetch` and `git rebase` may run before being killed.
+///
+/// Both touch the network or replay an unbounded number of commits, unlike
+/// every other git call in this file, which only reads local state; the 5s
+/// `GIT_TIMEOUT` is sized for that, not this.
+///
+/// Divergence: the shell caps neither, so any value here can cut short a call
+/// the shell would let finish. Sized high because the failure mode is quiet
+/// rather than loud: a timed-out fetch is indistinguishable from a failed
+/// one, and both are tolerated, so the rebase would then run against a STALE
+/// `<remote>/<base_ref>`. A cap tight enough to fire on a large repo or a
+/// slow link would silently rebase onto the wrong base. This is a bound on
+/// genuinely hung processes only, not a latency budget.
+const REBASE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Outcome of attempting to bring the current branch up to date with base.
+#[derive(Debug, PartialEq)]
+pub enum RebaseOutcome {
+    /// HEAD already contains `<remote>/<base_ref>`; nothing was rebased.
+    UpToDate,
+    /// The rebase completed cleanly.
+    Rebased,
+    /// The rebase failed and is STILL IN PROGRESS on disk.
+    ///
+    /// Mirrors the instant worktree.sh:431 finds `git rebase` failed: at that
+    /// point the shell has not yet decided between spawning the AI resolver
+    /// and aborting, so this port stops at the same spot and hands that
+    /// decision to the caller. A caller that drops this outcome on the floor
+    /// leaves the worktree mid-rebase, an actually broken state rather than a
+    /// resolved one; it MUST eventually call [`abort_rebase`], directly or
+    /// after a failed resolution attempt.
+    Conflicted,
+}
+
+/// Fetches `base_ref` from `remote` and rebases the current branch onto it,
+/// worktree.sh:424-431.
+///
+/// A failed fetch (offline, unreachable remote) is not fatal: the shell's
+/// `|| true` lets the ancestry check and rebase proceed against whatever
+/// `<remote>/<base_ref>` already exists locally.
+pub fn rebase_onto(worktree: &Path, remote: &str, base_ref: &str) -> RebaseOutcome {
+    let mut fetch = Command::new("git");
+    fetch
+        .arg("-C")
+        .arg(worktree)
+        .args(["fetch", remote, base_ref, "--quiet"]);
+    let _ = run_with_timeout(&mut fetch, REBASE_TIMEOUT);
+
+    let upstream = format!("{remote}/{base_ref}");
+    if git_ok(
+        worktree,
+        &["merge-base", "--is-ancestor", &upstream, "HEAD"],
+    ) {
+        return RebaseOutcome::UpToDate;
+    }
+
+    let range = format!("{upstream}..HEAD");
+    let has_merge_commits = git_stdout(worktree, &["log", "--merges", "--oneline", &range])
+        .is_some_and(|out| !out.trim().is_empty());
+
+    let mut rebase = Command::new("git");
+    rebase
+        .arg("-C")
+        .arg(worktree)
+        .arg("rebase")
+        .args(rebase_args(&upstream, has_merge_commits));
+    match run_with_timeout(&mut rebase, REBASE_TIMEOUT) {
+        Some(out) if out.status.success() => RebaseOutcome::Rebased,
+        _ => RebaseOutcome::Conflicted,
+    }
+}
+
+/// Aborts an in-progress rebase.
+///
+/// Matches the shell's `git rebase --abort 2>/dev/null || true`, used at all
+/// three of its call sites: failing because there was no rebase in progress
+/// is not an error worth reporting.
+pub fn abort_rebase(worktree: &Path) {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(worktree).args(["rebase", "--abort"]);
+    let _ = run_with_timeout(&mut command, GIT_TIMEOUT);
+}
+
+/// The detached-HEAD safety net, worktree.sh:453-458.
+///
+/// Runs after a rebase attempt, successful or not: if HEAD somehow ended up
+/// detached, abort whatever rebase might still be in progress and restore a
+/// real branch. `current_branch` (what the worktree started on) is tried
+/// FIRST, `wanted_branch` (what the launcher was asked for) only as a
+/// fallback once that checkout fails. The shell's `||` chain fixes that
+/// order and it is load-bearing: collapsing it to "try either" would recover
+/// onto the wrong branch whenever both exist.
+///
+/// Returns whether HEAD was actually detached and this had to act. The shell
+/// also prints "HEAD detached after rebase. Aborting and restoring." here;
+/// that is left to the caller, which is what the return value is for.
+pub fn recover_detached_head(worktree: &Path, current_branch: &str, wanted_branch: &str) -> bool {
+    let detached = git_stdout(worktree, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .is_some_and(|head| head.trim() == "HEAD");
+    if !detached {
+        return false;
+    }
+    abort_rebase(worktree);
+    if !git_ok(worktree, &["checkout", current_branch]) {
+        git_ok(worktree, &["checkout", wanted_branch]);
+    }
+    true
+}
+
 #[derive(Debug, PartialEq)]
 pub enum UpstreamAction {
     /// Tracking is already correct.
