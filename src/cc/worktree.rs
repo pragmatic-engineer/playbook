@@ -452,3 +452,85 @@ pub fn folder_for_branch(branch: &str, occupied_by: Option<&str>) -> String {
         None => branch_leaf(branch).to_string(),
     }
 }
+
+/// Branches that never auto-rebase, even when you authored their last commit.
+///
+/// Without this list, the ownership heuristic below would happily rebase
+/// `develop` or a `release/*` onto base, because whoever committed last looks
+/// like the owner. Shared history is not personal history.
+/// Slices rather than fixed-size arrays so adding a name stays a one-line edit
+/// with no length to keep in sync.
+const PROTECTED_BRANCHES: &[&str] = &[
+    "main", "master", "trunk", "develop", "dev", "staging", "release", "hotfix",
+];
+
+/// Prefixes whose whole namespace is protected. `release` and `hotfix` appear
+/// in both lists: bare, and as the root of a namespace.
+const PROTECTED_PREFIXES: &[&str] = &["release/", "hotfix/"];
+
+fn is_protected(branch: &str) -> bool {
+    PROTECTED_BRANCHES.contains(&branch) || PROTECTED_PREFIXES.iter().any(|p| branch.starts_with(p))
+}
+
+/// What the rebase decision needs, gathered by the caller.
+pub struct RebaseContext<'a> {
+    pub current_branch: &'a str,
+    /// `git config user.name`, empty when unset.
+    pub git_user: &'a str,
+    /// Author of the branch's last commit.
+    pub branch_author: &'a str,
+    /// GitHub login, empty when `gh` is absent or unauthenticated.
+    pub gh_user: &'a str,
+    /// The branch the launcher was asked for, which may embed the login.
+    pub wanted_branch: &'a str,
+    pub base_ref: &'a str,
+}
+
+/// Whether this branch may be auto-rebased onto base.
+///
+/// Protection is checked FIRST and is absolute. Only then does ownership apply,
+/// via either the last commit's author or a login embedded in the branch name.
+/// Rebasing rewrites history, so every uncertain case declines.
+pub fn should_rebase(ctx: &RebaseContext) -> bool {
+    if is_protected(ctx.current_branch) {
+        return false;
+    }
+    // Detached HEAD, or already sitting on base: nothing to rebase onto.
+    if ctx.current_branch == ctx.base_ref || ctx.current_branch == "HEAD" {
+        return false;
+    }
+
+    let authored_by_me = !ctx.git_user.is_empty() && ctx.branch_author == ctx.git_user;
+    let named_for_me = !ctx.gh_user.is_empty() && ctx.wanted_branch.contains(ctx.gh_user);
+    authored_by_me || named_for_me
+}
+
+#[derive(Debug, PartialEq)]
+pub enum UpstreamAction {
+    /// Tracking is already correct.
+    None,
+    /// The branch exists on the remote, so point at it without pushing.
+    SetTracking,
+    /// The branch is remote-only-absent and pushing is allowed.
+    PushAndTrack,
+    /// Absent remotely and `--no-push` was given, so leave it local.
+    SkipNoPush,
+}
+
+pub fn upstream_action(
+    current_upstream: Option<&str>,
+    expected: &str,
+    exists_on_remote: bool,
+    no_push: bool,
+) -> UpstreamAction {
+    if current_upstream == Some(expected) {
+        return UpstreamAction::None;
+    }
+    if exists_on_remote {
+        return UpstreamAction::SetTracking;
+    }
+    if no_push {
+        return UpstreamAction::SkipNoPush;
+    }
+    UpstreamAction::PushAndTrack
+}
