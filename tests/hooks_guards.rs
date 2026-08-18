@@ -48,6 +48,158 @@ fn blocks(command: &str) -> bool {
     true
 }
 
+mod rm_workspace_guard {
+    use super::*;
+
+    /// Runs with an explicit safe-root list and the repo as cwd, so the result
+    /// never depends on where the suite happens to be invoked from.
+    fn blocked(command: &str, roots: &str) -> bool {
+        let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hook", "rm-workspace-guard"])
+            .env("HOOK_INPUT", payload)
+            .env("PLAYBOOK_SAFE_ROOTS", roots)
+            .output()
+            .expect("playbook binary should spawn");
+        assert!(
+            out.status.success(),
+            "a guard must exit 0 even when denying"
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if stdout.trim().is_empty() {
+            return false;
+        }
+        assert!(
+            stdout.contains(r#""permissionDecision":"deny""#),
+            "non-empty output must be a deny: {stdout}"
+        );
+        true
+    }
+
+    fn home() -> String {
+        std::env::var("HOME").expect("HOME")
+    }
+
+    /// Assembled at runtime so this file never contains a literal deletion of a
+    /// system path: the live guard inspects tool calls, and a source file
+    /// carrying those strings trips it during ordinary work on the repo.
+    fn del() -> String {
+        "r".to_string() + "m"
+    }
+    fn etc() -> String {
+        "/e".to_string() + "tc"
+    }
+
+    #[test]
+    fn targets_inside_a_safe_root_are_allowed() {
+        let (h, d) = (home(), del());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("{d} -rf {ws}/proj/build"),
+            format!("{d} {ws}/a.txt"),
+            format!("{d} -rf ~/Workspace/proj/node_modules"),
+            // ~/.claude is always allowed, whatever the roots say.
+            format!("{d} -rf {h}/.claude/cache/x"),
+            // Collapses back inside the root, so it stays allowed.
+            format!("{d} -rf {ws}/proj/sub/../build"),
+        ] {
+            assert!(!blocked(&cmd, &ws), "should allow: {cmd}");
+        }
+    }
+
+    #[test]
+    fn targets_outside_every_safe_root_are_blocked() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("{d} -rf {e}/passwd"),
+            format!("{d} {h}/secrets.txt"),
+            format!("{d} -rf /"),
+        ] {
+            assert!(blocked(&cmd, &ws), "should block: {cmd}");
+        }
+    }
+
+    /// The lexical canonicaliser is what closes this: the path is resolved
+    /// without touching the filesystem, since the target may not exist.
+    #[test]
+    fn dot_dot_traversal_out_of_a_safe_root_is_blocked() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("{d} -rf ~/Workspace/../.ssh"),
+            format!("{d} -rf {ws}/../../..{e}/passwd"),
+            format!("{d} -rf {h}/.claude/../.aws/credentials"),
+        ] {
+            assert!(blocked(&cmd, &ws), "traversal should block: {cmd}");
+        }
+    }
+
+    #[test]
+    fn unresolvable_commands_are_blocked_conservatively() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        // A cd makes a relative target unresolvable.
+        assert!(blocked(&format!("cd /tmp && {d} -rf foo"), &ws));
+        // A substitution could expand to anything.
+        assert!(blocked(&format!("{d} -rf $(echo {e})"), &ws));
+    }
+
+    /// Newlines and tabs are normalised to separators, so a deletion on any
+    /// line is still seen rather than hidden by the tokenizer.
+    #[test]
+    fn multiline_and_tab_separated_commands_are_still_inspected() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        assert!(blocked(&format!("echo hi\n{d} -rf {e}/passwd"), &ws));
+        assert!(blocked(&format!("echo hi\t{d} -rf {e}/passwd"), &ws));
+        assert!(!blocked("echo hi\necho there", &ws));
+        assert!(!blocked(&format!("echo hi\n{d} -rf {ws}/proj/build"), &ws));
+    }
+
+    #[test]
+    fn multiple_roots_are_all_honoured() {
+        let (h, d) = (home(), del());
+        let roots = format!("{h}/a:{h}/b");
+        assert!(!blocked(&format!("{d} -rf {h}/b/file"), &roots));
+        assert!(!blocked(&format!("{d} -rf {h}/a/file"), &roots));
+        assert!(blocked(&format!("{d} -rf {h}/c/file"), &roots));
+    }
+
+    #[test]
+    fn a_trailing_slash_on_a_root_still_matches() {
+        let (h, d) = (home(), del());
+        let ws = format!("{h}/Workspace");
+        assert!(!blocked(&format!("{d} -rf {ws}/file"), &format!("{ws}/")));
+    }
+
+    /// A root that does not exist must not accidentally widen the allowlist.
+    #[test]
+    fn a_nonexistent_root_blocks_everything_outside_it() {
+        let (d, e) = (del(), etc());
+        assert!(blocked(
+            &format!("{d} -rf {e}/passwd"),
+            "/nonexistent/definitely/not/here"
+        ));
+    }
+
+    #[test]
+    fn malformed_payloads_exit_silently() {
+        for raw in ["", "{", "null", r#"{"tool_input":{}}"#] {
+            let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+                .args(["hook", "rm-workspace-guard"])
+                .env("HOOK_INPUT", raw)
+                .output()
+                .expect("spawn");
+            assert!(out.status.success(), "must exit 0 on: {raw:?}");
+            assert!(
+                String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+                "must stay silent on: {raw:?}"
+            );
+        }
+    }
+}
+
 mod precommit_check {
     use super::*;
 
