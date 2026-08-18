@@ -62,6 +62,14 @@ jobs:
       - name: cargo test
         run: cargo test
 
+      # Moved out of shell-ci with the port: the seed validator is now a
+      # subcommand, so it needs a built binary and belongs on this lane.
+      - name: Validate the shipped settings seed
+        run: |
+          cargo build
+          ./target/debug/playbook settings check \
+            settings.shared.json permissions.shared.json .
+
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked

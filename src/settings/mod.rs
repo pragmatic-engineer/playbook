@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Settings seed generation and drift-check modules, backing the `playbook
-//! settings` subcommand. `gen` ports `shell/gen-shared-settings.py`; `check`
-//! is filled in by WU-21, ported from `shell/check-shared-settings.py`.
+//! Settings seed generation and validation, backing `playbook settings`.
+//! Both are ports: `gen` of `shell/gen-shared-settings.py`, `check` of the
+//! now-deleted `shell/check-shared-settings.py`.
 
 pub mod check;
 pub mod gen;

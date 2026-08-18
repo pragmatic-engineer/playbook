@@ -125,8 +125,9 @@ out="$(printf '{"tool_input":{"command":"rm -rf /etc/hosts"}}' | bash "$REPO/hoo
 
 hdr "H. Repo validators and behavioral suites"
 ( cd "$REPO" && bash shell/check-manifest.sh >/dev/null 2>&1 ) && ok "check-manifest" || bad "check-manifest"
-( cd "$REPO" && python3 shell/check-shared-settings.py settings.shared.json permissions.shared.json . >/dev/null 2>&1 ) \
-  && ok "check-shared-settings" || bad "check-shared-settings"
+# The seed validator is not checked here. It became a binary subcommand, and
+# this script never builds one; it also only ever validated a repo file, never
+# anything in the packaged plugin. rust-ci owns it now.
 tp=0; tf=0
 while IFS= read -r t; do
   if ( cd "$REPO" && bash "$t" >/dev/null 2>&1 ); then tp=$((tp+1)); else tf=$((tf+1)); bad "suite: $t"; fi
