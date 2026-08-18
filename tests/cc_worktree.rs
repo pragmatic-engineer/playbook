@@ -16,6 +16,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM are process-wide, and cargo runs the
+/// tests in this binary on parallel threads, so mutating them needs one
+/// shared lock rather than a per-module one.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn scratch(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("playbook-wt-{tag}-{}-{n}", std::process::id()));
@@ -1009,5 +1018,287 @@ mod upstream {
             upstream_action(None, "origin/feat", true, true),
             UpstreamAction::SetTracking
         );
+    }
+}
+
+/// `worktree_add_args`: the shell builds `[-b <new_branch>] <dest> <ref>`
+/// once, then only prepends `-f` on the retry, so `-f` must land BEFORE `-b`.
+mod worktree_add_args_ordering {
+    use super::*;
+    use std::ffi::OsString;
+
+    fn args(strs: &[&str]) -> Vec<OsString> {
+        strs.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn no_branch_no_force_is_just_dest_and_ref() {
+        assert_eq!(
+            worktree::worktree_add_args(Path::new("/wt/dest"), "origin/main", None, false),
+            args(&["/wt/dest", "origin/main"])
+        );
+    }
+
+    #[test]
+    fn a_new_branch_without_force_puts_dash_b_first() {
+        assert_eq!(
+            worktree::worktree_add_args(Path::new("/wt/dest"), "origin/main", Some("feat"), false),
+            args(&["-b", "feat", "/wt/dest", "origin/main"])
+        );
+    }
+
+    #[test]
+    fn force_without_a_new_branch_puts_dash_f_first() {
+        assert_eq!(
+            worktree::worktree_add_args(Path::new("/wt/dest"), "origin/main", None, true),
+            args(&["-f", "/wt/dest", "origin/main"])
+        );
+    }
+
+    /// The order that matters most: `-f` before `-b`, matching the shell's
+    /// `git worktree add -f "${cmd_args[@]}"` where cmd_args already starts
+    /// with `-b`. Swapping them changes nothing about how git parses the
+    /// command today, but a line-for-line port exists so that is not left to
+    /// chance.
+    #[test]
+    fn force_with_a_new_branch_puts_dash_f_before_dash_b() {
+        assert_eq!(
+            worktree::worktree_add_args(Path::new("/wt/dest"), "origin/main", Some("feat"), true),
+            args(&["-f", "-b", "feat", "/wt/dest", "origin/main"])
+        );
+    }
+}
+
+/// `fallback_lookup_branch`: the shell's `refs/heads/${new_branch:-$ref}`
+/// (worktree.sh:113). A quirk, not a bug: without a new branch it looks up the
+/// REFERENCE ITSELF as a local branch name, which only resolves when the ref
+/// happens to be one.
+mod fallback_branch_quirk {
+    use super::*;
+
+    #[test]
+    fn a_new_branch_is_looked_up_over_the_reference() {
+        assert_eq!(
+            worktree::fallback_lookup_branch("origin/main", Some("feat")),
+            "feat"
+        );
+    }
+
+    /// The quirk itself: no new branch means the reference is looked up as a
+    /// local branch name, even though `origin/main` never was one. Preserved
+    /// because the shell does the same thing, not because it is correct.
+    #[test]
+    fn no_new_branch_falls_back_to_the_reference_even_when_it_is_not_a_local_branch_name() {
+        assert_eq!(
+            worktree::fallback_lookup_branch("origin/main", None),
+            "origin/main"
+        );
+    }
+
+    /// The other direction: when the reference DOES happen to name a local
+    /// branch, the quirk resolves correctly by coincidence.
+    #[test]
+    fn no_new_branch_resolves_correctly_when_the_reference_is_a_local_branch_name() {
+        assert_eq!(
+            worktree::fallback_lookup_branch("feature-x", None),
+            "feature-x"
+        );
+    }
+
+    /// Bash treats empty and unset alike in both places this value is read, so
+    /// an empty name must behave exactly like `None`. `Option` alone does not
+    /// draw that line, which is why the port normalises it.
+    #[test]
+    fn an_empty_branch_name_is_treated_as_absent_like_in_bash() {
+        assert_eq!(
+            worktree::worktree_add_args(Path::new("/tmp/d"), "origin/main", Some(""), false),
+            worktree::worktree_add_args(Path::new("/tmp/d"), "origin/main", None, false),
+            "an empty name must not produce a -b flag"
+        );
+        assert_eq!(
+            worktree::fallback_lookup_branch("origin/main", Some("")),
+            "origin/main",
+            "${{new_branch:-$ref}} falls back on empty, not just unset"
+        );
+    }
+}
+
+/// `create_worktree`: integration tests against a real git repo, since the
+/// function's whole job is driving three real `git worktree` invocations in
+/// sequence.
+mod create_worktree_ladder {
+    use super::*;
+    use playbook::cc::worktree::{create_worktree, CreateOutcome};
+
+    /// Disables the machine's global/system git config for the duration of
+    /// `f`. Per-repo identity is already set by `seeded_repo`, but a global
+    /// `core.hooksPath` could still fire during `worktree add`/`prune`/
+    /// `repair` and make the test depend on the machine running it.
+    fn with_isolated_git_env<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = lock_env();
+        let prev_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+        let prev_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+        let out = f();
+        match prev_global {
+            Some(v) => std::env::set_var("GIT_CONFIG_GLOBAL", v),
+            None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
+        }
+        match prev_system {
+            Some(v) => std::env::set_var("GIT_CONFIG_SYSTEM", v),
+            None => std::env::remove_var("GIT_CONFIG_SYSTEM"),
+        }
+        out
+    }
+
+    fn git(repo_path: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .output()
+            .expect("git command should spawn")
+    }
+
+    fn git_stdout(repo_path: &Path, args: &[&str]) -> String {
+        let output = git(repo_path, args);
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// A repo with one commit on `main`, so `git worktree add` has a ref to
+    /// check out. Self-contained rather than reusing `repo()`, so the branch
+    /// name is explicit instead of depending on git's default-branch config.
+    fn seeded_repo(tag: &str) -> PathBuf {
+        let dir = scratch(tag);
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "t@t"],
+            vec!["config", "user.name", "T"],
+        ] {
+            git(&dir, &args);
+        }
+        fs::write(dir.join("README.md"), "seed\n").expect("write");
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "seed"]);
+        dir
+    }
+
+    /// The plain first attempt succeeds outright: no prune, repair, or retry
+    /// needed.
+    #[test]
+    fn a_clean_creation_succeeds_on_the_first_attempt() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("clean-create");
+            let dest = repo_root.join("wt-feature-a");
+
+            let outcome = create_worktree(&repo_root, &dest, "main", Some("feature-a"));
+
+            assert_eq!(outcome, CreateOutcome::Created(dest.clone()));
+            assert_eq!(
+                git_stdout(&dest, &["rev-parse", "--abbrev-ref", "HEAD"]),
+                "feature-a"
+            );
+        });
+    }
+
+    /// Both the plain and `-f` attempts fail because the destination is the
+    /// exact directory the branch is already checked out in (a real,
+    /// non-empty path collision, which `-f` does not override). The ladder
+    /// falls back to reporting that existing path rather than failing.
+    #[test]
+    fn an_occupied_destination_falls_back_to_already_at() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("occupied-fallback");
+            let existing = repo_root.join("wt-feature-b");
+            let out = git(
+                &repo_root,
+                &[
+                    "worktree",
+                    "add",
+                    "-q",
+                    "-b",
+                    "feature-b",
+                    existing.to_str().expect("utf8 path"),
+                    "main",
+                ],
+            );
+            assert!(out.status.success(), "fixture worktree should be created");
+
+            let outcome = create_worktree(&repo_root, &existing, "feature-b", None);
+
+            // git registers worktrees by their resolved path, and on macOS
+            // /tmp is a symlink into /private/tmp, so both sides must be
+            // canonicalized before comparing or this fails for a reason that
+            // has nothing to do with the port.
+            let expected = existing.canonicalize().expect("existing should resolve");
+            match outcome {
+                CreateOutcome::AlreadyAt(path) => {
+                    assert_eq!(
+                        path.canonicalize().expect("returned path should resolve"),
+                        expected
+                    );
+                }
+                other => panic!("expected AlreadyAt, got {other:?}"),
+            }
+        });
+    }
+
+    /// The fallback's `-d "$existing"` check: `git worktree list --porcelain`
+    /// still reports a locked-but-missing worktree for the branch (locking
+    /// keeps `worktree prune` from clearing it), so a path IS found, but it no
+    /// longer exists as a directory. Dropping the directory check would wrongly
+    /// report `AlreadyAt` here.
+    #[test]
+    fn a_found_but_missing_fallback_path_is_not_treated_as_already_at() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("missing-fallback-dir");
+            let stale = repo_root.join("wt-feature-e");
+            git(
+                &repo_root,
+                &[
+                    "worktree",
+                    "add",
+                    "-q",
+                    "-b",
+                    "feature-e",
+                    stale.to_str().expect("utf8 path"),
+                    "main",
+                ],
+            );
+            git(
+                &repo_root,
+                &["worktree", "lock", stale.to_str().expect("utf8 path")],
+            );
+            fs::remove_dir_all(&stale).expect("remove the worktree dir out from under git");
+
+            // A second, unrelated, non-empty destination: both the plain and
+            // `-f` attempts fail on THIS path already existing, so the ladder
+            // reaches the fallback lookup for `feature-e`.
+            let dest = repo_root.join("wt-blocked");
+            fs::create_dir_all(&dest).expect("mkdir");
+            fs::write(dest.join("junk"), "x").expect("write");
+
+            let outcome = create_worktree(&repo_root, &dest, "feature-e", None);
+
+            assert_eq!(outcome, CreateOutcome::Failed);
+        });
+    }
+
+    /// Both attempts fail and the fallback lookup finds nothing at all: the
+    /// branch was never actually created, since neither `git worktree add`
+    /// attempt got past the destination already existing.
+    #[test]
+    fn a_true_failure_with_no_fallback_returns_failed() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("no-fallback");
+            let dest = repo_root.join("wt-blocked");
+            fs::create_dir_all(&dest).expect("mkdir");
+            fs::write(dest.join("junk"), "x").expect("write");
+
+            let outcome = create_worktree(&repo_root, &dest, "main", Some("orphan-branch"));
+
+            assert_eq!(outcome, CreateOutcome::Failed);
+        });
     }
 }

@@ -9,6 +9,7 @@
 //! fit one reviewable change.
 
 use crate::common::run_with_timeout;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -315,6 +316,127 @@ pub fn worktree_for_branch(porcelain: &str, branch: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// The `git worktree add` argument list, in the shell's exact order.
+///
+/// The shell builds `[-b <new_branch>] <dest> <ref>` once (worktree.sh:104-106),
+/// then only prepends `-f` on the retry (`git worktree add -f
+/// "${cmd_args[@]}"`, worktree.sh:111), so `-f` lands BEFORE `-b`, not after.
+/// A line-for-line port exists precisely so this order is not left to guessing.
+pub fn worktree_add_args(
+    dest: &Path,
+    reference: &str,
+    new_branch: Option<&str>,
+    force: bool,
+) -> Vec<OsString> {
+    let mut args = Vec::new();
+    if force {
+        args.push(OsString::from("-f"));
+    }
+    if let Some(branch) = named_branch(new_branch) {
+        args.push(OsString::from("-b"));
+        args.push(OsString::from(branch));
+    }
+    args.push(dest.as_os_str().to_os_string());
+    args.push(OsString::from(reference));
+    args
+}
+
+/// The branch name for the fallback lookup once both `git worktree add`
+/// attempts fail: the shell's `refs/heads/${new_branch:-$ref}`
+/// (worktree.sh:113), minus the `refs/heads/` prefix that `worktree_for_branch`
+/// already adds.
+///
+/// When a new branch is being created, that new branch is what to look up.
+/// Otherwise the REFERENCE ITSELF is looked up as though it were a local
+/// branch name, which only resolves when it happens to name one, e.g. a plain
+/// branch rather than a remote-tracking ref like `origin/main`. That mismatch
+/// is a genuine quirk of the shell, preserved here deliberately rather than
+/// fixed.
+pub fn fallback_lookup_branch<'a>(reference: &'a str, new_branch: Option<&'a str>) -> &'a str {
+    named_branch(new_branch).unwrap_or(reference)
+}
+
+/// Collapses an empty branch name to `None`.
+///
+/// Both shell tests that read `$new_branch` treat empty and unset as the same
+/// thing: `[[ -n "$new_branch" ]]` gates the `-b` flag, and `${new_branch:-$ref}`
+/// falls back on empty as well as unset. `Option<&str>` draws that line
+/// differently, so without this an empty name would pass `-b ""` to git and
+/// look up an empty branch, neither of which the shell can do.
+fn named_branch(new_branch: Option<&str>) -> Option<&str> {
+    new_branch.filter(|b| !b.is_empty())
+}
+
+/// Outcome of [`create_worktree`].
+#[derive(Debug, PartialEq)]
+pub enum CreateOutcome {
+    /// A fresh worktree was created at the given path.
+    Created(PathBuf),
+    /// Nothing was created: the wanted branch was already checked out at the
+    /// given path, discovered by the fallback lookup.
+    AlreadyAt(PathBuf),
+    /// Both `git worktree add` attempts failed and no fallback path resolved.
+    Failed,
+}
+
+/// Creates a worktree, recovering from a stale registration if needed.
+///
+/// Mirrors the shell's three-tier ladder in `_wt_create_worktree`
+/// (worktree.sh:102-124): try a plain `git worktree add`; on failure run
+/// `worktree prune` then `worktree repair`, each allowed to fail (the shell's
+/// `|| true`) since they are best-effort recovery, not preconditions; retry
+/// with `-f`; and on a second failure, fall back to whatever worktree already
+/// holds the branch via [`worktree_for_branch`], only accepting it when that
+/// worktree's directory still exists (the shell's `-d "$existing"`).
+///
+/// The shell prints two diagnostics here ("branch already at $existing", "git
+/// worktree add failed"); this function returns the outcome instead and
+/// leaves emitting messages to the caller, so that omission is a documented
+/// divergence rather than a silently dropped one.
+pub fn create_worktree(
+    repo_root: &Path,
+    dest: &Path,
+    reference: &str,
+    new_branch: Option<&str>,
+) -> CreateOutcome {
+    if run_worktree_add(repo_root, dest, reference, new_branch, false) {
+        return CreateOutcome::Created(dest.to_path_buf());
+    }
+
+    let _ = git_ok(repo_root, &["worktree", "prune"]);
+    let _ = git_ok(repo_root, &["worktree", "repair"]);
+
+    if run_worktree_add(repo_root, dest, reference, new_branch, true) {
+        return CreateOutcome::Created(dest.to_path_buf());
+    }
+
+    let Some(porcelain) = git_stdout(repo_root, &["worktree", "list", "--porcelain"]) else {
+        return CreateOutcome::Failed;
+    };
+    let lookup_branch = fallback_lookup_branch(reference, new_branch);
+    if let Some(existing) = worktree_for_branch(&porcelain, lookup_branch) {
+        let path = PathBuf::from(existing);
+        if path.is_dir() {
+            return CreateOutcome::AlreadyAt(path);
+        }
+    }
+    CreateOutcome::Failed
+}
+
+/// Runs `git worktree add` with [`worktree_add_args`], reporting only success.
+fn run_worktree_add(
+    repo_root: &Path,
+    dest: &Path,
+    reference: &str,
+    new_branch: Option<&str>,
+    force: bool,
+) -> bool {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(repo_root).arg("worktree").arg("add");
+    command.args(worktree_add_args(dest, reference, new_branch, force));
+    matches!(run_with_timeout(&mut command, GIT_TIMEOUT), Some(o) if o.status.success())
 }
 
 /// What the launcher found at the target path, gathered by the caller so the
