@@ -3,7 +3,7 @@
 
 use clap::Parser;
 use playbook::common::payload::Payload;
-use playbook::{hooks, settings, Cli, Command, SettingsCommand};
+use playbook::{cc, hooks, settings, CcCommand, Cli, Command, SettingsCommand};
 use std::io::{IsTerminal, Read};
 
 fn main() {
@@ -16,7 +16,13 @@ fn main() {
             hooks::dispatch(name, &payload);
         }
         // Launcher subcommands land in a later Work Unit; stub for now.
-        Command::Cc { sub: _ } => {}
+        Command::Cc { sub } => match sub {
+            Some(CcCommand::Prune) => cc::retention::prune(&cc::logical_cwd()),
+            Some(CcCommand::BustCache) => cc::bust_cache::bust(),
+            // The rest of the launcher lands in later Work Units; until then
+            // they are no-ops so the shell dispatcher stays authoritative.
+            _ => {}
+        },
         // RESERVED, not planned. No ADR 0007 Work Unit ports this: `statusline.sh`
         // stays a shell script and WU-9 only places it where `settings.json`
         // points. Do not read this arm as work in flight; see the blueprint's

@@ -5,6 +5,7 @@
 //! `main.rs` parses and dispatches on, plus the `common` helpers and `hooks`
 //! stubs every hook module builds on.
 
+pub mod cc;
 pub mod common;
 pub mod hooks;
 pub mod init;
@@ -108,6 +109,9 @@ pub enum CcCommand {
     List,
     /// Prune stale runtime state.
     Prune,
+    /// Clear caches that would otherwise freeze stale settings into a session.
+    #[command(name = "bust-cache")]
+    BustCache,
     /// Create a worktree and resume into it.
     #[command(alias = "new")]
     Worktree { branch: String },
