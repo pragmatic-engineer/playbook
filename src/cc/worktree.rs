@@ -316,3 +316,69 @@ pub fn worktree_for_branch(porcelain: &str, branch: &str) -> Option<String> {
     }
     None
 }
+
+/// What the launcher found at the target path, gathered by the caller so the
+/// decision stays pure.
+pub struct TargetState<'a> {
+    pub target_exists: bool,
+    /// Registered with `git worktree list`, as opposed to a stray directory.
+    pub registered: bool,
+    /// `None` means detached or unreadable HEAD.
+    pub current_branch: Option<&'a str>,
+    pub wanted_branch: &'a str,
+    /// Whether the branch currently checked out there still exists on the remote.
+    pub current_branch_on_remote: bool,
+    /// A different worktree already holding the wanted branch, and whether its
+    /// directory is still present.
+    pub existing_for_wanted: Option<(&'a str, bool)>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum WorktreePlan {
+    /// Detached HEAD in a registered worktree: abort any rebase or merge and
+    /// check the branch back out. The caller re-evaluates afterwards, since
+    /// recovery can fail and fall through to a rebuild.
+    RecoverDetached,
+    /// A directory git does not know about. Prune, remove, recreate.
+    CleanOrphanAndCreate,
+    /// Already on the wanted branch: fetch and fast-forward in place.
+    ReuseTarget,
+    /// The occupying branch still exists on the remote, so it is unfinished
+    /// work. Refuse rather than destroy it.
+    RefuseOccupied(String),
+    /// The occupying branch is gone from the remote, so it was merged or
+    /// deleted and the worktree can be recycled.
+    RecycleTarget(String),
+    /// The wanted branch is checked out in another worktree that still exists.
+    ReuseExisting(String),
+    /// Git has a worktree registered for the branch but the directory is gone.
+    PruneStaleAndCreate,
+    Create,
+}
+
+/// Chooses the recovery path for the target worktree.
+///
+/// The ordering is the whole point and mirrors the shell. In particular
+/// `RefuseOccupied` comes before `RecycleTarget`: recycling removes the
+/// worktree and deletes its branch, so a branch that still exists on the remote
+/// must stop the operation rather than be destroyed. Getting that pair the
+/// wrong way round would silently discard unfinished work.
+pub fn plan_for_target(state: &TargetState) -> WorktreePlan {
+    if state.target_exists {
+        return match (state.current_branch, state.registered) {
+            (None, true) => WorktreePlan::RecoverDetached,
+            (None, false) => WorktreePlan::CleanOrphanAndCreate,
+            (Some(current), _) if current == state.wanted_branch => WorktreePlan::ReuseTarget,
+            (Some(current), _) if state.current_branch_on_remote => {
+                WorktreePlan::RefuseOccupied(current.to_string())
+            }
+            (Some(current), _) => WorktreePlan::RecycleTarget(current.to_string()),
+        };
+    }
+
+    match state.existing_for_wanted {
+        Some((path, true)) => WorktreePlan::ReuseExisting(path.to_string()),
+        Some((_, false)) => WorktreePlan::PruneStaleAndCreate,
+        None => WorktreePlan::Create,
+    }
+}
