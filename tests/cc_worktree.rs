@@ -479,3 +479,123 @@ mod cleanup_rate_limit {
         assert!(worktree::cleanup_due(Some(NOW - 200_000), NOW));
     }
 }
+
+mod node_modules_reuse {
+    use super::*;
+
+    /// A source checkout with an installed node_modules and a lockfile.
+    fn source(tag: &str, lock: &str) -> PathBuf {
+        let dir = scratch(tag);
+        fs::write(dir.join("package-lock.json"), lock).expect("write");
+        fs::create_dir_all(dir.join("node_modules/dep")).expect("mkdir");
+        dir
+    }
+
+    fn worktree(tag: &str, lock: Option<&str>) -> PathBuf {
+        let dir = scratch(tag);
+        fs::write(dir.join("package.json"), "{}").expect("write");
+        if let Some(lock) = lock {
+            fs::write(dir.join("package-lock.json"), lock).expect("write");
+        }
+        dir
+    }
+
+    #[test]
+    fn matching_lockfiles_allow_reuse() {
+        let src = source("src-match", "{\"v\":1}");
+        let wt = worktree("wt-match", Some("{\"v\":1}"));
+        assert!(worktree::node_modules_reusable(&wt, &src));
+    }
+
+    /// The whole point of the check: differing lockfiles mean the installed
+    /// tree is wrong for this worktree, so reusing it would ship stale deps.
+    #[test]
+    fn differing_lockfiles_block_reuse() {
+        let src = source("src-diff", "{\"v\":1}");
+        let wt = worktree("wt-diff", Some("{\"v\":2}"));
+        assert!(!worktree::node_modules_reusable(&wt, &src));
+    }
+
+    /// A worktree with no lockfile of its own inherits the source's, which is
+    /// the copy the shell made before comparing.
+    #[test]
+    fn a_worktree_without_a_lockfile_inherits_and_matches() {
+        let src = source("src-inherit", "{\"v\":1}");
+        let wt = worktree("wt-inherit", None);
+        assert!(worktree::node_modules_reusable(&wt, &src));
+    }
+
+    #[test]
+    fn a_non_node_worktree_is_skipped() {
+        let src = source("src-nonnode", "{\"v\":1}");
+        let wt = scratch("wt-nonnode");
+        assert!(
+            !worktree::node_modules_reusable(&wt, &src),
+            "no package.json means this is not a node project"
+        );
+    }
+
+    #[test]
+    fn a_source_without_installed_modules_is_skipped() {
+        let src = scratch("src-bare");
+        fs::write(src.join("package-lock.json"), "{\"v\":1}").expect("write");
+        let wt = worktree("wt-bare", Some("{\"v\":1}"));
+        assert!(
+            !worktree::node_modules_reusable(&wt, &src),
+            "there is nothing to reuse without an installed node_modules"
+        );
+    }
+
+    #[test]
+    fn a_source_without_a_lockfile_is_skipped() {
+        let src = scratch("src-nolock");
+        fs::create_dir_all(src.join("node_modules")).expect("mkdir");
+        let wt = worktree("wt-nolock", None);
+        assert!(!worktree::node_modules_reusable(&wt, &src));
+    }
+}
+
+mod worktree_lookup {
+    use super::*;
+
+    const PORCELAIN: &str = "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\
+                             \nworktree /repo/.worktrees/feat\nHEAD def\n\
+                             branch refs/heads/feature-x\n\
+                             \nworktree /repo/.worktrees/detached\nHEAD 999\ndetached\n";
+
+    #[test]
+    fn finds_the_worktree_holding_a_branch() {
+        assert_eq!(
+            worktree::worktree_for_branch(PORCELAIN, "feature-x").as_deref(),
+            Some("/repo/.worktrees/feat")
+        );
+        assert_eq!(
+            worktree::worktree_for_branch(PORCELAIN, "main").as_deref(),
+            Some("/repo")
+        );
+    }
+
+    #[test]
+    fn an_unheld_branch_is_none() {
+        assert!(worktree::worktree_for_branch(PORCELAIN, "nope").is_none());
+    }
+
+    /// A prefix must not match: `feat` is not `feature-x`, and returning the
+    /// wrong worktree would send the recovery path somewhere unrelated.
+    #[test]
+    fn a_branch_prefix_does_not_match() {
+        assert!(worktree::worktree_for_branch(PORCELAIN, "feat").is_none());
+        assert!(worktree::worktree_for_branch(PORCELAIN, "ain").is_none());
+    }
+
+    #[test]
+    fn a_detached_worktree_is_never_returned() {
+        assert!(worktree::worktree_for_branch(PORCELAIN, "detached").is_none());
+        assert!(worktree::worktree_for_branch(PORCELAIN, "999").is_none());
+    }
+
+    #[test]
+    fn empty_input_is_none() {
+        assert!(worktree::worktree_for_branch("", "main").is_none());
+    }
+}

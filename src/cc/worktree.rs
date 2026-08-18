@@ -264,3 +264,55 @@ fn git_stdout(repo_root: &Path, args: &[&str]) -> Option<String> {
 fn git_ok(repo_root: &Path, args: &[&str]) -> bool {
     git_stdout(repo_root, args).is_some()
 }
+
+/// Whether the new worktree can reuse the main checkout's `node_modules`.
+///
+/// Requires a `package.json` in the worktree, and a lockfile plus installed
+/// modules in the source, then that the two lockfiles are byte-identical.
+///
+/// The shell hashed both lockfiles with sha256sum or shasum and compared the
+/// digests, which also meant skipping the reuse entirely when neither tool was
+/// present. Comparing the bytes answers the same question, is strictly
+/// stronger than a digest, and drops both the external dependency and that
+/// silent skip.
+pub fn node_modules_reusable(worktree: &Path, repo_root: &Path) -> bool {
+    if !worktree.join("package.json").is_file() {
+        return false;
+    }
+    let source_lock = repo_root.join("package-lock.json");
+    if !source_lock.is_file() || !repo_root.join("node_modules").is_dir() {
+        return false;
+    }
+
+    // A worktree without its own lockfile inherits the source's, which is the
+    // copy the shell made before comparing, so that case matches by definition.
+    let worktree_lock = worktree.join("package-lock.json");
+    if !worktree_lock.is_file() {
+        return true;
+    }
+    match (std::fs::read(&source_lock), std::fs::read(&worktree_lock)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// The worktree path already checked out on `branch`, from
+/// `git worktree list --porcelain`.
+///
+/// The recovery path when `git worktree add` fails: a branch can only live in
+/// one worktree, so the usual cause is that it is already checked out
+/// somewhere, and reporting that beats a bare failure.
+pub fn worktree_for_branch(porcelain: &str, branch: &str) -> Option<String> {
+    let wanted = format!("refs/heads/{branch}");
+    let mut current: Option<&str> = None;
+    for line in porcelain.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            current = Some(path);
+        } else if let Some(found) = line.strip_prefix("branch ") {
+            if found == wanted {
+                return current.map(|p| p.to_string());
+            }
+        }
+    }
+    None
+}
