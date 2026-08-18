@@ -160,3 +160,107 @@ fn is_gitignored(repo_root: &Path, rel: &str) -> bool {
         .args(["check-ignore", "-q", rel]);
     matches!(run_with_timeout(&mut command, GIT_TIMEOUT), Some(o) if o.status.success())
 }
+
+/// Branches tried when the remote publishes no `origin/HEAD`, in order.
+const BASE_BRANCH_CANDIDATES: [&str; 4] = ["main", "master", "trunk", "develop"];
+
+/// Last resort when the remote is unreachable and no candidate exists locally.
+const BASE_BRANCH_FALLBACK: &str = "master";
+
+/// A worktree is stale once its last commit is older than this.
+const STALE_AFTER_DAYS: i64 = 30;
+
+const SECS_PER_DAY: i64 = 86_400;
+
+/// Cleanup runs at most this often per repo. Kept as its own name so callers
+/// reference the rate limit rather than SECS_PER_DAY directly: retuning this
+/// must not move the staleness cutoff, which is a separate decision that
+/// happens to share the same number today.
+const CLEANUP_INTERVAL_SECS: i64 = SECS_PER_DAY;
+
+/// The base branch as a remote-tracking ref, for example `origin/main`.
+///
+/// Prefers what the remote itself publishes as `origin/HEAD`, then the common
+/// names, so a repo whose default is `trunk` is not silently rebased onto a
+/// `main` that does not exist.
+pub fn base_branch(repo_root: &Path) -> String {
+    let published = git_stdout(
+        repo_root,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    )
+    .map(|s| s.trim().trim_start_matches("origin/").to_string())
+    .filter(|s| !s.is_empty());
+
+    if let Some(name) = published {
+        return format!("origin/{name}");
+    }
+
+    for candidate in BASE_BRANCH_CANDIDATES {
+        let reference = format!("refs/remotes/origin/{candidate}");
+        if git_ok(repo_root, &["show-ref", "--verify", "--quiet", &reference]) {
+            return format!("origin/{candidate}");
+        }
+    }
+    format!("origin/{BASE_BRANCH_FALLBACK}")
+}
+
+/// Everything the staleness decision needs, gathered by the caller so the
+/// decision itself stays pure and exhaustively testable.
+pub struct WorktreeStatus<'a> {
+    pub path: &'a Path,
+    pub branch: &'a str,
+    /// The worktree this run is creating, which must never be reaped.
+    pub is_target: bool,
+    /// Something is cwd'd into it.
+    pub in_use: bool,
+    pub has_open_pr: bool,
+    pub merged_into_base: bool,
+    /// Unix seconds of the last commit.
+    pub last_commit_epoch: i64,
+}
+
+/// Whether a worktree may be removed.
+///
+/// The four skips come first and are absolute: the target of this run, anything
+/// in use, a branch with an open pull request, and a detached or unreadable
+/// HEAD. Only then does merged-or-old decide. Ordering matters, since an old
+/// branch with an open PR is still wanted.
+pub fn is_stale(status: &WorktreeStatus, now_epoch: i64) -> bool {
+    if status.is_target || status.in_use || status.has_open_pr || status.branch.is_empty() {
+        return false;
+    }
+    if status.merged_into_base {
+        return true;
+    }
+    let cutoff = now_epoch - (STALE_AFTER_DAYS * SECS_PER_DAY);
+    status.last_commit_epoch < cutoff
+}
+
+/// Whether the daily cleanup is due, given the marker's mtime.
+///
+/// `None` means the marker is absent, which counts as due: a repo that has
+/// never been cleaned should be.
+pub fn cleanup_due(marker_mtime_epoch: Option<i64>, now_epoch: i64) -> bool {
+    match marker_mtime_epoch {
+        None => true,
+        Some(stamped) => now_epoch - stamped >= CLEANUP_INTERVAL_SECS,
+    }
+}
+
+fn git_stdout(repo_root: &Path, args: &[&str]) -> Option<String> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(repo_root).args(args);
+    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn git_ok(repo_root: &Path, args: &[&str]) -> bool {
+    git_stdout(repo_root, args).is_some()
+}

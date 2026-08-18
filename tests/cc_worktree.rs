@@ -285,3 +285,197 @@ mod env_copy_guard {
         }
     }
 }
+
+mod base_branch_detection {
+    use super::*;
+
+    /// A remote-tracking ref, created without a network by pointing a local ref
+    /// at a commit. `origin/HEAD` is what a real clone gets from the server.
+    fn with_remote_refs(tag: &str, publish_head: Option<&str>, branches: &[&str]) -> PathBuf {
+        let dir = repo(tag);
+        fs::write(dir.join("f.txt"), "x").expect("write");
+        for args in [vec!["add", "f.txt"], vec!["commit", "-qm", "init"]] {
+            Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(&args)
+                .output()
+                .expect("git");
+        }
+        let sha = String::from_utf8_lossy(
+            &Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .expect("git")
+                .stdout,
+        )
+        .trim()
+        .to_string();
+
+        for branch in branches {
+            Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["update-ref", &format!("refs/remotes/origin/{branch}"), &sha])
+                .output()
+                .expect("git");
+        }
+        if let Some(head) = publish_head {
+            Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args([
+                    "symbolic-ref",
+                    "refs/remotes/origin/HEAD",
+                    &format!("refs/remotes/origin/{head}"),
+                ])
+                .output()
+                .expect("git");
+        }
+        dir
+    }
+
+    /// What the remote publishes wins, so a repo whose default is `trunk` is
+    /// never silently treated as `main`.
+    #[test]
+    fn the_published_head_wins_over_the_candidates() {
+        let dir = with_remote_refs("published", Some("trunk"), &["main", "trunk"]);
+        assert_eq!(worktree::base_branch(&dir), "origin/trunk");
+    }
+
+    #[test]
+    fn without_a_published_head_the_candidates_are_tried_in_order() {
+        let dir = with_remote_refs("candidates", None, &["develop", "master"]);
+        assert_eq!(
+            worktree::base_branch(&dir),
+            "origin/master",
+            "master precedes develop in the candidate order"
+        );
+    }
+
+    #[test]
+    fn a_repo_with_no_remote_refs_falls_back() {
+        let dir = repo("no-remote");
+        assert_eq!(worktree::base_branch(&dir), "origin/master");
+    }
+}
+
+mod staleness_decision {
+    use super::*;
+    use playbook::cc::worktree::WorktreeStatus;
+
+    const NOW: i64 = 1_800_000_000;
+    const DAY: i64 = 86_400;
+
+    fn status(path: &Path) -> WorktreeStatus<'_> {
+        WorktreeStatus {
+            path,
+            branch: "feature",
+            is_target: false,
+            in_use: false,
+            has_open_pr: false,
+            merged_into_base: false,
+            last_commit_epoch: NOW,
+        }
+    }
+
+    #[test]
+    fn a_merged_branch_is_stale() {
+        let p = Path::new("/tmp/wt");
+        let s = WorktreeStatus {
+            merged_into_base: true,
+            ..status(p)
+        };
+        assert!(worktree::is_stale(&s, NOW));
+    }
+
+    #[test]
+    fn an_old_unmerged_branch_is_stale_and_a_recent_one_is_not() {
+        let p = Path::new("/tmp/wt");
+        let old = WorktreeStatus {
+            last_commit_epoch: NOW - 31 * DAY,
+            ..status(p)
+        };
+        assert!(worktree::is_stale(&old, NOW), "31 days is past the cutoff");
+
+        let recent = WorktreeStatus {
+            last_commit_epoch: NOW - 29 * DAY,
+            ..status(p)
+        };
+        assert!(!worktree::is_stale(&recent, NOW), "29 days is inside it");
+    }
+
+    /// Each skip is absolute and beats both staleness reasons. An old branch
+    /// with an open pull request is still wanted, which is the case that would
+    /// hurt most if the ordering were wrong.
+    #[test]
+    fn every_skip_beats_both_staleness_reasons() {
+        let p = Path::new("/tmp/wt");
+        let base = WorktreeStatus {
+            merged_into_base: true,
+            last_commit_epoch: NOW - 400 * DAY,
+            ..status(p)
+        };
+
+        for (label, s) in [
+            (
+                "target",
+                WorktreeStatus {
+                    is_target: true,
+                    ..base
+                },
+            ),
+            (
+                "in use",
+                WorktreeStatus {
+                    in_use: true,
+                    ..base
+                },
+            ),
+            (
+                "open PR",
+                WorktreeStatus {
+                    has_open_pr: true,
+                    ..base
+                },
+            ),
+            ("no branch", WorktreeStatus { branch: "", ..base }),
+        ] {
+            assert!(
+                !worktree::is_stale(&s, NOW),
+                "{label} must never be reaped, even when merged and ancient"
+            );
+        }
+    }
+}
+
+mod cleanup_rate_limit {
+    use super::*;
+
+    const NOW: i64 = 1_800_000_000;
+
+    /// A repo that has never been cleaned should be.
+    #[test]
+    fn an_absent_marker_means_due() {
+        assert!(worktree::cleanup_due(None, NOW));
+    }
+
+    #[test]
+    fn it_runs_at_most_once_a_day() {
+        assert!(
+            !worktree::cleanup_due(Some(NOW - 3600), NOW),
+            "an hour ago is too soon"
+        );
+        assert!(
+            !worktree::cleanup_due(Some(NOW - 86_399), NOW),
+            "just under a day is too soon"
+        );
+        assert!(
+            worktree::cleanup_due(Some(NOW - 86_400), NOW),
+            "exactly a day is due"
+        );
+        assert!(worktree::cleanup_due(Some(NOW - 200_000), NOW));
+    }
+}
