@@ -382,3 +382,73 @@ pub fn plan_for_target(state: &TargetState) -> WorktreePlan {
         None => WorktreePlan::Create,
     }
 }
+
+/// Minimum letters in a JIRA project key, so a branch like `a-1` is not
+/// mistaken for one.
+const MIN_JIRA_PREFIX_LEN: usize = 2;
+
+/// Trims whitespace and carriage returns from a branch name.
+///
+/// The CR matters: a branch name pasted from a Windows-authored ticket or a CI
+/// variable carries one, and git rejects it while the error names a branch that
+/// looks identical to the one requested.
+pub fn sanitize_branch(raw: &str) -> String {
+    raw.replace('\r', "").trim().to_string()
+}
+
+/// The first JIRA-style key in the branch, uppercased.
+///
+/// Matches the shell's case-insensitive `[A-Z]{2,}-[0-9]+`, so `fix/abc-45`
+/// yields `ABC-45`. Scanned by hand rather than with a regex, since the crate
+/// graph is deliberately clap plus serde.
+pub fn jira_key(branch: &str) -> Option<String> {
+    let bytes = branch.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_alphabetic() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+            i += 1;
+        }
+        let letters = i - start;
+        if letters < MIN_JIRA_PREFIX_LEN || i >= bytes.len() || bytes[i] != b'-' {
+            continue;
+        }
+        let dash = i;
+        i += 1;
+        let digits_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i > digits_start {
+            return Some(branch[start..i].to_uppercase());
+        }
+        i = dash + 1;
+    }
+    None
+}
+
+/// Everything after the final slash, matching `${BRANCH##*/}`.
+pub fn branch_leaf(branch: &str) -> &str {
+    branch.rsplit('/').next().unwrap_or(branch)
+}
+
+/// The folder name a branch gets under the worktree root.
+///
+/// A JIRA key wins, so `feature/PROJ-1/spike` and `fix/PROJ-1` share one
+/// folder, which is the point: one ticket, one worktree. `occupied_by` is the
+/// branch already checked out in that key's folder, if any. When it is a
+/// DIFFERENT branch the key is already taken, so this falls back to the leaf
+/// rather than colliding.
+pub fn folder_for_branch(branch: &str, occupied_by: Option<&str>) -> String {
+    match jira_key(branch) {
+        Some(key) => match occupied_by {
+            Some(other) if other != branch => branch_leaf(branch).to_string(),
+            _ => key,
+        },
+        None => branch_leaf(branch).to_string(),
+    }
+}
