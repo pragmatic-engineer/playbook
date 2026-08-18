@@ -57,17 +57,10 @@ jobs:
       - name: ShellCheck (.sh files)
         # Lint once, on Linux only: shellcheck is not preinstalled on macOS
         # runners and static analysis is platform-independent.
-        # --severity=warning: the baseline is clean at error and warning.
-        # Dropping to --severity=style is NOT two fixes away, despite what this
-        # comment used to claim. Measured 2026-08-18: 87 findings appear below
-        # warning, and they are mostly not defects. 56 are SC2015 (A && B || C)
-        # from the pass/fail idiom in the .test.sh files, 18 are SC2016 (single
-        # quotes not expanding) which is the point of the quoting, and 7 are
-        # SC1091 (cannot follow a sourced path), which survives even with
-        # shellcheck -x, so no amount of source fixing clears it.
-        # Tightening therefore means adding disable directives, not fixing bugs.
-        # The findings that WERE real got fixed instead: SC2295 in statusline.sh
-        # (unquoted $HOME read as a glob) and SC2223 in shell/shared/worktree.sh.
+        # Stays at warning rather than style: of the 87 findings below warning
+        # (measured 2026-08-18), most are deliberate idiom, and 7 are SC1091
+        # which survives even `shellcheck -x`. Tightening would mean adding
+        # disable directives, not fixing bugs.
         if: runner.os == 'Linux'
         run: git ls-files '*.sh' | xargs shellcheck --severity=warning
 
@@ -89,9 +82,8 @@ jobs:
         # Lint once, on Linux only: static checks are platform-independent,
         # no need to burn the macOS leg. Config (line-length ignore) lives
         # in ruff.toml.
-        # Piped through `xargs -r` (not `ruff check $(...)`) so an empty file
-        # list runs nothing. Bare `ruff check` lints the whole tree recursively,
-        # so the substitution form silently widens to the entire repo the moment
+        # `xargs -r`, not `ruff check $(...)`: bare `ruff check` lints the whole
+        # tree, so the substitution form silently widens to the entire repo once
         # the last tracked .py goes away, which WU-14 does on purpose.
         if: runner.os == 'Linux'
         run: git ls-files '*.py' | xargs -r pipx run ruff check

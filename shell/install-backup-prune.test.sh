@@ -5,16 +5,10 @@
 # install-backup-prune.test.sh: re-running install.sh must not grow
 # CLAUDE_HOME/backups without bound.
 #
-# Re-running the installer IS the documented upgrade path, and every run past
-# the first copies the whole previous tree into backups/install-<stamp>/.
-# Nothing pruned those, so they accumulated: measured before the fix, nine
-# installs left eight backups totalling 13M. setup-local.sh already caps its
-# own setup-* dirs at the newest 5, so this only applies the rule the repo had
-# already chosen to the sibling case that missed it.
-#
-# The stamp has one-second resolution (date +%Y%m%d-%H%M%S), so the loop sleeps
-# between runs. Without that the dirs collide, the count stays low for the
-# wrong reason, and the suite passes while proving nothing.
+# Re-running the installer is the documented upgrade path, and each run past the
+# first copies the whole previous tree into backups/: 13M over nine installs
+# before the cap. The loop sleeps because the stamp has one-second resolution,
+# and colliding names would keep the count low for the wrong reason.
 #
 # Run:  bash shell/install-backup-prune.test.sh
 # Exit: 0 if all scenarios pass, non-zero otherwise.

@@ -327,27 +327,15 @@ if [[ -n "${session_id:-}" ]]; then
             "$(date +%s)" "${cost_usd:-0}" "${used:-0}" \
             >> "$telemetry_dir/telemetry.jsonl" 2>/dev/null || true
 
-        # Fire once per CROSSING, not once per render above the line.
+        # Fire once per CROSSING, not once per render above the line. Without
+        # the latch the Stop hook consumes the marker and the next render
+        # re-arms it, costing a turn every turn past the threshold.
         #
-        # hooks/memory-capture.py consumes `capture-due` on every Stop and tells
-        # the model the prompt "fires once per threshold crossing". That promise
-        # was false: this block used to re-drop the marker on every render while
-        # usage stayed at or above the threshold, so the hook consumed it and the
-        # next render immediately re-armed it. Past 70% that costs a turn every
-        # turn for the rest of the session, and the model has nothing new to
-        # capture by the second one. Observed firing four times with a byte
-        # identical file list.
-        #
-        # `capture-fired` is the latch, and its ABSENCE means armed. That
-        # direction matters: a fresh session dir has no state files at all, and a
-        # session can legitimately open above the threshold (a resume, or a
-        # post-compaction turn). An "armed" sentinel that had to exist first would
-        # silently never fire in those cases. Absent-means-armed fires on the
-        # first crossing from any starting state.
-        #
-        # Dropping back under the line clears the latch, so a session that dips
-        # and climbs again gets a second prompt, which is what "per crossing"
-        # means.
+        # ABSENCE of `capture-fired` means armed, and that direction matters: a
+        # fresh session dir has no state files, and a session can open above the
+        # threshold on a resume, so a sentinel that had to exist first would
+        # silently never fire. Dropping back under the line clears the latch, so
+        # a dip and climb gets a second prompt.
         capture_at="${CC_CAPTURE_AT:-70}"
         used_int="${used%%.*}"
         if [[ "${used_int:-0}" -ge "$capture_at" ]] 2>/dev/null; then

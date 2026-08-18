@@ -5,18 +5,11 @@
 # install-uninstall-roundtrip.test.sh: install.sh and uninstall.sh must agree
 # on what the toolkit owns.
 #
-# They cannot agree by construction: install.sh derives its copy set at runtime
-# (every top-level entry minus a short skip list) while uninstall.sh carries a
-# hardcoded SHIPPED array. Every file added to the repo root is therefore
-# installed immediately and uninstalled only if somebody remembers. Six had
-# already slipped through when this suite was written (.claude-plugin,
-# Cargo.lock, Cargo.toml, ruff.toml, src, tests), all surviving an uninstall.
-#
-# Rather than re-parse either list, which would rot alongside them, this runs
-# the real pair end to end against a scratch HOME and inspects what is left.
-# Source is `git archive HEAD`, so it sees tracked files only: a plain copy of
-# the working tree would drag in target/ and other untracked build output and
-# report failures that no user could ever hit.
+# They cannot agree by construction, since install derives its copy set at
+# runtime while uninstall hardcodes one; six entries had already drifted. Any
+# re-parse of either list would rot with it, so this runs the real pair and
+# inspects the leftovers, sourced from `git archive HEAD` so untracked build
+# output cannot report leaks no user could hit.
 #
 # Run:  bash shell/install-uninstall-roundtrip.test.sh
 # Exit: 0 if all scenarios pass, non-zero otherwise.

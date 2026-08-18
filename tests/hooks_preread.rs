@@ -61,6 +61,10 @@ fn stderr_string(output: &Output) -> String {
 mod preread_edit_check {
     use super::*;
 
+    /// Attempts allowed for a seed and run to land inside one wall-clock
+    /// second. Bounded so a pathological clock fails loudly instead of looping.
+    const CLOCK_STRADDLE_RETRIES: u32 = 10;
+
     fn payload(session_id: &str, file_path: &str) -> String {
         format!(r#"{{"session_id":"{session_id}","tool_input":{{"file_path":"{file_path}"}}}}"#)
     }
@@ -350,34 +354,17 @@ mod preread_edit_check {
         let cases: [(i64, &str); 2] = [(59, "59s ago"), (60, "1m ago")];
 
         for (delta, expected) in cases {
-            // The hook reads its OWN clock, and it does so after this test has
-            // already seeded the file, so the delta it computes is
-            // `hook_now - (test_now - delta)`. Any wall-clock tick in that gap
-            // makes it delta+1, and the 59 case then renders "1m ago" and fails.
-            // That is a real race, not a hypothetical: it fired on the macOS leg
-            // of rust-ci run 32071443210 on 2026-08-17, reporting exactly that
-            // ("delta 59s should render as '59s ago', got: ... 1m ago").
+            // The hook reads its own clock after this test seeds the file, so a
+            // wall-clock tick in that gap turns delta 59 into 60 and the case
+            // renders "1m ago". No clock seam exists to remove the race: the
+            // hook calls SystemTime::now() directly, matching the python
+            // original, and adding one to the Rust alone would be an
+            // undocumented divergence from the spec this port must match.
             //
-            // It reproduces only where a spawn is slow. Measured on an Apple
-            // Silicon dev machine: 60 seeded spawns, mean 3ms, zero straddles,
-            // so the local rate is roughly 0.3% and a green local run is not
-            // evidence of anything. A loaded macOS runner is a different story,
-            // which is why the failure showed up there first.
-            //
-            // There is no clock seam to inject: the hook calls SystemTime::now()
-            // directly (src/hooks/preread_edit_check.rs:106), matching the
-            // python original's time.time() (hooks/preread-edit-check.py:38),
-            // and adding one to the Rust alone would be an undocumented
-            // divergence from the specification this port has to match.
-            //
-            // So detect the straddle instead of pretending it cannot happen.
-            // Sampling now() before the seed and again after the run brackets
-            // the hook's own read: when both samples are the same second, the
-            // hook necessarily saw that second too, and the delta is exactly
-            // `delta`. Only then is the assertion meaningful. Bounded, so a
-            // pathological machine fails loudly instead of spinning forever.
+            // Sampling now() either side brackets the hook's own read, so equal
+            // samples prove it saw the same second and the delta is exact.
             let mut settled = None;
-            for attempt in 1..=10 {
+            for attempt in 1..=CLOCK_STRADDLE_RETRIES {
                 // Arrange
                 let started = now();
                 let home = scratch_dir(&format!("edit-format-ago-{delta}-{attempt}"));
@@ -398,9 +385,9 @@ mod preread_edit_check {
 
             // Assert
             let out = settled.expect(
-                "10 consecutive runs each straddled a second boundary, which means \
-                 the hook never observed the seeded delta exactly; suspect a clock \
-                 or a machine problem rather than a formatting regression",
+                "every attempt straddled a second boundary, so the hook never \
+                 observed the seeded delta exactly; suspect the clock or the \
+                 machine rather than a formatting regression",
             );
             assert!(
                 out.contains(expected),

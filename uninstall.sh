@@ -100,15 +100,10 @@ fi
 
 # --- Shipped-entry allowlist ---
 # Only these entries are ever removed.  CLAUDE_HOME itself is never touched.
-# Everything install.sh copies into CLAUDE_HOME must appear here, or an
-# uninstall leaves it behind. install.sh builds its copy set dynamically (every
-# top-level entry except a short skip list), while this list is hardcoded, so
-# the two drift apart every time a file is added to the repo root and nobody
-# thinks about uninstall. That is exactly what happened: .claude-plugin,
-# Cargo.lock, Cargo.toml, ruff.toml, src and tests all arrived after this array
-# was written and all six survived an uninstall. shell/install-uninstall-roundtrip.test.sh
-# now performs a real install and uninstall and fails if anything is stranded,
-# so the next addition is caught rather than discovered years later.
+# Must list everything install.sh copies, or an uninstall strands it. install.sh
+# derives its copy set dynamically while this is hardcoded, so the two drift on
+# every new repo-root file; six had already accumulated. Drift is now caught by
+# shell/install-uninstall-roundtrip.test.sh, which runs the real pair.
 #
 # agents, commands and skills are deliberately still here even though install.sh
 # no longer copies them: they are plugin-owned now, and this clears the residue
