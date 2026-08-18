@@ -916,6 +916,55 @@ mod rebase_eligibility {
         };
         assert!(!should_rebase(&detached));
     }
+
+    /// Ported quirk: the shell's `case` matches case-sensitively and the script
+    /// sets no `nocasematch`, so `Main` is an ordinary branch there. Normalising
+    /// case here would protect branches the shell rebases.
+    #[test]
+    fn protection_is_case_sensitive_like_the_shell() {
+        for branch in ["Main", "MAIN", "Develop", "Release/2.0"] {
+            assert!(
+                should_rebase(&mine(branch)),
+                "{branch} is not protected in the shell, so it must not be here"
+            );
+        }
+    }
+
+    /// Ported quirk: the shell's login test is `[[ "$BRANCH" == *"$gh_user"* ]]`,
+    /// and quoting the expansion inside the pattern makes it literal, so a login
+    /// containing glob metacharacters never matches as a wildcard.
+    #[test]
+    fn a_login_with_glob_metacharacters_is_matched_literally() {
+        let ctx = RebaseContext {
+            branch_author: "Someone Else",
+            gh_user: "a*b",
+            wanted_branch: "feature/aYYb",
+            ..mine("feature/aYYb")
+        };
+        assert!(!should_rebase(&ctx), "the pattern is literal, not a glob");
+
+        let literal = RebaseContext {
+            branch_author: "Someone Else",
+            gh_user: "a*b",
+            wanted_branch: "feature/a*b",
+            ..mine("feature/a*b")
+        };
+        assert!(should_rebase(&literal));
+    }
+
+    /// The shell's second signal reads `$BRANCH`, the branch that was asked for,
+    /// not the one currently checked out. Collapsing the two fields would change
+    /// who owns a branch.
+    #[test]
+    fn ownership_by_login_reads_the_wanted_branch_not_the_current_one() {
+        let ctx = RebaseContext {
+            current_branch: "feature/anon",
+            branch_author: "Someone Else",
+            wanted_branch: "feature/igorjs/thing",
+            ..mine("feature/anon")
+        };
+        assert!(should_rebase(&ctx));
+    }
 }
 
 mod upstream {
