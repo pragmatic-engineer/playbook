@@ -35,6 +35,18 @@ fn main() {
                     std::process::exit(2);
                 }
             },
+            // Exit 1, not 2: the python original used it and CI keys on it.
+            SettingsCommand::Check {
+                template,
+                perms,
+                repo_root,
+            } => match settings::check::check(&template, &perms, &repo_root) {
+                Ok(msg) => println!("{msg}"),
+                Err(err) => {
+                    eprintln!("check-shared-settings: {err}");
+                    std::process::exit(1);
+                }
+            },
         },
     }
 }
