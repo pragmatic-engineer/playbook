@@ -14,7 +14,7 @@
 //! shelling out itself, or the script it calls, failing degrades quietly
 //! rather than breaking the hook.
 
-use crate::common::{home_dir, repo_slug, run_with_timeout, session_dir, Payload};
+use crate::common::{config_hash, home_dir, repo_slug, run_with_timeout, session_dir, Payload};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -139,7 +139,7 @@ fn clear_statusline_cache() {
 /// the stored hash on a `startup` source, which becomes the new baseline.
 /// Matches hooks/session-init.py:120-152.
 fn check_config_drift(payload: &Payload, dir: &str, plugin_root: &str) -> (String, String) {
-    let current_hash = config_hash(plugin_root);
+    let current_hash = config_hash(Path::new(plugin_root), SUBPROCESS_TIMEOUT);
     if current_hash.is_empty() || dir.is_empty() {
         return (String::new(), String::new());
     }
@@ -164,30 +164,6 @@ fn check_config_drift(payload: &Payload, dir: &str, plugin_root: &str) -> (Strin
     }
 
     (system_message, extra_context)
-}
-
-/// Shell out to `hooks/lib/config-hash.sh`'s `config_hash` function and
-/// return its trimmed stdout, or an empty string on any failure (missing
-/// plugin root, missing bash, non-zero exit, ...). Never panics. Matches
-/// hooks/session-init.py:35-38.
-fn config_hash(plugin_root: &str) -> String {
-    if plugin_root.is_empty() {
-        return String::new();
-    }
-    let script = Path::new(plugin_root)
-        .join("hooks")
-        .join("lib")
-        .join("config-hash.sh");
-    let mut command = Command::new("bash");
-    command
-        .arg("-c")
-        .arg(". \"$1\"; config_hash")
-        .arg("_")
-        .arg(&script);
-    match run_with_timeout(&mut command, SUBPROCESS_TIMEOUT) {
-        Some(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => String::new(),
-    }
 }
 
 /// Inject the project memory slice into `extra_context`: the graph-backed

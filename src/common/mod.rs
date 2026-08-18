@@ -6,6 +6,7 @@
 //! primitives, so there is exactly one implementation to keep correct.
 
 pub mod atomic;
+pub mod config_hash;
 pub mod counter;
 pub mod emit;
 pub mod payload;
@@ -14,6 +15,7 @@ pub mod repo;
 pub mod session;
 
 pub use atomic::atomic_append;
+pub use config_hash::config_hash;
 pub use counter::incr_counter;
 pub use emit::{
     emit_block, emit_pre_context, emit_pre_deny, emit_prompt_context, emit_system_message,
