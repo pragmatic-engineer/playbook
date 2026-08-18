@@ -57,6 +57,16 @@ pub enum SettingsCommand {
         /// Path to the canned permissions object.
         perms: PathBuf,
     },
+    /// Validate the tracked settings.shared.json seed, ported from
+    /// `shell/check-shared-settings.py`.
+    Check {
+        /// Path to the settings.shared.json template to validate.
+        template: PathBuf,
+        /// Path to the tracked permissions.shared.json.
+        perms: PathBuf,
+        /// Repo root that every hook command must resolve inside.
+        repo_root: PathBuf,
+    },
 }
 
 /// Every hook Claude Code can invoke, one per entry in hooks.json. Kebab-case
