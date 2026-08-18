@@ -12,7 +12,7 @@ use crate::common::run_with_timeout;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -250,6 +250,269 @@ pub fn cleanup_due(marker_mtime_epoch: Option<i64>, now_epoch: i64) -> bool {
     match marker_mtime_epoch {
         None => true,
         Some(stamped) => now_epoch - stamped >= CLEANUP_INTERVAL_SECS,
+    }
+}
+
+/// Directory and filename prefix for the per-repo cleanup rate-limit marker
+/// (worktree.sh:203): `/tmp/.git-wt-cleanup-<hash>`.
+const CLEANUP_MARKER_DIR: &str = "/tmp";
+const CLEANUP_MARKER_PREFIX: &str = ".git-wt-cleanup-";
+
+/// Ports `_wt_cleanup_stale` (worktree.sh:201-242): the outer entry point.
+///
+/// Gathers the two inputs that reach outside this process, a real
+/// `/tmp/.git-wt-cleanup-*` marker path and a real `gh` call, then delegates
+/// the actual git-driving work to [`cleanup_stale_with`]. That split exists
+/// for testability: [`cleanup_stale_with`] is what the test suite calls
+/// directly, with a scratch marker and an injected PR list, so no test
+/// depends on `gh` being installed and authenticated or touches this
+/// machine's real markers.
+pub fn cleanup_stale(repo_root: &Path, target: &Path, now_epoch: i64) -> usize {
+    let Some(marker) = cleanup_marker_path(repo_root) else {
+        return 0;
+    };
+    let open_prs = open_pr_branches(repo_root);
+    cleanup_stale_with(repo_root, target, &marker, &open_prs, now_epoch)
+}
+
+/// Ports the loop body of `_wt_cleanup_stale` (worktree.sh:201-242): given a
+/// marker path and an open-PR list, decides and executes removals. Returns
+/// how many worktrees were removed.
+///
+/// THIS FUNCTION DELETES BRANCHES AND WORKTREES. Every skip in [`is_stale`]
+/// is a safety control, not a nicety, and the ordering below, remove first
+/// and only delete the branch once that succeeds, is one too: a branch is
+/// never destroyed while its worktree still exists on disk.
+pub fn cleanup_stale_with(
+    repo_root: &Path,
+    target: &Path,
+    marker: &Path,
+    open_prs: &[String],
+    now_epoch: i64,
+) -> usize {
+    if !cleanup_due(marker_mtime_epoch(marker), now_epoch) {
+        return 0;
+    }
+    // Touched BEFORE any removal work (worktree.sh:206): a crash partway
+    // through still rate-limits the next run, rather than retrying the same
+    // destructive pass on every invocation until one finally finishes.
+    touch_marker(marker, now_epoch);
+
+    let base = base_branch(repo_root);
+    let merged = merged_branches(repo_root, &base);
+
+    let Some(porcelain) = git_stdout(repo_root, &["worktree", "list", "--porcelain"]) else {
+        return 0;
+    };
+
+    let mut removed = 0;
+    for path in cleanup_candidates(&porcelain) {
+        let wt_path = Path::new(&path);
+        let branch = git_stdout(wt_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        let commit_epoch = git_stdout(wt_path, &["log", "-1", "--format=%ct"])
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
+
+        let status = WorktreeStatus {
+            path: wt_path,
+            branch: &branch,
+            is_target: wt_path == target,
+            in_use: is_in_use(wt_path),
+            has_open_pr: contains_line(open_prs, &branch),
+            merged_into_base: contains_line(&merged, &branch),
+            last_commit_epoch: commit_epoch,
+        };
+        if !is_stale(&status, now_epoch) {
+            continue;
+        }
+
+        if !git_ok(repo_root, &["worktree", "remove", "--force", path.as_str()]) {
+            // The shell's `|| continue` (worktree.sh:236): a failed remove
+            // must never be followed by a branch delete, so a branch is
+            // never destroyed while its worktree still exists on disk.
+            continue;
+        }
+        removed += 1;
+        if branch != "HEAD" {
+            let _ = git_ok(repo_root, &["branch", "-D", branch.as_str()]);
+        }
+    }
+
+    let _ = git_ok(repo_root, &["worktree", "prune"]);
+    removed
+}
+
+/// The default cleanup rate-limit marker path for `repo_root`
+/// (worktree.sh:203). `None` when the hash could not be computed at all (no
+/// `bash`, or it timed out).
+///
+/// Divergence: the shell in that state still proceeds, with an un-suffixed,
+/// effectively repo-agnostic marker (`/tmp/.git-wt-cleanup-`). This port
+/// instead treats an unknown hash as "cannot safely rate-limit" and skips the
+/// run entirely, per this file's "when in doubt, keep" rule for anything
+/// that decides what gets deleted.
+fn cleanup_marker_path(repo_root: &Path) -> Option<PathBuf> {
+    let hash = wt_hash(&repo_root.to_string_lossy())?;
+    Some(Path::new(CLEANUP_MARKER_DIR).join(format!("{CLEANUP_MARKER_PREFIX}{hash}")))
+}
+
+/// The shell's exact `_wt_hash` body (worktree.sh:69). `<<<` is a bash/zsh
+/// here-string, so this runs under `bash`, matching this file's own
+/// "sourceable in bash and zsh" contract, not `/bin/sh` (often dash on
+/// Linux, which rejects `<<<`).
+///
+/// macOS's `md5 -q` prints the full 32-character digest; the Linux fallback
+/// pipes through `cut -c1-8` and keeps only 8, so the two platforms produce
+/// cache filenames of different lengths for the same repo. That quirk is
+/// preserved on purpose, not normalized away.
+const WT_HASH_SCRIPT: &str =
+    r#"printf '%s\n' "$1" | md5 -q 2>/dev/null || md5sum <<< "$1" | cut -c1-8"#;
+
+/// Shells out to compute the shell's cache-marker hash of `input`, rather
+/// than hashing in Rust: the crate graph is deliberately clap + serde only,
+/// with no hashing crate, and shelling out guarantees byte-for-byte parity
+/// with the shell, digest length included (see [`WT_HASH_SCRIPT`]'s doc). If
+/// this port and a still-installed shell ever computed the hash differently,
+/// they would write to two different marker files for the same repo during
+/// the coexistence period, and the once-a-day cleanup would effectively run
+/// twice as often, once per implementation.
+fn wt_hash(input: &str) -> Option<String> {
+    let mut command = Command::new("bash");
+    command.arg("-c").arg(WT_HASH_SCRIPT).arg("bash").arg(input);
+    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Unix seconds of `marker`'s mtime, or `None` when it does not exist or is
+/// unreadable. Feeds directly into [`cleanup_due`], which already treats
+/// `None` as due, so this does not need to replicate the shell's
+/// `stat || stat || echo 0` fallback chain (worktree.sh:204): a missing
+/// marker and an unreadable one both mean "we do not know when this last
+/// ran," and that reads as due either way.
+fn marker_mtime_epoch(marker: &Path) -> Option<i64> {
+    let modified = std::fs::metadata(marker).ok()?.modified().ok()?;
+    Some(
+        modified
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+    )
+}
+
+/// Updates `marker`'s mtime, creating it first if absent, matching the
+/// shell's `touch "$cache"` (worktree.sh:206). Writes the current epoch
+/// rather than merely opening the file: POSIX only guarantees an mtime bump
+/// on `truncate` when the size actually changes, but a `write()` updates it
+/// unconditionally, so writing is the reliable "touch."
+fn touch_marker(marker: &Path, now_epoch: i64) {
+    let _ = std::fs::write(marker, now_epoch.to_string());
+}
+
+/// The `worktree` field paths from `git worktree list --porcelain`, in
+/// listed order. The first is always the main worktree.
+fn worktree_paths(porcelain: &str) -> Vec<String> {
+    porcelain
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree ").map(str::to_string))
+        .collect()
+}
+
+/// The worktree paths eligible for cleanup: every entry from
+/// `worktree_paths` EXCEPT the first, which is always the main worktree
+/// (worktree.sh:218's `awk '$1=="worktree" && c++>0{print $2}'`) and must
+/// never be a cleanup candidate. Getting this off by one would delete the
+/// user's main checkout.
+///
+/// Pulled out as its own function, rather than an inline `.skip(1)` in
+/// [`cleanup_stale_with`], so this exact decision has a direct unit test: a
+/// live-git test cannot tell this bug apart from correct behaviour, since
+/// `git worktree remove` already refuses to remove the main working tree on
+/// its own, no matter what this function passes it.
+pub fn cleanup_candidates(porcelain: &str) -> Vec<String> {
+    worktree_paths(porcelain).into_iter().skip(1).collect()
+}
+
+/// `git branch --merged <base>` (worktree.sh:213), with the shell's
+/// `sed 's/^[[:space:]*+]*//'` prefix-strip applied: `*` marks the branch
+/// checked out in the worktree this command ran from, `+` marks one checked
+/// out in another linked worktree, and either can mix with leading spaces.
+fn merged_branches(repo_root: &Path, base: &str) -> Vec<String> {
+    git_stdout(repo_root, &["branch", "--merged", base])
+        .map(|out| {
+            out.lines()
+                .map(|line| strip_branch_marker(line).to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn strip_branch_marker(line: &str) -> &str {
+    line.trim_start_matches(|c: char| c.is_whitespace() || c == '*' || c == '+')
+}
+
+/// Whole-line, fixed-string membership, matching the shell's `grep -qxF`
+/// (`-x` whole line, `-F` fixed string): worktree.sh:225 (open PRs) and
+/// worktree.sh:228 (merged branches). A substring match here would spare or
+/// reap the wrong branch, e.g. an open-PR entry of `feat-two` must not spare
+/// a branch named `feat`.
+fn contains_line(haystack: &[String], needle: &str) -> bool {
+    !needle.is_empty() && haystack.iter().any(|line| line == needle)
+}
+
+/// Whether some process's cwd is inside `path`, mirroring `lsof -d cwd +c0`
+/// piped to a plain, non-anchored `grep -qF` (worktree.sh:220). Absent
+/// `lsof` reads as "not in use": the shell's own `command -v lsof` gate means
+/// a machine without it never treats any worktree as busy.
+fn is_in_use(path: &Path) -> bool {
+    if !command_exists("lsof") {
+        return false;
+    }
+    let mut command = Command::new("lsof");
+    command.args(["-d", "cwd", "+c0"]);
+    let Some(out) = run_with_timeout(&mut command, GIT_TIMEOUT) else {
+        return false;
+    };
+    let path_str = path.to_string_lossy();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .any(|line| line.contains(path_str.as_ref()))
+}
+
+/// The current user's open PR head branches (worktree.sh:214-216), or empty
+/// when `gh` is absent or the call fails. Gathered here, in the outer
+/// [`cleanup_stale`], rather than in [`cleanup_stale_with`], so tests can
+/// inject the list directly instead of depending on `gh` being installed and
+/// authenticated.
+fn open_pr_branches(repo_root: &Path) -> Vec<String> {
+    if !command_exists("gh") {
+        return Vec::new();
+    }
+    let mut command = Command::new("gh");
+    command.current_dir(repo_root).args([
+        "pr",
+        "list",
+        "--state",
+        "open",
+        "--author",
+        "@me",
+        "--limit",
+        "200",
+        "--json",
+        "headRefName",
+        "--jq",
+        ".[].headRefName",
+    ]);
+    match run_with_timeout(&mut command, GIT_TIMEOUT) {
+        Some(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
