@@ -16,6 +16,17 @@ use std::time::Duration;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// HOME, PWD and CCD_KEEP are process-wide, and cargo runs the tests in this
+/// binary on parallel threads. One shared lock, not one per module: four
+/// separate mutexes each guarding the same variables serialise nothing, and
+/// produced an intermittent failure where one module swapped HOME out from
+/// under another mid-test.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// An isolated HOME, so a test can never reach the real `~/.claude`.
 struct Sandbox {
     home: PathBuf,
@@ -67,8 +78,7 @@ mod retention_tests {
 
     /// Serialises the env mutations, since CCD_KEEP and HOME are process-wide.
     fn with_env<T>(home: &Path, keep: Option<&str>, f: impl FnOnce() -> T) -> T {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_env();
         let prev_home = std::env::var_os("HOME");
         let prev_keep = std::env::var_os("CCD_KEEP");
         std::env::set_var("HOME", home);
@@ -187,8 +197,7 @@ mod retention_tests {
     /// differential: the shell deleted a transcript and the port did not.
     #[test]
     fn the_logical_path_is_preferred_over_the_resolved_one() {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_env();
         let prev = std::env::var_os("PWD");
         std::env::set_var("PWD", "/tmp/logical-path");
         assert_eq!(playbook::cc::logical_cwd(), "/tmp/logical-path");
@@ -196,6 +205,143 @@ mod retention_tests {
             Some(v) => std::env::set_var("PWD", v),
             None => std::env::remove_var("PWD"),
         }
+    }
+}
+
+mod config_drift_tests {
+    use super::*;
+    use playbook::cc::config_drift;
+
+    /// A sandbox HOME carrying the real config-hash.sh and a settings.json the
+    /// hash covers, so editing settings genuinely changes the hash.
+    fn sandbox_with_hasher(tag: &str) -> Sandbox {
+        let sb = Sandbox::new(tag);
+        let lib = sb.mkdir("hooks/lib");
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        fs::copy(
+            repo_root.join("hooks/lib/config-hash.sh"),
+            lib.join("config-hash.sh"),
+        )
+        .expect("copy config-hash.sh");
+        fs::write(sb.claude().join("settings.json"), "{\"a\":1}\n").expect("write settings");
+        sb
+    }
+
+    fn set_settings(sb: &Sandbox, body: &str) {
+        fs::write(sb.claude().join("settings.json"), body).expect("write settings");
+    }
+
+    fn with_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
+        let _guard = lock_env();
+        let prev = std::env::var_os("HOME");
+        std::env::set_var("HOME", home);
+        let out = f();
+        match prev {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        out
+    }
+
+    const CWD: &str = "/tmp/some-project";
+
+    #[test]
+    fn the_first_check_reports_drift_and_creates_a_baseline() {
+        let sb = sandbox_with_hasher("first");
+        let (drifted, marker) = with_home(&sb.home, || {
+            (config_drift::drifted(CWD), config_drift::marker_path(CWD))
+        });
+        assert!(drifted, "with no baseline, config counts as changed");
+        assert!(marker.is_file(), "the check must leave a baseline behind");
+    }
+
+    /// The behaviour the blueprint singles out: `drifted` re-stamps whether or
+    /// not it found a match. Without that, one drift would be reported forever.
+    #[test]
+    fn a_second_check_reports_no_drift_because_the_first_re_stamped() {
+        let sb = sandbox_with_hasher("restamp");
+        let (first, second) = with_home(&sb.home, || {
+            (config_drift::drifted(CWD), config_drift::drifted(CWD))
+        });
+        assert!(first, "first call has no baseline");
+        assert!(!second, "the first call must have re-stamped");
+    }
+
+    #[test]
+    fn changing_config_reports_drift_once_then_clears() {
+        let sb = sandbox_with_hasher("change");
+        with_home(&sb.home, || config_drift::stamp(CWD));
+
+        set_settings(&sb, "{\"a\":2}\n");
+        let (changed, after) = with_home(&sb.home, || {
+            (config_drift::drifted(CWD), config_drift::drifted(CWD))
+        });
+        assert!(changed, "a settings edit changes the hash");
+        assert!(!after, "and the report clears once re-stamped");
+    }
+
+    #[test]
+    fn stamping_makes_the_next_check_quiet() {
+        let sb = sandbox_with_hasher("stamp");
+        let quiet = with_home(&sb.home, || {
+            config_drift::stamp(CWD);
+            config_drift::drifted(CWD)
+        });
+        assert!(!quiet, "a fresh stamp is the current config by definition");
+    }
+
+    /// Differential against the shell functions. The marker path and its
+    /// contents must match, or the two would track different files for the same
+    /// project and each would see the other's launch as drift.
+    #[test]
+    fn the_marker_matches_the_shell_implementation() {
+        if Command::new("bash").arg("--version").output().is_err() {
+            eprintln!("SKIP: bash not available");
+            return;
+        }
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let script = repo_root.join("shell/shared/config-drift.sh");
+
+        let sh = sandbox_with_hasher("diff-shell");
+        let rs = sandbox_with_hasher("diff-rust");
+
+        // Bash reports the cwd it actually used, and the Rust side is handed
+        // that exact string. Two traps otherwise: bash rebuilds `$PWD` from
+        // getcwd() at startup, so exporting a PWD it is not standing in is
+        // ignored; and getcwd() resolves symlinks while `temp_dir()` returns the
+        // logical path, so on macOS one side sees /var and the other
+        // /private/var and they slug differently.
+        let project = Sandbox::new("diff-project").home;
+
+        let out = Command::new("bash")
+            .arg("-c")
+            .arg(format!(
+                ". \"{}\" 2>/dev/null; printf '%s' \"$PWD\"; _cc_config_stamp",
+                script.display()
+            ))
+            .env("HOME", &sh.home)
+            .current_dir(&project)
+            .output()
+            .expect("bash should run");
+        assert!(out.status.success(), "the shell stamp should succeed");
+        let cwd = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert!(!cwd.is_empty(), "bash should report its cwd");
+
+        with_home(&rs.home, || config_drift::stamp(&cwd));
+
+        let shell_marker = sh.claude().join("cc-state").join(project_slug(&cwd));
+        let rust_marker = with_home(&rs.home, || config_drift::marker_path(&cwd));
+
+        assert_eq!(
+            shell_marker.strip_prefix(&sh.home).expect("prefix"),
+            rust_marker.strip_prefix(&rs.home).expect("prefix"),
+            "the marker path must be identical relative to HOME"
+        );
+        assert_eq!(
+            fs::read_to_string(&shell_marker).expect("shell marker"),
+            fs::read_to_string(&rust_marker).expect("rust marker"),
+            "both must write the same hash, with the same trailing newline"
+        );
     }
 }
 
@@ -510,8 +656,7 @@ mod bust_cache_tests {
     use super::*;
 
     fn with_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_env();
         let prev = std::env::var_os("HOME");
         std::env::set_var("HOME", home);
         let out = f();
