@@ -564,6 +564,283 @@ mod node_modules_reuse {
     }
 }
 
+/// `reuse_node_modules`: the imperative half (worktree.sh:174-197). Helpers
+/// are duplicated rather than shared with `node_modules_reuse` above,
+/// per-binary test compilation makes that the simpler option.
+mod node_modules_apply {
+    use super::*;
+
+    /// A source checkout with an installed node_modules and a lockfile. The
+    /// installed content is a lone top-level file rather than a package-like
+    /// subdirectory: a real `npm install`, if one happens to run during
+    /// `reuse_node_modules`, reconciles node_modules against package.json and
+    /// prunes any subdirectory it does not recognise as a declared
+    /// dependency, which would make an assertion on copied content depend on
+    /// whichever npm happens to be on the machine running this suite.
+    fn source(tag: &str, lock: &str) -> PathBuf {
+        let dir = scratch(tag);
+        fs::write(dir.join("package-lock.json"), lock).expect("write");
+        fs::create_dir_all(dir.join("node_modules")).expect("mkdir");
+        fs::write(dir.join("node_modules/marker.txt"), "source-content").expect("write");
+        dir
+    }
+
+    fn worktree(tag: &str, lock: Option<&str>) -> PathBuf {
+        let dir = scratch(tag);
+        fs::write(dir.join("package.json"), "{}").expect("write");
+        if let Some(lock) = lock {
+            fs::write(dir.join("package-lock.json"), lock).expect("write");
+        }
+        dir
+    }
+
+    /// Hides `npm` from `PATH` for the duration of `f`, so the best-effort
+    /// refresh `reuse_node_modules` runs after a successful copy
+    /// (worktree.sh:196) never actually executes. Real npm's behaviour, its
+    /// presence, its version, and network access are not what is under test
+    /// here; only the copy ladder is. `/bin:/usr/bin` still resolves `cp`,
+    /// which the ladder does need.
+    fn with_npm_hidden<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = lock_env();
+        let prev = std::env::var_os("PATH");
+        std::env::set_var("PATH", "/bin:/usr/bin");
+        let out = f();
+        match prev {
+            Some(v) => std::env::set_var("PATH", v),
+            None => std::env::remove_var("PATH"),
+        }
+        out
+    }
+
+    /// The load-bearing case: a worktree with no lockfile of its own gets one
+    /// seeded (worktree.sh:184), and only then does the copy proceed.
+    #[test]
+    fn a_missing_worktree_lockfile_is_seeded_and_reuse_proceeds() {
+        with_npm_hidden(|| {
+            let src = source("apply-seed-src", "{\"v\":1}");
+            let wt = worktree("apply-seed-wt", None);
+
+            let copied = worktree::reuse_node_modules(&wt, &src);
+
+            assert!(
+                copied,
+                "a freshly seeded lockfile matches the source by construction"
+            );
+            assert_eq!(
+                fs::read(wt.join("package-lock.json")).expect("lockfile should have been seeded"),
+                fs::read(src.join("package-lock.json")).expect("source lockfile")
+            );
+            assert_eq!(
+                fs::read(wt.join("node_modules/marker.txt")).expect("content should be copied"),
+                b"source-content"
+            );
+        });
+    }
+
+    /// Proves the destructive step happens only after the decision: a
+    /// mismatch refuses the reuse, and the worktree's existing node_modules
+    /// is never touched to get there.
+    #[test]
+    fn a_differing_lockfile_refuses_reuse_and_leaves_existing_node_modules_untouched() {
+        let src = source("apply-diff-src", "{\"v\":1}");
+        let wt = worktree("apply-diff-wt", Some("{\"v\":2}"));
+        fs::create_dir_all(wt.join("node_modules")).expect("mkdir");
+        fs::write(wt.join("node_modules/keep.txt"), "keep-me").expect("write");
+
+        let copied = worktree::reuse_node_modules(&wt, &src);
+
+        assert!(!copied);
+        assert_eq!(
+            fs::read(wt.join("node_modules/keep.txt")).expect("existing content should survive"),
+            b"keep-me"
+        );
+    }
+
+    /// An existing `node_modules` directory is discarded and replaced with a
+    /// copy of the source's.
+    #[test]
+    fn an_existing_node_modules_directory_is_replaced_with_the_sources_content() {
+        with_npm_hidden(|| {
+            let src = source("apply-replace-src", "{\"v\":1}");
+            let wt = worktree("apply-replace-wt", Some("{\"v\":1}"));
+            fs::create_dir_all(wt.join("node_modules")).expect("mkdir");
+            fs::write(wt.join("node_modules/stale.txt"), "stale").expect("write");
+
+            let copied = worktree::reuse_node_modules(&wt, &src);
+
+            assert!(copied);
+            assert!(
+                !wt.join("node_modules/stale.txt").exists(),
+                "the old tree should have been discarded, not merged into"
+            );
+            assert_eq!(
+                fs::read(wt.join("node_modules/marker.txt")).expect("content should match source"),
+                fs::read(src.join("node_modules/marker.txt")).expect("source content")
+            );
+        });
+    }
+
+    /// Shadows `PATH` with a `cp` shell script for the duration of `f`, and
+    /// restores it afterwards. Guarded by `lock_env` since `PATH` is
+    /// process-wide. `/bin:/usr/bin` stays reachable behind the stub, so a
+    /// script that `exec`s the real `/bin/cp` still works, and so `npm`
+    /// remains unreachable the way `with_npm_hidden` also arranges.
+    #[cfg(unix)]
+    fn with_stub_cp<T>(tag: &str, script_body: &str, f: impl FnOnce() -> T) -> T {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = lock_env();
+        let fakebin = scratch(tag);
+        let script = fakebin.join("cp");
+        fs::write(&script, script_body).expect("write fake cp");
+        let mut perms = fs::metadata(&script).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).expect("chmod");
+
+        let prev_path = std::env::var_os("PATH");
+        let mut fake_path = fakebin.into_os_string();
+        fake_path.push(":/bin:/usr/bin");
+        std::env::set_var("PATH", &fake_path);
+
+        let out = f();
+
+        match prev_path {
+            Some(v) => std::env::set_var("PATH", v),
+            None => std::env::remove_var("PATH"),
+        }
+        out
+    }
+
+    /// The shell repeats `rm -rf node_modules` before every retry, not just
+    /// once (worktree.sh:192-194), because a `cp` that fails partway can
+    /// still leave a partial destination behind (per `man cp`, `-R` "will
+    /// continue copying even if errors are detected"). The real `cp -c` on
+    /// this machine falls back to a plain copy internally on failure and so
+    /// essentially never fails outright, which means the fallback tiers are
+    /// unreachable with a real `cp`. This stub stands in: tier 1 always
+    /// fails after creating an empty destination, and tier 2 always succeeds
+    /// for real, so whether the content lands at the right depth depends
+    /// entirely on whether that empty destination was removed first. Left
+    /// uncleaned, `cp -R` copies INTO an existing directory rather than
+    /// replacing it, nesting the result one level too deep.
+    #[cfg(unix)]
+    #[test]
+    fn the_ladder_removes_a_failed_attempts_partial_result_before_retrying() {
+        let copied = with_stub_cp(
+            "apply-ladder-fakebin",
+            "#!/bin/sh\n\
+             if [ \"$1\" = \"-cR\" ]; then\n\
+             \tmkdir -p \"$3\"\n\
+             \texit 1\n\
+             elif [ \"$1\" = \"-R\" ] && [ \"$2\" = \"--reflink=auto\" ]; then\n\
+             \texec /bin/cp -R \"$3\" \"$4\"\n\
+             elif [ \"$1\" = \"-R\" ]; then\n\
+             \texec /bin/cp -R \"$2\" \"$3\"\n\
+             fi\n\
+             exit 1\n",
+            || {
+                let src = source("apply-ladder-src", "{\"v\":1}");
+                let wt = worktree("apply-ladder-wt", Some("{\"v\":1}"));
+                let copied = worktree::reuse_node_modules(&wt, &src);
+                assert_eq!(
+                    fs::read(wt.join("node_modules/marker.txt")).expect(
+                        "content should be directly under node_modules, not nested under a \
+                         leftover tier-1 directory"
+                    ),
+                    b"source-content"
+                );
+                copied
+            },
+        );
+
+        assert!(
+            copied,
+            "tier 2 should still succeed for real once tier 1's partial result is out of the way"
+        );
+    }
+
+    /// The shell's `[[ -e ]]`, not `[[ -d ]]` (worktree.sh:191): a plain FILE
+    /// named `node_modules` is removed too, not just a stray directory.
+    ///
+    /// A real `cp -cR` refuses to write over an existing file regardless of
+    /// whether `reuse_node_modules` cleared it first, and the ladder's own
+    /// between-retries cleanup then quietly repairs a missed precondition
+    /// check on the very next tier, so a real `cp` cannot tell these two
+    /// implementations apart. This stub can: it "succeeds" without copying
+    /// anything whenever the destination already exists, so the file
+    /// surviving into tier 1 shows up directly as a `node_modules` that is
+    /// still a plain file instead of the copied directory.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_named_node_modules_is_removed_and_replaced_by_the_copy() {
+        let (copied, is_dir, content) = with_stub_cp(
+            "apply-file-fakebin",
+            "#!/bin/sh\n\
+             if [ \"$1\" = \"-cR\" ]; then\n\
+             \tif [ -e \"$3\" ]; then\n\
+             \t\texit 0\n\
+             \tfi\n\
+             \texec /bin/cp -R \"$2\" \"$3\"\n\
+             fi\n\
+             exit 1\n",
+            || {
+                let src = source("apply-file-src", "{\"v\":1}");
+                let wt = worktree("apply-file-wt", Some("{\"v\":1}"));
+                fs::write(wt.join("node_modules"), "not a directory").expect("write");
+
+                let copied = worktree::reuse_node_modules(&wt, &src);
+                let dest = wt.join("node_modules");
+                (copied, dest.is_dir(), fs::read(dest.join("marker.txt")))
+            },
+        );
+
+        assert!(copied);
+        assert!(
+            is_dir,
+            "the file should have been removed before the copy ladder ever ran"
+        );
+        assert_eq!(
+            content.expect("content should match source"),
+            b"source-content"
+        );
+    }
+
+    /// A worktree with no `package.json` at all fails the very first
+    /// precondition. This is also the case that would break under a literal
+    /// seed-then-decide port: deciding first means this worktree is never
+    /// written to at all, matching the shell, which returns before ever
+    /// reaching its own seed line.
+    #[test]
+    fn missing_preconditions_return_false_and_change_nothing_on_disk() {
+        let src = source("apply-missing-src", "{\"v\":1}");
+        let wt = scratch("apply-missing-wt");
+
+        let copied = worktree::reuse_node_modules(&wt, &src);
+
+        assert!(!copied);
+        assert!(
+            !wt.join("package-lock.json").exists(),
+            "nothing should be seeded into a non-node worktree"
+        );
+        assert!(!wt.join("node_modules").exists());
+    }
+
+    #[test]
+    fn restore_stash_does_nothing_when_no_stash_was_applied() {
+        let main = scratch("apply-restore-stash-false");
+        fs::write(main.join("marker.txt"), "untouched").expect("write");
+
+        worktree::restore_stash(&main, false);
+
+        assert_eq!(
+            fs::read(main.join("marker.txt")).expect("marker should survive"),
+            b"untouched"
+        );
+        let entries: Vec<_> = fs::read_dir(&main).expect("read_dir").collect();
+        assert_eq!(entries.len(), 1, "nothing else should have been created");
+    }
+}
+
 mod worktree_lookup {
     use super::*;
 
