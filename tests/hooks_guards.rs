@@ -48,6 +48,129 @@ fn blocks(command: &str) -> bool {
     true
 }
 
+mod bg_await_guard {
+    use super::*;
+
+    /// Returns true when the guard emitted its nudge. It must never deny:
+    /// backgrounding a long job and awaiting its exit is legitimate, so a block
+    /// here would break a valid workflow.
+    fn warns(command: &str, background: bool) -> bool {
+        let payload = serde_json::json!({
+            "tool_input": { "command": command, "run_in_background": background }
+        })
+        .to_string();
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hook", "bg-await-guard"])
+            .env("HOOK_INPUT", payload)
+            .output()
+            .expect("playbook binary should spawn");
+        assert!(out.status.success(), "a guard must exit 0");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if stdout.trim().is_empty() {
+            return false;
+        }
+        assert!(
+            !stdout.contains(r#""permissionDecision""#),
+            "this guard warns, it must never deny: {stdout}"
+        );
+        true
+    }
+
+    #[test]
+    fn backgrounded_await_sensitive_commands_warn() {
+        for cmd in [
+            "npm install",
+            "rm -rf node_modules package-lock.json && npm install",
+            "pnpm install --frozen-lockfile",
+            "yarn install",
+            "bun install",
+            "npm ci",
+            "npm run build",
+            "tsc && tsc-alias",
+            "make build",
+            "cargo build --release",
+            "pip install -r requirements.txt",
+            "rm -rf node_modules",
+        ] {
+            assert!(warns(cmd, true), "should warn: {cmd}");
+        }
+    }
+
+    /// Backgrounding is the trigger, not the command. Without this the guard
+    /// could pass while warning on every install anywhere.
+    #[test]
+    fn the_same_commands_in_the_foreground_stay_quiet() {
+        for cmd in [
+            "npm install",
+            "npm run build",
+            "rm -rf node_modules && npm install",
+        ] {
+            assert!(!warns(cmd, false), "foreground must be quiet: {cmd}");
+        }
+    }
+
+    #[test]
+    fn long_running_watches_are_left_alone() {
+        for cmd in [
+            "npm run dev",
+            "vite --host",
+            "tail -f /var/log/app.log",
+            "node server.js",
+        ] {
+            assert!(
+                !warns(cmd, true),
+                "backgrounding a watch is the correct use: {cmd}"
+            );
+        }
+    }
+
+    /// `tsc` and `make` only count at a command start, so an argument that
+    /// happens to spell one does not trip the guard.
+    #[test]
+    fn build_tools_only_match_at_a_command_start() {
+        assert!(!warns("echo tsc", true));
+        assert!(!warns("grep make Makefile", true));
+        assert!(warns("a; tsc", true), "after a separator it is a command");
+    }
+
+    #[test]
+    fn the_env_switch_disables_the_guard() {
+        let payload = serde_json::json!({
+            "tool_input": { "command": "npm install", "run_in_background": true }
+        })
+        .to_string();
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hook", "bg-await-guard"])
+            .env("HOOK_INPUT", payload)
+            .env("BG_AWAIT_GUARD", "0")
+            .output()
+            .expect("spawn");
+        assert!(String::from_utf8_lossy(&out.stdout).trim().is_empty());
+    }
+
+    #[test]
+    fn malformed_payloads_exit_silently() {
+        for raw in [
+            "",
+            "{",
+            "null",
+            r#"{"tool_input":{}}"#,
+            r#"{"tool_input":{"command":"npm install"}}"#,
+        ] {
+            let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+                .args(["hook", "bg-await-guard"])
+                .env("HOOK_INPUT", raw)
+                .output()
+                .expect("spawn");
+            assert!(out.status.success(), "must exit 0 on: {raw:?}");
+            assert!(
+                String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+                "must stay silent on: {raw:?}"
+            );
+        }
+    }
+}
+
 mod no_dash_guard {
     use super::*;
 
