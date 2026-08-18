@@ -8,7 +8,7 @@
 //! `shell/` except `*.test.sh` (its own comment at :172-178 calls this
 //! "every file/dir in shell/"), which also carries installer-only scripts
 //! this binary now supersedes: `ensure-deps.sh`, `merge-settings.py`,
-//! `gen-shared-settings.py`, `check-shared-settings.py`, and
+//! `gen-shared-settings.py` and
 //! `setup-local.sh` itself. Those aren't part of what the launcher sources
 //! at runtime (only `shell/bash/cc.sh`, `shell/zsh/cc.zsh` and
 //! `shell/shared/*.sh` are), so copying them into a user's `~/.claude/shell`
