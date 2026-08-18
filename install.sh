@@ -113,25 +113,12 @@ done
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v tar  >/dev/null 2>&1 || die "tar is required"
 
-# Resolve which tarball to install from.
-#
-# Telling "this repo published no release" apart from "I could not ask" is the
-# whole job here. The first is a real state (a fresh fork), and main is a
-# reasonable answer to it. The second means we do not know what the latest
-# release is, and quietly installing main instead silently swaps a tagged
-# release for whatever is on the branch, which is where in-progress work lands.
-# That is the more dangerous default, not the safer one.
-#
-# The old code could not tell them apart. `curl -f ... || true` discards the
-# exit code and -f empties the body on any HTTP error, so a 403, a 404 and a
-# dead network all arrived as the same empty string and all three fell through
-# to main while reporting "no GitHub release found" (true for exactly one of
-# them). The 403 is not hypothetical: the unauthenticated GitHub API allows 60
-# requests per hour per IP, which a corporate NAT or a CI runner reaches easily.
-#
-# So drop -f, keep the status code, and branch on it. Verified 2026-08-18:
-# a repo with releases answers 200, one without answers 404, and a transport
-# failure trips the `if !` instead of returning a code at all.
+# Only a 404 ("this repo published no release") may fall back to main. Any
+# other failure means we do not know what the latest release is, and quietly
+# installing main would swap a tagged release for in-progress branch work.
+# Hence no -f, which would empty the body and collapse 403, 404 and a dead
+# network into one indistinguishable empty string. The 403 is routine: the
+# unauthenticated API allows 60 requests per hour per IP.
 resolve_tarball_url() {
     if [ -n "$REF" ]; then
         printf 'https://codeload.github.com/%s/tar.gz/%s\n' "$PLUGIN_REPO" "$REF"
@@ -270,14 +257,10 @@ fi
 
 # --- summary ---------------------------------------------------------------
 
-# Prune install backup dirs older than the newest 5, matching what
-# setup-local.sh already does for its own setup-* dirs.
-#
-# Re-running install.sh is the documented upgrade path, and every re-run past
-# the first copies the entire previous tree into backups/install-<stamp>/.
-# Nothing removed them, so the directory grew without bound: measured
-# 2026-08-18, nine installs left eight backups totalling 13M, roughly 1.6M
-# each, and each one holds a full copy of src/, tests/ and docs/ as well.
+# Re-running install is the documented upgrade path and each run past the first
+# copies the whole previous tree here, so unpruned this grows without bound:
+# nine installs measured 13M. Keeps the newest 5, as setup-local.sh does for
+# its own setup-* dirs.
 find "$CLAUDE_HOME/backups" -maxdepth 1 -type d -name 'install-*' \
     2>/dev/null | sort -r | tail -n +6 \
     | while IFS= read -r _old; do [ -n "$_old" ] && rm -rf "$_old"; done \

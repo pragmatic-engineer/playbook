@@ -181,21 +181,13 @@ guardrails_section() {
   ' "$file"
 }
 
-# check_yaml_scalars <file> <body>: reject a frontmatter value that real YAML
-# would refuse to parse.
+# check_yaml_scalars <file> <body>: reject a value real YAML would refuse.
 #
-# Every other rule here reads values with frontmatter_value, which does
-# "${line#*:}" and is therefore far more forgiving than a YAML parser. That
-# gap let four agents ship with a description holding an unquoted colon-space
-# ("... the orchestrator's prompt: a single named lens ..."), which YAML reads
-# as a nested mapping and rejects outright. `claude plugin validate --strict`
-# failed on all four while this validator reported "all valid", in 0.9.0 and
-# 0.9.1 both. Nothing noticed, because the only harness running the strict
-# validator is shell/plugin-e2e.sh and no workflow invokes it.
-#
-# A colon is fine (`/playbook:deep-review`); a colon followed by a SPACE is
-# what starts a mapping. Quoting the value makes it a scalar again, so only
-# unquoted values are flagged.
+# Every other rule reads values with frontmatter_value, which does "${line#*:}"
+# and so is far more forgiving than a YAML parser. That gap let four agents ship
+# in 0.9.0 and 0.9.1 with a description YAML rejects outright, while this
+# validator reported "all valid". A bare colon is fine (/playbook:deep-review);
+# colon-space is what starts a mapping, and quoting makes it a scalar again.
 check_yaml_scalars() {
   local file="$1" body="$2" line key value
   while IFS= read -r line; do

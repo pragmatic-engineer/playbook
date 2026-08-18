@@ -4,15 +4,10 @@
 #
 # install-resolve.test.sh: hermetic tests for install.sh's resolve_tarball_url.
 #
-# The function picks what the installer downloads, and its risky branch is the
-# failure one: if it cannot reach the GitHub release API it must NOT quietly
-# install the main branch, because that swaps a tagged release for whatever
-# in-progress work is on the branch. Only a genuine 404 ("this repo published
-# no release") may fall back to main.
-#
-# Hermetic via a stub `curl` placed first on PATH, so the real function runs
-# unmodified against chosen HTTP status codes. No production test seam exists
-# for this and none is added: the stub exercises the shipped code path.
+# The risky branch is failure: an unreachable release API must NOT quietly
+# install main, which would swap a tagged release for in-progress branch work.
+# Only a genuine 404 may fall back. A stub curl first on PATH drives the status
+# codes, so the shipped function runs unmodified and needs no production seam.
 #
 # Run:  bash shell/install-resolve.test.sh
 # Exit: 0 if all scenarios pass, non-zero otherwise.
