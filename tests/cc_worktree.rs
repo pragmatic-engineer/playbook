@@ -709,3 +709,92 @@ mod recovery_plan {
         assert_eq!(plan_for_target(&s), WorktreePlan::RecoverDetached);
     }
 }
+
+mod folder_naming {
+    use playbook::cc::worktree::{branch_leaf, folder_for_branch, jira_key, sanitize_branch};
+
+    /// A carriage return survives a paste from a Windows-authored ticket or a
+    /// CI variable, and git then rejects a branch that looks identical to the
+    /// one asked for.
+    #[test]
+    fn sanitize_strips_carriage_returns_and_whitespace() {
+        assert_eq!(sanitize_branch("  feat/x  "), "feat/x");
+        assert_eq!(sanitize_branch("feat/x\r"), "feat/x");
+        assert_eq!(sanitize_branch("\r\n feat/x \r\n"), "feat/x");
+        assert_eq!(sanitize_branch("feat/x"), "feat/x");
+    }
+
+    #[test]
+    fn a_jira_key_is_found_anywhere_and_uppercased() {
+        assert_eq!(jira_key("feature/PROJ-123-add"), Some("PROJ-123".into()));
+        assert_eq!(jira_key("PROJ-123"), Some("PROJ-123".into()));
+        assert_eq!(
+            jira_key("fix/abc-45"),
+            Some("ABC-45".into()),
+            "case insensitive"
+        );
+        assert_eq!(jira_key("x/AB-1/y"), Some("AB-1".into()));
+    }
+
+    #[test]
+    fn the_first_key_wins_when_several_appear() {
+        assert_eq!(jira_key("PROJ-1-then-OTHER-2"), Some("PROJ-1".into()));
+    }
+
+    /// A single leading letter is not a project key, so `a-1` must not be
+    /// treated as one and collapse unrelated branches into one folder.
+    #[test]
+    fn near_misses_are_not_keys() {
+        for branch in [
+            "a-1",
+            "main",
+            "feature/no-digits-here",
+            "PROJ-",
+            "-123",
+            "PROJ123",
+        ] {
+            assert_eq!(jira_key(branch), None, "{branch} should not be a key");
+        }
+    }
+
+    #[test]
+    fn the_leaf_is_everything_after_the_last_slash() {
+        assert_eq!(branch_leaf("feat/deep/name"), "name");
+        assert_eq!(branch_leaf("flat"), "flat");
+        assert_eq!(branch_leaf("trailing/"), "");
+    }
+
+    /// One ticket, one worktree: two branches carrying the same key share a
+    /// folder, which is the behaviour the naming exists for.
+    #[test]
+    fn branches_sharing_a_key_share_a_folder() {
+        assert_eq!(folder_for_branch("feature/PROJ-1/spike", None), "PROJ-1");
+        assert_eq!(folder_for_branch("fix/PROJ-1", None), "PROJ-1");
+    }
+
+    #[test]
+    fn a_keyless_branch_uses_its_leaf() {
+        assert_eq!(folder_for_branch("feature/add-thing", None), "add-thing");
+        assert_eq!(folder_for_branch("hotfix", None), "hotfix");
+    }
+
+    /// When the key's folder already holds a DIFFERENT branch, falling back to
+    /// the leaf avoids two branches fighting over one directory.
+    #[test]
+    fn an_occupied_key_folder_falls_back_to_the_leaf() {
+        assert_eq!(
+            folder_for_branch("feature/PROJ-1/second", Some("feature/PROJ-1/first")),
+            "second"
+        );
+    }
+
+    /// Occupied by the SAME branch is not a conflict, it is a resume, so the
+    /// key folder is kept rather than a second one created alongside it.
+    #[test]
+    fn a_folder_occupied_by_the_same_branch_keeps_the_key() {
+        assert_eq!(
+            folder_for_branch("feature/PROJ-1", Some("feature/PROJ-1")),
+            "PROJ-1"
+        );
+    }
+}
