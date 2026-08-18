@@ -9,6 +9,7 @@
 
 pub mod bust_cache;
 pub mod retention;
+pub mod sessions;
 
 use std::path::PathBuf;
 

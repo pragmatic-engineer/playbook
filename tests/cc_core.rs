@@ -198,6 +198,115 @@ mod retention_tests {
     }
 }
 
+mod sessions_tests {
+    use super::*;
+    use playbook::cc::sessions;
+
+    const UUID_A: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const UUID_B: &str = "11111111-2222-3333-4444-555555555555";
+
+    /// Transcripts one whole second apart, since the shell ranks and
+    /// deduplicates on whole-second mtimes.
+    fn seed(sb: &Sandbox, entries: &[(&str, &str)]) -> PathBuf {
+        let dir = sb.mkdir("projects/proj");
+        for (sid, title) in entries {
+            fs::write(
+                dir.join(format!("{sid}.jsonl")),
+                format!("{{\"type\":\"summary\",\"customTitle\":\"{title}\"}}\n"),
+            )
+            .expect("write");
+            std::thread::sleep(Duration::from_millis(1100));
+        }
+        dir
+    }
+
+    #[test]
+    fn finds_a_session_by_its_custom_title() {
+        let sb = Sandbox::new("find");
+        let dir = seed(&sb, &[(UUID_A, "oldsession"), (UUID_B, "newsession")]);
+        assert_eq!(
+            sessions::find_by_title(&dir, "oldsession").as_deref(),
+            Some(UUID_A)
+        );
+        assert_eq!(
+            sessions::find_by_title(&dir, "newsession").as_deref(),
+            Some(UUID_B)
+        );
+    }
+
+    #[test]
+    fn a_lookup_miss_returns_nothing() {
+        let sb = Sandbox::new("miss");
+        let dir = seed(&sb, &[(UUID_A, "oldsession")]);
+        assert!(sessions::find_by_title(&dir, "nosuchtitle").is_none());
+        assert!(sessions::find_by_title(Path::new("/nope"), "x").is_none());
+    }
+
+    #[test]
+    fn enumeration_is_newest_first() {
+        let sb = Sandbox::new("order");
+        let dir = seed(&sb, &[(UUID_A, "oldsession"), (UUID_B, "newsession")]);
+        let listed = sessions::enumerate(&dir);
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, UUID_B, "the newest transcript comes first");
+        assert_eq!(listed[0].title, "newsession");
+    }
+
+    /// Pins the `sort -rnu -k1,1` quirk. `-u` deduplicates on the sort key, so
+    /// two sessions written in the same second collapse to one and the other
+    /// vanishes from the listing. Ported for parity, not because it is right.
+    #[test]
+    fn same_second_transcripts_collapse_to_one() {
+        let sb = Sandbox::new("dedup");
+        let dir = sb.mkdir("projects/proj");
+        for sid in [UUID_A, UUID_B] {
+            fs::write(
+                dir.join(format!("{sid}.jsonl")),
+                "{\"customTitle\":\"x\"}\n",
+            )
+            .expect("write");
+        }
+        assert_eq!(
+            sessions::enumerate(&dir).len(),
+            1,
+            "the shell drops all but one per whole-second mtime"
+        );
+    }
+
+    #[test]
+    fn non_uuid_transcripts_are_skipped() {
+        let sb = Sandbox::new("uuid");
+        let dir = seed(&sb, &[(UUID_A, "real")]);
+        fs::write(dir.join("memory.jsonl"), "{\"customTitle\":\"skip\"}\n").expect("write");
+        let listed = sessions::enumerate(&dir);
+        assert_eq!(listed.len(), 1, "only UUID-named files are sessions");
+        assert_eq!(listed[0].id, UUID_A);
+    }
+
+    #[test]
+    fn the_uuid_check_matches_the_shell_regex() {
+        assert!(sessions::is_uuid(UUID_A));
+        assert!(!sessions::is_uuid("memory"));
+        assert!(!sessions::is_uuid(""));
+        assert!(!sessions::is_uuid("AAAAAAAA-bbbb-cccc-dddd-eeeeeeeeeeee"));
+        assert!(!sessions::is_uuid("aaaaaaaa-bbbb-cccc-dddd"));
+    }
+
+    #[test]
+    fn a_transcript_without_a_title_renders_a_placeholder() {
+        let sb = Sandbox::new("untitled");
+        let dir = sb.mkdir("projects/proj");
+        fs::write(dir.join(format!("{UUID_A}.jsonl")), "{\"type\":\"x\"}\n").expect("write");
+        assert_eq!(sessions::enumerate(&dir)[0].title, "(no title)");
+    }
+
+    #[test]
+    fn a_missing_project_directory_reports_no_sessions() {
+        let out = sessions::render_list(Path::new("/nope"), "/tmp/myproject");
+        assert_eq!(out, "no sessions for myproject\n");
+    }
+}
+
 mod bust_cache_tests {
     use super::*;
 

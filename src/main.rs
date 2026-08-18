@@ -19,6 +19,11 @@ fn main() {
         Command::Cc { sub } => match sub {
             Some(CcCommand::Prune) => cc::retention::prune(&cc::logical_cwd()),
             Some(CcCommand::BustCache) => cc::bust_cache::bust(),
+            Some(CcCommand::List) => {
+                let cwd = cc::logical_cwd();
+                let dir = cc::sessions::project_dir(&cc::claude_dir(), &cwd);
+                print!("{}", cc::sessions::render_list(&dir, &cwd));
+            }
             // The rest of the launcher lands in later Work Units; until then
             // they are no-ops so the shell dispatcher stays authoritative.
             _ => {}
