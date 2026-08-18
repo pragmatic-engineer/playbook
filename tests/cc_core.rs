@@ -10,6 +10,7 @@
 use playbook::cc::{bust_cache, project_slug, retention};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -195,6 +196,204 @@ mod retention_tests {
             Some(v) => std::env::set_var("PWD", v),
             None => std::env::remove_var("PWD"),
         }
+    }
+}
+
+mod clean_resume_tests {
+    use super::*;
+    use playbook::cc::clean_resume::{self, CleanError};
+
+    const OLD_SID: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+    /// One transcript covering every branch: kept types, each of the five
+    /// override commands, a non-override slash command, a permission entry,
+    /// and lines with no sessionId at all.
+    fn transcript() -> String {
+        [
+            r#"{"type":"user","sessionId":"old","content":"hello"}"#,
+            r#"{"type":"system","sessionId":"old","content":"<command-name>/model</command-name> sonnet"}"#,
+            r#"{"type":"system","sessionId":"old","content":"<command-name>/effort</command-name> high"}"#,
+            r#"{"type":"system","sessionId":"old","content":"<command-name>/clear</command-name>"}"#,
+            r#"{"type":"assistant","sessionId":"old","content":"hi"}"#,
+            r#"{"type":"system","sessionId":"old","content":"<command-name>/output-style</command-name> x"}"#,
+            r#"{"type":"system","sessionId":"old","content":"<command-name>/style</command-name> y"}"#,
+            r#"{"type":"system","sessionId":"old","content":"<command-name>/config</command-name> z"}"#,
+            r#"{"type":"system","sessionId":"old","content":"permission mode changed"}"#,
+            r#"{"type":"summary","customTitle":"proj"}"#,
+            r#"{"type":"user","content":"no session id field"}"#,
+        ]
+        .join("\n")
+            + "\n"
+    }
+
+    fn seed(sb: &Sandbox) -> PathBuf {
+        let dir = sb.mkdir("projects/proj");
+        fs::write(dir.join(format!("{OLD_SID}.jsonl")), transcript()).expect("write");
+        let sidecar = dir.join(OLD_SID);
+        fs::create_dir_all(&sidecar).expect("mkdir");
+        fs::write(sidecar.join("tool.txt"), "sidecar").expect("write");
+        dir
+    }
+
+    fn lines_of(path: &Path) -> Vec<serde_json::Value> {
+        fs::read_to_string(path)
+            .expect("read")
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("valid json line"))
+            .collect()
+    }
+
+    #[test]
+    fn strips_every_override_command_and_keeps_the_rest() {
+        let sb = Sandbox::new("clean");
+        let dir = seed(&sb);
+        let prepared = clean_resume::prepare(&dir, OLD_SID).expect("prepare");
+
+        assert_eq!(prepared.stripped, 5, "the five override commands go");
+        assert_eq!(prepared.kept, 6);
+
+        let out = lines_of(&dir.join(format!("{}.jsonl", prepared.new_sid)));
+        let contents: Vec<String> = out
+            .iter()
+            .map(|v| {
+                v.get("content")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
+
+        // Kept on purpose: other slash commands, and permission entries, which
+        // the user should have to re-grant rather than have replayed silently.
+        assert!(contents.iter().any(|c| c.contains("/clear")));
+        assert!(contents.iter().any(|c| c.contains("permission mode")));
+        for banned in ["/model", "/effort", "/config", "/output-style", "/style"] {
+            assert!(
+                !contents.iter().any(|c| c.contains(banned)),
+                "{banned} must be stripped"
+            );
+        }
+    }
+
+    #[test]
+    fn rewrites_session_ids_without_inventing_the_field() {
+        let sb = Sandbox::new("sid");
+        let dir = seed(&sb);
+        let prepared = clean_resume::prepare(&dir, OLD_SID).expect("prepare");
+        let out = lines_of(&dir.join(format!("{}.jsonl", prepared.new_sid)));
+
+        let with_field: Vec<&serde_json::Value> = out
+            .iter()
+            .filter(|v| v.get("sessionId").is_some())
+            .collect();
+        assert!(!with_field.is_empty());
+        for v in with_field {
+            assert_eq!(v["sessionId"].as_str(), Some(prepared.new_sid.as_str()));
+        }
+        // A line that never had sessionId must not gain one.
+        assert!(out
+            .iter()
+            .any(|v| v.get("sessionId").is_none() && v.get("customTitle").is_some()));
+    }
+
+    #[test]
+    fn the_original_transcript_and_sidecar_are_untouched() {
+        let sb = Sandbox::new("original");
+        let dir = seed(&sb);
+        let before = fs::read_to_string(dir.join(format!("{OLD_SID}.jsonl"))).expect("read");
+        let prepared = clean_resume::prepare(&dir, OLD_SID).expect("prepare");
+
+        let after = fs::read_to_string(dir.join(format!("{OLD_SID}.jsonl"))).expect("read");
+        assert_eq!(before, after, "the original must never be rewritten");
+
+        // Copied, not symlinked, so harness writes cannot leak back.
+        let copied = dir.join(&prepared.new_sid).join("tool.txt");
+        assert!(copied.is_file(), "the sidecar is copied to the new session");
+        assert!(
+            !copied
+                .symlink_metadata()
+                .expect("stat")
+                .file_type()
+                .is_symlink(),
+            "a symlink would leak new-session writes into the original"
+        );
+    }
+
+    #[test]
+    fn a_missing_transcript_is_an_error_not_a_panic() {
+        let sb = Sandbox::new("missing");
+        let dir = sb.mkdir("projects/proj");
+        match clean_resume::prepare(&dir, "nope") {
+            Err(CleanError::TranscriptMissing(_)) => {}
+            other => panic!("expected TranscriptMissing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn each_new_session_id_is_distinct_and_uuid_shaped() {
+        let sb = Sandbox::new("uuid");
+        let dir = seed(&sb);
+        let a = clean_resume::prepare(&dir, OLD_SID)
+            .expect("prepare")
+            .new_sid;
+        let b = clean_resume::prepare(&dir, OLD_SID)
+            .expect("prepare")
+            .new_sid;
+        assert_ne!(a, b, "two clones must not collide");
+        assert!(
+            playbook::cc::sessions::is_uuid(&a),
+            "{a} is not uuid shaped"
+        );
+        assert!(playbook::cc::sessions::is_uuid(&b));
+    }
+
+    /// Differential against the real `jq` pipeline the shell used. Skipped when
+    /// jq is absent, which is the state WU-14 leaves the machine in.
+    #[test]
+    fn matches_the_jq_pipeline_line_for_line() {
+        if Command::new("jq").arg("--version").output().is_err() {
+            eprintln!("SKIP: jq not installed");
+            return;
+        }
+        let sb = Sandbox::new("jq-diff");
+        let dir = seed(&sb);
+        let src = dir.join(format!("{OLD_SID}.jsonl"));
+
+        let pattern = r"<command-name>/(model|effort|config|output-style|style)</command-name>";
+        let filtered = Command::new("jq")
+            .args(["-c", "--arg", "pat", pattern])
+            .arg(r#"select(.type != "system" or ((.content // "") | test($pat) | not))"#)
+            .arg(&src)
+            .output()
+            .expect("jq should run");
+        assert!(filtered.status.success());
+        let shell_lines: Vec<serde_json::Value> = String::from_utf8_lossy(&filtered.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("jq emits valid json"))
+            .collect();
+
+        let prepared = clean_resume::prepare(&dir, OLD_SID).expect("prepare");
+        let mut rust_lines = lines_of(&dir.join(format!("{}.jsonl", prepared.new_sid)));
+
+        // The two mint different session ids by design, so normalise that field
+        // and compare everything else.
+        let normalise = |v: &mut serde_json::Value| {
+            if let Some(obj) = v.as_object_mut() {
+                if obj.contains_key("sessionId") {
+                    obj.insert("sessionId".into(), serde_json::Value::String("N".into()));
+                }
+            }
+        };
+        let mut shell_lines = shell_lines;
+        shell_lines.iter_mut().for_each(normalise);
+        rust_lines.iter_mut().for_each(normalise);
+
+        assert_eq!(
+            shell_lines, rust_lines,
+            "the port must keep exactly the lines jq keeps"
+        );
     }
 }
 

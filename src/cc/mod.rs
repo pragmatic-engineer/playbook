@@ -8,6 +8,7 @@
 //! directory is missing is worse than a stale cache.
 
 pub mod bust_cache;
+pub mod clean_resume;
 pub mod retention;
 pub mod sessions;
 
