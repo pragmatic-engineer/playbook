@@ -599,3 +599,113 @@ mod worktree_lookup {
         assert!(worktree::worktree_for_branch("", "main").is_none());
     }
 }
+
+mod recovery_plan {
+    use playbook::cc::worktree::{plan_for_target, TargetState, WorktreePlan};
+
+    fn occupied<'a>(current: &'a str, on_remote: bool) -> TargetState<'a> {
+        TargetState {
+            target_exists: true,
+            registered: true,
+            current_branch: Some(current),
+            wanted_branch: "wanted",
+            current_branch_on_remote: on_remote,
+            existing_for_wanted: None,
+        }
+    }
+
+    #[test]
+    fn a_target_already_on_the_wanted_branch_is_reused() {
+        let s = TargetState {
+            current_branch: Some("wanted"),
+            ..occupied("wanted", true)
+        };
+        assert_eq!(plan_for_target(&s), WorktreePlan::ReuseTarget);
+    }
+
+    /// The guard that protects unfinished work. Recycling removes the worktree
+    /// AND deletes its branch, so a branch still on the remote must stop the
+    /// operation. This is the pairing the blueprint asks to pin.
+    #[test]
+    fn an_occupying_branch_still_on_the_remote_is_refused_not_recycled() {
+        let s = occupied("other-feature", true);
+        assert_eq!(
+            plan_for_target(&s),
+            WorktreePlan::RefuseOccupied("other-feature".to_string()),
+            "a branch that still exists remotely must never be destroyed"
+        );
+    }
+
+    #[test]
+    fn an_occupying_branch_gone_from_the_remote_is_recycled() {
+        let s = occupied("merged-feature", false);
+        assert_eq!(
+            plan_for_target(&s),
+            WorktreePlan::RecycleTarget("merged-feature".to_string())
+        );
+    }
+
+    #[test]
+    fn a_detached_registered_worktree_is_recovered() {
+        let s = TargetState {
+            current_branch: None,
+            ..occupied("x", false)
+        };
+        assert_eq!(plan_for_target(&s), WorktreePlan::RecoverDetached);
+    }
+
+    /// A directory git does not know about is not a worktree, so recovering it
+    /// makes no sense; it is cleaned and rebuilt.
+    #[test]
+    fn an_unregistered_directory_is_treated_as_an_orphan() {
+        let s = TargetState {
+            current_branch: None,
+            registered: false,
+            ..occupied("x", false)
+        };
+        assert_eq!(plan_for_target(&s), WorktreePlan::CleanOrphanAndCreate);
+    }
+
+    #[test]
+    fn an_absent_target_creates_or_reuses_an_existing_worktree() {
+        let base = TargetState {
+            target_exists: false,
+            registered: false,
+            current_branch: None,
+            wanted_branch: "wanted",
+            current_branch_on_remote: false,
+            existing_for_wanted: None,
+        };
+        assert_eq!(plan_for_target(&base), WorktreePlan::Create);
+
+        let reuse = TargetState {
+            existing_for_wanted: Some(("/repo/.worktrees/elsewhere", true)),
+            ..base
+        };
+        assert_eq!(
+            plan_for_target(&reuse),
+            WorktreePlan::ReuseExisting("/repo/.worktrees/elsewhere".to_string())
+        );
+
+        // Registered but the directory is gone: prune the stale entry first,
+        // since git refuses to add a worktree for a branch it thinks is taken.
+        let stale = TargetState {
+            existing_for_wanted: Some(("/repo/.worktrees/gone", false)),
+            ..base
+        };
+        assert_eq!(plan_for_target(&stale), WorktreePlan::PruneStaleAndCreate);
+    }
+
+    /// Detachment is checked before the branch comparison, so a detached
+    /// worktree is recovered rather than mistaken for a mismatch and recycled.
+    #[test]
+    fn detachment_is_decided_before_any_branch_comparison() {
+        let s = TargetState {
+            current_branch: None,
+            registered: true,
+            current_branch_on_remote: true,
+            ..occupied("ignored", true)
+        };
+        assert_eq!(plan_for_target(&s), WorktreePlan::RecoverDetached);
+    }
+}
