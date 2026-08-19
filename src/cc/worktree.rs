@@ -210,6 +210,73 @@ pub fn base_branch(repo_root: &Path) -> String {
     format!("origin/{BASE_BRANCH_FALLBACK}")
 }
 
+/// `_wt_main`'s own fallback (worktree.sh:272) when `origin/HEAD` is
+/// unpublished. Named separately from [`BASE_BRANCH_FALLBACK`] on purpose:
+/// same string today, but it belongs to a different function with a
+/// different contract (see [`main_base_ref`]'s doc), and this constant
+/// exists so that stays true even if the two values are ever tuned apart.
+const MAIN_BASE_REF_FALLBACK: &str = "master";
+
+/// The bare base branch name `_wt_main` computes directly (worktree.sh:271-272),
+/// e.g. `main`, never `origin/main`.
+///
+/// THIS IS A SECOND, DIFFERENTLY-SHAPED NOTION OF "THE BASE BRANCH," and the
+/// difference is deliberate, not an oversight to reconcile. [`base_branch`]
+/// (used by `_wt_make`, worktree.sh:72-88) returns a remote-tracking ref
+/// PREFIXED with `origin/`, and falls back through four candidate names
+/// (`main`, `master`, `trunk`, `develop`) before settling on `origin/master`.
+/// This function returns the BARE name with no prefix, checks only
+/// `origin/HEAD`, and on that being unpublished falls straight to a bare
+/// `master` with no candidate loop at all. The two shapes are consumed
+/// differently too: `_wt_main` builds `"$REMOTE/$BASE_REF"` itself from this
+/// bare value (worktree.sh:274, and again by `_wt_maybe_rebase`), whereas
+/// `base_branch`'s result is already a complete ref. Do not unify the two or
+/// route this through `base_branch` plus a prefix strip: that would also
+/// wrongly pull in the four-candidate fallback this one never had.
+pub fn main_base_ref(repo_root: &Path) -> String {
+    git_stdout(
+        repo_root,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    )
+    .map(|s| s.trim().trim_start_matches("origin/").to_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| MAIN_BASE_REF_FALLBACK.to_string())
+}
+
+/// Fetches `base_ref` and `branch` from `remote` before `_wt_main` decides
+/// how to source the worktree (worktree.sh:274-275).
+///
+/// Falls back to fetching `base_ref` alone when the combined fetch fails,
+/// since a brand-new branch that does not exist on the remote yet fails the
+/// combined form, but the base ref still needs fetching regardless. The
+/// whole call tolerates failure (the shell's trailing `|| true`): an
+/// unreachable remote just means the rest of the run works with whatever
+/// refs already exist locally. Shares [`REBASE_TIMEOUT`] rather than the 5s
+/// `GIT_TIMEOUT` other calls in this file use, since this is a network fetch
+/// like `rebase_onto`'s, not a local read.
+pub fn initial_fetch(repo_root: &Path, remote: &str, base_ref: &str, branch: &str) {
+    let mut combined = Command::new("git");
+    combined
+        .arg("-C")
+        .arg(repo_root)
+        .args(["fetch", remote, "--quiet", base_ref, branch]);
+    if matches!(run_with_timeout(&mut combined, REBASE_TIMEOUT), Some(o) if o.status.success()) {
+        return;
+    }
+
+    let mut base_only = Command::new("git");
+    base_only
+        .arg("-C")
+        .arg(repo_root)
+        .args(["fetch", remote, "--quiet", base_ref]);
+    let _ = run_with_timeout(&mut base_only, REBASE_TIMEOUT);
+}
+
 /// Everything the staleness decision needs, gathered by the caller so the
 /// decision itself stays pure and exhaustively testable.
 pub struct WorktreeStatus<'a> {
@@ -257,6 +324,14 @@ pub fn cleanup_due(marker_mtime_epoch: Option<i64>, now_epoch: i64) -> bool {
 /// (worktree.sh:203): `/tmp/.git-wt-cleanup-<hash>`.
 const CLEANUP_MARKER_DIR: &str = "/tmp";
 const CLEANUP_MARKER_PREFIX: &str = ".git-wt-cleanup-";
+
+/// Directory and filename prefix for the per-repo fetch-cache marker
+/// (worktree.sh:270): `/tmp/.git-fetch-<hash>`. This slice only computes
+/// where the marker lives; touching it belongs to the background
+/// housekeeping block (`touch "$FETCH_CACHE"`, worktree.sh:373), a later
+/// slice's job.
+const FETCH_CACHE_MARKER_DIR: &str = "/tmp";
+const FETCH_CACHE_MARKER_PREFIX: &str = ".git-fetch-";
 
 /// Ports `_wt_cleanup_stale` (worktree.sh:201-242): the outer entry point.
 ///
@@ -354,8 +429,23 @@ pub fn cleanup_stale_with(
 /// run entirely, per this file's "when in doubt, keep" rule for anything
 /// that decides what gets deleted.
 fn cleanup_marker_path(repo_root: &Path) -> Option<PathBuf> {
+    hashed_marker_path(CLEANUP_MARKER_DIR, CLEANUP_MARKER_PREFIX, repo_root)
+}
+
+/// `<dir>/<prefix><hash-of-repo_root>`, the shape both the cleanup marker
+/// above and the fetch-cache marker below share. Factored out so the two
+/// stay byte-for-byte consistent rather than each hand-rolling its own
+/// `format!`; behaviour of the existing cleanup marker is unchanged, only
+/// where its path construction lives.
+fn hashed_marker_path(dir: &str, prefix: &str, repo_root: &Path) -> Option<PathBuf> {
     let hash = wt_hash(&repo_root.to_string_lossy())?;
-    Some(Path::new(CLEANUP_MARKER_DIR).join(format!("{CLEANUP_MARKER_PREFIX}{hash}")))
+    Some(Path::new(dir).join(format!("{prefix}{hash}")))
+}
+
+/// The fetch-cache marker path `_wt_main` computes at worktree.sh:270. See
+/// [`FETCH_CACHE_MARKER_DIR`]'s doc for why nothing reads or writes it yet.
+pub fn fetch_cache_marker_path(repo_root: &Path) -> Option<PathBuf> {
+    hashed_marker_path(FETCH_CACHE_MARKER_DIR, FETCH_CACHE_MARKER_PREFIX, repo_root)
 }
 
 /// The shell's exact `_wt_hash` body (worktree.sh:69). `<<<` is a bash/zsh
@@ -435,6 +525,18 @@ fn worktree_paths(porcelain: &str) -> Vec<String> {
 /// its own, no matter what this function passes it.
 pub fn cleanup_candidates(porcelain: &str) -> Vec<String> {
     worktree_paths(porcelain).into_iter().skip(1).collect()
+}
+
+/// The main worktree's path: the FIRST entry from `git worktree list
+/// --porcelain` (worktree.sh:258's `awk '$1=="worktree" && !f{print $2;
+/// f=1}'`), what `_wt_main` `cd`'s into before anything else.
+///
+/// The exact counterpart of [`cleanup_candidates`]: one keeps the first
+/// entry, the other drops it, and both are built on the same
+/// [`worktree_paths`] so a change to how paths are parsed cannot put the
+/// pair out of sync with each other.
+pub fn main_worktree(porcelain: &str) -> Option<String> {
+    worktree_paths(porcelain).into_iter().next()
 }
 
 /// `git branch --merged <base>` (worktree.sh:213), with the shell's
@@ -687,6 +789,56 @@ fn command_exists(name: &str) -> bool {
     let mut command = Command::new(name);
     command.arg("--version");
     run_with_timeout(&mut command, NPM_INSTALL_TIMEOUT).is_some()
+}
+
+/// Whether the main worktree is dirty enough to need an auto-stash, the
+/// gate at worktree.sh:278.
+///
+/// Two checks, not one: `git diff-index --quiet HEAD --` catches changes
+/// against HEAD (staged or unstaged), and `git diff --quiet` catches changes
+/// against the index. Either alone would still flag a plain unstaged edit,
+/// but only the first sees a staged-but-uncommitted change whose working
+/// tree content happens to already match the index, so collapsing to one
+/// check would miss that case.
+pub fn needs_stash(repo_root: &Path) -> bool {
+    !git_ok(repo_root, &["diff-index", "--quiet", "HEAD", "--"])
+        || !git_ok(repo_root, &["diff", "--quiet"])
+}
+
+/// The message `_wt_main` tags its auto-stash with (worktree.sh:279), so
+/// `restore_stash`'s pop targets exactly the entry this pushed.
+const AUTO_STASH_MESSAGE: &str = "worktree: auto-stash";
+
+/// Auto-stashes a dirty main worktree, worktree.sh:279's
+/// `git stash push -m "worktree: auto-stash" --quiet`. Returns whether a
+/// stash was actually created.
+///
+/// `git stash push` exits 0 even when there is nothing to stash ("No local
+/// changes to save" is not an error to git), so a bare exit-code check would
+/// wrongly report success on a clean tree. That never happens in the shell,
+/// which only calls this after [`needs_stash`] has already confirmed the
+/// tree is dirty, but this function is a public, independently callable
+/// port, and its return value is exactly what tells a caller whether a later
+/// `git stash pop` (see [`restore_stash`]) is popping a stash this call
+/// pushed versus an unrelated one that predates it. So this compares the
+/// stash count before and after, and only reports success when it actually
+/// grew.
+pub fn auto_stash(repo_root: &Path) -> bool {
+    let before = stash_count(repo_root);
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .args(["stash", "push", "-m", AUTO_STASH_MESSAGE, "--quiet"]);
+    let succeeded =
+        matches!(run_with_timeout(&mut command, GIT_TIMEOUT), Some(o) if o.status.success());
+    succeeded && stash_count(repo_root) > before
+}
+
+fn stash_count(repo_root: &Path) -> usize {
+    git_stdout(repo_root, &["stash", "list"])
+        .map(|out| out.lines().filter(|line| !line.is_empty()).count())
+        .unwrap_or(0)
 }
 
 /// Ports `_wt_restore_stash` (worktree.sh:248-251): pops the auto-stash taken
@@ -1020,6 +1172,17 @@ const MIN_JIRA_PREFIX_LEN: usize = 2;
 /// looks identical to the one requested.
 pub fn sanitize_branch(raw: &str) -> String {
     raw.replace('\r', "").trim().to_string()
+}
+
+/// Whether `branch` is a syntactically valid git branch name:
+/// `git check-ref-format --branch <branch>` (worktree.sh:263).
+///
+/// Delegates to git rather than hand-rolling the ref-name grammar (no
+/// leading `-`, no `..`, no trailing `/`, no embedded whitespace, and more):
+/// git owns those rules, and a re-implementation here would just be a second
+/// copy of them to keep in sync.
+pub fn valid_branch_name(repo_root: &Path, branch: &str) -> bool {
+    git_ok(repo_root, &["check-ref-format", "--branch", branch])
 }
 
 /// The first JIRA-style key in the branch, uppercased.
