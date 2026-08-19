@@ -4,7 +4,8 @@
 use clap::Parser;
 use playbook::common::payload::Payload;
 use playbook::{
-    cc, hooks, manifest, settings, CcCommand, Cli, Command, ManifestCommand, SettingsCommand,
+    agents, cc, hooks, manifest, settings, AgentsCommand, CcCommand, Cli, Command, ManifestCommand,
+    SettingsCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -85,6 +86,28 @@ fn main() {
                     Ok(msg) => println!("{msg}"),
                     Err(err) => {
                         eprintln!("check-manifest: {err}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        },
+        Command::Agents { sub } => match sub {
+            // Exit 1, not 2: the shell original used it and CI keys on it,
+            // matching the manifest and settings checks' convention above.
+            AgentsCommand::Check { agents_dir } => {
+                let dir = match agents_dir.or_else(agents::check::default_dir) {
+                    Some(dir) => dir,
+                    None => {
+                        eprintln!(
+                            "check-agents: not inside a git repository and no AGENTS_DIR argument given"
+                        );
+                        std::process::exit(1);
+                    }
+                };
+                match agents::check::check(&dir) {
+                    Ok(msg) => println!("{msg}"),
+                    Err(err) => {
+                        eprintln!("check-agents: {err}");
                         std::process::exit(1);
                     }
                 }
