@@ -84,3 +84,23 @@ jobs:
         run: |
           cargo install cargo-audit --locked
           cargo audit
+
+  # release.yml builds five targets, but nothing else ever compiled for
+  # Windows, so `std::os::unix` reached the lib unnoticed and every Windows
+  # release leg failed on the first tag ever pushed. This lane guards exactly
+  # what release.yml builds (lib and bin, not tests) on the one platform the
+  # other lanes cannot cover.
+  #
+  # `cargo check`, not `cargo build`: type-checking catches the whole
+  # cfg-gating class without paying for a link, and linking is what
+  # release.yml is for. Tests are excluded on purpose; several still use
+  # unix-only APIs and making them portable is separate work.
+  windows-check:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: cargo check (lib and bin)
+        run: cargo check --bins --lib
