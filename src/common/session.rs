@@ -6,7 +6,6 @@
 
 use crate::common::payload::Payload;
 use std::fs;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 /// Return the `session_id` from the hook payload, or empty if absent.
@@ -47,10 +46,19 @@ fn session_dir_in(root: &Path, payload: &Payload) -> String {
     }
     let dir = root.join(&sid);
     if !dir.is_dir() {
-        let _ = fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&dir);
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        // Session dirs hold per-session state, so they are owner-only. The
+        // mode bits are unix-only; on Windows the directory inherits the
+        // parent ACL instead, and the runtime root already sits under the
+        // user's own profile. Gated rather than dropped so the guarantee is
+        // not silently weakened on the platform that still has it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        let _ = builder.create(&dir);
     }
     dir.to_string_lossy().into_owned()
 }
@@ -94,6 +102,7 @@ fn split_dir_base(p: &str) -> (&str, &str) {
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -146,11 +155,15 @@ mod tests {
         let expected = root.join("testsid");
         assert_eq!(got, expected.to_string_lossy());
         assert!(expected.is_dir());
-        let mode = fs::metadata(&expected).unwrap().permissions().mode() & 0o777;
-        assert_eq!(
-            mode, 0o700,
-            "session dir should be created with mode 0700, got {mode:o}"
-        );
+        // The 0700 guarantee only exists where mode bits do.
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(&expected).unwrap().permissions().mode() & 0o777;
+            assert_eq!(
+                mode, 0o700,
+                "session dir should be created with mode 0700, got {mode:o}"
+            );
+        }
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -224,6 +237,9 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// Unix only: `std::os::unix::fs::symlink` has no portable equivalent,
+    /// and Windows symlink creation needs elevation or developer mode.
+    #[cfg(unix)]
     #[test]
     fn abspath_leaf_symlink_stays_unresolved() {
         // Arrange: a symlink whose target is a real file in the same
