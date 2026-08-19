@@ -13,6 +13,7 @@ pub mod config_drift;
 pub mod retention;
 pub mod sessions;
 pub mod worktree;
+pub mod worktree_run;
 
 use std::path::PathBuf;
 

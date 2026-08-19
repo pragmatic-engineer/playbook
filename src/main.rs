@@ -24,6 +24,11 @@ fn main() {
                 let dir = cc::sessions::project_dir(&cc::claude_dir(), &cwd);
                 print!("{}", cc::sessions::render_list(&dir, &cwd));
             }
+            Some(CcCommand::Worktree { branch, env_base }) => {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let code = cc::worktree_run::run(&cwd, &branch, env_base.as_deref());
+                std::process::exit(code);
+            }
             // The rest of the launcher lands in later Work Units; until then
             // they are no-ops so the shell dispatcher stays authoritative.
             _ => {}
