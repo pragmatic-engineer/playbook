@@ -3,11 +3,14 @@
 
 use clap::Parser;
 use playbook::common::payload::Payload;
+use playbook::init::run::{InitPaths, StepStatus};
+use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, hooks, manifest, settings, AgentsCommand, CcCommand, Cli, Command, ManifestCommand,
-    SettingsCommand,
+    agents, cc, common, hooks, init, manifest, settings, AgentsCommand, CcCommand, Cli, Command,
+    ManifestCommand, SettingsCommand,
 };
 use std::io::{IsTerminal, Read};
+use std::path::PathBuf;
 
 fn main() {
     let cli = Cli::parse();
@@ -41,11 +44,39 @@ fn main() {
         // points. Do not read this arm as work in flight; see the blueprint's
         // third 2026-08-17 amendment.
         Command::Statusline => {}
-        // Installer/repair flow is wired by WU-11, together with retiring
-        // `hooks/hooks.json` and regenerating the seed. Those three are one
-        // atomic switchover: any two without the third leaves users with no
-        // functional hooks, or hooks pointing at a binary that is not installed.
-        Command::Init => {}
+        // Retiring `hooks/hooks.json` and regenerating the seed into
+        // binary-invoked form are the other two thirds of WU-11's atomic
+        // switchover and stay untouched here; see `src/init/mod.rs`'s doc
+        // comment for why running this wiring alone is still safe.
+        Command::Init => {
+            let home = common::home_dir();
+            let claude_home = home.join(".claude");
+            let self_root = std::env::var_os("CLAUDE_PLUGIN_ROOT")
+                .map(PathBuf::from)
+                .filter(|p| !p.as_os_str().is_empty());
+            let shell_kind = std::env::var("SHELL")
+                .ok()
+                .and_then(|shell| ShellKind::detect(&shell));
+
+            let outcome = init::run::run(&InitPaths {
+                self_root,
+                claude_home,
+                home,
+                shell_kind,
+            });
+            for step in &outcome.steps {
+                println!("{}", step.render());
+            }
+            if !outcome.ok() {
+                let failed = outcome
+                    .steps
+                    .iter()
+                    .filter(|s| s.status == StepStatus::Failed)
+                    .count();
+                eprintln!("init: {failed} step(s) failed; see above");
+                std::process::exit(1);
+            }
+        }
         Command::Settings { sub } => match sub {
             SettingsCommand::Gen { src, perms } => match settings::gen::generate(&src, &perms) {
                 Ok(output) => print!("{output}"),
