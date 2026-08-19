@@ -2344,3 +2344,439 @@ mod rebase_execution {
         });
     }
 }
+
+/// Tests for the PREAMBLE of `_wt_main` (worktree.sh:255-296): main-worktree
+/// selection, branch-name validation, the bare base-ref quirk, the initial
+/// best-effort fetch, and the auto-stash gate. The target-state dispatch
+/// (worktree.sh:299-355), the detach/attach step, the rebase call, and the
+/// background housekeeping block (worktree.sh:372-386) are later slices and
+/// are not exercised here.
+mod main_preamble {
+    use super::*;
+
+    /// Disables the machine's global/system git config for the duration of
+    /// `f`. Duplicated rather than shared, per this file's convention that
+    /// each module owns its harness.
+    fn with_isolated_git_env<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = lock_env();
+        let prev_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+        let prev_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+        let out = f();
+        match prev_global {
+            Some(v) => std::env::set_var("GIT_CONFIG_GLOBAL", v),
+            None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
+        }
+        match prev_system {
+            Some(v) => std::env::set_var("GIT_CONFIG_SYSTEM", v),
+            None => std::env::remove_var("GIT_CONFIG_SYSTEM"),
+        }
+        out
+    }
+
+    fn git(repo_path: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .output()
+            .expect("git command should spawn")
+    }
+
+    fn git_ok(repo_path: &Path, args: &[&str]) {
+        let out = git(repo_path, args);
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn git_stdout(repo_path: &Path, args: &[&str]) -> String {
+        let output = git(repo_path, args);
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn git_ref_exists(repo_path: &Path, reference: &str) -> bool {
+        git(repo_path, &["show-ref", "--verify", "--quiet", reference])
+            .status
+            .success()
+    }
+
+    /// A repo with an explicit initial branch name, unlike the file-level
+    /// `repo()` helper: fixtures below care about the remote's default
+    /// branch name and must not be at the mercy of this machine's
+    /// `init.defaultBranch`.
+    fn empty_repo(tag: &str, branch: &str) -> PathBuf {
+        let dir = scratch(tag);
+        for args in [
+            vec!["init", "-q", "-b", branch],
+            vec!["config", "user.email", "t@t"],
+            vec!["config", "user.name", "T"],
+        ] {
+            git_ok(&dir, &args);
+        }
+        dir
+    }
+
+    fn commit(repo_path: &Path, file: &str, contents: &str, message: &str) {
+        fs::write(repo_path.join(file), contents).expect("write");
+        git_ok(repo_path, &["add", "."]);
+        git_ok(repo_path, &["commit", "-q", "-m", message]);
+    }
+
+    fn committed_repo(tag: &str) -> PathBuf {
+        let dir = empty_repo(tag, "main");
+        commit(&dir, "f.txt", "seed\n", "seed");
+        dir
+    }
+
+    fn stash_list(repo_path: &Path) -> Vec<String> {
+        git_stdout(repo_path, &["stash", "list"])
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Pure string parsing, no git needed: this is the same input shape
+    /// `cleanup_candidate_paths` (in the parent scope) uses.
+    mod main_worktree_selection {
+        use super::*;
+
+        const PORCELAIN: &str = "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\
+                                 \nworktree /repo/.worktrees/a\nHEAD def\n\
+                                 branch refs/heads/a\n\
+                                 \nworktree /repo/.worktrees/b\nHEAD ghi\n\
+                                 branch refs/heads/b\n";
+
+        #[test]
+        fn returns_the_first_entry() {
+            assert_eq!(
+                worktree::main_worktree(PORCELAIN),
+                Some("/repo".to_string())
+            );
+        }
+
+        #[test]
+        fn empty_input_yields_none() {
+            assert_eq!(worktree::main_worktree(""), None);
+        }
+
+        #[test]
+        fn garbage_input_yields_none() {
+            assert_eq!(
+                worktree::main_worktree("not porcelain output\njust some text\n"),
+                None
+            );
+        }
+
+        /// The pairing that matters: prepending `main_worktree`'s answer to
+        /// `cleanup_candidates`'s answer must reconstruct the full listed
+        /// order, with no overlap between the two.
+        #[test]
+        fn is_the_exact_complement_of_cleanup_candidates() {
+            let main = worktree::main_worktree(PORCELAIN).expect("first entry");
+            let candidates = worktree::cleanup_candidates(PORCELAIN);
+            assert!(
+                !candidates.contains(&main),
+                "the main worktree must never also be a cleanup candidate"
+            );
+            let mut rebuilt = vec![main];
+            rebuilt.extend(candidates);
+            assert_eq!(
+                rebuilt,
+                vec![
+                    "/repo".to_string(),
+                    "/repo/.worktrees/a".to_string(),
+                    "/repo/.worktrees/b".to_string(),
+                ],
+                "prepending main_worktree to cleanup_candidates must \
+                 reconstruct the full listed order"
+            );
+        }
+    }
+
+    mod branch_name_validation {
+        use super::*;
+
+        #[test]
+        fn accepts_a_normal_branch_name() {
+            with_isolated_git_env(|| {
+                let dir = repo("valid-branch");
+                assert!(worktree::valid_branch_name(&dir, "feature/thing"));
+            });
+        }
+
+        #[test]
+        fn rejects_a_leading_dash() {
+            with_isolated_git_env(|| {
+                let dir = repo("dash-branch");
+                assert!(!worktree::valid_branch_name(&dir, "-foo"));
+            });
+        }
+
+        #[test]
+        fn rejects_a_double_dot() {
+            with_isolated_git_env(|| {
+                let dir = repo("dotdot-branch");
+                assert!(!worktree::valid_branch_name(&dir, "foo..bar"));
+            });
+        }
+
+        #[test]
+        fn rejects_a_trailing_slash() {
+            with_isolated_git_env(|| {
+                let dir = repo("trailing-slash-branch");
+                assert!(!worktree::valid_branch_name(&dir, "foo/"));
+            });
+        }
+
+        #[test]
+        fn rejects_a_space() {
+            with_isolated_git_env(|| {
+                let dir = repo("space-branch");
+                assert!(!worktree::valid_branch_name(&dir, "foo bar"));
+            });
+        }
+
+        #[test]
+        fn rejects_an_empty_name() {
+            with_isolated_git_env(|| {
+                let dir = repo("empty-branch");
+                assert!(!worktree::valid_branch_name(&dir, ""));
+            });
+        }
+    }
+
+    mod main_base_ref_detection {
+        use super::*;
+
+        /// A remote-tracking ref, created without a network by pointing a
+        /// local ref at a commit; `origin/HEAD` is what a real clone gets
+        /// from the server. The same shape as `base_branch_detection`'s
+        /// `with_remote_refs`, duplicated per this file's convention that
+        /// each module owns its own harness.
+        fn with_remote_refs(tag: &str, publish_head: Option<&str>, branches: &[&str]) -> PathBuf {
+            let dir = repo(tag);
+            fs::write(dir.join("f.txt"), "x").expect("write");
+            git_ok(&dir, &["add", "f.txt"]);
+            git_ok(&dir, &["commit", "-qm", "init"]);
+            let sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
+            for branch in branches {
+                git_ok(
+                    &dir,
+                    &["update-ref", &format!("refs/remotes/origin/{branch}"), &sha],
+                );
+            }
+            if let Some(head) = publish_head {
+                git_ok(
+                    &dir,
+                    &[
+                        "symbolic-ref",
+                        "refs/remotes/origin/HEAD",
+                        &format!("refs/remotes/origin/{head}"),
+                    ],
+                );
+            }
+            dir
+        }
+
+        #[test]
+        fn published_head_returns_the_bare_name_not_a_prefixed_ref() {
+            with_isolated_git_env(|| {
+                let dir = with_remote_refs("main-base-published", Some("main"), &["main"]);
+                let base = worktree::main_base_ref(&dir);
+                assert_eq!(base, "main");
+                assert_ne!(
+                    base, "origin/main",
+                    "main_base_ref must return the bare name; the \
+                     origin/-prefixed shape belongs to base_branch, not this \
+                     function"
+                );
+            });
+        }
+
+        #[test]
+        fn without_a_published_head_it_falls_back_to_a_bare_master() {
+            with_isolated_git_env(|| {
+                let dir = repo("main-base-no-remote");
+                let base = worktree::main_base_ref(&dir);
+                assert_eq!(base, "master");
+                assert_ne!(base, "origin/master");
+            });
+        }
+
+        /// The quirk that most distinguishes this function from
+        /// `base_branch`: `base_branch` would try `main`, `master`, `trunk`,
+        /// `develop` in turn and find `main`. `main_base_ref` has no
+        /// candidate loop at all, so an unpublished `origin/HEAD` always
+        /// falls straight to a bare `master`, even though `origin/main`
+        /// exists right here.
+        #[test]
+        fn ignores_candidate_branches_and_falls_straight_to_master_when_unpublished() {
+            with_isolated_git_env(|| {
+                let dir = with_remote_refs("main-base-candidates", None, &["main", "develop"]);
+                assert_eq!(worktree::main_base_ref(&dir), "master");
+            });
+        }
+    }
+
+    mod dirty_check {
+        use super::*;
+
+        #[test]
+        fn a_clean_repo_needs_no_stash() {
+            with_isolated_git_env(|| {
+                let dir = committed_repo("dirty-clean");
+                assert!(!worktree::needs_stash(&dir));
+            });
+        }
+
+        #[test]
+        fn an_unstaged_edit_needs_a_stash() {
+            with_isolated_git_env(|| {
+                let dir = committed_repo("dirty-unstaged");
+                fs::write(dir.join("f.txt"), "changed\n").expect("write");
+                assert!(worktree::needs_stash(&dir));
+            });
+        }
+
+        /// `git diff --quiet` alone (index vs worktree) would miss this: the
+        /// worktree content already matches what was staged, so only
+        /// `git diff-index --quiet HEAD --` (staged vs HEAD) sees the change.
+        #[test]
+        fn a_staged_but_uncommitted_change_needs_a_stash() {
+            with_isolated_git_env(|| {
+                let dir = committed_repo("dirty-staged");
+                fs::write(dir.join("f.txt"), "changed\n").expect("write");
+                git_ok(&dir, &["add", "f.txt"]);
+                assert!(worktree::needs_stash(&dir));
+            });
+        }
+    }
+
+    mod auto_stash_behavior {
+        use super::*;
+
+        #[test]
+        fn nothing_to_stash_returns_false() {
+            with_isolated_git_env(|| {
+                let dir = committed_repo("stash-clean");
+                assert!(!worktree::auto_stash(&dir));
+                assert!(
+                    stash_list(&dir).is_empty(),
+                    "a no-op stash push must not leave a stash entry behind"
+                );
+            });
+        }
+
+        #[test]
+        fn a_dirty_tree_is_actually_stashed() {
+            with_isolated_git_env(|| {
+                let dir = committed_repo("stash-dirty");
+                fs::write(dir.join("f.txt"), "changed\n").expect("write");
+
+                let stashed = worktree::auto_stash(&dir);
+
+                assert!(stashed);
+                let stash = stash_list(&dir);
+                assert_eq!(stash.len(), 1, "exactly one stash entry: {stash:?}");
+                assert_eq!(
+                    fs::read_to_string(dir.join("f.txt")).expect("read"),
+                    "seed\n",
+                    "the working tree must be clean again once the change is stashed"
+                );
+            });
+        }
+    }
+
+    mod initial_fetch_fallback {
+        use super::*;
+
+        /// A bare repo standing in for `origin`. `git fetch` against a local
+        /// filesystem path needs no network, unlike a real remote.
+        fn bare_remote(tag: &str) -> PathBuf {
+            let dir = scratch(tag);
+            git_ok(&dir, &["init", "-q", "--bare", "-b", "main"]);
+            dir.canonicalize().expect("bare remote should resolve")
+        }
+
+        /// Pushes `main`, and `branch` too when it differs, to `remote` from
+        /// a throwaway pusher repo that is discarded afterward. The repo
+        /// under test never pushes itself, so it starts with no
+        /// `refs/remotes/origin/*` at all, matching a fresh `git remote add`.
+        fn seed_remote_branch(remote: &Path, tag: &str, branch: &str) {
+            let pusher = empty_repo(&format!("{tag}-pusher"), "main");
+            git_ok(
+                &pusher,
+                &[
+                    "remote",
+                    "add",
+                    "origin",
+                    remote.to_str().expect("utf8 path"),
+                ],
+            );
+            commit(&pusher, "f.txt", "seed\n", "seed");
+            git_ok(&pusher, &["push", "-q", "origin", "main"]);
+            if branch != "main" {
+                git_ok(&pusher, &["checkout", "-q", "-b", branch]);
+                commit(&pusher, "g.txt", "feature\n", "feature");
+                git_ok(&pusher, &["push", "-q", "origin", branch]);
+            }
+        }
+
+        #[test]
+        fn falls_back_and_still_fetches_the_base_ref_when_the_branch_is_absent_on_the_remote() {
+            with_isolated_git_env(|| {
+                let remote = bare_remote("fetch-fallback-remote");
+                seed_remote_branch(&remote, "fetch-fallback", "main");
+                let dir = empty_repo("fetch-fallback", "main");
+                git_ok(
+                    &dir,
+                    &[
+                        "remote",
+                        "add",
+                        "origin",
+                        remote.to_str().expect("utf8 path"),
+                    ],
+                );
+                assert!(
+                    !git_ref_exists(&dir, "refs/remotes/origin/main"),
+                    "fixture must start with no prior fetch"
+                );
+
+                worktree::initial_fetch(&dir, "origin", "main", "does-not-exist-upstream");
+
+                assert!(
+                    git_ref_exists(&dir, "refs/remotes/origin/main"),
+                    "the base ref must still end up fetched even though the \
+                     branch does not exist on the remote"
+                );
+            });
+        }
+
+        #[test]
+        fn a_branch_that_exists_on_the_remote_is_fetched_alongside_the_base_ref() {
+            with_isolated_git_env(|| {
+                let remote = bare_remote("fetch-both-remote");
+                seed_remote_branch(&remote, "fetch-both", "feature-y");
+                let dir = empty_repo("fetch-both", "main");
+                git_ok(
+                    &dir,
+                    &[
+                        "remote",
+                        "add",
+                        "origin",
+                        remote.to_str().expect("utf8 path"),
+                    ],
+                );
+
+                worktree::initial_fetch(&dir, "origin", "main", "feature-y");
+
+                assert!(git_ref_exists(&dir, "refs/remotes/origin/main"));
+                assert!(git_ref_exists(&dir, "refs/remotes/origin/feature-y"));
+            });
+        }
+    }
+}
