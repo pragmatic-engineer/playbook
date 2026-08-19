@@ -9,12 +9,19 @@
 //!   first, and leaves the four guards on their `.sh` paths until WU-13.
 //! - `shim` installs the bash and zsh launcher shim idempotently.
 //! - `statusline` places `statusline.sh` at the path `settings.json` names.
+//! - `run` composes the four above into `Command::Init`'s dispatch arm.
 //!
-//! Nothing here is reachable from the CLI yet: `src/main.rs`'s `Command::Init`
-//! is still a stub, and WU-11 wires it together with retiring
-//! `hooks/hooks.json` and regenerating the seed, as one atomic switchover.
+//! `hooks/hooks.json` is deliberately NOT deleted and `settings.shared.json`
+//! is deliberately NOT regenerated into binary-invoked form here: those two
+//! moves, together with this one, are one atomic switchover that also needs
+//! a published release to hand a binary to `install.sh`, which does not
+//! exist yet. Landing this wiring alone is safe because `hooks/hooks.json`
+//! still delivers the 11 functional hooks exactly as before; `wire` only
+//! changes what a user's own `settings.json` looks like after they choose to
+//! run `playbook init`.
 
 pub mod merge;
+pub mod run;
 pub mod shim;
 pub mod statusline;
 pub mod wire;
