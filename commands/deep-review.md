@@ -202,7 +202,7 @@ Instruct each to:
 
 **A silent reviewer is NOT a reviewer with zero findings.** This is the single most important rule in this command (`playbook:delegating-subagents`).
 
-The `reviewer` agent is structurally read-only (Read, Grep, Glob, Skill), so it cannot write its findings to a file. `shell/check-agents.sh` forbids `Write` and `Bash` for that tier by design, and granting them would fail CI, so the return value is the only channel there is. In measured use, Agent-tool return values have failed outright. Treat a swarm as likely to lose lenses.
+The `reviewer` agent is structurally read-only (Read, Grep, Glob, Skill), so it cannot write its findings to a file. `playbook agents check` forbids `Write` and `Bash` for that tier by design, and granting them would fail CI, so the return value is the only channel there is. In measured use, Agent-tool return values have failed outright. Treat a swarm as likely to lose lenses.
 
 Track three outcomes per focus and carry them into Step 4's verdict:
 

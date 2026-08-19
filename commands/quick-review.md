@@ -171,7 +171,7 @@ Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`); the moment it returns its
 
 ## Step 3: Review report contract
 
-**The `reviewer` agent has only one channel, and it is unreliable. Plan for that** (`playbook:delegating-subagents`). It is structurally read-only (Read, Grep, Glob, Skill), so it cannot write its report to a file: `shell/check-agents.sh` forbids `Write` and `Bash` for that tier by design, and granting them would fail CI. Its return value is therefore the only route, and Agent-tool return values have failed outright in measured use.
+**The `reviewer` agent has only one channel, and it is unreliable. Plan for that** (`playbook:delegating-subagents`). It is structurally read-only (Read, Grep, Glob, Skill), so it cannot write its report to a file: `playbook agents check` forbids `Write` and `Bash` for that tier by design, and granting them would fail CI. Its return value is therefore the only route, and Agent-tool return values have failed outright in measured use.
 
 So:
 

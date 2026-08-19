@@ -54,7 +54,7 @@ Grant the smallest `tools` allowlist the role needs, and say so in the `descript
 - **`Structurally read-only`**: no `Edit`, no `Write`, no `NotebookEdit`, and no `Bash`. The agent reads and greps, nothing else. `reviewer` is the example.
 - **`read-only`**: no `Edit`, `Write`, or `NotebookEdit`, but `Bash` is allowed for non-mutating shell like `git log` or `find`. `auditor` is the example: it audits a whole repo, so it needs shell, and it still never writes.
 
-Pick the strict wording whenever the role genuinely needs no shell. `shell/check-agents.sh` reads the tier off the `description` and checks the `tools` list against it, so the claim and the allowlist cannot drift apart.
+Pick the strict wording whenever the role genuinely needs no shell. `playbook agents check` reads the tier off the `description` and checks the `tools` list against it, so the claim and the allowlist cannot drift apart.
 
 A **write-capable** agent claims neither tier and holds `Edit`, `Write`, and `Bash` because writing code is its job. `implementer` is the example: `/playbook:implement` spawns it for the RED, GREEN, and REFACTOR steps and the `--no-tdd` path. The lint does not forbid write tools, it only forbids them when a read-only claim contradicts them, so a write-capable agent passes as long as its description does not say read-only.
 
@@ -83,7 +83,7 @@ The trade-off in one line each: parametrizing keeps behaviour consistent and the
 
 ## The check
 
-`shell/check-agents.sh` validates every `agents/*.md` and runs as part of `shell-ci` (`.github/workflows/shell-ci.yml`). The template lives under `docs/authoring/`, so it isn't scanned at all. The validator still skips a file named `_TEMPLATE.md` inside `agents/`, which keeps a stray copy from failing the lint.
+`playbook agents check` validates every `agents/*.md` and runs as part of `rust-ci` (`.github/workflows/rust-ci.yml`), which builds the binary the check now lives in. The template lives under `docs/authoring/`, so it isn't scanned at all. The validator still skips a file named `_TEMPLATE.md` inside `agents/`, which keeps a stray copy from failing the lint.
 
 It enforces, per file:
 
@@ -99,7 +99,7 @@ It enforces, per file:
 Run it before committing a new or edited agent:
 
 ```bash
-bash shell/check-agents.sh
+playbook agents check
 ```
 
 It reports every offending file at once rather than stopping at the first one.
