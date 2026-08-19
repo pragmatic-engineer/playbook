@@ -49,7 +49,7 @@ another report was never seen at all. The reports were on disk the whole time.
 ## First check whether the agent CAN write a file
 
 File delivery needs `Write` or `Bash`. Several agents in this repo have neither,
-on purpose: `shell/check-agents.sh` enforces
+on purpose: `playbook agents check` enforces
 `FORBIDDEN_TOOLS_STRICT="Edit Write NotebookEdit Bash"` for structurally
 read-only agents, so granting `Write` to a reviewer fails CI. That property is
 deliberate (ADR 0003): a code reviewer must not be able to modify the code it

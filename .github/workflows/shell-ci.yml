@@ -6,7 +6,6 @@
 #   - ShellCheck static analysis on all tracked .sh files (Linux only, lint once)
 #   - Bash syntax (bash -n) on all tracked .sh files
 #   - Zsh syntax (zsh -n) on all tracked .zsh files
-#   - Agent definitions in agents/*.md (shell/check-agents.sh)
 #   - Every behavioral suite discovered via `git ls-files '*.test.sh'`
 
 name: shell-ci
@@ -85,12 +84,6 @@ jobs:
         # the last tracked .py goes away, which WU-14 does on purpose.
         if: runner.os == 'Linux'
         run: git ls-files '*.py' | xargs -r pipx run ruff check
-
-      - name: Validate agent definitions
-        # The settings seed and tracked-file manifest validators both moved
-        # to rust-ci with their ports into the binary; each needs a build,
-        # which this lane does not do.
-        run: bash shell/check-agents.sh
 
       - name: Run behavioral test suites
         # Discover every suite so a new *.test.sh is picked up automatically.

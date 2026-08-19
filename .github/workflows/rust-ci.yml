@@ -76,6 +76,10 @@ jobs:
       - name: Validate the tracked-file manifest
         run: ./target/debug/playbook manifest check .
 
+      # Moved out of shell-ci for the same reason as the two validators above.
+      - name: Validate agent definitions
+        run: ./target/debug/playbook agents check
+
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked
