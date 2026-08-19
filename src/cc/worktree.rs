@@ -3,10 +3,11 @@
 
 //! Ports the decision and path logic of `shell/shared/worktree.sh`.
 //!
-//! First slice of WU-17. The git-driving half (worktree creation, upstream
-//! setup, stale cleanup, rebase recovery) and the orchestration follow
-//! separately, because 496 lines of shell across 86 git invocations does not
-//! fit one reviewable change.
+//! Final slice of WU-17: every decision and git-driving action `_wt_main`
+//! takes is now ported. What is left outside this file is CLI wiring:
+//! argument parsing, message and exit-code presentation, how [`housekeep`]
+//! gets backgrounded, and the `--ai-resolve` spawn path (see their own doc
+//! comments for why each is deliberately deferred rather than guessed at).
 
 use crate::common::run_with_timeout;
 use std::ffi::OsString;
@@ -1417,6 +1418,46 @@ pub fn recover_detached_head(worktree: &Path, current_branch: &str, wanted_branc
     true
 }
 
+/// Ports `_wt_maybe_rebase` (worktree.sh:404-459), wiring the already-ported
+/// decision and actions: [`should_rebase`] gates whether to run at all,
+/// [`rebase_onto`] does the fetch-and-rebase, and a conflict is always
+/// aborted here.
+///
+/// THE AI-RESOLVE PATH IS DEFERRED, not ported: worktree.sh:432-446 spawns
+/// `claude -p`, reads a prompt answer from stdin, and decides via
+/// [`conflict_action`] (already ported) whether to spawn it. None of that
+/// belongs in a pure git-driving function, so on `RebaseOutcome::Conflicted`
+/// this always takes the shell's NON-AI branch (worktree.sh:447-450): abort
+/// via [`abort_rebase`]. A caller that wants `--ai-resolve` support offers it
+/// BEFORE calling this, then decides for itself whether to still call this
+/// (skip it, since the conflict is already resolved) or fall through to the
+/// same abort this does. Either way, a conflict is never left both
+/// unresolved and unaborted.
+///
+/// Returns `None` when [`should_rebase`] declined (worktree.sh's several
+/// early `return 0`s, worktree.sh:415, :421, :422), which also means the
+/// detached-HEAD safety net (worktree.sh:453-458) never runs: the shell only
+/// reaches it after an actual rebase attempt. `Some(UpToDate)` is the same
+/// story one gate later, worktree.sh:425's own early `return 0`; only
+/// `Some(Rebased)` and `Some(Conflicted)` reach that safety net here, exactly
+/// as they do in the shell.
+pub fn maybe_rebase(ctx: &RebaseContext, worktree: &Path, remote: &str) -> Option<RebaseOutcome> {
+    if !should_rebase(ctx) {
+        return None;
+    }
+    let outcome = rebase_onto(worktree, remote, ctx.base_ref);
+    match outcome {
+        RebaseOutcome::UpToDate => {}
+        RebaseOutcome::Rebased | RebaseOutcome::Conflicted => {
+            if outcome == RebaseOutcome::Conflicted {
+                abort_rebase(worktree);
+            }
+            recover_detached_head(worktree, ctx.current_branch, ctx.wanted_branch);
+        }
+    }
+    Some(outcome)
+}
+
 #[derive(Debug, PartialEq)]
 pub enum UpstreamAction {
     /// Tracking is already correct.
@@ -1445,4 +1486,454 @@ pub fn upstream_action(
         return UpstreamAction::SkipNoPush;
     }
     UpstreamAction::PushAndTrack
+}
+
+/// Whether `branch` exists on `remote`: `git ls-remote --heads <remote>
+/// <branch>` producing output. Shared by two call sites asking the same
+/// network question for different reasons: [`apply_upstream_action`]
+/// (worktree.sh:131, decide track vs. push) and [`prepare_worktree`]
+/// (worktree.sh:332, decide refuse vs. recycle).
+fn ls_remote_heads_has_branch(repo_root: &Path, remote: &str, branch: &str) -> bool {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .args(["ls-remote", "--heads", remote, branch]);
+    match run_with_timeout(&mut command, REBASE_TIMEOUT) {
+        Some(out) if out.status.success() => {
+            !String::from_utf8_lossy(&out.stdout).trim().is_empty()
+        }
+        _ => false,
+    }
+}
+
+/// Executes `_wt_setup_upstream` (worktree.sh:127-138) via the already-ported
+/// [`upstream_action`] decision. Every branch tolerates failure, including a
+/// failed push: the shell's `_wt_die "failed to create upstream" 6`
+/// (worktree.sh:136) belongs to whatever eventually surfaces this to a user,
+/// not to housekeeping running in the background where nothing reads that
+/// exit code anyway.
+fn apply_upstream_action(worktree: &Path, remote: &str, branch: &str, no_push: bool) {
+    let expected = format!("{remote}/{branch}");
+    let current = git_stdout(
+        worktree,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .map(|s| s.trim().to_string());
+    let exists_on_remote = ls_remote_heads_has_branch(worktree, remote, branch);
+
+    match upstream_action(current.as_deref(), &expected, exists_on_remote, no_push) {
+        UpstreamAction::None | UpstreamAction::SkipNoPush => {}
+        UpstreamAction::SetTracking => {
+            let _ = git_ok(
+                worktree,
+                &["branch", "--set-upstream-to", &expected, branch],
+            );
+        }
+        UpstreamAction::PushAndTrack => {
+            let mut push = Command::new("git");
+            push.arg("-C")
+                .arg(worktree)
+                .args(["push", "-u", remote, branch]);
+            let _ = run_with_timeout(&mut push, REBASE_TIMEOUT);
+        }
+    }
+}
+
+/// Static identity for one [`housekeep`] run: which worktree, which repo, and
+/// how to reach the remote. Gathered by the caller, like every other
+/// `*Context` in this file, so `housekeep` itself stays a plain function of
+/// its inputs.
+pub struct HousekeepContext<'a> {
+    pub worktree: &'a Path,
+    pub repo_root: &'a Path,
+    pub remote: &'a str,
+    pub branch: &'a str,
+    pub no_push: bool,
+}
+
+/// Ports the BODY of `_wt_main`'s background housekeeping block
+/// (worktree.sh:372-384): a full fetch, a local upstream sync, a
+/// fast-forward pull, stale-registration pruning, upstream tracking/push,
+/// `node_modules` reuse, and the daily stale-worktree cleanup.
+///
+/// THE SHELL RUNS THIS DETACHED. It backgrounds the block in a subshell,
+/// redirects all three streams, and `disown`s it so the work outlives
+/// `_wt_main` returning and the parent shell exiting (worktree.sh:371-386).
+/// A Rust process that returns from `main` takes its whole process tree with
+/// it, so there is a real design decision here (a detached child process? a
+/// thread the CLI declines to join? something else?) and it is not this
+/// slice's to make. This function is the block's BODY only, run
+/// synchronously and left for whatever wires the `cc worktree` CLI together
+/// to background however it decides is right. That deferral is deliberate,
+/// not an oversight.
+///
+/// Every step tolerates failure, matching the shell's `|| true` on each one:
+/// housekeeping is best-effort, and it already runs after the worktree the
+/// user asked for is ready and usable. The two marker paths and the open-PR
+/// list are caller-supplied rather than computed here (the real paths are
+/// [`fetch_cache_marker_path`] and [`cleanup_stale`]'s own marker, and a real
+/// PR list needs a real `gh pr list`), for the same reason [`cleanup_stale`]
+/// itself splits from [`cleanup_stale_with`]: so tests can inject scratch
+/// values instead of touching this machine's real `/tmp` markers or
+/// depending on `gh` being installed and authenticated.
+///
+/// Returns how many stale worktrees [`cleanup_stale_with`] removed.
+pub fn housekeep(
+    target: &HousekeepContext,
+    fetch_cache_marker: &Path,
+    cleanup_marker: &Path,
+    open_prs: &[String],
+    now_epoch: i64,
+) -> usize {
+    let mut fetch = Command::new("git");
+    fetch
+        .arg("-C")
+        .arg(target.worktree)
+        .args(["fetch", target.remote, "--prune", "--quiet"]);
+    if matches!(run_with_timeout(&mut fetch, REBASE_TIMEOUT), Some(o) if o.status.success()) {
+        touch_marker(fetch_cache_marker, now_epoch);
+    }
+
+    // Two upstream checks back to back, on purpose: this one reads only the
+    // LOCAL remote-tracking ref (`show-ref`, worktree.sh:376),
+    // `apply_upstream_action` below re-checks with a live `git ls-remote`
+    // (worktree.sh:131). The shell runs both in sequence too; preserved
+    // rather than collapsed into one.
+    let expected = format!("{}/{}", target.remote, target.branch);
+    let expected_ref = format!("refs/remotes/{expected}");
+    let remote_ref_registered = git_ok(
+        target.worktree,
+        &["show-ref", "--verify", "--quiet", &expected_ref],
+    );
+    let current_upstream = git_stdout(
+        target.worktree,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .map(|s| s.trim().to_string());
+
+    if remote_ref_registered && current_upstream.as_deref() != Some(expected.as_str()) {
+        let _ = git_ok(
+            target.worktree,
+            &["branch", "--set-upstream-to", &expected, target.branch],
+        );
+    }
+    if remote_ref_registered {
+        let mut pull = Command::new("git");
+        pull.arg("-C")
+            .arg(target.worktree)
+            .args(["pull", "--ff-only", "--quiet"]);
+        let _ = run_with_timeout(&mut pull, REBASE_TIMEOUT);
+    }
+
+    let _ = git_ok(target.worktree, &["worktree", "prune"]);
+
+    apply_upstream_action(
+        target.worktree,
+        target.remote,
+        target.branch,
+        target.no_push,
+    );
+    reuse_node_modules(target.worktree, target.repo_root);
+    cleanup_stale_with(
+        target.repo_root,
+        target.worktree,
+        cleanup_marker,
+        open_prs,
+        now_epoch,
+    )
+}
+
+/// If `worktree` is a genuinely detached HEAD right after creation, checks
+/// `branch` back out: worktree.sh:360-363. Prefers `checkout -B branch
+/// HEAD`, which also repoints a branch ref that happens to already exist
+/// elsewhere; only falls back to a plain `checkout branch` when that fails.
+/// Both tolerate failure, matching the shell's trailing `|| true`.
+///
+/// Returns whether HEAD was actually detached (and this therefore acted),
+/// not whether the checkout succeeded: that is what a caller needs to know
+/// to decide whether to print the shell's "Worktree created detached.
+/// Attaching to $BRANCH..." message (worktree.sh:361), left to the caller
+/// like every other diagnostic in this file.
+///
+/// A DIFFERENT function from [`recover_detached_head`] (worktree.sh:453-458):
+/// that one runs after a rebase attempt, aborts any rebase in progress
+/// first, and tries the pre-rebase branch before the wanted one as its
+/// fallback. This one runs right after worktree creation, aborts nothing,
+/// and only ever tries `branch`. Both exist in the shell, at different
+/// moments, doing different things; do not merge them.
+pub fn attach_if_detached(worktree: &Path, branch: &str) -> bool {
+    let detached = git_stdout(worktree, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .is_some_and(|head| head.trim() == "HEAD");
+    if !detached {
+        return false;
+    }
+    if !git_ok(worktree, &["checkout", "-B", branch, "HEAD"]) {
+        let _ = git_ok(worktree, &["checkout", branch]);
+    }
+    true
+}
+
+/// Outcome of [`prepare_worktree`].
+#[derive(Debug, PartialEq)]
+pub enum WorktreeOutcome {
+    /// Ready to use, plus what [`copy_env`] decided about the `.env` copy,
+    /// so a caller can still report a refusal even though it did not stop
+    /// the run.
+    Ready(PathBuf, EnvCopy),
+    /// worktree.sh:332-335: the branch already occupying the target still
+    /// exists on the remote. NOTHING WAS REMOVED. The caller owns the
+    /// message and exit code (5).
+    Refused(String),
+    /// [`create_worktree`]'s whole ladder failed and no fallback resolved
+    /// either. The caller owns the message and exit code (3, surfaced
+    /// through `_wt_main`'s `|| return $?`).
+    CreateFailed,
+}
+
+/// The branch and registration status of the worktree at `target`, combining
+/// worktree.sh:300-301's two separate `awk` passes over the same
+/// `git worktree list --porcelain` capture into one scan: nothing can change
+/// between the shell's two invocations of the same read-only command, so
+/// reusing one parse changes nothing observable.
+fn target_worktree_info(porcelain: &str, target: &Path) -> (Option<String>, bool) {
+    let target_str = target.to_string_lossy();
+    let mut in_target = false;
+    let mut registered = false;
+    let mut branch = None;
+    for line in porcelain.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            in_target = path == target_str.as_ref();
+            registered = registered || in_target;
+        } else if in_target {
+            if let Some(b) = line.strip_prefix("branch ") {
+                branch = Some(b.trim_start_matches("refs/heads/").to_string());
+            }
+        }
+    }
+    (branch, registered)
+}
+
+/// The `RecoverDetached` plan's actions (worktree.sh:304-311): abort any
+/// rebase or merge in progress, then try to check `branch` back out,
+/// falling back to creating it from the remote-tracking ref when a plain
+/// checkout fails. Returns the branch actually checked out, or `None` when
+/// HEAD is still detached afterwards.
+///
+/// Also `None` for the shell's `|| echo ""` case, an unreadable HEAD after
+/// the checkout attempts above: a checkout that just ran successfully
+/// against this exact worktree cannot leave it in a state `rev-parse` cannot
+/// even read, so this collapses that theoretical branch into "recovery did
+/// not land" rather than reproducing it as a third outcome the caller would
+/// have to handle for something that cannot occur in practice.
+///
+/// A THIRD, DIFFERENT detached-HEAD recovery routine: not
+/// [`attach_if_detached`] (runs once the worktree already exists in a
+/// settled sense, never touches rebase/merge state) and not
+/// [`recover_detached_head`] (runs after a rebase attempt, tries the
+/// pre-rebase branch before the wanted one). All three exist in the shell,
+/// at different moments, doing different things.
+fn recover_detached_target(
+    repo_root: &Path,
+    target: &Path,
+    branch: &str,
+    remote: &str,
+) -> Option<String> {
+    abort_rebase(target);
+    let _ = git_ok(target, &["merge", "--abort"]);
+    if !git_ok(target, &["checkout", branch]) {
+        let remote_ref = format!("refs/remotes/{remote}/{branch}");
+        if git_ok(repo_root, &["show-ref", "--verify", "--quiet", &remote_ref]) {
+            let _ = git_ok(target, &["checkout", "-b", branch, &remote_ref]);
+        }
+    }
+    git_stdout(target, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s != "HEAD")
+}
+
+/// `git worktree remove --force`, falling back to `rm -rf` plus `git
+/// worktree prune` on failure: the identical fallback the shell repeats at
+/// worktree.sh:314 and worktree.sh:337.
+fn force_remove_worktree(repo_root: &Path, target: &Path) {
+    let target_str = target.to_string_lossy();
+    if !git_ok(
+        repo_root,
+        &["worktree", "remove", "--force", target_str.as_ref()],
+    ) {
+        let _ = std::fs::remove_dir_all(target);
+        let _ = git_ok(repo_root, &["worktree", "prune"]);
+    }
+}
+
+/// `_wt_make` plus `_wt_copy_env`, wrapped into a [`WorktreeOutcome`]:
+/// worktree.sh:323-324, :339-340, and :352-353, the three places a fresh
+/// worktree gets created and then has its `.env` copied.
+fn create_fresh(
+    repo_root: &Path,
+    target: &Path,
+    branch: &str,
+    remote: &str,
+    env_base: Option<&str>,
+) -> WorktreeOutcome {
+    match make_worktree(repo_root, target, branch, remote) {
+        CreateOutcome::Failed => WorktreeOutcome::CreateFailed,
+        CreateOutcome::Created(path) | CreateOutcome::AlreadyAt(path) => {
+            let env_copy = copy_env(repo_root, &path, env_base);
+            WorktreeOutcome::Ready(path, env_copy)
+        }
+    }
+}
+
+/// Fetches `branch` and fast-forwards `path` in place when the
+/// remote-tracking ref exists, then copies `.env`: worktree.sh:326-330 and
+/// :345-349, shared because both are the same "already have it, just
+/// refresh it" action on two different paths. Also where `RecoverDetached`'s
+/// successful-recovery fallthrough lands, since a recovered worktree is now
+/// in exactly the state the shell's `current_branch == $BRANCH` arm handles.
+fn refresh_existing(
+    repo_root: &Path,
+    path: &Path,
+    branch: &str,
+    remote: &str,
+    env_base: Option<&str>,
+) -> WorktreeOutcome {
+    let mut fetch = Command::new("git");
+    fetch
+        .arg("-C")
+        .arg(repo_root)
+        .args(["fetch", remote, branch, "--quiet"]);
+    let _ = run_with_timeout(&mut fetch, REBASE_TIMEOUT);
+
+    let remote_ref = format!("refs/remotes/{remote}/{branch}");
+    if git_ok(repo_root, &["show-ref", "--verify", "--quiet", &remote_ref]) {
+        let mut pull = Command::new("git");
+        pull.arg("-C")
+            .arg(path)
+            .args(["pull", "--ff-only", "--quiet"]);
+        let _ = run_with_timeout(&mut pull, REBASE_TIMEOUT);
+    }
+
+    let env_copy = copy_env(repo_root, path, env_base);
+    WorktreeOutcome::Ready(path.to_path_buf(), env_copy)
+}
+
+/// Wires [`plan_for_target`]'s decision to the already-ported actions it
+/// dispatches to: worktree.sh:299-355, the whole "what to do with `target`"
+/// block. `target` must already be the same absolute path git itself would
+/// report (canonicalized by the caller if needed), since this compares it
+/// against `git worktree list --porcelain` output byte for byte, exactly as
+/// the shell's `awk -v t="$TARGET"` does.
+///
+/// Two things this function does NOT do, both left to the caller: print any
+/// of the shell's informational messages (worktree.sh:304, :313, :320, :336,
+/// :351), and decide the exit code for [`WorktreeOutcome::Refused`] or
+/// [`WorktreeOutcome::CreateFailed`] (worktree.sh's exit codes 5 and 3).
+pub fn prepare_worktree(
+    repo_root: &Path,
+    target: &Path,
+    branch: &str,
+    remote: &str,
+    env_base: Option<&str>,
+) -> WorktreeOutcome {
+    let target_exists = target.is_dir();
+    // A failed `worktree list` reads as empty, exactly like the shell's
+    // `$(...)` capturing nothing on failure: nothing downstream treats that
+    // as fatal, so this doesn't either.
+    let porcelain = git_stdout(repo_root, &["worktree", "list", "--porcelain"]).unwrap_or_default();
+
+    if target_exists {
+        let (current_branch, registered) = target_worktree_info(&porcelain, target);
+        // Only asked when it can actually change the outcome (worktree.sh:332
+        // asks it lazily too): a detached HEAD or the already-wanted branch
+        // never reaches the refuse-vs-recycle fork this answers.
+        //
+        // PORTED HAZARD, preserved deliberately: this answers "no" when
+        // `ls-remote` FAILS, not just when the branch is genuinely absent, and
+        // "no" is the destructive answer. An unreachable remote therefore
+        // recycles the worktree and force-deletes a branch that may still be
+        // live upstream. The shell does exactly this (worktree.sh:332 pipes to
+        // `grep -q .`, so a failed `ls-remote` yields no output and falls
+        // through to the recycle), and matching it is the rule here. Fixing it
+        // means fixing BOTH implementations, not diverging this one, since a
+        // port that quietly refuses where the shell recycles is its own bug.
+        let current_branch_on_remote = match current_branch.as_deref() {
+            Some(current) if current != branch => {
+                ls_remote_heads_has_branch(repo_root, remote, current)
+            }
+            _ => false,
+        };
+
+        let state = TargetState {
+            target_exists,
+            registered,
+            current_branch: current_branch.as_deref(),
+            wanted_branch: branch,
+            current_branch_on_remote,
+            existing_for_wanted: None,
+        };
+
+        return match plan_for_target(&state) {
+            WorktreePlan::RecoverDetached => {
+                match recover_detached_target(repo_root, target, branch, remote) {
+                    Some(_) => refresh_existing(repo_root, target, branch, remote, env_base),
+                    None => {
+                        force_remove_worktree(repo_root, target);
+                        create_fresh(repo_root, target, branch, remote, env_base)
+                    }
+                }
+            }
+            WorktreePlan::CleanOrphanAndCreate => {
+                let _ = git_ok(repo_root, &["worktree", "prune"]);
+                let _ = std::fs::remove_dir_all(target);
+                create_fresh(repo_root, target, branch, remote, env_base)
+            }
+            WorktreePlan::ReuseTarget => {
+                refresh_existing(repo_root, target, branch, remote, env_base)
+            }
+            WorktreePlan::RefuseOccupied(current) => WorktreeOutcome::Refused(current),
+            WorktreePlan::RecycleTarget(current) => {
+                force_remove_worktree(repo_root, target);
+                let _ = git_ok(repo_root, &["branch", "-D", &current]);
+                create_fresh(repo_root, target, branch, remote, env_base)
+            }
+            WorktreePlan::ReuseExisting(_)
+            | WorktreePlan::PruneStaleAndCreate
+            | WorktreePlan::Create => {
+                unreachable!("plan_for_target only returns these when target_exists is false")
+            }
+        };
+    }
+
+    let existing = worktree_for_branch(&porcelain, branch);
+    let existing_is_dir = existing
+        .as_deref()
+        .map(|p| Path::new(p).is_dir())
+        .unwrap_or(false);
+    let state = TargetState {
+        target_exists,
+        registered: false,
+        current_branch: None,
+        wanted_branch: branch,
+        current_branch_on_remote: false,
+        existing_for_wanted: existing.as_deref().map(|p| (p, existing_is_dir)),
+    };
+
+    match plan_for_target(&state) {
+        WorktreePlan::ReuseExisting(path) => {
+            refresh_existing(repo_root, Path::new(&path), branch, remote, env_base)
+        }
+        WorktreePlan::PruneStaleAndCreate => {
+            let _ = git_ok(repo_root, &["worktree", "prune"]);
+            create_fresh(repo_root, target, branch, remote, env_base)
+        }
+        WorktreePlan::Create => create_fresh(repo_root, target, branch, remote, env_base),
+        WorktreePlan::RecoverDetached
+        | WorktreePlan::CleanOrphanAndCreate
+        | WorktreePlan::ReuseTarget
+        | WorktreePlan::RefuseOccupied(_)
+        | WorktreePlan::RecycleTarget(_) => {
+            unreachable!("plan_for_target only returns these when target_exists is true")
+        }
+    }
 }

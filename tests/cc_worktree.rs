@@ -2343,14 +2343,78 @@ mod rebase_execution {
             );
         });
     }
+
+    /// `maybe_rebase` (worktree.sh:404-459), wiring `should_rebase` and
+    /// `rebase_onto` above to the conflict handling worktree.sh:447-450
+    /// takes without `--ai-resolve`.
+    mod maybe_rebase_orchestration {
+        use super::*;
+        use playbook::cc::worktree::{maybe_rebase, RebaseContext};
+
+        #[test]
+        fn declines_and_changes_nothing_when_should_rebase_says_no() {
+            with_isolated_git_env(|| {
+                let (dir, _remote) = repo_with_remote("maybe-rebase-declines");
+                let before = git_stdout(&dir, &["rev-parse", "HEAD"]);
+                let ctx = RebaseContext {
+                    current_branch: "main",
+                    git_user: "me",
+                    branch_author: "me",
+                    gh_user: "",
+                    wanted_branch: "main",
+                    base_ref: "main",
+                };
+
+                let outcome = maybe_rebase(&ctx, &dir, "origin");
+
+                assert_eq!(outcome, None, "main is protected, so this must decline");
+                assert_eq!(git_stdout(&dir, &["rev-parse", "HEAD"]), before);
+            });
+        }
+
+        /// The rule this function exists to guarantee: a conflict is never
+        /// left both unresolved and unaborted, even without `--ai-resolve`.
+        #[test]
+        fn a_conflict_is_always_aborted() {
+            with_isolated_git_env(|| {
+                let (dir, remote) = repo_with_remote("maybe-rebase-conflict");
+                git_ok(&dir, &["checkout", "-q", "-b", "feature-x"]);
+                advance_remote(
+                    &remote,
+                    "maybe-rebase-conflict-advancer",
+                    "shared.txt",
+                    "remote-change\n",
+                );
+                commit(&dir, "shared.txt", "local-change\n", "local-conflict");
+                let ctx = RebaseContext {
+                    current_branch: "feature-x",
+                    git_user: "me",
+                    branch_author: "me",
+                    gh_user: "",
+                    wanted_branch: "feature-x",
+                    base_ref: "main",
+                };
+
+                let outcome = maybe_rebase(&ctx, &dir, "origin");
+
+                assert_eq!(outcome, Some(RebaseOutcome::Conflicted));
+                assert!(
+                    !rebase_in_progress(&dir),
+                    "a conflict must always be aborted, not left mid-rebase"
+                );
+            });
+        }
+    }
 }
 
 /// Tests for the PREAMBLE of `_wt_main` (worktree.sh:255-296): main-worktree
 /// selection, branch-name validation, the bare base-ref quirk, the initial
 /// best-effort fetch, and the auto-stash gate. The target-state dispatch
-/// (worktree.sh:299-355), the detach/attach step, the rebase call, and the
-/// background housekeeping block (worktree.sh:372-386) are later slices and
-/// are not exercised here.
+/// (worktree.sh:299-355, see `worktree_plan_dispatch`), the detach/attach
+/// step (`detached_head_attachment`), the rebase call
+/// (`rebase_execution::maybe_rebase_orchestration`), and the background
+/// housekeeping block (worktree.sh:372-386, see `housekeeping_body`) are
+/// covered in their own modules, not here.
 mod main_preamble {
     use super::*;
 
@@ -2778,5 +2842,441 @@ mod main_preamble {
                 assert!(git_ref_exists(&dir, "refs/remotes/origin/feature-y"));
             });
         }
+    }
+}
+
+/// `attach_if_detached` (worktree.sh:360-363), against a real repo: no
+/// remote needed, since attaching is purely local.
+mod detached_head_attachment {
+    use super::*;
+    use playbook::cc::worktree::attach_if_detached;
+
+    /// Duplicated rather than shared, per this file's convention that each
+    /// module owns its harness.
+    fn with_isolated_git_env<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = lock_env();
+        let prev_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+        let prev_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+        let out = f();
+        match prev_global {
+            Some(v) => std::env::set_var("GIT_CONFIG_GLOBAL", v),
+            None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
+        }
+        match prev_system {
+            Some(v) => std::env::set_var("GIT_CONFIG_SYSTEM", v),
+            None => std::env::remove_var("GIT_CONFIG_SYSTEM"),
+        }
+        out
+    }
+
+    fn git(repo_path: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .output()
+            .expect("git command should spawn")
+    }
+
+    fn git_ok(repo_path: &Path, args: &[&str]) {
+        let out = git(repo_path, args);
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn git_stdout(repo_path: &Path, args: &[&str]) -> String {
+        String::from_utf8_lossy(&git(repo_path, args).stdout)
+            .trim()
+            .to_string()
+    }
+
+    fn seeded_repo(tag: &str) -> PathBuf {
+        let dir = scratch(tag);
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "t@t"],
+            vec!["config", "user.name", "T"],
+        ] {
+            git_ok(&dir, &args);
+        }
+        fs::write(dir.join("f.txt"), "seed\n").expect("write");
+        git_ok(&dir, &["add", "."]);
+        git_ok(&dir, &["commit", "-q", "-m", "seed"]);
+        dir
+    }
+
+    fn current_branch(repo_path: &Path) -> String {
+        git_stdout(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+    }
+
+    #[test]
+    fn attaches_to_the_branch_from_a_genuinely_detached_head() {
+        with_isolated_git_env(|| {
+            let dir = seeded_repo("attach-detached");
+            let sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
+            git_ok(&dir, &["checkout", "-q", &sha]);
+            assert_eq!(current_branch(&dir), "HEAD", "fixture must start detached");
+
+            let acted = attach_if_detached(&dir, "main");
+
+            assert!(acted, "a detached HEAD must report that it acted");
+            assert_eq!(current_branch(&dir), "main");
+        });
+    }
+
+    #[test]
+    fn returns_false_and_changes_nothing_when_already_attached() {
+        with_isolated_git_env(|| {
+            let dir = seeded_repo("attach-already-on-branch");
+
+            let acted = attach_if_detached(&dir, "main");
+
+            assert!(!acted);
+            assert_eq!(current_branch(&dir), "main");
+        });
+    }
+
+    /// Proves the `-B` form ran, not the plain-`checkout` fallback: `feat` is
+    /// created at the seed commit, HEAD is then detached and advanced by one
+    /// more commit. `checkout -B feat HEAD` force-moves `feat` to that newer
+    /// commit; a plain `checkout feat` would instead move HEAD back to
+    /// `feat`'s original (older) tip and leave `feat` unchanged. Asserting
+    /// `feat` ends up AT the newer commit is what a swap of the two checkout
+    /// forms (worktree.sh:362) would break.
+    #[test]
+    fn prefers_checkout_dash_b_over_a_plain_checkout() {
+        with_isolated_git_env(|| {
+            let dir = seeded_repo("attach-prefers-dash-b");
+            git_ok(&dir, &["branch", "feat"]);
+            let seed_sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
+            git_ok(&dir, &["checkout", "-q", &seed_sha]);
+            fs::write(dir.join("g.txt"), "advance\n").expect("write");
+            git_ok(&dir, &["add", "."]);
+            git_ok(&dir, &["commit", "-q", "-m", "advance while detached"]);
+            let advanced_sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
+            assert_ne!(seed_sha, advanced_sha, "fixture must add a real new commit");
+
+            let acted = attach_if_detached(&dir, "feat");
+
+            assert!(acted);
+            assert_eq!(current_branch(&dir), "feat");
+            assert_eq!(
+                git_stdout(&dir, &["rev-parse", "feat"]),
+                advanced_sha,
+                "checkout -B must have force-moved feat to HEAD's commit, \
+                 not left it at its original tip"
+            );
+        });
+    }
+}
+
+/// `prepare_worktree` (worktree.sh:299-355), against real repos with a real
+/// (local, no-network) bare remote: the refuse-vs-recycle fork depends on a
+/// genuine `git ls-remote`, which a hand-built `refs/remotes/origin/*` ref
+/// cannot exercise.
+mod worktree_plan_dispatch {
+    use super::*;
+    use playbook::cc::worktree::{prepare_worktree, WorktreeOutcome};
+
+    fn with_isolated_git_env<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = lock_env();
+        let prev_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+        let prev_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+        let out = f();
+        match prev_global {
+            Some(v) => std::env::set_var("GIT_CONFIG_GLOBAL", v),
+            None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
+        }
+        match prev_system {
+            Some(v) => std::env::set_var("GIT_CONFIG_SYSTEM", v),
+            None => std::env::remove_var("GIT_CONFIG_SYSTEM"),
+        }
+        out
+    }
+
+    fn git(repo_path: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .output()
+            .expect("git command should spawn")
+    }
+
+    fn git_ok(repo_path: &Path, args: &[&str]) {
+        let out = git(repo_path, args);
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn git_stdout(repo_path: &Path, args: &[&str]) -> String {
+        String::from_utf8_lossy(&git(repo_path, args).stdout)
+            .trim()
+            .to_string()
+    }
+
+    fn branch_exists(repo_root: &Path, branch: &str) -> bool {
+        git(
+            repo_root,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ],
+        )
+        .status
+        .success()
+    }
+
+    /// A bare repo standing in for `origin`. `git ls-remote`/`push` against a
+    /// local filesystem path need no network, unlike a real remote.
+    fn bare_remote(tag: &str) -> PathBuf {
+        let dir = scratch(tag);
+        git_ok(&dir, &["init", "-q", "--bare", "-b", "main"]);
+        dir.canonicalize().expect("bare remote should resolve")
+    }
+
+    /// A repo with one commit on `main`, an `origin` remote pointing at a
+    /// real bare repo, with `main` already pushed there.
+    fn seeded_repo_with_remote(tag: &str) -> PathBuf {
+        let remote = bare_remote(&format!("{tag}-remote"));
+        let dir = scratch(tag);
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "t@t"],
+            vec!["config", "user.name", "T"],
+        ] {
+            git_ok(&dir, &args);
+        }
+        fs::write(dir.join("README.md"), "seed\n").expect("write");
+        git_ok(&dir, &["add", "."]);
+        git_ok(&dir, &["commit", "-q", "-m", "seed"]);
+        git_ok(
+            &dir,
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote.to_str().expect("utf8 path"),
+            ],
+        );
+        git_ok(&dir, &["push", "-q", "origin", "main"]);
+        dir.canonicalize().expect("repo should resolve")
+    }
+
+    fn add_worktree(repo_root: &Path, dest_name: &str, branch: &str) -> PathBuf {
+        let dest = repo_root.join(dest_name);
+        git_ok(
+            repo_root,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                branch,
+                dest.to_str().expect("utf8 path"),
+                "main",
+            ],
+        );
+        dest.canonicalize().expect("worktree should resolve")
+    }
+
+    /// worktree.sh:332-335: recycling removes and deletes, so the branch
+    /// still living on the remote must be a hard refusal that touches
+    /// nothing. Getting the fork backwards would destroy unfinished work.
+    #[test]
+    fn refuses_and_removes_nothing_when_the_occupying_branch_still_exists_on_the_remote() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo_with_remote("refuse");
+            let target = add_worktree(&repo_root, "wt-target", "old-branch");
+            git_ok(&repo_root, &["push", "-q", "origin", "old-branch"]);
+            git_ok(&repo_root, &["branch", "new-branch", "main"]);
+
+            let outcome = prepare_worktree(&repo_root, &target, "new-branch", "origin", None);
+
+            assert_eq!(outcome, WorktreeOutcome::Refused("old-branch".to_string()));
+            assert!(
+                target.is_dir(),
+                "a refusal must leave the occupied worktree in place"
+            );
+            assert!(
+                branch_exists(&repo_root, "old-branch"),
+                "a refusal must leave the occupying branch in place"
+            );
+        });
+    }
+
+    /// worktree.sh:336-340: once the remote check clears, the old worktree
+    /// and branch are removed and the target rebuilt for the wanted branch.
+    #[test]
+    fn recycles_and_removes_both_when_the_occupying_branch_is_gone_from_the_remote() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo_with_remote("recycle");
+            let target = add_worktree(&repo_root, "wt-target", "old-branch");
+            // old-branch is deliberately never pushed: on the remote it
+            // looks exactly like a branch that was merged and deleted.
+            git_ok(&repo_root, &["branch", "new-branch", "main"]);
+
+            let outcome = prepare_worktree(&repo_root, &target, "new-branch", "origin", None);
+
+            match outcome {
+                WorktreeOutcome::Ready(path, _) => {
+                    assert_eq!(
+                        path.canonicalize().expect("ready path should resolve"),
+                        target
+                    );
+                }
+                other => panic!("expected Ready, got {other:?}"),
+            }
+            assert!(
+                !branch_exists(&repo_root, "old-branch"),
+                "recycling must delete the old branch"
+            );
+            assert_eq!(
+                git_stdout(&target, &["rev-parse", "--abbrev-ref", "HEAD"]),
+                "new-branch",
+                "the rebuilt worktree must be checked out on the wanted branch"
+            );
+        });
+    }
+}
+
+/// `housekeep` (worktree.sh:373-384): every step tolerates failure, so the
+/// one directly observable, deterministic signal is the fetch-cache marker,
+/// touched only on a successful fetch.
+mod housekeeping_body {
+    use super::*;
+    use playbook::cc::worktree::{housekeep, HousekeepContext};
+
+    fn with_isolated_git_env<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = lock_env();
+        let prev_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+        let prev_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+        let out = f();
+        match prev_global {
+            Some(v) => std::env::set_var("GIT_CONFIG_GLOBAL", v),
+            None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
+        }
+        match prev_system {
+            Some(v) => std::env::set_var("GIT_CONFIG_SYSTEM", v),
+            None => std::env::remove_var("GIT_CONFIG_SYSTEM"),
+        }
+        out
+    }
+
+    fn git(repo_path: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .output()
+            .expect("git command should spawn")
+    }
+
+    fn git_ok(repo_path: &Path, args: &[&str]) {
+        let out = git(repo_path, args);
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn bare_remote(tag: &str) -> PathBuf {
+        let dir = scratch(tag);
+        git_ok(&dir, &["init", "-q", "--bare", "-b", "main"]);
+        dir.canonicalize().expect("bare remote should resolve")
+    }
+
+    fn seeded_repo(tag: &str) -> PathBuf {
+        let dir = scratch(tag);
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "t@t"],
+            vec!["config", "user.name", "T"],
+        ] {
+            git_ok(&dir, &args);
+        }
+        fs::write(dir.join("README.md"), "seed\n").expect("write");
+        git_ok(&dir, &["add", "."]);
+        git_ok(&dir, &["commit", "-q", "-m", "seed"]);
+        dir.canonicalize().expect("repo should resolve")
+    }
+
+    /// A marker under the repo's own scratch dir, never the shared `/tmp`
+    /// path a real run would use.
+    fn scratch_marker(repo_root: &Path, name: &str) -> PathBuf {
+        repo_root.join(name)
+    }
+
+    #[test]
+    fn touches_the_fetch_marker_only_when_the_fetch_succeeds() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("housekeep-fetch-ok");
+            let remote = bare_remote("housekeep-fetch-ok-remote");
+            git_ok(
+                &repo_root,
+                &[
+                    "remote",
+                    "add",
+                    "origin",
+                    remote.to_str().expect("utf8 path"),
+                ],
+            );
+            let fetch_marker = scratch_marker(&repo_root, ".fetch-marker-test");
+            let cleanup_marker = scratch_marker(&repo_root, ".cleanup-marker-test");
+            let ctx = HousekeepContext {
+                worktree: &repo_root,
+                repo_root: &repo_root,
+                remote: "origin",
+                branch: "main",
+                no_push: true,
+            };
+
+            housekeep(&ctx, &fetch_marker, &cleanup_marker, &[], 1_800_000_000);
+
+            assert!(
+                fetch_marker.exists(),
+                "a successful fetch must touch the marker"
+            );
+        });
+    }
+
+    #[test]
+    fn leaves_the_fetch_marker_untouched_when_the_fetch_fails() {
+        with_isolated_git_env(|| {
+            let repo_root = seeded_repo("housekeep-fetch-fail");
+            // No `origin` remote configured at all, so `git fetch origin`
+            // fails outright, with no network involved either way.
+            let fetch_marker = scratch_marker(&repo_root, ".fetch-marker-test");
+            let cleanup_marker = scratch_marker(&repo_root, ".cleanup-marker-test");
+            let ctx = HousekeepContext {
+                worktree: &repo_root,
+                repo_root: &repo_root,
+                remote: "origin",
+                branch: "main",
+                no_push: true,
+            };
+
+            housekeep(&ctx, &fetch_marker, &cleanup_marker, &[], 1_800_000_000);
+
+            assert!(
+                !fetch_marker.exists(),
+                "a failed fetch must not touch the marker"
+            );
+        });
     }
 }
