@@ -188,6 +188,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.verify-version.outputs.version }}
+          # This job never checks the repo out, so gh cannot infer the repo
+          # from a git remote the way it does in the build jobs. Passing it
+          # explicitly is cheaper than a checkout it has no other use for.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           mkdir -p dist && cd dist
