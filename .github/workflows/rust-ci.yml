@@ -70,6 +70,12 @@ jobs:
           ./target/debug/playbook settings check \
             settings.shared.json permissions.shared.json .
 
+      # Moved out of shell-ci with the port, same reasoning: the manifest
+      # validator is now a subcommand too, so it needs the binary already
+      # built by the step above.
+      - name: Validate the tracked-file manifest
+        run: ./target/debug/playbook manifest check .
+
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked
