@@ -9,6 +9,7 @@ pub mod cc;
 pub mod common;
 pub mod hooks;
 pub mod init;
+pub mod manifest;
 pub mod settings;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -45,6 +46,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: SettingsCommand,
     },
+    /// Tracked-file manifest subcommands, backing `src/manifest/`.
+    Manifest {
+        #[command(subcommand)]
+        sub: ManifestCommand,
+    },
 }
 
 /// `playbook settings` subcommands, backing `src/settings/`.
@@ -67,6 +73,21 @@ pub enum SettingsCommand {
         perms: PathBuf,
         /// Repo root that every hook command must resolve inside.
         repo_root: PathBuf,
+    },
+}
+
+/// `playbook manifest` subcommands, backing `src/manifest/`.
+#[derive(Subcommand, Debug)]
+pub enum ManifestCommand {
+    /// Validate every tracked file lives at an allowlisted top-level path,
+    /// ported from `shell/check-manifest.sh`.
+    Check {
+        /// Repo root whose tracked files (`git ls-files`) are checked.
+        ///
+        /// Optional, like the shell's `${1:-}`: omitting it falls back to
+        /// `git rev-parse --show-toplevel`, so `playbook manifest check` run
+        /// from anywhere inside the repo behaves as the script did.
+        repo_root: Option<PathBuf>,
     },
 }
 

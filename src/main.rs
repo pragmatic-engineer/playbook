@@ -3,7 +3,9 @@
 
 use clap::Parser;
 use playbook::common::payload::Payload;
-use playbook::{cc, hooks, settings, CcCommand, Cli, Command, SettingsCommand};
+use playbook::{
+    cc, hooks, manifest, settings, CcCommand, Cli, Command, ManifestCommand, SettingsCommand,
+};
 use std::io::{IsTerminal, Read};
 
 fn main() {
@@ -63,6 +65,30 @@ fn main() {
                     std::process::exit(1);
                 }
             },
+        },
+        Command::Manifest { sub } => match sub {
+            // Exit 1, not 2: the shell original used it and both CI lanes key
+            // on it, matching the settings check convention above.
+            ManifestCommand::Check { repo_root } => {
+                let root = match repo_root.or_else(manifest::check::toplevel) {
+                    Some(root) => root,
+                    None => {
+                        // The shell's own wording when it had neither
+                        // (check-manifest.sh:22).
+                        eprintln!(
+                            "check-manifest: not inside a git repository and no REPO_ROOT argument given"
+                        );
+                        std::process::exit(1);
+                    }
+                };
+                match manifest::check::check(&root) {
+                    Ok(msg) => println!("{msg}"),
+                    Err(err) => {
+                        eprintln!("check-manifest: {err}");
+                        std::process::exit(1);
+                    }
+                }
+            }
         },
     }
 }

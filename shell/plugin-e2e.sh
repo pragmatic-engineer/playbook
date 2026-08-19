@@ -124,10 +124,10 @@ out="$(printf '{"tool_input":{"command":"rm -rf /etc/hosts"}}' | bash "$REPO/hoo
 [ -n "$out" ] && ok "rm-workspace-guard blocks rm outside the allowlist" || bad "rm-workspace-guard did not block"
 
 hdr "H. Repo validators and behavioral suites"
-( cd "$REPO" && bash shell/check-manifest.sh >/dev/null 2>&1 ) && ok "check-manifest" || bad "check-manifest"
-# The seed validator is not checked here. It became a binary subcommand, and
-# this script never builds one; it also only ever validated a repo file, never
-# anything in the packaged plugin. rust-ci owns it now.
+# Neither the tracked-file manifest nor the settings seed validator is
+# checked here. Both became binary subcommands, and this script never builds
+# one; they also only ever validated repo files, never anything in the
+# packaged plugin. rust-ci owns both now.
 tp=0; tf=0
 while IFS= read -r t; do
   if ( cd "$REPO" && bash "$t" >/dev/null 2>&1 ); then tp=$((tp+1)); else tf=$((tf+1)); bad "suite: $t"; fi
