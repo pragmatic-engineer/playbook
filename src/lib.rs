@@ -5,6 +5,7 @@
 //! `main.rs` parses and dispatches on, plus the `common` helpers and `hooks`
 //! stubs every hook module builds on.
 
+pub mod agents;
 pub mod cc;
 pub mod common;
 pub mod hooks;
@@ -51,6 +52,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: ManifestCommand,
     },
+    /// Agent-definition validation subcommands, backing `src/agents/`.
+    Agents {
+        #[command(subcommand)]
+        sub: AgentsCommand,
+    },
 }
 
 /// `playbook settings` subcommands, backing `src/settings/`.
@@ -88,6 +94,22 @@ pub enum ManifestCommand {
         /// `git rev-parse --show-toplevel`, so `playbook manifest check` run
         /// from anywhere inside the repo behaves as the script did.
         repo_root: Option<PathBuf>,
+    },
+}
+
+/// `playbook agents` subcommands, backing `src/agents/`.
+#[derive(Subcommand, Debug)]
+pub enum AgentsCommand {
+    /// Validate every `agents/*.md` definition against the house agent
+    /// contract, ported from `shell/check-agents.sh`.
+    Check {
+        /// Directory holding the agent definitions to validate.
+        ///
+        /// Optional, like the shell's `[AGENTS_DIR]`: omitting it falls back
+        /// to `<repo root>/agents`, where repo root is resolved the same way
+        /// `check-agents.sh` did, via `git rev-parse --show-toplevel` from
+        /// the current directory.
+        agents_dir: Option<PathBuf>,
     },
 }
 
