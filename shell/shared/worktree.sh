@@ -329,8 +329,20 @@ _wt_main() {
             _wt_copy_env "$TARGET"
             worktree_path="$TARGET"
         else
-            if git ls-remote --heads "$REMOTE" "$current_branch" 2>/dev/null | grep -q .; then
-                _wt_die "worktree at $TARGET is on branch '$current_branch' which still exists on remote. Finish it or remove the worktree first." 5
+            # "Not on the remote" is the answer that force-deletes the branch
+            # below, so a failed `ls-remote` must NOT reach it. Piping straight
+            # into `grep -q .` conflates "absent" with "could not ask", and an
+            # unreachable remote or expired credentials would then reap a
+            # branch that is still live. Capture the exit status separately and
+            # refuse when the question could not be answered.
+            local remote_heads=""
+            if remote_heads="$(git ls-remote --heads "$REMOTE" "$current_branch" 2>/dev/null)"; then
+                if [[ -n "$remote_heads" ]]; then
+                    _wt_die "worktree at $TARGET is on branch '$current_branch' which still exists on remote. Finish it or remove the worktree first." 5
+                    return $?
+                fi
+            else
+                _wt_die "worktree at $TARGET is on branch '$current_branch', and '$REMOTE' could not be reached to check whether it still exists. Refusing to recycle it. Retry when online, or remove the worktree yourself." 5
                 return $?
             fi
             printf '%s\n' "Previous branch '$current_branch' merged/deleted on remote. Recycling worktree for '$BRANCH'..." >&2

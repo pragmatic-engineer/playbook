@@ -1488,11 +1488,12 @@ pub fn upstream_action(
     UpstreamAction::PushAndTrack
 }
 
-/// Whether `branch` exists on `remote`: `git ls-remote --heads <remote>
-/// <branch>` producing output. Shared by two call sites asking the same
-/// network question for different reasons: [`apply_upstream_action`]
-/// (worktree.sh:131, decide track vs. push) and [`prepare_worktree`]
-/// (worktree.sh:332, decide refuse vs. recycle).
+/// Whether the remote publishes `branch`, reading a failed `ls-remote` as
+/// "not published".
+///
+/// Correct for the upstream decision only, where the shell's own fallthrough
+/// on a failed call is to push (worktree.sh:131-136). Do NOT use it for
+/// anything destructive; see [`remote_may_still_have_branch`].
 fn ls_remote_heads_has_branch(repo_root: &Path, remote: &str, branch: &str) -> bool {
     let mut command = Command::new("git");
     command
@@ -1504,6 +1505,34 @@ fn ls_remote_heads_has_branch(repo_root: &Path, remote: &str, branch: &str) -> b
             !String::from_utf8_lossy(&out.stdout).trim().is_empty()
         }
         _ => false,
+    }
+}
+
+/// Whether the branch occupying the target might still be live on the remote,
+/// which is the question that decides refuse-versus-recycle.
+///
+/// Answers TRUE when `ls-remote` cannot tell us, not just when the branch is
+/// present. "Absent" and "could not ask" are different states and only the
+/// first is safe to act on, because the destructive branch of that decision
+/// force-deletes the branch. An unreachable remote, expired credentials or a
+/// timeout therefore refuse rather than reap.
+///
+/// This deliberately DIVERGES from the shell as originally written, which
+/// piped `ls-remote` into `grep -q .` and so read a failed call as "absent"
+/// and recycled. `shell/shared/worktree.sh` carries the same fix, so the two
+/// stay in parity; changing only one would be the real defect.
+fn remote_may_still_have_branch(repo_root: &Path, remote: &str, branch: &str) -> bool {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .args(["ls-remote", "--heads", remote, branch]);
+    match run_with_timeout(&mut command, REBASE_TIMEOUT) {
+        Some(out) if out.status.success() => {
+            !String::from_utf8_lossy(&out.stdout).trim().is_empty()
+        }
+        // Could not ask. Assume live and keep the worktree.
+        _ => true,
     }
 }
 
@@ -1848,18 +1877,15 @@ pub fn prepare_worktree(
         // asks it lazily too): a detached HEAD or the already-wanted branch
         // never reaches the refuse-vs-recycle fork this answers.
         //
-        // PORTED HAZARD, preserved deliberately: this answers "no" when
-        // `ls-remote` FAILS, not just when the branch is genuinely absent, and
-        // "no" is the destructive answer. An unreachable remote therefore
-        // recycles the worktree and force-deletes a branch that may still be
-        // live upstream. The shell does exactly this (worktree.sh:332 pipes to
-        // `grep -q .`, so a failed `ls-remote` yields no output and falls
-        // through to the recycle), and matching it is the rule here. Fixing it
-        // means fixing BOTH implementations, not diverging this one, since a
-        // port that quietly refuses where the shell recycles is its own bug.
+        // "no" here is the DESTRUCTIVE answer: it recycles the worktree and
+        // force-deletes the occupying branch. So this asks whether the branch
+        // MIGHT still be live, not whether it is, and an `ls-remote` that
+        // could not run counts as "might". Both implementations originally
+        // read a failed call as "absent" and reaped on it; `worktree.sh`
+        // carries the matching fix, so the two stay in parity.
         let current_branch_on_remote = match current_branch.as_deref() {
             Some(current) if current != branch => {
-                ls_remote_heads_has_branch(repo_root, remote, current)
+                remote_may_still_have_branch(repo_root, remote, current)
             }
             _ => false,
         };
@@ -1935,5 +1961,101 @@ pub fn prepare_worktree(
         | WorktreePlan::RecycleTarget(_) => {
             unreachable!("plan_for_target only returns these when target_exists is true")
         }
+    }
+}
+
+#[cfg(test)]
+mod remote_reachability_tests {
+    use super::*;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) {
+        Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git should spawn");
+    }
+
+    /// A repo with one commit plus a bare sibling acting as its remote. Named
+    /// per test so parallel runs cannot collide, since there is no temp-dir
+    /// crate in this deliberately minimal dependency graph.
+    fn repo_with_remote(tag: &str) -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("pb-lsremote-{tag}"));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        let remote = base.join("remote.git");
+        std::fs::create_dir_all(&repo).expect("scratch repo dir");
+        Command::new("git")
+            .args(["init", "-q", "--bare"])
+            .arg(&remote)
+            .output()
+            .expect("git init --bare");
+        git(&repo, &["init", "-q"]);
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "init",
+            ],
+        );
+        git(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        (repo, remote)
+    }
+
+    #[test]
+    fn a_branch_published_on_the_remote_blocks_recycling() {
+        let (repo, _remote) = repo_with_remote("present");
+        git(&repo, &["push", "-q", "origin", "HEAD:refs/heads/live"]);
+        assert!(remote_may_still_have_branch(&repo, "origin", "live"));
+    }
+
+    #[test]
+    fn a_branch_genuinely_absent_allows_recycling() {
+        let (repo, _remote) = repo_with_remote("absent");
+        assert!(!remote_may_still_have_branch(&repo, "origin", "ghost"));
+    }
+
+    /// The regression this guards is data loss, not a wrong answer: "no" is
+    /// what force-deletes the branch, so a remote that cannot be reached must
+    /// never produce it. Both implementations previously read a failed
+    /// `ls-remote` as "absent" and reaped on it.
+    #[test]
+    fn an_unreachable_remote_never_allows_recycling() {
+        let (repo, _remote) = repo_with_remote("unreachable");
+        git(
+            &repo,
+            &["remote", "set-url", "origin", "/nonexistent/nope.git"],
+        );
+        assert!(
+            remote_may_still_have_branch(&repo, "origin", "ghost"),
+            "an unanswerable lookup must not read as absent"
+        );
+    }
+
+    /// The upstream decision keeps the opposite reading on failure, matching
+    /// the shell's fallthrough to push (worktree.sh:131-136). Pinned so the
+    /// two helpers are not collapsed into one.
+    #[test]
+    fn the_upstream_helper_still_reads_failure_as_not_published() {
+        let (repo, _remote) = repo_with_remote("upstream");
+        git(
+            &repo,
+            &["remote", "set-url", "origin", "/nonexistent/nope.git"],
+        );
+        assert!(!ls_remote_heads_has_branch(&repo, "origin", "ghost"));
     }
 }
