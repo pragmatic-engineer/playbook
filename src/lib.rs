@@ -114,7 +114,11 @@ pub enum CcCommand {
     BustCache,
     /// Create a worktree and resume into it.
     #[command(alias = "new")]
-    Worktree { branch: String },
+    Worktree {
+        branch: String,
+        /// Folder (relative to the repo root) holding the `.env` to copy in.
+        env_base: Option<String>,
+    },
 }
 
 #[cfg(test)]
@@ -175,6 +179,8 @@ mod tests {
         let ls = Cli::command().try_get_matches_from(["playbook", "cc", "ls"]);
         let worktree =
             Cli::command().try_get_matches_from(["playbook", "cc", "worktree", "my-branch"]);
+        let worktree_with_env_base =
+            Cli::command().try_get_matches_from(["playbook", "cc", "worktree", "my-branch", "env"]);
         let new = Cli::command().try_get_matches_from(["playbook", "cc", "new", "my-branch"]);
         let raw_no_sid = Cli::command().try_get_matches_from(["playbook", "cc", "raw"]);
         let raw_with_sid =
@@ -185,6 +191,10 @@ mod tests {
         assert!(list.is_ok(), "cc list should parse");
         assert!(ls.is_ok(), "cc ls alias should parse");
         assert!(worktree.is_ok(), "cc worktree BRANCH should parse");
+        assert!(
+            worktree_with_env_base.is_ok(),
+            "cc worktree BRANCH ENV_BASE should parse"
+        );
         assert!(new.is_ok(), "cc new alias should parse");
         assert!(raw_no_sid.is_ok(), "cc raw with no sid should parse");
         assert!(raw_with_sid.is_ok(), "cc raw SID should parse");
