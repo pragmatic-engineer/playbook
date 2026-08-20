@@ -36,6 +36,33 @@ CLAUDE_DIR="$HOME_DIR/.claude"
 mkdir -p "$SRC" "$CLAUDE_DIR"
 git -C "$REPO_ROOT" archive HEAD | tar -x -C "$SRC"
 
+# Stub `playbook` binary. install.sh's PLAYBOOK_SRC seam skips the network
+# path entirely, including install_release_binary, which is what would
+# normally place a binary at PLAYBOOK_BIN_DIR; yet install.sh still hands off
+# unconditionally to "$PLAYBOOK_BIN_DIR/playbook init". Without a binary
+# there, that call is a bare command-not-found (exit 127) that kills the
+# script before the prune block this suite exercises ever runs. Answers just
+# enough for install.sh to proceed: exits 0 and prints a step report shaped
+# like the real `playbook init`'s, so the output stays a plausible stand-in.
+BIN_STUB="$WORK/bin"
+mkdir -p "$BIN_STUB"
+cat > "$BIN_STUB/playbook" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --version) printf 'playbook 0.0.0-stub\n' ;;
+  init)
+    printf 'settings: ok - already matches the template\n'
+    printf 'guards: ok - already in place\n'
+    printf 'hooks: ok - all hooks already wired\n'
+    printf 'shim: skipped - $SHELL is neither bash nor zsh\n'
+    printf 'statusline: ok - already up to date\n'
+    printf 'system-prompt: skipped - not installed; pass --system-prompt to opt in\n'
+    ;;
+esac
+exit 0
+STUB
+chmod +x "$BIN_STUB/playbook"
+
 RUNS=7
 KEEP=5
 
@@ -50,7 +77,7 @@ list_backups() {
 }
 
 for _ in $(seq 1 "$RUNS"); do
-    PLAYBOOK_SRC="$SRC" CLAUDE_HOME="$CLAUDE_DIR" HOME="$HOME_DIR" \
+    PLAYBOOK_SRC="$SRC" CLAUDE_HOME="$CLAUDE_DIR" HOME="$HOME_DIR" PLAYBOOK_BIN_DIR="$BIN_STUB" \
         bash "$REPO_ROOT/install.sh" --no-setup --skip-plugin >/dev/null 2>&1
     sleep 1
 done
@@ -83,7 +110,7 @@ fi
 if [ "$count" -ge 1 ]; then
     prev_newest="$(printf '%s\n' "$backups" | tail -1)"
     sleep 1
-    PLAYBOOK_SRC="$SRC" CLAUDE_HOME="$CLAUDE_DIR" HOME="$HOME_DIR" \
+    PLAYBOOK_SRC="$SRC" CLAUDE_HOME="$CLAUDE_DIR" HOME="$HOME_DIR" PLAYBOOK_BIN_DIR="$BIN_STUB" \
         bash "$REPO_ROOT/install.sh" --no-setup --skip-plugin >/dev/null 2>&1
     latest="$(list_backups | tail -1)"
     if [ -n "$latest" ] && [ "$latest" \> "$prev_newest" ]; then

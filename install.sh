@@ -3,13 +3,14 @@
 # SPDX-License-Identifier: MIT
 #
 # Installer for pragmatic-engineer/playbook. Plugin based: the toolkit (skills,
-# commands, agents, and the functional hooks) is delivered as a Claude Code
-# plugin, while this script installs the always-on safety guards and the other
-# local configs (settings.json, statusline, shell integration, dependencies).
-# It also fetches, verifies (SHA256, then a --version smoke test), and installs
-# the playbook binary into PLAYBOOK_BIN_DIR (default $HOME/.local/bin), and
-# puts that directory on PATH. Interactive by default; every optional step
-# asks before it runs.
+# commands, and agents) is delivered as a Claude Code plugin, while this
+# script fetches, verifies (SHA256, then a --version smoke test), and installs
+# the playbook binary into PLAYBOOK_BIN_DIR (default $HOME/.local/bin), puts
+# that directory on PATH, then hands off to `playbook init`, which wires the
+# 11 functional hooks and the 4 always-on safety guards into settings.json,
+# places the guard scripts, and seeds or merges the other local configs
+# (settings.json, statusline, shell integration). Interactive by default;
+# every optional step asks before it runs.
 #
 #   curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 #
@@ -28,7 +29,6 @@ PLUGIN="playbook@pragmatic-engineer"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
 REF="${PLAYBOOK_REF:-}"
-SKIP_DEPS=0
 SKIP_PLUGIN=0
 OPT_ALIASES=0
 OPT_SYSTEM_PROMPT=0
@@ -91,10 +91,10 @@ Env:
 Flags:
   --yes              non-interactive: accept every step's default
   --skip-plugin      don't add the marketplace or install the plugin
-  --skip-deps        skip 'brew bundle'
+  --skip-deps        accepted, ignored: `playbook init` installs no deps itself
   --aliases          install the shell launchers (cc/ccd) without prompting
   --system-prompt    install the custom system prompt without prompting (implies --aliases)
-  --no-setup         install files only: no plugin, deps, or shell edits
+  --no-setup         skip the plugin only: guards, settings, and shell wiring still run
   --ref <ref>        same as PLAYBOOK_REF
   -h, --help         show this help
 EOF
@@ -104,11 +104,11 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --yes|-y)        ASSUME_YES=1 ;;
         --skip-plugin)   SKIP_PLUGIN=1 ;;
-        --skip-deps)     SKIP_DEPS=1 ;;
+        --skip-deps)     ;; # accepted, ignored -- `playbook init` installs no deps itself
         --skip-shell)    ;; # accepted, ignored -- use --aliases to wire shell
         --aliases)       OPT_ALIASES=1 ;;
         --system-prompt) OPT_SYSTEM_PROMPT=1; OPT_ALIASES=1 ;;
-        --no-setup)      SKIP_DEPS=1; SKIP_PLUGIN=1 ;;
+        --no-setup)      SKIP_PLUGIN=1 ;;
         --ref)           shift; REF="${1:-}" ;;
         --ref=*)         REF="${1#--ref=}" ;;
         -h|--help)       print_help; exit 0 ;;
@@ -364,10 +364,19 @@ for src in "$SRC"/*; do
 done
 shopt -u dotglob nullglob
 
-# Wire the always-on guards and seed/merge settings.json via setup-local.sh.
-# IMPORTANT: setup-local.sh is called unconditionally -- even with --no-setup.
-# --no-setup means "no plugin, no deps", not "no guards or settings".
-# The guard hooks and settings.json must always be wired.
+# Wire the always-on guards, seed/merge settings.json, and install the shell
+# launcher and statusline, via `playbook init`. IMPORTANT: this runs
+# unconditionally -- even with --no-setup. --no-setup means "no plugin, no
+# deps", not "no guards or settings". The guard hooks and settings.json must
+# always be wired.
+#
+# CLAUDE_PLUGIN_ROOT points `init` at $SRC (the staged tarball tree, or the
+# local checkout under PLAYBOOK_SRC) so every step that needs shipped content
+# (the settings template, the guard scripts, the launcher runtime, the
+# statusline) resolves; without it, `init` writes only a bare `.hooks` block.
+# Invoked by absolute path: a fresh shell's PATH may not yet include
+# PLAYBOOK_BIN_DIR, and this runs before the rc-file PATH line takes effect.
+# `init` prints one line per step, so its output is not redirected.
 #
 # Interactive prompts for the opt-in layers (skip when --yes or no tty):
 if [ "$OPT_ALIASES" -eq 0 ]; then
@@ -381,13 +390,31 @@ if [ "$OPT_ALIASES" -eq 1 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ]; then
     fi
 fi
 
-_SETUP_ARGS=""
-[ "$SKIP_DEPS"          -eq 1 ] && _SETUP_ARGS="$_SETUP_ARGS --skip-deps"
-[ "$OPT_ALIASES"        -eq 1 ] && _SETUP_ARGS="$_SETUP_ARGS --aliases"
-[ "$OPT_SYSTEM_PROMPT"  -eq 1 ] && _SETUP_ARGS="$_SETUP_ARGS --system-prompt"
-[ "$ASSUME_YES"         -eq 1 ] && _SETUP_ARGS="$_SETUP_ARGS --yes"
+# Probe for each optional flag rather than assuming the binary supports it.
+#
+# This script is fetched from the main branch by the documented curl one-liner,
+# while the binary comes from the latest RELEASE. Those two are permanently
+# allowed to drift, so install.sh must never assume a binary feature newer than
+# the last published release. Measured 2026-08-20: passing --system-prompt to
+# the v0.10.0 binary, which predates that flag, made `init` exit non-zero with
+# "unexpected argument", so the install finished having written no settings.json
+# at all. Probing costs one process and removes the whole class of failure.
+_init_supports() {
+    "$PLAYBOOK_BIN_DIR/playbook" init --help 2>/dev/null | grep -q -- "$1"
+}
+
+_INIT_ARGS=""
+if [ "$OPT_SYSTEM_PROMPT" -eq 1 ]; then
+    if _init_supports --system-prompt; then
+        _INIT_ARGS="$_INIT_ARGS --system-prompt"
+    else
+        warn "the installed playbook $( "$PLAYBOOK_BIN_DIR/playbook" --version 2>/dev/null | awk '{print $NF}' ) does not support --system-prompt; skipping it. Re-run this installer once a release includes it."
+    fi
+fi
+log "Running playbook init"
 # shellcheck disable=SC2086
-bash "$CLAUDE_HOME/shell/setup-local.sh" $_SETUP_ARGS
+CLAUDE_PLUGIN_ROOT="$SRC" "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \
+    die "playbook init failed; see the step report above"
 
 # --- setup -----------------------------------------------------------------
 

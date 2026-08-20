@@ -94,21 +94,30 @@ done
 unset CLAUDE_CONFIG_DIR
 rm -rf "$BASE"
 
-hdr "F. install.sh into a throwaway HOME (files, settings seed, guard wiring)"
-TH="$(mktemp -d)"; CH="$TH/.claude"
-HOME="$TH" CLAUDE_HOME="$CH" PLAYBOOK_SRC="$REPO" \
-  bash "$REPO/install.sh" --no-setup --yes >"$TH/install.log" 2>&1
-rc=$?
-[ "$rc" -eq 0 ] && ok "install.sh --no-setup --yes exits 0" || bad "install.sh exit=$rc"
+hdr "F. install.sh into a throwaway HOME (files, settings seed, hook + guard wiring)"
+TH="$(mktemp -d)"; CH="$TH/.claude"; BD="$TH/bin"
+mkdir -p "$BD"
+BIN_SRC="$REPO/target/debug/playbook"
+[ -x "$BIN_SRC" ] || ( cd "$REPO" && cargo build --quiet ) >/dev/null 2>&1
+if [ -x "$BIN_SRC" ]; then
+  cp "$BIN_SRC" "$BD/playbook"; chmod 0755 "$BD/playbook"
+  HOME="$TH" CLAUDE_HOME="$CH" PLAYBOOK_SRC="$REPO" PLAYBOOK_BIN_DIR="$BD" \
+    bash "$REPO/install.sh" --no-setup --yes >"$TH/install.log" 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] && ok "install.sh --no-setup --yes exits 0" || bad "install.sh exit=$rc"
+else
+  bad "playbook binary not built (cargo build failed); section F skipped"
+  rc=1
+fi
 [ -f "$CH/settings.json" ] && ok "settings.json seeded" || bad "settings.json not seeded"
 [ -f "$CH/.settings.base.json" ] && ok ".settings.base.json baseline written" || bad "baseline missing"
 if [ -f "$CH/settings.json" ]; then
-  guards="$(jq -r '[.hooks.PreToolUse[]?.hooks[]?.command] | map(select(test("rm-workspace-guard|bg-await-guard|no-dash-guard"))) | length' "$CH/settings.json" 2>/dev/null)"
-  [ "${guards:-0}" -ge 3 ] && ok "3 safety guards wired in settings.json" || bad "safety guards not wired (found ${guards:-0})"
-  func="$(jq -r '[.hooks[]?[]?.hooks[]?.command] | map(select(test("session-init|search-counter|post-edit-track"))) | length' "$CH/settings.json" 2>/dev/null)"
-  [ "${func:-0}" = "0" ] && ok "functional hooks NOT in settings (plugin-owned, no double-fire)" || warn "functional hooks in settings ($func)"
+  guards="$(jq -r '[.hooks.PreToolUse[]?.hooks[]?.command] | map(select(test("rm-workspace-guard|bg-await-guard|no-dash-guard|precommit-check"))) | length' "$CH/settings.json" 2>/dev/null)"
+  [ "${guards:-0}" -ge 4 ] && ok "4 safety guards wired in settings.json" || bad "safety guards not wired (found ${guards:-0})"
+  func="$(jq -r '[.hooks[]?[]?.hooks[]?.command] | map(select(test("^playbook hook (session-init|search-counter|post-edit-track)$"))) | length' "$CH/settings.json" 2>/dev/null)"
+  [ "${func:-0}" = "3" ] && ok "functional hooks ARE in settings, wired to the binary (no plugin registry left to double-fire)" || bad "functional hooks not wired in settings (found ${func:-0})"
 fi
-for g in rm-workspace-guard bg-await-guard no-dash-guard; do
+for g in rm-workspace-guard bg-await-guard no-dash-guard precommit-check; do
   [ -f "$CH/hooks/$g.sh" ] && ok "guard installed: $g.sh" || bad "guard not installed: $g.sh"
 done
 [ ! -e "$CH/commands" ] && ok "commands/ not copied (plugin-owned)" || warn "commands/ copied directly"
