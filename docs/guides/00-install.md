@@ -17,11 +17,13 @@ This page covers requirements, the full local install path with the curl one-lin
 
 ## Full local install with curl
 
-The `curl | bash` one-liner downloads the files into `~/.claude`, runs the plugin install, and prompts for the opt-in layers. Use this if you want the full `~/.claude` file set locally (for example, to clone and edit the config).
+The `curl | bash` one-liner is a two-step install: it fetches, verifies (SHA256, then a `--version` smoke test), and installs the `playbook` binary into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`), puts that directory on `PATH`, then hands off to `playbook init`, which wires the safety guards and functional hooks into `settings.json`, seeds or merges the rest of the local config, and installs the shell launcher and statusline. It also runs the plugin install and prompts for the opt-in layers. Use this if you want the full `~/.claude` file set locally (for example, to clone and edit the config).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
+
+Open a new terminal (or source your rc file) afterwards so the binary resolves on `PATH`.
 
 Pass `--yes` to accept every default without prompting. Pin a version:
 
@@ -41,10 +43,10 @@ Flags (pass after `-s --` when piping):
 |---|---|
 | `--yes`, `-y` | non-interactive: accept every step's default |
 | `--skip-plugin` | don't add the marketplace or install the plugin |
-| `--skip-deps` | skip `brew bundle` |
+| `--skip-deps` | accepted, ignored: `playbook init` installs no deps itself |
 | `--aliases` | install the shell launchers without prompting |
 | `--system-prompt` | install the custom system prompt without prompting (implies `--aliases`) |
-| `--no-setup` | install files only: no plugin, deps, or shell edits |
+| `--no-setup` | skip the plugin only; guards, settings, and shell wiring still run |
 | `--ref <ref>` | source ref (same as `PLAYBOOK_REF`) |
 
 Prefer git? Clone fresh:

@@ -11,7 +11,7 @@ claude plugin install playbook@pragmatic-engineer
 
 Then open a Claude Code session and run `/playbook:setup --install-aliases --use-system-prompt`. Those flags install the shell launchers and the custom system prompt without asking; drop them and `/playbook:setup` asks two yes/no questions instead (both default to yes). Run `/playbook:doctor` afterwards to verify.
 
-That is the primary path. The plugin content (skills, commands, agents, hooks) is available immediately after install; `/playbook:setup` adds the local layers on top. For the full local install (curl one-liner, requirements, uninstall), see [docs/guides/00-install.md](docs/guides/00-install.md).
+That is the primary path. The plugin content (skills, commands, agents) is available immediately after install; `/playbook:setup` adds the local layers on top. The functional hooks and the safety guards are wired locally by `playbook init`, which the full local installer below runs for you. For the full local install (curl one-liner, requirements, uninstall), see [docs/guides/00-install.md](docs/guides/00-install.md).
 
 ## Layers
 
