@@ -6,12 +6,18 @@
 # commands, agents, and the functional hooks) is delivered as a Claude Code
 # plugin, while this script installs the always-on safety guards and the other
 # local configs (settings.json, statusline, shell integration, dependencies).
-# Interactive by default; every optional step asks before it runs.
+# It also fetches, verifies (SHA256, then a --version smoke test), and installs
+# the playbook binary into PLAYBOOK_BIN_DIR (default $HOME/.local/bin), and
+# puts that directory on PATH. Interactive by default; every optional step
+# asks before it runs.
 #
 #   curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 #
 # Source of truth: the latest GitHub release by default, or PLAYBOOK_REF
 # (any tag/branch/sha). Falls back to the main branch when no release exists.
+# The release binary, unlike the source tree, can only come from a confirmed
+# release: PLAYBOOK_REF pins the source tree, not the binary, since a branch
+# or a commit has no published release to fetch one from.
 # Existing tracked files are backed up before being replaced; runtime state
 # (sessions/, projects/, history, plugins/) is never touched.
 set -euo pipefail
@@ -20,6 +26,7 @@ PLUGIN_REPO="pragmatic-engineer/playbook"
 MARKETPLACE="pragmatic-engineer/marketplace"
 PLUGIN="playbook@pragmatic-engineer"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
 REF="${PLAYBOOK_REF:-}"
 SKIP_DEPS=0
 SKIP_PLUGIN=0
@@ -79,6 +86,7 @@ What it does:
 Env:
   PLAYBOOK_REF=<tag|branch|sha>  source ref (default: latest release, else main)
   CLAUDE_HOME=<dir>              install target (default: $HOME/.claude)
+  PLAYBOOK_BIN_DIR=<dir>         binary install dir (default: $HOME/.local/bin)
 
 Flags:
   --yes              non-interactive: accept every step's default
@@ -112,6 +120,15 @@ done
 [ -n "$CLAUDE_HOME" ] || die "CLAUDE_HOME is empty"
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v tar  >/dev/null 2>&1 || die "tar is required"
+# shasum ships on macOS, sha256sum on Linux (including a bare debian:stable-slim
+# container, which has no shasum); either verifies the release binary.
+if command -v shasum >/dev/null 2>&1; then
+    CKSUM_CMD=(shasum -a 256 -c)
+elif command -v sha256sum >/dev/null 2>&1; then
+    CKSUM_CMD=(sha256sum -c)
+else
+    die "shasum or sha256sum is required to verify the release binary"
+fi
 
 # Only a 404 ("this repo published no release") may fall back to main. Any
 # other failure means we do not know what the latest release is, and quietly
@@ -119,9 +136,21 @@ command -v tar  >/dev/null 2>&1 || die "tar is required"
 # Hence no -f, which would empty the body and collapse 403, 404 and a dead
 # network into one indistinguishable empty string. The 403 is routine: the
 # unauthenticated API allows 60 requests per hour per IP.
+#
+# Sets three globals rather than printing the URL to stdout, so the caller can
+# also read the resolved tag (needed to name and version the release binary)
+# without a second round trip. Called directly, not via command substitution,
+# so die()'s exit ends the real script rather than only a subshell.
+#   RESOLVED_TAG       the git ref to fetch: a real tag, "main", or $REF
+#   RESOLVED_FROM_REF   1 when RESOLVED_TAG did not come from a confirmed
+#                       release lookup (a REF pin, or the no-release
+#                       fallback), which install_release_binary refuses below
+#   TARBALL_URL         source tarball URL for that ref
 resolve_tarball_url() {
     if [ -n "$REF" ]; then
-        printf 'https://codeload.github.com/%s/tar.gz/%s\n' "$PLUGIN_REPO" "$REF"
+        RESOLVED_TAG="$REF"
+        RESOLVED_FROM_REF=1
+        TARBALL_URL="https://codeload.github.com/$PLUGIN_REPO/tar.gz/$REF"
         return
     fi
     local body code tag
@@ -134,17 +163,18 @@ resolve_tarball_url() {
     tag="${tag%%$'\n'*}"
     rm -f "$body"
 
-    # die runs in this command substitution's subshell, so its exit only ends
-    # the subshell. That still aborts the install, because `set -e` makes the
-    # enclosing assignment inherit the non-zero status.
     case "$code" in
         200)
             [ -n "$tag" ] || die "the release API returned 200 with no tag_name; refusing to guess a version"
-            printf 'https://codeload.github.com/%s/tar.gz/refs/tags/%s\n' "$PLUGIN_REPO" "$tag"
+            RESOLVED_TAG="$tag"
+            RESOLVED_FROM_REF=0
+            TARBALL_URL="https://codeload.github.com/$PLUGIN_REPO/tar.gz/refs/tags/$tag"
             ;;
         404)
             warn "$PLUGIN_REPO has published no release; installing from the main branch"
-            printf 'https://codeload.github.com/%s/tar.gz/refs/heads/main\n' "$PLUGIN_REPO"
+            RESOLVED_TAG="main"
+            RESOLVED_FROM_REF=1
+            TARBALL_URL="https://codeload.github.com/$PLUGIN_REPO/tar.gz/refs/heads/main"
             ;;
         *)
             die "could not read the release API (HTTP $code); retry, or pin a version with PLAYBOOK_REF=vX.Y.Z"
@@ -152,19 +182,156 @@ resolve_tarball_url() {
     esac
 }
 
+# One seam for the download transport, so adding a wget fallback later is a
+# one-function change. curl only for now: this repo already hard-requires curl
+# (see the preflight check above), and shell/install-resolve.test.sh's stub
+# only implements curl.
+_fetch() {
+    curl -fsSL "$1" -o "$2"
+}
+
+# Maps `uname -s`/`uname -m` to the exact asset name a release publishes, into
+# the global ASSET. macOS always reports arm64, never aarch64. Under Rosetta,
+# `uname -m` still reports x86_64 and the x86_64 binary runs correctly there,
+# so no Rosetta special case is needed.
+release_asset_name() {
+    local version="$1" os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+    case "$os-$arch" in
+        Darwin-arm64)  ASSET="playbook-${version}-aarch64-apple-darwin" ;;
+        Darwin-x86_64) ASSET="playbook-${version}-x86_64-apple-darwin" ;;
+        Linux-aarch64) ASSET="playbook-${version}-aarch64-unknown-linux-musl" ;;
+        Linux-x86_64)  ASSET="playbook-${version}-x86_64-unknown-linux-musl" ;;
+        *)
+            die "unsupported platform: $os $arch (a Windows binary is published as playbook-${version}-x86_64-pc-windows-msvc.exe, but this is a bash installer and cannot select it)"
+            ;;
+    esac
+}
+
+# Fetches, verifies, and installs the release binary matching $RESOLVED_TAG.
+# Refuses when the tag is not a confirmed release (a PLAYBOOK_REF pin, or the
+# no-release-published fallback in resolve_tarball_url): a branch or a commit
+# has no release and therefore no binary, and mixing a "latest" binary with a
+# pinned or unpublished tree is exactly the failure this must not produce
+# silently.
+install_release_binary() {
+    if [ "$RESOLVED_FROM_REF" -eq 1 ]; then
+        if [ -n "$REF" ]; then
+            die "PLAYBOOK_REF=$REF pins a branch or commit, not a published release; no release binary exists for it. Unset PLAYBOOK_REF to install the latest release together with its matching binary."
+        fi
+        die "$PLUGIN_REPO has published no release; a verified release binary cannot be fetched."
+    fi
+
+    local version
+    version="${RESOLVED_TAG#v}"
+    release_asset_name "$version"
+
+    STAGE="$(mktemp -d)"
+
+    log "Fetching release binary $ASSET"
+    _fetch "https://github.com/$PLUGIN_REPO/releases/download/$RESOLVED_TAG/$ASSET" "$STAGE/$ASSET" \
+        || die "could not download $ASSET from the $RESOLVED_TAG release"
+    # SHA256SUMS is not signed. Its integrity rests on TLS and on trusting
+    # github.com, not on any cryptographic signature; do not imply more
+    # assurance than that.
+    _fetch "https://github.com/$PLUGIN_REPO/releases/download/$RESOLVED_TAG/SHA256SUMS" "$STAGE/SHA256SUMS" \
+        || die "could not download SHA256SUMS from the $RESOLVED_TAG release"
+
+    # SHA256SUMS lists all five published assets; shasum/sha256sum -c on the
+    # whole file fails, because the other four are not present locally. Filter
+    # to the one line for our asset first. cd into staging so the filename in
+    # that line resolves relative to it.
+    (cd "$STAGE" && grep -E "^[0-9a-f]{64}  ${ASSET}$" SHA256SUMS > "$ASSET.sha256") \
+        || die "no checksum line for $ASSET in SHA256SUMS; the release may be incomplete or corrupt"
+    (cd "$STAGE" && "${CKSUM_CMD[@]}" "$ASSET.sha256") >/dev/null 2>&1 \
+        || die "checksum mismatch for $ASSET; the download is corrupt"
+
+    chmod 0755 "$STAGE/$ASSET"
+    mv "$STAGE/$ASSET" "$STAGE/playbook"
+
+    # The checksum only proves the bytes downloaded intact; it cannot prove
+    # they run. A binary that is intact-but-empty, or built for the wrong
+    # platform, needs an actual execution to catch.
+    local bin_version
+    bin_version="$("$STAGE/playbook" --version 2>/dev/null)" \
+        || die "the downloaded binary did not run; the $RESOLVED_TAG release may be broken for this platform"
+    case "$bin_version" in
+        *"$version"*) ;;
+        *) die "version mismatch: the downloaded binary reports '$bin_version', expected $version" ;;
+    esac
+
+    # ---- first durable write: everything above here leaves no trace on failure.
+    mkdir -p "$PLAYBOOK_BIN_DIR"
+    local bin_tmp
+    bin_tmp="$(mktemp "$PLAYBOOK_BIN_DIR/.playbook.XXXXXX")"
+    cp "$STAGE/playbook" "$bin_tmp"
+    chmod 0755 "$bin_tmp"
+    mv -f "$bin_tmp" "$PLAYBOOK_BIN_DIR/playbook"
+    log "Installed playbook $version to $PLAYBOOK_BIN_DIR/playbook"
+
+    rm -rf "$STAGE"
+    STAGE=""
+
+    ensure_bin_dir_on_path
+}
+
+# Puts $PLAYBOOK_BIN_DIR on PATH for future shells via one idempotent rc-file
+# line, using the same grep -qF guard and comment-marker idiom as
+# shell/setup-local.sh:263-268, so uninstall.sh can find and strip this exact
+# line later.
+ensure_bin_dir_on_path() {
+    local shell_bin rc_file
+    shell_bin="$(basename "${SHELL:-}")"
+    case "$shell_bin" in
+        zsh)  rc_file="$HOME/.zshrc" ;;
+        bash) rc_file="$HOME/.bashrc" ;;
+        *)
+            rc_file=""
+            warn "Shell '$shell_bin' not recognised; add $PLAYBOOK_BIN_DIR to PATH manually."
+            ;;
+    esac
+
+    if [ -n "$rc_file" ]; then
+        if grep -qF "$PLAYBOOK_BIN_DIR" "$rc_file" 2>/dev/null; then
+            log "$rc_file already has $PLAYBOOK_BIN_DIR on PATH"
+        else
+            printf '\n# playbook binary\nexport PATH="%s:$PATH"\n' "$PLAYBOOK_BIN_DIR" >> "$rc_file"
+            log "Added $PLAYBOOK_BIN_DIR to PATH in $rc_file"
+        fi
+    fi
+
+    warn "playbook is installed to $PLAYBOOK_BIN_DIR. Open a new terminal (or source your rc file) so it resolves on PATH."
+}
+
+# STAGE (the binary staging dir) and TMP (the source tarball staging dir) are
+# cleaned up on any exit, including an interrupted `curl | bash`: the previous
+# version of this trap covered EXIT only, so ctrl-c during the network path
+# leaked a temp dir.
+STAGE=""
+TMP=""
+_cleanup_staging() {
+    [ -n "$STAGE" ] && rm -rf "$STAGE"
+    [ -n "$TMP" ] && rm -rf "$TMP"
+    return 0
+}
+trap _cleanup_staging EXIT INT TERM
+
 # PLAYBOOK_SRC is a test seam: when set, install straight from a local
-# checkout and skip the network path (resolve/curl/tar) entirely.
+# checkout and skip the network path (resolve/curl/tar, and the release
+# binary fetch) entirely.
 SRC="${PLAYBOOK_SRC:-}"
 if [ -n "$SRC" ]; then
     [ -d "$SRC" ] || die "PLAYBOOK_SRC is not a directory: $SRC"
     log "Installing from local source $SRC"
 else
-    TMP="$(mktemp -d)"
-    trap 'rm -rf "$TMP"' EXIT
+    resolve_tarball_url
+    log "Downloading $TARBALL_URL"
 
-    url="$(resolve_tarball_url)"
-    log "Downloading $url"
-    curl -fsSL "$url" -o "$TMP/config.tar.gz" || die "download failed: $url"
+    install_release_binary
+
+    TMP="$(mktemp -d)"
+    _fetch "$TARBALL_URL" "$TMP/config.tar.gz" || die "download failed: $TARBALL_URL"
     tar -xzf "$TMP/config.tar.gz" -C "$TMP" || die "could not extract archive"
 
     SRC="$(find "$TMP" -mindepth 1 -maxdepth 1 -type d -name '*playbook*' | head -1)"

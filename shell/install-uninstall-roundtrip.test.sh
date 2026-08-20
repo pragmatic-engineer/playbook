@@ -102,6 +102,172 @@ else
     fail "uninstall preserves user-owned settings" "removed:$missing"
 fi
 
+# --- Binary install/uninstall lifecycle -------------------------------------
+# install_release_binary and ensure_bin_dir_on_path only run on install.sh's
+# network path, never under PLAYBOOK_SRC, so run_install() above never touches
+# the binary or its PATH line. These scenarios stub curl and uname (same
+# technique as shell/install-resolve.test.sh) and drive that path directly.
+# The stub serves no source tarball, so install.sh always dies right after
+# installing the binary and wiring PATH; that is expected here, since the
+# binary and PATH work are already done by the time it dies.
+
+BIN_STUB="$WORK/binstub"
+mkdir -p "$BIN_STUB"
+
+# Same dual call-shape stub as shell/install-resolve.test.sh: install.sh calls
+# curl both as `-o FILE -w '%{http_code}'` (resolve_tarball_url) and as
+# `-fsSL URL -o FILE` (_fetch). Serves the releases API, the release asset,
+# and SHA256SUMS; anything else, including the source tarball, fails on
+# purpose, which is what drives the "dies right after the binary" behaviour
+# above.
+cat > "$BIN_STUB/curl" <<'STUB'
+#!/usr/bin/env bash
+out=""; url=""; fail_on_http_error=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -w) shift 2 ;;
+    -*) case "$1" in *f*) fail_on_http_error=1 ;; esac; shift ;;
+    *)  url="$1"; shift ;;
+  esac
+done
+case "$url" in
+  *api.github.com/repos/*/releases/latest)
+    code="${STUB_CODE:-200}"
+    if [ "$fail_on_http_error" = "1" ] && [ "$code" -ge 400 ]; then exit 22; fi
+    if [ -n "$out" ]; then
+      printf '%s' "${STUB_BODY:-}" > "$out"
+      printf '%s' "$code"
+    else
+      printf '%s' "${STUB_BODY:-}"
+    fi
+    exit 0 ;;
+  */releases/download/*/SHA256SUMS)
+    if [ -n "$out" ]; then printf '%s' "${STUB_SUMS_BODY:-}" > "$out"
+    else printf '%s' "${STUB_SUMS_BODY:-}"; fi
+    exit 0 ;;
+  */releases/download/*)
+    if [ -n "$out" ]; then printf '%s' "${STUB_ASSET_BODY:-}" > "$out"
+    else printf '%s' "${STUB_ASSET_BODY:-}"; fi
+    exit 0 ;;
+  *) exit 22 ;;
+esac
+STUB
+chmod +x "$BIN_STUB/curl"
+
+# Stub uname so the asset name install.sh computes is deterministic across
+# hosts (real macOS/Linux dev boxes and CI alike), matching the fixed ASSET
+# below instead of whatever the machine running the suite actually is.
+cat > "$BIN_STUB/uname" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  -s) printf '%s\n' "${STUB_UNAME_S:-Linux}" ;;
+  -m) printf '%s\n' "${STUB_UNAME_M:-x86_64}" ;;
+  *) command -p uname "$@" ;;
+esac
+STUB
+chmod +x "$BIN_STUB/uname"
+
+_sha256() {
+    if command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+    else
+        printf '%s' "$1" | sha256sum | awk '{print $1}'
+    fi
+}
+
+RELEASE_BODY='{"tag_name": "v1.2.3"}'
+ASSET="playbook-1.2.3-x86_64-unknown-linux-musl"
+GOOD_ASSET_BODY=$'#!/usr/bin/env bash\necho "playbook 1.2.3"\n'
+SUMS_BODY="$(_sha256 "$GOOD_ASSET_BODY")  $ASSET"
+
+run_binary_install() {
+    local home="$1" bindir="$2"
+    PATH="$BIN_STUB:$PATH" CLAUDE_HOME="$home/.claude" HOME="$home" \
+        PLAYBOOK_BIN_DIR="$bindir" SHELL=/bin/bash \
+        STUB_CODE=200 STUB_BODY="$RELEASE_BODY" \
+        STUB_ASSET_BODY="$GOOD_ASSET_BODY" STUB_SUMS_BODY="$SUMS_BODY" \
+        bash "$REPO_ROOT/install.sh" --no-setup --skip-plugin >/dev/null 2>&1
+}
+run_binary_uninstall() {
+    local home="$1" bindir="$2"
+    CLAUDE_HOME="$home/.claude" HOME="$home" PLAYBOOK_BIN_DIR="$bindir" \
+        bash "$REPO_ROOT/uninstall.sh" --yes --force >/dev/null 2>&1
+}
+marker_count() {
+    local n
+    n="$(grep -cF '# playbook binary' "$1" 2>/dev/null || true)"
+    printf '%s' "${n:-0}"
+}
+
+# 1 & 2. One lifecycle: install, then uninstall that same install. After
+# install the binary is executable and the rc file carries exactly one
+# marker; after uninstall both are gone.
+bin_home="$(mktemp -d "$WORK/bin-home.XXXXXX")"
+bin_dir="$WORK/bin-dir"
+run_binary_install "$bin_home" "$bin_dir"
+
+if [ -x "$bin_dir/playbook" ] && [ "$(marker_count "$bin_home/.bashrc")" -eq 1 ]; then
+    pass "install places the binary and exactly one PATH marker"
+else
+    fail "install places the binary and exactly one PATH marker" \
+        "binary executable: $([ -x "$bin_dir/playbook" ] && echo yes || echo no), markers: $(marker_count "$bin_home/.bashrc")"
+fi
+
+run_binary_uninstall "$bin_home" "$bin_dir"
+
+if [ ! -e "$bin_dir/playbook" ] && [ "$(marker_count "$bin_home/.bashrc")" -eq 0 ]; then
+    pass "uninstall removes the binary and its PATH marker"
+else
+    fail "uninstall removes the binary and its PATH marker" \
+        "binary present: $([ -e "$bin_dir/playbook" ] && echo yes || echo no), markers: $(marker_count "$bin_home/.bashrc")"
+fi
+
+# 3. Idempotence: installing twice must not double the marker.
+idem_home="$(mktemp -d "$WORK/bin-idem.XXXXXX")"
+idem_dir="$WORK/bin-idem-dir"
+run_binary_install "$idem_home" "$idem_dir"
+run_binary_install "$idem_home" "$idem_dir"
+
+if [ "$(marker_count "$idem_home/.bashrc")" -eq 1 ]; then
+    pass "installing twice leaves exactly one PATH marker"
+else
+    fail "installing twice leaves exactly one PATH marker" \
+        "markers: $(marker_count "$idem_home/.bashrc")"
+fi
+
+# 4. Surgical: uninstall must strip only the marker block it owns, never a
+# user's own PATH edit. strip_rc_binary_path anchors on the "# playbook
+# binary" marker specifically so it cannot eat an unrelated export line.
+surgical_home="$(mktemp -d "$WORK/bin-surgical.XXXXXX")"
+surgical_dir="$WORK/bin-surgical-dir"
+mkdir -p "$surgical_home"
+USER_LINE='export PATH="/opt/mytools:$PATH"'
+printf '%s\n' "$USER_LINE" > "$surgical_home/.bashrc"
+
+run_binary_install "$surgical_home" "$surgical_dir"
+run_binary_uninstall "$surgical_home" "$surgical_dir"
+
+if grep -qF "$USER_LINE" "$surgical_home/.bashrc" 2>/dev/null \
+    && [ "$(marker_count "$surgical_home/.bashrc")" -eq 0 ]; then
+    pass "uninstall preserves a user's own PATH edit"
+else
+    fail "uninstall preserves a user's own PATH edit" \
+        "user line present: $(grep -qF "$USER_LINE" "$surgical_home/.bashrc" 2>/dev/null && echo yes || echo no), markers: $(marker_count "$surgical_home/.bashrc")"
+fi
+
+# 5. Uninstall with no binary installed is a clean no-op, not an error.
+noop_home="$(mktemp -d "$WORK/bin-noop.XXXXXX")"
+noop_dir="$WORK/bin-noop-dir"
+run_binary_uninstall "$noop_home" "$noop_dir"
+noop_rc=$?
+
+if [ "$noop_rc" -eq 0 ] && [ ! -e "$noop_dir/playbook" ]; then
+    pass "uninstall with no binary present is a clean no-op"
+else
+    fail "uninstall with no binary present is a clean no-op" "exit $noop_rc"
+fi
+
 TOTAL=$(( PASS + FAIL ))
 echo ""
 echo "${PASS}/${TOTAL} scenarios passed"
