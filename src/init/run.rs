@@ -34,6 +34,7 @@ use crate::init::guards;
 use crate::init::merge;
 use crate::init::shim::{self, ShellKind};
 use crate::init::statusline;
+use crate::init::system_prompt;
 use crate::init::wire;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -55,6 +56,11 @@ pub struct InitPaths {
     /// `None` when `$SHELL` names neither bash nor zsh, in which case the
     /// shim step is skipped with instructions to source it manually.
     pub shell_kind: Option<ShellKind>,
+    /// Whether the user asked for `prompts/SYSTEM_PROMPT.md` via
+    /// `--system-prompt`. False still refreshes an already-installed copy;
+    /// see `init::system_prompt` for why installing one unasked would be a
+    /// behaviour change rather than a port.
+    pub system_prompt: bool,
 }
 
 /// How one step of `run` landed.
@@ -152,6 +158,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let hooks_step = wire_hooks(&settings_path, &placed_guards, &paths.claude_home);
     let shim_step = install_shim_step(self_root, &paths.claude_home, &paths.home, paths.shell_kind);
     let statusline_step = place_statusline_step(self_root, &settings_path, &paths.home);
+    let system_prompt_step =
+        place_system_prompt_step(self_root, &paths.claude_home, paths.system_prompt);
 
     InitOutcome {
         steps: vec![
@@ -160,7 +168,42 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
             hooks_step,
             shim_step,
             statusline_step,
+            system_prompt_step,
         ],
+    }
+}
+
+/// Step 6: place `prompts/SYSTEM_PROMPT.md`, which is opt-in. See
+/// `init::system_prompt` for why `init` refreshes an existing copy but never
+/// installs one the user did not ask for.
+fn place_system_prompt_step(
+    self_root: Option<&Path>,
+    claude_home: &Path,
+    opt_in: bool,
+) -> StepReport {
+    let Some(self_root) = self_root else {
+        return StepReport::skipped(
+            "system-prompt",
+            "CLAUDE_PLUGIN_ROOT is not set, no prompt to place",
+        );
+    };
+    match system_prompt::place_system_prompt(self_root, claude_home, opt_in) {
+        Ok(system_prompt::Placement::Placed(dest)) => {
+            StepReport::wired("system-prompt", format!("placed at {}", dest.display()))
+        }
+        Ok(system_prompt::Placement::AlreadyCurrent(dest)) => StepReport::already_correct(
+            "system-prompt",
+            format!("already up to date at {}", dest.display()),
+        ),
+        Ok(system_prompt::Placement::NotShipped(source)) => StepReport::skipped(
+            "system-prompt",
+            format!("not shipped at {}", source.display()),
+        ),
+        Ok(system_prompt::Placement::NotOptedIn) => StepReport::skipped(
+            "system-prompt",
+            "not installed; pass --system-prompt to opt in",
+        ),
+        Err(err) => StepReport::failed("system-prompt", err.to_string()),
     }
 }
 

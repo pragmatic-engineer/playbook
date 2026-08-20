@@ -362,6 +362,7 @@ fn guard_placement_failure_leaves_no_guard_command_but_still_wires_the_ported_ho
         claude_home: claude_home.clone(),
         home: home.clone(),
         shell_kind: Some(ShellKind::Bash),
+        system_prompt: false,
     };
 
     // Act
@@ -428,6 +429,7 @@ fn all_four_guards_present_with_real_template_wires_all_four_and_places_all_four
         claude_home: claude_home.clone(),
         home: home.clone(),
         shell_kind: Some(ShellKind::Bash),
+        system_prompt: false,
     };
 
     // Act
@@ -536,6 +538,7 @@ fn repair_path_removes_a_pre_existing_dangling_guard_command_end_to_end() {
         claude_home: claude_home.clone(),
         home: home.clone(),
         shell_kind: Some(ShellKind::Bash),
+        system_prompt: false,
     };
 
     // Act
