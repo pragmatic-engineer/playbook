@@ -12,15 +12,17 @@
 //!   WU-13.
 //! - `shim` installs the bash and zsh launcher shim idempotently.
 //! - `statusline` places `statusline.sh` at the path `settings.json` names.
-//! - `run` composes all five above into `Command::Init`'s dispatch arm.
+//! - `system_prompt` places the opt-in `prompts/SYSTEM_PROMPT.md`.
+//! - `run` composes all six above into `Command::Init`'s dispatch arm.
 //!
-//! Three of those five place a file, and each places one that some other
+//! Four of those six place a file, and each places one that some other
 //! component names: `settings.json`'s `statusLine.command` names the
-//! statusline, and `wire`'s guard commands name the guard scripts. That is
-//! the rule this module enforces, **the component that names a path is the
-//! component that puts the file there**, learned twice the hard way (the
-//! 2026-08-12 statusline outage, and the 2026-08-11 hook-rename incident that
-//! produced roughly 110 silent errors over 28 hours).
+//! statusline, `wire`'s guard commands name the guard scripts, and
+//! `commands/doctor.md`'s Layer 4 names the system prompt. That is the rule
+//! this module enforces, **the component that names a path is the component
+//! that puts the file there**, learned twice the hard way (the 2026-08-12
+//! statusline outage, and the 2026-08-11 hook-rename incident that produced
+//! roughly 110 silent errors over 28 hours).
 //!
 //! `hooks/hooks.json` is deliberately NOT deleted and `settings.shared.json`
 //! is deliberately NOT regenerated into binary-invoked form here: those two
@@ -36,4 +38,5 @@ pub mod merge;
 pub mod run;
 pub mod shim;
 pub mod statusline;
+pub mod system_prompt;
 pub mod wire;

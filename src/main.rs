@@ -48,7 +48,7 @@ fn main() {
         // binary-invoked form are the other two thirds of WU-11's atomic
         // switchover and stay untouched here; see `src/init/mod.rs`'s doc
         // comment for why running this wiring alone is still safe.
-        Command::Init => {
+        Command::Init { system_prompt } => {
             let home = common::home_dir();
             let claude_home = home.join(".claude");
             let self_root = std::env::var_os("CLAUDE_PLUGIN_ROOT")
@@ -63,6 +63,7 @@ fn main() {
                 claude_home,
                 home,
                 shell_kind,
+                system_prompt,
             });
             for step in &outcome.steps {
                 println!("{}", step.render());

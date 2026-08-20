@@ -41,7 +41,14 @@ pub enum Command {
     /// Print the Claude Code status line.
     Statusline,
     /// Install or repair the local Claude Code configuration.
-    Init,
+    Init {
+        /// Also install `prompts/SYSTEM_PROMPT.md` into `~/.claude/prompts/`.
+        /// Opt-in, matching `shell/setup-local.sh`'s flag of the same name:
+        /// without it an already-installed copy is still refreshed, but one
+        /// is never installed for a user who did not ask.
+        #[arg(long)]
+        system_prompt: bool,
+    },
     /// Shared-settings seed subcommands (`gen` today; `check` from WU-21).
     Settings {
         #[command(subcommand)]

@@ -143,6 +143,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         claude_home: claude_home_of(home),
         home: home.to_path_buf(),
         shell_kind,
+        system_prompt: false,
     }
 }
 
@@ -167,6 +168,19 @@ fn fresh_config_gets_fully_wired() {
             .collect::<Vec<_>>()
     );
     for step in &outcome.steps {
+        // `system-prompt` is opt-in: `system_prompt: false` and no
+        // pre-existing file correctly reports `Skipped` rather than
+        // `Wired`, per `init::system_prompt`'s documented opt-in rules.
+        // `tests/init_system_prompt.rs` covers this step's own scenarios.
+        if step.name == "system-prompt" {
+            assert_eq!(
+                step.status,
+                StepStatus::Skipped,
+                "expected 'system-prompt' to be skipped without --system-prompt and no existing file: {}",
+                step.detail
+            );
+            continue;
+        }
         assert_eq!(
             step.status,
             StepStatus::Wired,
@@ -235,12 +249,17 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     // Assert: nothing is reported as a change the second time.
     assert!(second.ok());
     for step in &second.steps {
+        // `system-prompt` stays `Skipped` on both runs: `system_prompt: false`
+        // and no file ever appears, since it was never opted into.
+        let expected = if step.name == "system-prompt" {
+            StepStatus::Skipped
+        } else {
+            StepStatus::AlreadyCorrect
+        };
         assert_eq!(
-            step.status,
-            StepStatus::AlreadyCorrect,
+            step.status, expected,
             "expected '{}' to report no change on a second run: {}",
-            step.name,
-            step.detail
+            step.name, step.detail
         );
     }
 
@@ -344,6 +363,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         claude_home: claude_home_of(&home),
         home: home.clone(),
         shell_kind: Some(ShellKind::Bash),
+        system_prompt: false,
     };
 
     // Act
