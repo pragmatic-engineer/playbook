@@ -21,17 +21,52 @@ Pass if the output contains "playbook" and the status shows it is enabled.
 
 Remediation hint on miss: "run: claude plugin marketplace add pragmatic-engineer/marketplace && claude plugin install playbook@pragmatic-engineer"
 
-## Layer 2: Safety guards wired
+## Layer 2: Safety guards wired AND present
+
+Checking only that a guard is wired is not enough, and this layer used to do
+exactly that. A `settings.json` command naming a script that is not on disk
+fails **open**: the hook is invoked, the file is not there, nothing runs, and
+nothing is reported. That is the failure the `hook-rename-lockstep-settings`
+note records, roughly 110 silent errors over 28 hours on 2026-08-11. So this
+layer checks both halves, and treats wired-but-absent as the worst of the three
+states rather than a pass.
 
 ```bash
-jq '[.hooks.PreToolUse[]?.hooks[]?.command]
-    | map(select(test("rm-workspace-guard|bg-await-guard|no-dash-guard")))
-    | length' ~/.claude/settings.json 2>/dev/null
+wired=0; present=0; problems=""
+for g in rm-workspace-guard bg-await-guard no-dash-guard precommit-check; do
+  n=$(jq -r --arg g "$g" \
+      '[.hooks.PreToolUse[]?.hooks[]?.command // ""] | map(select(contains($g))) | length' \
+      ~/.claude/settings.json 2>/dev/null)
+  if [ "${n:-0}" -gt 0 ]; then
+    wired=$((wired + 1))
+    if [ -x "$HOME/.claude/hooks/$g.sh" ]; then
+      present=$((present + 1))
+    else
+      problems="$problems $g:WIRED_BUT_ABSENT"
+    fi
+  else
+    problems="$problems $g:NOT_WIRED"
+  fi
+done
+echo "wired=$wired/4 present=$present/4$problems"
 ```
 
-Pass if the result is 3 or more.
+Report:
 
-Remediation hint on miss: "run /playbook:setup to seed settings.json with the guard hooks"
+- `wired=4/4 present=4/4` → PASS.
+- Any `WIRED_BUT_ABSENT` → **FAIL, and say it fails open.** `settings.json`
+  names the script but it is not executable at `~/.claude/hooks/<name>.sh`, so
+  that guard is silently doing nothing right now. Remediation: `playbook init`,
+  which places every guard it wires and removes any command whose script it
+  cannot place.
+- Any `NOT_WIRED` → **FAIL.** Remediation: `playbook init`, or
+  `/playbook:setup` on a machine without the binary.
+
+**Four guards, not three.** The previous check matched only
+`rm-workspace-guard|bg-await-guard|no-dash-guard` and passed on "3 or more", so
+`precommit-check` was never counted. `settings.shared.json` has seeded all four
+since before this check was written, and `src/init/wire.rs` wires all four, so
+the count was simply wrong and a missing fourth guard read as healthy.
 
 ## Layer 3: Launcher (opt-in)
 
@@ -115,6 +150,69 @@ plugin cache while the older, buggy backup reported `MATCH`, because the baselin
 is the RELEASED copy. Calling that "stale" would have told the user to overwrite
 a good file with a broken one.
 
+## Layer 6: Binary resolves
+
+`settings.json` invokes every ported hook as a bare `playbook hook <name>`, with
+no path (`src/init/wire.rs`, and the reasoning in its module doc). So the binary
+has to resolve on PATH or all 11 ported hooks silently do nothing: the command
+is not found, the hook produces no output, and the session carries on as if
+nothing were wired. That is the same fail-open shape as a guard script that is
+named but absent, which is why this is a hard failure rather than an INFO.
+
+This layer exists because the installer cannot guarantee PATH on its own. It
+appends a line to the rc file, but a Claude Code already running, or one
+launched from the macOS Dock, has a PATH that no rc file can retroactively
+change. That residual gap is precisely what this check is for.
+
+```bash
+if ! command -v playbook >/dev/null 2>&1; then
+  echo "MISSING"
+else
+  bin_ver=$(playbook --version 2>/dev/null | awk '{print $NF}')
+  manifest="${CLAUDE_PLUGIN_ROOT:-}/.claude-plugin/plugin.json"
+  if [ ! -f "$manifest" ]; then
+    manifest=$(ls -d "$HOME"/.claude/plugins/cache/*/playbook/*/.claude-plugin/plugin.json 2>/dev/null | sort -V | tail -1)
+  fi
+  man_ver=$(jq -r '.version // ""' "$manifest" 2>/dev/null)
+  if [ -z "$bin_ver" ]; then echo "NO_VERSION"
+  elif [ -z "$man_ver" ]; then echo "PRESENT_NO_BASELINE $bin_ver"
+  elif [ "$bin_ver" = "$man_ver" ]; then echo "MATCH $bin_ver"
+  else echo "SKEW binary=$bin_ver plugin=$man_ver"
+  fi
+fi
+```
+
+Report:
+
+- `MATCH` → PASS.
+- `MISSING` → **FAIL.** Every ported hook is dead. Remediation: install the
+  binary and make sure its directory is on PATH. Until ADR 0007 WU-11 lands the
+  fetch step, `install.sh` does **not** place the binary, so the honest hint
+  today is to download the asset for your platform from the latest release, or
+  build it with `cargo build --release`, and put it on PATH.
+- `NO_VERSION` → **FAIL.** `playbook` resolved but `--version` printed nothing,
+  so the file on PATH is not the binary this plugin expects. A stale shim or a
+  name collision with another tool are both live causes; report the resolved
+  path from `command -v playbook` so the user can see which.
+- `SKEW` → **INFO, not FAIL.** The binary and the plugin manifest disagree on
+  version. Say which is which rather than assuming the binary is the stale one:
+  a user who built from source is legitimately AHEAD of the released plugin, and
+  a user who updated the plugin without re-running the installer is behind.
+  This mirrors the direction-unknown rule Layer 5 already applies to the status
+  line, and for the same reason.
+- `PRESENT_NO_BASELINE` → INFO, the binary is there but no plugin manifest was
+  found to compare against, so skew cannot be judged.
+
+**Layer numbering: do not renumber.** ADR 0007's WU-12 specified this as "Layer
+5" and a statusline-existence check as "Layer 6", written before PR #143 shipped
+the current Layer 5. Two corrections, recorded 2026-08-20. First, the binary
+check is appended as Layer 6 rather than displacing the shipped Layer 5, since
+renumbering a layer users and docs already refer to costs more than it buys.
+Second, the proposed "Layer 6: the statusLine command path exists" was **not
+implemented, because Layer 5 already does it**: its `MISSING` branch reports a
+hard FAIL when the path in `settings.json` is absent. Adding it would have been
+a duplicate check under a second number.
+
 ## Output format
 
 Print a table with one row per layer. Use a clear status marker and a brief
@@ -124,12 +222,20 @@ one-line remediation hint. Example shape:
 
 ```
 PASS  plugin enabled
-PASS  safety guards wired (3 of 3)
+PASS  safety guards wired and present (4 of 4)
 INFO  launcher not installed (opt-in; run /playbook:setup)    -- run /playbook:setup and choose Yes for the launcher question
 INFO  system prompt not installed (opt-in, recommended) -- run /playbook:setup and choose Yes for the system prompt question
 INFO  status line differs from the shipped copy -- stale, or a local fix ahead of the release; a plugin install will overwrite it either way
+FAIL  playbook binary not on PATH -- every ported hook is dead; install the release asset or cargo build --release, then ensure its directory is on PATH
 ```
 
 If all required layers pass and optional layers are installed, say so in one
-line. If any required layer fails, end with: "Run /playbook:setup to fix the items
-above."
+line.
+
+If any required layer fails, end with a remediation line that names the right
+tool for what failed, rather than always pointing at `/playbook:setup`:
+
+- Layers 1 to 5 → "Run /playbook:setup to fix the items above."
+- Layer 6 → `/playbook:setup` cannot fix it. It does not install the binary, so
+  say so and give the install instruction instead. Telling a user to run a
+  command that cannot repair the thing that failed is worse than saying nothing.
