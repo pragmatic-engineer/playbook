@@ -89,22 +89,27 @@ jobs:
         # Discover every suite so a new *.test.sh is picked up automatically.
         # The git identity is needed by the worktree suites, which commit.
         #
-        # Passed as environment variables, NOT `git config`. An unscoped
-        # `git config user.email` writes into the checked-out repo's
-        # .git/config, which is harmless on an ephemeral runner but permanent
-        # when anyone reproduces this step locally: on 2026-08-20 it rewrote
-        # the maintainer's real identity to "CI <ci@github.local>", and the
-        # next commit landed on main authored by a user GitHub cannot resolve,
-        # so its signature could not be verified. `git config --local` would
-        # NOT have helped, since that is already what an unscoped write does.
-        # Environment variables apply to this process tree only and touch no
-        # file on disk.
-        env:
-          GIT_AUTHOR_NAME: CI
-          GIT_AUTHOR_EMAIL: ci@github.local
-          GIT_COMMITTER_NAME: CI
-          GIT_COMMITTER_EMAIL: ci@github.local
+        # Written to a THROWAWAY global config, never to a repo and never as
+        # GIT_AUTHOR_*/GIT_COMMITTER_*.
+        #
+        # An unscoped `git config user.email` writes into the checked-out
+        # repo's .git/config, harmless on an ephemeral runner but permanent
+        # when the step is reproduced locally: on 2026-08-20 it rewrote a real
+        # repo's identity and the next commit was authored by a user GitHub
+        # cannot resolve, so its signature would not verify. `git config
+        # --local` does not help, since that is already what an unscoped write
+        # does.
+        #
+        # Environment variables are NOT the fix either. They sit ABOVE per-repo
+        # config in git's precedence, so they override every fixture that sets
+        # its own identity; that broke shell/worktree.test.sh scenario M.
+        # GIT_CONFIG_GLOBAL keeps the identity at global precedence, which a
+        # fixture's own `git config user.email` still beats, exactly as before.
         run: |
+          GIT_CONFIG_GLOBAL="$(mktemp)"
+          export GIT_CONFIG_GLOBAL
+          git config --global user.email "ci@github.local"
+          git config --global user.name "CI"
           for f in $(git ls-files '*.test.sh'); do
             echo "== $f"
             bash "$f" || exit 1
