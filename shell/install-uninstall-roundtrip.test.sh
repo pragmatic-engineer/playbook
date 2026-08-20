@@ -37,11 +37,45 @@ CLAUDE_DIR="$HOME_DIR/.claude"
 mkdir -p "$SRC" "$CLAUDE_DIR"
 git -C "$REPO_ROOT" archive HEAD | tar -x -C "$SRC"
 
+# Stub `playbook` binary. install.sh's PLAYBOOK_SRC seam skips the network
+# path entirely, including install_release_binary, which is what would
+# normally place a binary at PLAYBOOK_BIN_DIR; yet install.sh still hands off
+# unconditionally to "$PLAYBOOK_BIN_DIR/playbook init". Without a binary
+# there, that call is a bare command-not-found (exit 127) that kills the
+# script before settings.json and .settings.base.json -- both written only by
+# the real `init`, never by install.sh's own tree copy -- ever exist, which is
+# what the preserved-settings assertion below needs. Answers just enough for
+# install.sh to proceed: writes those two files, exits 0, and prints a step
+# report shaped like the real `playbook init`'s, so the output stays a
+# plausible stand-in. Named distinctly from BIN_STUB below, which stubs curl
+# and uname for the unrelated binary-lifecycle scenarios.
+PLAYBOOK_STUB_DIR="$WORK/init-bin"
+mkdir -p "$PLAYBOOK_STUB_DIR"
+cat > "$PLAYBOOK_STUB_DIR/playbook" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --version) printf 'playbook 0.0.0-stub\n' ;;
+  init)
+    home="${CLAUDE_HOME:-$HOME/.claude}"
+    [ -f "$home/settings.json" ] || printf '{}\n' > "$home/settings.json"
+    [ -f "$home/.settings.base.json" ] || printf '{}\n' > "$home/.settings.base.json"
+    printf 'settings: wired - seeded from template\n'
+    printf 'guards: ok - already in place\n'
+    printf 'hooks: ok - all hooks already wired\n'
+    printf 'shim: skipped - $SHELL is neither bash nor zsh\n'
+    printf 'statusline: ok - already up to date\n'
+    printf 'system-prompt: skipped - not installed; pass --system-prompt to opt in\n'
+    ;;
+esac
+exit 0
+STUB
+chmod +x "$PLAYBOOK_STUB_DIR/playbook"
+
 # --force bypasses the git-repo guard. The scratch HOME can sit inside a git
 # working tree depending on where mktemp points, and that guard exists to stop
 # a raw rm from stranding index entries, which is irrelevant here.
 run_install() {
-    PLAYBOOK_SRC="$SRC" CLAUDE_HOME="$CLAUDE_DIR" HOME="$HOME_DIR" \
+    PLAYBOOK_SRC="$SRC" CLAUDE_HOME="$CLAUDE_DIR" HOME="$HOME_DIR" PLAYBOOK_BIN_DIR="$PLAYBOOK_STUB_DIR" \
         bash "$REPO_ROOT/install.sh" --no-setup --skip-plugin >/dev/null 2>&1
 }
 run_uninstall() {
