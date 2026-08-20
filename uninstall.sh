@@ -222,4 +222,41 @@ strip_rc_launcher() {
 strip_rc_launcher "$HOME/.zshrc"  'shell/(zsh/)?cc\.zsh'   'cc.zsh'
 strip_rc_launcher "$HOME/.bashrc" 'shell/(bash/)?cc\.sh'   'cc.sh'
 
+# --- Remove the release binary and its PATH line ---
+# install.sh places the binary outside CLAUDE_HOME, so the SHIPPED sweep above
+# cannot reach it. Whatever the installer creates, this must remove, or
+# uninstall stops being a true inverse and leaves a stale binary that
+# `playbook --version` still answers from.
+BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
+if [ -f "$BIN_DIR/playbook" ]; then
+    rm -f "$BIN_DIR/playbook"
+    log "Removed $BIN_DIR/playbook"
+else
+    log "No playbook binary at $BIN_DIR; nothing to remove"
+fi
+
+# Strips the two-line block install.sh appends: the "# playbook binary"
+# marker and the export immediately after it. Anchored on the marker rather
+# than on any `export PATH` line, so a user's own PATH edits are never touched.
+strip_rc_binary_path() {
+    local rc="$1" stamp rc_tmp
+    [ -f "$rc" ] && grep -qF '# playbook binary' "$rc" || {
+        log "$(basename "$rc"): no playbook binary PATH line; nothing to remove"
+        return 0
+    }
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    cp "$rc" "${rc}.bak-${stamp}"
+    rc_tmp="$(mktemp "${rc}.tmp.XXXXXX")"
+    awk '
+      /^# playbook binary$/ { skip = 1; next }
+      skip && /^export PATH=/ { skip = 0; next }
+      { skip = 0; print }
+    ' "$rc" > "$rc_tmp"
+    mv "$rc_tmp" "$rc"
+    log "Removed playbook binary PATH line from $(basename "$rc") (backup: ${rc}.bak-${stamp})"
+}
+
+strip_rc_binary_path "$HOME/.zshrc"
+strip_rc_binary_path "$HOME/.bashrc"
+
 log "Done. Reload your shell or open a new terminal to apply changes."
