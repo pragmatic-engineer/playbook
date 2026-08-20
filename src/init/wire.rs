@@ -22,13 +22,29 @@
 //! should flip `GUARD_SPECS`'s `ported` field to `true`; do not "tidy" this
 //! ahead of that unit landing.
 //!
-//! `wire` is an upsert into whatever `settings.json` already has, never a
-//! wholesale replace: a hand-added hook entry a user placed alongside one of
-//! ours, or an entire event/matcher group we do not manage, survives
-//! untouched. This is the same clobber risk `src/init/merge.rs`'s mandatory
-//! fixture 6 pins at the settings-merge layer; `wire` pins it again at the
-//! narrower hook-wiring layer, since it edits `.hooks` directly rather than
-//! going through a three-way merge.
+//! `wire` is mostly an upsert into whatever `settings.json` already has,
+//! never a wholesale replace: a hand-added hook entry a user placed
+//! alongside one of ours, or an entire event/matcher group we do not manage,
+//! survives untouched. This is the same clobber risk `src/init/merge.rs`'s
+//! mandatory fixture 6 pins at the settings-merge layer; `wire` pins it
+//! again at the narrower hook-wiring layer, since it edits `.hooks` directly
+//! rather than going through a three-way merge.
+//!
+//! The one deliberate exception: a guard NOT in `placed_guards` gets its
+//! legacy command actively REMOVED, but only when `claude_home` genuinely
+//! has no `.sh` script for it. `settings.shared.json` still seeds all four
+//! guard commands (they stay legitimate template content until WU-13 ports
+//! their Rust bodies), so a guard `init::guards` failed to place, or never
+//! ran for, would otherwise leave the seeded command dangling: a
+//! `settings.json` entry naming a script that is not on disk, which fails
+//! open and silent, the exact defect this module exists to close. The
+//! existence check on `claude_home` is what keeps that removal narrow rather
+//! than destructive: a guard some other installer already placed there
+//! (`shell/setup-local.sh` copies three of the four) has a script that still
+//! resolves, so `wire` leaves its command alone even though `placed_guards`
+//! does not name it. Removal only ever matches the exact legacy command
+//! string (`legacy_shell_command`); nothing else under `.hooks` is touched
+//! by it.
 //!
 //! The bare-name form (`playbook hook session-init`, not an absolute path)
 //! is deliberate: Claude Code already accepts a bare command resolved on
@@ -274,22 +290,52 @@ pub struct WireOutcome {
     pub backup_path: Option<PathBuf>,
 }
 
+/// The guards `wire` still points at a `~/.claude/hooks/<name>.sh` path,
+/// derived from `GUARD_SPECS` rather than restated, so `init::guards` copies
+/// exactly the set this module wires and the two cannot drift. WU-13 flips a
+/// guard's `ported` flag and both sides follow in one edit.
+pub(crate) fn unported_guard_names() -> impl Iterator<Item = &'static str> {
+    GUARD_SPECS
+        .iter()
+        .filter(|spec| !spec.ported)
+        .map(|spec| spec.name)
+}
+
 /// Writes every hook in `PORTED_HOOK_SPECS` to its bare `playbook hook
-/// <name>` command and every hook in `GUARD_SPECS` to its legacy
+/// <name>` command, and each guard named in `placed_guards` to its legacy
 /// `~/.claude/hooks/<name>.sh` command, creating `.hooks` and any event or
-/// matcher group it needs from scratch, and leaving every other key in the
-/// file, and every hook entry not managed here, untouched. Idempotent:
+/// matcher group it needs from scratch. A guard NOT in `placed_guards` is
+/// actively cleaned up rather than silently ignored: when `claude_home`
+/// holds no `.sh` script for it, its legacy command is removed from every
+/// `.hooks` group that carries it, pruning a group or event that removal
+/// leaves empty; when the script DOES exist there (say, because
+/// `shell/setup-local.sh` placed it), the entry is left completely alone,
+/// since that command still resolves. Every other key in the file, and every
+/// hook entry not managed here, is left untouched either way. Idempotent:
 /// calling this twice in a row writes nothing the second time, since the
 /// second call's freshly rendered content is compared byte for byte against
 /// what is already on disk before anything is written.
 ///
-/// Backs `settings_path` up first, timestamped, whenever a change is about
-/// to land; a no-op call takes no backup. This guards the same failure the
-/// `hook-rename-lockstep-settings` incident recorded: a settings/hook name
-/// mismatch went unnoticed for 28 hours and produced roughly 110 silent
-/// errors, because there was no pre-change snapshot to recover from or diff
-/// against.
-pub fn wire(settings_path: &Path) -> Result<WireOutcome, WireError> {
+/// `placed_guards` is the set `init::guards::place_guards` confirmed on disk
+/// and executable, NOT every guard in `GUARD_SPECS`. Writing a command for a
+/// guard whose script is absent is the exact silent failure this whole
+/// Segment exists to close: the hook never fires and nothing says so. A
+/// caller with no guards to report passes an empty slice; `claude_home` is
+/// then the only thing standing between "nothing to wire" and "a dangling
+/// command left behind", which is why the existence check happens on
+/// `claude_home` and never on `placed_guards` alone.
+///
+/// Backs `settings_path` up first, timestamped, whenever a change (an
+/// upsert or a removal) is about to land; a no-op call takes no backup. This
+/// guards the same failure the `hook-rename-lockstep-settings` incident
+/// recorded: a settings/hook name mismatch went unnoticed for 28 hours and
+/// produced roughly 110 silent errors, because there was no pre-change
+/// snapshot to recover from or diff against.
+pub fn wire(
+    settings_path: &Path,
+    placed_guards: &[&str],
+    claude_home: &Path,
+) -> Result<WireOutcome, WireError> {
     let (mut root, original) = load_settings(settings_path)?;
 
     {
@@ -302,8 +348,15 @@ pub fn wire(settings_path: &Path) -> Result<WireOutcome, WireError> {
                 settings_path.display()
             ))
         })?;
-        for spec in PORTED_HOOK_SPECS.iter().chain(GUARD_SPECS.iter()) {
+        for spec in PORTED_HOOK_SPECS {
             upsert_hook(hooks, spec, settings_path)?;
+        }
+        for spec in GUARD_SPECS {
+            if placed_guards.contains(&spec.name) {
+                upsert_hook(hooks, spec, settings_path)?;
+            } else if !guard_script_exists(claude_home, spec.name) {
+                remove_dangling_command(hooks, &legacy_shell_command(spec.name));
+            }
         }
     }
 
@@ -421,6 +474,71 @@ fn upsert_hook(
         None => hooks_array.push(entry),
     }
     Ok(())
+}
+
+/// Whether `claude_home` already holds a `.sh` script for guard `name`,
+/// regardless of who put it there. `wire` only removes a dangling guard
+/// command when this is false: a script some other installer placed, such
+/// as `shell/setup-local.sh`'s own three-guard copy, still resolves, so its
+/// command must survive even though `placed_guards` does not name it.
+fn guard_script_exists(claude_home: &Path, name: &str) -> bool {
+    claude_home
+        .join("hooks")
+        .join(format!("{name}.sh"))
+        .is_file()
+}
+
+/// Removes every hook entry anywhere in `hooks` whose `command` equals
+/// `target` exactly, then prunes whatever that removal itself left empty: a
+/// group whose `hooks` array emptied as a result loses the group, and an
+/// event whose groups array emptied as a result loses the event key. A group
+/// or event that was already empty before this call touched it is left
+/// exactly as found, since pruning it would not be this removal's business.
+fn remove_dangling_command(hooks: &mut Map<String, Value>, target: &str) {
+    let mut emptied_events = Vec::new();
+
+    for (event, groups_value) in hooks.iter_mut() {
+        let Some(groups) = groups_value.as_array_mut() else {
+            continue;
+        };
+        let mut removed_in_event = false;
+        let mut emptied_group_indices = Vec::new();
+
+        for (idx, group) in groups.iter_mut().enumerate() {
+            let Some(hooks_array) = group
+                .as_object_mut()
+                .and_then(|g| g.get_mut("hooks"))
+                .and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            let before = hooks_array.len();
+            hooks_array.retain(|entry| {
+                entry
+                    .as_object()
+                    .and_then(|e| e.get("command"))
+                    .and_then(Value::as_str)
+                    != Some(target)
+            });
+            if hooks_array.len() != before {
+                removed_in_event = true;
+                if hooks_array.is_empty() {
+                    emptied_group_indices.push(idx);
+                }
+            }
+        }
+
+        for idx in emptied_group_indices.into_iter().rev() {
+            groups.remove(idx);
+        }
+        if removed_in_event && groups.is_empty() {
+            emptied_events.push(event.clone());
+        }
+    }
+
+    for event in emptied_events {
+        hooks.remove(&event);
+    }
 }
 
 /// The `matcher` field of a `.hooks.<event>` array entry, or `None` when the
