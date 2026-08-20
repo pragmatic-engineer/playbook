@@ -115,8 +115,8 @@ const PORTED_HOOK_NAMES: &[&str] = &[
     "memory-capture",
 ];
 
-/// The 4 safety guards `wire` leaves on their legacy `~/.claude/hooks/*.sh`
-/// path until WU-13 ports their Rust bodies.
+/// The 4 safety guards, wired the same as `PORTED_HOOK_NAMES` since WU-13
+/// ported all four Rust bodies.
 const GUARD_HOOK_NAMES: &[&str] = &[
     "rm-workspace-guard",
     "bg-await-guard",
@@ -181,6 +181,19 @@ fn fresh_config_gets_fully_wired() {
             );
             continue;
         }
+        // `guards` is a permanent no-op since WU-13 ported all four guards:
+        // `place_guards` never places anything any more, so it reports
+        // `AlreadyCorrect` even on the very first run. See
+        // `init::guards`'s doc comment for why the step stays until WU-14.
+        if step.name == "guards" {
+            assert_eq!(
+                step.status,
+                StepStatus::AlreadyCorrect,
+                "expected 'guards' to be a permanent no-op: {}",
+                step.detail
+            );
+            continue;
+        }
         assert_eq!(
             step.status,
             StepStatus::Wired,
@@ -202,10 +215,10 @@ fn fresh_config_gets_fully_wired() {
         );
     }
     for name in GUARD_HOOK_NAMES {
-        let legacy = format!("~/.claude/hooks/{name}.sh");
+        let bare = format!("playbook hook {name}");
         assert!(
-            commands.contains(&legacy),
-            "missing guard '{legacy}' in {commands:?}"
+            commands.contains(&bare),
+            "missing guard '{bare}' in {commands:?}"
         );
     }
 
@@ -471,8 +484,14 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
     let first_out = String::from_utf8_lossy(&first.stdout);
     let second_out = String::from_utf8_lossy(&second.stdout);
     assert!(
-        first_out.lines().all(|l| !l.contains(": ok -")),
-        "first run should report only changes: {first_out}"
+        // `guards` is a permanent no-op since WU-13 (see `init::guards`'s
+        // doc comment), so it legitimately reports "ok -" even on the very
+        // first run; every other step should still report a real change.
+        first_out
+            .lines()
+            .filter(|l| !l.starts_with("guards:"))
+            .all(|l| !l.contains(": ok -")),
+        "first run should report only changes (guards excepted): {first_out}"
     );
     assert!(
         second_out.lines().all(|l| !l.contains(": wired -")),

@@ -118,7 +118,11 @@ if [ -f "$CH/settings.json" ]; then
   [ "${func:-0}" = "3" ] && ok "functional hooks ARE in settings, wired to the binary (no plugin registry left to double-fire)" || bad "functional hooks not wired in settings (found ${func:-0})"
 fi
 for g in rm-workspace-guard bg-await-guard no-dash-guard precommit-check; do
-  [ -f "$CH/hooks/$g.sh" ] && ok "guard installed: $g.sh" || bad "guard not installed: $g.sh"
+  # WU-13 ported all four guards into the binary, so `playbook init` no
+  # longer places a per-guard script; a script showing up here would mean a
+  # stale leftover from before that change, not a healthy install.
+  [ ! -e "$CH/hooks/$g.sh" ] && ok "guard runs from the binary, no script placed: $g.sh" \
+    || warn "guard script still present (stale leftover?): $g.sh"
 done
 [ ! -e "$CH/commands" ] && ok "commands/ not copied (plugin-owned)" || warn "commands/ copied directly"
 rm -rf "$TH"

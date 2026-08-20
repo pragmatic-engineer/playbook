@@ -51,17 +51,6 @@ const PERSONAL_KEYS: [&str; 5] = [
     "prefersReducedMotion",
 ];
 
-/// The four safety guards still on their legacy `~/.claude/hooks/<name>.sh`
-/// script, ported unchanged from `shell/gen-shared-settings.py`'s
-/// `SAFETY_RE`; see that file's header comment for why they are exempt from
-/// the bare `playbook hook <name>` form until WU-13 ports their Rust bodies.
-const LEGACY_GUARD_COMMANDS: [&str; 4] = [
-    "~/.claude/hooks/rm-workspace-guard.sh",
-    "~/.claude/hooks/bg-await-guard.sh",
-    "~/.claude/hooks/no-dash-guard.sh",
-    "~/.claude/hooks/precommit-check.sh",
-];
-
 /// Everything that can stop generation before it produces output, one
 /// variant per `die()` call site in `shell/gen-shared-settings.py`. Every
 /// python `die()` call there exits with code 2; `generate` below returns
@@ -90,15 +79,16 @@ fn load_json(path: &Path, label: &str) -> Result<Value, GenError> {
 }
 
 /// Ports `SAFETY_RE.fullmatch` from `shell/gen-shared-settings.py` as
-/// explicit string matching: either a bare `playbook hook <name>`
-/// invocation, where `<name>` starts with an ASCII lowercase letter and
-/// continues with ASCII lowercase letters, digits or hyphens, or one of the
-/// four legacy guard scripts.
+/// explicit string matching: a bare `playbook hook <name>` invocation,
+/// where `<name>` starts with an ASCII lowercase letter and continues with
+/// ASCII lowercase letters, digits or hyphens. Before WU-13 this also
+/// accepted the four safety guards' legacy `~/.claude/hooks/<name>.sh`
+/// script; that branch is gone on both sides now that all four guards are
+/// ported and `wire::wire` never writes that form any more.
 fn is_safe_hook_command(command: &str) -> bool {
-    if let Some(name) = command.strip_prefix("playbook hook ") {
-        return is_valid_hook_name(name);
-    }
-    LEGACY_GUARD_COMMANDS.contains(&command)
+    command
+        .strip_prefix("playbook hook ")
+        .is_some_and(is_valid_hook_name)
 }
 
 /// `[a-z][a-z0-9-]*`: at least one character, the first an ASCII lowercase

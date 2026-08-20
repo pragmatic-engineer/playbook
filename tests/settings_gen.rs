@@ -123,18 +123,20 @@ const PERMS_EMPTY: &str = "{}";
 const PERMS_NOALLOW: &str = r#"{"allow":[],"deny":[],"ask":[]}"#;
 
 /// Hooks-heavy source matching the shell test's `SRC_HOOKS`: a bare
-/// `session-init` entry plus a `PreToolUse` group mixing the three legacy
-/// guards, a functional `rtk hook claude` command, and a `Read` matcher with
-/// only a functional hook, plus a `PostToolUse` group that is entirely
-/// functional.
+/// `session-init` entry plus a `PreToolUse` group mixing two guards already
+/// on their bare binary form, one guard still on its legacy `.sh` command
+/// (WU-13 ported all four, but a machine that has not re-run `playbook init`
+/// yet can still have one wired that way), a functional `rtk hook claude`
+/// command, and a `Read` matcher with only a functional hook, plus a
+/// `PostToolUse` group that is entirely functional.
 const SRC_HOOKS: &str = r#"{
   "env": {},
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-init.sh" }] }],
     "PreToolUse": [
       { "matcher": "Bash", "hooks": [
-        { "type": "command", "command": "~/.claude/hooks/rm-workspace-guard.sh", "if": "Bash(rm:*)", "timeout": 10 },
-        { "type": "command", "command": "~/.claude/hooks/bg-await-guard.sh", "timeout": 10 },
+        { "type": "command", "command": "playbook hook rm-workspace-guard", "if": "Bash(rm:*)", "timeout": 10 },
+        { "type": "command", "command": "playbook hook bg-await-guard", "timeout": 10 },
         { "type": "command", "command": "~/.claude/hooks/no-dash-guard.sh", "timeout": 10 },
         { "type": "command", "command": "rtk hook claude" }
       ] },
@@ -342,9 +344,10 @@ fn no_arguments_guard_rejects_on_both_sides() {
     );
 }
 
-// J: hooks reduced to the safety guards only; functional hooks and rtk are
-// dropped. Also stands in for "the generator still refuses to reintroduce
-// functional hooks into the seed".
+// J: hooks reduced to the bare `playbook hook <name>` commands only;
+// functional hooks, rtk, and a guard still on its legacy `.sh` command are
+// all dropped. Also stands in for "the generator still refuses to
+// reintroduce functional hooks into the seed".
 #[test]
 fn hooks_reduced_to_safety_guards_only_functional_hooks_dropped() {
     // Arrange
@@ -387,11 +390,11 @@ fn hooks_reduced_to_safety_guards_only_functional_hooks_dropped() {
     assert_eq!(
         commands,
         vec![
-            "~/.claude/hooks/rm-workspace-guard.sh",
-            "~/.claude/hooks/bg-await-guard.sh",
-            "~/.claude/hooks/no-dash-guard.sh",
+            "playbook hook rm-workspace-guard",
+            "playbook hook bg-await-guard"
         ],
-        "functional hooks (rtk hook claude) and the Read matcher group should be dropped"
+        "functional hooks (rtk hook claude), a guard still on its legacy .sh command, \
+         and the Read matcher group should all be dropped"
     );
 }
 
