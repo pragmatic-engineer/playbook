@@ -33,7 +33,25 @@
 //!    dangling command. A caller can no longer mistake a partial success for
 //!    a complete one, because `failures` being non-empty says so directly.
 //!
-//! WU-13 deletes this module once all four guards run inside the binary.
+//! **This module is now a permanent no-op, deliberately not deleted.** The
+//! blueprint's original plan was for WU-13 to delete this module once all
+//! four guards run inside the binary, but that undersold what "porting"
+//! leaves behind: `wire::unported_guard_names()` (property 1 above) now
+//! yields nothing, since WU-13 flipped every `GUARD_SPECS` entry's `ported`
+//! field to `true`, so `place_guards`'s loop body never runs and it always
+//! returns an empty `GuardOutcome`, on every machine, regardless of what
+//! `self_root` or `claude_home` hold. That is deliberate, not a bug to fix
+//! here: an existing installation from before this change still has the
+//! four `.sh` scripts on disk at `~/.claude/hooks/` (this module placed
+//! three of them, `shell/setup-local.sh` the fourth), and nothing in
+//! `playbook init` was ever responsible for removing them again. That is
+//! WU-14's job by name, "delete the old runtime": remove the shell guard
+//! scripts themselves, `shell/setup-local.sh`'s copy of them, and only then
+//! this module and the `guards` step in `init::run::run` that calls it.
+//! Deleting this module now, ahead of WU-14, would sever `init::run`'s
+//! composition (dropping the `guards` step from its report and its call
+//! site) for a module that, left exactly as it is, does nothing and reports
+//! that honestly; that composition change belongs to WU-14, not here.
 
 use crate::init::wire;
 use std::fs;

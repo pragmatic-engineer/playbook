@@ -151,7 +151,11 @@ else
   fail "no arguments" "rc=$rc"
 fi
 
-# J: hooks reduced to the safety guards only; functional hooks and rtk dropped.
+# J: hooks reduced to the bare playbook-hook commands only; functional hooks
+# still on a legacy script path, and rtk, are dropped. Guard commands moved
+# to their bare binary form here too (WU-13 ported all four), so a guard
+# still on its old `~/.claude/hooks/<name>.sh` path is now dropped exactly
+# like any other legacy path, not kept as a special case.
 SRC_HOOKS="${WORK}/src-hooks.json"
 cat > "$SRC_HOOKS" <<'JSON'
 {
@@ -160,8 +164,8 @@ cat > "$SRC_HOOKS" <<'JSON'
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-init.sh" }] }],
     "PreToolUse": [
       { "matcher": "Bash", "hooks": [
-        { "type": "command", "command": "~/.claude/hooks/rm-workspace-guard.sh", "if": "Bash(rm:*)", "timeout": 10 },
-        { "type": "command", "command": "~/.claude/hooks/bg-await-guard.sh", "timeout": 10 },
+        { "type": "command", "command": "playbook hook rm-workspace-guard", "if": "Bash(rm:*)", "timeout": 10 },
+        { "type": "command", "command": "playbook hook bg-await-guard", "timeout": 10 },
         { "type": "command", "command": "~/.claude/hooks/no-dash-guard.sh", "timeout": 10 },
         { "type": "command", "command": "rtk hook claude" }
       ] },
@@ -176,11 +180,10 @@ if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '
       ((.hooks | keys) == ["PreToolUse"])
   and ((.hooks.PreToolUse | length) == 1)
   and ([.hooks.PreToolUse[0].hooks[].command]
-        == ["~/.claude/hooks/rm-workspace-guard.sh",
-            "~/.claude/hooks/bg-await-guard.sh",
-            "~/.claude/hooks/no-dash-guard.sh"])
+        == ["playbook hook rm-workspace-guard",
+            "playbook hook bg-await-guard"])
 ' >/dev/null 2>&1; then
-  pass "hooks reduced to the three safety guards only"
+  pass "hooks reduced to the bare playbook-hook commands only"
 else
   fail "hooks safety-only filter" "rc=$rc hooks=$(printf '%s' "$out" | jq -c '.hooks' 2>/dev/null)"
 fi

@@ -70,35 +70,35 @@ for pair in "LAYER2:2" "LAYER5:5" "LAYER6:6"; do
   [[ -n "${!var}" ]] || { echo "FATAL: could not extract Layer $num snippet from $DOCTOR_MD" >&2; exit 2; }
 done
 
-# ── Layer 2: safety guards wired AND present ────────────────────────────────
+# ── Layer 2: safety guards wired ────────────────────────────────────────────
 
 GUARDS=(rm-workspace-guard bg-await-guard no-dash-guard precommit-check)
 
-# Args: home dir, then one "name:executable" pair per guard to create a
-# script for (executable is 1 or 0). A guard omitted from the pairs gets no
-# script on disk at all.
-write_guard_scripts() {
-  local home="$1"; shift
-  mkdir -p "$home/.claude/hooks"
-  local pair name exe
-  for pair in "$@"; do
-    name="${pair%%:*}"; exe="${pair##*:}"
-    printf '#!/usr/bin/env bash\ntrue\n' > "$home/.claude/hooks/$name.sh"
-    if [[ "$exe" == 1 ]]; then chmod +x "$home/.claude/hooks/$name.sh"; else chmod -x "$home/.claude/hooks/$name.sh"; fi
-  done
-}
-
-# Args: home dir, then the guard names to wire into settings.json's
-# PreToolUse hooks. A guard omitted here is not wired at all.
-write_wired_settings() {
+# Args: home dir, then one "name:command" pair per hooks.PreToolUse entry to
+# write. Lets a scenario wire a guard to an arbitrary command string (its
+# bare binary form, its legacy .sh form, or a near-miss), not just its name.
+write_wired_settings_raw() {
   local home="$1"; shift
   mkdir -p "$home/.claude"
-  local entries="" name
-  for name in "$@"; do
-    entries="${entries}{\"hooks\":[{\"command\":\"$name\"}]},"
+  local entries="" pair name cmd
+  for pair in "$@"; do
+    name="${pair%%:*}"; cmd="${pair#*:}"
+    entries="${entries}{\"hooks\":[{\"command\":\"$cmd\"}]},"
   done
   entries="${entries%,}"
   printf '{"hooks":{"PreToolUse":[%s]}}' "$entries" > "$home/.claude/settings.json"
+}
+
+# Args: home dir, then the guard names to wire into settings.json's
+# PreToolUse hooks in their bare `playbook hook <name>` form. A guard
+# omitted here is not wired at all.
+write_wired_settings() {
+  local home="$1"; shift
+  local pairs=() name
+  for name in "$@"; do
+    pairs+=("$name:playbook hook $name")
+  done
+  write_wired_settings_raw "$home" "${pairs[@]}"
 }
 
 run_layer2() {
@@ -106,66 +106,71 @@ run_layer2() {
   HOME="$home" bash -c "$LAYER2" 2>&1
 }
 
-# A: all four guards wired and all four scripts present and executable.
-scenario_layer2_all_wired_present() {
+# A: all four guards wired in their bare binary form.
+scenario_layer2_all_wired() {
   local home="$WORK/l2-a" out
   write_wired_settings "$home" "${GUARDS[@]}"
-  write_guard_scripts "$home" rm-workspace-guard:1 bg-await-guard:1 no-dash-guard:1 precommit-check:1
   out="$(run_layer2 "$home")"
-  [[ "$out" == "wired=4/4 present=4/4" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == "wired=4/4" ]] || { echo "  got: $out"; return 1; }
 }
 
-# B: precommit-check wired but its script is absent. Regression pin for the
-# fail-open defect: settings.json names the script, nothing is on disk, and
-# that must read as WIRED_BUT_ABSENT rather than a silent pass.
-scenario_layer2_wired_but_absent() {
+# B: precommit-check is still on its legacy `.sh` command from before this
+# fix shipped, not the bare form. Regression pin: a stale, un-migrated entry
+# must read as NOT_WIRED, not as wired, since it is not actually running
+# from the binary.
+scenario_layer2_legacy_command_not_wired() {
   local home="$WORK/l2-b" out
-  write_wired_settings "$home" "${GUARDS[@]}"
-  write_guard_scripts "$home" rm-workspace-guard:1 bg-await-guard:1 no-dash-guard:1
+  write_wired_settings_raw "$home" \
+    "rm-workspace-guard:playbook hook rm-workspace-guard" \
+    "bg-await-guard:playbook hook bg-await-guard" \
+    "no-dash-guard:playbook hook no-dash-guard" \
+    "precommit-check:~/.claude/hooks/precommit-check.sh"
   out="$(run_layer2 "$home")"
-  [[ "$out" == *"precommit-check:WIRED_BUT_ABSENT"* ]] || { echo "  got: $out"; return 1; }
-  [[ "$out" == "wired=4/4"* ]] || { echo "  wired count wrong: $out"; return 1; }
+  [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == "wired=3/4"* ]] || { echo "  wired count wrong: $out"; return 1; }
 }
 
-# C: rm-workspace-guard wired and its script is present but not executable.
-# The snippet tests -x, so this is also WIRED_BUT_ABSENT, not present.
-scenario_layer2_present_not_executable() {
+# C: a near-miss command that merely contains a guard's name as a substring
+# must not count as that guard being wired. Pins the exact-match comparison
+# in the snippet (`. == $cmd`), not a substring `contains`.
+scenario_layer2_near_miss_command_not_wired() {
   local home="$WORK/l2-c" out
-  write_wired_settings "$home" "${GUARDS[@]}"
-  write_guard_scripts "$home" rm-workspace-guard:0 bg-await-guard:1 no-dash-guard:1 precommit-check:1
+  write_wired_settings_raw "$home" \
+    "rm-workspace-guard:playbook hook rm-workspace-guard-legacy" \
+    "bg-await-guard:playbook hook bg-await-guard" \
+    "no-dash-guard:playbook hook no-dash-guard" \
+    "precommit-check:playbook hook precommit-check"
   out="$(run_layer2 "$home")"
-  [[ "$out" == *"rm-workspace-guard:WIRED_BUT_ABSENT"* ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == *"rm-workspace-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
 
 # D: bg-await-guard is not wired into settings.json at all.
 scenario_layer2_not_wired() {
   local home="$WORK/l2-d" out
   write_wired_settings "$home" rm-workspace-guard no-dash-guard precommit-check
-  write_guard_scripts "$home" rm-workspace-guard:1 no-dash-guard:1 precommit-check:1
   out="$(run_layer2 "$home")"
   [[ "$out" == *"bg-await-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
 
 # E: the fourth-guard regression, specifically. The previous version of this
 # layer matched only three guard names and passed on "3 or more wired", so a
-# missing precommit-check read as healthy. Wire only the other three (with
-# their scripts present) and require the count to say 3/4, not 4/4, and to
-# name precommit-check as NOT_WIRED. A test that only checked the other three
-# guards would let this exact regression back in.
+# missing precommit-check read as healthy. Wire only the other three and
+# require the count to say 3/4, not 4/4, and to name precommit-check as
+# NOT_WIRED. A test that only checked the other three guards would let this
+# exact regression back in.
 scenario_layer2_precommit_check_counted() {
   local home="$WORK/l2-e" out
   write_wired_settings "$home" rm-workspace-guard bg-await-guard no-dash-guard
-  write_guard_scripts "$home" rm-workspace-guard:1 bg-await-guard:1 no-dash-guard:1
   out="$(run_layer2 "$home")"
   [[ "$out" == "wired=3/4"* ]] || { echo "  wired count did not drop: $out"; return 1; }
   [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
 
-run_scenario "A: all four guards wired and present -> wired=4/4 present=4/4"        scenario_layer2_all_wired_present
-run_scenario "B: guard wired, script absent -> WIRED_BUT_ABSENT (fail-open pin)"     scenario_layer2_wired_but_absent
-run_scenario "C: guard wired, script present but not executable -> WIRED_BUT_ABSENT" scenario_layer2_present_not_executable
-run_scenario "D: guard not wired at all -> NOT_WIRED"                                scenario_layer2_not_wired
-run_scenario "E: precommit-check is counted, not silently dropped to '3 or more'"    scenario_layer2_precommit_check_counted
+run_scenario "A: all four guards wired in bare form -> wired=4/4"                   scenario_layer2_all_wired
+run_scenario "B: guard still on its legacy .sh command -> NOT_WIRED"                scenario_layer2_legacy_command_not_wired
+run_scenario "C: a near-miss command must not count as wired (exact-match pin)"     scenario_layer2_near_miss_command_not_wired
+run_scenario "D: guard not wired at all -> NOT_WIRED"                               scenario_layer2_not_wired
+run_scenario "E: precommit-check is counted, not silently dropped to '3 or more'"   scenario_layer2_precommit_check_counted
 
 # ── Layer 5: status line matches the shipped copy ───────────────────────────
 

@@ -18,14 +18,14 @@
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
-//!   and the 11 ported hooks are exactly the ones wired that way:
+//!   and all 15 ported hooks (the 11 functional hooks plus the 4 safety
+//!   guards, all ported as of WU-13) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
 //!   `pre_existing_user_hook_entry_is_preserved_not_clobbered`
-//! - Regression pin, scoped per the 2026-08-16 ADR amendment: only the four
-//!   guards may still point under `~/.claude/hooks/` after wiring, since
-//!   their Rust ports are still stubs until WU-13:
-//!   `only_the_four_guards_still_point_under_claude_hooks_dir_after_wiring`
+//! - Done-When pin: no command anywhere under `.hooks` points under
+//!   `~/.claude/hooks/` after wiring, now that all four guards are ported:
+//!   `no_hook_command_points_under_claude_hooks_dir_after_wiring`
 //! - The bare-name form survives a write-then-read round trip:
 //!   `bare_name_form_survives_write_then_read_round_trip`
 //! - Backup is timestamped and taken only when a change actually lands:
@@ -33,19 +33,16 @@
 //! - Regression pin for the defect itself: every hook name wired in binary
 //!   form has a real (non-stub) Rust implementation behind it:
 //!   `every_hook_wired_in_binary_form_has_a_non_stub_implementation`
-//! - A guard not in `placed_guards` whose script is absent from
-//!   `claude_home` has its dangling legacy command removed:
-//!   `guard_not_placed_with_absent_script_has_its_command_removed`
-//! - A guard not in `placed_guards` whose script already exists at
-//!   `claude_home` (the `shell/setup-local.sh` compatibility case) survives
-//!   completely untouched:
-//!   `guard_not_placed_with_existing_script_survives_untouched`
-//! - Removal leaves every other entry in the same group intact, including a
-//!   hand-authored user entry:
-//!   `removal_leaves_other_entries_in_the_same_group_intact_including_a_user_entry`
-//! - A group removal empties is dropped, but a group that was already empty
-//!   before this call is left exactly as found:
-//!   `group_emptied_by_removal_is_dropped_but_a_pre_existing_empty_group_is_left_alone`
+//! - THE SUBTLE PART pinned directly: a guard omitted from `placed_guards`,
+//!   with no script on `claude_home` either, is still wired in bare form.
+//!   A guard's `ported` flag alone decides this now; `placed_guards` and
+//!   script presence are irrelevant to it, so flipping the flag without
+//!   fixing the loop (the exact near-miss this Work Unit had to avoid)
+//!   would fail this test:
+//!   `guard_is_wired_in_bare_form_even_when_absent_from_placed_guards_and_script_missing`
+//! - A pre-existing legacy `~/.claude/hooks/<name>.sh` guard command is
+//!   REPLACED by the bare form, not left to coexist as a duplicate entry:
+//!   `legacy_guard_entry_is_replaced_by_bare_form_not_duplicated`
 
 #![allow(dead_code)]
 
@@ -236,9 +233,8 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
     // Assert: every command that takes the bare form is bare (no path
     // separator, no absolute path, no legacy python/shell script suffix)
     // and its hook name resolves to a real HookName the same way clap would
-    // parse `playbook hook <name>`. The four guards deliberately do NOT
-    // take this form yet; they are covered separately in
-    // `only_the_four_guards_still_point_under_claude_hooks_dir_after_wiring`.
+    // parse `playbook hook <name>`. The four guards now take this form too,
+    // since WU-13 ported all four to real Rust bodies.
     assert!(!commands.is_empty(), "wiring should write hook commands");
     let mut resolved_names = std::collections::HashSet::new();
     for cmd in &commands {
@@ -254,13 +250,10 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.insert(name.to_string());
     }
 
-    // The 11 already-ported HookName variants should be wired in binary
-    // form at least once: this is the pivot the whole Work Unit exists for,
-    // so pin it directly rather than only checking the commands that happen
-    // to be present. The four guards are excluded on purpose: their Rust
-    // ports are still stubs until WU-13, so wiring them here would silently
-    // disable them, which is exactly the defect the 2026-08-16 ADR
-    // amendment records.
+    // All 15 HookName variants should be wired in binary form at least
+    // once: this is the pivot the whole Work Unit exists for, so pin it
+    // directly rather than only checking the commands that happen to be
+    // present.
     let expected: std::collections::HashSet<&str> = [
         "session-init",
         "preread-edit-check",
@@ -273,6 +266,10 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "precompact-warn",
         "session-clean-exit",
         "memory-capture",
+        "rm-workspace-guard",
+        "bg-await-guard",
+        "no-dash-guard",
+        "precommit-check",
     ]
     .into_iter()
     .collect();
@@ -280,7 +277,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly the 11 ported HookName variants in binary form"
+        "wiring should register exactly all 15 ported HookName variants in binary form"
     );
 }
 
@@ -329,8 +326,10 @@ fn pre_existing_user_hook_entry_is_preserved_not_clobbered() {
 }
 
 #[test]
-fn only_the_four_guards_still_point_under_claude_hooks_dir_after_wiring() {
-    // Arrange: today's real shape, all four guards under ~/.claude/hooks/.
+fn no_hook_command_points_under_claude_hooks_dir_after_wiring() {
+    // Arrange: today's real pre-WU-13 shape, all four guards under
+    // ~/.claude/hooks/, so wiring has to actually rewrite something rather
+    // than trivially finding nothing to fix.
     let path = scratch_settings_path("no-hooks-dir-paths");
     let claude_home = scratch_claude_home("no-hooks-dir-paths-home");
     write_json(&path, &unwired_fixture());
@@ -340,33 +339,26 @@ fn only_the_four_guards_still_point_under_claude_hooks_dir_after_wiring() {
     let settings = read_json(&path);
     let commands = all_hook_commands(&settings);
 
-    // Assert: the 2026-08-16 ADR amendment moved the original "no command
-    // may point under ~/.claude/hooks/" pin to WU-13, the unit where it
-    // becomes true for every hook. Until then it holds for the 11 ported
-    // hooks, and the four guards are the sole, explicit exception, since
-    // their Rust ports are still stubs.
-    let expected_guard_paths: std::collections::HashSet<String> = [
+    // Assert: the Done-When pin this Work Unit exists to satisfy. The
+    // 2026-08-16 ADR amendment moved the original "no command may point
+    // under ~/.claude/hooks/" pin to WU-13, the unit where all four guards
+    // are ported and it becomes true unconditionally; there is no longer an
+    // exception for the guards.
+    for cmd in &commands {
+        assert!(
+            !cmd.contains("/.claude/hooks/"),
+            "no hook command may point under ~/.claude/hooks/ after wiring: {cmd}"
+        );
+    }
+    for name in [
         "rm-workspace-guard",
         "bg-await-guard",
         "no-dash-guard",
         "precommit-check",
-    ]
-    .into_iter()
-    .map(|name| format!("~/.claude/hooks/{name}.sh"))
-    .collect();
-
-    for cmd in &commands {
-        if cmd.contains("/.claude/hooks/") {
-            assert!(
-                expected_guard_paths.contains(cmd),
-                "only the four unported guards may still point under ~/.claude/hooks/: {cmd}"
-            );
-        }
-    }
-    for expected in &expected_guard_paths {
+    ] {
         assert!(
-            commands.contains(expected),
-            "each guard should still be wired to its working shell script: {expected}"
+            commands.contains(&format!("playbook hook {name}")),
+            "guard '{name}' should be wired to its bare binary form: {commands:?}"
         );
     }
 }
@@ -500,172 +492,92 @@ fn every_hook_wired_in_binary_form_has_a_non_stub_implementation() {
     );
 }
 
+/// THE SUBTLE PART, pinned directly. Before this Work Unit, a guard was
+/// wired in `.sh` form only when its name was in `placed_guards`, and
+/// otherwise had that command actively removed if `claude_home` had no
+/// script for it. Flipping `GUARD_SPECS`'s `ported` field to `true` without
+/// also fixing `wire`'s loop would leave a ported guard falling into that
+/// same removal branch: nothing in `placed_guards` names it, no script
+/// exists, so its OLD `.sh` command would be removed and nothing would take
+/// its place, silently disabling the guard forever. This test constructs
+/// exactly that near-miss (`placed_guards` empty, no scripts on
+/// `claude_home` at all) and asserts every guard is wired in bare binary
+/// form anyway, since `ported` alone decides it now.
 #[test]
-fn guard_not_placed_with_absent_script_has_its_command_removed() {
-    // Arrange: the full unwired fixture, all four guard commands present.
-    // "precommit-check" is not in `placed_guards`, and `claude_home` has no
-    // `hooks/` directory at all, so its script is genuinely absent.
-    let path = scratch_settings_path("guard-absent-removed");
-    let claude_home = scratch_claude_home("guard-absent-removed-home");
-    write_json(&path, &unwired_fixture());
-    let placed: &[&str] = &["rm-workspace-guard", "bg-await-guard", "no-dash-guard"];
+fn guard_is_wired_in_bare_form_even_when_absent_from_placed_guards_and_script_missing() {
+    // Arrange: a fresh install, no settings.json, no placed guards, and a
+    // claude_home with no hooks/ directory at all.
+    let path = scratch_settings_path("guard-unconditional");
+    let claude_home = scratch_claude_home("guard-unconditional-home");
 
-    // Act
-    wire(&path, placed, &claude_home).expect("wire should succeed");
+    // Act: pass an empty placed_guards slice, the worst case for the old
+    // placement-gate behaviour.
+    wire(&path, &[], &claude_home).expect("wire should succeed");
     let settings = read_json(&path);
     let commands = all_hook_commands(&settings);
 
-    // Assert: the dangling command is gone, and the three placed guards
-    // stay wired.
-    assert!(
-        !commands.contains(&"~/.claude/hooks/precommit-check.sh".to_string()),
-        "the unplaced guard's dangling command should be removed: {commands:?}"
-    );
-    for name in placed {
-        let legacy = format!("~/.claude/hooks/{name}.sh");
-        assert!(
-            commands.contains(&legacy),
-            "placed guard '{name}' should still be wired: {commands:?}"
-        );
-    }
-}
-
-#[test]
-fn guard_not_placed_with_existing_script_survives_untouched() {
-    // Arrange: the same fixture, but this time "precommit-check"'s script IS
-    // present at `claude_home`, standing in for something else having placed
-    // it, the `shell/setup-local.sh` compatibility case. It is still not in
-    // `placed_guards`.
-    let path = scratch_settings_path("guard-present-survives");
-    let claude_home = scratch_claude_home("guard-present-survives-home");
-    fs::create_dir_all(claude_home.join("hooks")).expect("hooks dir should be creatable");
-    fs::write(
-        claude_home.join("hooks").join("precommit-check.sh"),
-        "#!/bin/sh\n",
-    )
-    .expect("scratch guard script should be writable");
-    let fixture = unwired_fixture();
-    write_json(&path, &fixture);
-    let placed: &[&str] = &["rm-workspace-guard", "bg-await-guard", "no-dash-guard"];
-
-    // Act
-    wire(&path, placed, &claude_home).expect("wire should succeed");
-    let settings = read_json(&path);
-
-    // Assert: the entry is exactly what it was before, byte for value, even
-    // though "precommit-check" is not in `placed_guards`.
-    let original_entry = &fixture["hooks"]["PreToolUse"][0]["hooks"][3];
-    let bash_hooks_after = settings["hooks"]["PreToolUse"][0]["hooks"]
-        .as_array()
-        .unwrap();
-    let entry_after = bash_hooks_after
-        .iter()
-        .find(|h| h["command"] == "~/.claude/hooks/precommit-check.sh")
-        .expect("precommit-check's command should survive when its script exists");
-    assert_eq!(
-        entry_after, original_entry,
-        "an unplaced guard's command must be left completely alone when its script resolves"
-    );
-}
-
-#[test]
-fn removal_leaves_other_entries_in_the_same_group_intact_including_a_user_entry() {
-    // Arrange: the unwired fixture, plus a hand-authored entry in the very
-    // same Bash group the guards live in. "precommit-check" is not placed
-    // and its script is absent, so only its command should move.
-    let mut fixture = unwired_fixture();
-    let bash_hooks = fixture["hooks"]["PreToolUse"][0]["hooks"]
-        .as_array_mut()
-        .unwrap();
-    bash_hooks.push(json!({
-        "type": "command",
-        "command": "my-custom-bash-guard.sh"
-    }));
-    let path = scratch_settings_path("removal-preserves-siblings");
-    let claude_home = scratch_claude_home("removal-preserves-siblings-home");
-    write_json(&path, &fixture);
-    let placed: &[&str] = &["rm-workspace-guard", "bg-await-guard", "no-dash-guard"];
-
-    // Act
-    wire(&path, placed, &claude_home).expect("wire should succeed");
-    let settings = read_json(&path);
-    let bash_hooks_after = settings["hooks"]["PreToolUse"][0]["hooks"]
-        .as_array()
-        .unwrap();
-    let commands_after: Vec<&str> = bash_hooks_after
-        .iter()
-        .filter_map(|h| h["command"].as_str())
-        .collect();
-
     // Assert
-    assert!(
-        !commands_after.contains(&"~/.claude/hooks/precommit-check.sh"),
-        "the dangling command should be removed: {commands_after:?}"
-    );
-    assert!(
-        commands_after.contains(&"my-custom-bash-guard.sh"),
-        "a hand-authored sibling entry must survive removal: {commands_after:?}"
-    );
-    for name in placed {
-        let legacy = format!("~/.claude/hooks/{name}.sh");
+    for name in [
+        "rm-workspace-guard",
+        "bg-await-guard",
+        "no-dash-guard",
+        "precommit-check",
+    ] {
         assert!(
-            commands_after.contains(&legacy.as_str()),
-            "placed guard '{name}' should still be present: {commands_after:?}"
+            commands.contains(&format!("playbook hook {name}")),
+            "guard '{name}' must be wired in bare form even when placed_guards is empty \
+             and no script exists on claude_home: {commands:?}"
+        );
+        assert!(
+            !commands.contains(&format!("~/.claude/hooks/{name}.sh")),
+            "guard '{name}' must not be left on or reverted to its legacy .sh command: {commands:?}"
         );
     }
 }
 
+/// The scenario the brief asked to be added explicitly: a user's
+/// pre-existing `settings.json` still carries a guard's legacy
+/// `~/.claude/hooks/<name>.sh` command from before this fix shipped.
+/// Wiring must REPLACE that entry with the bare form, not add a second
+/// entry alongside it, since a guard firing twice on the same event is as
+/// much a defect as it not firing at all.
 #[test]
-fn group_emptied_by_removal_is_dropped_but_a_pre_existing_empty_group_is_left_alone() {
-    // Arrange: a Bash-matcher group holding only the dangling guard's
-    // command, so removal empties and drops it, and a separate group on an
-    // event `wire` never manages, already empty before this call, which must
-    // survive exactly as it was found.
-    let path = scratch_settings_path("group-pruning");
-    let claude_home = scratch_claude_home("group-pruning-home");
-    write_json(
-        &path,
-        &json!({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": "~/.claude/hooks/precommit-check.sh",
-                                "if": "Bash(git commit:*)",
-                                "timeout": 10
-                            }
-                        ]
-                    }
-                ],
-                "Notification": [
-                    {"hooks": []}
-                ]
-            }
-        }),
-    );
+fn legacy_guard_entry_is_replaced_by_bare_form_not_duplicated() {
+    // Arrange: the unwired fixture, today's real pre-WU-13 shape.
+    let path = scratch_settings_path("legacy-guard-replaced");
+    let claude_home = scratch_claude_home("legacy-guard-replaced-home");
+    write_json(&path, &unwired_fixture());
 
-    // Act: no guard is reported as placed, so all four go through the
-    // existence check against `claude_home`; only "precommit-check"'s
-    // command actually exists to remove.
-    wire(&path, &[], &claude_home).expect("wire should succeed");
+    // Act
+    wire(&path, ALL_GUARDS, &claude_home).expect("wire should succeed");
     let settings = read_json(&path);
+    let bash_hooks_after = settings["hooks"]["PreToolUse"][0]["hooks"]
+        .as_array()
+        .unwrap();
 
-    // Assert: the Bash-matcher group that removal emptied is gone, not left
-    // behind as an empty array.
-    let pre_tool_use = settings["hooks"]["PreToolUse"].as_array().unwrap();
-    assert!(
-        pre_tool_use.iter().all(|g| g["matcher"] != "Bash"),
-        "the group removal emptied should be dropped: {pre_tool_use:?}"
-    );
-
-    // Assert: the pre-existing empty group on an event `wire` never manages
-    // is left exactly as found.
-    assert_eq!(
-        settings["hooks"]["Notification"],
-        json!([{"hooks": []}]),
-        "a group that was already empty before this call must not be pruned"
-    );
+    // Assert: exactly one entry per guard, and it is the bare form.
+    for name in [
+        "rm-workspace-guard",
+        "bg-await-guard",
+        "no-dash-guard",
+        "precommit-check",
+    ] {
+        let bare = format!("playbook hook {name}");
+        let matching: Vec<&Value> = bash_hooks_after
+            .iter()
+            .filter(|h| {
+                h["command"] == bare || h["command"] == format!("~/.claude/hooks/{name}.sh")
+            })
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "guard '{name}' should have exactly one entry after wiring, not a duplicate: \
+             {bash_hooks_after:?}"
+        );
+        assert_eq!(
+            matching[0]["command"], bare,
+            "guard '{name}'s single entry should be the bare form: {matching:?}"
+        );
+    }
 }

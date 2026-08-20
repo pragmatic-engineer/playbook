@@ -21,46 +21,49 @@ Pass if the output contains "playbook" and the status shows it is enabled.
 
 Remediation hint on miss: "run: claude plugin marketplace add pragmatic-engineer/marketplace && claude plugin install playbook@pragmatic-engineer"
 
-## Layer 2: Safety guards wired AND present
+## Layer 2: Safety guards wired
 
-Checking only that a guard is wired is not enough, and this layer used to do
-exactly that. A `settings.json` command naming a script that is not on disk
-fails **open**: the hook is invoked, the file is not there, nothing runs, and
-nothing is reported. That is the failure the `hook-rename-lockstep-settings`
-note records, roughly 110 silent errors over 28 hours on 2026-08-11. So this
-layer checks both halves, and treats wired-but-absent as the worst of the three
-states rather than a pass.
+Before WU-13 ported the four safety guards into the Rust binary, each was a
+`.sh` script `settings.json` invoked by path, so "wired" and "present on
+disk" were two different facts, and a command naming a missing script failed
+**open**: the hook was invoked, the file was not there, nothing ran, and
+nothing was reported. That was the failure the `hook-rename-lockstep-settings`
+note records, roughly 110 silent errors over 28 hours on 2026-08-11, and this
+layer used to check both halves for exactly that reason.
+
+Now that all four guards run inside the compiled binary
+(`src/hooks/*_guard.rs`), there is no per-guard script to check presence for
+any more: `settings.json` names `playbook hook <name>`, the same bare form
+every other ported hook uses, and whether that name resolves is purely a
+question of whether the `playbook` binary itself is on PATH, which Layer 6
+already checks once for every ported hook, guards included. This layer's job
+narrows to the one question that is still specific to the guards: is each one
+actually wired to that bare form?
 
 ```bash
-wired=0; present=0; problems=""
+wired=0; problems=""
 for g in rm-workspace-guard bg-await-guard no-dash-guard precommit-check; do
-  n=$(jq -r --arg g "$g" \
-      '[.hooks.PreToolUse[]?.hooks[]?.command // ""] | map(select(contains($g))) | length' \
+  n=$(jq -r --arg cmd "playbook hook $g" \
+      '[.hooks.PreToolUse[]?.hooks[]?.command // ""] | map(select(. == $cmd)) | length' \
       ~/.claude/settings.json 2>/dev/null)
   if [ "${n:-0}" -gt 0 ]; then
     wired=$((wired + 1))
-    if [ -x "$HOME/.claude/hooks/$g.sh" ]; then
-      present=$((present + 1))
-    else
-      problems="$problems $g:WIRED_BUT_ABSENT"
-    fi
   else
     problems="$problems $g:NOT_WIRED"
   fi
 done
-echo "wired=$wired/4 present=$present/4$problems"
+echo "wired=$wired/4$problems"
 ```
 
 Report:
 
-- `wired=4/4 present=4/4` → PASS.
-- Any `WIRED_BUT_ABSENT` → **FAIL, and say it fails open.** `settings.json`
-  names the script but it is not executable at `~/.claude/hooks/<name>.sh`, so
-  that guard is silently doing nothing right now. Remediation: `playbook init`,
-  which places every guard it wires and removes any command whose script it
-  cannot place.
-- Any `NOT_WIRED` → **FAIL.** Remediation: `playbook init`, or
-  `/playbook:setup` on a machine without the binary.
+- `wired=4/4` → PASS.
+- Any `NOT_WIRED` → **FAIL.** The guard is either still on its legacy
+  `~/.claude/hooks/<name>.sh` command from before this change shipped, or
+  missing from `settings.json` entirely; either way it is not running from
+  the binary. Remediation: `playbook init`, which rewrites every guard's
+  command to its bare form unconditionally, or `/playbook:setup` on a
+  machine without the binary.
 
 **Four guards, not three.** The previous check matched only
 `rm-workspace-guard|bg-await-guard|no-dash-guard` and passed on "3 or more", so
@@ -222,7 +225,7 @@ one-line remediation hint. Example shape:
 
 ```
 PASS  plugin enabled
-PASS  safety guards wired and present (4 of 4)
+PASS  safety guards wired (4 of 4)
 INFO  launcher not installed (opt-in; run /playbook:setup)    -- run /playbook:setup and choose Yes for the launcher question
 INFO  system prompt not installed (opt-in, recommended) -- run /playbook:setup and choose Yes for the system prompt question
 INFO  status line differs from the shipped copy -- stale, or a local fix ahead of the release; a plugin install will overwrite it either way

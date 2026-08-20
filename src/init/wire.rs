@@ -1,26 +1,44 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Wires the 11 hooks Claude Code can invoke that are already ported to
-//! Rust straight into `settings.json` as a bare `playbook hook <name>`
-//! command, retiring `hooks/hooks.json` as the source of truth for them.
-//! Before this module lands, `hooks/hooks.json` points all 15 hooks at
-//! python scripts under `${CLAUDE_PLUGIN_ROOT}/hooks/`, so the Rust binary
-//! this crate builds dispatches nothing in production; `wire` is the pivot
-//! that makes the 11 ported hooks live.
+//! Wires the 15 hooks Claude Code can invoke, all of them now ported to
+//! Rust, straight into `settings.json` as a bare `playbook hook <name>`
+//! command, retiring both `hooks/hooks.json` (source of truth for the 11
+//! functional hooks) and a guard's own `~/.claude/hooks/<name>.sh` path
+//! (source of truth for the 4 safety guards). Before this module lands,
+//! `hooks/hooks.json` points all 15 hooks at python scripts under
+//! `${CLAUDE_PLUGIN_ROOT}/hooks/`, so the Rust binary this crate builds
+//! dispatches nothing in production; `wire` is the pivot that makes every
+//! ported hook live.
 //!
-//! The remaining four hooks (`rm-workspace-guard`, `bg-await-guard`,
-//! `no-dash-guard`, `precommit-check`) are deliberately NOT rewired here.
-//! Their Rust modules (`src/hooks/*_guard.rs`) are still empty stubs
-//! (`pub fn run(_payload: &Payload) {}`) until WU-13 ports them, two
-//! Segments later; pointing `settings.json` at `playbook hook <name>` for
-//! one of them before then would silently disable a live safety guard,
-//! since the stub runs, emits no permission decision, and exits 0. This is
-//! the exact defect the 2026-08-16 ADR amendment to WU-8 records, and this
-//! module now avoids it: `wire` keeps writing their existing
-//! `~/.claude/hooks/<name>.sh` command instead. WU-13 is the only unit that
-//! should flip `GUARD_SPECS`'s `ported` field to `true`; do not "tidy" this
-//! ahead of that unit landing.
+//! The four safety guards (`rm-workspace-guard`, `bg-await-guard`,
+//! `no-dash-guard`, `precommit-check`) stayed on their legacy
+//! `~/.claude/hooks/<name>.sh` command for two Segments after the other 11
+//! hooks moved, because their Rust modules (`src/hooks/*_guard.rs`) were
+//! still the empty stub `pub fn run(_payload: &Payload) {}`. Wiring one of
+//! them to `playbook hook <name>` before its Rust body existed would have
+//! silently disabled a live safety guard, since the stub runs, emits no
+//! permission decision, and exits 0: the exact defect the 2026-08-16 ADR
+//! amendment to WU-8 records. WU-13 ports all four guard bodies and flips
+//! every `GUARD_SPECS` entry's `ported` field to `true`, so they are now
+//! wired exactly like `PORTED_HOOK_SPECS`: unconditionally, in bare form,
+//! ignoring `placed_guards` entirely. A guard's pre-existing legacy command,
+//! if a user still has one, is REPLACED in place rather than left to coexist
+//! with the new bare command (`entry_targets` recognises both forms as
+//! targeting the same hook, so `upsert_hook` rewrites the same array slot
+//! rather than appending a second entry).
+//!
+//! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS`, and `wire`
+//! still carries the placement-gate branch it always had for a guard that is
+//! NOT `ported` (checking `placed_guards`, then `guard_script_exists`, then
+//! `remove_dangling_command`). That branch cannot fire today: every
+//! `GUARD_SPECS` entry is `ported: true`, so no guard reaches it. It stays
+//! because `init::guards` still places the four legacy `.sh` scripts for a
+//! machine mid-migration (see that module's doc comment) and because the
+//! gate is the mechanism that stops a future unported hook or guard from
+//! being wired to a stub the same way WU-8 was bitten. WU-14 deletes
+//! `init::guards`, the shell guard scripts themselves, and this now-dead
+//! gate branch together, once no installed machine can still depend on them.
 //!
 //! `wire` is mostly an upsert into whatever `settings.json` already has,
 //! never a wholesale replace: a hand-added hook entry a user placed
@@ -29,22 +47,6 @@
 //! mandatory fixture 6 pins at the settings-merge layer; `wire` pins it
 //! again at the narrower hook-wiring layer, since it edits `.hooks` directly
 //! rather than going through a three-way merge.
-//!
-//! The one deliberate exception: a guard NOT in `placed_guards` gets its
-//! legacy command actively REMOVED, but only when `claude_home` genuinely
-//! has no `.sh` script for it. `settings.shared.json` still seeds all four
-//! guard commands (they stay legitimate template content until WU-13 ports
-//! their Rust bodies), so a guard `init::guards` failed to place, or never
-//! ran for, would otherwise leave the seeded command dangling: a
-//! `settings.json` entry naming a script that is not on disk, which fails
-//! open and silent, the exact defect this module exists to close. The
-//! existence check on `claude_home` is what keeps that removal narrow rather
-//! than destructive: a guard some other installer already placed there
-//! (`shell/setup-local.sh` copies three of the four) has a script that still
-//! resolves, so `wire` leaves its command alone even though `placed_guards`
-//! does not name it. Removal only ever matches the exact legacy command
-//! string (`legacy_shell_command`); nothing else under `.hooks` is touched
-//! by it.
 //!
 //! The bare-name form (`playbook hook session-init`, not an absolute path)
 //! is deliberate: Claude Code already accepts a bare command resolved on
@@ -187,18 +189,19 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
     },
 ];
 
-/// The 4 always-on safety guards `settings.json` already wires directly
-/// today, deliberately kept off the binary form `PORTED_HOOK_SPECS` gets.
-/// Their Rust modules (`src/hooks/rm_workspace_guard.rs` and the three
-/// siblings beside it) are still the empty stub
-/// `pub fn run(_payload: &Payload) {}`; WU-13, two Segments later, is the
-/// unit that fills them in, and is the only unit that should flip `ported`
-/// to `true` here. Until then `wire` keeps these four pointed at their
-/// working `~/.claude/hooks/<name>.sh` script, self-healing the entry back
-/// to that form even if a prior run (or a hand edit) left it on the binary
-/// form instead. See the 2026-08-16 amendment to this Work Unit in
-/// `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`: wiring
-/// a guard to a stub silently disables it.
+/// The 4 always-on safety guards, now wired identically to
+/// `PORTED_HOOK_SPECS`: every entry here is `ported: true`, since WU-13
+/// ported all four Rust modules (`src/hooks/rm_workspace_guard.rs` and the
+/// three siblings beside it) to real bodies. `wire` upserts each one
+/// unconditionally in bare `playbook hook <name>` form, the same as any
+/// `PORTED_HOOK_SPECS` entry, regardless of what `placed_guards` names; a
+/// pre-existing legacy `~/.claude/hooks/<name>.sh` command is replaced, not
+/// left to coexist. Kept as a list separate from `PORTED_HOOK_SPECS`, rather
+/// than merged into it, so the placement-gate branch in `wire`'s loop stays
+/// meaningful for a future guard or hook that lands unported, the same shape
+/// every one of these four guards themselves went through for two Segments.
+/// See the module doc comment for why that branch is currently unreachable
+/// and why it still stays.
 const GUARD_SPECS: &[HookSpec] = &[
     HookSpec {
         event: "PreToolUse",
@@ -206,7 +209,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "rm-workspace-guard",
         if_cond: Some("Bash(rm:*)"),
         timeout: Some(10),
-        ported: false,
+        ported: true,
     },
     HookSpec {
         event: "PreToolUse",
@@ -214,7 +217,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "bg-await-guard",
         if_cond: None,
         timeout: Some(10),
-        ported: false,
+        ported: true,
     },
     HookSpec {
         event: "PreToolUse",
@@ -222,7 +225,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "no-dash-guard",
         if_cond: None,
         timeout: Some(10),
-        ported: false,
+        ported: true,
     },
     HookSpec {
         event: "PreToolUse",
@@ -230,7 +233,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "precommit-check",
         if_cond: Some("Bash(git commit:*)"),
         timeout: Some(10),
-        ported: false,
+        ported: true,
     },
 ];
 
@@ -292,8 +295,10 @@ pub struct WireOutcome {
 
 /// The guards `wire` still points at a `~/.claude/hooks/<name>.sh` path,
 /// derived from `GUARD_SPECS` rather than restated, so `init::guards` copies
-/// exactly the set this module wires and the two cannot drift. WU-13 flips a
-/// guard's `ported` flag and both sides follow in one edit.
+/// exactly the set this module wires and the two cannot drift. Empty today:
+/// WU-13 flipped every `GUARD_SPECS` entry's `ported` field to `true`, so
+/// nothing is unported any more. Kept for `init::guards` to keep calling
+/// until WU-14 deletes that module; see its doc comment for why it stays.
 pub(crate) fn unported_guard_names() -> impl Iterator<Item = &'static str> {
     GUARD_SPECS
         .iter()
@@ -301,29 +306,29 @@ pub(crate) fn unported_guard_names() -> impl Iterator<Item = &'static str> {
         .map(|spec| spec.name)
 }
 
-/// Writes every hook in `PORTED_HOOK_SPECS` to its bare `playbook hook
-/// <name>` command, and each guard named in `placed_guards` to its legacy
-/// `~/.claude/hooks/<name>.sh` command, creating `.hooks` and any event or
-/// matcher group it needs from scratch. A guard NOT in `placed_guards` is
-/// actively cleaned up rather than silently ignored: when `claude_home`
-/// holds no `.sh` script for it, its legacy command is removed from every
-/// `.hooks` group that carries it, pruning a group or event that removal
-/// leaves empty; when the script DOES exist there (say, because
-/// `shell/setup-local.sh` placed it), the entry is left completely alone,
-/// since that command still resolves. Every other key in the file, and every
+/// Writes every hook in `PORTED_HOOK_SPECS` and every guard in `GUARD_SPECS`
+/// to its bare `playbook hook <name>` command, creating `.hooks` and any
+/// event or matcher group it needs from scratch. Every `GUARD_SPECS` entry
+/// is `ported: true` today (WU-13), so every guard takes this same
+/// unconditional path regardless of what `placed_guards` names. A guard's
+/// pre-existing legacy `~/.claude/hooks/<name>.sh` command, if a user still
+/// has one, is replaced in place rather than left to coexist alongside the
+/// new bare command (`entry_targets` recognises both forms as targeting the
+/// same hook).
+///
+/// `placed_guards` and `claude_home` remain live only for a `GUARD_SPECS`
+/// entry that is NOT `ported` (none today): such a guard is wired only when
+/// its name is in `placed_guards`, and otherwise has its legacy command
+/// actively removed, but only when `claude_home` genuinely has no `.sh`
+/// script for it left, pruning a group or event that removal leaves empty.
+/// This is the mechanism `init::guards::place_guards` and this module used
+/// for every guard before WU-13 ported their Rust bodies; it stays for a
+/// future hook or guard that lands unported, and WU-14 removes it once
+/// `init::guards` itself is deleted. Every other key in the file, and every
 /// hook entry not managed here, is left untouched either way. Idempotent:
 /// calling this twice in a row writes nothing the second time, since the
 /// second call's freshly rendered content is compared byte for byte against
 /// what is already on disk before anything is written.
-///
-/// `placed_guards` is the set `init::guards::place_guards` confirmed on disk
-/// and executable, NOT every guard in `GUARD_SPECS`. Writing a command for a
-/// guard whose script is absent is the exact silent failure this whole
-/// Segment exists to close: the hook never fires and nothing says so. A
-/// caller with no guards to report passes an empty slice; `claude_home` is
-/// then the only thing standing between "nothing to wire" and "a dangling
-/// command left behind", which is why the existence check happens on
-/// `claude_home` and never on `placed_guards` alone.
 ///
 /// Backs `settings_path` up first, timestamped, whenever a change (an
 /// upsert or a removal) is about to land; a no-op call takes no backup. This
@@ -352,7 +357,12 @@ pub fn wire(
             upsert_hook(hooks, spec, settings_path)?;
         }
         for spec in GUARD_SPECS {
-            if placed_guards.contains(&spec.name) {
+            // A ported guard is wired unconditionally, exactly like a
+            // `PORTED_HOOK_SPECS` entry: `placed_guards` is irrelevant to it,
+            // since the binary needs no script on disk to run. Only a guard
+            // that is NOT yet ported (none today) goes through the
+            // placement gate below.
+            if spec.ported || placed_guards.contains(&spec.name) {
                 upsert_hook(hooks, spec, settings_path)?;
             } else if !guard_script_exists(claude_home, spec.name) {
                 remove_dangling_command(hooks, &legacy_shell_command(spec.name));
@@ -667,4 +677,112 @@ fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
         return Err(err);
     }
     Ok(())
+}
+
+// `remove_dangling_command` and `guard_script_exists` back the
+// placement-gate branch `wire()`'s public integration tests
+// (`tests/init_wire.rs`) can no longer reach: every `GUARD_SPECS` entry is
+// `ported: true` now, so no input to the public `wire()` function can select
+// that branch any more. Unit-testing the two helpers directly here, rather
+// than leaving them uncovered, is what keeps this now-dormant mechanism
+// exercised until WU-14 removes it.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guard_script_exists_true_only_when_the_sh_file_is_actually_present() {
+        // Arrange
+        let dir = std::env::temp_dir().join(format!(
+            "playbook-wire-unit-guard-script-exists-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(dir.join("hooks")).expect("scratch hooks dir should be creatable");
+        fs::write(
+            dir.join("hooks").join("rm-workspace-guard.sh"),
+            "#!/bin/sh\n",
+        )
+        .expect("scratch guard script should be writable");
+
+        // Act, Assert
+        assert!(guard_script_exists(&dir, "rm-workspace-guard"));
+        assert!(!guard_script_exists(&dir, "no-dash-guard"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remove_dangling_command_prunes_only_the_matching_command_and_empties_it_leaves_behind() {
+        // Arrange: two groups on the same event, one holding only the
+        // target command (so removal must prune the whole group), the other
+        // holding the target alongside a sibling entry that must survive.
+        let mut hooks = Map::new();
+        hooks.insert(
+            "PreToolUse".to_string(),
+            Value::Array(vec![
+                Value::Object(Map::from_iter([(
+                    "hooks".to_string(),
+                    Value::Array(vec![Value::Object(Map::from_iter([
+                        ("type".to_string(), Value::String("command".to_string())),
+                        (
+                            "command".to_string(),
+                            Value::String("~/.claude/hooks/precommit-check.sh".to_string()),
+                        ),
+                    ]))]),
+                )])),
+                Value::Object(Map::from_iter([(
+                    "hooks".to_string(),
+                    Value::Array(vec![
+                        Value::Object(Map::from_iter([
+                            ("type".to_string(), Value::String("command".to_string())),
+                            (
+                                "command".to_string(),
+                                Value::String("~/.claude/hooks/precommit-check.sh".to_string()),
+                            ),
+                        ])),
+                        Value::Object(Map::from_iter([(
+                            "command".to_string(),
+                            Value::String("my-custom-hook.sh".to_string()),
+                        )])),
+                    ]),
+                )])),
+            ]),
+        );
+        hooks.insert(
+            "Notification".to_string(),
+            Value::Array(vec![Value::Object(Map::from_iter([(
+                "hooks".to_string(),
+                Value::Array(vec![]),
+            )]))]),
+        );
+
+        // Act
+        remove_dangling_command(&mut hooks, "~/.claude/hooks/precommit-check.sh");
+
+        // Assert: the group that held only the target is gone, leaving one
+        // group behind whose sibling entry survived untouched.
+        let pre_tool_use = hooks["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre_tool_use.len(), 1, "the emptied group should be pruned");
+        assert_eq!(
+            pre_tool_use[0]["hooks"],
+            json_array_of_one_command("my-custom-hook.sh")
+        );
+
+        // Assert: an event `remove_dangling_command` never touched (no match
+        // in it at all) is left exactly as found, empty group included.
+        assert_eq!(
+            hooks["Notification"],
+            Value::Array(vec![Value::Object(Map::from_iter([(
+                "hooks".to_string(),
+                Value::Array(vec![]),
+            )]))])
+        );
+    }
+
+    fn json_array_of_one_command(command: &str) -> Value {
+        Value::Array(vec![Value::Object(Map::from_iter([(
+            "command".to_string(),
+            Value::String(command.to_string()),
+        )]))])
+    }
 }

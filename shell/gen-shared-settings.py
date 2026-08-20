@@ -7,19 +7,16 @@
 # permissions object, forces skipAutoPermissionPrompt:false, strips any pinned
 # model (the harness or the user's own settings.json chooses it), drops the
 # owner's personal keys, and keeps only the .hooks entries whose command
-# matches SAFETY_RE: either a bare `playbook hook <name>` invocation, or one
-# of the four safety guards still on its legacy `~/.claude/hooks/<name>.sh`
-# script. `playbook init` (src/init/wire.rs) wires the 11 ported hooks
-# straight into settings.json as the bare form, none through the retired
-# hooks/hooks.json registry, so those are legitimate to ship in the seed; the
-# four guards (rm-workspace-guard, bg-await-guard, no-dash-guard,
-# precommit-check) stay on their working shell script until WU-13 ports their
-# Rust bodies, so the seed must keep shipping that form for them too, or a
-# fresh install would carry no safety guards at all. SAFETY_RE is still a
-# real filter, not a formality: it stops a maintainer's own ad hoc hook
-# command, or anything not shaped like one of these two forms, from leaking
-# into the public template. Other product config (env, statusLine, worktree,
-# plugins, ...) passes through unchanged. Merged JSON goes to stdout.
+# matches SAFETY_RE: a bare `playbook hook <name>` invocation. `playbook init`
+# (src/init/wire.rs) wires all 15 hooks, including the four safety guards
+# (rm-workspace-guard, bg-await-guard, no-dash-guard, precommit-check) since
+# WU-13 ported their Rust bodies, straight into settings.json in that bare
+# form, none through the retired hooks/hooks.json registry, so those are
+# legitimate to ship in the seed. SAFETY_RE is still a real filter, not a
+# formality: it stops a maintainer's own ad hoc hook command, or anything not
+# shaped like `playbook hook <name>`, from leaking into the public template.
+# Other product config (env, statusLine, worktree, plugins, ...) passes
+# through unchanged. Merged JSON goes to stdout.
 #
 # Regeneration order: this script derives the seed from the maintainer's live
 # settings.json (SRC), so SRC must already carry whatever the seed is meant to
@@ -47,16 +44,12 @@ REPO_ROOT = SCRIPT_DIR.parent
 PERSONAL_KEYS = frozenset(
     {"model", "effortLevel", "theme", "preferredNotifChannel", "prefersReducedMotion"}
 )
-# The `~/.claude/hooks/<guard>.sh` branch is transitional: it exists only
-# because the four guards are not yet ported to Rust (WU-13 ports them).
-# Once WU-13 lands, wire.rs will target all 15 hooks with the bare
-# `playbook hook <name>` form and this branch can be deleted.
-SAFETY_RE = re.compile(
-    r"^playbook hook [a-z][a-z0-9-]*$"
-    r"|"
-    r"^~/\.claude/hooks/"
-    r"(?:rm-workspace-guard|bg-await-guard|no-dash-guard|precommit-check)\.sh$"
-)
+# The `~/.claude/hooks/<guard>.sh` branch this pattern used to carry was
+# transitional: it existed only because the four guards were not yet ported
+# to Rust. WU-13 ported them and flipped wire.rs to target all 15 hooks,
+# guards included, with the bare `playbook hook <name>` form, so no hook
+# ships as a path any more and that branch is gone.
+SAFETY_RE = re.compile(r"^playbook hook [a-z][a-z0-9-]*$")
 
 
 def die(msg: str, code: int = 1) -> None:
