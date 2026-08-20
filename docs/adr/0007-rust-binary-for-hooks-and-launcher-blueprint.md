@@ -340,8 +340,18 @@ A `settings.json` entry naming a script that does not exist is precisely the fai
 ### WU-12: doctor layers 5 and 6
 - Requires: WU-11
 - Goal: `/playbook:doctor` fails hard when the binary or the statusline is missing.
+
+**Amended 2026-08-20, on executing it. This unit is smaller than written, and it also had to fix a defect in an existing layer.**
+
+Three corrections, all verified against `commands/doctor.md` rather than assumed:
+
+1. **The numbering collision is resolved by appending, not renumbering.** This unit was written before PR #143 shipped "Layer 5: Status line matches the shipped copy". The binary check therefore lands as **Layer 6**, leaving Layers 1 to 5 exactly as users and docs already know them. Renumbering a shipped layer costs more than it buys.
+2. **The proposed "Layer 6: the statusLine command path exists" was NOT implemented, because it already exists.** The shipped Layer 5's `MISSING` branch (`commands/doctor.md`, the `if [ ! -f "$sl_path" ]` arm) already reports a hard FAIL when the path named in `settings.json` is absent. Adding it again under a second number would have been a duplicate check. So this unit adds **one** new layer, not two.
+3. **Layer 2 was itself defective and is fixed here.** It matched only `rm-workspace-guard|bg-await-guard|no-dash-guard` and passed on "3 or more", so `precommit-check` was never counted and a missing fourth guard read as healthy. Worse, it only checked that a guard was WIRED, never that the script existed, which is the exact fail-open blind spot WU-11's guard work closed in `init`. A doctor that cannot see the defect the installer just learned to prevent is not worth much. Layer 2 now reports `wired=N/4 present=M/4` and treats wired-but-absent as a hard FAIL.
+
 - Files:
-  - `commands/doctor.md` | edit | add Layer 5 (`playbook --version` resolves) and Layer 6 (the `statusLine` command path exists), both hard failures with remediation hints
+  - `commands/doctor.md` | edit | add Layer 6 (`playbook --version` resolves, with version-skew reporting), and fix Layer 2 to check all four guards for BOTH wiring and presence
+  - `shell/doctor.test.sh` | create | the first executable test this command has ever had. It EXTRACTS each layer's fenced bash block from the markdown and runs it against fixture `HOME`s, so the shipped snippets are the ones under test and cannot drift from it
 - Verification: `bash shell/plugin-e2e.sh` and a manual `/playbook:doctor` run showing 6 layers
 - Tests: Gherkin. Given the binary is absent, when doctor runs, then Layer 5 reports FAIL, never PASS. Given `~/.claude/statusline.sh` is missing, when doctor runs, then Layer 6 reports FAIL. Given an installed binary whose version differs from `.claude-plugin/plugin.json`, when doctor runs, then it warns about version skew.
 - Done When:
