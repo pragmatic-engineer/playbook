@@ -88,9 +88,23 @@ jobs:
       - name: Run behavioral test suites
         # Discover every suite so a new *.test.sh is picked up automatically.
         # The git identity is needed by the worktree suites, which commit.
+        #
+        # Passed as environment variables, NOT `git config`. An unscoped
+        # `git config user.email` writes into the checked-out repo's
+        # .git/config, which is harmless on an ephemeral runner but permanent
+        # when anyone reproduces this step locally: on 2026-08-20 it rewrote
+        # the maintainer's real identity to "CI <ci@github.local>", and the
+        # next commit landed on main authored by a user GitHub cannot resolve,
+        # so its signature could not be verified. `git config --local` would
+        # NOT have helped, since that is already what an unscoped write does.
+        # Environment variables apply to this process tree only and touch no
+        # file on disk.
+        env:
+          GIT_AUTHOR_NAME: CI
+          GIT_AUTHOR_EMAIL: ci@github.local
+          GIT_COMMITTER_NAME: CI
+          GIT_COMMITTER_EMAIL: ci@github.local
         run: |
-          git config user.email "ci@github.local"
-          git config user.name "CI"
           for f in $(git ls-files '*.test.sh'); do
             echo "== $f"
             bash "$f" || exit 1
