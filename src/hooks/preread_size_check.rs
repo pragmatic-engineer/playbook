@@ -21,7 +21,7 @@ const LINE_LIMIT: u64 = 1000;
 const BYTE_LIMIT: u64 = 204_800;
 
 /// Matches ALLOWLIST in hooks/preread-size-check.py:20-27.
-const ALLOWLIST: [&str; 25] = [
+const ALLOWLIST: [&str; 26] = [
     "package.json",
     "tsconfig.json",
     "tsconfig.*.json",
@@ -44,6 +44,7 @@ const ALLOWLIST: [&str; 25] = [
     "docker-compose.yml",
     "docker-compose.yaml",
     "Makefile",
+    "justfile",
     ".env.example",
     "settings.json",
     "settings.local.json",

@@ -23,7 +23,7 @@ const ALLOW_FILES: [&str; 16] = [
     "README.md",
     "LICENSE",
     "Brewfile",
-    "Makefile",
+    "justfile",
     "install.sh",
     "uninstall.sh",
     "settings.shared.json",

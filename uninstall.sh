@@ -54,7 +54,7 @@ Flags:
 What is removed (allowlist only):
   .claude-plugin  .gitignore  agents  Brewfile  Cargo.lock  Cargo.toml
   CODE_OF_CONDUCT.md  commands  CONTRIBUTING.md  docs  hooks  install.sh
-  LICENSE  Makefile  output-styles  permissions.shared.json  prompts
+  LICENSE  justfile  Makefile  output-styles  permissions.shared.json  prompts
   README.md  ruff.toml  SECURITY.md  settings.shared.json  shell  skills
   src  statusline.sh  tests  uninstall.sh
 
@@ -122,6 +122,10 @@ SHIPPED=(
     hooks
     install.sh
     LICENSE
+    justfile
+    # Makefile stays listed even though the repo no longer ships one. Every
+    # install before the justfile migration copied it into CLAUDE_HOME, so
+    # dropping it here would strand a real file on every existing machine.
     Makefile
     output-styles
     permissions.shared.json

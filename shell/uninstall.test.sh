@@ -50,7 +50,7 @@ create_shipped() {
     local ch="$1"
     # files
     for f in .gitignore Brewfile CODE_OF_CONDUCT.md CONTRIBUTING.md install.sh \
-              LICENSE Makefile permissions.shared.json README.md SECURITY.md \
+              LICENSE justfile permissions.shared.json README.md SECURITY.md \
               settings.shared.json statusline.sh uninstall.sh; do
         touch "$ch/$f"
     done
@@ -65,7 +65,7 @@ create_shipped() {
 assert_shipped_removed() {
     local ch="$1"
     for f in .gitignore Brewfile CODE_OF_CONDUCT.md CONTRIBUTING.md install.sh \
-              LICENSE Makefile permissions.shared.json README.md SECURITY.md \
+              LICENSE justfile permissions.shared.json README.md SECURITY.md \
               settings.shared.json statusline.sh uninstall.sh; do
         [ ! -e "$ch/$f" ] || { echo "  shipped file not removed: $f"; return 1; }
     done

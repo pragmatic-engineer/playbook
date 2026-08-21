@@ -11,7 +11,7 @@
 !/Brewfile
 !/install.sh
 !/uninstall.sh
-!/Makefile
+!/justfile
 !/prompts/
 # settings.json is intentionally NOT tracked: it is the owner's live, personal
 # config. The shipped install seed is the generated settings.shared.json below.
