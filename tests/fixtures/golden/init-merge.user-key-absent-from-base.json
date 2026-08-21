@@ -1,0 +1,5 @@
+{
+  "stdout": "{\n  \"newkey\": \"user_val\",\n  \"other\": \"x\"\n}\n",
+  "newbase": "{\n  \"other\": \"x\"\n}\n",
+  "skip": "[\n  {\n    \"key\": \"newkey\",\n    \"template_had\": \"tmpl_val\",\n    \"yours\": \"user_val\"\n  }\n]\n"
+}

@@ -1,0 +1,5 @@
+{
+  "stdout": "{\n  \"k\": \"v2\",\n  \"shared\": \"tmpl\"\n}\n",
+  "newbase": "{\n  \"k\": \"v2\",\n  \"shared\": \"tmpl\"\n}\n",
+  "skip": "[]\n"
+}

@@ -1,0 +1,5 @@
+{
+  "stdout": "{\n  \"existing\": \"x\",\n  \"newkey\": \"from_tmpl\"\n}\n",
+  "newbase": "{\n  \"existing\": \"x\",\n  \"newkey\": \"from_tmpl\"\n}\n",
+  "skip": "[]\n"
+}

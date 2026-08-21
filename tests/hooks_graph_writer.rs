@@ -987,24 +987,6 @@ fn populate_fixture_tree(home: &Path) {
     );
 }
 
-fn run_python_rebuild(home: &Path, relpath: &str) {
-    let hook = concat!(env!("CARGO_MANIFEST_DIR"), "/hooks/rebuild-memory-graph.py");
-    let file_path = home.join(".claude").join("memory").join(relpath);
-    let hook_input = json!({"tool_input": {"file_path": file_path.to_string_lossy()}}).to_string();
-    let status = Command::new("python3")
-        .arg(hook)
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .env("HOME", home)
-        .env("HOOK_INPUT", hook_input)
-        .stdin(Stdio::null())
-        .status()
-        .expect("python3 should run rebuild-memory-graph.py");
-    assert!(
-        status.success(),
-        "python rebuild-memory-graph.py exited non-zero"
-    );
-}
-
 /// A node is uniquely keyed by its `id`; an edge has no id, so its
 /// `(from, to, relation)` triple serves the same purpose. One key function
 /// covering both shapes, since it is only ever applied within one
@@ -1047,25 +1029,28 @@ fn canonical_graph(path: &Path) -> Value {
 /// parsed JSON. This is a deliberate, explicitly flagged choice per the
 /// WU-5 brief, not a silent weakening of the assertion.
 #[test]
-fn python_and_rust_writers_agree_on_the_same_fixture_tree() {
+fn rust_writer_matches_the_frozen_python_golden() {
     // Arrange
-    let home_py = scratch_home("cross-impl-py");
-    let home_rs = scratch_home("cross-impl-rs");
-    populate_fixture_tree(&home_py);
+    let home_rs = scratch_home("golden-rs");
     populate_fixture_tree(&home_rs);
 
     // Act
-    run_python_rebuild(&home_py, "scalar-fact.md");
     run_rebuild_for(&home_rs, "scalar-fact.md");
 
-    // Assert
-    let python_graph = canonical_graph(&graph_path(&home_py));
+    // Assert against the frozen python oracle rather than a live python run.
+    // See tests/fixtures/golden/README.md: the python original is deleted by
+    // ADR 0007 WU-14, so its output is committed instead. This keeps the
+    // cross-implementation check that a ported-only suite cannot give, since
+    // a ported suite passes against an empty stub.
     let rust_graph = canonical_graph(&graph_path(&home_rs));
+    let golden: Value = serde_json::from_str(include_str!(
+        "fixtures/golden/rebuild-memory-graph.scalar-fact.json"
+    ))
+    .expect("golden fixture should be valid JSON");
     assert_eq!(
-        python_graph, rust_graph,
-        "python and rust graph.json outputs differ"
+        golden, rust_graph,
+        "rust graph.json drifted from the frozen python output"
     );
 
-    let _ = fs::remove_dir_all(&home_py);
     let _ = fs::remove_dir_all(&home_rs);
 }

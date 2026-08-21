@@ -1,0 +1,4 @@
+{
+  "exit_code": 0,
+  "stderr": "warning: BASE is not a valid JSON object; treating as {}: <base-path>\n"
+}

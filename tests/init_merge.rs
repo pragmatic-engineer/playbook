@@ -45,13 +45,7 @@ use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-
-/// The repo checkout root, where `shell/merge-settings.py` actually lives.
-fn plugin_root() -> &'static str {
-    env!("CARGO_MANIFEST_DIR")
-}
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -71,44 +65,6 @@ fn write_file(path: &Path, content: &str) {
     fs::write(path, content).expect("scratch file should be writable");
 }
 
-struct PyOutcome {
-    exit_code: i32,
-    stdout: String,
-    stderr: String,
-}
-
-/// Run the real `shell/merge-settings.py` as a subprocess: the oracle every
-/// comparison test below diffs the Rust port against.
-fn run_python_merge(
-    base: &Path,
-    template: &Path,
-    user: &Path,
-    newbase_out: &Path,
-    skip_out: Option<&Path>,
-) -> PyOutcome {
-    let script = Path::new(plugin_root())
-        .join("shell")
-        .join("merge-settings.py");
-    let mut command = Command::new("python3");
-    command
-        .arg(&script)
-        .arg(base)
-        .arg(template)
-        .arg(user)
-        .arg(newbase_out);
-    if let Some(skip) = skip_out {
-        command.arg(skip);
-    }
-    let output = command
-        .output()
-        .expect("python3 should run shell/merge-settings.py");
-    PyOutcome {
-        exit_code: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
-}
-
 /// A base/template/user triple the Rust and python mergers must agree on,
 /// byte for byte, in merged stdout, NEWBASE_OUT and SKIP_OUT.
 struct Fixture {
@@ -124,6 +80,10 @@ struct Fixture {
     /// asserts NEWBASE_OUT's value for `key` directly, rather than relying
     /// only on cross-engine equality to notice a frozen-value regression.
     frozen_newbase: Option<(&'static str, &'static str)>,
+    /// The frozen python oracle for this fixture: a JSON object with
+    /// `stdout`, `newbase` and `skip` string fields, captured from
+    /// `shell/merge-settings.py`. See tests/fixtures/golden/README.md.
+    golden: &'static str,
 }
 
 const FIXTURES: [Fixture; 9] = [
@@ -134,6 +94,7 @@ const FIXTURES: [Fixture; 9] = [
         user: r#"{"other":"x","newkey":"user_val"}"#,
         must_contain: None,
         frozen_newbase: None,
+        golden: include_str!("fixtures/golden/init-merge.user-key-absent-from-base.json"),
     },
     Fixture {
         name: "user key modified from base",
@@ -142,6 +103,7 @@ const FIXTURES: [Fixture; 9] = [
         user: r#"{"k":"user_val"}"#,
         must_contain: None,
         frozen_newbase: Some(("k", "base_val")),
+        golden: include_str!("fixtures/golden/init-merge.user-key-modified-from-base.json"),
     },
     Fixture {
         name: "template key removed",
@@ -150,6 +112,7 @@ const FIXTURES: [Fixture; 9] = [
         user: r#"{"gone":"was_here","keep":"yes"}"#,
         must_contain: None,
         frozen_newbase: None,
+        golden: include_str!("fixtures/golden/init-merge.template-key-removed.json"),
     },
     Fixture {
         name: "user key nested three deep differs from base",
@@ -158,6 +121,9 @@ const FIXTURES: [Fixture; 9] = [
         user: r#"{"k":{"a":{"b":{"c":99}}}}"#,
         must_contain: None,
         frozen_newbase: None,
+        golden: include_str!(
+            "fixtures/golden/init-merge.user-key-nested-three-deep-differs-from-base.json"
+        ),
     },
     Fixture {
         name: "user hand-added hook entry template does not know about",
@@ -166,6 +132,9 @@ const FIXTURES: [Fixture; 9] = [
         user: r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"tmpl-hook-a"},{"type":"command","command":"user-added-hook-b"}]}]}}"#,
         must_contain: Some("user-added-hook-b"),
         frozen_newbase: None,
+        golden: include_str!(
+            "fixtures/golden/init-merge.user-hand-added-hook-entry-template-does-not-know-about.json"
+        ),
     },
     Fixture {
         name: "s1: user-unchanged key gets the template update",
@@ -174,6 +143,9 @@ const FIXTURES: [Fixture; 9] = [
         user: r#"{"k":"v1","shared":"base"}"#,
         must_contain: None,
         frozen_newbase: None,
+        golden: include_str!(
+            "fixtures/golden/init-merge.s1--user-unchanged-key-gets-the-template-update.json"
+        ),
     },
     Fixture {
         name: "s3: new template key added when absent from user",
@@ -182,6 +154,9 @@ const FIXTURES: [Fixture; 9] = [
         user: r#"{"existing":"x"}"#,
         must_contain: None,
         frozen_newbase: None,
+        golden: include_str!(
+            "fixtures/golden/init-merge.s3--new-template-key-added-when-absent-from-user.json"
+        ),
     },
     Fixture {
         name: "s12: user is an empty object, output equals template",
@@ -190,6 +165,9 @@ const FIXTURES: [Fixture; 9] = [
         user: r#"{}"#,
         must_contain: None,
         frozen_newbase: None,
+        golden: include_str!(
+            "fixtures/golden/init-merge.s12--user-is-an-empty-object--output-equals-template.json"
+        ),
     },
     Fixture {
         name: "s14: type-mismatch on a contested key keeps user's whole value",
@@ -198,6 +176,9 @@ const FIXTURES: [Fixture; 9] = [
         user: r#"{"k":{"nested":"obj"}}"#,
         must_contain: None,
         frozen_newbase: None,
+        golden: include_str!(
+            "fixtures/golden/init-merge.s14--type-mismatch-on-a-contested-key-keeps-user-s-whole-value.json"
+        ),
     },
 ];
 
@@ -212,19 +193,10 @@ fn mandatory_and_ported_fixtures_rust_and_python_mergers_agree() {
         write_file(&base_path, fixture.base);
         write_file(&template_path, fixture.template);
         write_file(&user_path, fixture.user);
-        let py_newbase = dir.join("py-newbase.json");
-        let py_skip = dir.join("py-skip.json");
         let rs_newbase = dir.join("rs-newbase.json");
         let rs_skip = dir.join("rs-skip.json");
 
         // Act
-        let py = run_python_merge(
-            &base_path,
-            &template_path,
-            &user_path,
-            &py_newbase,
-            Some(&py_skip),
-        );
         let rs = merge(
             &base_path,
             &template_path,
@@ -233,17 +205,21 @@ fn mandatory_and_ported_fixtures_rust_and_python_mergers_agree() {
             Some(&rs_skip),
         );
 
-        // Assert
-        assert_eq!(
-            py.exit_code, 0,
-            "{}: python should succeed: {}",
-            fixture.name, py.stderr
-        );
+        // Assert against the frozen python oracle rather than a live python
+        // run. See tests/fixtures/golden/README.md: the python original is
+        // deleted by ADR 0007 WU-14, so its output is committed instead.
+        let golden: Value = serde_json::from_str(fixture.golden).unwrap_or_else(|e| {
+            panic!("{}: golden fixture should be valid JSON: {e}", fixture.name)
+        });
+        let golden_stdout = golden["stdout"].as_str().unwrap();
+        let golden_newbase = golden["newbase"].as_str().unwrap();
+        let golden_skip = golden["skip"].as_str().unwrap();
+
         let outcome = rs.unwrap_or_else(|e| panic!("{}: rust merge failed: {e:?}", fixture.name));
 
         assert_eq!(
             outcome.stdout.trim_end_matches('\n'),
-            py.stdout.trim_end_matches('\n'),
+            golden_stdout.trim_end_matches('\n'),
             "{}: merged stdout should match python's",
             fixture.name
         );
@@ -255,10 +231,9 @@ fn mandatory_and_ported_fixtures_rust_and_python_mergers_agree() {
             outcome.stdout
         );
 
-        let py_newbase_content = fs::read_to_string(&py_newbase).unwrap();
         let rs_newbase_content = fs::read_to_string(&rs_newbase).unwrap();
         assert_eq!(
-            rs_newbase_content, py_newbase_content,
+            rs_newbase_content, golden_newbase,
             "{}: NEWBASE_OUT should match python's byte for byte",
             fixture.name
         );
@@ -270,10 +245,9 @@ fn mandatory_and_ported_fixtures_rust_and_python_mergers_agree() {
             rs_newbase_content
         );
 
-        let py_skip_content = fs::read_to_string(&py_skip).unwrap();
         let rs_skip_content = fs::read_to_string(&rs_skip).unwrap();
         assert_eq!(
-            rs_skip_content, py_skip_content,
+            rs_skip_content, golden_skip,
             "{}: SKIP_OUT should match python's byte for byte",
             fixture.name
         );
@@ -376,25 +350,23 @@ fn n2_non_object_template_or_user_fails_closed_with_no_output() {
         if let Some(content) = case.user {
             write_file(&user_path, content);
         }
-        let py_newbase = dir.join("py-newbase.json");
         let rs_newbase = dir.join("rs-newbase.json");
 
         // Act
-        let py = run_python_merge(&base_path, &template_path, &user_path, &py_newbase, None);
         let rs = merge(&base_path, &template_path, &user_path, &rs_newbase, None);
 
         // Assert
-        assert_ne!(
-            py.exit_code, 0,
-            "{}: python should fail closed (N2)",
-            case.name
-        );
-        assert!(
-            py.stdout.is_empty(),
-            "{}: python stdout should be empty on N2 failure, got: {}",
-            case.name,
-            py.stdout
-        );
+        //
+        // The python half was REMOVED rather than frozen as a golden. It
+        // asserted only that python exited non-zero with empty stdout, and
+        // once ADR 0007 WU-14 deletes the script `python3` exits non-zero
+        // with "can't open file" and empty stdout, so both assertions would
+        // have held for the wrong reason: a test that survives the deletion
+        // while proving nothing. Demonstrated 2026-08-21 by pointing the
+        // helper at a non-existent script and watching every test still pass.
+        // Freezing it was rejected because the assertion is a bare "python
+        // rejected this", a boolean with no content, unlike the output
+        // comparisons the goldens preserve.
         assert!(
             matches!(rs, Err(MergeError::Validation(_))),
             "{}: rust should fail closed with a validation error",
@@ -420,23 +392,33 @@ fn n4_missing_base_becomes_empty_object_with_warning_not_hard_fail() {
     );
     write_file(&user_path, r#"{"mykey":"myval","shared":"user_val"}"#);
     let missing_base = dir.join("no-such-base.json");
-    let py_newbase = dir.join("py-newbase.json");
     let rs_newbase = dir.join("rs-newbase.json");
 
+    // The frozen python oracle for this fixture: `exit_code`, `stdout` and
+    // `stderr`, captured from shell/merge-settings.py before its deletion.
+    // `stderr`'s BASE path is normalised to `<base-path>`, since python's
+    // warning text embeds the absolute path of the (never written)
+    // `no-such-base.json`, which varies with the capture machine's temp
+    // directory. See tests/fixtures/golden/README.md.
+    let golden: Value = serde_json::from_str(include_str!(
+        "fixtures/golden/init-merge.n4-missing-base.json"
+    ))
+    .expect("golden fixture should be valid JSON");
+    let py_exit_code = golden["exit_code"].as_i64().unwrap();
+    let py_stderr = golden["stderr"].as_str().unwrap();
+    let py_stdout = golden["stdout"].as_str().unwrap();
+
     // Act
-    let py = run_python_merge(&missing_base, &template_path, &user_path, &py_newbase, None);
     let rs = merge(&missing_base, &template_path, &user_path, &rs_newbase, None);
 
     // Assert
     assert_eq!(
-        py.exit_code, 0,
-        "python should still succeed on a missing base (N4): {}",
-        py.stderr
+        py_exit_code, 0,
+        "python should still succeed on a missing base (N4)"
     );
     assert!(
-        py.stderr.to_lowercase().contains("warning"),
-        "python should warn on stderr: {}",
-        py.stderr
+        py_stderr.to_lowercase().contains("warning"),
+        "python should warn on stderr: {py_stderr}"
     );
     let outcome = rs.expect("rust should still succeed on a missing base (N4)");
     let warning = outcome
@@ -457,7 +439,7 @@ fn n4_missing_base_becomes_empty_object_with_warning_not_hard_fail() {
     );
     assert_eq!(
         outcome.stdout.trim_end_matches('\n'),
-        py.stdout.trim_end_matches('\n'),
+        py_stdout.trim_end_matches('\n'),
         "merged output should still match python's"
     );
 }
@@ -472,23 +454,30 @@ fn n4_invalid_base_becomes_empty_object_with_warning_not_hard_fail() {
     write_file(&base_path, "not json");
     write_file(&template_path, r#"{"newkey":"nv","shared":"tv"}"#);
     write_file(&user_path, r#"{"mykey":"mv","shared":"uv"}"#);
-    let py_newbase = dir.join("py-newbase.json");
     let rs_newbase = dir.join("rs-newbase.json");
 
+    // The frozen python oracle for this fixture: `exit_code` and `stderr`,
+    // captured from shell/merge-settings.py before its deletion. `stderr`'s
+    // BASE path is normalised to `<base-path>` for the same reason as
+    // init-merge.n4-missing-base.json. See tests/fixtures/golden/README.md.
+    let golden: Value = serde_json::from_str(include_str!(
+        "fixtures/golden/init-merge.n4-invalid-base.json"
+    ))
+    .expect("golden fixture should be valid JSON");
+    let py_exit_code = golden["exit_code"].as_i64().unwrap();
+    let py_stderr = golden["stderr"].as_str().unwrap();
+
     // Act
-    let py = run_python_merge(&base_path, &template_path, &user_path, &py_newbase, None);
     let rs = merge(&base_path, &template_path, &user_path, &rs_newbase, None);
 
     // Assert
     assert_eq!(
-        py.exit_code, 0,
-        "python should still succeed on a corrupt base (N4): {}",
-        py.stderr
+        py_exit_code, 0,
+        "python should still succeed on a corrupt base (N4)"
     );
     assert!(
-        py.stderr.to_lowercase().contains("warning"),
-        "python should warn on stderr: {}",
-        py.stderr
+        py_stderr.to_lowercase().contains("warning"),
+        "python should warn on stderr: {py_stderr}"
     );
     let outcome = rs.expect("rust should still succeed on a corrupt base (N4)");
     let warning = outcome
@@ -516,17 +505,18 @@ fn n3_zero_withheld_keys_writes_empty_skip_array() {
     write_file(&user_path, r#"{"k":"v"}"#);
     let rs_newbase = dir.join("rs-newbase.json");
     let rs_skip = dir.join("rs-skip.json");
-    let py_newbase = dir.join("py-newbase.json");
-    let py_skip = dir.join("py-skip.json");
+
+    // The frozen python oracle for this fixture: `exit_code` and `skip`
+    // (SKIP_OUT's content), captured from shell/merge-settings.py before its
+    // deletion. See tests/fixtures/golden/README.md.
+    let golden: Value = serde_json::from_str(include_str!(
+        "fixtures/golden/init-merge.n3-zero-withheld-keys.json"
+    ))
+    .expect("golden fixture should be valid JSON");
+    let py_exit_code = golden["exit_code"].as_i64().unwrap();
+    let py_skip_content = golden["skip"].as_str().unwrap();
 
     // Act
-    let py = run_python_merge(
-        &base_path,
-        &template_path,
-        &user_path,
-        &py_newbase,
-        Some(&py_skip),
-    );
     let rs = merge(
         &base_path,
         &template_path,
@@ -536,7 +526,7 @@ fn n3_zero_withheld_keys_writes_empty_skip_array() {
     );
 
     // Assert
-    assert_eq!(py.exit_code, 0);
+    assert_eq!(py_exit_code, 0);
     let outcome = rs.expect("merge should succeed");
     assert!(
         outcome.skipped.is_empty(),
@@ -549,7 +539,6 @@ fn n3_zero_withheld_keys_writes_empty_skip_array() {
         "[]",
         "SKIP_OUT should be an empty array, got: {skip_content}"
     );
-    let py_skip_content = fs::read_to_string(&py_skip).unwrap();
     assert_eq!(
         skip_content, py_skip_content,
         "skip file should match python's byte for byte"
@@ -601,16 +590,30 @@ fn c2_coincidence_keeps_user_value_frozen_through_a_matching_template_cycle() {
     write_file(&base0, r#"{"k":"original"}"#);
     write_file(&user, r#"{"k":"my_custom"}"#);
 
+    // The frozen python oracle for both cycles: `cycle1_exit_code`,
+    // `cycle1_newbase` (cycle 1's NEWBASE_OUT content) and
+    // `cycle2_exit_code`, captured from shell/merge-settings.py before its
+    // deletion. Cycle 2's python run used cycle 1's NEWBASE_OUT as its BASE
+    // input, same as the rust run below does with `nb1`, so freezing only
+    // what each cycle actually asserts on keeps the capture faithful. See
+    // tests/fixtures/golden/README.md.
+    let golden: Value = serde_json::from_str(include_str!(
+        "fixtures/golden/init-merge.c2-coincidence.json"
+    ))
+    .expect("golden fixture should be valid JSON");
+    let py1_exit_code = golden["cycle1_exit_code"].as_i64().unwrap();
+    let py_newbase1: Value = serde_json::from_str(golden["cycle1_newbase"].as_str().unwrap())
+        .expect("golden cycle1_newbase should be valid JSON");
+    let py2_exit_code = golden["cycle2_exit_code"].as_i64().unwrap();
+
     // Act, Assert: cycle 1, the template ships a value different from
     // original. The merged value stays the user's; NEWBASE freezes to the
     // OLD base value, not the template's.
     let template1 = dir.join("template1.json");
     write_file(&template1, r#"{"k":"tmpl_v2"}"#);
     let nb1 = dir.join("nb1.json");
-    let py_nb1 = dir.join("py-nb1.json");
-    let py1 = run_python_merge(&base0, &template1, &user, &py_nb1, None);
     let outcome1 = merge(&base0, &template1, &user, &nb1, None).expect("cycle 1 should succeed");
-    assert_eq!(py1.exit_code, 0, "python cycle 1 should succeed");
+    assert_eq!(py1_exit_code, 0, "python cycle 1 should succeed");
     let merged1: Value = serde_json::from_str(&outcome1.stdout).unwrap();
     assert_eq!(
         merged1["k"], "my_custom",
@@ -621,7 +624,6 @@ fn c2_coincidence_keeps_user_value_frozen_through_a_matching_template_cycle() {
         newbase1["k"], "original",
         "cycle 1: NEWBASE should freeze to the OLD base value"
     );
-    let py_newbase1: Value = serde_json::from_str(&fs::read_to_string(&py_nb1).unwrap()).unwrap();
     assert_eq!(
         py_newbase1["k"], "original",
         "python oracle should also freeze to the OLD base value"
@@ -633,10 +635,8 @@ fn c2_coincidence_keeps_user_value_frozen_through_a_matching_template_cycle() {
     let template2 = dir.join("template2.json");
     write_file(&template2, r#"{"k":"my_custom"}"#);
     let nb2 = dir.join("nb2.json");
-    let py_nb2 = dir.join("py-nb2.json");
-    let py2 = run_python_merge(&nb1, &template2, &user, &py_nb2, None);
     let outcome2 = merge(&nb1, &template2, &user, &nb2, None).expect("cycle 2 should succeed");
-    assert_eq!(py2.exit_code, 0, "python cycle 2 should succeed");
+    assert_eq!(py2_exit_code, 0, "python cycle 2 should succeed");
     let merged2: Value = serde_json::from_str(&outcome2.stdout).unwrap();
     assert_eq!(
         merged2["k"], "my_custom",

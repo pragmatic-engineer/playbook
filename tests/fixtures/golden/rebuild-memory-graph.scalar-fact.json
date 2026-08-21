@@ -1,0 +1,180 @@
+{
+  "nodes": [
+    {
+      "id": "acme/widget/proj-fact",
+      "file": "acme/widget/proj-fact.md",
+      "scope": "project",
+      "type": "reference",
+      "name": "proj-fact",
+      "description": "",
+      "project": "acme/widget"
+    },
+    {
+      "id": "code:src/index.ts",
+      "file": "src/index.ts",
+      "scope": "code",
+      "type": "code"
+    },
+    {
+      "id": "code:src/other.ts",
+      "file": "src/other.ts",
+      "scope": "code",
+      "type": "code"
+    },
+    {
+      "id": "global/anchor-fact",
+      "file": "anchor-fact.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "anchor-fact",
+      "description": ""
+    },
+    {
+      "id": "global/cr-fact",
+      "file": "cr-fact.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "cr-fact",
+      "description": "before"
+    },
+    {
+      "id": "global/duplicate-key-fact",
+      "file": "duplicate-key-fact.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "duplicate-key-fact",
+      "description": ""
+    },
+    {
+      "id": "global/fact-v1",
+      "file": "fact-v1.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "fact-v1",
+      "description": ""
+    },
+    {
+      "id": "global/fact-v2",
+      "file": "fact-v2.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "fact-v2",
+      "description": ""
+    },
+    {
+      "id": "global/fact-v3",
+      "file": "fact-v3.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "fact-v3",
+      "description": ""
+    },
+    {
+      "id": "global/inline-anchor-fact",
+      "file": "inline-anchor-fact.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "inline-anchor-fact",
+      "description": ""
+    },
+    {
+      "id": "global/list-fact",
+      "file": "list-fact.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "list-fact",
+      "description": ""
+    },
+    {
+      "id": "global/nested-fact",
+      "file": "nested-fact.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "nested-fact",
+      "description": ""
+    },
+    {
+      "id": "global/no-frontmatter",
+      "file": "no-frontmatter.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "no-frontmatter",
+      "description": ""
+    },
+    {
+      "id": "global/scalar-fact",
+      "file": "scalar-fact.md",
+      "scope": "global",
+      "type": "reference",
+      "name": "scalar-fact",
+      "description": ""
+    }
+  ],
+  "edges": [
+    {
+      "from": "acme/widget/proj-fact",
+      "to": "acme/widget/sibling-fact",
+      "relation": "relates_to"
+    },
+    {
+      "from": "global/anchor-fact",
+      "to": "code:src/index.ts",
+      "relation": "anchors"
+    },
+    {
+      "from": "global/anchor-fact",
+      "to": "code:src/other.ts",
+      "relation": "anchors"
+    },
+    {
+      "from": "global/fact-v1",
+      "to": "global/fact-v2",
+      "relation": "supersedes"
+    },
+    {
+      "from": "global/fact-v2",
+      "to": "global/fact-v3",
+      "relation": "supersedes"
+    },
+    {
+      "from": "global/inline-anchor-fact",
+      "to": "code:src/index.ts",
+      "relation": "anchors"
+    },
+    {
+      "from": "global/inline-anchor-fact",
+      "to": "code:src/other.ts",
+      "relation": "anchors"
+    },
+    {
+      "from": "global/list-fact",
+      "to": "global/alpha",
+      "relation": "relates_to"
+    },
+    {
+      "from": "global/list-fact",
+      "to": "global/beta",
+      "relation": "relates_to"
+    },
+    {
+      "from": "global/list-fact",
+      "to": "global/gamma",
+      "relation": "relates_to"
+    },
+    {
+      "from": "global/nested-fact",
+      "to": "global/item-one",
+      "relation": "relates_to"
+    },
+    {
+      "from": "global/nested-fact",
+      "to": "global/item-two",
+      "relation": "relates_to"
+    },
+    {
+      "from": "global/scalar-fact",
+      "to": "global/other-fact",
+      "relation": "relates_to"
+    }
+  ]
+}

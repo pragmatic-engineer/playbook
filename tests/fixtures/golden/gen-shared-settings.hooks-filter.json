@@ -1,0 +1,37 @@
+{
+  "env": {},
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook rm-workspace-guard",
+            "if": "Bash(rm:*)",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "playbook hook bg-await-guard",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash(git:*)"
+    ],
+    "deny": [
+      "Read(**/.env)"
+    ],
+    "ask": [
+      "Bash(curl:*)"
+    ],
+    "defaultMode": "auto"
+  },
+  "skipAutoPermissionPrompt": false
+}

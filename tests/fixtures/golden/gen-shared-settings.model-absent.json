@@ -1,0 +1,19 @@
+{
+  "env": {
+    "IS_DEMO": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash(git:*)"
+    ],
+    "deny": [
+      "Read(**/.env)"
+    ],
+    "ask": [
+      "Bash(curl:*)"
+    ],
+    "defaultMode": "auto"
+  },
+  "skipAutoPermissionPrompt": false
+}

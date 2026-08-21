@@ -1,0 +1,1 @@
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"Memory facts anchored to src/a.py:\n- fact-a: Fact A describes src/a.py (depends_on:fact-neighbour)\n- fact-dir: Fact dir describes everything under src/"}}
