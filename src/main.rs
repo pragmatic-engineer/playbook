@@ -7,7 +7,7 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     agents, cc, common, hooks, init, manifest, settings, AgentsCommand, CcCommand, Cli, Command,
-    ManifestCommand, SettingsCommand,
+    ManifestCommand, MemoryCommand, SettingsCommand,
 };
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
@@ -98,6 +98,12 @@ fn main() {
                     std::process::exit(1);
                 }
             },
+        },
+        Command::Memory { sub } => match sub {
+            MemoryCommand::Rebuild => {
+                hooks::rebuild_memory_graph::rebuild_now();
+                println!("memory: graph.json rebuilt");
+            }
         },
         Command::Manifest { sub } => match sub {
             // Exit 1, not 2: the shell original used it and both CI lanes key

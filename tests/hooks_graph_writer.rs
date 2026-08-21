@@ -1054,3 +1054,67 @@ fn rust_writer_matches_the_frozen_python_golden() {
 
     let _ = fs::remove_dir_all(&home_rs);
 }
+
+/// `playbook memory rebuild` rebuilds with NO payload at all.
+///
+/// This is the `--graph-only` path of `/playbook:learn-project`. It used to
+/// run `python3 hooks/rebuild-memory-graph.py < /dev/null`, because that
+/// script treated empty stdin as "rebuild everything". The Rust port dropped
+/// that branch deliberately (`should_skip` in
+/// `src/hooks/rebuild_memory_graph.rs`), reasoning it was unexercised by the
+/// hook's own test suite. It was exercised, by a slash command rather than a
+/// test, so deleting the python would have broken it silently.
+///
+/// The assertion that matters is the contrast: the hook SKIPS the same tree
+/// when handed a payload naming a file outside the memory dir, while the
+/// subcommand rebuilds regardless. A test that only checked the subcommand
+/// would still pass if the forced path quietly regained a skip check.
+#[test]
+fn memory_rebuild_subcommand_rebuilds_with_no_payload_where_the_hook_skips() {
+    // Arrange
+    let home = scratch_home("memory-rebuild");
+    populate_fixture_tree(&home);
+    let graph = graph_path(&home);
+
+    // Act: the hook, told about a file outside the memory dir, must not rebuild
+    let hook = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["hook", "rebuild-memory-graph"])
+        .env("HOME", &home)
+        .env(
+            "HOOK_INPUT",
+            r#"{"tool_input":{"file_path":"/tmp/elsewhere.md"}}"#,
+        )
+        .output()
+        .expect("binary should run");
+
+    // Assert
+    assert!(
+        hook.status.success(),
+        "the hook should exit 0 when skipping"
+    );
+    assert!(
+        !graph.exists(),
+        "the hook must not rebuild for a path outside the memory dir"
+    );
+
+    // Act: the subcommand, with no payload whatsoever
+    let forced = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["memory", "rebuild"])
+        .env("HOME", &home)
+        .output()
+        .expect("binary should run");
+
+    // Assert
+    assert!(forced.status.success(), "memory rebuild should exit 0");
+    assert!(
+        graph.exists(),
+        "memory rebuild must rebuild with no payload, which is what --graph-only needs"
+    );
+    let value = canonical_graph(&graph);
+    assert!(
+        !value["nodes"].as_array().unwrap().is_empty(),
+        "the rebuilt graph should carry the fixture tree's facts, not be empty"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
