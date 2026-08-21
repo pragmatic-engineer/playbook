@@ -18,6 +18,13 @@
 //!   `missing_self_root_skips_template_dependent_steps` and
 //!   `unrecognised_shell_skips_shim_only` for the two ways a step is
 //!   legitimately skipped rather than wired or failed
+//! - regression pin: since WU-13 ported all four safety guards, a full
+//!   composed `init` on a clean scratch HOME must never write a guard command
+//!   in its old `~/.claude/hooks/<name>.sh` path form, even when that form
+//!   would itself resolve (a guard's script still ships in this repo, so a
+//!   regression here would not be caught by "does the path exist"; only
+//!   "does the guard still take path form at all" catches it):
+//!   `zero_hook_commands_point_under_claude_hooks_dir_after_a_full_init`
 //!
 //! Every test uses a scratch directory standing in for `$HOME`; none read or
 //! write the developer's real `~/.claude`.
@@ -234,6 +241,44 @@ fn fresh_config_gets_fully_wired() {
         fs::read(self_root().join("statusline.sh"))
             .expect("shipped statusline.sh should be readable")
     );
+}
+
+/// D6 regression pin: `wire`'s guard loop once gated a guard's bare
+/// `playbook hook <name>` form on whether `init::guards` had actually placed
+/// a script for it, so flipping a `GUARD_SPECS` entry's `ported` field to
+/// `true` would have silently done nothing, since a ported guard is never
+/// placed. All four guards are ported now, so this must hold unconditionally
+/// on a fresh install: not one `.hooks` command may name a path under
+/// `~/.claude/hooks/`, regardless of whether that path happens to exist.
+/// Asserting only "every command that IS a path resolves" would miss this
+/// exact regression, since a guard's `.sh` script still ships in this repo
+/// and would resolve if `wire` reverted to writing it; the invariant that
+/// actually matters is that a ported guard never takes path form at all.
+#[test]
+fn zero_hook_commands_point_under_claude_hooks_dir_after_a_full_init() {
+    // Arrange: a machine with no `~/.claude` at all, the same clean-install
+    // shape `fresh_config_gets_fully_wired` exercises.
+    let home = scratch_home("zero-hooks-dir");
+    let claude_home = claude_home_of(&home);
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    assert!(outcome.ok(), "expected every step to succeed");
+    let settings = read_json(&claude_home.join("settings.json"));
+    let commands = all_hook_commands(&settings);
+    assert!(
+        !commands.is_empty(),
+        "a fresh init should write hook commands"
+    );
+    for cmd in &commands {
+        assert!(
+            !cmd.contains("/.claude/hooks/"),
+            "no hook command may point under ~/.claude/hooks/ after a full init: {cmd}"
+        );
+    }
 }
 
 #[test]
