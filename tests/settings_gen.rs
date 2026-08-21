@@ -3,15 +3,18 @@
 
 //! Integration tests for `playbook::settings::gen`, ported from
 //! `shell/gen-shared-settings.test.sh`'s 10 scenarios (A through J). The real
-//! `shell/gen-shared-settings.py` is the oracle throughout: every comparison
-//! test that only needs a pass/fail signal (D through I) still runs it as a
-//! subprocess, while every test that compares actual generated JSON (A, B,
-//! C, J, the non-ASCII fixture, and the regression pin) asserts against a
-//! frozen copy of its stdout under `tests/fixtures/golden/` instead of a
-//! live run. See `tests/fixtures/golden/README.md`: the python original is
+//! `shell/gen-shared-settings.py` WAS the oracle. Every test that compares
+//! generated JSON now asserts against a frozen copy of its stdout under
+//! `tests/fixtures/golden/`; see that directory's README. The python is
 //! deleted by ADR 0007 WU-14, so freezing its output is what keeps those
 //! comparisons meaningful once python is gone, rather than hand-typing an
 //! expected JSON blob.
+//!
+//! The pass/fail-only cases (D through I) no longer invoke python at all.
+//! They asserted that python exited non-zero with empty stdout, which stays
+//! true when the script is absent, so they would have survived WU-14 while
+//! proving nothing. Their Rust assertions are unchanged and are the real
+//! coverage.
 //!
 //! Coverage map, so every scenario named in the Work Unit brief is
 //! traceable to one place below:
@@ -79,22 +82,6 @@ struct PyOutcome {
     exit_code: i32,
     stdout: String,
     stderr: String,
-}
-
-/// Run the real `shell/gen-shared-settings.py` as a subprocess: the oracle
-/// every comparison test below diffs the Rust port against.
-fn run_python_gen(src: &Path, perms: &Path) -> PyOutcome {
-    let output = Command::new("python3")
-        .arg(python_script_path())
-        .arg(src)
-        .arg(perms)
-        .output()
-        .expect("python3 should run shell/gen-shared-settings.py");
-    PyOutcome {
-        exit_code: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
 }
 
 /// Canned permissions fixture, reused read-only across scenarios, matching
@@ -307,42 +294,37 @@ fn malformed_or_missing_inputs_guard_rejects_with_no_output() {
         }
 
         // Act
-        let py = run_python_gen(&src_path, &perms_path);
         let rust = generate(&src_path, &perms_path);
 
         // Assert
-        assert_ne!(py.exit_code, 0, "{}: python should guard-reject", case.name);
-        assert!(
-            py.stdout.is_empty(),
-            "{}: python stdout should be empty on failure",
-            case.name
-        );
+        //
+        // The python half of this case was REMOVED rather than frozen as a
+        // golden, because it asserted nothing. It checked only that python
+        // exited non-zero with empty stdout, and once WU-14 deletes the
+        // script `python3` exits non-zero with "can't open file" and empty
+        // stdout, so both assertions would have held for the wrong reason.
+        // Demonstrated 2026-08-21 by pointing the helper at a deliberately
+        // non-existent script: all ten tests in this file still passed.
+        //
+        // Freezing it as a golden was considered and rejected: the assertion
+        // is a bare "python rejected this", a boolean with no content, unlike
+        // the output comparisons the other goldens preserve.
         assert!(rust.is_err(), "{}: rust should guard-reject", case.name);
     }
 }
 
-// I: no arguments -> guard rejects, on both the python oracle and the Rust
-// CLI's own required-argument parsing.
+// I: no arguments -> the Rust CLI's own required-argument parsing rejects.
+//
+// The python half was removed, not frozen as a golden, for the reason given
+// on the guard-rejection loop above: asserting "python exited non-zero with
+// empty stdout" holds just as well when the script is absent, so it survives
+// WU-14's deletion while proving nothing.
 #[test]
 fn no_arguments_guard_rejects_on_both_sides() {
-    // Arrange, Act: python
-    let py_output = Command::new("python3")
-        .arg(python_script_path())
-        .output()
-        .expect("python3 should run shell/gen-shared-settings.py");
-
     // Act: rust CLI parsing
     let rust_result = Cli::try_parse_from(["playbook", "settings", "gen"]);
 
     // Assert
-    assert!(
-        !py_output.status.success(),
-        "python should guard-reject with no arguments"
-    );
-    assert!(
-        py_output.stdout.is_empty(),
-        "python stdout should be empty on failure"
-    );
     assert!(
         rust_result.is_err(),
         "rust CLI should guard-reject with no SRC/PERMS given"
@@ -576,18 +558,14 @@ fn malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout() {
         write_file(&src_path, src_json);
 
         // Act
-        let py = run_python_gen(&src_path, &perms_path);
         let rust = generate(&src_path, &perms_path);
 
         // Assert
-        assert_ne!(
-            py.exit_code, 0,
-            "{label}: python should reject this shape, not emit a seed"
-        );
-        assert!(
-            py.stdout.is_empty(),
-            "{label}: python should write nothing to stdout on rejection"
-        );
+        //
+        // The python half was removed for the reason recorded on the
+        // guard-rejection loop above: "python exited non-zero with empty
+        // stdout" is equally true when the script does not exist, so it
+        // would have survived WU-14 while asserting nothing.
         assert!(
             rust.is_err(),
             "{label}: the Rust port must reject it too. Emitting a hooks-less \

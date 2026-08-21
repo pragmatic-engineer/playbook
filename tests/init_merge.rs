@@ -45,7 +45,6 @@ use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The repo checkout root, where `shell/merge-settings.py` actually lives.
@@ -75,38 +74,6 @@ struct PyOutcome {
     exit_code: i32,
     stdout: String,
     stderr: String,
-}
-
-/// Run the real `shell/merge-settings.py` as a subprocess: the oracle every
-/// comparison test below diffs the Rust port against.
-fn run_python_merge(
-    base: &Path,
-    template: &Path,
-    user: &Path,
-    newbase_out: &Path,
-    skip_out: Option<&Path>,
-) -> PyOutcome {
-    let script = Path::new(plugin_root())
-        .join("shell")
-        .join("merge-settings.py");
-    let mut command = Command::new("python3");
-    command
-        .arg(&script)
-        .arg(base)
-        .arg(template)
-        .arg(user)
-        .arg(newbase_out);
-    if let Some(skip) = skip_out {
-        command.arg(skip);
-    }
-    let output = command
-        .output()
-        .expect("python3 should run shell/merge-settings.py");
-    PyOutcome {
-        exit_code: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
 }
 
 /// A base/template/user triple the Rust and python mergers must agree on,
@@ -394,25 +361,23 @@ fn n2_non_object_template_or_user_fails_closed_with_no_output() {
         if let Some(content) = case.user {
             write_file(&user_path, content);
         }
-        let py_newbase = dir.join("py-newbase.json");
         let rs_newbase = dir.join("rs-newbase.json");
 
         // Act
-        let py = run_python_merge(&base_path, &template_path, &user_path, &py_newbase, None);
         let rs = merge(&base_path, &template_path, &user_path, &rs_newbase, None);
 
         // Assert
-        assert_ne!(
-            py.exit_code, 0,
-            "{}: python should fail closed (N2)",
-            case.name
-        );
-        assert!(
-            py.stdout.is_empty(),
-            "{}: python stdout should be empty on N2 failure, got: {}",
-            case.name,
-            py.stdout
-        );
+        //
+        // The python half was REMOVED rather than frozen as a golden. It
+        // asserted only that python exited non-zero with empty stdout, and
+        // once ADR 0007 WU-14 deletes the script `python3` exits non-zero
+        // with "can't open file" and empty stdout, so both assertions would
+        // have held for the wrong reason: a test that survives the deletion
+        // while proving nothing. Demonstrated 2026-08-21 by pointing the
+        // helper at a non-existent script and watching every test still pass.
+        // Freezing it was rejected because the assertion is a bare "python
+        // rejected this", a boolean with no content, unlike the output
+        // comparisons the goldens preserve.
         assert!(
             matches!(rs, Err(MergeError::Validation(_))),
             "{}: rust should fail closed with a validation error",
