@@ -28,14 +28,14 @@ case "$BG" in true|1|yes) ;; *) exit 0 ;; esac
 # Await-sensitive commands: package installs, builds, and typechecks whose
 # output a later step usually needs, plus a node_modules wipe (its reinstall is
 # always awaited).
-await_re='(npm|pnpm|yarn|bun)[[:space:]]+(install|ci|add|i)([[:space:]]|$)'
-await_re+='|(npm|pnpm|yarn|bun)[[:space:]]+run[[:space:]]+build'
-await_re+='|(^|[;&|[:space:]])(tsc|make|gradle|mvn)([[:space:]]|$)'
-await_re+='|(cargo|go)[[:space:]]+build'
-await_re+='|(pip|poetry|bundle)[[:space:]]+install'
-await_re+='|rm[[:space:]]+-[a-z]*[[:space:]]*.*node_modules'
+await_regexp='(npm|pnpm|yarn|bun)[[:space:]]+(install|ci|add|i)([[:space:]]|$)'
+await_regexp+='|(npm|pnpm|yarn|bun)[[:space:]]+run[[:space:]]+build'
+await_regexp+='|(^|[;&|[:space:]])(tsc|make|gradle|mvn)([[:space:]]|$)'
+await_regexp+='|(cargo|go)[[:space:]]+build'
+await_regexp+='|(pip|poetry|bundle)[[:space:]]+install'
+await_regexp+='|rm[[:space:]]+-[a-z]*[[:space:]]*.*node_modules'
 
-if printf '%s' "$CMD" | grep -qiE "$await_re"; then
+if printf '%s' "$CMD" | grep -qiE "$await_regexp"; then
   emit_pre_context "PreToolUse" \
 "You backgrounded a command whose result a later step usually needs (install/build/typecheck). Backgrounding it and then running the next command is a common failure: e.g. \`npm run build\` before \`npm install\` finished gives \`tsc: not found\`. If anything downstream depends on this, run it in the FOREGROUND (run_in_background off) with an extended timeout (up to 600000ms) instead. A backgrounded job re-invokes you only when it exits; shell state and \`wait\` do NOT persist across Bash calls, so don't poll it (no Monitor/\`wait\` to synchronize)."
 fi

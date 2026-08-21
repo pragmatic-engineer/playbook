@@ -38,7 +38,7 @@ settings-shared write="0": build
     # this on a machine whose settings.json still carried the legacy
     # ~/.claude/hooks/<name>.sh guard commands deleted the ENTIRE .hooks block
     # from the seed, because ADR 0007 WU-13 removed that form from the
-    # generator's SAFETY_RE. `playbook settings check` passed on the gutted
+    # generator's SAFETY_REGEXP. `playbook settings check` passed on the gutted
     # result, so nothing downstream would have objected.
     #
     # Pass write=1 only after reading the diff this prints.

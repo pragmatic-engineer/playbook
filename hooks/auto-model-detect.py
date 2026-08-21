@@ -20,7 +20,7 @@ import common as c  # noqa: E402
 #   - explicit nouns: design, architecture, ADR, schema, tradeoff
 #   - decision verbs: evaluate, compare, decide, choose between, plan, propose
 #   - design-shaped questions: "should we", "how would you", "what's the best"
-INTENT_RE = re.compile(
+INTENT_REGEXP = re.compile(
     r"(\b(design|architect|architecture|ADR|tradeoffs?|alternatives?|approach|"
     r"strategy|paradigm|pattern|abstraction|refactor plan|migration|decompos|"
     r"schema|modeling|data model|contract|interface design)\b|"
@@ -55,7 +55,7 @@ def main() -> int:
     if len(prompt) < 20:
         return 0
 
-    if not INTENT_RE.search(prompt):
+    if not INTENT_REGEXP.search(prompt):
         return 0
 
     c.emit_prompt_context(MSG)

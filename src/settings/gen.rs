@@ -22,8 +22,8 @@
 //!   settings file has a non-ASCII byte today; `tests/settings_gen.rs`
 //!   pins the direction of the divergence with a dedicated fixture rather
 //!   than leaving it to this comment.
-//! - **`SAFETY_RE`.** `is_safe_hook_command` below reimplements python's
-//!   `SAFETY_RE.fullmatch` as explicit string matching rather than adding a
+//! - **`SAFETY_REGEXP`.** `is_safe_hook_command` below reimplements python's
+//!   `SAFETY_REGEXP.fullmatch` as explicit string matching rather than adding a
 //!   `regex` dependency for one fixed-shape pattern; the set of accepted
 //!   strings is identical, only the mechanism differs.
 //! - **`PERMS`'s default path.** python defaults an omitted `PERMS` argument
@@ -78,7 +78,7 @@ fn load_json(path: &Path, label: &str) -> Result<Value, GenError> {
         .map_err(|_| GenError(format!("{label} is not valid JSON: {}", path.display())))
 }
 
-/// Ports `SAFETY_RE.fullmatch` from `shell/gen-shared-settings.py` as
+/// Ports `SAFETY_REGEXP.fullmatch` from `shell/gen-shared-settings.py` as
 /// explicit string matching: a bare `playbook hook <name>` invocation,
 /// where `<name>` starts with an ASCII lowercase letter and continues with
 /// ASCII lowercase letters, digits or hyphens. Before WU-13 this also

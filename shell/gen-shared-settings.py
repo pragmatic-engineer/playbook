@@ -7,12 +7,12 @@
 # permissions object, forces skipAutoPermissionPrompt:false, strips any pinned
 # model (the harness or the user's own settings.json chooses it), drops the
 # owner's personal keys, and keeps only the .hooks entries whose command
-# matches SAFETY_RE: a bare `playbook hook <name>` invocation. `playbook init`
+# matches SAFETY_REGEXP: a bare `playbook hook <name>` invocation. `playbook init`
 # (src/init/wire.rs) wires all 15 hooks, including the four safety guards
 # (rm-workspace-guard, bg-await-guard, no-dash-guard, precommit-check) since
 # WU-13 ported their Rust bodies, straight into settings.json in that bare
 # form, none through the retired hooks/hooks.json registry, so those are
-# legitimate to ship in the seed. SAFETY_RE is still a real filter, not a
+# legitimate to ship in the seed. SAFETY_REGEXP is still a real filter, not a
 # formality: it stops a maintainer's own ad hoc hook command, or anything not
 # shaped like `playbook hook <name>`, from leaking into the public template.
 # Other product config (env, statusLine, worktree, plugins, ...) passes
@@ -49,7 +49,7 @@ PERSONAL_KEYS = frozenset(
 # to Rust. WU-13 ported them and flipped wire.rs to target all 15 hooks,
 # guards included, with the bare `playbook hook <name>` form, so no hook
 # ships as a path any more and that branch is gone.
-SAFETY_RE = re.compile(r"^playbook hook [a-z][a-z0-9-]*$")
+SAFETY_REGEXP = re.compile(r"^playbook hook [a-z][a-z0-9-]*$")
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -75,7 +75,7 @@ def filter_hooks(hooks: dict) -> dict:
         for group in groups:
             safe = [
                 h for h in group.get("hooks", [])
-                if SAFETY_RE.fullmatch(h.get("command", ""))
+                if SAFETY_REGEXP.fullmatch(h.get("command", ""))
             ]
             if safe:
                 new_group = dict(group)

@@ -409,7 +409,7 @@ test file's map now names s2 too.
 | malformed source / missing source / missing permissions, all non-zero exit with empty stdout (3) | `malformed_or_missing_inputs_guard_rejects_with_no_output` | a table covering all three input-guard shapes |
 | degenerate permissions {} rejected / empty allow array rejected (2) | `malformed_or_missing_inputs_guard_rejects_with_no_output` | the same table's permissions-guard cases |
 | no arguments rejected (1) | `no_arguments_guard_rejects_on_both_sides` | asserted against both engines |
-| hooks reduced to the safety guards only (1) | `hooks_reduced_to_safety_guards_only_functional_hooks_dropped` | the SAFETY_RE filter |
+| hooks reduced to the safety guards only (1) | `hooks_reduced_to_safety_guards_only_functional_hooks_dropped` | the SAFETY_REGEXP filter |
 
 Adds, with no old counterpart:
 
