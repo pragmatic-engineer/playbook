@@ -302,6 +302,65 @@ else
     fail "uninstall with no binary present is a clean no-op" "exit $noop_rc"
 fi
 
+# --- install.sh must not assume a binary feature newer than the last release
+# -----------------------------------------------------------------------------
+# install.sh is fetched from the main branch by the documented curl
+# one-liner, while the binary comes from the latest RELEASE, so the two are
+# permanently allowed to drift. This stub behaves like a real release binary
+# that predates --system-prompt: it accepts --version and a bare `init`, but
+# rejects any flag it does not recognise, exactly the way clap does, exit
+# code and wording included. --yes auto-accepts both the aliases and
+# system-prompt prompts, which is what feeds --system-prompt into
+# install.sh's $_INIT_ARGS in the first place; without install.sh's own
+# `_init_supports` probe checking `init --help` first, that reaches this
+# stub and install.sh dies with settings.json never written, exactly what
+# happened against the real v0.10.0 release on 2026-08-20.
+STRICT_STUB_DIR="$WORK/strict-init-bin"
+mkdir -p "$STRICT_STUB_DIR"
+cat > "$STRICT_STUB_DIR/playbook" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --version) printf 'playbook 0.10.0\n'; exit 0 ;;
+  init)
+    shift
+    if [ "${1:-}" = "--help" ]; then
+      printf 'Install or repair the local Claude Code configuration\n\nUsage: playbook init\n'
+      exit 0
+    fi
+    if [ $# -gt 0 ]; then
+      printf "error: unexpected argument '%s' found\n\nUsage: playbook init\n" "$1" >&2
+      exit 2
+    fi
+    home="${CLAUDE_HOME:-$HOME/.claude}"
+    mkdir -p "$home"
+    [ -f "$home/settings.json" ] || printf '{}\n' > "$home/settings.json"
+    [ -f "$home/.settings.base.json" ] || printf '{}\n' > "$home/.settings.base.json"
+    printf 'settings: wired - seeded from template\n'
+    printf 'guards: ok - already in place\n'
+    printf 'hooks: ok - all hooks already wired\n'
+    printf 'shim: skipped - $SHELL is neither bash nor zsh\n'
+    printf 'statusline: ok - already up to date\n'
+    printf 'system-prompt: skipped - not installed; pass --system-prompt to opt in\n'
+    exit 0
+    ;;
+esac
+exit 0
+STUB
+chmod +x "$STRICT_STUB_DIR/playbook"
+
+strict_home="$(mktemp -d "$WORK/strict-home.XXXXXX")"
+strict_out="$(PLAYBOOK_SRC="$SRC" CLAUDE_HOME="$strict_home/.claude" HOME="$strict_home" \
+    PLAYBOOK_BIN_DIR="$STRICT_STUB_DIR" SHELL=/bin/bash \
+    bash "$REPO_ROOT/install.sh" --yes --skip-plugin 2>&1)"
+strict_rc=$?
+
+if [ "$strict_rc" -eq 0 ] && [ -f "$strict_home/.claude/settings.json" ]; then
+    pass "install succeeds against a release binary that predates an optional init flag"
+else
+    fail "install succeeds against a release binary that predates an optional init flag" \
+        "exit $strict_rc, settings.json present: $([ -f "$strict_home/.claude/settings.json" ] && echo yes || echo no); output: $strict_out"
+fi
+
 TOTAL=$(( PASS + FAIL ))
 echo ""
 echo "${PASS}/${TOTAL} scenarios passed"
