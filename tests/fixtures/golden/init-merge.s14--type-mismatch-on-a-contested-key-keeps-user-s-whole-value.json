@@ -1,0 +1,5 @@
+{
+  "stdout": "{\n  \"k\": {\n    \"nested\": \"obj\"\n  }\n}\n",
+  "newbase": "{\n  \"k\": \"scalar_base\"\n}\n",
+  "skip": "[\n  {\n    \"key\": \"k\",\n    \"template_had\": \"scalar_tmpl\",\n    \"yours\": {\n      \"nested\": \"obj\"\n    }\n  }\n]\n"
+}

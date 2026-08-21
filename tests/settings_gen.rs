@@ -4,8 +4,14 @@
 //! Integration tests for `playbook::settings::gen`, ported from
 //! `shell/gen-shared-settings.test.sh`'s 10 scenarios (A through J). The real
 //! `shell/gen-shared-settings.py` is the oracle throughout: every comparison
-//! test runs it as a subprocess and compares its actual stdout against the
-//! Rust port's, rather than hand-typing an expected JSON blob.
+//! test that only needs a pass/fail signal (D through I) still runs it as a
+//! subprocess, while every test that compares actual generated JSON (A, B,
+//! C, J, the non-ASCII fixture, and the regression pin) asserts against a
+//! frozen copy of its stdout under `tests/fixtures/golden/` instead of a
+//! live run. See `tests/fixtures/golden/README.md`: the python original is
+//! deleted by ADR 0007 WU-14, so freezing its output is what keeps those
+//! comparisons meaningful once python is gone, rather than hand-typing an
+//! expected JSON blob.
 //!
 //! Coverage map, so every scenario named in the Work Unit brief is
 //! traceable to one place below:
@@ -158,18 +164,17 @@ fn happy_path_canned_perms_model_stripped_personal_keys_dropped_passthrough() {
     write_file(&perms_path, CANNED_PERMS);
 
     // Act
-    let py = run_python_gen(&src_path, &perms_path);
     let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
 
-    // Assert
+    // Assert against the frozen python oracle rather than a live python run.
+    // See tests/fixtures/golden/README.md: the python original is deleted by
+    // ADR 0007 WU-14, so its output is committed instead. SRC_FULL and
+    // CANNED_PERMS are the same inputs the regression pin below uses, so this
+    // reuses that fixture rather than freezing a duplicate.
+    let golden_py_stdout = include_str!("fixtures/golden/gen-shared-settings.src-full.json");
     assert_eq!(
-        py.exit_code, 0,
-        "python oracle should succeed: {}",
-        py.stderr
-    );
-    assert_eq!(
-        rust_output, py.stdout,
-        "rust output should byte-match python's, trailing newline included"
+        rust_output, golden_py_stdout,
+        "rust output should byte-match the frozen python oracle's output, trailing newline included"
     );
     let result: Value = serde_json::from_str(&rust_output).unwrap();
     let canned_perms: Value = serde_json::from_str(CANNED_PERMS).unwrap();
@@ -211,16 +216,16 @@ fn model_absent_in_source_stays_absent() {
     write_file(&perms_path, CANNED_PERMS);
 
     // Act
-    let py = run_python_gen(&src_path, &perms_path);
     let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
 
-    // Assert
+    // Assert against the frozen python oracle rather than a live python run.
+    // See tests/fixtures/golden/README.md: the python original is deleted by
+    // ADR 0007 WU-14, so its output is committed instead.
+    let golden_py_stdout = include_str!("fixtures/golden/gen-shared-settings.model-absent.json");
     assert_eq!(
-        py.exit_code, 0,
-        "python oracle should succeed: {}",
-        py.stderr
+        rust_output, golden_py_stdout,
+        "rust output should byte-match the frozen python oracle's output, trailing newline included"
     );
-    assert_eq!(rust_output, py.stdout);
     let result: Value = serde_json::from_str(&rust_output).unwrap();
     assert!(result.get("model").is_none());
 }
@@ -236,16 +241,16 @@ fn model_in_source_is_stripped() {
     write_file(&perms_path, CANNED_PERMS);
 
     // Act
-    let py = run_python_gen(&src_path, &perms_path);
     let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
 
-    // Assert
+    // Assert against the frozen python oracle rather than a live python run.
+    // See tests/fixtures/golden/README.md: the python original is deleted by
+    // ADR 0007 WU-14, so its output is committed instead.
+    let golden_py_stdout = include_str!("fixtures/golden/gen-shared-settings.model-present.json");
     assert_eq!(
-        py.exit_code, 0,
-        "python oracle should succeed: {}",
-        py.stderr
+        rust_output, golden_py_stdout,
+        "rust output should byte-match the frozen python oracle's output, trailing newline included"
     );
-    assert_eq!(rust_output, py.stdout);
     let result: Value = serde_json::from_str(&rust_output).unwrap();
     assert!(result.get("model").is_none());
 }
@@ -358,16 +363,16 @@ fn hooks_reduced_to_safety_guards_only_functional_hooks_dropped() {
     write_file(&perms_path, CANNED_PERMS);
 
     // Act
-    let py = run_python_gen(&src_path, &perms_path);
     let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
 
-    // Assert
+    // Assert against the frozen python oracle rather than a live python run.
+    // See tests/fixtures/golden/README.md: the python original is deleted by
+    // ADR 0007 WU-14, so its output is committed instead.
+    let golden_py_stdout = include_str!("fixtures/golden/gen-shared-settings.hooks-filter.json");
     assert_eq!(
-        py.exit_code, 0,
-        "python oracle should succeed: {}",
-        py.stderr
+        rust_output, golden_py_stdout,
+        "rust output should byte-match the frozen python oracle's output, trailing newline included"
     );
-    assert_eq!(rust_output, py.stdout);
     let result: Value = serde_json::from_str(&rust_output).unwrap();
     let hooks = result["hooks"].as_object().unwrap();
     assert_eq!(
@@ -412,24 +417,22 @@ fn non_ascii_value_diverges_from_python_named_direction() {
     write_file(&perms_path, CANNED_PERMS);
 
     // Act
-    let py = run_python_gen(&src_path, &perms_path);
     let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
 
-    // Assert: python escapes non-ASCII to \uXXXX...
-    assert_eq!(
-        py.exit_code, 0,
-        "python oracle should succeed: {}",
-        py.stderr
+    // Assert against the frozen python oracle rather than a live python run.
+    // See tests/fixtures/golden/README.md: the python original is deleted by
+    // ADR 0007 WU-14, so its output is committed instead. This golden
+    // captures python's ESCAPED output deliberately: the assertions below
+    // still pin a genuine divergence, not an accidental one, and must never
+    // be "fixed" into agreement.
+    let golden_py_stdout = include_str!("fixtures/golden/gen-shared-settings.non-ascii.json");
+    assert!(
+        golden_py_stdout.contains("\\u00e9") && golden_py_stdout.contains("\\u2603"),
+        "python output should escape the non-ASCII characters to \\uXXXX: {golden_py_stdout}"
     );
     assert!(
-        py.stdout.contains("\\u00e9") && py.stdout.contains("\\u2603"),
-        "python output should escape the non-ASCII characters to \\uXXXX: {}",
-        py.stdout
-    );
-    assert!(
-        !py.stdout.contains("café"),
-        "python output should not contain the raw UTF-8 characters: {}",
-        py.stdout
+        !golden_py_stdout.contains("café"),
+        "python output should not contain the raw UTF-8 characters: {golden_py_stdout}"
     );
     // ...rust writes raw UTF-8 instead.
     assert!(
@@ -442,7 +445,7 @@ fn non_ascii_value_diverges_from_python_named_direction() {
     );
     // The two genuinely diverge on this input, in the direction just pinned.
     assert_ne!(
-        rust_output, py.stdout,
+        rust_output, golden_py_stdout,
         "python-escaped and rust-raw-UTF-8 outputs should diverge on non-ASCII input"
     );
 }
@@ -477,19 +480,16 @@ fn regression_pin_rust_matches_python_oracle_and_mutation_diverges() {
     write_file(&src_path, SRC_FULL);
     write_file(&perms_path, CANNED_PERMS);
 
-    // Act: the pin itself, Rust against the python oracle on matching input.
-    let py = run_python_gen(&src_path, &perms_path);
+    // Act: the pin itself, Rust against the frozen python oracle on matching
+    // input. See tests/fixtures/golden/README.md: the python original is
+    // deleted by ADR 0007 WU-14, so its output is committed instead.
     let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
 
     // Assert: the pin holds.
+    let golden_py_stdout = include_str!("fixtures/golden/gen-shared-settings.src-full.json");
     assert_eq!(
-        py.exit_code, 0,
-        "python oracle should succeed: {}",
-        py.stderr
-    );
-    assert_eq!(
-        rust_output, py.stdout,
-        "rust output should byte-match the python oracle's output, trailing newline included"
+        rust_output, golden_py_stdout,
+        "rust output should byte-match the frozen python oracle's output, trailing newline included"
     );
 
     // Act: mutate the input.

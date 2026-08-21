@@ -785,8 +785,8 @@ mod preread_size_check {
 
     #[test]
     fn deny_output_matches_the_python_reference_byte_for_byte() {
-        // Arrange: the same oversized fixture and payload, fed to both the
-        // Rust binary and the python hook it ports.
+        // Arrange: the same oversized fixture and payload the frozen golden
+        // was captured from.
         let home = scratch_dir("size-byte-identical");
         let big = home.join("big.log");
         write_numbered_lines(&big, 1500);
@@ -794,34 +794,19 @@ mod preread_size_check {
 
         // Act
         let rust_output = run_hook("preread-size-check", &home, &payload_json);
-        let python_script = concat!(env!("CARGO_MANIFEST_DIR"), "/hooks/preread-size-check.py");
-        let mut python_child = Command::new("python3")
-            .arg(python_script)
-            .env("HOME", &home)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("python3 should be available to run the reference hook");
-        python_child
-            .stdin
-            .as_mut()
-            .expect("stdin should be piped")
-            .write_all(payload_json.as_bytes())
-            .expect("writing stdin should succeed");
-        let python_output = python_child
-            .wait_with_output()
-            .expect("python3 should exit");
 
-        // Assert
+        // Assert against the frozen python oracle rather than a live python
+        // run. See tests/fixtures/golden/README.md: the python original is
+        // deleted by ADR 0007 WU-14, so its output is committed instead.
         let rust_stdout = stdout_string(&rust_output);
-        let python_stdout = stdout_string(&python_output);
+        let golden = include_str!("fixtures/golden/preread-size-check.deny.txt");
         assert!(
             rust_stdout.contains(r#""permissionDecision":"deny""#),
             "sanity: should deny"
         );
         assert_eq!(
-            rust_stdout, python_stdout,
-            "the deny JSON must be byte-identical to the python hook's output"
+            rust_stdout, golden,
+            "the deny JSON must be byte-identical to the frozen python output"
         );
     }
 }

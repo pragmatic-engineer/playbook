@@ -1,0 +1,28 @@
+{
+  "skipAutoPermissionPrompt": false,
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash(git:*)"
+    ],
+    "deny": [
+      "Read(**/.env)"
+    ],
+    "ask": [
+      "Bash(curl:*)"
+    ],
+    "defaultMode": "auto"
+  },
+  "env": {
+    "IS_DEMO": "1",
+    "DISABLE_AUTOUPDATER": "1"
+  },
+  "hooks": {},
+  "statusLine": {
+    "type": "command",
+    "command": "bash x"
+  },
+  "customUnknownKey": {
+    "keep": "me"
+  }
+}

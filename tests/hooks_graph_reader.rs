@@ -112,22 +112,6 @@ fn anchors_hook_input(file_path: &str, session_id: &str) -> String {
     .to_string()
 }
 
-/// Run the python `hooks/memory-anchors.py` original the same way
-/// `run_playbook` runs the compiled binary, for cross-implementation
-/// comparison.
-fn run_python_anchors(home: &Path, file_path: &str, session_id: &str) -> Output {
-    let hook = concat!(env!("CARGO_MANIFEST_DIR"), "/hooks/memory-anchors.py");
-    let hook_input = anchors_hook_input(file_path, session_id);
-    Command::new("python3")
-        .arg(hook)
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .env("HOME", home)
-        .env("HOOK_INPUT", hook_input)
-        .stdin(Stdio::null())
-        .output()
-        .expect("python3 should run memory-anchors.py")
-}
-
 /// hooks/memory-anchors.test.sh scenarios 1 and 3: an exactly anchored file
 /// names its fact, and that fact's `depends_on` neighbour is named too.
 #[test]
@@ -358,27 +342,22 @@ fn additional_context_output_is_valid_json_with_pretooluse_event_name() {
 #[test]
 fn python_and_rust_readers_agree_on_the_same_fixture() {
     // Arrange
-    let home_py = scratch_home("cross-impl-py");
     let home_rs = scratch_home("cross-impl-rs");
-    write_graph(&home_py, BASE_GRAPH);
     write_graph(&home_rs, BASE_GRAPH);
     let target = edit_path("src/a.py");
 
     // Act
-    let out_py = run_python_anchors(&home_py, &target, "cross1");
     let out_rs = run_anchors_hook(&home_rs, &target, "cross1");
 
-    // Assert
-    assert!(
-        out_py.status.success(),
-        "python memory-anchors.py exited non-zero"
-    );
+    // Assert against the frozen python oracle rather than a live python run.
+    // See tests/fixtures/golden/README.md: the python original is deleted by
+    // ADR 0007 WU-14, so its output is committed instead.
+    let golden = include_str!("fixtures/golden/memory-anchors.src-a.txt");
     assert_eq!(
-        stdout_of(&out_py),
         stdout_of(&out_rs),
+        golden,
         "python and rust memory-anchors outputs differ"
     );
 
-    let _ = fs::remove_dir_all(&home_py);
     let _ = fs::remove_dir_all(&home_rs);
 }

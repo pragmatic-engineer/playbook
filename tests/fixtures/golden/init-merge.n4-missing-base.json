@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "stdout": "{\n  \"added\": \"from_tmpl\",\n  \"mykey\": \"myval\",\n  \"shared\": \"user_val\"\n}\n",
+  "stderr": "warning: BASE not found; treating as {}: <base-path>\n"
+}
