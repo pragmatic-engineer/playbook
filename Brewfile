@@ -17,6 +17,7 @@
 # Core: required by hooks and the cc launcher
 brew "git"          # used everywhere; hooks drive git directly
 brew "jq"           # JSON parsing in hooks and statusline.sh
+brew "just"         # task runner; see justfile (replaced the Makefile)
 brew "python@3.13"  # hooks (Python >=3.9)
 brew "rtk"          # CLI proxy that a PreToolUse hook routes every Bash command through
 

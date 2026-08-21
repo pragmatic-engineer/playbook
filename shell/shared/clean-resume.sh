@@ -50,12 +50,12 @@ _cc_clean_resume() {
     new_sid="$(uuidgen | tr 'A-Z' 'a-z')"
     local new_jsonl="$project_dir/$new_sid.jsonl"
 
-    local strip_re='<command-name>/(model|effort|config|output-style|style)</command-name>'
+    local strip_regexp='<command-name>/(model|effort|config|output-style|style)</command-name>'
 
     local total_in
     total_in=$(wc -l < "$old_jsonl" | tr -d ' ')
 
-    jq -c --arg pat "$strip_re" '
+    jq -c --arg pat "$strip_regexp" '
         select(.type != "system" or ((.content // "") | test($pat) | not))
     ' "$old_jsonl" > "$new_jsonl" || {
         printf '%s\n' "-> cc clean: jq filter failed"
