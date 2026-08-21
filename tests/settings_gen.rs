@@ -25,7 +25,7 @@
 //!   permissions file), G (degenerate permissions object), H (permissions
 //!   with an empty allow array): `GUARD_CASES` inside
 //!   `malformed_or_missing_inputs_guard_rejects_with_no_output`
-//! - I (no arguments): `no_arguments_guard_rejects_on_both_sides`
+//! - I (no arguments): `no_arguments_is_rejected_by_the_rust_cli_parser`
 //! - J (hooks reduced to the safety guards only, functional hooks dropped):
 //!   `hooks_reduced_to_safety_guards_only_functional_hooks_dropped`
 //! - Mandatory non-ASCII fixture, divergence asserted in a named direction:
@@ -47,18 +47,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The repo checkout root, where `shell/gen-shared-settings.py` actually
-/// lives.
-fn plugin_root() -> &'static str {
-    env!("CARGO_MANIFEST_DIR")
-}
-
-fn python_script_path() -> PathBuf {
-    Path::new(plugin_root())
-        .join("shell")
-        .join("gen-shared-settings.py")
-}
-
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A fresh scratch directory under the OS temp dir, unique per call so
@@ -76,12 +64,6 @@ fn scratch_dir(tag: &str) -> PathBuf {
 
 fn write_file(path: &Path, content: &str) {
     fs::write(path, content).expect("scratch file should be writable");
-}
-
-struct PyOutcome {
-    exit_code: i32,
-    stdout: String,
-    stderr: String,
 }
 
 /// Canned permissions fixture, reused read-only across scenarios, matching
@@ -320,7 +302,7 @@ fn malformed_or_missing_inputs_guard_rejects_with_no_output() {
 // empty stdout" holds just as well when the script is absent, so it survives
 // WU-14's deletion while proving nothing.
 #[test]
-fn no_arguments_guard_rejects_on_both_sides() {
+fn no_arguments_is_rejected_by_the_rust_cli_parser() {
     // Act: rust CLI parsing
     let rust_result = Cli::try_parse_from(["playbook", "settings", "gen"]);
 

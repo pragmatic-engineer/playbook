@@ -47,11 +47,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The repo checkout root, where `shell/merge-settings.py` actually lives.
-fn plugin_root() -> &'static str {
-    env!("CARGO_MANIFEST_DIR")
-}
-
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A fresh scratch directory under the OS temp dir, unique per call so
@@ -68,12 +63,6 @@ fn scratch_dir(tag: &str) -> PathBuf {
 
 fn write_file(path: &Path, content: &str) {
     fs::write(path, content).expect("scratch file should be writable");
-}
-
-struct PyOutcome {
-    exit_code: i32,
-    stdout: String,
-    stderr: String,
 }
 
 /// A base/template/user triple the Rust and python mergers must agree on,
