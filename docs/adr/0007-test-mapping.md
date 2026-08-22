@@ -3,19 +3,19 @@
 - **Parent ADR:** `docs/adr/0007-rust-binary-for-hooks-and-launcher.md`
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
-- **Status: PARTIAL, and read the scope line before trusting it.**
+- **Status: COMPLETE for all 19 suites, and the scope is stated deliberately.**
   - **The 15 ported python suites: COMPLETE.** Suite-level mapping is done and
     measured for all 15. Per-scenario rows are complete for 15 of 15, covering
     all 214 old scenarios with zero blank rows. WU-14's acceptance rule is
     satisfied for every one of those suites and both `shell/` python scripts it
     deletes.
-  - **The 4 guard suites: 69 of 78 scenarios mapped, 9 BLANK.** Added
+  - **The 4 guard suites: COMPLETE, 78 of 78 scenarios mapped.** Mapped
     2026-08-22. `hooks/*.sh | delete | the 4 guards` is in WU-14's file list, so
-    the same acceptance rule applies to them, and it is **not** satisfied.
-    `hooks/bg-await-guard.test.sh`, `hooks/no-dash-guard.test.sh` and
-    `hooks/precommit-check.test.sh` are clear and may be deleted.
-    **`hooks/rm-workspace-guard.test.sh` may NOT be deleted:** 9 of its 30
-    scenarios have no Rust counterpart. See the section at the end.
+    the same acceptance rule applies to them. The mapping opened 9 blank rows in
+    `hooks/rm-workspace-guard.test.sh`; **all 9 were closed the same day** by 6
+    new tests in `tests/hooks_guards.rs::rm_workspace_guard`, taking that file
+    from 30 tests to 36. All four guard suites are now clear to delete.
+  - **Combined: 292 old scenarios across 19 suites, zero blank rows.**
 
 **The earlier version of this line read "COMPLETE ... for all 15 of 15 suites"
 with no scope qualifier, while the four guard suites had no rows at all.** Read
@@ -94,14 +94,15 @@ whose 30 tests sit in four `mod` blocks named for the four scripts.
 | `hooks/bg-await-guard.test.sh` | 19 | `tests/hooks_guards.rs::bg_await_guard` | 6 | **DONE, see below** |
 | `hooks/no-dash-guard.test.sh` | 17 | `tests/hooks_guards.rs::no_dash_guard` | 8 | **DONE, see below** |
 | `hooks/precommit-check.test.sh` | 12 | `tests/hooks_guards.rs::precommit_check` | 7 | **DONE, see below** |
-| `hooks/rm-workspace-guard.test.sh` | 30 | `tests/hooks_guards.rs::rm_workspace_guard` | 9 | **9 BLANK, deletion blocked** |
+| `hooks/rm-workspace-guard.test.sh` | 30 | `tests/hooks_guards.rs::rm_workspace_guard` | 15 | **DONE, see below** |
 
-**Totals: 78 old guard scenarios against 30 Rust tests. 69 mapped, 9 blank.**
-This is the suite where the naive-count warning at the top of this file does
-*not* explain the gap away. 19 old bg-await scenarios really do collapse into 3
-table-driven Rust tests holding the same 19 command strings verbatim, and that
-is honest compression. The 9 blanks below are not compression; the behaviour is
-absent.
+**Totals: 78 old guard scenarios against 36 Rust tests, all 78 mapped.** This is
+the suite where the naive-count warning at the top of this file did *not* explain
+the gap away. 19 old bg-await scenarios really do collapse into 3 table-driven
+Rust tests holding the same 19 command strings verbatim, and that is honest
+compression. The 9 rm-workspace blanks were not compression: the behaviour was
+absent, and the count went 30 -> 36 to supply it rather than the table being
+edited to look complete.
 
 `hooks/rebuild-memory-graph.test.sh` at 61 old scenarios against 24 Rust tests
 is the widest gap and the one to fill in first. It is also the suite whose port
@@ -131,10 +132,11 @@ New behaviour, so nothing to map, and nothing blocks on them:
   16 hooks as bare `playbook hook <name>`. The python hooks are no longer in
   production, so the rule above no longer blocks anything; the suites that
   remain are gated by their mapping rows alone.
-- **`hooks/rm-workspace-guard.test.sh`: blocked on 9 unmapped scenarios, not on
-  its subject being live.** Added 2026-08-22. This is the only guard suite still
-  held back. It is the `rm`-outside-the-workspace guard, and the 9 blanks are
-  concentrated on the zero-config default-root path that no Rust test reaches.
+- **`hooks/rm-workspace-guard.test.sh`: was blocked on 9 unmapped scenarios, now
+  cleared.** Added and resolved 2026-08-22. It was held back not because its
+  subject was live but because the mapping found 9 scenarios, concentrated on
+  the zero-config default-root path, that no Rust test reached. Six new tests
+  closed them, each verified by mutating the guard rather than by a green run.
   See the per-scenario section near the end of this file.
 
 ## Per-scenario rows: `hooks/rebuild-memory-graph.test.sh`
@@ -665,26 +667,39 @@ Adds, with no old counterpart:
 
 ## Per-scenario rows: `hooks/rm-workspace-guard.test.sh`
 
-**INCOMPLETE. 21 of 30 old scenarios mapped, 9 BLANK. WU-14 may NOT delete this
-suite.** This is the guard that blocks `rm` outside the workspace, so the blanks
-below are the highest-consequence gap in this file, wider in kind than the
+**COMPLETE. All 30 old scenarios accounted for, zero blank rows, so WU-14 may
+delete this suite.** It got there in two steps on 2026-08-22: the mapping found
+21 of 30 covered and 9 blank, and the 9 were closed by writing tests, not by
+adjusting the table. This is the guard that blocks `rm` outside the workspace,
+so the gap was the highest-consequence one in this file, wider in kind than the
 `rebuild-memory-graph` count gap the top of this file calls the highest risk.
 
-**Root cause of every blank: the Rust helper always sets the variable.**
-`tests/hooks_guards.rs:56` defines `blocked(command, roots)` and `:61` sets
-`PLAYBOOK_SAFE_ROOTS` on every single invocation. Grepping the whole Rust tree
-for `PLAYBOOK_SAFE_ROOTS` returns exactly that one line in `tests/`, so **no
-Rust test ever runs this guard with the variable unset or empty**, and
-`src/hooks/rm_workspace_guard.rs` carries no `#[cfg(test)]` block of its own.
-That leaves `safe_roots()` at `:76` and `git_repo_root()` at `:89`, the entire
-zero-config fallback chain, executed only in production.
+**Root cause of all 9 blanks: the Rust helper always set the variable.**
+`blocked(command, roots)` set `PLAYBOOK_SAFE_ROOTS` on every single invocation,
+and grepping the whole Rust tree for that name returned exactly that one line
+under `tests/`, while `src/hooks/rm_workspace_guard.rs` carries no
+`#[cfg(test)]` block of its own. So **no Rust test ever ran this guard with the
+variable unset or empty**, leaving `safe_roots()` at `:76` and `git_repo_root()`
+at `:89`, the entire zero-config fallback chain, executed only in production.
 
 The shell suite covered that chain deliberately. Its comment at `:63-66` calls
 those cases "the regression proof that the zero-config default is no weaker than
 the old hardcoded `~/Workspace`, i.e. it must NOT default to `$HOME` (that would
-unblock `~/.ssh` and `~/.aws`)". Deleting the suite as it stands drops that proof.
+unblock `~/.ssh` and `~/.aws`)". Deleting the suite before 2026-08-22 would have
+dropped that proof.
 
-### Mapped (21)
+**The fix was verified by mutation, not by a green run**, since a test that
+cannot fail is what produced this gap in the first place:
+
+| Mutation applied to `src/hooks/rm_workspace_guard.rs` | Result |
+|---|---|
+| `safe_roots()` falls back to `$HOME` instead of repo-root-then-cwd, the exact regression the shell comment names | **3 new tests fail**, no old test notices |
+| The deny message's root list replaced with a hardcoded `~/Workspace/**` | **1 new test fails**, no old test notices |
+
+Both mutations pass all 30 pre-existing tests. That is the measured proof the
+old suite could not have caught either regression.
+
+### Covered by the original port (21)
 
 | Old scenario | New test | How it is covered |
 |---|---|---|
@@ -710,30 +725,36 @@ unblock `~/.ssh` and `~/.aws`)". Deleting the suite as it stands drops that proo
 | allow trailing-slash root, case 6 (1) | `a_trailing_slash_on_a_root_still_matches` | direct |
 | block with a nonexistent root, case 8 (1) | `a_nonexistent_root_blocks_everything_outside_it` | direct |
 
-### BLANK: no Rust counterpart (9)
+### Closed 2026-08-22 by 6 new tests (9)
 
-Each row here blocks the deletion under WU-14's acceptance rule. The right fix
-is a Rust test, not a mapping edit.
+These 9 rows were blank when the mapping was written. They are closed by tests
+added the same day, listed here with the same evidence standard as every other
+row above.
 
-| Old scenario | New test | Why it is blank |
+| Old scenario | New test | How it is covered |
 |---|---|---|
-| block heredoc body containing `rm -rf /etc/example` (1) | *(none)* | The **accepted false positive**, pinned at `:97-102` precisely so it is not "discovered as a bug later". No Rust test pins it, so the deliberate trade-off is undocumented in the new suite and a future change could silently flip it |
-| allow `rm -rf $repo_dir/sub/file`, unset, cwd inside a git repo, case 1 (1) | *(none)* | Needs `PLAYBOOK_SAFE_ROOTS` unset and cwd in a scratch repo; exercises `git_repo_root()` |
-| block `rm -rf $repo_sibling/file`, unset, case 2 (1) | *(none)* | The negative half: a sibling of the repo root is outside it |
-| allow `rm -rf $plain_dir/file`, unset, cwd NOT in a git repo, case 3 (1) | *(none)* | Exercises the `current_dir()` leg of the fallback |
-| block `rm -rf $plain_sibling/file`, unset, case 3 (1) | *(none)* | The negative half of the cwd leg |
-| block `rm -rf /etc/passwd` with `PLAYBOOK_SAFE_ROOTS=""`, case 5 (1) | *(none)* | Empty-string-behaves-like-unset. `safe_roots()` branches on `configured.is_empty()`; nothing tests that branch |
-| allow `rm -rf $rel_base/relroot/file` with a relative root, case 7 (1) | *(none)* | A relative root canon-ed against the guard's own cwd |
-| block `rm -rf /etc/passwd` with that same relative root, case 7 (1) | *(none)* | Proves the relative root does not widen into a false allow elsewhere |
-| deny reason names the roots in effect, case 10 (1) | *(none)* | The only old assertion on `permissionDecisionReason` content. Both Rust helpers assert `"permissionDecision":"deny"` and never inspect the reason, so the message could regress to a hardcoded `~/Workspace` literal with every test still green |
+| block heredoc body quoting a deletion (1) | `a_heredoc_body_quoting_a_deletion_is_an_accepted_false_positive` | direct, and the doc comment carries the old suite's `:97-102` rationale so the trade-off stays deliberate |
+| allow `$repo_dir/sub/file`, unset, cwd inside a git repo, case 1 (1) | `an_unset_variable_defaults_to_the_git_repo_root` | first assert, `git init` in a scratch repo, exercises `git_repo_root()` |
+| block `$repo_sibling/file`, unset, case 2 (1) | same | second assert, the negative half |
+| allow `$plain_dir/file`, unset, cwd NOT in a git repo, case 3 (1) | `an_unset_variable_outside_a_git_repo_defaults_to_the_cwd` | first assert, the `current_dir()` leg |
+| block `$plain_sibling/file`, unset, case 3 (1) | same | second assert, the negative half |
+| block outside with `PLAYBOOK_SAFE_ROOTS=""`, case 5 (1) | `an_empty_variable_behaves_like_unset` | first assert; the second pins that it falls back rather than blocking everything, which a block-all bug would otherwise satisfy |
+| allow `$rel_base/relroot/file` with a relative root, case 7 (1) | `a_relative_root_resolves_against_the_guards_cwd` | first assert |
+| block outside with that same relative root, case 7 (1) | same | second assert, proving no widening into a false allow |
+| deny reason names the roots in effect, case 10 (1) | `the_deny_reason_names_the_roots_in_effect` | parses `hookSpecificOutput.permissionDecisionReason` and asserts both configured roots appear; the only content assertion on the message |
 
-### What unblocks the deletion
+The 6 tests rest on two helper changes, both of which are the actual fix rather
+than a restatement of the old suite:
 
-Nine tests in `mod rm_workspace_guard`, or fewer if table-driven. Two helper
-changes carry most of it: a variant of `blocked()` that leaves
-`PLAYBOOK_SAFE_ROOTS` unset and sets `current_dir`, which covers six rows, and
-one assertion on `permissionDecisionReason` content, which covers the last.
-The heredoc row needs only a single case appended to the existing multiline test.
+- `run_guard_in(command, roots, cwd)` takes `roots: Option<&str>` and, on `None`,
+  calls `env_remove` rather than setting an empty value. Removing it matters:
+  the variable may be set in the environment the suite inherits, and then the
+  zero-config branch would never run even in a test written to target it.
+- `real_dir(tag)` canonicalises each scratch dir. macOS temp dirs sit under
+  `/var`, a symlink to `/private/var`, while `git rev-parse --show-toplevel` and
+  `getcwd` both report the resolved form, and the guard's `canon()` is lexical by
+  design. Without this the fixtures would fail on path form, not guard logic.
+  This is the same trap the shell suite documented at its `:110-113`.
 
 ## Deletion pre-flight: what still EXECUTES these files
 

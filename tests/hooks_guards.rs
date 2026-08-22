@@ -8,7 +8,7 @@
 //! one that only proves it allows can pass while guarding nothing.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -51,21 +51,32 @@ fn blocks(command: &str) -> bool {
 mod rm_workspace_guard {
     use super::*;
 
-    /// Runs with an explicit safe-root list and the repo as cwd, so the result
-    /// never depends on where the suite happens to be invoked from.
-    fn blocked(command: &str, roots: &str) -> bool {
+    /// `roots: None` REMOVES `PLAYBOOK_SAFE_ROOTS` rather than setting it empty,
+    /// which is the only way to reach `safe_roots()`'s zero-config fallback. It
+    /// must be removed, not merely left alone: the variable may be set in the
+    /// environment the suite inherits, and then the default path would never run.
+    fn run_guard_in(command: &str, roots: Option<&str>, cwd: Option<&Path>) -> String {
         let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
-        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        let mut spawn = Command::new(env!("CARGO_BIN_EXE_playbook"));
+        spawn
             .args(["hook", "rm-workspace-guard"])
-            .env("HOOK_INPUT", payload)
-            .env("PLAYBOOK_SAFE_ROOTS", roots)
-            .output()
-            .expect("playbook binary should spawn");
+            .env("HOOK_INPUT", payload);
+        match roots {
+            Some(value) => spawn.env("PLAYBOOK_SAFE_ROOTS", value),
+            None => spawn.env_remove("PLAYBOOK_SAFE_ROOTS"),
+        };
+        if let Some(dir) = cwd {
+            spawn.current_dir(dir);
+        }
+        let out = spawn.output().expect("playbook binary should spawn");
         assert!(
             out.status.success(),
             "a guard must exit 0 even when denying"
         );
-        let stdout = String::from_utf8_lossy(&out.stdout);
+        String::from_utf8_lossy(&out.stdout).to_string()
+    }
+
+    fn is_deny(stdout: &str) -> bool {
         if stdout.trim().is_empty() {
             return false;
         }
@@ -74,6 +85,28 @@ mod rm_workspace_guard {
             "non-empty output must be a deny: {stdout}"
         );
         true
+    }
+
+    /// Runs with an explicit safe-root list and the repo as cwd, so the result
+    /// never depends on where the suite happens to be invoked from.
+    fn blocked(command: &str, roots: &str) -> bool {
+        is_deny(&run_guard_in(command, Some(roots), None))
+    }
+
+    /// The zero-config path. `blocked` above can never reach it, because it sets
+    /// the variable on every call.
+    fn blocked_defaulting(command: &str, cwd: &Path) -> bool {
+        is_deny(&run_guard_in(command, None, Some(cwd)))
+    }
+
+    /// A scratch dir resolved through its symlinks. macOS temp dirs live under
+    /// `/var`, a symlink to `/private/var`, while `git rev-parse --show-toplevel`
+    /// and `getcwd` both report the resolved form. The guard's `canon()` is
+    /// deliberately lexical and never touches the filesystem, so an unresolved
+    /// fixture path would compare unequal to the derived root and the case would
+    /// fail on path form rather than on guard logic.
+    fn real_dir(tag: &str) -> PathBuf {
+        fs::canonicalize(scratch(tag)).expect("scratch dir should resolve")
     }
 
     fn home() -> String {
@@ -181,6 +214,145 @@ mod rm_workspace_guard {
             &format!("{d} -rf {e}/passwd"),
             "/nonexistent/definitely/not/here"
         ));
+    }
+
+    /// With the variable unset the repo root becomes the safe root. The negative
+    /// half is the point: a sibling of the repo must still block, or the default
+    /// would have widened to the whole temp parent.
+    #[test]
+    fn an_unset_variable_defaults_to_the_git_repo_root() {
+        let d = del();
+        let repo = real_dir("default-repo");
+        let sibling = real_dir("default-repo-sibling");
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "-q"])
+            .output()
+            .expect("git should run");
+        fs::create_dir_all(repo.join("sub")).expect("sub dir");
+
+        let (inside, outside) = (repo.display(), sibling.display());
+        assert!(
+            !blocked_defaulting(&format!("{d} -rf {inside}/sub/file"), &repo),
+            "the repo root is the default safe root"
+        );
+        assert!(
+            blocked_defaulting(&format!("{d} -rf {outside}/file"), &repo),
+            "a sibling of the repo root is outside it"
+        );
+    }
+
+    /// No repo, so the fallback drops through to the cwd itself.
+    #[test]
+    fn an_unset_variable_outside_a_git_repo_defaults_to_the_cwd() {
+        let d = del();
+        let plain = real_dir("default-plain");
+        let sibling = real_dir("default-plain-sibling");
+
+        let (inside, outside) = (plain.display(), sibling.display());
+        assert!(
+            !blocked_defaulting(&format!("{d} -rf {inside}/file"), &plain),
+            "the cwd is the default safe root when there is no repo"
+        );
+        assert!(
+            blocked_defaulting(&format!("{d} -rf {outside}/file"), &plain),
+            "a sibling of the cwd is outside it"
+        );
+    }
+
+    /// `safe_roots()` branches on `configured.is_empty()`, so an explicitly empty
+    /// value has to take the same path as an absent one.
+    #[test]
+    fn an_empty_variable_behaves_like_unset() {
+        let (d, e) = (del(), etc());
+        let plain = real_dir("empty-var");
+        let inside = plain.display();
+
+        assert!(
+            is_deny(&run_guard_in(
+                &format!("{d} -rf {e}/passwd"),
+                Some(""),
+                Some(&plain)
+            )),
+            "an empty value must not open the allowlist"
+        );
+        assert!(
+            !is_deny(&run_guard_in(
+                &format!("{d} -rf {inside}/file"),
+                Some(""),
+                Some(&plain)
+            )),
+            "it falls back to the default root rather than blocking everything"
+        );
+    }
+
+    /// A relative root is canon-ed against the guard's own cwd. Both halves are
+    /// needed: resolving to the wrong directory would show up as a false allow
+    /// elsewhere, not as a failure on the intended path.
+    #[test]
+    fn a_relative_root_resolves_against_the_guards_cwd() {
+        let (d, e) = (del(), etc());
+        let base = real_dir("relative-root");
+        fs::create_dir_all(base.join("relroot")).expect("relroot dir");
+        let inside = base.display();
+
+        assert!(
+            !is_deny(&run_guard_in(
+                &format!("{d} -rf {inside}/relroot/file"),
+                Some("relroot"),
+                Some(&base)
+            )),
+            "a relative root resolves against the cwd"
+        );
+        assert!(
+            is_deny(&run_guard_in(
+                &format!("{d} -rf {e}/passwd"),
+                Some("relroot"),
+                Some(&base)
+            )),
+            "and must not widen into a blanket allow"
+        );
+    }
+
+    /// The only assertion on the deny message's CONTENT. Without it the message
+    /// could regress to a hardcoded `~/Workspace` literal with every other test
+    /// in this file still green.
+    #[test]
+    fn the_deny_reason_names_the_roots_in_effect() {
+        let (h, d, e) = (home(), del(), etc());
+        let (first, second) = (format!("{h}/a"), format!("{h}/b"));
+        let out = run_guard_in(
+            &format!("{d} -rf {e}/passwd"),
+            Some(&format!("{first}:{second}")),
+            None,
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(out.trim()).expect("a deny must be valid JSON");
+        let reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .expect("a deny must carry a reason");
+        assert!(
+            reason.contains(&first) && reason.contains(&second),
+            "the reason must name the roots actually in effect: {reason}"
+        );
+    }
+
+    /// ACCEPTED false positive, pinned so it is not "discovered" as a bug later.
+    /// The tokenizer cannot tell a heredoc body from a command, so a body merely
+    /// QUOTING a deletion still blocks. The trade-off is intentional; the old
+    /// shell suite documented it at :97-102 and this keeps that record.
+    #[test]
+    fn a_heredoc_body_quoting_a_deletion_is_an_accepted_false_positive() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        assert!(
+            blocked(
+                &format!("cat <<EOF\nold script did {d} -rf {e}/example here\nEOF"),
+                &ws
+            ),
+            "nothing is deleted here, but the tokenizer cannot know that"
+        );
     }
 
     #[test]
