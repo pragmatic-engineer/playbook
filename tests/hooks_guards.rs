@@ -14,10 +14,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Scratch space for fixtures, deliberately NOT `std::env::temp_dir()`.
+///
+/// The guard always allows paths inside `/tmp`, and on Linux `temp_dir()` IS
+/// `/tmp`. A fixture placed there would be allowed no matter what the root
+/// derivation did, so every "this is allowed" assertion built on one would pass
+/// even with root handling completely broken, while still looking meaningful on
+/// macOS where `temp_dir()` is `/var/folders`.
 fn scratch(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir =
-        std::env::temp_dir().join(format!("playbook-guards-{tag}-{}-{n}", std::process::id()));
+    let base = PathBuf::from(std::env::var("HOME").expect("HOME")).join(".cache/playbook-tests");
+    let dir = base.join(format!("playbook-guards-{tag}-{}-{n}", std::process::id()));
     fs::create_dir_all(&dir).expect("scratch dir");
     dir
 }
