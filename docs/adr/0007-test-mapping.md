@@ -3,10 +3,26 @@
 - **Parent ADR:** `docs/adr/0007-rust-binary-for-hooks-and-launcher.md`
 - **Blueprint:** `docs/adr/0007-rust-binary-for-hooks-and-launcher-blueprint.md`
 - **Started:** 2026-08-18
-- **Status: COMPLETE. Suite-level mapping is done and measured for all 15 suites.
-  Per-scenario rows are COMPLETE for all 15 of 15 suites, covering all 214 old
-  scenarios with zero blank rows. WU-14's acceptance rule is satisfied for every
-  suite and both `shell/` python scripts it deletes.**
+- **Status: PARTIAL, and read the scope line before trusting it.**
+  - **The 15 ported python suites: COMPLETE.** Suite-level mapping is done and
+    measured for all 15. Per-scenario rows are complete for 15 of 15, covering
+    all 214 old scenarios with zero blank rows. WU-14's acceptance rule is
+    satisfied for every one of those suites and both `shell/` python scripts it
+    deletes.
+  - **The 4 guard suites: 69 of 78 scenarios mapped, 9 BLANK.** Added
+    2026-08-22. `hooks/*.sh | delete | the 4 guards` is in WU-14's file list, so
+    the same acceptance rule applies to them, and it is **not** satisfied.
+    `hooks/bg-await-guard.test.sh`, `hooks/no-dash-guard.test.sh` and
+    `hooks/precommit-check.test.sh` are clear and may be deleted.
+    **`hooks/rm-workspace-guard.test.sh` may NOT be deleted:** 9 of its 30
+    scenarios have no Rust counterpart. See the section at the end.
+
+**The earlier version of this line read "COMPLETE ... for all 15 of 15 suites"
+with no scope qualifier, while the four guard suites had no rows at all.** Read
+quickly, it said the gate was satisfied. It was not, and the file it cleared by
+implication is the one that blocks `rm` outside the workspace. Anything that
+narrows this file's scope must say so in the status line itself, not only in the
+section that does the narrowing.
 
 ## What this file is for
 
@@ -65,6 +81,28 @@ counts come from `cargo test --test <name>`.
 **Totals: 214 old scenarios. 141 Rust integration tests plus 50 unit tests, 191
 in all.** Again, these totals prove nothing on their own; see the caveat above.
 
+### The 4 guard suites, measured 2026-08-22
+
+These were missing from this table entirely until 2026-08-22, which is how the
+status line above came to imply a gate they had never been checked against.
+WU-14 deletes them (`hooks/*.sh | delete | the 4 guards`), so they need rows on
+the same terms as everything else. All four map into `tests/hooks_guards.rs`,
+whose 30 tests sit in four `mod` blocks named for the four scripts.
+
+| Old suite | Old cases | New Rust home | New tests | Per-scenario rows |
+|---|---|---|---|---|
+| `hooks/bg-await-guard.test.sh` | 19 | `tests/hooks_guards.rs::bg_await_guard` | 6 | **DONE, see below** |
+| `hooks/no-dash-guard.test.sh` | 17 | `tests/hooks_guards.rs::no_dash_guard` | 8 | **DONE, see below** |
+| `hooks/precommit-check.test.sh` | 12 | `tests/hooks_guards.rs::precommit_check` | 7 | **DONE, see below** |
+| `hooks/rm-workspace-guard.test.sh` | 30 | `tests/hooks_guards.rs::rm_workspace_guard` | 9 | **9 BLANK, deletion blocked** |
+
+**Totals: 78 old guard scenarios against 30 Rust tests. 69 mapped, 9 blank.**
+This is the suite where the naive-count warning at the top of this file does
+*not* explain the gap away. 19 old bg-await scenarios really do collapse into 3
+table-driven Rust tests holding the same 19 command strings verbatim, and that
+is honest compression. The 9 blanks below are not compression; the behaviour is
+absent.
+
 `hooks/rebuild-memory-graph.test.sh` at 61 old scenarios against 24 Rust tests
 is the widest gap and the one to fill in first. It is also the suite whose port
 already shipped a real defect (inline `anchors:` silently dropped), found by
@@ -88,6 +126,16 @@ New behaviour, so nothing to map, and nothing blocks on them:
 - Every `hooks/*.test.sh` above: the python hook it tests is still live, because
   `hooks/hooks.json` still routes all 11 functional hooks at python. Deleting a
   suite while its subject is in production removes the only check on it.
+  **Amended 2026-08-22: this reason has expired.** `hooks/hooks.json` now holds
+  one `"command"`, the `SessionStart` migration shim, and a real install wires
+  16 hooks as bare `playbook hook <name>`. The python hooks are no longer in
+  production, so the rule above no longer blocks anything; the suites that
+  remain are gated by their mapping rows alone.
+- **`hooks/rm-workspace-guard.test.sh`: blocked on 9 unmapped scenarios, not on
+  its subject being live.** Added 2026-08-22. This is the only guard suite still
+  held back. It is the `rm`-outside-the-workspace guard, and the 9 blanks are
+  concentrated on the zero-config default-root path that no Rust test reaches.
+  See the per-scenario section near the end of this file.
 
 ## Per-scenario rows: `hooks/rebuild-memory-graph.test.sh`
 
@@ -481,6 +529,211 @@ the expected VALUE instead. Two further traps: `common.test.sh`'s helper contain
 `incr-counter.test.sh` has one INLINE pass site (`lock-dir-absent`) that no
 `check` grep will find, so it reads as 6 against a real 7. Both were caught by
 reconciling against the suites' own summary lines.
+
+## Per-scenario rows: `hooks/bg-await-guard.test.sh`
+
+**COMPLETE. All 19 old scenarios accounted for, zero blank rows, so WU-14 may
+delete this suite.** The old suite passes `run <expect> <bg> <command>` with no
+label, so the command string is the case. All 19 strings appear verbatim in
+`mod bg_await_guard`, in the same order, across three table-driven tests.
+
+### Warn: backgrounded and await-sensitive (12) into `backgrounded_await_sensitive_commands_warn`
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| `npm install` (1) | `backgrounded_await_sensitive_commands_warn` | array element 1, verbatim |
+| `rm -rf node_modules package-lock.json && npm install` (1) | same | element 2, verbatim |
+| `pnpm install --frozen-lockfile` (1) | same | element 3, verbatim |
+| `yarn install` (1) | same | element 4, verbatim |
+| `bun install` (1) | same | element 5, verbatim |
+| `npm ci` (1) | same | element 6, verbatim |
+| `npm run build` (1) | same | element 7, verbatim |
+| `tsc && tsc-alias` (1) | same | element 8, verbatim |
+| `make build` (1) | same | element 9, verbatim |
+| `cargo build --release` (1) | same | element 10, verbatim |
+| `pip install -r requirements.txt` (1) | same | element 11, verbatim |
+| `rm -rf node_modules` (1) | same | element 12, verbatim |
+
+### Quiet: same commands in the foreground (3) into `the_same_commands_in_the_foreground_stay_quiet`
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| `npm install` foreground (1) | `the_same_commands_in_the_foreground_stay_quiet` | element 1, `background = false` |
+| `npm run build` foreground (1) | same | element 2 |
+| `rm -rf node_modules && npm install` foreground (1) | same | element 3 |
+
+### Quiet: legitimately long-running watches (4) into `long_running_watches_are_left_alone`
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| `npm run dev` backgrounded (1) | `long_running_watches_are_left_alone` | element 1 |
+| `vite --host` backgrounded (1) | same | element 2 |
+| `tail -f /var/log/app.log` backgrounded (1) | same | element 3 |
+| `node server.js` backgrounded (1) | same | element 4 |
+
+Adds, with no old counterpart:
+
+| New test | What it adds |
+|---|---|
+| `build_tools_only_match_at_a_command_start` | `echo tsc` and `grep make Makefile` must not trip; `a; tsc` must, so the anchor is a separator and not a blanket substring |
+| `the_env_switch_disables_the_guard` | `BG_AWAIT_GUARD=0` silences it |
+| `malformed_payloads_exit_silently` | Empty, `{`, `null`, no `command`, and a payload with no `run_in_background` key |
+
+## Per-scenario rows: `hooks/no-dash-guard.test.sh`
+
+**COMPLETE. All 17 old scenarios accounted for, zero blank rows, so WU-14 may
+delete this suite.** Note the old suite's clean-body-file pair maps into the
+*blocking* Rust test rather than the allow test: `a_dash_inside_a_referenced_body_file_blocks`
+deliberately carries both halves, so that "blocks whenever a `--body-file` flag
+appears" cannot satisfy it.
+
+### Block: inline em/en dash in a posting command (5) into `posting_commands_with_an_inline_dash_block`
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| `gh pr edit 42 --title "... — really"` (1) | `posting_commands_with_an_inline_dash_block` | element 1, U+2014 |
+| `gh pr create --title "fix: a – b" --body "x"` (1) | same | element 2, U+2013 |
+| `git commit -m "... — after invalidation"` (1) | same | element 3 |
+| `git tag -a v1.0 -m "release – first"` (1) | same | element 4 |
+| `gh pr comment 42 --body "nice work — ship it"` (1) | same | element 5 |
+
+### Block: dash inside a referenced body/message file (4) into `a_dash_inside_a_referenced_body_file_blocks`
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| `gh pr create --body-file $DASH_FILE --title "clean title"` (1) | `a_dash_inside_a_referenced_body_file_blocks` | blocking loop, element 1 |
+| `gh pr edit 42 --body-file=$DASH_FILE` (1) | same | element 2, the `=` form |
+| `git commit -F $DASH_FILE` (1) | same | element 3 |
+| `gh api -X POST ... --input $DASH_FILE` (1) | same | element 4 |
+
+### Allow: clean posting commands (4)
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| `gh pr edit 42 --title "... - really"` (1) | `clean_posting_commands_pass` | element 1, ascii hyphen |
+| `git commit -m "fix: stop stale reads after invalidation"` (1) | same | element 2 |
+| `gh pr create --body-file $CLEAN_FILE --title "clean title"` (1) | `a_dash_inside_a_referenced_body_file_blocks` | the allow loop, element 1 |
+| `git commit -F $CLEAN_FILE` (1) | same | the allow loop, element 2 |
+
+### Allow: non-posting commands are never guarded (4) into `non_posting_commands_are_never_guarded`
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| `echo "a — b"` (1) | `non_posting_commands_are_never_guarded` | element 1 |
+| `grep -n "–" notes.md` (1) | same | element 2 |
+| `gh pr view 42` (1) | same | element 3 |
+| `gh pr diff 42` (1) | same | element 4 |
+
+Adds, with no old counterpart:
+
+| New test | What it adds |
+|---|---|
+| `every_dash_in_the_family_blocks_a_posting_command` | `DASH_FAMILY` U+2012 figure and U+2015 horizontal bar. The shell suite only ever exercised en and em, so the outer two were unproven |
+| `a_missing_body_file_does_not_block` | An unreadable path must not become a false deny |
+| `the_env_switch_disables_the_guard` | `NO_DASH_GUARD=0` silences it |
+| `malformed_and_empty_payloads_exit_silently` | Empty, `{`, `null`, no `command`, and `"tool_input":null` |
+
+## Per-scenario rows: `hooks/precommit-check.test.sh`
+
+**COMPLETE. All 12 old scenarios accounted for, zero blank rows, so WU-14 may
+delete this suite.** The old suite's `run` helper fails any case that emits a
+`permissionDecision: deny`; the Rust `warns_in` helper asserts the same
+never-block property on every call, so that guarantee is preserved per-case
+rather than in a single dedicated test.
+
+| Old scenario (verbatim label) | New test | How it is covered |
+|---|---|---|
+| `git log is not a commit` (1) | `only_a_real_commit_is_inspected` | loop element 1 |
+| `git status is not a commit` (1) | same | element 2 |
+| `commit --help is not a commit` (1) | same | element 3 |
+| `clean small staged diff` (1) | same | the trailing direct assert, staged `a.txt` |
+| `nothing staged` (1) | `nothing_staged_is_quiet` | direct, untracked `b.txt` only |
+| `staged .env` (1) | `secret_shaped_filenames_warn` | table row `("env", ".env", true)`, `add -f` |
+| `staged .pem` (1) | same | table row `("pem", "server.pem", false)` |
+| `console.log added` (1) | `debug_leftovers_in_added_lines_warn` | table row `("js", "app.js", ...)` |
+| `breakpoint added` (1) | same | table row `("py", "app.py", ...)` |
+| `over 600 changed lines` (1) | `oversized_commits_warn_by_lines_and_by_files` | first half, 700-line `big.txt` |
+| `over 20 files` (1) | same | second half, 25 files |
+| `PRECOMMIT_CHECK=0 should silence the guard` (1) | `the_env_switch_disables_the_guard` | direct, staged `.env` plus `PRECOMMIT_CHECK=0` |
+
+Adds, with no old counterpart:
+
+| New test | What it adds |
+|---|---|
+| `secret_shaped_filenames_warn` row `("key", "id_rsa", false)` | A third secret shape the shell suite never tried |
+| `outside_a_git_repo_it_is_quiet` | No repo means no diff; the guard must not surface git's error |
+
+## Per-scenario rows: `hooks/rm-workspace-guard.test.sh`
+
+**INCOMPLETE. 21 of 30 old scenarios mapped, 9 BLANK. WU-14 may NOT delete this
+suite.** This is the guard that blocks `rm` outside the workspace, so the blanks
+below are the highest-consequence gap in this file, wider in kind than the
+`rebuild-memory-graph` count gap the top of this file calls the highest risk.
+
+**Root cause of every blank: the Rust helper always sets the variable.**
+`tests/hooks_guards.rs:56` defines `blocked(command, roots)` and `:61` sets
+`PLAYBOOK_SAFE_ROOTS` on every single invocation. Grepping the whole Rust tree
+for `PLAYBOOK_SAFE_ROOTS` returns exactly that one line in `tests/`, so **no
+Rust test ever runs this guard with the variable unset or empty**, and
+`src/hooks/rm_workspace_guard.rs` carries no `#[cfg(test)]` block of its own.
+That leaves `safe_roots()` at `:76` and `git_repo_root()` at `:89`, the entire
+zero-config fallback chain, executed only in production.
+
+The shell suite covered that chain deliberately. Its comment at `:63-66` calls
+those cases "the regression proof that the zero-config default is no weaker than
+the old hardcoded `~/Workspace`, i.e. it must NOT default to `$HOME` (that would
+unblock `~/.ssh` and `~/.aws`)". Deleting the suite as it stands drops that proof.
+
+### Mapped (21)
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| allow `rm -rf $HOME/Workspace/proj/build` (1) | `targets_inside_a_safe_root_are_allowed` | element 1 |
+| allow `rm $HOME/Workspace/a.txt` (1) | same | element 2 |
+| allow `rm -rf ~/Workspace/proj/node_modules` (1) | same | element 3, tilde form |
+| allow `rm -rf $HOME/.claude/cache/x` (1) | same | element 4, `~/.claude` always allowed |
+| allow `rm -rf $HOME/Workspace/proj/sub/../build` (1) | same | element 5, `..` collapsing back inside |
+| block `rm -rf /etc/passwd` (1) | `targets_outside_every_safe_root_are_blocked` | element 1 |
+| block `rm $HOME/secrets.txt` (1) | same | element 2 |
+| block `rm -rf /` (1) | same | element 3 |
+| block `rm -rf ~/Workspace/../.ssh` (1) | `dot_dot_traversal_out_of_a_safe_root_is_blocked` | element 1 |
+| block `rm -rf $HOME/Workspace/../../../etc/passwd` (1) | same | element 2 |
+| block `rm -rf $HOME/.claude/../.aws/credentials` (1) | same | element 3, escaping the always-on root |
+| block traversal escaping a configured root, case 9 (1) | same | element 1 is the identical shape, `<root>/../.ssh` |
+| block `cd /tmp && rm -rf foo` (1) | `unresolvable_commands_are_blocked_conservatively` | first assert |
+| block `rm -rf $(echo /etc)` (1) | same | second assert, substitution |
+| block `rm` on line 2 after a newline (1) | `multiline_and_tab_separated_commands_are_still_inspected` | first assert |
+| block tab-separated `rm` (1) | same | second assert |
+| allow multi-line with no `rm` on any line (1) | same | third assert |
+| allow `rm` on line 2 targeting an allowed root (1) | same | fourth assert |
+| allow target in the second of two colon-separated roots, case 4 (1) | `multiple_roots_are_all_honoured` | `$h/b/file` allowed against `$h/a:$h/b` |
+| allow trailing-slash root, case 6 (1) | `a_trailing_slash_on_a_root_still_matches` | direct |
+| block with a nonexistent root, case 8 (1) | `a_nonexistent_root_blocks_everything_outside_it` | direct |
+
+### BLANK: no Rust counterpart (9)
+
+Each row here blocks the deletion under WU-14's acceptance rule. The right fix
+is a Rust test, not a mapping edit.
+
+| Old scenario | New test | Why it is blank |
+|---|---|---|
+| block heredoc body containing `rm -rf /etc/example` (1) | *(none)* | The **accepted false positive**, pinned at `:97-102` precisely so it is not "discovered as a bug later". No Rust test pins it, so the deliberate trade-off is undocumented in the new suite and a future change could silently flip it |
+| allow `rm -rf $repo_dir/sub/file`, unset, cwd inside a git repo, case 1 (1) | *(none)* | Needs `PLAYBOOK_SAFE_ROOTS` unset and cwd in a scratch repo; exercises `git_repo_root()` |
+| block `rm -rf $repo_sibling/file`, unset, case 2 (1) | *(none)* | The negative half: a sibling of the repo root is outside it |
+| allow `rm -rf $plain_dir/file`, unset, cwd NOT in a git repo, case 3 (1) | *(none)* | Exercises the `current_dir()` leg of the fallback |
+| block `rm -rf $plain_sibling/file`, unset, case 3 (1) | *(none)* | The negative half of the cwd leg |
+| block `rm -rf /etc/passwd` with `PLAYBOOK_SAFE_ROOTS=""`, case 5 (1) | *(none)* | Empty-string-behaves-like-unset. `safe_roots()` branches on `configured.is_empty()`; nothing tests that branch |
+| allow `rm -rf $rel_base/relroot/file` with a relative root, case 7 (1) | *(none)* | A relative root canon-ed against the guard's own cwd |
+| block `rm -rf /etc/passwd` with that same relative root, case 7 (1) | *(none)* | Proves the relative root does not widen into a false allow elsewhere |
+| deny reason names the roots in effect, case 10 (1) | *(none)* | The only old assertion on `permissionDecisionReason` content. Both Rust helpers assert `"permissionDecision":"deny"` and never inspect the reason, so the message could regress to a hardcoded `~/Workspace` literal with every test still green |
+
+### What unblocks the deletion
+
+Nine tests in `mod rm_workspace_guard`, or fewer if table-driven. Two helper
+changes carry most of it: a variant of `blocked()` that leaves
+`PLAYBOOK_SAFE_ROOTS` unset and sets `current_dir`, which covers six rows, and
+one assertion on `permissionDecisionReason` content, which covers the last.
+The heredoc row needs only a single case appended to the existing multiline test.
 
 ## Deletion pre-flight: what still EXECUTES these files
 
