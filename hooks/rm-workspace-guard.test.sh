@@ -69,7 +69,24 @@ run block "rm -rf $HOME/Workspace/../../../etc/passwd"
 run block "rm -rf $HOME/.claude/../.aws/credentials"
 
 # --- Blocked: relative target after a cd (unresolvable, conservative block) ---
+# Still blocked even though /tmp is an allowed root: the block is about the
+# unresolvable relative target `foo`, not about where the cd points.
 run block "cd /tmp && rm -rf foo"
+
+# --- Allowed: scratch space, whatever PLAYBOOK_SAFE_ROOTS says ---
+# Both spellings, because canon() is lexical and macOS /tmp is a symlink to
+# /private/tmp, so matching one would allow /tmp/x and block /private/tmp/x.
+run allow "rm -rf /tmp/scratch-file"
+run allow "rm -rf /private/tmp/scratch-file"
+
+# --- Blocked: the temp root ITSELF, unlike a configured safe root ---
+# Wiping it takes out sockets and runtime state live processes depend on.
+run block "rm -rf /tmp"
+run block "rm -rf /private/tmp"
+
+# --- Blocked: the temp exemption is by resolved path, not by spelling ---
+run block "rm -rf /tmp/../etc/passwd"
+run block "rm -rf /tmpfoo/file"
 
 # --- Allowed: `..` that stays inside the allowlist ---
 export PLAYBOOK_SAFE_ROOTS="$HOME/Workspace"

@@ -9,13 +9,20 @@
     all 214 old scenarios with zero blank rows. WU-14's acceptance rule is
     satisfied for every one of those suites and both `shell/` python scripts it
     deletes.
-  - **The 4 guard suites: COMPLETE, 78 of 78 scenarios mapped.** Mapped
+  - **The 4 guard suites: COMPLETE, 84 of 84 scenarios mapped.** Mapped
     2026-08-22. `hooks/*.sh | delete | the 4 guards` is in WU-14's file list, so
     the same acceptance rule applies to them. The mapping opened 9 blank rows in
     `hooks/rm-workspace-guard.test.sh`; **all 9 were closed the same day** by 6
     new tests in `tests/hooks_guards.rs::rm_workspace_guard`, taking that file
     from 30 tests to 36. All four guard suites are now clear to delete.
-  - **Combined: 292 old scenarios across 19 suites, zero blank rows.**
+  - **Temp-directory exemption, added 2026-08-22 after the mapping.** Paths
+    inside `/tmp` and `/private/tmp` are now allowed regardless of
+    `PLAYBOOK_SAFE_ROOTS`, the temp root itself still blocks. Added to BOTH
+    implementations at once and to both suites: 6 scenarios to the shell suite
+    (30 -> 36) and 2 tests to the Rust one (36 -> 38). Changing only the Rust
+    side would have made WU-14d's deletion a silent behaviour change, since the
+    shell guard is still what a pre-`init` machine actually runs.
+  - **Combined: 298 old scenarios across 19 suites, zero blank rows.**
 
 **The earlier version of this line read "COMPLETE ... for all 15 of 15 suites"
 with no scope qualifier, while the four guard suites had no rows at all.** Read
@@ -87,16 +94,16 @@ These were missing from this table entirely until 2026-08-22, which is how the
 status line above came to imply a gate they had never been checked against.
 WU-14 deletes them (`hooks/*.sh | delete | the 4 guards`), so they need rows on
 the same terms as everything else. All four map into `tests/hooks_guards.rs`,
-whose 30 tests sit in four `mod` blocks named for the four scripts.
+whose 38 tests sit in four `mod` blocks named for the four scripts.
 
 | Old suite | Old cases | New Rust home | New tests | Per-scenario rows |
 |---|---|---|---|---|
 | `hooks/bg-await-guard.test.sh` | 19 | `tests/hooks_guards.rs::bg_await_guard` | 6 | **DONE, see below** |
 | `hooks/no-dash-guard.test.sh` | 17 | `tests/hooks_guards.rs::no_dash_guard` | 8 | **DONE, see below** |
 | `hooks/precommit-check.test.sh` | 12 | `tests/hooks_guards.rs::precommit_check` | 7 | **DONE, see below** |
-| `hooks/rm-workspace-guard.test.sh` | 30 | `tests/hooks_guards.rs::rm_workspace_guard` | 15 | **DONE, see below** |
+| `hooks/rm-workspace-guard.test.sh` | 36 | `tests/hooks_guards.rs::rm_workspace_guard` | 17 | **DONE, see below** |
 
-**Totals: 78 old guard scenarios against 36 Rust tests, all 78 mapped.** This is
+**Totals: 84 old guard scenarios against 38 Rust tests, all 84 mapped.** This is
 the suite where the naive-count warning at the top of this file did *not* explain
 the gap away. 19 old bg-await scenarios really do collapse into 3 table-driven
 Rust tests holding the same 19 command strings verbatim, and that is honest
@@ -667,7 +674,7 @@ Adds, with no old counterpart:
 
 ## Per-scenario rows: `hooks/rm-workspace-guard.test.sh`
 
-**COMPLETE. All 30 old scenarios accounted for, zero blank rows, so WU-14 may
+**COMPLETE. All 36 old scenarios accounted for, zero blank rows, so WU-14 may
 delete this suite.** It got there in two steps on 2026-08-22: the mapping found
 21 of 30 covered and 9 blank, and the 9 were closed by writing tests, not by
 adjusting the table. This is the guard that blocks `rm` outside the workspace,
@@ -743,8 +750,24 @@ row above.
 | block outside with that same relative root, case 7 (1) | same | second assert, proving no widening into a false allow |
 | deny reason names the roots in effect, case 10 (1) | `the_deny_reason_names_the_roots_in_effect` | parses `hookSpecificOutput.permissionDecisionReason` and asserts both configured roots appear; the only content assertion on the message |
 
-The 6 tests rest on two helper changes, both of which are the actual fix rather
-than a restatement of the old suite:
+### Added to both suites 2026-08-22: the temp exemption (6)
+
+Not a port. These scenarios were written into the shell suite and the Rust suite
+in the same change, so the pair stays at parity right up to the deletion. Both
+implementations were verified against each other on 11 commands, including
+`~/.ssh/id_rsa`, with zero disagreements.
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| allow `/tmp/scratch-file` (1) | `paths_inside_temp_are_allowed_but_the_temp_root_is_not` | allow loop, element 1 |
+| allow `/private/tmp/scratch-file` (1) | same | allow loop, element 2, the macOS resolved spelling |
+| block `/tmp` itself (1) | same | block loop, element 1 |
+| block `/private/tmp` itself (1) | same | block loop, element 2 |
+| block `/tmp/../etc/passwd` (1) | `the_temp_exemption_does_not_leak_through_traversal_or_prefixes` | first assert, `canon` collapses the traversal first |
+| block `/tmpfoo/file` (1) | same | second assert, component-wise prefix match |
+
+The 6 zero-config tests rest on two helper changes, both of which are the actual
+fix rather than a restatement of the old suite:
 
 - `run_guard_in(command, roots, cwd)` takes `roots: Option<&str>` and, on `None`,
   calls `env_remove` rather than setting an empty value. Removing it matters:
