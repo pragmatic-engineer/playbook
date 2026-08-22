@@ -335,7 +335,8 @@ fn additional_context_output_is_valid_json_with_pretooluse_event_name() {
 }
 
 /// No shell equivalent for this hook (unlike rebuild-memory-graph, which
-/// hooks/graph_writer's tests compare against hooks/rebuild-memory-graph.py);
+/// hooks/graph_writer's tests compare against a frozen golden of that
+/// script's output, see tests/fixtures/golden/README.md);
 /// this is the equivalent cross-implementation comparison against
 /// hooks/memory-anchors.py, feeding both implementations the same
 /// graph.json fixture and the same edit.

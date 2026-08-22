@@ -122,19 +122,13 @@ Then write each approved fact:
 
 `~/.claude/memory/graph.json` is a single graph covering every fact, global and project. It rebuilds automatically: the `rebuild-memory-graph.py` PostToolUse hook fires whenever a fact file under `~/.claude/memory/` is saved, so once Phase 4 has written the facts the graph is already current. Normally you skip this phase.
 
-`--graph-only` forces a rebuild without re-collecting, for use after hand-editing fact files. The hook ships inside the plugin, so it is NOT at `~/.claude/hooks/`; resolve it from `$CLAUDE_PLUGIN_ROOT` when that is set (it only is inside a hook run) and fall back to the newest installed version:
+`--graph-only` forces a rebuild without re-collecting, for use after hand-editing fact files:
 
 ```bash
-HOOK="${CLAUDE_PLUGIN_ROOT:-}/hooks/rebuild-memory-graph.py"
-if [ ! -f "$HOOK" ]; then
-  HOOK="$(ls -d "$HOME"/.claude/plugins/cache/*/playbook/*/hooks/rebuild-memory-graph.py \
-    2>/dev/null | sort -V | tail -1)"
-fi
-[ -f "$HOOK" ] || { echo "error: rebuild-memory-graph.py not found; is the plugin installed?" >&2; exit 1; }
-python3 "$HOOK" < /dev/null
+playbook memory rebuild
 ```
 
-`< /dev/null` is deliberate. The hook skips unless the write it was told about is under `~/.claude/memory/`, but with no input at all it rebuilds unconditionally, which is exactly what a forced rebuild wants. Feeding it a synthetic `tool_input` payload works too and is more fragile, since it has to name a path inside the memory dir to avoid being skipped.
+**Why a dedicated subcommand rather than invoking the hook.** The hook skips unless the write it was told about is under `~/.claude/memory/`, which is right for a PostToolUse hook and leaves no way to force a full rebuild. This used to run `python3 hooks/rebuild-memory-graph.py < /dev/null`, because that script treated empty stdin as "rebuild everything". The Rust port dropped that branch deliberately (see `should_skip` in `src/hooks/rebuild_memory_graph.rs`), judging it unexercised by the hook's test suite. It was exercised, by this command. Faking a `tool_input` payload that names a path inside the memory dir would also work and is what the port's own doc calls the more fragile option, since it breaks silently the next time the skip logic changes.
 
 It walks every fact under `~/.claude/memory/`, derives each fact's scope (`global`, or `project` with its `owner/repo`), and writes `~/.claude/memory/graph.json` atomically. Nodes are facts plus their `anchors:` code locations; edges are the `links:` between facts and the fact→code anchors. Report the node and edge counts, and flag any dangling edge.
 

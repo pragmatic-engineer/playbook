@@ -59,6 +59,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: ManifestCommand,
     },
+    /// Memory-graph subcommands.
+    Memory {
+        #[command(subcommand)]
+        sub: MemoryCommand,
+    },
     /// Agent-definition validation subcommands, backing `src/agents/`.
     Agents {
         #[command(subcommand)]
@@ -87,6 +92,18 @@ pub enum SettingsCommand {
         /// Repo root that every hook command must resolve inside.
         repo_root: PathBuf,
     },
+}
+
+/// `playbook memory` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum MemoryCommand {
+    /// Rebuild `~/.claude/memory/graph.json` from every fact on disk.
+    ///
+    /// The PostToolUse hook rebuilds automatically when a fact is saved, so
+    /// this is only needed after hand-editing fact files. Forcing it through
+    /// the hook is not possible: the hook skips unless its payload names a
+    /// file under the memory dir.
+    Rebuild,
 }
 
 /// `playbook manifest` subcommands, backing `src/manifest/`.

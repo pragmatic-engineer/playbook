@@ -447,6 +447,19 @@ struct Edge {
     relation: String,
 }
 
+/// Rebuild the graph unconditionally, with no payload and no skip check.
+///
+/// Exists because `run` deliberately skips when the payload names no file
+/// under the memory dir, which is correct for a PostToolUse hook but leaves
+/// no way to force a rebuild. `commands/learn-project.md`'s `--graph-only`
+/// path needs exactly that: the python original treated empty stdin as
+/// "rebuild everything", and this port dropped that branch (see `should_skip`)
+/// on the grounds it was unexercised by the test suite. It was exercised, just
+/// by a slash command rather than a test.
+pub fn rebuild_now() {
+    rebuild();
+}
+
 fn rebuild() {
     let mem_dir = memory_dir();
     let mut nodes: Vec<Node> = Vec::new();
