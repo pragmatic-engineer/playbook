@@ -9,7 +9,7 @@
     all 214 old scenarios with zero blank rows. WU-14's acceptance rule is
     satisfied for every one of those suites and both `shell/` python scripts it
     deletes.
-  - **The 4 guard suites: COMPLETE, 84 of 84 scenarios mapped.** Mapped
+  - **The 4 guard suites: COMPLETE, 91 of 91 scenarios mapped.** Mapped
     2026-08-22. `hooks/*.sh | delete | the 4 guards` is in WU-14's file list, so
     the same acceptance rule applies to them. The mapping opened 9 blank rows in
     `hooks/rm-workspace-guard.test.sh`; **all 9 were closed the same day** by 6
@@ -22,7 +22,13 @@
     (30 -> 36) and 2 tests to the Rust one (36 -> 38). Changing only the Rust
     side would have made WU-14d's deletion a silent behaviour change, since the
     shell guard is still what a pre-`init` machine actually runs.
-  - **Combined: 298 old scenarios across 19 suites, zero blank rows.**
+  - **Quoted-token fix, added 2026-08-22.** A `rm` inside a quoted region now
+    counts as a command only when a separator puts it in command position, so a
+    commit message or PR title that merely mentions the guard stops blocking.
+    Outside quotes nothing changed, so `sudo rm`, `xargs rm` and `find -exec rm`
+    are all still caught. 7 scenarios to the shell suite (36 -> 43) and 2 tests
+    to the Rust one (38 -> 40), again in both implementations at once.
+  - **Combined: 305 old scenarios across 19 suites, zero blank rows.**
 
 **The earlier version of this line read "COMPLETE ... for all 15 of 15 suites"
 with no scope qualifier, while the four guard suites had no rows at all.** Read
@@ -94,16 +100,16 @@ These were missing from this table entirely until 2026-08-22, which is how the
 status line above came to imply a gate they had never been checked against.
 WU-14 deletes them (`hooks/*.sh | delete | the 4 guards`), so they need rows on
 the same terms as everything else. All four map into `tests/hooks_guards.rs`,
-whose 38 tests sit in four `mod` blocks named for the four scripts.
+whose 40 tests sit in four `mod` blocks named for the four scripts.
 
 | Old suite | Old cases | New Rust home | New tests | Per-scenario rows |
 |---|---|---|---|---|
 | `hooks/bg-await-guard.test.sh` | 19 | `tests/hooks_guards.rs::bg_await_guard` | 6 | **DONE, see below** |
 | `hooks/no-dash-guard.test.sh` | 17 | `tests/hooks_guards.rs::no_dash_guard` | 8 | **DONE, see below** |
 | `hooks/precommit-check.test.sh` | 12 | `tests/hooks_guards.rs::precommit_check` | 7 | **DONE, see below** |
-| `hooks/rm-workspace-guard.test.sh` | 36 | `tests/hooks_guards.rs::rm_workspace_guard` | 17 | **DONE, see below** |
+| `hooks/rm-workspace-guard.test.sh` | 43 | `tests/hooks_guards.rs::rm_workspace_guard` | 19 | **DONE, see below** |
 
-**Totals: 84 old guard scenarios against 38 Rust tests, all 84 mapped.** This is
+**Totals: 91 old guard scenarios against 40 Rust tests, all 91 mapped.** This is
 the suite where the naive-count warning at the top of this file did *not* explain
 the gap away. 19 old bg-await scenarios really do collapse into 3 table-driven
 Rust tests holding the same 19 command strings verbatim, and that is honest
@@ -674,7 +680,7 @@ Adds, with no old counterpart:
 
 ## Per-scenario rows: `hooks/rm-workspace-guard.test.sh`
 
-**COMPLETE. All 36 old scenarios accounted for, zero blank rows, so WU-14 may
+**COMPLETE. All 43 old scenarios accounted for, zero blank rows, so WU-14 may
 delete this suite.** It got there in two steps on 2026-08-22: the mapping found
 21 of 30 covered and 9 blank, and the 9 were closed by writing tests, not by
 adjusting the table. This is the guard that blocks `rm` outside the workspace,
@@ -765,6 +771,32 @@ implementations were verified against each other on 11 commands, including
 | block `/private/tmp` itself (1) | same | block loop, element 2 |
 | block `/tmp/../etc/passwd` (1) | `the_temp_exemption_does_not_leak_through_traversal_or_prefixes` | first assert, `canon` collapses the traversal first |
 | block `/tmpfoo/file` (1) | same | second assert, component-wise prefix match |
+
+### Added to both suites 2026-08-22: quoted tokens are prose (7)
+
+Also not a port. A `rm` inside a quoted region now counts as a command only when
+a separator puts it in command position.
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| allow `git commit -m "... rm on /etc/passwd"` (1) | `a_quoted_mention_is_prose_not_a_command` | element 1, double quotes |
+| allow `git commit -m '... rm on /etc/passwd ...'` (1) | same | element 2, single quotes |
+| allow a quoted mention plus a `$(...)` elsewhere (1) | same | element 3, the exact shape that blocked an agent mid-commit |
+| block `sudo rm -rf /etc/passwd` (1) | `quoting_does_not_hide_a_real_deletion` | element 1, unquoted is unchanged |
+| block `xargs rm -rf /etc/passwd` (1) | same | element 2 |
+| block `echo hi && rm -rf /etc/passwd` (1) | same | element 3 |
+| block `sh -c "cd /x && rm -rf /etc/passwd"` (1) | same | element 4, quoted but in command position |
+
+**Both directions are mutation-verified**, which matters here because the first
+attempt at the prose test was vacuous: a message whose other words are relative
+paths canonicalises inside the safe root, so the old code allowed it too and the
+test passed against the very behaviour it was meant to reject. Each case now
+carries an absolute path or a substitution.
+
+| Mutation | Result |
+|---|---|
+| `is_command = true`, the old behaviour | `a_quoted_mention_is_prose_not_a_command` fails; shell suite fails 3 |
+| `is_command = !quoted`, quoting as a blanket escape hatch | `quoting_does_not_hide_a_real_deletion` fails |
 
 The 6 zero-config tests rest on two helper changes, both of which are the actual
 fix rather than a restatement of the old suite:

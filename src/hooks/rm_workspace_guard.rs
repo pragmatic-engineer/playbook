@@ -162,6 +162,45 @@ fn is_allowed(target: &str, home: &str, claude_dir: &Path, safe_roots: &[PathBuf
 
 /// Walks the command left to right tracking whether the cursor sits inside an
 /// `rm`'s argument list, which is what lets `rm a && ls b` judge only `a`.
+/// Splits on spaces exactly as the previous tokenizer did, INCLUDING inside
+/// quotes, and keeps every quote character in the token text. Both choices are
+/// deliberate: identical tokens mean target judging is byte-for-byte unchanged,
+/// and splitting inside quotes is what still catches `sh -c "cd /x && rm -rf
+/// /etc"`. The only new information is whether each token began inside a quoted
+/// region.
+///
+/// An unbalanced quote leaves the remaining tokens marked quoted. That can only
+/// make the guard demand a separator before believing a deletion, never fewer
+/// checks on the unquoted path, so the failure direction is unchanged.
+fn tokenize(normalised: &str) -> Vec<(String, bool)> {
+    let mut tokens = Vec::new();
+    let (mut in_single, mut in_double) = (false, false);
+    let mut current = String::new();
+    let mut current_quoted = false;
+
+    for ch in normalised.chars() {
+        if ch == ' ' {
+            if !current.is_empty() {
+                tokens.push((std::mem::take(&mut current), current_quoted));
+            }
+            continue;
+        }
+        if current.is_empty() {
+            current_quoted = in_single || in_double;
+        }
+        current.push(ch);
+        match ch {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            _ => {}
+        }
+    }
+    if !current.is_empty() {
+        tokens.push((current, current_quoted));
+    }
+    tokens
+}
+
 fn offending_targets(
     cmd: &str,
     home: &str,
@@ -176,21 +215,35 @@ fn offending_targets(
     let mut in_rm = false;
     let mut saw_cd = false;
     let mut saw_rm = false;
+    // The very start of a command is a command position, same as after a `;`.
+    let mut prev_was_separator = true;
 
-    for token in normalised.split(' ').filter(|t| !t.is_empty()) {
-        if token == "cd" || token.ends_with("/cd") {
+    for (token, quoted) in tokenize(&normalised) {
+        let token = token.as_str();
+
+        // A word inside quotes is prose unless a separator put it in command
+        // position. `-m "fix: stop using rm"` is a message; `sh -c "cd /x && rm
+        // -rf /etc"` really does delete. Outside quotes nothing changes, so
+        // `sudo rm`, `xargs rm` and `find -exec rm` are all still caught.
+        let is_command = !quoted || prev_was_separator;
+
+        if is_command && (token == "cd" || token.ends_with("/cd")) {
             saw_cd = true;
+            prev_was_separator = false;
             continue;
         }
-        if token == "rm" || token.ends_with("/rm") {
+        if is_command && (token == "rm" || token.ends_with("/rm")) {
             in_rm = true;
             saw_rm = true;
+            prev_was_separator = false;
             continue;
         }
         if SEPARATORS.contains(&token) {
             in_rm = false;
+            prev_was_separator = true;
             continue;
         }
+        prev_was_separator = false;
         if !in_rm || token.starts_with('-') {
             continue;
         }
