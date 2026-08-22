@@ -13,6 +13,16 @@
 //! expand to anything, and a quoted path containing a space still splits into
 //! two tokens and is judged as two paths.
 //!
+//! **ACCEPTED MISS**, pinned so it is not re-reported as a vulnerability later:
+//! a command name that is obfuscated or built at runtime is not resolved, so it
+//! is not recognised as a deletion. Escaped and quote-split spellings, and names
+//! produced by command or parameter substitution, all fall in this class.
+//! Closing it needs word expansion, which for the substitution cases cannot be
+//! done statically at all. This is deliberate and in scope for a guard that
+//! exists to catch an ACCIDENT: no agent writes an obfuscated command name by
+//! accident, and the ordinary forms it would write, including `sudo`, `xargs`,
+//! `/bin/rm`, env prefixes and multi-line commands, are all still caught.
+//!
 //! **One documented divergence: JSON formatting.** This is the only guard that
 //! never sourced `lib/common.sh`; it piped through `jq -n`, so its output was
 //! pretty-printed while every other hook emits compact JSON. The port uses the

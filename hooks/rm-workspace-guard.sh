@@ -19,6 +19,16 @@
 # A bare `rm` inside a quoted region is treated as prose unless a separator puts
 # it in command position, so a commit message or PR title that mentions `rm` no
 # longer blocks, while `sh -c "cd /x && rm -rf /etc"` still does.
+#
+# ACCEPTED MISS, pinned so it is not re-reported as a vulnerability later: a
+# command name that is obfuscated or built at runtime is not resolved, so it is
+# not recognised as a deletion. Escaped and quote-split spellings, and names
+# produced by command or parameter substitution, all fall in this class. Closing
+# it needs word expansion, which cannot be done statically for the substitution
+# cases at all. This is deliberate and in scope for a guard that exists to catch
+# an ACCIDENT: no agent writes an obfuscated command name by accident, and the
+# ordinary forms it would write (including `sudo`, `xargs`, `/bin/rm`, env
+# prefixes and multi-line commands) are all still caught.
 set -u  # not -e: a parse failure must not exit non-zero and let the rm through
 
 CMD=$(jq -r '.tool_input.command // ""' -)
