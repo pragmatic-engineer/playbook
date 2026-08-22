@@ -8,7 +8,8 @@
 # fresh checkout needs no configuration, work inside your own project is
 # allowed, and ~/.ssh and ~/.aws stay blocked exactly as before ($HOME itself
 # is deliberately NOT the default: that would unblock them). $HOME/.claude is
-# always allowed, regardless of PLAYBOOK_SAFE_ROOTS.
+# always allowed, regardless of PLAYBOOK_SAFE_ROOTS, and so is anything INSIDE
+# /tmp or /private/tmp; the temp root itself still blocks.
 # Best-effort protection against an accidental rm, NOT a security boundary: it only
 # guards `rm` (not find -delete, unlink, or `>` truncation), and `rm` reached through
 # `$(...)` or a backtick is blocked conservatively rather than evaluated. A `cd` in
@@ -67,6 +68,17 @@ is_allowed() {
   local path="${1/#\~/$HOME}"
   path="$(canon "$path")"
   [[ "$path" == "$CLAUDE_DIR" || "$path" == "$CLAUDE_DIR/"* ]] && return 0
+  # Scratch space, allowed whatever SAFE_ROOTS says. Both spellings are listed
+  # because canon() is lexical and macOS /tmp is a symlink to /private/tmp, so
+  # matching one would allow /tmp/x while blocking the identical /private/tmp/x.
+  # The `/`* pattern requires something INSIDE the root, so `rm -rf /tmp` itself
+  # still blocks: it would take out sockets and runtime state that live
+  # processes depend on. canon() has already collapsed `..`, so /tmp/../etc is
+  # judged as /etc and blocks.
+  local tmp_root
+  for tmp_root in /tmp /private/tmp; do
+    [[ "$path" == "$tmp_root/"* ]] && return 0
+  done
   local root
   for root in ${SAFE_ROOTS[@]+"${SAFE_ROOTS[@]}"}; do
     [[ "$path" == "$root" || "$path" == "$root/"* ]] && return 0

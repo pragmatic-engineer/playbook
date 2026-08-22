@@ -69,7 +69,24 @@ run block "rm -rf $HOME/Workspace/../../../etc/passwd"
 run block "rm -rf $HOME/.claude/../.aws/credentials"
 
 # --- Blocked: relative target after a cd (unresolvable, conservative block) ---
+# Still blocked even though /tmp is an allowed root: the block is about the
+# unresolvable relative target `foo`, not about where the cd points.
 run block "cd /tmp && rm -rf foo"
+
+# --- Allowed: scratch space, whatever PLAYBOOK_SAFE_ROOTS says ---
+# Both spellings, because canon() is lexical and macOS /tmp is a symlink to
+# /private/tmp, so matching one would allow /tmp/x and block /private/tmp/x.
+run allow "rm -rf /tmp/scratch-file"
+run allow "rm -rf /private/tmp/scratch-file"
+
+# --- Blocked: the temp root ITSELF, unlike a configured safe root ---
+# Wiping it takes out sockets and runtime state live processes depend on.
+run block "rm -rf /tmp"
+run block "rm -rf /private/tmp"
+
+# --- Blocked: the temp exemption is by resolved path, not by spelling ---
+run block "rm -rf /tmp/../etc/passwd"
+run block "rm -rf /tmpfoo/file"
 
 # --- Allowed: `..` that stays inside the allowlist ---
 export PLAYBOOK_SAFE_ROOTS="$HOME/Workspace"
@@ -103,25 +120,43 @@ run block "$(printf 'cat <<EOF\nold script did rm -rf /etc/example here\nEOF')"
 
 # --- PLAYBOOK_SAFE_ROOTS: configurable safe roots (WU-15) ---
 #
-# Every fixture below lives under a mktemp -d sandbox, never the developer's
+# Every fixture below lives under a throwaway sandbox, never the developer's
 # real ~/.claude or real repos. One trap cleans all of them up on exit.
+#
+# The sandbox is deliberately NOT under mktemp's default directory. The guard
+# now always allows paths inside /tmp, and on Linux `mktemp -d` returns
+# /tmp/..., so an "allowed" fixture placed there would be allowed no matter what
+# the root derivation did. Those assertions would pass with root handling
+# completely broken, while still looking meaningful on macOS, where mktemp uses
+# $TMPDIR (/var/folders).
 ORIG_DIR="$(pwd)"
-repo_dir="$(mktemp -d)"
+SCRATCH_BASE="$HOME/.cache/playbook-tests"
+mkdir -p "$SCRATCH_BASE"
+
+# A path outside every safe root AND outside the temp tree, used as the negative
+# half of the default-root cases. It must NOT come from mktemp: on Linux mktemp
+# returns /tmp/..., which the guard now always allows, so a temp-based fixture
+# would quietly stop proving anything there while still passing on macOS, where
+# mktemp uses $TMPDIR (/var/folders). Nothing here is ever created or deleted;
+# the guard resolves paths lexically without touching the filesystem.
+OUTSIDE="$HOME/outside-every-safe-root"
+# Same reasoning for the traversal case: the root has to sit outside /tmp, or
+# `$root/../.ssh` collapses to /tmp/.ssh and is legitimately allowed now.
+TRAV_ROOT="$HOME/Workspace/trav-root"
+
+repo_dir="$(mktemp -d "$SCRATCH_BASE/XXXXXX")"
 # mktemp's own output can be a symlinked path (e.g. macOS /var -> /private/var).
 # `git rev-parse --show-toplevel` always reports the resolved path, so resolve
 # repo_dir up front too or an allow case here would false-fail on path form
 # alone, not on guard logic.
 repo_dir="$(cd "$repo_dir" && pwd -P)"
-repo_sibling="$(mktemp -d)"
-plain_dir="$(mktemp -d)"
-plain_sibling="$(mktemp -d)"
-root_a="$(mktemp -d)"
-root_b="$(mktemp -d)"
-trail_dir="$(mktemp -d)"
-rel_base="$(mktemp -d)"
-trav_root="$(mktemp -d)"
-trap 'cd "$ORIG_DIR"; rm -rf "$repo_dir" "$repo_sibling" "$plain_dir" \
-  "$plain_sibling" "$root_a" "$root_b" "$trail_dir" "$rel_base" "$trav_root"' \
+plain_dir="$(mktemp -d "$SCRATCH_BASE/XXXXXX")"
+root_a="$(mktemp -d "$SCRATCH_BASE/XXXXXX")"
+root_b="$(mktemp -d "$SCRATCH_BASE/XXXXXX")"
+trail_dir="$(mktemp -d "$SCRATCH_BASE/XXXXXX")"
+rel_base="$(mktemp -d "$SCRATCH_BASE/XXXXXX")"
+trap 'cd "$ORIG_DIR"; rm -rf "$repo_dir" "$plain_dir" \
+  "$root_a" "$root_b" "$trail_dir" "$rel_base"' \
   EXIT INT TERM
 
 (cd "$repo_dir" && git init -q) >/dev/null 2>&1
@@ -132,14 +167,14 @@ mkdir -p "$repo_dir/sub" "$rel_base/relroot"
 unset PLAYBOOK_SAFE_ROOTS
 cd "$repo_dir" || exit 1
 run allow "rm -rf $repo_dir/sub/file"
-run block "rm -rf $repo_sibling/file"
+run block "rm -rf $OUTSIDE/file"
 cd "$ORIG_DIR" || exit 1
 
 # 3: unset, cwd NOT inside a git repo -> cwd itself is the default root.
 unset PLAYBOOK_SAFE_ROOTS
 cd "$plain_dir" || exit 1
 run allow "rm -rf $plain_dir/file"
-run block "rm -rf $plain_sibling/file"
+run block "rm -rf $OUTSIDE/file"
 cd "$ORIG_DIR" || exit 1
 
 # 4: two colon-separated roots; a target in the second is allowed.
@@ -174,8 +209,8 @@ run block "rm -rf /etc/passwd"
 unset PLAYBOOK_SAFE_ROOTS
 
 # 9: traversal escaping a configured root is still closed.
-export PLAYBOOK_SAFE_ROOTS="$trav_root"
-run block "rm -rf $trav_root/../.ssh"
+export PLAYBOOK_SAFE_ROOTS="$TRAV_ROOT"
+run block "rm -rf $TRAV_ROOT/../.ssh"
 unset PLAYBOOK_SAFE_ROOTS
 
 # 10: the deny message names the roots actually in effect, not a hardcoded

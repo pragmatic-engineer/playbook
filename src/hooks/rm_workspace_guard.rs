@@ -37,6 +37,19 @@ const SUBSTITUTION_LABEL: &str = "<command substitution>";
 
 const SEPARATORS: [&str; 5] = [";", "&&", "||", "|", "&"];
 
+/// Scratch space allowed regardless of `PLAYBOOK_SAFE_ROOTS`, the same standing
+/// exemption `~/.claude` already has.
+///
+/// BOTH spellings are listed because `canon` is lexical and never resolves a
+/// symlink: on macOS `/tmp` is a symlink to `/private/tmp`, so listing one would
+/// allow `/tmp/x` while still blocking the identical `/private/tmp/x`.
+///
+/// The temp root ITSELF stays blocked, unlike a configured safe root, which may
+/// be deleted whole. `rm -rf /tmp` takes out sockets and runtime state that live
+/// processes depend on, which is the class of accident this guard exists to
+/// stop, and no ordinary cleanup needs it.
+const TEMP_ROOTS: [&str; 2] = ["/tmp", "/private/tmp"];
+
 pub fn run(payload: &Payload) {
     let cmd = payload.field(".tool_input.command");
     if cmd.is_empty() {
@@ -131,6 +144,15 @@ fn is_allowed(target: &str, home: &str, claude_dir: &Path, safe_roots: &[PathBuf
     };
     let path = canon(Path::new(&expanded));
     if path == claude_dir || path.starts_with(claude_dir) {
+        return true;
+    }
+    // Scratch space, allowed whatever the roots say. `starts_with` compares whole
+    // components, so `/tmpfoo` does not match `/tmp`, and `canon` has already
+    // collapsed `..`, so `/tmp/../etc` is judged as `/etc` and still blocks.
+    if TEMP_ROOTS
+        .iter()
+        .any(|root| path.starts_with(root) && path != Path::new(root))
+    {
         return true;
     }
     safe_roots
