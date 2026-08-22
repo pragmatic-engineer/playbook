@@ -109,6 +109,16 @@ mod rm_workspace_guard {
         fs::canonicalize(scratch(tag)).expect("scratch dir should resolve")
     }
 
+    /// A path guaranteed outside every safe root, used as the negative half of
+    /// the default-root cases. Deliberately NOT under the temp tree: temp is
+    /// always allowed, and on Linux `std::env::temp_dir()` IS `/tmp`, so a
+    /// temp-based fixture would quietly stop proving anything there while still
+    /// passing on macOS, where temp is `/var/folders`. It never needs to exist,
+    /// because the guard resolves lexically without touching the filesystem.
+    fn outside_everything() -> String {
+        format!("{}/outside-every-safe-root", home())
+    }
+
     fn home() -> String {
         std::env::var("HOME").expect("HOME")
     }
@@ -223,7 +233,6 @@ mod rm_workspace_guard {
     fn an_unset_variable_defaults_to_the_git_repo_root() {
         let d = del();
         let repo = real_dir("default-repo");
-        let sibling = real_dir("default-repo-sibling");
         Command::new("git")
             .arg("-C")
             .arg(&repo)
@@ -232,14 +241,14 @@ mod rm_workspace_guard {
             .expect("git should run");
         fs::create_dir_all(repo.join("sub")).expect("sub dir");
 
-        let (inside, outside) = (repo.display(), sibling.display());
+        let inside = repo.display();
         assert!(
             !blocked_defaulting(&format!("{d} -rf {inside}/sub/file"), &repo),
             "the repo root is the default safe root"
         );
         assert!(
-            blocked_defaulting(&format!("{d} -rf {outside}/file"), &repo),
-            "a sibling of the repo root is outside it"
+            blocked_defaulting(&format!("{d} -rf {}/file", outside_everything()), &repo),
+            "a path outside the repo root is not covered by the default"
         );
     }
 
@@ -248,16 +257,15 @@ mod rm_workspace_guard {
     fn an_unset_variable_outside_a_git_repo_defaults_to_the_cwd() {
         let d = del();
         let plain = real_dir("default-plain");
-        let sibling = real_dir("default-plain-sibling");
 
-        let (inside, outside) = (plain.display(), sibling.display());
+        let inside = plain.display();
         assert!(
             !blocked_defaulting(&format!("{d} -rf {inside}/file"), &plain),
             "the cwd is the default safe root when there is no repo"
         );
         assert!(
-            blocked_defaulting(&format!("{d} -rf {outside}/file"), &plain),
-            "a sibling of the cwd is outside it"
+            blocked_defaulting(&format!("{d} -rf {}/file", outside_everything()), &plain),
+            "a path outside the cwd is not covered by the default"
         );
     }
 
@@ -352,6 +360,45 @@ mod rm_workspace_guard {
                 &ws
             ),
             "nothing is deleted here, but the tokenizer cannot know that"
+        );
+    }
+
+    /// Scratch space is exempt from the configured roots, the same standing
+    /// exemption `~/.claude` has. The root itself is NOT exempt: unlike a
+    /// configured safe root, which may be deleted whole, wiping the temp root
+    /// takes out sockets and runtime state that live processes depend on.
+    #[test]
+    fn paths_inside_temp_are_allowed_but_the_temp_root_is_not() {
+        let (h, d) = (home(), del());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("{d} -rf /tmp/scratch-file"),
+            // macOS spells the same directory both ways and `canon` is lexical,
+            // so the resolved form has to be listed too.
+            format!("{d} -rf /private/tmp/scratch-file"),
+        ] {
+            assert!(!blocked(&cmd, &ws), "temp scratch should be allowed: {cmd}");
+        }
+        for cmd in [format!("{d} -rf /tmp"), format!("{d} -rf /private/tmp")] {
+            assert!(
+                blocked(&cmd, &ws),
+                "the temp root itself must stay blocked: {cmd}"
+            );
+        }
+    }
+
+    /// The exemption is by resolved path, never by how the string is spelled.
+    #[test]
+    fn the_temp_exemption_does_not_leak_through_traversal_or_prefixes() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        assert!(
+            blocked(&format!("{d} -rf /tmp/..{e}/passwd"), &ws),
+            "canon collapses the traversal, so this is judged as its real target"
+        );
+        assert!(
+            blocked(&format!("{d} -rf /tmpfoo/file"), &ws),
+            "a directory that merely starts with the same letters is not temp"
         );
     }
 
