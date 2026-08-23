@@ -180,18 +180,6 @@ fn is_allowed(target: &str, home: &str, claude_dir: &Path, safe_roots: &[PathBuf
         .any(|root| path == *root || path.starts_with(root))
 }
 
-/// Walks the command left to right tracking whether the cursor sits inside an
-/// `rm`'s argument list, which is what lets `rm a && ls b` judge only `a`.
-/// Splits on spaces exactly as the previous tokenizer did, INCLUDING inside
-/// quotes, and keeps every quote character in the token text. Both choices are
-/// deliberate: identical tokens mean target judging is byte-for-byte unchanged,
-/// and splitting inside quotes is what still catches `sh -c "cd /x && rm -rf
-/// /etc"`. The only new information is whether each token began inside a quoted
-/// region.
-///
-/// An unbalanced quote leaves the remaining tokens marked quoted. That can only
-/// make the guard demand a separator before believing a deletion, never fewer
-/// checks on the unquoted path, so the failure direction is unchanged.
 /// The delimiter of a heredoc opened on this line, if any.
 ///
 /// The delimiter must start with a letter or `_`, which is what keeps an
@@ -276,6 +264,14 @@ fn heredoc_body_lines(cmd: &str) -> Vec<bool> {
 /// whether each token is DATA rather than a command: either inside shell quotes
 /// or inside a heredoc body. A newline becomes a `;` token, so the existing
 /// command-position rule still sees the start of each body line.
+///
+/// Splitting continues INSIDE quotes, which is deliberate: identical tokens mean
+/// target judging is byte-for-byte unchanged, and it is what still catches
+/// `sh -c "cd /x && rm -rf /etc"`.
+///
+/// An unbalanced quote leaves the remaining tokens marked as data. That can only
+/// make the guard demand a separator before believing a deletion, never fewer
+/// checks on the unquoted path, so the failure direction is unchanged.
 fn tokenize(cmd: &str) -> Vec<(String, bool)> {
     let body = heredoc_body_lines(cmd);
     let mut tokens = Vec::new();
@@ -319,6 +315,8 @@ fn tokenize(cmd: &str) -> Vec<(String, bool)> {
     tokens
 }
 
+/// Walks the command left to right tracking whether the cursor sits inside an
+/// `rm`'s argument list, which is what lets `rm a && ls b` judge only `a`.
 fn offending_targets(
     cmd: &str,
     home: &str,
