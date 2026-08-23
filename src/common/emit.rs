@@ -119,10 +119,12 @@ mod tests {
     /// that file still existed. See tests/fixtures/golden/README.md.
     ///
     /// These five tests were differential: they sourced common.sh and asserted
-    /// the Rust port matched byte for byte. ADR 0007 WU-14 deletes common.sh,
-    /// which would have removed the oracle and quietly downgraded them to
-    /// "Rust agrees with itself". Reading a committed golden keeps the check,
-    /// and keeps it working on a machine with no bash at all.
+    /// the Rust port matched byte for byte. ADR 0007 WU-14d deletes common.sh,
+    /// and unlike the python oracles this one would have FAILED rather than
+    /// quietly weakened: `shell_stdout` asserted the subprocess exited 0, so a
+    /// missing `source` tripped it. Verified by hiding the file and watching
+    /// all five fail. Reading a committed golden keeps the check, and keeps it
+    /// working on a machine with no bash at all.
     fn shell_golden(key: &str) -> String {
         let raw = include_str!("../../tests/fixtures/golden/common-sh.emitters.json");
         let bundle: serde_json::Value =
@@ -251,10 +253,9 @@ mod tests {
     /// Re-invoke this test binary as a child process to run `emit_probe`
     /// below with `EMIT_PROBE` naming one emitter, so that emitter's own
     /// real stdout can be captured from a subprocess. This process's own
-    /// stdout is
-    /// shared with every other test thread, so it cannot be read directly;
-    /// a fresh child process is the only way to observe just one call's
-    /// output.
+    /// stdout is shared with every other test thread, so it cannot be read
+    /// directly; a fresh child process is the only way to observe just one
+    /// call's output.
     fn capture_emitter_stdout(probe: &str) -> String {
         let exe = std::env::current_exe().expect("test binary path should be available");
         let output = Command::new(exe)

@@ -8,7 +8,6 @@ because it is shell rather than python, so the deletion would have broken those
 tests rather than silently weakening them. With the two fixtures below,
 `cargo test` needs neither bash nor python3 on the machine.
 
-
 Each file here is the exact output of an implementation that ADR 0007 replaced
 with a Rust port, captured while that original still existed and committed so
 the cross-implementation check survives its deletion. Most are python hooks;
@@ -40,8 +39,6 @@ absolute path normalised to the literal `<base-path>`, since python's N4
 warning text embeds that path and it otherwise varies with the capturing
 machine's temp directory; the assertions against it only check for the
 substring "warning", so the normalisation changes nothing the tests verify.
-
-
 
 | Fixture | Produced by | Input | Captured |
 |---|---|---|---|
