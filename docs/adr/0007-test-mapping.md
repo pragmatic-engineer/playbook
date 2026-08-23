@@ -9,7 +9,7 @@
     all 214 old scenarios with zero blank rows. WU-14's acceptance rule is
     satisfied for every one of those suites and both `shell/` python scripts it
     deletes.
-  - **The 4 guard suites: COMPLETE, 96 of 96 scenarios mapped.** Mapped
+  - **The 4 guard suites: COMPLETE, 101 of 101 scenarios mapped.** Mapped
     2026-08-22. `hooks/*.sh | delete | the 4 guards` is in WU-14's file list, so
     the same acceptance rule applies to them. The mapping opened 9 blank rows in
     `hooks/rm-workspace-guard.test.sh`; **all 9 were closed the same day** by 6
@@ -28,7 +28,7 @@
     Outside quotes nothing changed, so `sudo rm`, `xargs rm` and `find -exec rm`
     are all still caught. 7 scenarios to the shell suite (36 -> 43) and 2 tests
     to the Rust one (38 -> 40), again in both implementations at once.
-  - **Combined: 310 old scenarios across 19 suites, zero blank rows.**
+  - **Combined: 315 old scenarios across 19 suites, zero blank rows.**
 
 **The earlier version of this line read "COMPLETE ... for all 15 of 15 suites"
 with no scope qualifier, while the four guard suites had no rows at all.** Read
@@ -100,16 +100,16 @@ These were missing from this table entirely until 2026-08-22, which is how the
 status line above came to imply a gate they had never been checked against.
 WU-14 deletes them (`hooks/*.sh | delete | the 4 guards`), so they need rows on
 the same terms as everything else. All four map into `tests/hooks_guards.rs`,
-whose 42 tests sit in four `mod` blocks named for the four scripts.
+whose 43 tests sit in four `mod` blocks named for the four scripts.
 
 | Old suite | Old cases | New Rust home | New tests | Per-scenario rows |
 |---|---|---|---|---|
 | `hooks/bg-await-guard.test.sh` | 19 | `tests/hooks_guards.rs::bg_await_guard` | 6 | **DONE, see below** |
 | `hooks/no-dash-guard.test.sh` | 17 | `tests/hooks_guards.rs::no_dash_guard` | 8 | **DONE, see below** |
 | `hooks/precommit-check.test.sh` | 12 | `tests/hooks_guards.rs::precommit_check` | 7 | **DONE, see below** |
-| `hooks/rm-workspace-guard.test.sh` | 48 | `tests/hooks_guards.rs::rm_workspace_guard` | 21 | **DONE, see below** |
+| `hooks/rm-workspace-guard.test.sh` | 53 | `tests/hooks_guards.rs::rm_workspace_guard` | 22 | **DONE, see below** |
 
-**Totals: 96 old guard scenarios against 42 Rust tests, all 96 mapped.** This is
+**Totals: 101 old guard scenarios against 43 Rust tests, all 101 mapped.** This is
 the suite where the naive-count warning at the top of this file did *not* explain
 the gap away. 19 old bg-await scenarios really do collapse into 3 table-driven
 Rust tests holding the same 19 command strings verbatim, and that is honest
@@ -680,7 +680,7 @@ Adds, with no old counterpart:
 
 ## Per-scenario rows: `hooks/rm-workspace-guard.test.sh`
 
-**COMPLETE. All 48 old scenarios accounted for, zero blank rows, so WU-14 may
+**COMPLETE. All 53 old scenarios accounted for, zero blank rows, so WU-14 may
 delete this suite.** It got there in two steps on 2026-08-22: the mapping found
 21 of 30 covered and 9 blank, and the 9 were closed by writing tests, not by
 adjusting the table. This is the guard that blocks `rm` outside the workspace,
@@ -755,6 +755,41 @@ row above.
 | allow `$rel_base/relroot/file` with a relative root, case 7 (1) | `a_relative_root_resolves_against_the_guards_cwd` | first assert |
 | block outside with that same relative root, case 7 (1) | same | second assert, proving no widening into a false allow |
 | deny reason names the roots in effect, case 10 (1) | `the_deny_reason_names_the_roots_in_effect` | parses `hookSpecificOutput.permissionDecisionReason` and asserts both configured roots appear; the only content assertion on the message |
+
+### Revised in both suites 2026-08-23: heredoc bodies are data (5)
+
+The one entry here that REVISES a previously pinned trade-off rather than adding
+a rule. A heredoc body was treated as commands, so `rm` appearing as prose in a
+commit message written through a heredoc set the in-rm state, and any `$(...)`
+elsewhere in the same command then tripped the substitution guard. It blocked
+three commits in one session, each reported as
+`rm blocked: <command substitution> is outside ...`.
+
+A body is now DATA, so the command-position rule from the quoted-token fix
+applies to it: a mention mid-line is prose, a line that STARTS with a deletion is
+still a command. No new concept was needed, only the correct classification.
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| allow `cat <<EOF` body mentioning a deletion mid-line (1) | `a_heredoc_body_mentioning_a_deletion_is_prose` | element 1, the scenario this file previously pinned as an accepted false positive |
+| allow a commit message body plus a `$(...)` elsewhere (1) | same | element 2, the exact shape that blocked three commits |
+| allow an apostrophe in the body (1) | same | element 3, prose must not flip quote state for the rest |
+| block a body line that STARTS with a deletion (1) | `a_heredoc_line_starting_with_a_deletion_still_blocks` | first assert, `bash <<EOF` really does delete |
+| block a mid-line deletion under an UNTERMINATED heredoc (1) | same | second assert; mid-line on purpose, see below |
+| block after `$((1 << 2))`, which is not a heredoc (1) | same | third assert, arithmetic must not start a body |
+
+**Two vacuity traps caught here, both by mutation rather than by review.** The
+unterminated-heredoc case was first written with the deletion at line start,
+where it is in command position either way, so it passed with the terminator
+rule removed and pinned nothing; it is mid-line now. And an earlier restore used
+`git checkout` on a branch with no commits, silently reverting the very
+implementation under test, which showed up as a "baseline failure" rather than
+as a clean revert.
+
+| Mutation | Result |
+|---|---|
+| Heredoc awareness disabled | `a_heredoc_body_mentioning_a_deletion_is_prose` fails |
+| Unterminated `<<` swallows the rest of the command | `a_heredoc_line_starting_with_a_deletion_still_blocks` fails |
 
 ### Added to both suites 2026-08-23: unexpanded variables fail closed (5)
 
