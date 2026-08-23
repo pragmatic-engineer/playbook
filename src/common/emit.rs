@@ -115,38 +115,31 @@ mod tests {
     use super::*;
     use std::process::Command;
 
-    /// Run `command` after sourcing common.sh with empty stdin, and return
-    /// its stdout with the trailing newline stripped, so it lines up with
-    /// what a `println!`-based Rust caller captures without the newline.
-    fn shell_stdout(command: &str) -> String {
-        let common_sh = concat!(env!("CARGO_MANIFEST_DIR"), "/hooks/lib/common.sh");
-        let script = format!("source '{common_sh}' </dev/null; {command}");
-        let output = Command::new("bash")
-            .arg("-c")
-            .arg(script)
-            .output()
-            .expect("bash should be available to run common.sh");
-        assert!(
-            output.status.success(),
-            "common.sh command failed: {command}"
-        );
-        String::from_utf8(output.stdout)
-            .expect("common.sh output should be valid UTF-8")
-            .trim_end_matches('\n')
+    /// The frozen output of `hooks/lib/common.sh`'s emitters, captured while
+    /// that file still existed. See tests/fixtures/golden/README.md.
+    ///
+    /// These five tests were differential: they sourced common.sh and asserted
+    /// the Rust port matched byte for byte. ADR 0007 WU-14d deletes common.sh,
+    /// and unlike the python oracles this one would have FAILED rather than
+    /// quietly weakened: `shell_stdout` asserted the subprocess exited 0, so a
+    /// missing `source` tripped it. Verified by hiding the file and watching
+    /// all five fail. Reading a committed golden keeps the check, and keeps it
+    /// working on a machine with no bash at all.
+    fn shell_golden(key: &str) -> String {
+        let raw = include_str!("../../tests/fixtures/golden/common-sh.emitters.json");
+        let bundle: serde_json::Value =
+            serde_json::from_str(raw).expect("golden bundle should be valid JSON");
+        bundle[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("golden bundle has no key {key}"))
             .to_string()
     }
 
-    /// Run a one-line python3 script and return its stdout with the trailing
-    /// newline stripped, for the one emitter with no shell equivalent.
-    fn python_stdout(code: &str) -> String {
-        let output = Command::new("python3")
-            .arg("-c")
-            .arg(code)
-            .output()
-            .expect("python3 should be available to run reference code");
-        assert!(output.status.success(), "python3 code failed: {code}");
-        String::from_utf8(output.stdout)
-            .expect("python3 output should be valid UTF-8")
+    /// The frozen output of the python one-liner that was the oracle for the
+    /// one emitter with no shell equivalent. Frozen for the same reason, and it
+    /// removes the last reason `cargo test` needed python3 on the machine.
+    fn python_golden() -> String {
+        include_str!("../../tests/fixtures/golden/memory-capture.block.txt")
             .trim_end_matches('\n')
             .to_string()
     }
@@ -161,7 +154,7 @@ mod tests {
     #[test]
     fn emit_pre_context_matches_shell() {
         // Arrange
-        let expected = shell_stdout("emit_pre_context 'PreToolUse' 'hello'");
+        let expected = shell_golden("emit_pre_context");
 
         // Act
         let got = json_of(&AdditionalContextOutput {
@@ -182,7 +175,7 @@ mod tests {
     #[test]
     fn emit_pre_deny_matches_shell() {
         // Arrange
-        let expected = shell_stdout("emit_pre_deny 'not allowed'");
+        let expected = shell_golden("emit_pre_deny");
 
         // Act
         let got = json_of(&PreDenyOutput {
@@ -200,7 +193,7 @@ mod tests {
     #[test]
     fn emit_prompt_context_matches_shell() {
         // Arrange
-        let expected = shell_stdout("emit_prompt_context 'context text'");
+        let expected = shell_golden("emit_prompt_context");
 
         // Act
         let got = json_of(&AdditionalContextOutput {
@@ -217,7 +210,7 @@ mod tests {
     #[test]
     fn emit_system_message_matches_shell() {
         // Arrange
-        let expected = shell_stdout("emit_system_message 'system msg'");
+        let expected = shell_golden("emit_system_message");
 
         // Act
         let got = json_of(&SystemMessageOutput {
@@ -231,7 +224,7 @@ mod tests {
     #[test]
     fn emit_system_message_non_ascii_matches_shell() {
         // Arrange
-        let expected = shell_stdout("emit_system_message '\u{26a0} warn'");
+        let expected = shell_golden("emit_system_message_non_ascii");
 
         // Act
         let got = json_of(&SystemMessageOutput {
@@ -245,10 +238,7 @@ mod tests {
     #[test]
     fn emit_block_matches_memory_capture_python_shape() {
         // Arrange
-        let expected = python_stdout(
-            "import json; print(json.dumps({'decision':'block','reason':'reason text'}, \
-             separators=(',',':'), ensure_ascii=False))",
-        );
+        let expected = python_golden();
 
         // Act
         let got = json_of(&BlockOutput {
@@ -262,11 +252,10 @@ mod tests {
 
     /// Re-invoke this test binary as a child process to run `emit_probe`
     /// below with `EMIT_PROBE` naming one emitter, so that emitter's own
-    /// real stdout can be captured the same way `shell_stdout`/`python_stdout`
-    /// above capture a subprocess's output. This process's own stdout is
-    /// shared with every other test thread, so it cannot be read directly;
-    /// a fresh child process is the only way to observe just one call's
-    /// output.
+    /// real stdout can be captured from a subprocess. This process's own
+    /// stdout is shared with every other test thread, so it cannot be read
+    /// directly; a fresh child process is the only way to observe just one
+    /// call's output.
     fn capture_emitter_stdout(probe: &str) -> String {
         let exe = std::env::current_exe().expect("test binary path should be available");
         let output = Command::new(exe)
