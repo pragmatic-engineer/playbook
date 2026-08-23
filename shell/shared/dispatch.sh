@@ -31,7 +31,9 @@ _claude() {
 
     local name="${PWD##*/}"
     # Claude derives the project-dir slug by replacing EVERY non-alphanumeric
-    # char with "-" (not just "/"). E.g. ~/.claude becomes "-Users-isantos--claude".
+    # char with "-" (not just "/"). E.g. /Users/me/.claude becomes
+    # "-Users-me--claude": note the DOUBLE dash, from the "/" and the "." both
+    # being replaced.
     local project_dir="$HOME/.claude/projects/${PWD//[^a-zA-Z0-9]/-}"
 
     # Separate leading flags from positional args. The subcommand must be the
