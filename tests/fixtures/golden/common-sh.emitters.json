@@ -1,0 +1,7 @@
+{
+  "emit_pre_context": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"hello\"}}",
+  "emit_pre_deny": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"not allowed\"}}",
+  "emit_prompt_context": "{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"context text\"}}",
+  "emit_system_message": "{\"systemMessage\":\"system msg\"}",
+  "emit_system_message_non_ascii": "{\"systemMessage\":\"⚠ warn\"}"
+}
