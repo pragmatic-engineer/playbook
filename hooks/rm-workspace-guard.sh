@@ -9,7 +9,7 @@
 # allowed, and ~/.ssh and ~/.aws stay blocked exactly as before ($HOME itself
 # is deliberately NOT the default: that would unblock them). $HOME/.claude is
 # always allowed, regardless of PLAYBOOK_SAFE_ROOTS, and so is anything INSIDE
-# /tmp or /private/tmp; the temp root itself still blocks.
+# /tmp, /private/tmp or $HOME/.cache; those roots themselves still block.
 # Best-effort protection against an accidental rm, NOT a security boundary: it only
 # guards `rm` (not find -delete, unlink, or `>` truncation), and `rm` reached through
 # `$(...)` or a backtick is blocked conservatively rather than evaluated. A `cd` in
@@ -101,6 +101,12 @@ is_allowed() {
   for tmp_root in /tmp /private/tmp; do
     [[ "$path" == "$tmp_root/"* ]] && return 0
   done
+  # $HOME/.cache is regenerable scratch by definition, and where this repo's own
+  # test fixtures live. Derived from HOME the same way $CLAUDE_DIR is, and
+  # deliberately NOT from XDG_CACHE_HOME: that can be set to "/", which would
+  # hand the whole filesystem to the allowlist. Contents only, like /tmp above:
+  # no cleanup needs to delete the cache root itself.
+  [[ -n "$HOME" && "$path" == "$HOME/.cache/"* ]] && return 0
   local root
   for root in ${SAFE_ROOTS[@]+"${SAFE_ROOTS[@]}"}; do
     [[ "$path" == "$root" || "$path" == "$root/"* ]] && return 0

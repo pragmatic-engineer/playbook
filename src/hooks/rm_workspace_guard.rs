@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Ports hooks/rm-workspace-guard.sh: denies an `rm` whose target sits outside
-//! the safe roots and `~/.claude/**`.
+//! the safe roots, `~/.claude/**`, and the scratch trees `/tmp` and
+//! `~/.cache` (contents only, not those roots themselves).
 //!
 //! Best-effort protection against an accidental `rm`, NOT a security boundary.
 //! It only sees `rm`, so `find -delete`, `unlink` and `>` truncation pass, and
@@ -174,6 +175,21 @@ fn is_allowed(target: &str, home: &str, claude_dir: &Path, safe_roots: &[PathBuf
         .any(|root| path.starts_with(root) && path != Path::new(root))
     {
         return true;
+    }
+    // `~/.cache` is regenerable scratch by definition, and it is where this
+    // repo's own test fixtures live. Derived from HOME the same way `~/.claude`
+    // is, deliberately NOT from `XDG_CACHE_HOME`: that variable can be set to
+    // `/`, which would hand the whole filesystem to the allowlist, whereas the
+    // worst a bad HOME yields here is a narrow `<junk>/.cache`.
+    //
+    // Contents only, following TEMP_ROOTS rather than `~/.claude`: no cleanup
+    // needs to delete the cache root itself, and doing so by accident costs
+    // every rebuild on the machine.
+    if !home.is_empty() {
+        let cache_dir = Path::new(home).join(".cache");
+        if path.starts_with(&cache_dir) && path != cache_dir {
+            return true;
+        }
     }
     safe_roots
         .iter()

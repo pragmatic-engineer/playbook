@@ -9,7 +9,7 @@
     all 214 old scenarios with zero blank rows. WU-14's acceptance rule is
     satisfied for every one of those suites and both `shell/` python scripts it
     deletes.
-  - **The 4 guard suites: COMPLETE, 101 of 101 scenarios mapped.** Mapped
+  - **The 4 guard suites: COMPLETE, 106 of 106 scenarios mapped.** Mapped
     2026-08-22. `hooks/*.sh | delete | the 4 guards` is in WU-14's file list, so
     the same acceptance rule applies to them. The mapping opened 9 blank rows in
     `hooks/rm-workspace-guard.test.sh`; **all 9 were closed the same day** by 6
@@ -28,7 +28,7 @@
     Outside quotes nothing changed, so `sudo rm`, `xargs rm` and `find -exec rm`
     are all still caught. 7 scenarios to the shell suite (36 -> 43) and 2 tests
     to the Rust one (38 -> 40), again in both implementations at once.
-  - **Combined: 315 old scenarios across 19 suites, zero blank rows.**
+  - **Combined: 320 old scenarios across 19 suites, zero blank rows.**
 
 **The earlier version of this line read "COMPLETE ... for all 15 of 15 suites"
 with no scope qualifier, while the four guard suites had no rows at all.** Read
@@ -100,16 +100,16 @@ These were missing from this table entirely until 2026-08-22, which is how the
 status line above came to imply a gate they had never been checked against.
 WU-14 deletes them (`hooks/*.sh | delete | the 4 guards`), so they need rows on
 the same terms as everything else. All four map into `tests/hooks_guards.rs`,
-whose 43 tests sit in four `mod` blocks named for the four scripts.
+whose 45 tests sit in four `mod` blocks named for the four scripts.
 
 | Old suite | Old cases | New Rust home | New tests | Per-scenario rows |
 |---|---|---|---|---|
 | `hooks/bg-await-guard.test.sh` | 19 | `tests/hooks_guards.rs::bg_await_guard` | 6 | **DONE, see below** |
 | `hooks/no-dash-guard.test.sh` | 17 | `tests/hooks_guards.rs::no_dash_guard` | 8 | **DONE, see below** |
 | `hooks/precommit-check.test.sh` | 12 | `tests/hooks_guards.rs::precommit_check` | 7 | **DONE, see below** |
-| `hooks/rm-workspace-guard.test.sh` | 53 | `tests/hooks_guards.rs::rm_workspace_guard` | 22 | **DONE, see below** |
+| `hooks/rm-workspace-guard.test.sh` | 58 | `tests/hooks_guards.rs::rm_workspace_guard` | 24 | **DONE, see below** |
 
-**Totals: 101 old guard scenarios against 43 Rust tests, all 101 mapped.** This is
+**Totals: 106 old guard scenarios against 45 Rust tests, all 106 mapped.** This is
 the suite where the naive-count warning at the top of this file did *not* explain
 the gap away. 19 old bg-await scenarios really do collapse into 3 table-driven
 Rust tests holding the same 19 command strings verbatim, and that is honest
@@ -680,7 +680,7 @@ Adds, with no old counterpart:
 
 ## Per-scenario rows: `hooks/rm-workspace-guard.test.sh`
 
-**COMPLETE. All 53 old scenarios accounted for, zero blank rows, so WU-14 may
+**COMPLETE. All 58 old scenarios accounted for, zero blank rows, so WU-14 may
 delete this suite.** It got there in two steps on 2026-08-22: the mapping found
 21 of 30 covered and 9 blank, and the 9 were closed by writing tests, not by
 adjusting the table. This is the guard that blocks `rm` outside the workspace,
@@ -755,6 +755,28 @@ row above.
 | allow `$rel_base/relroot/file` with a relative root, case 7 (1) | `a_relative_root_resolves_against_the_guards_cwd` | first assert |
 | block outside with that same relative root, case 7 (1) | same | second assert, proving no widening into a false allow |
 | deny reason names the roots in effect, case 10 (1) | `the_deny_reason_names_the_roots_in_effect` | parses `hookSpecificOutput.permissionDecisionReason` and asserts both configured roots appear; the only content assertion on the message |
+
+### Added to both suites 2026-08-23: the ~/.cache exemption (5)
+
+`$HOME/.cache` joins `/tmp` as always-allowed scratch. It is regenerable by
+definition and it is where this repo's own test fixtures live, after the
+temp-tree move earlier the same day.
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| allow `$HOME/.cache/playbook-tests/scratch` (1) | `paths_inside_the_cache_dir_are_allowed_but_its_root_is_not` | allow loop, element 1 |
+| allow the `~/.cache/...` tilde spelling (1) | same | allow loop, element 2 |
+| block `$HOME/.cache` itself (1) | same | trailing assert, contents-only like `/tmp` |
+| block `$HOME/.cache/../.ssh` (1) | `the_cache_exemption_does_not_leak_through_traversal_or_prefixes` | first assert |
+| block `$HOME/.cachefoo/x` (1) | same | second assert, component-wise prefix match |
+
+**Derived from `HOME`, deliberately not from `XDG_CACHE_HOME`.** That variable
+can legitimately be set to `/`, which would hand the entire filesystem to the
+allowlist; the worst a bad `HOME` yields here is a narrow `<junk>/.cache`.
+
+**Mutation-verified in both directions:** dropping the rule, and allowing the
+cache root as well, each fail
+`paths_inside_the_cache_dir_are_allowed_but_its_root_is_not` and nothing else.
 
 ### Revised in both suites 2026-08-23: heredoc bodies are data (5)
 
