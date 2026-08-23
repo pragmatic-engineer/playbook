@@ -170,7 +170,7 @@ rm -rf "$t4_home"
 # 4b. REGRESSION: staying above the threshold fires exactly ONCE, not per render.
 #
 # The marker used to be re-dropped on every render while usage sat at or above
-# the threshold, while hooks/memory-capture.py consumes it every Stop. Past 70%
+# the threshold, while the memory-capture hook consumes it every Stop. Past 70%
 # that cost a turn every turn for the rest of the session, and the hook's own
 # message claims it "fires once per threshold crossing". Observed firing four
 # times in a row with a byte identical edited-files list.
