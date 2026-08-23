@@ -16,6 +16,19 @@
 # the command makes relative targets unresolvable, so those are blocked
 # conservatively too. A quoted path containing a space still splits into two
 # tokens and is evaluated as two separate paths (pre-existing gap, fails closed).
+# A bare `rm` inside a quoted region is treated as prose unless a separator puts
+# it in command position, so a commit message or PR title that mentions `rm` no
+# longer blocks, while `sh -c "cd /x && rm -rf /etc"` still does.
+#
+# ACCEPTED MISS, pinned so it is not re-reported as a vulnerability later: a
+# command name that is obfuscated or built at runtime is not resolved, so it is
+# not recognised as a deletion. Escaped and quote-split spellings, and names
+# produced by command or parameter substitution, all fall in this class. Closing
+# it needs word expansion, which cannot be done statically for the substitution
+# cases at all. This is deliberate and in scope for a guard that exists to catch
+# an ACCIDENT: no agent writes an obfuscated command name by accident, and the
+# ordinary forms it would write (including `sudo`, `xargs`, `/bin/rm`, env
+# prefixes and multi-line commands) are all still caught.
 set -u  # not -e: a parse failure must not exit non-zero and let the rm through
 
 CMD=$(jq -r '.tool_input.command // ""' -)
@@ -96,22 +109,72 @@ outside=()
 # to a standalone `;` so it resets in_rm the same as a real command separator.
 CMD_NORM="${CMD//$'\n'/ ; }"
 CMD_NORM="${CMD_NORM//$'\t'/ }"
-IFS=' ' read -ra tokens <<< "$CMD_NORM"
-
-# ${tokens[@]+...}: a whitespace-only command splits to an empty array, which
-# would error under set -u on bash 3.2 and fail the guard open. Safe-expand it.
-for token in ${tokens[@]+"${tokens[@]}"}; do
-  [[ -z "$token" ]] && continue
-  # A `cd` anywhere means $(pwd) no longer reflects where a relative rm resolves.
-  if [[ "$token" == "cd" || "$token" == */cd ]]; then
-    saw_cd=true; continue
+# Tokenize on spaces exactly as before, INCLUDING inside quotes: splitting
+# inside quotes is what still catches `sh -c "cd /x && rm -rf /etc"`. Quote
+# characters stay in the token text so target judging is unchanged. The only new
+# output is a parallel array recording whether each token began inside a quoted
+# region, which is what lets a `rm` in a commit message or PR title be told from
+# a real command. An unbalanced quote leaves the rest marked quoted, which only
+# ever demands a separator before believing a deletion, so it fails closed.
+tokens=()
+tok_quoted=()
+_cur=""
+_cur_quoted=false
+_in_single=false
+_in_double=false
+_i=0
+_len=${#CMD_NORM}
+while (( _i < _len )); do
+  _ch="${CMD_NORM:_i:1}"
+  if [[ "$_ch" == " " ]]; then
+    if [[ -n "$_cur" ]]; then
+      tokens+=("$_cur"); tok_quoted+=("$_cur_quoted"); _cur=""
+    fi
+    _i=$(( _i + 1 )); continue
   fi
-  if [[ "$token" == "rm" || "$token" == */rm ]]; then
-    in_rm=true; saw_rm=true; continue
+  if [[ -z "$_cur" ]]; then
+    if [[ "$_in_single" == true || "$_in_double" == true ]]; then
+      _cur_quoted=true
+    else
+      _cur_quoted=false
+    fi
+  fi
+  _cur+="$_ch"
+  if [[ "$_ch" == "'" && "$_in_double" == false ]]; then
+    if [[ "$_in_single" == true ]]; then _in_single=false; else _in_single=true; fi
+  elif [[ "$_ch" == '"' && "$_in_single" == false ]]; then
+    if [[ "$_in_double" == true ]]; then _in_double=false; else _in_double=true; fi
+  fi
+  _i=$(( _i + 1 ))
+done
+if [[ -n "$_cur" ]]; then tokens+=("$_cur"); tok_quoted+=("$_cur_quoted"); fi
+
+# The very start of a command is a command position, same as after a `;`.
+prev_was_separator=true
+_n=${#tokens[@]}
+_j=0
+while (( _j < _n )); do
+  token="${tokens[$_j]}"
+  quoted="${tok_quoted[$_j]}"
+  _j=$(( _j + 1 ))
+  [[ -z "$token" ]] && continue
+  # A word inside quotes is prose unless a separator put it in command position.
+  # Outside quotes nothing changes, so `sudo rm` and `xargs rm` stay caught.
+  if [[ "$quoted" == false || "$prev_was_separator" == true ]]; then
+    is_command=true
+  else
+    is_command=false
+  fi
+  if [[ "$is_command" == true && ( "$token" == "cd" || "$token" == */cd ) ]]; then
+    saw_cd=true; prev_was_separator=false; continue
+  fi
+  if [[ "$is_command" == true && ( "$token" == "rm" || "$token" == */rm ) ]]; then
+    in_rm=true; saw_rm=true; prev_was_separator=false; continue
   fi
   if [[ "$token" == ";" || "$token" == "&&" || "$token" == "||" || "$token" == "|" || "$token" == "&" ]]; then
-    in_rm=false; continue
+    in_rm=false; prev_was_separator=true; continue
   fi
+  prev_was_separator=false
   if [[ "$in_rm" == true ]]; then
     [[ "$token" == -* ]] && continue
     if [[ "$saw_cd" == true && "$token" != /* && "$token" != '~'* ]]; then

@@ -409,6 +409,46 @@ mod rm_workspace_guard {
         );
     }
 
+    /// A mention inside a quoted message or title is prose, not a command. This
+    /// was a live annoyance rather than a theoretical one: it blocked commits
+    /// and PR creation whose text merely named the guard.
+    /// Every case here must FAIL under the old tokenizer, or the test proves
+    /// nothing. A message whose remaining words are all relative paths is not
+    /// enough: they canonicalise inside the safe root and were allowed anyway.
+    /// So each case carries either an absolute path the old code would have
+    /// judged as a target, or a substitution, which is the shape that actually
+    /// blocked an agent mid-commit.
+    #[test]
+    fn a_quoted_mention_is_prose_not_a_command() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("git commit -m \"fix: stop using {d} on {e}/passwd\""),
+            format!("git commit -m 'docs: {d} on {e}/passwd is fatal'"),
+            format!("git commit -m \"note: {d} is risky\" && echo $(date)"),
+        ] {
+            assert!(!blocked(&cmd, &ws), "prose must not block: {cmd}");
+        }
+    }
+
+    /// Quoting must not become an escape hatch. Anything in command position is
+    /// still a command, and outside quotes nothing changed at all, which is what
+    /// keeps the wrapper forms caught.
+    #[test]
+    fn quoting_does_not_hide_a_real_deletion() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("sudo {d} -rf {e}/passwd"),
+            format!("xargs {d} -rf {e}/passwd"),
+            format!("echo hi && {d} -rf {e}/passwd"),
+            // Inside quotes, but a separator puts it back in command position.
+            format!("sh -c \"cd /x && {d} -rf {e}/passwd\""),
+        ] {
+            assert!(blocked(&cmd, &ws), "must still block: {cmd}");
+        }
+    }
+
     #[test]
     fn malformed_payloads_exit_silently() {
         for raw in ["", "{", "null", r#"{"tool_input":{}}"#] {

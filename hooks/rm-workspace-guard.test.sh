@@ -88,6 +88,28 @@ run block "rm -rf /private/tmp"
 run block "rm -rf /tmp/../etc/passwd"
 run block "rm -rf /tmpfoo/file"
 
+# --- Allowed: a quoted mention is prose, not a command ---
+# A live annoyance, not a theoretical one: it blocked commits and PR creation
+# whose text merely named the guard.
+export PLAYBOOK_SAFE_ROOTS="$HOME/Workspace"
+# Each case must FAIL under the old tokenizer or it proves nothing. A message
+# whose other words are relative paths is not enough: those canonicalise inside
+# the safe root and were allowed anyway. So each carries an absolute path the
+# old code judged as a target, or a substitution, which is the shape that
+# actually blocked an agent mid-commit.
+run allow "git commit -m \"fix: stop using rm on /etc/passwd\""
+run allow "git commit -m 'docs: rm on /etc/passwd is fatal'"
+run allow "git commit -m \"note: rm is risky\" && echo \$(date)"
+
+# --- Blocked: quoting is not an escape hatch ---
+# Outside quotes nothing changed, so the wrapper forms stay caught, and inside
+# quotes a separator puts the token back in command position.
+run block "sudo rm -rf /etc/passwd"
+run block "xargs rm -rf /etc/passwd"
+run block "echo hi && rm -rf /etc/passwd"
+run block "sh -c \"cd /x && rm -rf /etc/passwd\""
+unset PLAYBOOK_SAFE_ROOTS
+
 # --- Allowed: `..` that stays inside the allowlist ---
 export PLAYBOOK_SAFE_ROOTS="$HOME/Workspace"
 run allow "rm -rf $HOME/Workspace/proj/sub/../build"
