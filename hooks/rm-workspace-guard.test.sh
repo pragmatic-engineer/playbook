@@ -84,6 +84,15 @@ run allow "rm -rf /private/tmp/scratch-file"
 run block "rm -rf /tmp"
 run block "rm -rf /private/tmp"
 
+# --- Allowed: $HOME/.cache is regenerable scratch, and holds our fixtures ---
+run allow "rm -rf $HOME/.cache/playbook-tests/scratch"
+run allow "rm -rf ~/.cache/some-probe"
+
+# --- Blocked: the cache ROOT itself, and anything the exemption must not reach ---
+run block "rm -rf $HOME/.cache"
+run block "rm -rf $HOME/.cache/../.ssh"
+run block "rm -rf $HOME/.cachefoo/x"
+
 # --- Blocked: the temp exemption is by resolved path, not by spelling ---
 run block "rm -rf /tmp/../etc/passwd"
 run block "rm -rf /tmpfoo/file"

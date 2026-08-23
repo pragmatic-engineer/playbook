@@ -420,6 +420,43 @@ mod rm_workspace_guard {
         }
     }
 
+    /// `~/.cache` is regenerable scratch, and where this repo's own fixtures
+    /// live. Contents only: the root itself is not a cleanup target.
+    #[test]
+    fn paths_inside_the_cache_dir_are_allowed_but_its_root_is_not() {
+        let (h, d) = (home(), del());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("{d} -rf {h}/.cache/playbook-tests/scratch"),
+            // The tilde form must resolve the same way.
+            format!("{d} -rf ~/.cache/some-probe"),
+        ] {
+            assert!(
+                !blocked(&cmd, &ws),
+                "cache scratch should be allowed: {cmd}"
+            );
+        }
+        assert!(
+            blocked(&format!("{d} -rf {h}/.cache"), &ws),
+            "the cache root itself must stay blocked"
+        );
+    }
+
+    /// The exemption must not widen past the directory it names.
+    #[test]
+    fn the_cache_exemption_does_not_leak_through_traversal_or_prefixes() {
+        let (h, d) = (home(), del());
+        let ws = format!("{h}/Workspace");
+        assert!(
+            blocked(&format!("{d} -rf {h}/.cache/../.ssh"), &ws),
+            "canon collapses the traversal, so this is judged as ~/.ssh"
+        );
+        assert!(
+            blocked(&format!("{d} -rf {h}/.cachefoo/x"), &ws),
+            "a sibling that merely starts with the same letters is not the cache"
+        );
+    }
+
     /// The exemption is by resolved path, never by how the string is spelled.
     #[test]
     fn the_temp_exemption_does_not_leak_through_traversal_or_prefixes() {
