@@ -449,6 +449,38 @@ mod rm_workspace_guard {
         }
     }
 
+    /// Regression for a FAIL-OPEN. `canon` treats a leading `$` as a relative
+    /// path and joins it to the cwd, so `$HOME/.cache/x` resolved to
+    /// `<repo>/$HOME/.cache/x`, landed inside a safe root and was ALLOWED, while
+    /// the shell expanded it to a real path outside the workspace. Unlike the
+    /// obfuscation cases this file documents as accepted misses, `$VAR` paths are
+    /// ordinary agent output, so this one had to fail closed.
+    #[test]
+    fn an_unexpanded_variable_target_is_unresolvable_and_blocks() {
+        let (h, d) = (home(), del());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("{d} -rf \"$HOME/.cache/x\""),
+            format!("{d} -rf $HOME/.cache/x"),
+            format!("{d} -rf \"${{BUILD_DIR}}/out\""),
+            format!("{d} -rf `echo /etc`/passwd"),
+            // Accepted cost: a variable pointing INSIDE the workspace blocks too.
+            format!("{d} -rf \"$REPO/target\""),
+        ] {
+            assert!(blocked(&cmd, &ws), "unresolvable target must block: {cmd}");
+        }
+    }
+
+    /// The fix must not turn into a blanket block: literal paths are unaffected.
+    #[test]
+    fn literal_targets_are_unaffected_by_the_expansion_rule() {
+        let (h, d) = (home(), del());
+        let ws = format!("{h}/Workspace");
+        assert!(!blocked(&format!("{d} -rf {ws}/proj/build"), &ws));
+        assert!(!blocked(&format!("{d} -rf {h}/.claude/cache/x"), &ws));
+        assert!(!blocked(&format!("{d} -rf /tmp/scratch"), &ws));
+    }
+
     #[test]
     fn malformed_payloads_exit_silently() {
         for raw in ["", "{", "null", r#"{"tool_input":{}}"#] {
