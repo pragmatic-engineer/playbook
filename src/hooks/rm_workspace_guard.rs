@@ -8,10 +8,14 @@
 //! It only sees `rm`, so `find -delete`, `unlink` and `>` truncation pass, and
 //! anything it cannot resolve is blocked rather than evaluated.
 //!
-//! Three deliberate conservative blocks, all carried over unchanged: a `cd`
-//! anywhere makes relative targets unresolvable, a command substitution could
-//! expand to anything, and a quoted path containing a space still splits into
-//! two tokens and is judged as two paths.
+//! Four deliberate conservative blocks. Three are carried over unchanged: a
+//! `cd` anywhere makes relative targets unresolvable, a command substitution
+//! could expand to anything, and a quoted path containing a space still splits
+//! into two tokens and is judged as two paths. The fourth was added later: a
+//! target containing `$` or a backtick is unresolvable, because it expands at
+//! runtime to a path the guard never sees. That one fixed a FAIL-OPEN rather
+//! than tightening an existing block, so it is the one to be careful about
+//! reverting.
 //!
 //! **ACCEPTED MISS**, pinned so it is not re-reported as a vulnerability later:
 //! a command name that is obfuscated or built at runtime is not resolved, so it
@@ -257,8 +261,24 @@ fn offending_targets(
         if !in_rm || token.starts_with('-') {
             continue;
         }
-        // After a cd, the cwd a relative target resolves against is unknown.
-        let unresolvable = saw_cd && !token.starts_with('/') && !token.starts_with('~');
+        // A target carrying `$` or a backtick expands at runtime to a path the
+        // guard cannot see, so it is unresolvable in the same way a relative
+        // target after a `cd` is.
+        //
+        // This one closes a FAIL-OPEN, which is why it is worth the false
+        // positives it adds. `canon` treats a leading `$` as a relative path and
+        // joins it to the cwd, so `rm -rf "$HOME/.cache/x"` resolved to
+        // `<repo>/$HOME/.cache/x`, landed inside a safe root, and was ALLOWED.
+        // The shell then expanded it to a real path outside the workspace, which
+        // is precisely the accident this guard exists to prevent, and agents
+        // write `$VAR` paths as a matter of course.
+        //
+        // The cost is that `rm -rf "$REPO/target"` now blocks too, even though
+        // it would have expanded to somewhere allowed. That is the correct
+        // direction to be wrong in: the caller can retry with a literal path.
+        let unresolvable = token.contains('$')
+            || token.contains('`')
+            || (saw_cd && !token.starts_with('/') && !token.starts_with('~'));
         if unresolvable || !is_allowed(token, home, claude_dir, safe_roots) {
             outside.push(token.to_string());
         }

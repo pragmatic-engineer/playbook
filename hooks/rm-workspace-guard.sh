@@ -16,6 +16,9 @@
 # the command makes relative targets unresolvable, so those are blocked
 # conservatively too. A quoted path containing a space still splits into two
 # tokens and is evaluated as two separate paths (pre-existing gap, fails closed).
+# A target containing `$` or a backtick is unresolvable and blocks: it expands at
+# runtime to a path this guard never sees. That rule fixed a FAIL-OPEN, so be
+# careful about reverting it.
 # A bare `rm` inside a quoted region is treated as prose unless a separator puts
 # it in command position, so a commit message or PR title that mentions `rm` no
 # longer blocks, while `sh -c "cd /x && rm -rf /etc"` still does.
@@ -177,7 +180,17 @@ while (( _j < _n )); do
   prev_was_separator=false
   if [[ "$in_rm" == true ]]; then
     [[ "$token" == -* ]] && continue
-    if [[ "$saw_cd" == true && "$token" != /* && "$token" != '~'* ]]; then
+    # A target carrying `$` or a backtick expands at runtime to a path the guard
+    # cannot see, so it is unresolvable the same way a relative target after a
+    # `cd` is. This closes a FAIL-OPEN: canon() treated a leading `$` as a
+    # relative path and joined it to the cwd, so `rm -rf "$HOME/.cache/x"`
+    # resolved to <repo>/$HOME/.cache/x, landed inside a safe root and was
+    # ALLOWED, while the shell expanded it to a real path outside the workspace.
+    # The cost is that `rm -rf "$REPO/target"` blocks too; that is the correct
+    # direction to be wrong in, and the caller can retry with a literal path.
+    if [[ "$token" == *'$'* || "$token" == *'`'* ]]; then
+      outside+=("$token")            # unexpanded expansion: unresolvable, block
+    elif [[ "$saw_cd" == true && "$token" != /* && "$token" != '~'* ]]; then
       outside+=("$token")            # relative target after a cd: unresolvable, block
     elif ! is_allowed "$token"; then
       outside+=("$token")

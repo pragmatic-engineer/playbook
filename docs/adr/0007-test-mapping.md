@@ -9,7 +9,7 @@
     all 214 old scenarios with zero blank rows. WU-14's acceptance rule is
     satisfied for every one of those suites and both `shell/` python scripts it
     deletes.
-  - **The 4 guard suites: COMPLETE, 91 of 91 scenarios mapped.** Mapped
+  - **The 4 guard suites: COMPLETE, 96 of 96 scenarios mapped.** Mapped
     2026-08-22. `hooks/*.sh | delete | the 4 guards` is in WU-14's file list, so
     the same acceptance rule applies to them. The mapping opened 9 blank rows in
     `hooks/rm-workspace-guard.test.sh`; **all 9 were closed the same day** by 6
@@ -28,7 +28,7 @@
     Outside quotes nothing changed, so `sudo rm`, `xargs rm` and `find -exec rm`
     are all still caught. 7 scenarios to the shell suite (36 -> 43) and 2 tests
     to the Rust one (38 -> 40), again in both implementations at once.
-  - **Combined: 305 old scenarios across 19 suites, zero blank rows.**
+  - **Combined: 310 old scenarios across 19 suites, zero blank rows.**
 
 **The earlier version of this line read "COMPLETE ... for all 15 of 15 suites"
 with no scope qualifier, while the four guard suites had no rows at all.** Read
@@ -100,16 +100,16 @@ These were missing from this table entirely until 2026-08-22, which is how the
 status line above came to imply a gate they had never been checked against.
 WU-14 deletes them (`hooks/*.sh | delete | the 4 guards`), so they need rows on
 the same terms as everything else. All four map into `tests/hooks_guards.rs`,
-whose 40 tests sit in four `mod` blocks named for the four scripts.
+whose 42 tests sit in four `mod` blocks named for the four scripts.
 
 | Old suite | Old cases | New Rust home | New tests | Per-scenario rows |
 |---|---|---|---|---|
 | `hooks/bg-await-guard.test.sh` | 19 | `tests/hooks_guards.rs::bg_await_guard` | 6 | **DONE, see below** |
 | `hooks/no-dash-guard.test.sh` | 17 | `tests/hooks_guards.rs::no_dash_guard` | 8 | **DONE, see below** |
 | `hooks/precommit-check.test.sh` | 12 | `tests/hooks_guards.rs::precommit_check` | 7 | **DONE, see below** |
-| `hooks/rm-workspace-guard.test.sh` | 43 | `tests/hooks_guards.rs::rm_workspace_guard` | 19 | **DONE, see below** |
+| `hooks/rm-workspace-guard.test.sh` | 48 | `tests/hooks_guards.rs::rm_workspace_guard` | 21 | **DONE, see below** |
 
-**Totals: 91 old guard scenarios against 40 Rust tests, all 91 mapped.** This is
+**Totals: 96 old guard scenarios against 42 Rust tests, all 96 mapped.** This is
 the suite where the naive-count warning at the top of this file did *not* explain
 the gap away. 19 old bg-await scenarios really do collapse into 3 table-driven
 Rust tests holding the same 19 command strings verbatim, and that is honest
@@ -680,7 +680,7 @@ Adds, with no old counterpart:
 
 ## Per-scenario rows: `hooks/rm-workspace-guard.test.sh`
 
-**COMPLETE. All 43 old scenarios accounted for, zero blank rows, so WU-14 may
+**COMPLETE. All 48 old scenarios accounted for, zero blank rows, so WU-14 may
 delete this suite.** It got there in two steps on 2026-08-22: the mapping found
 21 of 30 covered and 9 blank, and the 9 were closed by writing tests, not by
 adjusting the table. This is the guard that blocks `rm` outside the workspace,
@@ -755,6 +755,31 @@ row above.
 | allow `$rel_base/relroot/file` with a relative root, case 7 (1) | `a_relative_root_resolves_against_the_guards_cwd` | first assert |
 | block outside with that same relative root, case 7 (1) | same | second assert, proving no widening into a false allow |
 | deny reason names the roots in effect, case 10 (1) | `the_deny_reason_names_the_roots_in_effect` | parses `hookSpecificOutput.permissionDecisionReason` and asserts both configured roots appear; the only content assertion on the message |
+
+### Added to both suites 2026-08-23: unexpanded variables fail closed (5)
+
+Not a port, and the only entry in this file that fixed a **fail-open** rather
+than tightening an existing block. `canon` treats a leading `$` as a relative
+path and joins it to the cwd, so `rm -rf "$HOME/.cache/x"` resolved to
+`<repo>/$HOME/.cache/x`, landed inside a safe root and was ALLOWED, while the
+shell expanded it to a real path outside the workspace. Found by noticing that
+one of this session's own cleanup commands succeeded when it should not have.
+
+| Old scenario | New test | How it is covered |
+|---|---|---|
+| block `rm -rf "$HOME/.cache/x"` (1) | `an_unexpanded_variable_target_is_unresolvable_and_blocks` | element 1, quoted |
+| block `rm -rf $HOME/.cache/x` (1) | same | element 2, unquoted |
+| block `rm -rf "${BUILD_DIR}/out"` (1) | same | element 3, brace form |
+| block ``rm -rf `echo /etc`/passwd`` (1) | same | element 4, backtick |
+| block `rm -rf "$REPO/target"` (1) | same | element 5, the accepted cost: a variable pointing INSIDE the workspace blocks too |
+
+`literal_targets_are_unaffected_by_the_expansion_rule` has no old counterpart. It
+pins that the rule did not become a blanket block, which a rule this broad could
+otherwise satisfy while breaking every ordinary deletion.
+
+**Mutation-verified:** dropping the `$`/backtick condition, which restores the
+fail-open, fails `an_unexpanded_variable_target_is_unresolvable_and_blocks` and
+nothing else.
 
 ### Added to both suites 2026-08-22: the temp exemption (6)
 

@@ -110,6 +110,19 @@ run block "echo hi && rm -rf /etc/passwd"
 run block "sh -c \"cd /x && rm -rf /etc/passwd\""
 unset PLAYBOOK_SAFE_ROOTS
 
+# --- Blocked: an unexpanded variable is unresolvable, so it fails closed ---
+# Regression for a FAIL-OPEN: canon() treated a leading `$` as a relative path
+# and joined it to the cwd, so these landed inside the repo root and were
+# ALLOWED, while the shell expanded them to real paths outside the workspace.
+# Single-quoted here so the test harness passes the literal `$` to the guard.
+run block 'rm -rf "$HOME/.cache/x"'
+run block 'rm -rf $HOME/.cache/x'
+run block 'rm -rf "${BUILD_DIR}/out"'
+run block 'rm -rf `echo /etc`/passwd'
+# Accepted cost: a variable pointing INSIDE the workspace blocks too. Failing
+# closed is the correct direction, and a literal path still works.
+run block 'rm -rf "$REPO/target"'
+
 # --- Allowed: `..` that stays inside the allowlist ---
 export PLAYBOOK_SAFE_ROOTS="$HOME/Workspace"
 run allow "rm -rf $HOME/Workspace/proj/sub/../build"
