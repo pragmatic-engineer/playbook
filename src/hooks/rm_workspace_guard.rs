@@ -17,6 +17,12 @@
 //! than tightening an existing block, so it is the one to be careful about
 //! reverting.
 //!
+//! A heredoc body is DATA, not commands, so a mention inside one is prose
+//! unless it starts a line. That was previously an accepted false positive,
+//! revised on 2026-08-23 because commit messages written through a heredoc were
+//! blocking real work. A body line that STARTS with a deletion is still in
+//! command position and still blocks, which is what keeps `bash <<EOF` honest.
+//!
 //! **ACCEPTED MISS**, pinned so it is not re-reported as a vulnerability later:
 //! a command name that is obfuscated or built at runtime is not resolved, so it
 //! is not recognised as a deletion. Escaped and quote-split spellings, and names
@@ -174,57 +180,149 @@ fn is_allowed(target: &str, home: &str, claude_dir: &Path, safe_roots: &[PathBuf
         .any(|root| path == *root || path.starts_with(root))
 }
 
-/// Walks the command left to right tracking whether the cursor sits inside an
-/// `rm`'s argument list, which is what lets `rm a && ls b` judge only `a`.
-/// Splits on spaces exactly as the previous tokenizer did, INCLUDING inside
-/// quotes, and keeps every quote character in the token text. Both choices are
-/// deliberate: identical tokens mean target judging is byte-for-byte unchanged,
-/// and splitting inside quotes is what still catches `sh -c "cd /x && rm -rf
-/// /etc"`. The only new information is whether each token began inside a quoted
-/// region.
+/// The delimiter of a heredoc opened on this line, if any.
 ///
-/// An unbalanced quote leaves the remaining tokens marked quoted. That can only
-/// make the guard demand a separator before believing a deletion, never fewer
-/// checks on the unquoted path, so the failure direction is unchanged.
-fn tokenize(normalised: &str) -> Vec<(String, bool)> {
-    let mut tokens = Vec::new();
+/// The delimiter must start with a letter or `_`, which is what keeps an
+/// arithmetic shift like `$((1 << 2))` from being read as a heredoc.
+fn heredoc_delimiter(line: &str) -> Option<String> {
+    let chars: Vec<char> = line.chars().collect();
     let (mut in_single, mut in_double) = (false, false);
-    let mut current = String::new();
-    let mut current_quoted = false;
-
-    for ch in normalised.chars() {
-        if ch == ' ' {
-            if !current.is_empty() {
-                tokens.push((std::mem::take(&mut current), current_quoted));
-            }
-            continue;
-        }
-        if current.is_empty() {
-            current_quoted = in_single || in_double;
-        }
-        current.push(ch);
-        match ch {
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
+            '<' if !in_single && !in_double && chars.get(i + 1) == Some(&'<') => {
+                let mut j = i + 2;
+                if chars.get(j) == Some(&'-') {
+                    j += 1;
+                }
+                while chars.get(j) == Some(&' ') {
+                    j += 1;
+                }
+                let quote = match chars.get(j) {
+                    Some(&q @ ('\'' | '"')) => {
+                        j += 1;
+                        Some(q)
+                    }
+                    _ => None,
+                };
+                let start = j;
+                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                    j += 1;
+                }
+                let word: String = chars[start..j].iter().collect();
+                let named = word
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphabetic() || c == '_');
+                let closed = quote.is_none_or(|q| chars.get(j) == Some(&q));
+                if named && closed {
+                    return Some(word);
+                }
+                i = j;
+                continue;
+            }
             _ => {}
         }
+        i += 1;
     }
-    if !current.is_empty() {
-        tokens.push((current, current_quoted));
+    None
+}
+
+/// Marks which lines are heredoc BODY, which is data rather than commands.
+///
+/// Heredoc mode is only entered when the terminator actually appears later. An
+/// unterminated `<<` would otherwise turn the rest of the command into data and
+/// hide a deletion, which is the wrong way for this to fail.
+fn heredoc_body_lines(cmd: &str) -> Vec<bool> {
+    let lines: Vec<&str> = cmd.lines().collect();
+    let mut body = vec![false; lines.len()];
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(delim) = heredoc_delimiter(lines[i]) {
+            if let Some(end) = lines
+                .iter()
+                .enumerate()
+                .skip(i + 1)
+                .find(|(_, l)| l.trim() == delim)
+                .map(|(j, _)| j)
+            {
+                for flag in body.iter_mut().take(end).skip(i + 1) {
+                    *flag = true;
+                }
+                i = end + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    body
+}
+
+/// Splits on spaces, keeping quote characters in the token text, and reports
+/// whether each token is DATA rather than a command: either inside shell quotes
+/// or inside a heredoc body. A newline becomes a `;` token, so the existing
+/// command-position rule still sees the start of each body line.
+///
+/// Splitting continues INSIDE quotes, which is deliberate: identical tokens mean
+/// target judging is byte-for-byte unchanged, and it is what still catches
+/// `sh -c "cd /x && rm -rf /etc"`.
+///
+/// An unbalanced quote leaves the remaining tokens marked as data. That can only
+/// make the guard demand a separator before believing a deletion, never fewer
+/// checks on the unquoted path, so the failure direction is unchanged.
+fn tokenize(cmd: &str) -> Vec<(String, bool)> {
+    let body = heredoc_body_lines(cmd);
+    let mut tokens = Vec::new();
+    let (mut in_single, mut in_double) = (false, false);
+
+    for (index, line) in cmd.lines().enumerate() {
+        if index > 0 {
+            // A newline resets in-rm state exactly as `;` does.
+            tokens.push((";".to_string(), false));
+        }
+        let is_body = body.get(index).copied().unwrap_or(false);
+        let mut current = String::new();
+        let mut current_data = false;
+
+        for ch in line.replace('\t', " ").chars() {
+            if ch == ' ' {
+                if !current.is_empty() {
+                    tokens.push((std::mem::take(&mut current), current_data));
+                }
+                continue;
+            }
+            if current.is_empty() {
+                current_data = is_body || in_single || in_double;
+            }
+            current.push(ch);
+            // Quote state is NOT tracked inside a heredoc body: the body is
+            // literal text, and an ordinary apostrophe in prose would otherwise
+            // flip the state and mis-mark every token after it.
+            if !is_body {
+                match ch {
+                    '\'' if !in_double => in_single = !in_single,
+                    '"' if !in_single => in_double = !in_double,
+                    _ => {}
+                }
+            }
+        }
+        if !current.is_empty() {
+            tokens.push((current, current_data));
+        }
     }
     tokens
 }
 
+/// Walks the command left to right tracking whether the cursor sits inside an
+/// `rm`'s argument list, which is what lets `rm a && ls b` judge only `a`.
 fn offending_targets(
     cmd: &str,
     home: &str,
     claude_dir: &Path,
     safe_roots: &[PathBuf],
 ) -> Vec<String> {
-    // A newline becomes a separator so an rm on any line is still seen, and
-    // resets the in-rm state exactly as `;` does.
-    let normalised = cmd.replace('\n', " ; ").replace('\t', " ");
-
     let mut outside = Vec::new();
     let mut in_rm = false;
     let mut saw_cd = false;
@@ -232,14 +330,16 @@ fn offending_targets(
     // The very start of a command is a command position, same as after a `;`.
     let mut prev_was_separator = true;
 
-    for (token, quoted) in tokenize(&normalised) {
+    for (token, is_data) in tokenize(cmd) {
         let token = token.as_str();
 
-        // A word inside quotes is prose unless a separator put it in command
-        // position. `-m "fix: stop using rm"` is a message; `sh -c "cd /x && rm
-        // -rf /etc"` really does delete. Outside quotes nothing changes, so
+        // A word that is DATA, meaning inside quotes or inside a heredoc body,
+        // is prose unless a separator put it in command position. `-m "fix: stop
+        // using rm"` is a message and a commit message mentioning `rm` is prose,
+        // while `sh -c "cd /x && rm -rf /etc"` and a heredoc line that STARTS
+        // with `rm` really do delete. Outside those regions nothing changes, so
         // `sudo rm`, `xargs rm` and `find -exec rm` are all still caught.
-        let is_command = !quoted || prev_was_separator;
+        let is_command = !is_data || prev_was_separator;
 
         if is_command && (token == "cd" || token.ends_with("/cd")) {
             saw_cd = true;
@@ -284,7 +384,7 @@ fn offending_targets(
         }
     }
 
-    if saw_rm && (normalised.contains("$(") || normalised.contains('`')) {
+    if saw_rm && (cmd.contains("$(") || cmd.contains('`')) {
         outside.push(SUBSTITUTION_LABEL.to_string());
     }
     outside

@@ -146,12 +146,28 @@ export PLAYBOOK_SAFE_ROOTS="$HOME/Workspace"
 run allow "$(printf 'echo hi\nrm -rf %s/Workspace/proj/build' "$HOME")"
 unset PLAYBOOK_SAFE_ROOTS
 
-# --- Blocked: heredoc body containing the literal words `rm -rf /etc/example`
-# but no rm command actually runs. ACCEPTED false positive: the tokenizer can't
-# tell a heredoc body from a real command, so this blocks even though nothing
-# is being removed. The trade-off is intentional, pinned here so it's not
-# "discovered" as a bug later. ---
-run block "$(printf 'cat <<EOF\nold script did rm -rf /etc/example here\nEOF')"
+# --- Allowed: a heredoc body is DATA, so a mention inside it is prose ---
+# REVISED 2026-08-23. This was pinned as an accepted false positive on the
+# grounds that the tokenizer could not tell a heredoc body from a command. It
+# now can, and the trade-off was revised deliberately rather than rediscovered,
+# because commit messages written through a heredoc were blocking real work.
+run allow "$(printf 'cat <<EOF\nold script did rm -rf /etc/example here\nEOF')"
+# The exact shape that blocked three commits: prose in the body, plus a
+# substitution elsewhere in the same command.
+run allow "$(printf 'git commit --file - <<EOF\nfix: block rm targets\nEOF\necho $(date)')"
+# An apostrophe in the body must not flip quote state for everything after it.
+run allow "$(printf "git commit --file - <<EOF\ndon't let rm escape\nEOF")"
+
+# --- Blocked: the body is data, not a free pass ---
+# A line that STARTS with rm is in command position and really does delete when
+# the heredoc is fed to a shell.
+run block "$(printf 'bash <<EOF\nrm -rf /etc/passwd\nEOF')"
+# An unterminated heredoc is not treated as a body at all. The mention here is
+# MID-LINE on purpose: a line-start deletion is in command position either way,
+# so it would pass whether or not the terminator rule exists and pin nothing.
+run block "$(printf 'bash <<EOF\nfoo rm -rf /etc/passwd')"
+# `<<` in arithmetic is not a heredoc, so nothing after it becomes data.
+run block "$(printf 'echo $((1 << 2))\nrm -rf /etc/passwd')"
 
 # --- PLAYBOOK_SAFE_ROOTS: configurable safe roots (WU-15) ---
 #

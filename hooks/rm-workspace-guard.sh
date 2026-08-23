@@ -23,6 +23,12 @@
 # it in command position, so a commit message or PR title that mentions `rm` no
 # longer blocks, while `sh -c "cd /x && rm -rf /etc"` still does.
 #
+# A heredoc body is DATA, not commands, so a mention inside one is prose unless
+# it starts a line. That was previously an accepted false positive, revised on
+# 2026-08-23 because commit messages written through a heredoc were blocking real
+# work. A body line that STARTS with a deletion is still in command position and
+# still blocks, which is what keeps `bash <<EOF` honest.
+#
 # ACCEPTED MISS, pinned so it is not re-reported as a vulnerability later: a
 # command name that is obfuscated or built at runtime is not resolved, so it is
 # not recognised as a deletion. Escaped and quote-split spellings, and names
@@ -107,50 +113,109 @@ saw_cd=false
 saw_rm=false
 outside=()
 
-# `read` only tokenizes one line; normalise newlines and tabs to spaces first
-# so an rm on any line of a multi-line command is still seen. A newline maps
-# to a standalone `;` so it resets in_rm the same as a real command separator.
-CMD_NORM="${CMD//$'\n'/ ; }"
-CMD_NORM="${CMD_NORM//$'\t'/ }"
-# Tokenize on spaces exactly as before, INCLUDING inside quotes: splitting
-# inside quotes is what still catches `sh -c "cd /x && rm -rf /etc"`. Quote
-# characters stay in the token text so target judging is unchanged. The only new
-# output is a parallel array recording whether each token began inside a quoted
-# region, which is what lets a `rm` in a commit message or PR title be told from
-# a real command. An unbalanced quote leaves the rest marked quoted, which only
-# ever demands a separator before believing a deletion, so it fails closed.
+# The delimiter of a heredoc opened on this line, if any. The delimiter must
+# start with a letter or _, which keeps an arithmetic shift like $((1 << 2))
+# from being read as a heredoc.
+heredoc_delim() {
+  local l="$1" n=${#1} i=0 j ch q w ins=false ind=false
+  while (( i < n )); do
+    ch="${l:i:1}"
+    if [[ "$ch" == "'" && "$ind" == false ]]; then
+      if [[ "$ins" == true ]]; then ins=false; else ins=true; fi
+    elif [[ "$ch" == '"' && "$ins" == false ]]; then
+      if [[ "$ind" == true ]]; then ind=false; else ind=true; fi
+    elif [[ "$ch" == "<" && "$ins" == false && "$ind" == false && "${l:i+1:1}" == "<" ]]; then
+      j=$(( i + 2 ))
+      [[ "${l:j:1}" == "-" ]] && j=$(( j + 1 ))
+      while [[ "${l:j:1}" == " " ]]; do j=$(( j + 1 )); done
+      q=""
+      if [[ "${l:j:1}" == "'" || "${l:j:1}" == '"' ]]; then q="${l:j:1}"; j=$(( j + 1 )); fi
+      w=""
+      while [[ "${l:j:1}" == [A-Za-z0-9_] ]]; do w+="${l:j:1}"; j=$(( j + 1 )); done
+      if [[ "$w" == [A-Za-z_]* ]] && { [[ -z "$q" ]] || [[ "${l:j:1}" == "$q" ]]; }; then
+        printf '%s' "$w"; return 0
+      fi
+      i=$j; continue
+    fi
+    i=$(( i + 1 ))
+  done
+}
+
+# Split into lines, then mark which ones are heredoc BODY. A body is data, not
+# commands, so a commit message written through a heredoc stops reading as a
+# deletion while a body line that STARTS with rm still does.
+# Heredoc mode is only entered when the terminator actually appears later: an
+# unterminated `<<` would otherwise turn the rest into data and hide a deletion.
+lines=()
+while IFS= read -r _l; do lines+=("$_l"); done <<< "$CMD"
+_nlines=${#lines[@]}
+is_body=()
+for (( _k = 0; _k < _nlines; _k++ )); do is_body+=(false); done
+_k=0
+while (( _k < _nlines )); do
+  _d="$(heredoc_delim "${lines[$_k]}")"
+  if [[ -n "$_d" ]]; then
+    _end=-1
+    for (( _j = _k + 1; _j < _nlines; _j++ )); do
+      _t="${lines[$_j]}"
+      _t="${_t#"${_t%%[![:space:]]*}"}"
+      _t="${_t%"${_t##*[![:space:]]}"}"
+      if [[ "$_t" == "$_d" ]]; then _end=$_j; break; fi
+    done
+    if (( _end >= 0 )); then
+      for (( _j = _k + 1; _j < _end; _j++ )); do is_body[$_j]=true; done
+      _k=$(( _end + 1 )); continue
+    fi
+  fi
+  _k=$(( _k + 1 ))
+done
+
+# Tokenize on spaces, INCLUDING inside quotes: splitting inside quotes is what
+# still catches `sh -c "cd /x && rm -rf /etc"`. Quote characters stay in the
+# token text so target judging is unchanged. The parallel tok_data array records
+# whether each token is DATA (inside quotes or a heredoc body) rather than a
+# command. A newline emits a `;` token so the command-position rule still sees
+# the start of every body line.
 tokens=()
-tok_quoted=()
-_cur=""
-_cur_quoted=false
+tok_data=()
 _in_single=false
 _in_double=false
-_i=0
-_len=${#CMD_NORM}
-while (( _i < _len )); do
-  _ch="${CMD_NORM:_i:1}"
-  if [[ "$_ch" == " " ]]; then
-    if [[ -n "$_cur" ]]; then
-      tokens+=("$_cur"); tok_quoted+=("$_cur_quoted"); _cur=""
+for (( _k = 0; _k < _nlines; _k++ )); do
+  (( _k > 0 )) && { tokens+=(";"); tok_data+=(false); }
+  _body="${is_body[$_k]}"
+  _line="${lines[$_k]//$'\t'/ }"
+  _cur=""
+  _cur_data=false
+  _i=0
+  _len=${#_line}
+  while (( _i < _len )); do
+    _ch="${_line:_i:1}"
+    if [[ "$_ch" == " " ]]; then
+      if [[ -n "$_cur" ]]; then tokens+=("$_cur"); tok_data+=("$_cur_data"); _cur=""; fi
+      _i=$(( _i + 1 )); continue
     fi
-    _i=$(( _i + 1 )); continue
-  fi
-  if [[ -z "$_cur" ]]; then
-    if [[ "$_in_single" == true || "$_in_double" == true ]]; then
-      _cur_quoted=true
-    else
-      _cur_quoted=false
+    if [[ -z "$_cur" ]]; then
+      if [[ "$_body" == true || "$_in_single" == true || "$_in_double" == true ]]; then
+        _cur_data=true
+      else
+        _cur_data=false
+      fi
     fi
-  fi
-  _cur+="$_ch"
-  if [[ "$_ch" == "'" && "$_in_double" == false ]]; then
-    if [[ "$_in_single" == true ]]; then _in_single=false; else _in_single=true; fi
-  elif [[ "$_ch" == '"' && "$_in_single" == false ]]; then
-    if [[ "$_in_double" == true ]]; then _in_double=false; else _in_double=true; fi
-  fi
-  _i=$(( _i + 1 ))
+    _cur+="$_ch"
+    # Quote state is NOT tracked inside a heredoc body: the body is literal
+    # text, and an ordinary apostrophe in prose would otherwise flip the state
+    # and mis-mark every token after it.
+    if [[ "$_body" != true ]]; then
+      if [[ "$_ch" == "'" && "$_in_double" == false ]]; then
+        if [[ "$_in_single" == true ]]; then _in_single=false; else _in_single=true; fi
+      elif [[ "$_ch" == '"' && "$_in_single" == false ]]; then
+        if [[ "$_in_double" == true ]]; then _in_double=false; else _in_double=true; fi
+      fi
+    fi
+    _i=$(( _i + 1 ))
+  done
+  [[ -n "$_cur" ]] && { tokens+=("$_cur"); tok_data+=("$_cur_data"); }
 done
-if [[ -n "$_cur" ]]; then tokens+=("$_cur"); tok_quoted+=("$_cur_quoted"); fi
 
 # The very start of a command is a command position, same as after a `;`.
 prev_was_separator=true
@@ -158,7 +223,7 @@ _n=${#tokens[@]}
 _j=0
 while (( _j < _n )); do
   token="${tokens[$_j]}"
-  quoted="${tok_quoted[$_j]}"
+  quoted="${tok_data[$_j]}"
   _j=$(( _j + 1 ))
   [[ -z "$token" ]] && continue
   # A word inside quotes is prose unless a separator put it in command position.
@@ -200,7 +265,7 @@ done
 
 # rm reached through $(...) or a backtick: the tokenizer cannot evaluate what
 # the substitution expands to, so block conservatively, same posture as saw_cd.
-if [[ "$saw_rm" == true && ( "$CMD_NORM" == *'$('* || "$CMD_NORM" == *'`'* ) ]]; then
+if [[ "$saw_rm" == true && ( "$CMD" == *'$('* || "$CMD" == *'`'* ) ]]; then
   outside+=("<command substitution>")
 fi
 

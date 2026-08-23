@@ -353,21 +353,47 @@ mod rm_workspace_guard {
         );
     }
 
-    /// ACCEPTED false positive, pinned so it is not "discovered" as a bug later.
-    /// The tokenizer cannot tell a heredoc body from a command, so a body merely
-    /// QUOTING a deletion still blocks. The trade-off is intentional; the old
-    /// shell suite documented it at :97-102 and this keeps that record.
+    /// REVISED 2026-08-23. This was pinned as an accepted false positive, on the
+    /// grounds that the tokenizer could not tell a heredoc body from a command.
+    /// It now can: a body is data, so a mention inside one is prose unless it
+    /// starts a line. The trade-off was revised deliberately, not rediscovered,
+    /// because commit messages written through a heredoc were blocking real work.
     #[test]
-    fn a_heredoc_body_quoting_a_deletion_is_an_accepted_false_positive() {
+    fn a_heredoc_body_mentioning_a_deletion_is_prose() {
         let (h, d, e) = (home(), del(), etc());
         let ws = format!("{h}/Workspace");
-        assert!(
-            blocked(
-                &format!("cat <<EOF\nold script did {d} -rf {e}/example here\nEOF"),
-                &ws
-            ),
-            "nothing is deleted here, but the tokenizer cannot know that"
-        );
+        for cmd in [
+            format!("cat <<EOF\nold script did {d} -rf {e}/example here\nEOF"),
+            // The shape that blocked three commits: prose in the body, plus a
+            // substitution elsewhere in the same command.
+            format!("git commit --file - <<EOF\nfix: block {d} targets\nEOF\necho $(date)"),
+            // An apostrophe in the body must not flip quote state for the rest.
+            format!("git commit --file - <<EOF\ndon't let {d} escape\nEOF"),
+        ] {
+            assert!(!blocked(&cmd, &ws), "heredoc prose must not block: {cmd}");
+        }
+    }
+
+    /// The body is data, not a free pass: a line that STARTS with a deletion is
+    /// in command position and really does delete when fed to a shell.
+    #[test]
+    fn a_heredoc_line_starting_with_a_deletion_still_blocks() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        assert!(blocked(
+            &format!("bash <<EOF\n{d} -rf {e}/passwd\nEOF"),
+            &ws
+        ));
+        // An unterminated heredoc is not treated as a body at all. The mention
+        // here is MID-LINE on purpose: a line-start deletion is in command
+        // position either way, so it would pass whether or not the terminator
+        // rule exists and would pin nothing.
+        assert!(blocked(&format!("bash <<EOF\nfoo {d} -rf {e}/passwd"), &ws));
+        // `<<` in arithmetic is not a heredoc, so nothing after it becomes data.
+        assert!(blocked(
+            &format!("echo $((1 << 2))\n{d} -rf {e}/passwd"),
+            &ws
+        ));
     }
 
     /// Scratch space is exempt from the configured roots, the same standing
