@@ -363,6 +363,57 @@ scenario_j_binary_on_path() {
     [ ! -e "$bin/playbook" ] || { echo "wrote to PLAYBOOK_BIN_DIR unnecessarily" >&2; return 1; }
 }
 
+# Step 2b: `playbook init --hooks-only` must be invoked, with
+# CLAUDE_PLUGIN_ROOT pointed at SELF_ROOT, whenever CLAUDE_HOME resolves to
+# the default $HOME/.claude and a `playbook` binary is on PATH. The stub
+# records its own args and CLAUDE_PLUGIN_ROOT to a file instead of doing
+# anything real, since the actual wiring behaviour is covered at the Rust
+# level (tests/init_run.rs); this only pins that setup-local.sh calls it.
+scenario_k_hooks_only_invoked() {
+    local home="$WORK/k-home" ch="$WORK/k-home/.claude" bin="$WORK/k-bin" record out
+    mkdir -p "$home" "$ch" "$bin"
+    record="$WORK/k-record"
+    cat > "$bin/playbook" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" > "$record"
+printf 'CLAUDE_PLUGIN_ROOT=%s\n' "\$CLAUDE_PLUGIN_ROOT" >> "$record"
+EOF
+    chmod 0755 "$bin/playbook"
+
+    out="$(CLAUDE_HOME="$ch" HOME="$home" PATH="$bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+           bash "$SCRIPT" --skip-deps 2>&1)"
+
+    [ -f "$record" ] || { echo "playbook was never invoked: $out" >&2; return 1; }
+    grep -q "^init --hooks-only$" "$record" \
+        || { echo "unexpected invocation: $(cat "$record")" >&2; return 1; }
+    grep -q "^CLAUDE_PLUGIN_ROOT=$SCRIPT_DIR/\.\.$" "$record" \
+        || grep -q "^CLAUDE_PLUGIN_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)$" "$record" \
+        || { echo "CLAUDE_PLUGIN_ROOT not passed: $(cat "$record")" >&2; return 1; }
+}
+
+# Step 2b must NOT fire when CLAUDE_HOME is not the default $HOME/.claude:
+# `playbook init` has no CLAUDE_HOME override, so calling it would silently
+# wire the wrong directory.
+scenario_l_hooks_only_skipped_for_non_default_claude_home() {
+    local home="$WORK/l-home" ch="$WORK/l-claude" bin="$WORK/l-bin" record out
+    mkdir -p "$home" "$ch" "$bin"
+    record="$WORK/l-record"
+    cat > "$bin/playbook" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" > "$record"
+EOF
+    chmod 0755 "$bin/playbook"
+
+    out="$(CLAUDE_HOME="$ch" HOME="$home" PATH="$bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+           bash "$SCRIPT" --skip-deps 2>&1)"
+
+    [ ! -f "$record" ] || { echo "playbook was invoked against a non-default CLAUDE_HOME: $(cat "$record")" >&2; return 1; }
+    case "$out" in
+        *"skipping playbook init --hooks-only"*) ;;
+        *) echo "expected a skip warning, got: $out" >&2; return 1 ;;
+    esac
+}
+
 run_scenario "A: default run wires guards+settings; no rc file; no shell files in CLAUDE_HOME" scenario_a_default
 run_scenario "B: --aliases bash copies launcher files and adds cc.sh source line to .bashrc"   scenario_b_aliases_bash
 run_scenario "C: --aliases zsh copies launcher files and adds cc.zsh source line to .zshrc"    scenario_c_aliases_zsh
@@ -373,6 +424,8 @@ run_scenario "G: default idempotent -- third run byte-identical to second"      
 run_scenario "H: migration of an old-form rc line preserves unrelated content and blanks"      scenario_h_migration
 run_scenario "I: an existing binary in PLAYBOOK_BIN_DIR is detected, not re-downloaded"        scenario_i_binary_present
 run_scenario "J: a binary already on PATH is detected without touching PLAYBOOK_BIN_DIR"       scenario_j_binary_on_path
+run_scenario "K: playbook init --hooks-only is invoked with CLAUDE_PLUGIN_ROOT set"             scenario_k_hooks_only_invoked
+run_scenario "L: playbook init --hooks-only is skipped for a non-default CLAUDE_HOME"           scenario_l_hooks_only_skipped_for_non_default_claude_home
 
 TOTAL=$(( PASS + FAIL ))
 echo ""

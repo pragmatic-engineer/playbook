@@ -48,6 +48,13 @@ pub enum Command {
         /// is never installed for a user who did not ask.
         #[arg(long)]
         system_prompt: bool,
+        /// Run only the `guards` and `hooks` steps, skipping `settings`,
+        /// `shim`, `statusline`, and `system-prompt`. For a caller
+        /// (`setup-local.sh`) that already seeded or merged `settings.json`
+        /// itself and must not install the shell launcher shim or the
+        /// system prompt without separate consent for either.
+        #[arg(long)]
+        hooks_only: bool,
     },
     /// Shared-settings seed subcommands (`gen` today; `check` from WU-21).
     Settings {
