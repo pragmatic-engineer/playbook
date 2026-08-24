@@ -132,6 +132,18 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         ported: true,
     },
     HookSpec {
+        event: "UserPromptSubmit",
+        matcher: None,
+        // ADR 0008 WU-0: prompt-time recall, same hook name and binary as
+        // the PreToolUse entry above, following the exact two-event
+        // precedent `session-clean-exit` already uses across Stop and
+        // SessionEnd (see its entries below).
+        name: "memory-anchors",
+        if_cond: None,
+        timeout: None,
+        ported: true,
+    },
+    HookSpec {
         event: "PostToolUse",
         matcher: Some("Edit|Write|NotebookEdit"),
         name: "post-edit-track",

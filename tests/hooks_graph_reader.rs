@@ -335,6 +335,305 @@ fn additional_context_output_is_valid_json_with_pretooluse_event_name() {
     let _ = fs::remove_dir_all(&home);
 }
 
+// --- memory-anchors: UserPromptSubmit prompt-time recall ------------------
+//
+// ADR 0008 WU-0: the same anchor index above, now also matched on
+// UserPromptSubmit (prompt text and this-session touched files), injecting
+// fact BODIES rather than the name/description line PreToolUse emits.
+// Scenario numbering follows the WU-0 brief in
+// docs/adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity-blueprint.md.
+
+/// Writes a fact's markdown body under `~/.claude/memory/<relpath>`, the
+/// path `Node.file` is relative to (`rebuild_memory_graph.rs` builds it via
+/// `strip_prefix` against the memory root). Creates parent dirs as needed.
+fn write_fact_body(home: &Path, relpath: &str, content: &str) {
+    let path = home.join(".claude").join("memory").join(relpath);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, content).unwrap();
+}
+
+/// Appends one `edits.jsonl` line in the exact shape `post_edit_track.rs`
+/// writes (`EditRecord { path, ts }`), under this session's runtime dir, so
+/// the touched-file signal has something real to match against.
+fn write_edit_record(home: &Path, session_id: &str, abs_path: &str, ts: u64) {
+    let dir = home.join(".claude").join("runtime").join(session_id);
+    fs::create_dir_all(&dir).unwrap();
+    let line = json!({"path": abs_path, "ts": ts}).to_string();
+    let mut contents = fs::read_to_string(dir.join("edits.jsonl")).unwrap_or_default();
+    contents.push_str(&line);
+    contents.push('\n');
+    fs::write(dir.join("edits.jsonl"), contents).unwrap();
+}
+
+fn prompt_hook_input(prompt: &str, session_id: &str) -> String {
+    json!({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": session_id,
+        "prompt": prompt
+    })
+    .to_string()
+}
+
+fn run_prompt_hook(home: &Path, prompt: &str, session_id: &str) -> Output {
+    let hook_input = prompt_hook_input(prompt, session_id);
+    run_playbook(home, &["hook", "memory-anchors"], &hook_input)
+}
+
+/// Parses stdout as JSON and pulls `additionalContext`, or "" if the hook
+/// emitted nothing. Unlike the PreToolUse tests above (which pin the exact
+/// line format), these tests check content is present, not exact
+/// formatting, since the preamble around an injected fact body is an
+/// implementation choice, not part of the contract under test.
+fn additional_context(output: &Output) -> String {
+    let out = stdout_of(output);
+    if out.is_empty() {
+        return String::new();
+    }
+    let parsed: Value = match serde_json::from_str(&out) {
+        Ok(v) => v,
+        Err(_) => return String::new(),
+    };
+    parsed["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// WU-0 scenario 1: a prompt naming a fact surfaces its BODY, not just its
+/// name or description. The body carries a string absent from both the name
+/// and the description, so this fails against unmodified code (which has no
+/// UserPromptSubmit branch at all) and would also fail a buggy
+/// implementation that only echoed the description.
+#[test]
+fn prompt_mentions_a_fact_by_name_surfaces_its_body_not_just_its_name() {
+    // Arrange
+    let home = scratch_home("prompt-body");
+    let graph = json!({
+        "nodes": [
+            {"id": "global/guard-fact", "file": "guard-fact.md", "scope": "global",
+             "type": "feedback", "name": "guard-default-roots-untested",
+             "description": "A test helper hid the zero-config fallback."}
+        ],
+        "edges": []
+    })
+    .to_string();
+    write_graph(&home, &graph);
+    write_fact_body(
+        &home,
+        "guard-fact.md",
+        "---\nname: guard-default-roots-untested\n---\n\nBody mentions PLAYBOOK_SAFE_ROOTS explicitly, a string the description never uses.\n",
+    );
+
+    // Act
+    let output = run_prompt_hook(
+        &home,
+        "why does guard-default-roots-untested happen",
+        "p1",
+    );
+
+    // Assert
+    let context = additional_context(&output);
+    assert!(
+        context.contains("PLAYBOOK_SAFE_ROOTS"),
+        "additionalContext should carry the fact BODY, not just its description: {context}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// WU-0 scenario 2: a fact already surfaced this session is not repeated,
+/// but a newly matching fact still appears. Both halves are required: a
+/// test asserting only "not repeated" would pass identically against
+/// unmodified code, since nothing injects on UserPromptSubmit today either.
+#[test]
+fn dedup_skips_a_repeated_fact_but_still_injects_a_new_one() {
+    // Arrange
+    let home = scratch_home("prompt-dedup");
+    let graph = json!({
+        "nodes": [
+            {"id": "global/fact-one", "file": "fact-one.md", "scope": "global",
+             "type": "feedback", "name": "fact-one", "description": "First fact"},
+            {"id": "global/fact-two", "file": "fact-two.md", "scope": "global",
+             "type": "feedback", "name": "fact-two", "description": "Second fact"}
+        ],
+        "edges": []
+    })
+    .to_string();
+    write_graph(&home, &graph);
+    write_fact_body(&home, "fact-one.md", "BODYONE marks fact one's content.\n");
+    write_fact_body(&home, "fact-two.md", "BODYTWO marks fact two's content.\n");
+    let sid = "p2";
+
+    // Act: turn 1 matches fact-one only.
+    let turn1 = run_prompt_hook(&home, "tell me about fact-one", sid);
+    let turn1_context = additional_context(&turn1);
+    assert!(
+        turn1_context.contains("BODYONE"),
+        "turn 1 should inject fact-one's body: {turn1_context}"
+    );
+
+    // Act: turn 2 matches both fact-one (already seen) and fact-two (new).
+    let turn2 = run_prompt_hook(&home, "fact-one and fact-two both matter", sid);
+
+    // Assert
+    let turn2_context = additional_context(&turn2);
+    assert!(
+        !turn2_context.contains("BODYONE"),
+        "turn 2 should not repeat fact-one, already injected this session: {turn2_context}"
+    );
+    assert!(
+        turn2_context.contains("BODYTWO"),
+        "turn 2 should still inject fact-two, matched for the first time: {turn2_context}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// WU-0 scenario 3: a file touched earlier this session, but not named in
+/// the current prompt, still surfaces its anchored fact. Pins the exact
+/// defect this WU exists to fix: asking about a file, without editing it,
+/// used to surface nothing.
+#[test]
+fn a_file_touched_this_session_surfaces_its_anchored_fact_even_if_unmentioned() {
+    // Arrange
+    let home = scratch_home("prompt-touched-file");
+    let touched_abs = edit_path(&home, "src/rm_workspace_guard.rs");
+    let graph = json!({
+        "nodes": [
+            {"id": "global/guard-anchor-fact", "file": "guard-anchor-fact.md", "scope": "global",
+             "type": "feedback", "name": "guard-anchor-fact", "description": "About the rm guard"},
+            {"id": "code:src/rm_workspace_guard.rs", "file": "src/rm_workspace_guard.rs", "scope": "code", "type": "code"}
+        ],
+        "edges": [
+            {"from": "global/guard-anchor-fact", "to": "code:src/rm_workspace_guard.rs", "relation": "anchors"}
+        ]
+    })
+    .to_string();
+    write_graph(&home, &graph);
+    write_fact_body(&home, "guard-anchor-fact.md", "TOUCHEDFILEBODY is the guard's gotcha.\n");
+    let sid = "p3";
+    write_edit_record(&home, sid, &touched_abs, 1_700_000_000);
+
+    // Act: the prompt names neither the file nor the fact.
+    let output = run_prompt_hook(&home, "what should I work on next", sid);
+
+    // Assert
+    let context = additional_context(&output);
+    assert!(
+        context.contains("TOUCHEDFILEBODY"),
+        "a fact anchored to a file touched earlier this session should surface: {context}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// WU-0 scenario 4: no match emits nothing. Not a regression pin (both old
+/// and new code emit nothing here), a boundary test catching a malformed or
+/// empty-but-present block specifically.
+#[test]
+fn prompt_with_no_match_emits_no_additional_context() {
+    // Arrange
+    let home = scratch_home("prompt-nomatch");
+    write_graph(&home, BASE_GRAPH);
+
+    // Act
+    let output = run_prompt_hook(&home, "completely unrelated words here", "p4");
+
+    // Assert
+    assert_eq!(
+        stdout_of(&output),
+        "",
+        "a non-matching prompt should emit nothing, not an empty block"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// WU-0 scenario 5: a missing or corrupted anchor index degrades to
+/// silence, not a crash, matching this codebase's "never panics, degrades
+/// to say nothing" invariant.
+#[test]
+fn corrupted_anchor_index_degrades_to_silence_not_a_crash() {
+    // Arrange: pre-plant a garbage index file. The cache is "built once and
+    // reused" by file EXISTENCE, so a pre-existing garbage file is not
+    // rebuilt, it must be tolerated on read instead.
+    let home = scratch_home("prompt-corrupt-index");
+    let graph = json!({
+        "nodes": [
+            {"id": "global/fact-a", "file": "fact-a.md", "scope": "global",
+             "type": "feedback", "name": "fact-a", "description": "describes something"}
+        ],
+        "edges": []
+    })
+    .to_string();
+    write_graph(&home, &graph);
+    let sid = "p5";
+    let idx_dir = home.join(".claude").join("runtime").join(sid);
+    fs::create_dir_all(&idx_dir).unwrap();
+    fs::write(
+        idx_dir.join("memory-anchor-index.tsv"),
+        "this is not\tvalid\ttsv\tin the\texpected\tcolumn\tshape\tat all\textra\tcolumns",
+    )
+    .unwrap();
+
+    // Act
+    let output = run_prompt_hook(&home, "tell me about fact-a", sid);
+
+    // Assert
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "a corrupted index should not crash the hook"
+    );
+    assert_eq!(
+        stdout_of(&output),
+        "",
+        "a corrupted index should degrade to no additionalContext, not garbage output"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// WU-0 scenario 6: a fact whose `file` path has been deleted since the
+/// graph was last rebuilt is skipped, not fatal; a second, real match still
+/// injects.
+#[test]
+fn a_fact_with_a_deleted_file_path_is_skipped_without_blocking_a_real_match() {
+    // Arrange: two facts match the same prompt. Only the second has a body
+    // on disk; the first's `file` points nowhere.
+    let home = scratch_home("prompt-deleted-file");
+    let graph = json!({
+        "nodes": [
+            {"id": "global/fact-missing", "file": "fact-missing.md", "scope": "global",
+             "type": "feedback", "name": "fact-missing", "description": "shared-keyword fact one"},
+            {"id": "global/fact-present", "file": "fact-present.md", "scope": "global",
+             "type": "feedback", "name": "fact-present", "description": "shared-keyword fact two"}
+        ],
+        "edges": []
+    })
+    .to_string();
+    write_graph(&home, &graph);
+    // Deliberately do NOT write fact-missing.md.
+    write_fact_body(&home, "fact-present.md", "PRESENTBODY is real and on disk.\n");
+
+    // Act
+    let output = run_prompt_hook(&home, "shared-keyword fact one and fact two", "p6");
+
+    // Assert
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "a deleted fact file should not crash the hook"
+    );
+    let context = additional_context(&output);
+    assert!(
+        context.contains("PRESENTBODY"),
+        "the real, present fact should still inject even though its sibling's file is missing: {context}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// No shell equivalent for this hook (unlike rebuild-memory-graph, which
 /// hooks/graph_writer's tests compare against a frozen golden of that
 /// script's output, see tests/fixtures/golden/README.md);
