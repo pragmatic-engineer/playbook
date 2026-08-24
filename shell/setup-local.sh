@@ -218,6 +218,35 @@ if [ -f "$SELF_ROOT/settings.shared.json" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 2b. Rewire every guard and functional hook via `playbook init --hooks-only`.
+#
+#     Step 2's merge (merge-settings.py) reconciles `.hooks` as one whole
+#     top-level key: on an existing install where `.hooks` differs at all
+#     from the frozen baseline, the WHOLE key is kept as a user customisation,
+#     stale guard commands included, rather than adopting the template's
+#     fixed ones. That stranded `/playbook:doctor`'s guard check at "0 of 4"
+#     even right after setup. `playbook init --hooks-only` fixes it with a
+#     fine-grained per-entry upsert instead, and touches nothing else:
+#     `--hooks-only` skips `settings`, `shim`, and `system-prompt`, so it
+#     never installs the shell launcher or the system prompt without the
+#     separate consent `--aliases`/`--system-prompt` already gate below.
+#
+#     `playbook init` has no `CLAUDE_HOME` override of its own; it always
+#     targets `$HOME/.claude`. Only run it when this script's own `CLAUDE_HOME`
+#     (which does support the override) resolves to that same default path,
+#     so a non-default `CLAUDE_HOME` is left to the merge above rather than
+#     silently rewired at the wrong location.
+# ---------------------------------------------------------------------------
+if [ "$CLAUDE_HOME" != "$HOME/.claude" ]; then
+    warn "CLAUDE_HOME is not \$HOME/.claude; skipping playbook init --hooks-only (it has no CLAUDE_HOME override)"
+elif command -v playbook >/dev/null 2>&1; then
+    CLAUDE_PLUGIN_ROOT="$SELF_ROOT" playbook init --hooks-only \
+        || warn "playbook init --hooks-only reported errors; guards may be unwired"
+else
+    warn "playbook binary unavailable; guards may still be unwired. Re-run /playbook:setup once it is installed."
+fi
+
+# ---------------------------------------------------------------------------
 # 3. Install dependencies (unless --skip-deps).
 #    Per-dependency check-then-install: for each formula in the Brewfile, use
 #    the version already on PATH (from any source: brew, nvm, pyenv, system, a
