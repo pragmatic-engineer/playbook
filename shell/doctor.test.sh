@@ -61,11 +61,12 @@ extract_snippet() {
 LAYER2="$(extract_snippet 2)"
 LAYER5="$(extract_snippet 5)"
 LAYER6="$(extract_snippet 6)"
+LAYER7="$(extract_snippet 7)"
 
 # A missing extraction would let every scenario below pass vacuously (bash -c
 # "" exits 0 and prints nothing, which several assertions read as a match).
 # Fail the whole suite up front rather than let that happen quietly.
-for pair in "LAYER2:2" "LAYER5:5" "LAYER6:6"; do
+for pair in "LAYER2:2" "LAYER5:5" "LAYER6:6" "LAYER7:7"; do
   var="${pair%%:*}"; num="${pair##*:}"
   [[ -n "${!var}" ]] || { echo "FATAL: could not extract Layer $num snippet from $DOCTOR_MD" >&2; exit 2; }
 done
@@ -311,6 +312,89 @@ run_scenario "K: binary and manifest agree -> MATCH <ver>"                     s
 run_scenario "L: binary and manifest disagree -> SKEW binary=.. plugin=.."     scenario_layer6_skew
 run_scenario "M: --version prints nothing -> NO_VERSION"                       scenario_layer6_no_version
 run_scenario "N: binary present, no manifest found -> PRESENT_NO_BASELINE"     scenario_layer6_present_no_baseline
+
+# ── Layer 7: no hook command points at a missing file ───────────────────────
+
+run_layer7() {
+  local home="$1"
+  HOME="$home" bash -c "$LAYER7" 2>&1
+}
+
+# O: every hook command is the bare `playbook hook <name>` form, across two
+# different events. None of them look like a path, so nothing is checked.
+scenario_layer7_all_bare_healthy() {
+  local home="$WORK/l7-o" out
+  mkdir -p "$home/.claude"
+  printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"playbook hook rm-workspace-guard"}]}],"Stop":[{"hooks":[{"command":"playbook hook memory-capture"}]}]}}' \
+    > "$home/.claude/settings.json"
+  out="$(run_layer7 "$home")"
+  [[ "$out" == "checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
+}
+
+# P: the exact shape the orphaned memory_context.py incident had, a leftover
+# Python hook command naming a file that is no longer on disk. Regression pin
+# for that incident.
+scenario_layer7_dangling_python_hook() {
+  local home="$WORK/l7-p" out
+  mkdir -p "$home/.claude"
+  printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"python3 ~/.claude/hooks/memory_context.py"}]}]}}' \
+    > "$home/.claude/settings.json"
+  out="$(run_layer7 "$home")"
+  [[ "$out" == "checked=1 dangling=python3 ~/.claude/hooks/memory_context.py" ]] || { echo "  got: $out"; return 1; }
+}
+
+# Q: a legacy `.sh` command left over from before a hook was ported, on a
+# machine where the script itself is gone. A second, independent path shape.
+scenario_layer7_dangling_legacy_guard() {
+  local home="$WORK/l7-q" out
+  mkdir -p "$home/.claude"
+  printf '{"hooks":{"Stop":[{"hooks":[{"command":"~/.claude/hooks/retired-guard.sh"}]}]}}' \
+    > "$home/.claude/settings.json"
+  out="$(run_layer7 "$home")"
+  [[ "$out" == "checked=1 dangling=~/.claude/hooks/retired-guard.sh" ]] || { echo "  got: $out"; return 1; }
+}
+
+# R: a path-shaped command whose file genuinely exists must not be flagged.
+scenario_layer7_existing_path_not_flagged() {
+  local home="$WORK/l7-r" out
+  mkdir -p "$home/.claude/hooks"
+  touch "$home/.claude/hooks/real.sh"
+  printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"%s/.claude/hooks/real.sh"}]}]}}' "$home" \
+    > "$home/.claude/settings.json"
+  out="$(run_layer7 "$home")"
+  [[ "$out" == "checked=1 dangling=" ]] || { echo "  got: $out"; return 1; }
+}
+
+# S: the same dangling command wired under two different events, the real
+# session-clean-exit precedent (one hook name legitimately wired on both Stop
+# and SessionEnd), must be reported once, not twice, even though both count
+# toward `checked`.
+scenario_layer7_duplicate_across_events_deduped() {
+  local home="$WORK/l7-s" out
+  mkdir -p "$home/.claude"
+  printf '{"hooks":{"Stop":[{"hooks":[{"command":"~/.claude/hooks/gone.sh"}]}],"SessionEnd":[{"hooks":[{"command":"~/.claude/hooks/gone.sh"}]}]}}' \
+    > "$home/.claude/settings.json"
+  out="$(run_layer7 "$home")"
+  [[ "$out" == "checked=2 dangling=~/.claude/hooks/gone.sh" ]] || { echo "  got: $out"; return 1; }
+}
+
+# T: a command whose path still contains an unresolved environment variable
+# after ~/$HOME substitution must be skipped, not falsely flagged as missing.
+scenario_layer7_unresolved_var_skipped() {
+  local home="$WORK/l7-t" out
+  mkdir -p "$home/.claude"
+  printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"bash $CLAUDE_PLUGIN_ROOT/hooks/foo.sh"}]}]}}' \
+    > "$home/.claude/settings.json"
+  out="$(run_layer7 "$home")"
+  [[ "$out" == "checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
+}
+
+run_scenario "O: every command is the bare form -> nothing checked, nothing dangling" scenario_layer7_all_bare_healthy
+run_scenario "P: leftover Python hook command, file gone -> dangling (memory_context.py regression pin)" scenario_layer7_dangling_python_hook
+run_scenario "Q: leftover legacy .sh guard command, file gone -> dangling"     scenario_layer7_dangling_legacy_guard
+run_scenario "R: path-shaped command whose file exists -> not flagged"        scenario_layer7_existing_path_not_flagged
+run_scenario "S: same dangling command on two events -> reported once"        scenario_layer7_duplicate_across_events_deduped
+run_scenario "T: unresolved \$VAR in path -> skipped, not flagged"            scenario_layer7_unresolved_var_skipped
 
 TOTAL=$(( PASS + FAIL ))
 echo ""
