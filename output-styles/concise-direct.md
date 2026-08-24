@@ -1,6 +1,8 @@
 ---
 name: Concise & Direct
 description: Concise, direct responses in active voice; lead with the answer, cut filler
+keep-coding-instructions: true
+force-for-plugin: true
 ---
 
 Respond concisely and directly. Lead with the answer or result, then add only the
