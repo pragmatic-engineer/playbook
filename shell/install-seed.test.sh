@@ -80,8 +80,9 @@ run_scenario() {
 # the template (compared as parsed JSON, not bytes: merge::merge serialises
 # with sorted keys, so a raw template copy is never byte-identical to it once
 # a real settings.json exists), and all 15 ported hooks (11 functional plus
-# the 4 safety guards, ported as of WU-13) are wired on top, 16 entries since
-# session-clean-exit fires on both Stop and SessionEnd.
+# the 4 safety guards, ported as of WU-13) are wired on top, 17 entries since
+# session-clean-exit fires on both Stop and SessionEnd, and, since ADR 0008,
+# memory-anchors fires on both PreToolUse and UserPromptSubmit too.
 scenario_fresh() {
   local d src home log rc
   d="$(mktemp -d "$WORK/fresh.XXXXXX")"
@@ -100,7 +101,7 @@ scenario_fresh() {
     || { echo "  non-hooks keys differ from the template"; return 1; }
   local n_ported
   n_ported="$(jq '[.hooks[]?[]?.hooks[]?.command] | map(select(startswith("playbook hook "))) | length' "$settings")"
-  [ "$n_ported" = "16" ] || { echo "  expected 16 ported hook commands (15 distinct), got $n_ported"; return 1; }
+  [ "$n_ported" = "17" ] || { echo "  expected 17 ported hook commands (15 distinct), got $n_ported"; return 1; }
 }
 
 # (B) A user-authored hook entry in a pre-existing settings.json survives a
@@ -134,7 +135,7 @@ EOF
     || { echo "  user-authored hook entry lost: $(jq -c .hooks.Notification "$settings" 2>/dev/null)"; return 1; }
   local n_ported
   n_ported="$(jq '[.hooks[]?[]?.hooks[]?.command] | map(select(startswith("playbook hook "))) | length' "$settings")"
-  [ "$n_ported" = "16" ] || { echo "  ported hooks not wired alongside the user entry (got $n_ported)"; return 1; }
+  [ "$n_ported" = "17" ] || { echo "  ported hooks not wired alongside the user entry (got $n_ported)"; return 1; }
 }
 
 # (C) install.sh's own file-copy loop still skips a settings.json shipped in
