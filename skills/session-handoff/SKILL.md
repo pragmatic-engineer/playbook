@@ -61,9 +61,11 @@ This is the section where "we did not verify X" or "Y depends on Z which is not 
 
 Default: print the handoff to the conversation as plain Markdown. The user can copy it into a note, a PR description, an issue, or wherever they want.
 
+**Always also write to a fixed internal path**, so the next session can reload it automatically (see `docs/adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md`): compute `project-slug` as the current working directory with every non-alphanumeric character replaced by `-` (the exact `${PWD//[^a-zA-Z0-9]/-}` expansion `shell/shared/config-drift.sh` already uses for the same reason, keyed by directory rather than by git remote so two worktrees of the same repo never collide), and write the document to `~/.claude/runtime/handoff/<project-slug>.md`, creating the `handoff/` directory if it does not exist. Overwrite on every run; this is not the user-facing path below, and the "never write to a path not explicitly provided" rule does not apply to it.
+
 If the user passes a path as an argument (e.g. `/session-handoff docs/handoffs/2026-06-22.md`), additionally write the document to that file. Create parent directories as needed. Confirm the written path in one line after the document.
 
-If the argument is a bare filename with no directory, write it to the current working directory. Never write to a path that was not explicitly provided.
+If the argument is a bare filename with no directory, write it to the current working directory. Never write to a path that was not explicitly provided, this rule governs only the user-facing path, not the fixed internal one above.
 
 ## What NOT to Include
 
