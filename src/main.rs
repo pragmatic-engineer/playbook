@@ -51,6 +51,7 @@ fn main() {
         Command::Init {
             system_prompt,
             hooks_only,
+            aliases,
         } => {
             let home = common::home_dir();
             let claude_home = home.join(".claude");
@@ -67,6 +68,7 @@ fn main() {
                 home,
                 shell_kind,
                 system_prompt,
+                aliases,
             };
             let outcome = if hooks_only {
                 init::run::run_hooks_only(&paths)

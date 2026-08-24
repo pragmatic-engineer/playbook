@@ -55,6 +55,12 @@ pub enum Command {
         /// system prompt without separate consent for either.
         #[arg(long)]
         hooks_only: bool,
+        /// Also install the shell launcher shim (`cc`/`ccd`) and wire the rc
+        /// file. Opt-in, matching `shell/setup-local.sh`'s `--aliases` flag:
+        /// without it the `shim` step is skipped entirely, never partially
+        /// touched.
+        #[arg(long)]
+        aliases: bool,
     },
     /// Shared-settings seed subcommands (`gen` today; `check` from WU-21).
     Settings {
