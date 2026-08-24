@@ -94,7 +94,7 @@ fi
 
 # ── WU-4: smoke tests ─────────────────────────────────────────────────────────
 
-# F: Branch classification – assert the protected-branch case patterns directly.
+# F: Branch classification, assert the protected-branch case patterns directly.
 # Exact patterns from worktree.zsh:378 (more than the spec listed):
 #   main|master|trunk|develop|dev|staging|release|release/*|hotfix|hotfix/*
 scenario_branch_classification() {
@@ -248,7 +248,7 @@ fi
 
 # ── WU-1/2/3 tests ────────────────────────────────────────────────────────────
 
-# I: _wt_ai_resolve_decision – full matrix (pure, no repo needed)
+# I: _wt_ai_resolve_decision, full matrix (pure, no repo needed)
 scenario_ai_resolve_decision() {
   local ok=1
 
@@ -288,7 +288,7 @@ scenario_ai_resolve_decision() {
   (( ok ))
 }
 
-# J: _wt_ai_resolve_info – info block mentions branch, base, files, git add, git rebase --continue
+# J: _wt_ai_resolve_info, info block mentions branch, base, files, git add, git rebase --continue
 scenario_ai_resolve_info() {
   local ok=1
   # shellcheck disable=SC2016
@@ -366,7 +366,7 @@ scenario_no_push() {
   (( ok ))
 }
 
-# L: _wt_node_modules – CoW clone, independence, no nesting, npm invoked
+# L: _wt_node_modules, CoW clone, independence, no nesting, npm invoked
 scenario_cow_node_modules() {
   local base wt npm_shim ok=1
   base="$(mktemp -d)"
@@ -461,7 +461,7 @@ scenario_cow_node_modules() {
   (( ok ))
 }
 
-# M: Integration – _wt_maybe_rebase with rebase conflict
+# M: Integration, _wt_maybe_rebase with rebase conflict
 # WORKTREE_AI_RESOLVE_SILENT=1 -> claude shim invoked (sentinel created)
 # stdin not a tty + silent unset -> shim NOT invoked, rebase aborted
 scenario_maybe_rebase_conflict() {

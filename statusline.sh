@@ -478,7 +478,7 @@ render_pr_right() {
 
     # Single jq pass: extract all PR fields + CI rollup in one fork.
     # (CI rollup uses the same is_failed/is_running logic as $JQ_CI_ROLLUP.)
-    # ci_* are NOT declared local — the standalone CI block reads them after return.
+    # ci_* are NOT declared local: the standalone CI block reads them after return.
     local _pr_out pr_number pr_author pr_review pr_state pr_merged_at pr_closed_at
     local jira_from_body ci_summary pr_pending pr_completed
     _pr_out=$(printf '%s' "$pr_json" | jq -r '

@@ -88,7 +88,7 @@ fi
 
 # 6. Cross-shell: sources cleanly under zsh and config_hash produces output.
 if ! command -v zsh >/dev/null 2>&1; then
-  echo "SKIP (zsh): cross-shell source test — zsh not available"
+  echo "SKIP (zsh): cross-shell source test, zsh not available"
 else
   printf '{"model":"claude-opus-4-5"}\n' > "$SCRATCH/.claude/settings.json"
   # shellcheck disable=SC2016

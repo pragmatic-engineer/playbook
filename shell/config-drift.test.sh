@@ -7,10 +7,10 @@
 # to a scratch .claude tree.
 #
 # Tests:
-#   PARITY  – config_hash via bash (config-hash.sh) and via zsh (config-drift.zsh)
+#   PARITY  : config_hash via bash (config-hash.sh) and via zsh (config-drift.zsh)
 #             return the same 16-char hash for the same tree.
-#   DRIFT   – _cc_config_drifted returns non-empty when a hook script changed.
-#   STAMP   – _cc_config_stamp + _cc_config_drifted is quiet when nothing changed.
+#   DRIFT   : _cc_config_drifted returns non-empty when a hook script changed.
+#   STAMP   : _cc_config_stamp + _cc_config_drifted is quiet when nothing changed.
 #
 # Run:  bash shell/config-drift.test.sh
 # Exit: 0 if all cases pass, non-zero otherwise.
@@ -90,7 +90,7 @@ mkdir -p "$SCRATCH/proj-drift"
 HOME="$SCRATCH" zsh -c 'cd "$2"; source "$1"; _cc_config_stamp' \
   _ "$DRIFT_ZSH" "$SCRATCH/proj-drift"
 
-# Mutate a hook script — this should change the hash.
+# Mutate a hook script: this should change the hash.
 printf '# drift marker\n' >> "$SCRATCH/.claude/hooks/a.sh"
 
 # shellcheck disable=SC2016
