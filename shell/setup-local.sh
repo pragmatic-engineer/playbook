@@ -59,7 +59,7 @@ done
 # 0. Ensure the `playbook` binary exists.
 #
 # Every ported hook is a bare `playbook hook <name>` command, so without the
-# binary all 16 are dead and `/playbook:doctor` reports the guards as unwired.
+# binary all 17 are dead and `/playbook:doctor` reports the guards as unwired.
 # Neither `claude plugin install` nor this script used to install it, which made
 # the README's primary path produce a half-broken install: plugin content worked
 # and every ported hook silently did nothing.
