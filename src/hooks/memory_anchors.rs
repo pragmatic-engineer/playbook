@@ -124,7 +124,10 @@ fn run_prompt(payload: &Payload, dir: &str) {
         }
         for row in matching_rows(&contents, &relpath) {
             let from_id = row.get(1).cloned().unwrap_or_default();
-            if !matches.iter().any(|m: &Vec<String>| m.get(1) == Some(&from_id)) {
+            if !matches
+                .iter()
+                .any(|m: &Vec<String>| m.get(1) == Some(&from_id))
+            {
                 matches.push(row);
             }
         }

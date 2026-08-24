@@ -425,11 +425,7 @@ fn prompt_mentions_a_fact_by_name_surfaces_its_body_not_just_its_name() {
     );
 
     // Act
-    let output = run_prompt_hook(
-        &home,
-        "why does guard-default-roots-untested happen",
-        "p1",
-    );
+    let output = run_prompt_hook(&home, "why does guard-default-roots-untested happen", "p1");
 
     // Assert
     let context = additional_context(&output);
@@ -510,7 +506,11 @@ fn a_file_touched_this_session_surfaces_its_anchored_fact_even_if_unmentioned() 
     })
     .to_string();
     write_graph(&home, &graph);
-    write_fact_body(&home, "guard-anchor-fact.md", "TOUCHEDFILEBODY is the guard's gotcha.\n");
+    write_fact_body(
+        &home,
+        "guard-anchor-fact.md",
+        "TOUCHEDFILEBODY is the guard's gotcha.\n",
+    );
     let sid = "p3";
     write_edit_record(&home, sid, &touched_abs, 1_700_000_000);
 
@@ -614,7 +614,11 @@ fn a_fact_with_a_deleted_file_path_is_skipped_without_blocking_a_real_match() {
     .to_string();
     write_graph(&home, &graph);
     // Deliberately do NOT write fact-missing.md.
-    write_fact_body(&home, "fact-present.md", "PRESENTBODY is real and on disk.\n");
+    write_fact_body(
+        &home,
+        "fact-present.md",
+        "PRESENTBODY is real and on disk.\n",
+    );
 
     // Act
     let output = run_prompt_hook(&home, "shared-keyword fact one and fact two", "p6");
