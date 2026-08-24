@@ -25,6 +25,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Matches hooks/session-init.py:29's `timeout=15`.
 const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Shared cap for the injected memory slice, graph-backed or legacy
+/// fallback alike. See `cap_memory_body`'s doc comment for why this exists.
+const MEMORY_BODY_CAP_CHARS: usize = 16000;
+
 /// The five per-session counter/state files zeroed at the start of every
 /// session. Matches hooks/session-init.py:88 exactly; anything else in the
 /// session directory (config-hash, start-ts, clean-exit, ...) is untouched.
@@ -186,7 +190,8 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, home: &str
     };
     let mut mem_body = match &mem_script {
         Some(script) if script.is_file() => {
-            run_memory_context(script, &mem_slug).unwrap_or_default()
+            let raw = run_memory_context(script, &mem_slug).unwrap_or_default();
+            cap_memory_body(raw)
         }
         _ => String::new(),
     };
@@ -237,13 +242,22 @@ fn run_memory_context(script: &Path, mem_slug: &str) -> Option<String> {
     }
 }
 
-/// Read up to the first 16000 characters of the legacy `MEMORY.md` index.
-/// Empty on any read failure. Matches hooks/session-init.py:173-179.
+/// Read up to the first `MEMORY_BODY_CAP_CHARS` characters of the legacy
+/// `MEMORY.md` index. Empty on any read failure. Matches
+/// hooks/session-init.py:173-179.
 fn read_legacy_memory(path: &Path) -> String {
     let Ok(contents) = fs::read_to_string(path) else {
         return String::new();
     };
-    contents.chars().take(16000).collect()
+    contents.chars().take(MEMORY_BODY_CAP_CHARS).collect()
+}
+
+/// ADR 0008 WU-1: the graph-backed slice had no cap, unlike the legacy
+/// fallback above, so it grew without bound as the memory store grew (8.8 KB
+/// when ADR 0004 measured it, 29.3 KB two weeks later). Same cap, same
+/// constant, so the two paths cannot drift apart again.
+fn cap_memory_body(body: String) -> String {
+    body.chars().take(MEMORY_BODY_CAP_CHARS).collect()
 }
 
 /// Nudge the user to refresh project memory if a previous session queued an

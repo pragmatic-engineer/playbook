@@ -182,6 +182,62 @@ fn session_init_injects_the_graph_backed_slice() {
     );
 }
 
+/// ADR 0008 WU-1: the graph-backed slice has no cap today, unlike the legacy
+/// fallback (`read_legacy_memory`, capped at 16000 chars). A repo-slice with
+/// enough facts to exceed that cap must still be truncated: an early fact
+/// (guaranteed within the first 16000 chars) survives, a fact deliberately
+/// placed past that boundary does not.
+#[test]
+fn session_init_caps_the_graph_backed_slice_like_the_legacy_fallback() {
+    // Arrange: ~120 facts, each with a ~150-char description, so the
+    // rendered "Facts:" section alone exceeds 16000 chars well before the
+    // last node. Zero-padded names sort in the same order memory-context.sh
+    // renders them (`sort_by(.name)`), so "fact-001" is early and
+    // "fact-120" is guaranteed past the cap.
+    let work = scratch_dir("graph-cap");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-cap");
+    let memory_dir = home.join(".claude").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    let padding = "x".repeat(140);
+    let nodes: Vec<String> = (1..=120)
+        .map(|n| {
+            format!(
+                r#"{{"id":"{repo_slug}/f{n:03}","file":"{repo_slug}/f{n:03}.md","scope":"project","type":"project","name":"fact-{n:03}","description":"desc-{n:03}-{padding}","project":"{repo_slug}"}}"#
+            )
+        })
+        .collect();
+    fs::write(
+        memory_dir.join("graph.json"),
+        format!(r#"{{"nodes":[{}],"edges":[]}}"#, nodes.join(",")),
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        "{}",
+        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
+    );
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("fact-001"),
+        "an early fact, well within the cap, should survive: {context}"
+    );
+    assert!(
+        !context.contains("fact-120"),
+        "a fact placed past the 16000-char cap should be truncated away: {context}"
+    );
+}
+
 #[test]
 fn session_init_falls_back_to_the_legacy_memory_index() {
     // Arrange: a fake HOME with the legacy MEMORY.md index but no graph.json.
