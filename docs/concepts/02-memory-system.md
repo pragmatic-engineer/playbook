@@ -14,7 +14,7 @@ Both scopes use the same file format and the same index structure. The only diff
 
 **Global** at `~/.claude/memory/`: cross-project facts. Your preferences, corrections, and pointers to external resources. These apply in every repo. The index is read on demand, not at session start.
 
-**Project** under `~/.claude/memory/<owner>/<repo>/`: facts true only inside one repo, namespaced by the repo's git remote (`<owner>/<repo>` from `git remote get-url origin`). Each project subfolder has its own `MEMORY.md`, which loads automatically at session start. The whole `~/.claude/memory/` store is git-ignored at the `.claude` level, so these files stay on your machine and never get committed.
+**Project** under `~/.claude/memory/<owner>/<repo>/`: facts true only inside one repo, namespaced by the repo's git remote (`<owner>/<repo>` from `git remote get-url origin`). Each project subfolder has its own `MEMORY.md` index. The whole `~/.claude/memory/` store is git-ignored at the `.claude` level, so these files stay on your machine and never get committed.
 
 The split exists because the two categories are genuinely different. A preference for a coding style applies everywhere. The auth layer's token flow is meaningless outside one service. Namespacing project facts by repo also keeps them from polluting the global root, so the global index stays small enough to load efficiently.
 
@@ -72,21 +72,29 @@ Both paths produce the same file format and land in the right scope of the store
 
 ## How Facts Are Loaded
 
-At session start, `session-init.py` derives the repo's `<owner>/<repo>` from its git remote and reads that project's `MEMORY.md` index at `~/.claude/memory/<owner>/<repo>/` (capped at 16KB), injecting it as context. Fact bodies are not injected upfront; they're read on demand when you or a command needs them. The global index is also read on demand, not at session start. This keeps the initial context lean.
+Facts reach context three ways, described in full in [ADR 0004](../adr/0004-graph-first-memory.md) and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md).
+
+**At session start**, the `session-init` hook injects a slice of `graph.json`: every global fact plus every fact scoped to the current repo, as names and one-line descriptions, not full bodies. The slice is capped at 16000 characters, so it cannot grow without bound as the store grows. If the graph is unavailable, `session-init` falls back to the legacy `MEMORY.md` index (capped the same way); if neither exists, it injects nothing.
+
+**Editing or writing a file** surfaces the facts anchored to it: the `memory-anchors` hook matches the edited path against the graph's anchor index and injects the matching facts' names, descriptions, and `depends_on`/`contradicts` neighbours.
+
+**Asking about a file or topic**, a prompt rather than an edit, surfaces matching facts' full bodies, not just their descriptions. `memory-anchors` also runs on every prompt, matching prompt text and this session's already-touched files against the same index, deduped so a fact injects at most once per session.
+
+The anchor index above builds once per session and is not rebuilt within it, so a fact written mid-session will not surface via anchor or prompt matching until the next session starts.
 
 The planning and execution commands (`/playbook:scope`, `/playbook:adr`, `/playbook:implement`) read both scopes before planning or executing. Project facts override global for that repo. Conflicts between the two scopes surface rather than resolve silently. The commit and review commands (`/playbook:commit-and-push`, `/playbook:quick-review`, `/playbook:address-pr-comments`) don't touch memory.
 
-At session end, a `SessionEnd` hook fires a last-chance prompt: if any durable facts from the session haven't been written yet, persist them now. This pairs with the auto-learn nudge on the next session start to close the loop.
+**Across a session boundary**, `/playbook:session-handoff` persists a handoff document to disk; `session-init` reloads and deletes it automatically at the next `SessionStart`, including after `/clear`, so `/clear` no longer discards what the session had figured out. The `memory-capture` hook also fires once per context-usage threshold crossing during a session (a `Stop` hook, not a `SessionEnd` one), prompting you to write down durable facts and, since ADR 0008, to run a handoff too, in case the session runs long enough to approach compaction.
 
 ## graph.json
 
-A single `graph.json` lives at `~/.claude/memory/graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It's a navigation aid: commands read it for orientation; nothing parses it automatically at session start. The graph is becoming the primary retrieval path rather than just a navigation aid; see [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision.
+A single `graph.json` lives at `~/.claude/memory/graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It is the primary retrieval path, not just a navigation aid: every mechanism in "How Facts Are Loaded" above, the SessionStart slice, the edit-time anchor lookup, and prompt-time recall, reads this file. See [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision, and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) for what was added on top of it.
 
-The graph rebuilds automatically. A PostToolUse hook (`rebuild-memory-graph.py`) fires whenever a file under `~/.claude/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
+The graph rebuilds automatically. The `rebuild-memory-graph` hook fires whenever a file under `~/.claude/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
 
 ## The Auto-Learn Loop
 
-When a session ends after making at least five edits in a repo, the `session-clean-exit.py` hook drops a flag in `~/.claude/runtime/to-learn/`. The next time you open a session in that repo, `session-init.py` reads the flag and surfaces a nudge: consider running `/playbook:learn-project` to refresh project memory, or `/playbook:learn-project --stage` to queue candidate facts for review.
+When a session ends after making at least five edits in a repo, the `session-clean-exit` hook drops a flag in `~/.claude/runtime/to-learn/`. The next time you open a session in that repo, `session-init` reads the flag and surfaces a nudge: consider running `/playbook:learn-project` to refresh project memory, or `/playbook:learn-project --stage` to queue candidate facts for review.
 
 `--stage` collects candidates into `~/.claude/memory/<owner>/<repo>/staging/` without touching the live store. `--from-staged` reviews them and promotes confirmed facts through the normal write flow.
 
