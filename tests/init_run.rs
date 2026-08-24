@@ -151,6 +151,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         home: home.to_path_buf(),
         shell_kind,
         system_prompt: false,
+        aliases: true,
     }
 }
 
@@ -422,6 +423,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         home: home.clone(),
         shell_kind: Some(ShellKind::Bash),
         system_prompt: false,
+        aliases: true,
     };
 
     // Act
@@ -561,6 +563,43 @@ fn hooks_only_is_idempotent() {
         after_first, after_second,
         "a second run must not rewrite settings.json"
     );
+}
+
+/// `aliases: false` (the default, absent `--aliases`) must skip the `shim`
+/// step entirely, the same all-or-nothing gate `setup-local.sh`'s own Step 4
+/// uses, so a caller like `setup-local.sh` can call `playbook init` for
+/// guards and settings without silently installing a shell launcher the
+/// user did not opt into this run.
+#[test]
+fn aliases_false_skips_shim_entirely() {
+    // Arrange
+    let home = scratch_home("no-aliases");
+    let paths = InitPaths {
+        self_root: Some(self_root()),
+        claude_home: claude_home_of(&home),
+        home: home.clone(),
+        shell_kind: Some(ShellKind::Bash),
+        system_prompt: false,
+        aliases: false,
+    };
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    assert!(outcome.ok());
+    let shim_step = find_step(&outcome, "shim");
+    assert_eq!(shim_step.status, StepStatus::Skipped);
+    assert!(
+        shim_step.detail.contains("--aliases"),
+        "{}",
+        shim_step.detail
+    );
+    assert!(!home.join(".bashrc").is_file());
+    assert!(!home.join(".zshrc").is_file());
+    // The other steps still ran; only `shim` is gated by `aliases`.
+    assert_eq!(find_step(&outcome, "settings").status, StepStatus::Wired);
+    assert_eq!(find_step(&outcome, "hooks").status, StepStatus::Wired);
 }
 
 /// Spawns the real compiled binary rather than calling `run` directly: the

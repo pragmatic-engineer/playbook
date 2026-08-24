@@ -72,6 +72,7 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         home: home.to_path_buf(),
         shell_kind: Some(ShellKind::Bash),
         system_prompt,
+        aliases: true,
     }
 }
 
