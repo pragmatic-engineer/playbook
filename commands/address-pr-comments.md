@@ -31,35 +31,7 @@ Forbidden internal monologue and forbidden in draft reply text:
 
 ## Discipline: writing the reply
 
-Replies must read like a human typed them quickly in a code-review thread.
-
-- **One sentence ideal, two max.** A paragraph is never acceptable.
-- **Skip the opener.** Go straight to substance. "Fixed." not "Good catch, let me fix that."
-- **Never paraphrase the reviewer.** They already said it. Restating wastes space and sounds like a chatbot confirming receipt.
-- **Use contractions.** "doesn't", "won't", "there's", "it's". Uncontracted forms are an immediate AI tell.
-- **Code-change replies are especially terse.** "Fixed.", "Done.", "Ok, done.", "Sorted." Add a brief locator only when it adds value ("Done, added the null check.").
-- **Only explain when you deviated.** Verbatim application: no rationale. Different approach: one clause. Intentional disagreement: one clause.
-- **No trailing hedges.** Don't end with "but good to be aware of", "worth keeping in mind", "we can revisit if needed." Say the thing and stop.
-- **Match the reviewer's register.** Casual gets casual, formal gets formal. Australian slang is fine sparingly ("should be sweet", "too easy", "reckon that's fine").
-- **No commit hashes in the reply text.** Humans don't write "fixed in abc1234" in conversation. Say "fixed in the latest push" instead. GitHub auto-renders the SHA when the reply lands.
-- **No em or en dashes.** Hard rule. Use commas, colons, parentheses, or separate sentences.
-- **No markdown emphasis in inline comments.** Plain text reads more human. `issue:` not `**issue:**`.
-
-Banned words in replies (LLM vocabulary tells): `utilize`, `however`, `furthermore`, `moreover`, `hence`, `certainly`, `basically`, `actually`, `very`, `just`, `really`, `probably`, `delve`, `harness`, `pivotal`, `intricate`, `groundbreaking`, `remarkable`, `serves as`, `stands as`, `crucial`, `valuable`, `powerful`. Replace `utilize` with `use`, `however` with `but` (or a new sentence), `furthermore` and `moreover` with `and` (or a new sentence), `hence` with `so`. Drop the rest.
-
-Banned reply openers (immediate AI tells, NEVER lead with these):
-
-- "Good catch." / "Nice catch." / "Great catch."
-- "You're right." / "Great point." / "Good point." / "Valid point."
-- Any "Thanks for X" / "I appreciate" gratitude expression.
-
-Banned reply patterns:
-
-- Praise opener + restate the reviewer's finding + describe the fix. The diff is the description.
-- Three-item lists when one or two would do. AI defaults to threes.
-- Setup language: "It's worth noting", "In conclusion", "To summarise", "Let me explain".
-- Persuasive authority tropes: "The real question is", "at its core", "fundamentally", "the deeper issue".
-- Copula avoidance: say "is" and "are", not "serves as", "stands as", "functions as", "represents".
+Invoke the `playbook:writing-style` skill before drafting any reply. It governs voice, contractions, banned words, banned openers, reply brevity (one sentence ideal, two max, a paragraph is never acceptable), and the GitHub-specific rules (no commit hashes in reply text, no markdown emphasis in inline comments, no em or en dashes). Load it once at the start of Step 4 and apply it to every reply in the loop; do not re-derive these rules from memory.
 
 Shell-quoting gotcha for `gh api -f body=`: apostrophes in double quotes are literal (`"I don't"` is correct, NEVER escape to `"I don\'t"` which posts as `don'''t`). If the body contains complex quoting, write it to a temp file and use `-F body=@/tmp/reply.txt`.
 
