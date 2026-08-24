@@ -374,6 +374,18 @@ fn prompt_hook_input(prompt: &str, session_id: &str) -> String {
     .to_string()
 }
 
+/// A payload with `.prompt` absent and `.user_prompt` set instead, matching
+/// the official docs' field name rather than this repo's own `.prompt`
+/// convention.
+fn user_prompt_hook_input(prompt: &str, session_id: &str) -> String {
+    json!({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": session_id,
+        "user_prompt": prompt
+    })
+    .to_string()
+}
+
 fn run_prompt_hook(home: &Path, prompt: &str, session_id: &str) -> Output {
     let hook_input = prompt_hook_input(prompt, session_id);
     run_playbook(home, &["hook", "memory-anchors"], &hook_input)
@@ -432,6 +444,43 @@ fn prompt_mentions_a_fact_by_name_surfaces_its_body_not_just_its_name() {
     assert!(
         context.contains("PLAYBOOK_SAFE_ROOTS"),
         "additionalContext should carry the fact BODY, not just its description: {context}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Refinement pass finding: the `.prompt` empty, fall back to `.user_prompt`
+/// branch (added defensively because the official docs and this repo's own
+/// live code disagree on the field name, see the blueprint's resolved open
+/// items) had no test at all. Added here rather than left uncovered.
+#[test]
+fn prompt_field_absent_falls_back_to_user_prompt_field() {
+    // Arrange
+    let home = scratch_home("prompt-fallback-field");
+    let graph = json!({
+        "nodes": [
+            {"id": "global/fallback-fact", "file": "fallback-fact.md", "scope": "global",
+             "type": "feedback", "name": "fallback-fact", "description": "reached via user_prompt"}
+        ],
+        "edges": []
+    })
+    .to_string();
+    write_graph(&home, &graph);
+    write_fact_body(
+        &home,
+        "fallback-fact.md",
+        "FALLBACKBODY only reachable via user_prompt.\n",
+    );
+
+    // Act: a payload with `.user_prompt` set and `.prompt` entirely absent.
+    let hook_input = user_prompt_hook_input("tell me about fallback-fact", "pfallback");
+    let output = run_playbook(&home, &["hook", "memory-anchors"], &hook_input);
+
+    // Assert
+    let context = additional_context(&output);
+    assert!(
+        context.contains("FALLBACKBODY"),
+        "a payload carrying only .user_prompt should still match, via the fallback: {context}"
     );
 
     let _ = fs::remove_dir_all(&home);
