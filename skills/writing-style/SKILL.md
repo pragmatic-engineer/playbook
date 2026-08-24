@@ -16,15 +16,17 @@ These rules are MUST-level unless marked SHOULD.
 Adopt these principles to what you write for review: the reviewer is the user, the text is the interface, a question in their head is the cost. Reviewers scan, they don't read.
 
 - Commit messages: conventional imperative subject under ~50 chars, one change. Add a body only when the why isn't obvious; a sentence or two, or tight bullets.
-- PR descriptions: lead with one line of what and why, then a short bulleted "what changed". Link to detail, don't inline it. Aim for the gist in under 30 seconds.
+- PR descriptions: one line of what and why is the target, not the floor. Add a short bulleted "what changed" only when the diff needs it to be reviewable; link to detail instead of inlining it. Aim for the gist in under 30 seconds, most PRs need fewer words than feel natural to write.
+- Review findings: default to one sentence, two at most (the problem, then what breaks). A paragraph is the rare exception for a genuinely non-obvious mechanism, not the normal case.
 - Block and doc comments: only when the why isn't obvious from the code. Explain why, never restate what the code shows.
 - When clarity and consistency conflict, choose clarity.
 
 ## Voice
 
 - Use clear, simple language. Write like someone who learned English 5-8 years ago: common words, simple grammar, short connectors. No fancy vocabulary ("ameliorate", "exacerbate", "necessitate", "defensible", "notation"). No idioms ("at the end of the day", "low-hanging fruit"). Prefer common words over formal ones. If you wouldn't say it out loud to a teammate, rewrite it.
+- One instruction or claim per sentence. No phrasal verbs when one plain verb says the same thing: "start" not "spin up", "contact" not "reach out", "investigate" not "dive into". Prefer a verb over a noun built from one: "analyze" beats "perform an analysis".
 - Be spartan and informative. Every sentence adds information. Cut sentences that only add emphasis.
-- Use short sentences.
+- Use short sentences. Default to one line for a reply, a reaction, or a status update; a paragraph is the exception, earned by genuine complexity, not the default.
 - Use active voice. "This breaks the import" not "the import is broken by this."
 - Use data and examples to support claims.
 - Use "you" and "your" to address the reader directly. Exception: in code review comments, use "we" and "this" to stay non-confrontational.
@@ -68,6 +70,8 @@ Adopt these principles to what you write for review: the reviewer is the user, t
 These words are LLM vocabulary tells. MUST NOT appear in generated content:
 
 can, may, just, that, very, really, literally, actually, certainly, probably, basically, could, maybe, delve, embark, enlightening, esteemed, shed light, craft, crafting, imagine, realm, game-changer, unlock, discover, skyrocket, abyss, not alone, in a world where, revolutionize, disruptive, utilize, utilizing, dive deep, tapestry, illuminate, unveil, pivotal, intricate, elucidate, hence, furthermore, realm, however, harness, exciting, groundbreaking, cutting-edge, remarkable, it remains to be seen, glimpse into, navigating, landscape, stark, testament, in summary, in conclusion, moreover, boost, skyrocketing, opened up, powerful, inquiries, ever-evolving, serves as, stands as, functions as, nestled, vibrant, profound, enhancing, showcasing, underscoring, highlighting, fostering, garner, enduring, interplay, valuable, crucial.
+
+A second, distinct category: phrases that perform depth or authority instead of stating a fact ("smart-ass" tone, not flowery vocabulary). Never appear in generated content: "load-bearing", "worth stating plainly", "here's the honest truth", "the real tension", "carry the argument", "at its core", "what really matters", "the deeper issue". State the fact; don't announce that you're about to state it.
 
 ### Replacements
 

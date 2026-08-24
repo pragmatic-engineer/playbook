@@ -123,10 +123,10 @@ Phase 3 / Improvement Strategy
 
 Synthesize the audit into a strategy:
 
-- Identify the 3–5 themes that explain most of the findings, for example "no enforced boundaries between layers" or "error handling is ad hoc".
+- Identify the 3 to 5 themes that explain most of the findings, for example "no enforced boundaries between layers" or "error handling is ad hoc".
 - For each theme, propose a target state and the principle behind it.
 - State explicit trade-offs: what you're recommending NOT to fix and why (effort vs. payoff, risk, project maturity).
-- Define what "done" looks like — measurable signals, for example "CI fails on lint errors," "core module test coverage ≥ 80%," or "zero Critical findings".
+- Define what "done" looks like: measurable signals, for example "CI fails on lint errors," "core module test coverage ≥ 80%," or "zero Critical findings".
 
 Phase 4 / Detailed Task Plan
 
@@ -139,7 +139,7 @@ Each task must include:
 - Title and one-paragraph description
 - Files/areas affected
 - Acceptance criteria: how we verify it's done
-- Effort estimate: S = <2h, M = half-day, L = 1–2 days, XL = needs breakdown
+- Effort estimate: S = <2h, M = half-day, L = 1 to 2 days, XL = needs breakdown
 - Risk of the change itself: could it break things?
 - Dependencies on other tasks
 
@@ -161,7 +161,7 @@ Final Deliverable Format
 
 Produce a single document with these sections:
 
-- Executive Summary: ≤10 sentences, overall health grade A–F with justification, top 3 risks, top 3 opportunities
+- Executive Summary: ≤10 sentences, overall health grade A to F with justification, top 3 risks, top 3 opportunities
 - Repo Map
 - Audit Report
 - Improvement Strategy

@@ -169,6 +169,7 @@ Every Agent prompt MUST include: the full plan content, the specific cycle/step/
 - **DRY:** factor out genuine duplication once it recurs (rule of three); don't couple unrelated code that only looks alike.
 - **KISS:** the simplest design that passes the tests and reads clearly; fewer moving parts wins.
 - **YAGNI:** build only what the plan requires now. No speculative hooks, flags, config, or generality.
+- **Self-explanatory over commented.** Clear names, small functions, obvious control flow, so a reader rarely needs a comment to follow it. No comments unless WHY is non-obvious; never restate WHAT the code already shows.
 
 When SOLID's abstraction pulls against KISS/YAGNI, favour the simplest thing that meets the plan. These principles are also the lens for the refinement pass (Step 8).
 
