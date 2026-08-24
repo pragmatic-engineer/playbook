@@ -470,7 +470,8 @@ fn session_init_treats_a_handoff_older_than_14_days_as_stale_and_clears_it() {
     let home = work.join("home");
     let handoff_path = write_handoff(&home, &repo_dir, "HANDOFFMARKER should never surface");
 
-    let fifteen_days_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(15 * 86400);
+    let fifteen_days_ago =
+        std::time::SystemTime::now() - std::time::Duration::from_secs(15 * 86400);
     let file = fs::File::open(&handoff_path).unwrap();
     file.set_modified(fifteen_days_ago).unwrap();
 
@@ -500,7 +501,11 @@ fn session_init_never_reads_a_handoff_written_under_a_different_worktree() {
     let worktree_b = work.join("worktree-b");
     fs::create_dir_all(&worktree_a).unwrap();
     fs::create_dir_all(&worktree_b).unwrap();
-    write_handoff(&home, &worktree_a, "HANDOFFMARKER belongs only to worktree A");
+    write_handoff(
+        &home,
+        &worktree_a,
+        "HANDOFFMARKER belongs only to worktree A",
+    );
 
     // Act: SessionStart runs from worktree B.
     let outcome = run_session_init_at(&worktree_b, &home);
@@ -514,7 +519,11 @@ fn session_init_never_reads_a_handoff_written_under_a_different_worktree() {
     );
     // Worktree A's own handoff must be untouched by B's run: not read, not deleted.
     let slug_a = project_slug(&worktree_a.to_string_lossy());
-    let path_a = home.join(".claude").join("runtime").join("handoff").join(format!("{slug_a}.md"));
+    let path_a = home
+        .join(".claude")
+        .join("runtime")
+        .join("handoff")
+        .join(format!("{slug_a}.md"));
     assert!(
         path_a.exists(),
         "worktree B's SessionStart must not delete worktree A's handoff file"

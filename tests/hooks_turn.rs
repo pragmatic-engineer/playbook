@@ -549,6 +549,31 @@ mod memory_capture {
         );
     }
 
+    /// ADR 0008 WU-4: the same threshold trigger that already asks the model
+    /// to write down durable facts now also nudges a session handoff, so a
+    /// long session gets one persisted even if the user never runs the
+    /// command manually.
+    #[test]
+    fn reason_also_instructs_a_session_handoff() {
+        // Arrange
+        let home = scratch_home("mc-handoff-nudge");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+
+        // Act
+        let (stdout, _code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(
+            reason.contains("/playbook:session-handoff"),
+            "reason should instruct running session-handoff, not just fact capture: {reason}"
+        );
+    }
+
     #[test]
     fn path_list_is_capped_at_five_with_a_more_note() {
         // Arrange
