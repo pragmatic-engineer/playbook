@@ -194,6 +194,7 @@ fn guards_step_never_fails_and_places_nothing_on_disk() {
         home: home.clone(),
         shell_kind: Some(ShellKind::Bash),
         system_prompt: false,
+        aliases: true,
     };
 
     // Act
@@ -233,6 +234,7 @@ fn all_hook_and_guard_commands_are_wired_via_wire_alone_even_when_no_guard_scrip
         home: home.clone(),
         shell_kind: Some(ShellKind::Bash),
         system_prompt: false,
+        aliases: true,
     };
 
     // Act
@@ -301,6 +303,7 @@ fn repair_path_replaces_a_pre_existing_dangling_guard_command_with_the_bare_form
         home: home.clone(),
         shell_kind: Some(ShellKind::Bash),
         system_prompt: false,
+        aliases: true,
     };
 
     // Act

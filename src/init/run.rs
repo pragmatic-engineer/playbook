@@ -61,6 +61,13 @@ pub struct InitPaths {
     /// see `init::system_prompt` for why installing one unasked would be a
     /// behaviour change rather than a port.
     pub system_prompt: bool,
+    /// Whether the user asked for the shell launcher shim via `--aliases`,
+    /// matching `shell/setup-local.sh`'s flag of the same name. False skips
+    /// the `shim` step entirely, the same all-or-nothing gate
+    /// `setup-local.sh`'s own Step 4 uses: unlike `system_prompt`, there is
+    /// no "refresh an existing copy" case here, since a launcher a user
+    /// never asked for should not be touched at all.
+    pub aliases: bool,
 }
 
 /// How one step of `run` landed.
@@ -156,7 +163,13 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let settings_step = seed_or_merge_settings(self_root, &paths.claude_home, &settings_path);
     let (guards_step, placed_guards) = place_guards_step(self_root, &paths.claude_home);
     let hooks_step = wire_hooks(&settings_path, &placed_guards, &paths.claude_home);
-    let shim_step = install_shim_step(self_root, &paths.claude_home, &paths.home, paths.shell_kind);
+    let shim_step = install_shim_step(
+        self_root,
+        &paths.claude_home,
+        &paths.home,
+        paths.shell_kind,
+        paths.aliases,
+    );
     let statusline_step = place_statusline_step(self_root, &settings_path, &paths.home);
     let system_prompt_step =
         place_system_prompt_step(self_root, &paths.claude_home, paths.system_prompt);
@@ -417,13 +430,18 @@ fn wire_hooks(settings_path: &Path, placed_guards: &[&str], claude_home: &Path) 
 }
 
 /// Step 3: install the launcher runtime and wire the rc file, skipped
-/// cleanly when either input is missing rather than guessed.
+/// cleanly when `aliases` is false or either other input is missing rather
+/// than guessed.
 fn install_shim_step(
     self_root: Option<&Path>,
     claude_home: &Path,
     home: &Path,
     shell_kind: Option<ShellKind>,
+    aliases: bool,
 ) -> StepReport {
+    if !aliases {
+        return StepReport::skipped("shim", "not installed; pass --aliases to opt in");
+    }
     let Some(self_root) = self_root else {
         return StepReport::skipped(
             "shim",
