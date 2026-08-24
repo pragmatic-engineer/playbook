@@ -41,6 +41,81 @@ claude plugin install playbook@pragmatic-engineer
 Expect `/playbook:doctor` to report the binary, the guards and the status line
 as missing. That is correct for this path, not a broken install.
 
+### Install without `curl | bash`
+
+Piping a script into a shell is a reasonable thing to refuse. Two routes avoid
+it, both fully supported.
+
+**Route 1: plugin, then `/playbook:setup`.** Nothing is piped anywhere.
+
+```bash
+claude plugin marketplace add pragmatic-engineer/marketplace
+claude plugin install playbook@pragmatic-engineer
+```
+
+Then in a Claude Code session run `/playbook:setup`. It installs the release
+binary itself (checksum-verified) when one is not already on `PATH`, wires the
+guards and settings, and offers the launchers and system prompt. Verify with
+`/playbook:doctor`.
+
+**Route 2: fully manual.** Every step auditable, nothing downloaded by a script
+you have not read.
+
+1. Install the plugin, so the skills, commands and subagents are present:
+
+   ```bash
+   claude plugin marketplace add pragmatic-engineer/marketplace
+   claude plugin install playbook@pragmatic-engineer
+   ```
+
+2. From the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest),
+   download the asset for your platform and the `SHA256SUMS` file:
+
+   | Platform | Asset |
+   |---|---|
+   | macOS, Apple silicon | `playbook-<version>-aarch64-apple-darwin` |
+   | macOS, Intel | `playbook-<version>-x86_64-apple-darwin` |
+   | Linux, x86_64 | `playbook-<version>-x86_64-unknown-linux-musl` |
+   | Linux, arm64 | `playbook-<version>-aarch64-unknown-linux-musl` |
+   | Windows | `playbook-<version>-x86_64-pc-windows-msvc.exe` |
+
+3. Verify the download. `SHA256SUMS` lists all five assets, so check only your
+   own line:
+
+   ```bash
+   grep "  <asset>$" SHA256SUMS | shasum -a 256 -c -
+   ```
+
+   `SHA256SUMS` is not signed: its integrity rests on TLS and on trusting
+   github.com, not on a cryptographic signature. Treat it as a corruption check.
+
+4. Put it on `PATH` as `playbook`:
+
+   ```bash
+   mkdir -p ~/.local/bin
+   mv <asset> ~/.local/bin/playbook
+   chmod 0755 ~/.local/bin/playbook
+   ```
+
+   Add `~/.local/bin` to `PATH` in your shell rc if it is not already there.
+
+5. Wire the local configuration. **`CLAUDE_PLUGIN_ROOT` is required**: without
+   it `init` has no template to copy from and skips almost every step, reporting
+   `skipped - CLAUDE_PLUGIN_ROOT is not set`.
+
+   ```bash
+   CLAUDE_PLUGIN_ROOT=~/.claude/plugins/cache/pragmatic-engineer/playbook/<version> \
+     playbook init
+   ```
+
+   Add `--system-prompt` to also install the custom system prompt. Every step
+   is idempotent, so re-running is safe.
+
+6. Verify with `/playbook:doctor` in a Claude Code session.
+
+Route 2 does not install the `cc`/`ccd` shell launchers; `init` has no
+`--aliases`. Run `/playbook:setup` if you want them, or add the rc line by hand.
+
 For requirements, pinning a version, and uninstall, see
 [docs/guides/00-install.md](docs/guides/00-install.md).
 
@@ -86,7 +161,7 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 | Command | What it does |
 |---|---|
 | `/playbook:setup` | Wires the guards, seeds `settings.json`, and installs what you choose. Safe to run repeatedly. |
-| `/playbook:doctor` | Checks the four layers and prints a pass/info table with a remediation hint for each miss. |
+| `/playbook:doctor` | Checks the six layers and prints a pass/info table with a remediation hint for each miss. |
 | `/playbook:brainstorm` | Divergent discovery session; explores a raw idea and produces an approved design doc for `/playbook:scope`. |
 | `/playbook:scope` | Interview-driven planning; saves a verified, parallel-safe plan to `.claude/plans/` for `/playbook:implement`. |
 | `/playbook:implement` | Executes a `/playbook:scope` plan or `/playbook:adr` blueprint with subagents and TDD, committing each work unit. `--auto` opens a PR. |
