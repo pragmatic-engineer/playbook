@@ -319,6 +319,50 @@ scenario_h_migration() {
         || { echo "  .zshrc changed on second run"; return 1; }
 }
 
+# Binary detection. Both cases are deliberately no-download: the fetch path
+# needs the network and a published release, so it is exercised manually rather
+# than in CI. What these pin is that setup does NOT re-download when a binary is
+# already available, which is the part that would otherwise silently re-fetch on
+# every run.
+#
+# PATH is stripped to system dirs so the developer's own `playbook` cannot leak
+# in and make either case pass for the wrong reason.
+scenario_i_binary_present() {
+    local home="$WORK/i-home" ch="$WORK/i-home/.claude" bin="$WORK/i-bin" out
+    mkdir -p "$home" "$ch" "$bin"
+    printf '#!/bin/sh\necho stub\n' > "$bin/playbook"
+    chmod 0755 "$bin/playbook"
+
+    out="$(CLAUDE_HOME="$ch" HOME="$home" PLAYBOOK_BIN_DIR="$bin" \
+           PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+           bash "$SCRIPT" --skip-deps 2>&1)"
+
+    case "$out" in
+        *"binary: ok"*) ;;
+        *) echo "expected 'binary: ok', got: $out" >&2; return 1 ;;
+    esac
+    # A re-download would have replaced the stub with the real binary.
+    grep -q "^echo stub$" "$bin/playbook" || { echo "stub was overwritten" >&2; return 1; }
+}
+
+scenario_j_binary_on_path() {
+    local home="$WORK/j-home" ch="$WORK/j-home/.claude" bin="$WORK/j-bin" onpath="$WORK/j-path" out
+    mkdir -p "$home" "$ch" "$bin" "$onpath"
+    printf '#!/bin/sh\necho stub\n' > "$onpath/playbook"
+    chmod 0755 "$onpath/playbook"
+
+    out="$(CLAUDE_HOME="$ch" HOME="$home" PLAYBOOK_BIN_DIR="$bin" \
+           PATH="$onpath:/usr/bin:/bin" \
+           bash "$SCRIPT" --skip-deps 2>&1)"
+
+    case "$out" in
+        *"binary: ok"*) ;;
+        *) echo "expected 'binary: ok', got: $out" >&2; return 1 ;;
+    esac
+    # Nothing should be written into PLAYBOOK_BIN_DIR when PATH already resolves.
+    [ ! -e "$bin/playbook" ] || { echo "wrote to PLAYBOOK_BIN_DIR unnecessarily" >&2; return 1; }
+}
+
 run_scenario "A: default run wires guards+settings; no rc file; no shell files in CLAUDE_HOME" scenario_a_default
 run_scenario "B: --aliases bash copies launcher files and adds cc.sh source line to .bashrc"   scenario_b_aliases_bash
 run_scenario "C: --aliases zsh copies launcher files and adds cc.zsh source line to .zshrc"    scenario_c_aliases_zsh
@@ -327,6 +371,8 @@ run_scenario "E: idempotent --aliases re-run does not duplicate source line in r
 run_scenario "F: merge preserves a custom key from pre-existing settings.json"                 scenario_f_merge_preserves
 run_scenario "G: default idempotent -- third run byte-identical to second"                     scenario_g_default_idempotent
 run_scenario "H: migration of an old-form rc line preserves unrelated content and blanks"      scenario_h_migration
+run_scenario "I: an existing binary in PLAYBOOK_BIN_DIR is detected, not re-downloaded"        scenario_i_binary_present
+run_scenario "J: a binary already on PATH is detected without touching PLAYBOOK_BIN_DIR"       scenario_j_binary_on_path
 
 TOTAL=$(( PASS + FAIL ))
 echo ""
