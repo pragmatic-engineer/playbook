@@ -152,16 +152,47 @@ fi
 if [ "${CHANGED:-0}" -gt 1500 ]; then
   echo "ABORT: ${CHANGED} changed lines is over the 1500-line hard size limit; split the work into smaller PRs"; exit 1
 fi
+
+# The thresholds are applied HERE, not narrated downstream.
+#
+# This block used to print the four raw numbers and leave the caller to apply
+# the limits and describe the result in prose. Three separate runs then reported
+# `test_files_touched=0` for diffs that really did touch tests, and twice
+# invented the same false cause (a "missing regex anchor" that is present two
+# lines above and demonstrably works). A value the script can compute must never
+# be restated from memory: the script decides, the caller copies.
+verdict() { printf 'VERDICT %s\n' "$1"; }
+
+if [ "$DIRTY" -gt 0 ]; then
+  verdict "dirty: WARN - $DIRTY uncommitted file(s) will NOT be in the PR"
+else
+  verdict "dirty: OK - nothing uncommitted"
+fi
+
+if [ "${CHANGED:-0}" -gt 1000 ]; then
+  verdict "size: OVER - ${CHANGED} lines is above the 1000-line enforced limit and needs explicit justification in the PR body"
+elif [ "${CHANGED:-0}" -gt 500 ]; then
+  verdict "size: SOFT - ${CHANGED} lines is above the 500-line soft limit"
+else
+  verdict "size: OK - ${CHANGED:-0} lines"
+fi
+
+if [ "$TESTS" -eq 0 ]; then
+  verdict "tests: NONE - the diff adds no test files or inline test blocks; the readiness criteria expect tests for behaviour changes"
+else
+  verdict "tests: OK - $TESTS test file(s) or inline test block(s) touched"
+fi
 ```
 
-Evaluate against `playbook:engineering-standards`, then decide (the two hard stops above have already exited; these are the non-blocking ones):
+**Copy every `VERDICT` line verbatim into the readiness block.** Do not recompute
+them, re-derive them from the diff, or paraphrase them: the script has already
+applied every threshold in `playbook:engineering-standards`. If a `VERDICT`
+contradicts your own reading of the diff, the `VERDICT` is right and your reading
+is wrong; report the `VERDICT` and, if it seems worth investigating, say so as a
+separate remark rather than replacing the line.
 
-- **`DIRTY` > 0** → print a warning: those changes are uncommitted and won't be in the PR. Continue.
-- **`CHANGED` > 1000** → print a prominent warning that it is over the enforced limit and needs explicit justification. Continue.
-- **`CHANGED` > 500** → note it is above the soft limit and continue.
-- **`TESTS` = 0** → note the diff adds no tests (the readiness criteria expect tests for behaviour changes). Continue.
-
-Report the readiness picture in one short block. The two hard stops (`AHEAD` = 0, `CHANGED` > 1500) already exited in the block above; the rest print and move on without pausing.
+The two hard stops (`AHEAD` = 0, `CHANGED` > 1500) have already exited above.
+Every `VERDICT` is non-blocking: print them and move on without pausing.
 
 ## Step 3: Gather the diff and commit history
 
