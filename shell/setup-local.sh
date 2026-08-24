@@ -127,7 +127,7 @@ ensure_playbook_binary() {
 }
 
 ensure_playbook_binary ||
-    warn "binary: missing; the 16 ported hooks will not run until it is installed"
+    warn "binary: missing; the 17 ported hooks will not run until it is installed"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP="$CLAUDE_HOME/backups/setup-$STAMP"
