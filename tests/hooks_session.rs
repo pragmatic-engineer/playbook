@@ -182,6 +182,62 @@ fn session_init_injects_the_graph_backed_slice() {
     );
 }
 
+/// ADR 0008 WU-1: the graph-backed slice has no cap today, unlike the legacy
+/// fallback (`read_legacy_memory`, capped at 16000 chars). A repo-slice with
+/// enough facts to exceed that cap must still be truncated: an early fact
+/// (guaranteed within the first 16000 chars) survives, a fact deliberately
+/// placed past that boundary does not.
+#[test]
+fn session_init_caps_the_graph_backed_slice_like_the_legacy_fallback() {
+    // Arrange: ~120 facts, each with a ~150-char description, so the
+    // rendered "Facts:" section alone exceeds 16000 chars well before the
+    // last node. Zero-padded names sort in the same order memory-context.sh
+    // renders them (`sort_by(.name)`), so "fact-001" is early and
+    // "fact-120" is guaranteed past the cap.
+    let work = scratch_dir("graph-cap");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-cap");
+    let memory_dir = home.join(".claude").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    let padding = "x".repeat(140);
+    let nodes: Vec<String> = (1..=120)
+        .map(|n| {
+            format!(
+                r#"{{"id":"{repo_slug}/f{n:03}","file":"{repo_slug}/f{n:03}.md","scope":"project","type":"project","name":"fact-{n:03}","description":"desc-{n:03}-{padding}","project":"{repo_slug}"}}"#
+            )
+        })
+        .collect();
+    fs::write(
+        memory_dir.join("graph.json"),
+        format!(r#"{{"nodes":[{}],"edges":[]}}"#, nodes.join(",")),
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        "{}",
+        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
+    );
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("fact-001"),
+        "an early fact, well within the cap, should survive: {context}"
+    );
+    assert!(
+        !context.contains("fact-120"),
+        "a fact placed past the 16000-char cap should be truncated away: {context}"
+    );
+}
+
 #[test]
 fn session_init_falls_back_to_the_legacy_memory_index() {
     // Arrange: a fake HOME with the legacy MEMORY.md index but no graph.json.
@@ -280,6 +336,197 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
     assert!(
         !context.contains("widget-fact-one"),
         "the fact from the slice should be absent: {context}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// session-init: ADR 0008 WU-3, reload a persisted handoff at SessionStart
+// ---------------------------------------------------------------------
+
+/// The exact slugify `src/cc/mod.rs::project_slug` uses: every
+/// non-alphanumeric character becomes `-`. Duplicated here rather than
+/// imported, since this is a black-box test of the compiled binary.
+fn project_slug(path: &str) -> String {
+    path.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+fn write_handoff(home: &Path, cwd: &Path, contents: &str) -> PathBuf {
+    let slug = project_slug(&cwd.to_string_lossy());
+    let dir = home.join(".claude").join("runtime").join("handoff");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{slug}.md"));
+    fs::write(&path, contents).unwrap();
+    path
+}
+
+/// Run session-init with `PWD` explicitly set to `cwd`. `Command::current_dir`
+/// alone does not update the child's `PWD` env var (that is a shell
+/// convention, not something chdir does), and `logical_cwd()` prefers `PWD`
+/// over `current_dir()` specifically for symlink-consistency reasons
+/// (macOS `/tmp` and `/var` resolve through `/private`). Real Claude Code
+/// sets `PWD` to match; a test that omits it would silently exercise the
+/// wrong path and pass for the wrong reason.
+fn run_session_init_at(cwd: &Path, home: &Path) -> Outcome {
+    run_hook(
+        "session-init",
+        cwd,
+        home,
+        "{}",
+        &[
+            ("CLAUDE_PLUGIN_ROOT", plugin_root()),
+            ("PWD", cwd.to_str().unwrap()),
+        ],
+    )
+}
+
+fn run_session_init_with_source(cwd: &Path, home: &Path, source: &str) -> Outcome {
+    run_hook(
+        "session-init",
+        cwd,
+        home,
+        &format!(r#"{{"source":"{source}"}}"#),
+        &[
+            ("CLAUDE_PLUGIN_ROOT", plugin_root()),
+            ("PWD", cwd.to_str().unwrap()),
+        ],
+    )
+}
+
+#[test]
+fn session_init_injects_a_present_handoff_and_deletes_it() {
+    // Arrange
+    let work = scratch_dir("handoff-present");
+    let repo_dir = work.join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    let home = work.join("home");
+    let handoff_path = write_handoff(&home, &repo_dir, "HANDOFFMARKER decisions from last time");
+
+    // Act
+    let outcome = run_session_init_at(&repo_dir, &home);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("HANDOFFMARKER"),
+        "a present handoff should be injected: {context}"
+    );
+    assert!(
+        !handoff_path.exists(),
+        "the handoff file should be deleted after being read (read-once)"
+    );
+}
+
+#[test]
+fn session_init_no_handoff_file_emits_no_handoff_block_and_no_error() {
+    // Arrange: no handoff file written at all.
+    let work = scratch_dir("handoff-absent");
+    let repo_dir = work.join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    let home = work.join("home");
+
+    // Act
+    let outcome = run_session_init_at(&repo_dir, &home);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "an absent handoff should not error");
+    assert!(
+        !additional_context(&outcome.stdout).contains("Handoff from your previous session"),
+        "no handoff block should be emitted when there is nothing to reload"
+    );
+}
+
+#[test]
+fn session_init_reloads_the_handoff_identically_on_clear_and_on_startup() {
+    // Arrange: two independent scratch setups, one per source value, since
+    // the handoff is consumed (deleted) by the first read.
+    for source in ["clear", "startup"] {
+        let work = scratch_dir(&format!("handoff-source-{source}"));
+        let repo_dir = work.join("repo");
+        fs::create_dir_all(&repo_dir).unwrap();
+        let home = work.join("home");
+        write_handoff(&home, &repo_dir, "HANDOFFMARKER present for this source");
+
+        // Act
+        let outcome = run_session_init_with_source(&repo_dir, &home, source);
+
+        // Assert
+        let context = additional_context(&outcome.stdout);
+        assert!(
+            context.contains("HANDOFFMARKER"),
+            "source={source} should inject the handoff exactly like any other source: {context}"
+        );
+    }
+}
+
+#[test]
+fn session_init_treats_a_handoff_older_than_14_days_as_stale_and_clears_it() {
+    // Arrange
+    let work = scratch_dir("handoff-stale");
+    let repo_dir = work.join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    let home = work.join("home");
+    let handoff_path = write_handoff(&home, &repo_dir, "HANDOFFMARKER should never surface");
+
+    let fifteen_days_ago =
+        std::time::SystemTime::now() - std::time::Duration::from_secs(15 * 86400);
+    let file = fs::File::open(&handoff_path).unwrap();
+    file.set_modified(fifteen_days_ago).unwrap();
+
+    // Act
+    let outcome = run_session_init_at(&repo_dir, &home);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "a stale handoff should not error");
+    assert!(
+        !context.contains("HANDOFFMARKER"),
+        "a handoff older than the 14-day cap should not be injected: {context}"
+    );
+    assert!(
+        !handoff_path.exists(),
+        "a stale handoff should still be cleared, ending the backstop it exists for"
+    );
+}
+
+#[test]
+fn session_init_never_reads_a_handoff_written_under_a_different_worktree() {
+    // Arrange: two distinct working directories under the same HOME
+    // (simulating two worktrees of one repo), a handoff only under A's slug.
+    let work = scratch_dir("handoff-worktree");
+    let home = work.join("home");
+    let worktree_a = work.join("worktree-a");
+    let worktree_b = work.join("worktree-b");
+    fs::create_dir_all(&worktree_a).unwrap();
+    fs::create_dir_all(&worktree_b).unwrap();
+    write_handoff(
+        &home,
+        &worktree_a,
+        "HANDOFFMARKER belongs only to worktree A",
+    );
+
+    // Act: SessionStart runs from worktree B.
+    let outcome = run_session_init_at(&worktree_b, &home);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        !context.contains("HANDOFFMARKER"),
+        "worktree B must never see worktree A's handoff: {context}"
+    );
+    // Worktree A's own handoff must be untouched by B's run: not read, not deleted.
+    let slug_a = project_slug(&worktree_a.to_string_lossy());
+    let path_a = home
+        .join(".claude")
+        .join("runtime")
+        .join("handoff")
+        .join(format!("{slug_a}.md"));
+    assert!(
+        path_a.exists(),
+        "worktree B's SessionStart must not delete worktree A's handoff file"
     );
 }
 

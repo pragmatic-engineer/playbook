@@ -25,6 +25,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Matches hooks/session-init.py:29's `timeout=15`.
 const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Shared cap for the injected memory slice, graph-backed or legacy
+/// fallback alike. See `cap_memory_body`'s doc comment for why this exists.
+const MEMORY_BODY_CAP_CHARS: usize = 16000;
+
+/// Age past which a persisted handoff (see `append_handoff_slice`) is
+/// treated as stale and cleared without injecting. Matches `to-learn`'s own
+/// `DEFAULT_AUTO_LEARN_MAX_AGE_DAYS`, and exists for the same reason: if a
+/// prior session's delete step ever silently failed, an undeleted handoff
+/// would otherwise re-inject into every future session in that worktree
+/// indefinitely, with no backstop to end it.
+const HANDOFF_MAX_AGE_DAYS: u64 = 14;
+
 /// The five per-session counter/state files zeroed at the start of every
 /// session. Matches hooks/session-init.py:88 exactly; anything else in the
 /// session directory (config-hash, start-ts, clean-exit, ...) is untouched.
@@ -81,6 +93,7 @@ pub fn run(payload: &Payload) {
     let (system_message, mut extra_context) = check_config_drift(payload, &dir, &plugin_root);
 
     append_memory_slice(&mut extra_context, &plugin_root, &home, &repo_root);
+    append_handoff_slice(&mut extra_context, &home);
     append_auto_learn_nudge(&mut extra_context, &home, &repo_root);
     append_skills_primer(&mut extra_context, &home);
     append_async_discipline(&mut extra_context);
@@ -186,7 +199,8 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, home: &str
     };
     let mut mem_body = match &mem_script {
         Some(script) if script.is_file() => {
-            run_memory_context(script, &mem_slug).unwrap_or_default()
+            let raw = run_memory_context(script, &mem_slug).unwrap_or_default();
+            cap_memory_body(raw)
         }
         _ => String::new(),
     };
@@ -221,6 +235,49 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, home: &str
     push_context(extra_context, &mem_ctx);
 }
 
+/// ADR 0008 WU-3: reload a persisted session-handoff (written by
+/// `skills/session-handoff/SKILL.md`) at every `SessionStart`, including
+/// `source: "clear"`: this function is called unconditionally regardless of
+/// `.source`, unlike `check_config_drift` which branches on it. Read-once,
+/// mirroring `to-learn`'s pattern exactly: the file is deleted whether it
+/// was injected or found stale, so a delete failure cannot make the same
+/// handoff re-inject forever. Never panics: a missing, unreadable, or
+/// permission-denied file degrades to "say nothing", the same invariant
+/// `read_legacy_memory` already holds for its own file.
+fn append_handoff_slice(extra_context: &mut String, home: &str) {
+    let slug = crate::cc::project_slug(&crate::cc::logical_cwd());
+    if slug.is_empty() {
+        return;
+    }
+    let path = Path::new(home)
+        .join(".claude")
+        .join("runtime")
+        .join("handoff")
+        .join(format!("{slug}.md"));
+
+    let Ok(metadata) = fs::metadata(&path) else {
+        return;
+    };
+    let is_fresh = metadata
+        .modified()
+        .ok()
+        .and_then(|m| m.elapsed().ok())
+        .map(|age| age.as_secs() <= HANDOFF_MAX_AGE_DAYS * 86400)
+        .unwrap_or(false);
+
+    if is_fresh {
+        if let Ok(contents) = fs::read_to_string(&path) {
+            if !contents.is_empty() {
+                let ctx =
+                    format!("Handoff from your previous session in this directory:\n\n{contents}");
+                push_context(extra_context, &ctx);
+            }
+        }
+    }
+
+    let _ = fs::remove_file(&path);
+}
+
 /// Shell out to `shell/memory-context.sh --repo <slug>` and return its
 /// stdout with surrounding newlines trimmed, or `None` on any failure
 /// (missing bash, non-zero exit, ...). Never panics.
@@ -237,13 +294,22 @@ fn run_memory_context(script: &Path, mem_slug: &str) -> Option<String> {
     }
 }
 
-/// Read up to the first 16000 characters of the legacy `MEMORY.md` index.
-/// Empty on any read failure. Matches hooks/session-init.py:173-179.
+/// Read up to the first `MEMORY_BODY_CAP_CHARS` characters of the legacy
+/// `MEMORY.md` index. Empty on any read failure. Matches
+/// hooks/session-init.py:173-179.
 fn read_legacy_memory(path: &Path) -> String {
     let Ok(contents) = fs::read_to_string(path) else {
         return String::new();
     };
-    contents.chars().take(16000).collect()
+    contents.chars().take(MEMORY_BODY_CAP_CHARS).collect()
+}
+
+/// ADR 0008 WU-1: the graph-backed slice had no cap, unlike the legacy
+/// fallback above, so it grew without bound as the memory store grew (8.8 KB
+/// when ADR 0004 measured it, 29.3 KB two weeks later). Same cap, same
+/// constant, so the two paths cannot drift apart again.
+fn cap_memory_body(body: String) -> String {
+    body.chars().take(MEMORY_BODY_CAP_CHARS).collect()
 }
 
 /// Nudge the user to refresh project memory if a previous session queued an

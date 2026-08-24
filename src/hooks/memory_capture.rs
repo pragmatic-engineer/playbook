@@ -48,6 +48,10 @@ session worth remembering next time, such as a decision made, a gotcha \
 found, or a convention confirmed, using the memory tools or store this \
 project keeps. Then continue with the rest of the turn.";
 
+const HANDOFF_NUDGE: &str = "\n\nAlso worth doing now: if this feels like a natural stopping \
+point, run /playbook:session-handoff so the next session can pick up without re-reading \
+this one.";
+
 const OUTRO: &str = "\n\nThis prompt fires once per threshold crossing, so it will not \
 interrupt the next turn unless usage climbs past the threshold again.";
 
@@ -88,6 +92,7 @@ for capture worthy facts:\n",
             body.push_str(&format!("\n...and {more} more not shown."));
         }
     }
+    body.push_str(HANDOFF_NUDGE);
     body.push_str(OUTRO);
 
     emit_block(&body);
