@@ -28,7 +28,26 @@ fn scratch_home(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let home = std::env::temp_dir().join(format!("playbook-wu5-{}-{tag}-{n}", std::process::id()));
     fs::create_dir_all(home.join(".claude").join("memory")).unwrap();
+    // The hook relativises the edited path with `git rev-parse --show-toplevel`,
+    // so it needs a real repo. Giving each scratch home its own removes the
+    // dependency on THIS tree being a checkout, which is what made all eight
+    // tests here panic under `cargo mutants` and would break them in a tarball
+    // or the debian:stable-slim container WU-14 requires.
+    let repo = home.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let ok = Command::new("git")
+        .args(["-C", repo.to_str().unwrap(), "init", "--quiet"])
+        .status()
+        .expect("git should be available")
+        .success();
+    assert!(ok, "scratch repo should initialise");
     home
+}
+
+/// The scratch repo inside `home`, resolved through its symlinks so it matches
+/// what `git rev-parse --show-toplevel` reports back to the hook.
+fn repo_dir(home: &Path) -> PathBuf {
+    fs::canonicalize(home.join("repo")).expect("scratch repo should resolve")
 }
 
 fn graph_path(home: &Path) -> PathBuf {
@@ -42,7 +61,7 @@ fn write_graph(home: &Path, content: &str) {
 fn run_playbook(home: &Path, args: &[&str], hook_input: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(args)
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .current_dir(repo_dir(home))
         .env("HOME", home)
         .env("HOOK_INPUT", hook_input)
         .stdin(Stdio::null())
@@ -73,29 +92,11 @@ const BASE_GRAPH: &str = r#"{
   ]
 }"#;
 
-/// The hook strips the git worktree root off an absolute `file_path` to get
-/// a repo-relative match key, using its own process's cwd (set to this
-/// crate's manifest dir by `run_playbook`). Mirrors that exactly so a test
-/// path is built the same way the real Edit tool's path is.
-fn git_root() -> String {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            env!("CARGO_MANIFEST_DIR"),
-            "rev-parse",
-            "--show-toplevel",
-        ])
-        .output()
-        .expect("git should be available");
-    assert!(
-        output.status.success(),
-        "git rev-parse --show-toplevel failed"
-    );
-    String::from_utf8(output.stdout).unwrap().trim().to_string()
-}
-
-fn edit_path(relpath: &str) -> String {
-    format!("{}/{relpath}", git_root())
+/// An absolute path inside this test's own scratch repo, built the same way the
+/// real Edit tool's `file_path` arrives, so the hook's relativisation is
+/// genuinely exercised rather than bypassed.
+fn edit_path(home: &Path, relpath: &str) -> String {
+    format!("{}/{relpath}", repo_dir(home).display())
 }
 
 fn run_anchors_hook(home: &Path, file_path: &str, session_id: &str) -> Output {
@@ -121,7 +122,7 @@ fn anchored_file_names_matching_fact_and_depends_on_neighbour() {
     write_graph(&home, BASE_GRAPH);
 
     // Act
-    let output = run_anchors_hook(&home, &edit_path("src/a.py"), "s1");
+    let output = run_anchors_hook(&home, &edit_path(&home, "src/a.py"), "s1");
 
     // Assert: the exact line, not a substring, so a column reorder or a
     // garbled "(relation:name)" format is caught. "src/" is also a
@@ -144,7 +145,7 @@ fn directory_anchor_names_the_containing_directory_fact() {
     write_graph(&home, BASE_GRAPH);
 
     // Act
-    let output = run_anchors_hook(&home, &edit_path("src/deep/b.py"), "s2");
+    let output = run_anchors_hook(&home, &edit_path(&home, "src/deep/b.py"), "s2");
 
     // Assert: the exact line, not a substring.
     let out = stdout_of(&output);
@@ -164,7 +165,7 @@ fn unanchored_path_emits_nothing() {
     write_graph(&home, BASE_GRAPH);
 
     // Act
-    let output = run_anchors_hook(&home, &edit_path("other/unrelated.py"), "s4");
+    let output = run_anchors_hook(&home, &edit_path(&home, "other/unrelated.py"), "s4");
 
     // Assert
     assert_eq!(stdout_of(&output), "");
@@ -212,7 +213,7 @@ fn never_blocks_on_malformed_payload_missing_file_path_or_missing_graph() {
 
     // 5c: missing graph.json entirely (fresh store, no graph ever written)
     let home_c = scratch_home("anchors-missing-graph");
-    let out_c = run_anchors_hook(&home_c, &edit_path("src/a.py"), "s5c");
+    let out_c = run_anchors_hook(&home_c, &edit_path(&home_c, "src/a.py"), "s5c");
     assert_eq!(out_c.status.code(), Some(0), "missing graph should exit 0");
     assert_eq!(stdout_of(&out_c), "", "missing graph should emit nothing");
     let _ = fs::remove_dir_all(&home_c);
@@ -228,7 +229,7 @@ fn anchor_index_is_built_once_and_reused_on_second_edit() {
     let sid = "s6";
 
     // Act (first edit: builds the cache)
-    run_anchors_hook(&home, &edit_path("src/a.py"), sid);
+    run_anchors_hook(&home, &edit_path(&home, "src/a.py"), sid);
 
     // Assert: index was built and is non-empty
     let idx = home
@@ -247,7 +248,7 @@ fn anchor_index_is_built_once_and_reused_on_second_edit() {
     fs::write(&idx, contents).unwrap();
 
     // Act (second edit)
-    run_anchors_hook(&home, &edit_path("src/dir-two.py"), sid);
+    run_anchors_hook(&home, &edit_path(&home, "src/dir-two.py"), sid);
 
     // Assert: marker survived, meaning the cache was reused, not rebuilt.
     let after = fs::read_to_string(&idx).unwrap();
@@ -279,7 +280,7 @@ fn stale_cache_does_not_surface_a_fact_added_after_it_was_built() {
     .to_string();
     write_graph(&home, &graph_before);
     let sid = "s7";
-    run_anchors_hook(&home, &edit_path("src/a.py"), sid); // builds the cache
+    run_anchors_hook(&home, &edit_path(&home, "src/a.py"), sid); // builds the cache
 
     let graph_with_new_fact = json!({
         "nodes": [
@@ -297,7 +298,7 @@ fn stale_cache_does_not_surface_a_fact_added_after_it_was_built() {
     write_graph(&home, &graph_with_new_fact);
 
     // Act
-    let output = run_anchors_hook(&home, &edit_path("src/new-file.py"), sid);
+    let output = run_anchors_hook(&home, &edit_path(&home, "src/new-file.py"), sid);
 
     // Assert
     assert_eq!(
@@ -318,7 +319,7 @@ fn additional_context_output_is_valid_json_with_pretooluse_event_name() {
     write_graph(&home, BASE_GRAPH);
 
     // Act
-    let output = run_anchors_hook(&home, &edit_path("src/a.py"), "s8");
+    let output = run_anchors_hook(&home, &edit_path(&home, "src/a.py"), "s8");
 
     // Assert: the shape AND the message body, so a garbled or truncated
     // additionalContext would fail here rather than only a hookEventName
@@ -345,7 +346,7 @@ fn python_and_rust_readers_agree_on_the_same_fixture() {
     // Arrange
     let home_rs = scratch_home("cross-impl-rs");
     write_graph(&home_rs, BASE_GRAPH);
-    let target = edit_path("src/a.py");
+    let target = edit_path(&home_rs, "src/a.py");
 
     // Act
     let out_rs = run_anchors_hook(&home_rs, &target, "cross1");
