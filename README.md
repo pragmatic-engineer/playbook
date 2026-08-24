@@ -2,27 +2,62 @@
 
 A pragmatic Claude Code toolkit: opinionated skills, slash commands, subagents, and safety and state hooks for planning, review, memory, and guarded editing. It ships as a Claude Code plugin so it works in any shell. An optional local setup layer wires the always-on safety guards, seeds `settings.json`, and adds shell launchers and a custom system prompt.
 
-## Quick start (3 commands)
+## Quick start (1 command)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+```
+
+That is the primary path. It adds the marketplace, installs and enables the
+plugin, **installs the `playbook` binary**, wires the safety guards and the 16
+functional hooks, seeds or merges `settings.json`, and installs the status line.
+It asks before adding the shell launchers and the custom system prompt; pass
+`--yes` to accept every default, or `--system-prompt` to take both without
+prompting.
+
+Then open a Claude Code session and run `/playbook:doctor` to verify.
+
+### Why not plugin-install on its own
+
+`claude plugin install` gives you the skills, commands and subagents, and
+nothing else. It does **not** install the `playbook` binary, and every ported
+hook is a bare `playbook hook <name>` command, so without the binary all 16 are
+dead and the guards stay unwired.
+
+`/playbook:setup` closes that gap: it installs the release binary into
+`~/.local/bin` when one is not already on `PATH`, verifying it against the
+release's `SHA256SUMS` first. So plugin-install followed by `/playbook:setup`
+also reaches a working state; the one-liner above is simply the shorter route
+and does not need a Claude Code session.
+
+If you want only the plugin content and no local layer, that is a supported
+choice:
 
 ```bash
 claude plugin marketplace add pragmatic-engineer/marketplace
 claude plugin install playbook@pragmatic-engineer
 ```
 
-Then open a Claude Code session and run `/playbook:setup --install-aliases --use-system-prompt`. Those flags install the shell launchers and the custom system prompt without asking; drop them and `/playbook:setup` asks two yes/no questions instead (both default to yes). Run `/playbook:doctor` afterwards to verify.
+Expect `/playbook:doctor` to report the binary, the guards and the status line
+as missing. That is correct for this path, not a broken install.
 
-That is the primary path. The plugin content (skills, commands, agents) is available immediately after install; `/playbook:setup` adds the local layers on top. The functional hooks and the safety guards are wired locally by `playbook init`, which the full local installer below runs for you. For the full local install (curl one-liner, requirements, uninstall), see [docs/guides/00-install.md](docs/guides/00-install.md).
+For requirements, pinning a version, and uninstall, see
+[docs/guides/00-install.md](docs/guides/00-install.md).
 
 ## Layers
 
-Playbook has four layers. Each is independent; stop at any level.
+Playbook has six layers, numbered to match what `/playbook:doctor` reports.
+Layers 1, 2 and 6 are what a working install needs; 3, 4 and 5 are optional or
+cosmetic.
 
 | Layer | When | What it does |
 |---|---|---|
-| 1. Plugin content | Always, after `claude plugin install` | Skills, commands, subagents, and functional hooks load from the plugin. No files written to `~/.claude`. |
-| 2. Safety guards and settings | Always, after `/playbook:setup` | Copies the three guard hooks into `~/.claude/hooks/` and seeds or merges `~/.claude/settings.json`. Runs regardless of the other choices. |
+| 1. Plugin content | Always, after `claude plugin install` | Skills, commands and subagents load from the plugin. No files written to `~/.claude`. The functional hooks are registered but **need Layer 6 to run**. |
+| 2. Safety guards and settings | After `install.sh`, or `/playbook:setup` | Wires the guards and seeds or merges `~/.claude/settings.json`. `install.sh` wires them as `playbook hook <name>`; `/playbook:setup` still copies the legacy `~/.claude/hooks/*.sh` scripts, which `/playbook:doctor` reports as not wired. |
 | 3. Shell launchers | Opt-in (recommended) | Adds `cc` and `ccd` to `~/.bashrc` or `~/.zshrc`. Both shells work; `cc clean` and `cc raw` are zsh-only (see Usage). |
 | 4. Custom system prompt | Opt-in (recommended) | Copies `prompts/SYSTEM_PROMPT.md` to `~/.claude/prompts/`; `cc` passes it via `--system-prompt-file`. Plugin content works without it. |
+| 5. Status line | After `install.sh` | Installs `~/.claude/statusline.sh`. `/playbook:setup` does **not** install it; `/playbook:doctor` checks it. |
+| 6. The `playbook` binary | `install.sh` or `/playbook:setup` | Installs the release binary to `~/.local/bin`, checksum-verified. **Every ported hook is a bare `playbook hook <name>` command, so without this all 16 are dead.** `claude plugin install` alone does not provide it. |
 
 ## Usage
 
