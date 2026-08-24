@@ -1,6 +1,6 @@
 ---
 description: Use when committing staged changes with a generated message and pushing. Handles staging, formatting, a signed commit, optional rebase, and push.
-allowed-tools: Bash, Read
+allowed-tools: Bash, Read, Skill
 argument-hint: "[--all|-A] [--update|-u] [--amend|-a]"
 context: fork
 agent: git
@@ -103,6 +103,8 @@ fi
 If the output contains `NO_STAGED_CHANGES`, tell the user "No staged changes. Use `git add` to stage files first." and stop.
 
 ## Step 2: Generate the commit message
+
+Invoke the `playbook:writing-style` skill before drafting. It governs voice, banned words, and the no-dash rule; the constraints below are only the parts specific to commit header/body structure, not a substitute for it.
 
 Analyse the staged diff from Step 1 and draft a commit message:
 

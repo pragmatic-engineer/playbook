@@ -81,7 +81,7 @@ invoke_claude() {
 #
 # fresh path: _cc_config_stamp fires; claude receives --system-prompt-file /tmp/p
 # and then -n <name> (proving /tmp/p was consumed as the flag's value so -n is
-# NOT swallowed — the swallow bug is documented at dispatch.zsh:27-31).
+# NOT swallowed: the swallow bug is documented at dispatch.zsh:27-31).
 scenario_system_prompt_fresh() {
   local rec="$TMP/s1_record" home="$TMP/s1_home"
   mkdir -p "$home"

@@ -122,7 +122,7 @@ scenario_basic() {
     h="$d/home"
     mkdir -p "$ch" "$h"
 
-    # Hard hermeticity guard — runs BEFORE uninstall.sh
+    # Hard hermeticity guard: runs BEFORE uninstall.sh
     assert_hermetic "$d" "$ch" "$h"
 
     create_shipped "$ch"
@@ -165,7 +165,7 @@ scenario_basic() {
 }
 
 # ---------------------------------------------------------------------------
-# Scenario B: git guard — refuse without --force, proceed with --force --yes
+# Scenario B: git guard, refuse without --force, proceed with --force --yes
 # ---------------------------------------------------------------------------
 scenario_git_guard() {
     local d ch h
@@ -239,7 +239,7 @@ scenario_purge() {
 # Scenario D: .zshrc comment variants
 # ---------------------------------------------------------------------------
 
-# D1: old variant — # claude-config launchers (cc/ccd)
+# D1: old variant, # claude-config launchers (cc/ccd)
 scenario_comment_old() {
     local d ch h
     d="$(mktemp -d "$WORK/comment_old.XXXXXX")"
@@ -273,7 +273,7 @@ scenario_comment_old() {
     [ -d "$d" ] || { echo "  SAFETY: temp root removed"; exit 1; }
 }
 
-# D2: new variant — # playbook launchers (cc/ccd)
+# D2: new variant, # playbook launchers (cc/ccd)
 scenario_comment_new() {
     local d ch h
     d="$(mktemp -d "$WORK/comment_new.XXXXXX")"
@@ -307,7 +307,7 @@ scenario_comment_new() {
     [ -d "$d" ] || { echo "  SAFETY: temp root removed"; exit 1; }
 }
 
-# D3: no-comment case — bare source line only
+# D3: no-comment case, bare source line only
 scenario_comment_none() {
     local d ch h
     d="$(mktemp -d "$WORK/comment_none.XXXXXX")"

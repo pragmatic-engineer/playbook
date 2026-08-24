@@ -55,6 +55,80 @@ done
 
 [ -n "$CLAUDE_HOME" ] || die "CLAUDE_HOME is empty"
 
+# ---------------------------------------------------------------------------
+# 0. Ensure the `playbook` binary exists.
+#
+# Every ported hook is a bare `playbook hook <name>` command, so without the
+# binary all 16 are dead and `/playbook:doctor` reports the guards as unwired.
+# Neither `claude plugin install` nor this script used to install it, which made
+# the README's primary path produce a half-broken install: plugin content worked
+# and every ported hook silently did nothing.
+#
+# The download mirrors install.sh's `install_release_binary`, deliberately
+# duplicated rather than shared. install.sh is the proven primary path and this
+# script is scheduled for deletion by ADR 0007 WU-14, so breaking the working
+# installer costs more than a temporary second copy. Keep the two in step until
+# this file goes.
+# ---------------------------------------------------------------------------
+PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
+
+ensure_playbook_binary() {
+    local suffix os arch tag asset stage
+    if command -v playbook >/dev/null 2>&1; then
+        log "binary: ok ($(command -v playbook))"
+        return 0
+    fi
+    if [ -x "$PLAYBOOK_BIN_DIR/playbook" ]; then
+        PATH="$PLAYBOOK_BIN_DIR:$PATH"; export PATH
+        log "binary: ok ($PLAYBOOK_BIN_DIR/playbook, was not yet on PATH)"
+        return 0
+    fi
+
+    os="$(uname -s)"; arch="$(uname -m)"
+    case "$os-$arch" in
+        Darwin-arm64)  suffix="aarch64-apple-darwin" ;;
+        Darwin-x86_64) suffix="x86_64-apple-darwin" ;;
+        Linux-aarch64) suffix="aarch64-unknown-linux-musl" ;;
+        Linux-x86_64)  suffix="x86_64-unknown-linux-musl" ;;
+        *) warn "binary: unsupported platform $os $arch; install it manually"; return 1 ;;
+    esac
+
+    tag="$(curl -fsSL https://api.github.com/repos/pragmatic-engineer/playbook/releases/latest 2>/dev/null |
+           sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+    [ -n "$tag" ] || { warn "binary: could not resolve the latest release"; return 1; }
+
+    asset="playbook-${tag#v}-${suffix}"
+    stage="$(mktemp -d)"
+    log "binary: fetching $asset ($tag)"
+
+    if ! curl -fsSL "https://github.com/pragmatic-engineer/playbook/releases/download/$tag/$asset" -o "$stage/$asset"; then
+        warn "binary: download failed"; return 1
+    fi
+    # SHA256SUMS is not signed. Its integrity rests on TLS and on trusting
+    # github.com, not on any signature. Verify anyway, so a truncated or corrupt
+    # download is caught before it is made executable. An unverifiable download
+    # is refused rather than installed.
+    if ! curl -fsSL "https://github.com/pragmatic-engineer/playbook/releases/download/$tag/SHA256SUMS" -o "$stage/SHA256SUMS"; then
+        warn "binary: SHA256SUMS unavailable; refusing to install unverified"; return 1
+    fi
+    if ! ( cd "$stage" &&
+           grep -E "^[0-9a-f]{64}  ${asset}$" SHA256SUMS > "$asset.sha256" &&
+           { shasum -a 256 -c "$asset.sha256" >/dev/null 2>&1 ||
+             sha256sum -c "$asset.sha256" >/dev/null 2>&1; } ); then
+        warn "binary: checksum mismatch for $asset; refusing to install"; return 1
+    fi
+
+    mkdir -p "$PLAYBOOK_BIN_DIR"
+    chmod 0755 "$stage/$asset"
+    mv "$stage/$asset" "$PLAYBOOK_BIN_DIR/playbook"
+    PATH="$PLAYBOOK_BIN_DIR:$PATH"; export PATH
+    log "binary: installed $tag to $PLAYBOOK_BIN_DIR/playbook"
+    warn "binary: open a new shell so $PLAYBOOK_BIN_DIR resolves on PATH"
+}
+
+ensure_playbook_binary ||
+    warn "binary: missing; the 16 ported hooks will not run until it is installed"
+
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP="$CLAUDE_HOME/backups/setup-$STAMP"
 backed_up=0
