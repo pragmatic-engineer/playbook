@@ -119,17 +119,33 @@ mod tests {
         assert_eq!(got, "owner/repo");
     }
 
+    /// Asserts the CONTRACT, which holds everywhere, not the shape of the
+    /// developer's checkout.
+    ///
+    /// This previously asserted `!got.is_empty()`, which is true only when the
+    /// test happens to run inside a git repo that has an `origin` remote. That
+    /// is a property of the environment, not of the code: `repo_slug` documents
+    /// empty as the correct result outside a repo or with no origin. The old
+    /// form failed in a copied tree, in a clone whose remote is not named
+    /// `origin`, and in the `debian:stable-slim` container WU-14 requires, and
+    /// it blocked `cargo mutants` outright, since that runs from a copy with no
+    /// `.git`.
     #[test]
-    fn repo_slug_returns_owner_repo_format_in_this_checkout() {
+    fn repo_slug_is_empty_or_a_single_segment_pair() {
         // Arrange, Act
         let got = repo_slug();
 
-        // Assert: this test runs inside the playbook git checkout, which has
-        // an origin remote, matching the same loose contract
-        // hooks/lib/common.test.sh's repo_slug case asserts.
-        assert!(
-            !got.is_empty() && got.contains('/'),
-            "expected owner/repo format, got '{got}'"
-        );
+        // Assert: either the documented empty result, or exactly `owner/repo`.
+        if !got.is_empty() {
+            assert_eq!(
+                got.matches('/').count(),
+                1,
+                "a non-empty slug must be exactly owner/repo, got '{got}'"
+            );
+            assert!(
+                !got.contains(char::is_whitespace),
+                "a slug must not carry whitespace, got '{got}'"
+            );
+        }
     }
 }
