@@ -348,25 +348,33 @@ graph TD
 
 ## Confidence + open items
 
-- Confidence: MEDIUM. Every mechanism reuses a pattern already implemented
-  and tested in this codebase (anchor index, `to-learn` read-once file,
-  `project_slug`, `emit_prompt_context`), which is what keeps this above LOW.
-  It is not HIGH because WU-0's event-branching signal (`hook_event_name` on
-  the input payload vs. field-presence inference) is not yet confirmed
-  against a real captured payload from this specific hook, only against
-  external documentation and one other hook's usage of `.prompt`.
+- Confidence: HIGH. Every mechanism reuses a pattern already implemented and
+  tested in this codebase (anchor index, `to-learn` read-once file,
+  `project_slug`, `emit_prompt_context`). The one open item that kept this at
+  MEDIUM, whether `.hook_event_name` is reliably present on the input
+  payload, is now resolved against the official documentation (fetched live
+  2026-08-24): it is present on every event unconditionally. The prompt-text
+  field name conflict the same fetch surfaced (`user_prompt` vs. this repo's
+  own live, tested `.prompt`) is neutralized by reading both, not by
+  guessing which is correct.
 - Open items (verify downstream):
-  - Confirm whether `UserPromptSubmit`'s **input** payload includes
-    `.hook_event_name`, or whether `memory_anchors.rs` must infer the event
-    from field presence (`.prompt` empty vs non-empty). Verify by capturing a
-    real payload (e.g. a temporary debug print in a local build) before
-    finalizing WU-0's branch condition. Who verifies: the WU-0 implementer,
-    before writing the branch logic, not deferred to review.
-  - Confirm the exact on-disk form of a `Node`'s `file` field (relative to
-    `~/.claude/memory/`, or absolute) before WU-0 reads a fact body from it.
-    Verify against `rebuild_memory_graph.rs`'s node-construction code. Who
-    verifies: the WU-0 implementer, first thing, since the whole "inject
-    bodies not names" goal depends on this path resolving correctly.
+  - RESOLVED 2026-08-24 against the official Claude Code hooks documentation
+    (fetched live): `.hook_event_name` is present on every event's input
+    payload unconditionally. `memory_anchors.rs` branches on
+    `payload.field(".hook_event_name") == "UserPromptSubmit"` vs
+    `"PreToolUse"`, not on field-presence inference. The same fetch reported
+    the prompt-text field as `user_prompt`, which conflicts with this
+    repo's own live, tested code (`auto_model_detect.rs:89` reads `.prompt`,
+    with passing tests against `{"prompt":...}` payloads); the discrepancy is
+    resolved defensively rather than guessed: read `.prompt` first, fall back
+    to `.user_prompt` if empty. Costs one extra field lookup, removes the
+    ambiguity regardless of which name is real.
+  - RESOLVED 2026-08-24: `Node.file` is relative to `~/.claude/memory/`, not
+    absolute. `rebuild_memory_graph.rs:473,476` builds it via
+    `fpath.strip_prefix(&mem_dir)` where `mem_dir` is the memory root, so a
+    value looks like `pragmatic-engineer/playbook/some-fact.md`. WU-0's body
+    reader must join it as `home_dir().join(".claude/memory").join(&node.file)`,
+    never read the field as a standalone path.
   - WU-2 has no automated verification in this repo's tooling. If a skill
     validator gets built later, add a check that the "Where to Write It"
     section's fixed path and WU-3's Rust-computed path can never drift
