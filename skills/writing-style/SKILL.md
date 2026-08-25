@@ -136,7 +136,7 @@ Real engineers writing PR comments make small mistakes: typos, dropped words, ca
 ### When reviewing (posting as a reviewer)
 
 - **Trust the author.** Assume they know the language and the codebase. Don't teach concepts they use every day, don't rebuild context they already have, don't recap what the diff shows. Say the problem, not the background to it.
-- **Two sentences by default: the problem, then what breaks.** State the defect and its failure ("this won't hold because X"), then stop. Earn a third sentence, or a short second paragraph, only when the mechanism is genuinely non-obvious (a subtle race, a data-loss path you can't see from the diff). Plainest words available, short sentences.
+- **One sentence when possible, two at most: the problem, then what breaks.** State the defect and its failure ("this won't hold because X"), then stop. A second sentence only when the mechanism is genuinely non-obvious (a subtle race, a data-loss path you can't see from the diff). A dev skims a review comment for the gist, not an essay: plainest words available, short sentences, active voice.
 - **Avoid jargon.** Say things in plain words a teammate would use out loud. If a technical term is unavoidable, add what it means in a few words. Prefer "anyone can read another user's record" over "IDOR".
 - Assume the reader is a senior dev.
 - Do NOT pad with blank lines or formatting. The label + the comment is enough.
@@ -144,7 +144,7 @@ Real engineers writing PR comments make small mistakes: typos, dropped words, ca
 - Don't write comparison reports. "X uses A while Y uses B. Works because C. Worth aligning to D." is a static-analyser pattern. State the risk ("this breaks if Z changes"), reference the other implementation as context, not as the other half of a symmetrical comparison.
 - When suggesting a fix, use natural language ("consider changing X to Y", "this should probably be", "you might want to").
 - For nitpicks and minor suggestions, soften the tone.
-- Start each review comment with a conventional comment label, no bold formatting: `issue:`, `suggestion:`, `nitpick:`, `question:`. A human typing fast doesn't wrap labels in `**`. Use the bare label on posted comments: no `(blocking)` or `(non-blocking)` decoration. That split stays in the local review summary, not on the comment.
+- Start each review comment with a conventional comment label, no bold formatting: `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. A human typing fast doesn't wrap labels in `**`. Use `blocking:` for a finding that must be fixed before merge; reserve `issue:` for a real problem that is not merge-blocking. `suggestion:`, `nitpick:`, and `question:` are non-blocking by definition, so they never take the `blocking:` label.
 - **Nitpicks must be lightweight.** If the reason is obvious from the code, state the finding and stop. Don't trace the history of why the code exists.
 - **Don't state implications the reader can draw themselves.** "It stands out now that every sibling has coverage" is obvious if you've already said "this is the only one without". Stop after the fact.
 - **Don't explain what code does when the reader can see it.** State what's wrong, suggest the action (update or remove, pick one), stop.
@@ -201,7 +201,7 @@ Patterns that flag content as non-human. NEVER appear in GitHub-posted content:
 2. **Escaped apostrophes in double-quoted strings:** `"don\'t"` posts as `don'''t`. Just write `"don't"`.
 3. **Paraphrasing openers:** never echo the reviewer's point in a noun phrase ("Valid concern on the behavioural inconsistency", "Great observation about the null handling"). Humans say "Ok.", "Fair point.", "Yeah.", "My bad." then move to substance.
 4. **Finding numbers (1, 2, 3) or coloured circle emojis** in posted content.
-5. **Formatted headers** like "File-Level Findings", "Blocking:", "Non-blocking:" in posted content (these are local report artifacts).
+5. **Formatted section headers** like "File-Level Findings" or "Summary" grouping multiple findings under one banner, in posted content (these are local report artifacts). This does not apply to the bare per-comment label (`blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`) that starts each individual finding.
 6. **"Fix:" prefix on suggestions** when posted to GitHub (sounds robotic).
 7. **Bullet-point summaries of findings** (that's what inline comments are for).
 8. **Emojis** unless the project convention includes them.
