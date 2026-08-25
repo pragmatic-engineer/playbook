@@ -23,8 +23,9 @@
 //! `time.strftime`, which also renders in the local timezone. `std` alone
 //! has no timezone database to do this without shelling out.
 
+use crate::common::atomic::with_dir_lock;
 use crate::common::payload::Payload;
-use crate::common::{atomic_append, emit_system_message, home_dir, run_with_timeout, session_id};
+use crate::common::{emit_system_message, home_dir, run_with_timeout, session_id};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -53,8 +54,30 @@ pub fn run(payload: &Payload) {
 
     let log_path = runtime_root().join("compactions.log");
     if let Some(log_path_str) = log_path.to_str() {
-        atomic_append(log_path_str, &line);
-        cap_lines(&log_path, LOG_LINE_CAP);
+        // The append and the trim must serialize together, not just each
+        // against itself: `common::atomic_append` releases its own lock the
+        // moment it returns, so calling it and then `cap_lines` separately
+        // leaves a window where another session's append lands in between,
+        // and this session's trim (reading the file before that append,
+        // writing after) silently drops the line that just landed. Sharing
+        // one `with_dir_lock` acquisition across both closes that window.
+        // This inlines the raw append instead of calling `atomic_append`,
+        // since nesting two acquisitions of the same lock path from one
+        // process would make the inner one retry its full budget pointlessly
+        // before failing open, the lock isn't reentrant. `atomic_append`
+        // also created the log's parent directory before writing; do the
+        // same here, since a fresh runtime dir has nothing under it yet.
+        if let Some(parent) = log_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let lock_path = PathBuf::from(format!("{log_path_str}.lock"));
+        let (acquired, ()) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
+            append_line_unlocked(&log_path, &line);
+            cap_lines(&log_path, LOG_LINE_CAP);
+        });
+        if acquired {
+            let _ = fs::remove_dir(&lock_path);
+        }
     }
 
     let message_trigger = if trigger.is_empty() {
@@ -87,6 +110,16 @@ fn current_timestamp() -> String {
             String::from_utf8_lossy(&output.stdout).trim().to_string()
         }
         _ => String::new(),
+    }
+}
+
+/// Append `line` plus a trailing newline to `path`, with no locking of its
+/// own: the caller holds a `with_dir_lock` around this and `cap_lines`
+/// together (see the call site's comment for why). Never panics; a failure
+/// is swallowed, matching every other hook write in this codebase.
+fn append_line_unlocked(path: &Path, line: &str) {
+    if let Ok(mut opened) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(opened, "{line}");
     }
 }
 

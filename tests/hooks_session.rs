@@ -1022,6 +1022,50 @@ fn session_clean_exit_queues_auto_learn_flag_with_expected_shape() {
 }
 
 #[test]
+fn session_clean_exit_queues_correctly_when_the_lock_is_already_held() {
+    // Arrange: the queue is keyed by repo, not session, so two sessions in
+    // the same repo can race here. Pre-create the lock directory to
+    // simulate another session already writing this repo's flag. The lock
+    // is advisory and fails open after its retry budget (a hook must never
+    // hang on contention), so this must still succeed and queue a correct,
+    // complete flag, not a half-written or missing one.
+    let home = scratch_dir("auto-learn-lock-held");
+    let session_dir = seeded_session_dir(&home, "sid-lock-held");
+    fs::write(session_dir.join("edit-count"), "9").unwrap();
+    let repo_dir = scratch_dir("auto-learn-lock-held-repo");
+    init_repo_with_origin(&repo_dir, "https://github.com/acme/widget.git");
+    let slug = slugify(&git_toplevel(&repo_dir));
+    let to_learn_dir = home.join(".claude").join("runtime").join("to-learn");
+    fs::create_dir_all(&to_learn_dir).unwrap();
+    let lock_dir = to_learn_dir.join(format!("{slug}.json.lock"));
+    fs::create_dir(&lock_dir).expect("pre-creating the lock dir should succeed");
+
+    // Act
+    let outcome = run_hook(
+        "session-clean-exit",
+        &repo_dir,
+        &home,
+        r#"{"session_id":"sid-lock-held","reason":"logout"}"#,
+        &[],
+    );
+
+    // Assert
+    assert_eq!(
+        outcome.exit_code, 0,
+        "the hook must fail open, not hang or error, when the lock is already held"
+    );
+    let dest = to_learn_dir.join(format!("{slug}.json"));
+    let contents = fs::read_to_string(&dest).expect("the flag should still be queued correctly");
+    let flag: serde_json::Value = serde_json::from_str(&contents)
+        .expect("the queued flag must be complete, valid JSON, not a torn write");
+    assert_eq!(flag["edits"], 9);
+    assert!(
+        lock_dir.exists(),
+        "a writer that did not acquire the lock must not remove it"
+    );
+}
+
+#[test]
 fn session_clean_exit_at_default_threshold_queues_a_flag() {
     // Arrange: edit-count sits exactly at the default threshold of 5,
     // pinning the `<` comparison `queue_auto_learn` uses against a `<=`

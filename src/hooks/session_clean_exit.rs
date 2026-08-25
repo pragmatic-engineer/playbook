@@ -15,6 +15,7 @@
 //! auto-learn nudge; that presence-and-not-other check is how the two
 //! events are told apart from inside one script.
 
+use crate::common::atomic::with_dir_lock;
 use crate::common::{home_dir, run_with_timeout, session_dir, session_id, Payload};
 use serde::Serialize;
 use std::fs;
@@ -110,11 +111,31 @@ fn queue_auto_learn(payload: &Payload, dir: &str) {
 
     let slug = slugify(&root);
     let dest = qdir.join(format!("{slug}.json"));
-    let tmp = qdir.join(format!("{slug}.json.tmp"));
-    if fs::write(&tmp, rendered).is_ok() {
-        let _ = fs::rename(&tmp, &dest);
-    } else {
-        let _ = fs::remove_file(&tmp);
+    // Repo-shared, not session-scoped: two sessions in the same repo can
+    // queue this near the same moment. A tmp name that isn't unique per
+    // writer (the earlier version of this code used a fixed
+    // `{slug}.json.tmp`) lets two processes' writes interleave into the
+    // same file before either renames, producing invalid JSON regardless of
+    // which rename wins. PID plus thread id (matching
+    // `rebuild_memory_graph.rs`'s tmp naming) makes collision practically
+    // impossible. The lock additionally serializes the two writers so the
+    // rename that lands last is a complete, independent write, not a
+    // coincidence of timing.
+    let tmp = qdir.join(format!(
+        "{slug}.json.{}-{:?}.tmp",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let lock_path = qdir.join(format!("{slug}.json.lock"));
+    let (acquired, ()) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
+        if fs::write(&tmp, rendered).is_ok() {
+            let _ = fs::rename(&tmp, &dest);
+        } else {
+            let _ = fs::remove_file(&tmp);
+        }
+    });
+    if acquired {
+        let _ = fs::remove_dir(&lock_path);
     }
 }
 
