@@ -84,7 +84,7 @@ With no arguments, it lists saved plans to pick from. If the reference isn't a r
 
 Pass `--no-tdd` to write tests and implementation together instead.
 
-**One commit per Work Unit (savepoint).** After the orchestrator reviews a completed WU, it stages exactly that WU's files and commits. Each deliverable becomes its own small savepoint commit, even when WUs ran concurrently, and each Segment's commits land on that Segment's branch.
+**One commit per Work Unit (savepoint).** Each red/green/refactor subagent checkpoints its own step with a small `wip` commit as it goes. Once a WU's last step passes review, the orchestrator squashes its checkpoints into one commit and stages exactly that WU's files. Each deliverable becomes its own small savepoint commit, even when WUs ran concurrently, and each Segment's commits land on that Segment's branch. If a step's subagent dies or goes idle mid-WU, `/playbook:implement` resumes from its last `wip` commit instead of redoing the whole Work Unit.
 
 **After all Segments.** `/playbook:implement` runs a refinement pass: a self quick-review plus a SOLID/DRY/KISS/YAGNI simplify analysis, folded into refinement Work Units and executed autonomously. Then an adversarial subagent reviews the full diff. Blocking findings get fixed, routed onto the Segment branch that owns the touched file (the stack is rebased in order), and re-validated. Non-blocking ones become follow-ups.
 

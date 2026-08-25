@@ -162,7 +162,7 @@ Record the resolved Segments and the chosen strategy in the progress ledger (Ste
 
 **Delegation (MUST):** this command runs on Sonnet. The orchestrating session reads the plan and delegates each implementation chunk to a subagent via the Agent tool, then reviews the result. Delegation keeps each chunk in a fresh, isolated context (no bleed between cycles); the orchestrator spends its turn reviewing, not editing. Independent Work Units run in parallel by default, each isolated in its own git worktree, with the model tier set per role (see the scheduler below). The deep design reasoning already happened in `/playbook:scope` or `/playbook:adr`, so execution doesn't need Opus.
 
-Every Agent prompt MUST include: the full plan content, the specific cycle/step/Work Unit, its Gherkin scenarios, the test-structure rules below, the verify command, the design principles below, and grounding rules ("read files before modifying, match existing style, verify imports resolve, don't guess types, apply SOLID/DRY/KISS/YAGNI").
+Every Agent prompt MUST include: a pointer to its Work Unit's brief file (Step 5's File-based handoff), which carries the plan content that dispatch needs, the specific cycle/step, the test-structure rules below, the design principles below, and grounding rules ("read files before modifying, match existing style, verify imports resolve, don't guess types, apply SOLID/DRY/KISS/YAGNI"). Point at the brief; don't paste the whole multi-WU plan into every prompt.
 
 **Design principles (MUST).** Every change, and every Agent prompt, applies:
 - **SOLID:** one responsibility per unit, small focused interfaces, depend on abstractions only at real seams (no abstraction without a second caller).
@@ -170,6 +170,10 @@ Every Agent prompt MUST include: the full plan content, the specific cycle/step/
 - **KISS:** the simplest design that passes the tests and reads clearly; fewer moving parts wins.
 - **YAGNI:** build only what the plan requires now. No speculative hooks, flags, config, or generality.
 - **Self-explanatory over commented.** Clear names, small functions, obvious control flow, so a reader rarely needs a comment to follow it. No comments unless WHY is non-obvious; never restate WHAT the code already shows.
+- **Composable over inherited.** Prefer composition (small, combinable functions or objects) over deep inheritance, in both OOP and functional code. Inheritance only for a genuine is-a relationship, kept shallow.
+- **Model multi-step processing explicitly.** A request handler, a hook, a CLI command, or any multi-step pipeline reads as a named sequence of steps, not implicit control flow scattered across helpers. Log at each step, so a failure's exact location is visible from the logs alone, without needing to reproduce it locally first.
+- **Idempotent and retryable where the operation allows it.** Design service and API operations to be safely repeatable (idempotency keys, upserts, at-least-once-safe handlers). This is also a `playbook:grounding-review` Reliability check, so building it in avoids a review round-trip.
+- **Error messages are descriptive and assertive.** State exactly what failed and why, in plain language: "order 4471 has no shipping address", not "an error occurred". Never put PII or PHI (names, emails, government IDs, health data) in an error message or a log line; reference a record by its non-sensitive identifier instead.
 
 When SOLID's abstraction pulls against KISS/YAGNI, favour the simplest thing that meets the plan. These principles are also the lens for the refinement pass (Step 8).
 
@@ -208,23 +212,25 @@ Scope each WU's verify command to its own test files (the full suite runs in Ste
 
 **Worktree isolation (parallel waves).** For each WU in a multi-WU wave:
 
-- `git worktree add "$ROOT/.claude/worktrees/<plan-slug>/<wu-id>" HEAD` off the current branch, one per WU.
-- Dispatch the implementer to work in that worktree path (absolute paths in its brief). It implements, runs its scoped verify, and commits inside the worktree. It does NOT push.
-- **Integrate:** cherry-pick each WU's commit onto the current Segment branch (the run's branch, never the default branch) in dependency order. Disjoint files make this conflict-free. If a cherry-pick conflicts, the safety test was violated: STOP, keep the worktrees, and report. Then `git worktree remove` each.
-- Single-WU waves skip the worktree and run in the main tree.
+- `git worktree add "$ROOT/.claude/worktrees/<plan-slug>/<wu-id>" HEAD` off the current branch, one per WU. Record this as the WU's base SHA in the ledger (Progress ledger, below): it's the anchor `git log` resumes against.
+- Dispatch the implementer to work in that worktree path (absolute paths in its brief). A Work Unit with several test scenarios means several dispatches into the same worktree (see "With TDD" below); each commits its own step there. It does NOT push.
+- **Integrate:** squash the WU's step commits into one (Commit per Work Unit, below), then cherry-pick that commit onto the current Segment branch (the run's branch, never the default branch) in dependency order. Disjoint files make this conflict-free. If a cherry-pick conflicts, the safety test was violated: STOP, keep the worktrees, and report. Then `git worktree remove` each.
+- Single-WU waves skip the worktree and run in the main tree, on the Segment branch directly; the WU's base SHA is that branch's tip when the WU starts. The commit and resume mechanics below are the same either way: only the tree differs.
+
+**No lock-step across WUs in a wave.** WUs in a wave proceed independently. If WU-A's RED returns before WU-B's RED, dispatch WU-A's GREEN immediately; don't wait for sibling WUs to reach the same scenario or step.
 
 **File-based handoff.** Keep the orchestrator's context clean over long runs:
 
 - Write each WU's brief (its `Files`, `Changes`, `Test scenarios`, `Done When`, the worktree path, and the scoped verify command) to `.claude/implement/<plan-slug>/<wu-id>.brief.md` and point the subagent at that file, instead of pasting the whole plan into every prompt.
-- The implementer writes its full report to `<wu-id>.report.md` and returns ONLY: a status (`DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, or `NEEDS_CONTEXT`), its commit SHAs, and a one-line test result.
+- A WU dispatches once per step (RED, GREEN, REFACTOR per scenario, or once per file group under `--no-tdd`), so its report path is scoped per dispatch: `<wu-id>.<step-slug>.report.md`, e.g. `wu-3.s2-red.report.md`. A shared `<wu-id>.report.md` would let GREEN's report clobber RED's before it's ever read. Each dispatch writes its full report there and returns ONLY: a status (`DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, or `NEEDS_CONTEXT`), its commit SHA, and a one-line test result.
 
-**Read the report file (MUST, per `playbook:delegating-subagents`).** `<wu-id>.report.md` is the deliverable; the returned status is a courtesy. The moment a WU's agent finishes, goes idle, or is given up on, **Read `<wu-id>.report.md` before doing anything else with that WU**, including before deciding it produced nothing. Agent-tool spawns frequently complete their work and return no result at all, so a silent agent is not an empty one. If the file is missing, say so explicitly rather than inferring what it would have said.
+**Read the report file (MUST, per `playbook:delegating-subagents`).** The dispatch's report file is the deliverable; the returned status is a courtesy. The moment a dispatch finishes, goes idle, or is given up on, **read its report file before doing anything else with that WU**, including before deciding it produced nothing. Agent-tool spawns frequently complete their work and return no result at all, so a silent agent is not an empty one. If the file is missing, say so explicitly rather than inferring what it would have said.
 
 This is not optional when the commit looks fine. The report is the only place a WU records what it deliberately did NOT do: divergences it preserved on purpose, edges it left untested, files it declined to touch as out of scope. On 2026-08-16 a WU report stated plainly that `Command::Init` was still wired to nothing, and that a shell harness would break once a registry file was deleted. Both were blocking, both were rediscovered by hand a day later, and both were sitting in a file the orchestrator never opened while every test passed.
 
 **Verify-by-diff (MUST).** Never take the subagent's word. After a WU returns, confirm the work from git (`git show --stat <sha>`, review the diff against the brief) and the scoped verify. A `DONE` the diff doesn't support is a failure: re-dispatch or stop per Error handling. Git tells you whether the work landed; only the report tells you what the agent observed, so do both.
 
-**Progress ledger.** Record progress in `.claude/implement/<plan-slug>.progress.md` (gitignored). At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary) from Step 4.5. Per Segment, record: Segment id, branch, its WU rows (WU id, status, commit range), whether it was re-split, and its PR URL once opened. On a fresh run or after compaction, read the ledger first and skip WUs already recorded done and Segments already delivered (a paused run resumes from the first Segment without a PR URL). First use in a repo, create and ignore the dir:
+**Progress ledger.** Record progress in `.claude/implement/<plan-slug>.progress.md` (gitignored). At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary) from Step 4.5. Per Segment, record its id, branch, whether it was re-split, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch. First use in a repo, create and ignore the dir:
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
@@ -238,21 +244,37 @@ done
 
 **Test structure (from `playbook:engineering-standards`):** every test follows Arrange-Act-Assert with `// Arrange` / `// Act` / `// Assert` comments mapping to the scenario's Given/When/Then; one action per test; use parameterised tests (`test.each`, `pytest.mark.parametrize`, table-driven) when scenarios share AAA structure but differ in data.
 
-**With TDD (default).** For each cycle within a Work Unit (in dependency order):
+**With TDD (default).** A Work Unit with N test scenarios means up to 3N dispatches: for each scenario, in dependency order:
 
-1. **RED** - `implementer` subagent (`subagent_type: implementer`): "Write ONLY the failing tests encoding this Gherkin scenario, AAA-structured. Don't touch production code." Then run the verify command: tests MUST fail (if they pass, the test proves nothing - fix it).
-2. **GREEN** - `implementer` subagent: "Write ONLY the minimal implementation to pass." Run verify: tests MUST pass (on failure, spawn a follow-up `implementer` with the error output).
-3. **REFACTOR** - `implementer` subagent: "Clean up without changing behaviour; tests stay green." Run verify.
+1. **RED** - `implementer` subagent (`subagent_type: implementer`): "Write ONLY the failing tests encoding this Gherkin scenario, AAA-structured. Don't touch production code." Then run the verify command: tests MUST fail (if they pass, the test proves nothing - fix it). On success, commit: `git commit -m "wip(<wu-id>): red - <scenario-id>"`, signed and signed off, inside the WU's tree. Never pushed.
+2. **GREEN** - `implementer` subagent: "Write ONLY the minimal implementation to pass." Run verify: tests MUST pass (on failure, spawn a follow-up `implementer` with the error output). On success, commit: `wip(<wu-id>): green - <scenario-id>`.
+3. **REFACTOR** - `implementer` subagent: "Clean up without changing behaviour; tests stay green." Run verify. On success, commit: `wip(<wu-id>): refactor - <scenario-id>`.
 4. **Orchestrator review:** read the modified files; confirm changes match the plan, doc comments explain WHY, no unplanned side effects.
 
-**Without TDD (`--no-tdd`).** For each logical file group: one `implementer` subagent (`subagent_type: implementer`) implements code + tests together (tests still encode the Gherkin scenarios); run verify; the orchestrator reviews as above.
+Each `wip` commit is a checkpoint, not the delivered shape: see Commit per Work Unit, below, for the squash that turns them into the WU's one real commit.
 
-**Commit per Work Unit (MUST): small commits.** One coherent commit per WU.
+**Without TDD (`--no-tdd`).** For each logical file group: one `implementer` subagent (`subagent_type: implementer`) implements code + tests together (tests still encode the Gherkin scenarios); run verify; commit `wip(<wu-id>): <group-name>` on success; the orchestrator reviews as above.
 
-- **Parallel wave (worktree):** the implementer commits its WU inside its worktree, staging exactly its `Files` (it does not push). During integration the orchestrator cherry-picks each commit onto the current Segment branch in dependency order (never the default branch). The Segment's branch stays local until its PR opens (Step 9, `/playbook:create-pull-request` handles the push); under the pause boundary that push happens per Segment mid-run, under savepoint at the end. Confirm each WU's files landed (`git log --stat`).
-- **Single-WU wave (main tree):** after the orchestrator review passes, stage exactly that WU's files (`git add <the WU's Files list>`) and run `/playbook:commit-and-push`. Confirm the files are committed (they no longer appear in `git status --porcelain`).
+**Commit per Work Unit (MUST): small commits.** One coherent commit per WU, in the tree the WU used (worktree for a parallel wave, the Segment branch in the main tree for a single-WU wave). The `wip` commits above are checkpoints while the WU is in flight, not the delivered shape:
 
-If a commit or cherry-pick fails, retry once, then stop and report.
+1. Once the WU's last dispatch (its last REFACTOR, or its last `--no-tdd` group) passes review, squash: `git reset --soft <wu-base-sha>` then one commit with the WU's real message, staging exactly its `Files`.
+2. **Parallel wave (worktree):** during integration the orchestrator cherry-picks that one commit onto the current Segment branch in dependency order (never the default branch). The Segment's branch stays local until its PR opens (Step 9, `/playbook:create-pull-request` handles the push); under the pause boundary that push happens per Segment mid-run, under savepoint at the end. Confirm the WU's files landed (`git log --stat`), then remove its worktree.
+3. **Single-WU wave (main tree):** the squash commit already sits on the Segment branch; run `/playbook:commit-and-push` to push it. Confirm the files are committed (they no longer appear in `git status --porcelain`).
+
+If a commit, squash, or cherry-pick fails, retry once, then stop and report.
+
+**Resuming a Work Unit whose dispatch died mid-flight (MUST).** Trigger: a dispatch returns nothing usable (idle, errored, no report file), or a ledger-driven resume lands on a WU recorded `IN_PROGRESS`.
+
+1. Per "Read the report file" above, read the last dispatch's report first, before classifying anything.
+2. If that dispatch is still alive but idle, `TaskStop` it before dispatching a replacement. Two write-capable agents in the same tree risks a corrupted tree, not a recovery.
+3. Find the WU's tree (its worktree, if still present, else the Segment branch) and its base SHA from the ledger. A missing worktree only means recreate it before continuing; it does not mean there's nothing to resume; a single-WU wave never had one, and its `wip` commits live on the Segment branch itself.
+4. `git log --oneline <wu-base-sha>..HEAD` in that tree lists the `wip` commits landed so far. The last one's step and scenario say what's next (none found: start the WU from scratch, first scenario, RED).
+5. Re-run the scoped verify against the tree's current state before trusting that last commit (the same Verify-by-diff principle above, applied to the last checkpoint instead of the whole WU). If it doesn't hold, `git reset --hard` past it and redo that step.
+6. Continue the WU's per-scenario loop from there, dispatching fresh implementers only for what remains.
+
+This restores the work, not the agent: nothing revives a dead or unreachable dispatch (per `playbook:delegating-subagents`, `SendMessage`-based recovery is unreliable for this agent type too). The existing "3 fix retries then stop" rule (Error handling, below) is unchanged and still governs a scenario whose verify genuinely fails after a real, confirmed attempt; this procedure targets the separate case of a dispatch that died or went silent with real, uncommitted-but-checkpointed progress on disk.
+
+This mechanism doesn't apply to Step 8's refinement Work Units: they're synthesized in-session with no plan entry and no brief file, small enough that a failed one is simply redone whole.
 
 ## Step 6: Autonomous Mode (`--auto`)
 
@@ -275,10 +297,10 @@ Report the result: `Cycle check: PASS (N WUs resolve in topological order)` or h
 1. Confirm all WUs in the "Requires" column are done.
 2. Dispatch each wave with the Step 5 parallel-by-default scheduler (ready set, safety test, worktree isolation, integration). Don't gate on `Parallel group` annotations; parallelize whatever the safety test allows, sequential only when forced. Within a WU, WU-0 types first, then the RED/GREEN/REFACTOR flow per cycle (or a single subagent for `--no-tdd`), delegated to Sonnet.
 3. **Post-WU review:** changes match each WU's spec and file plan; doc comments explain WHY; no files outside the file plan touched.
-4. Commit and integrate per the Step 5 commit rules: implementers commit inside their worktrees, the orchestrator cherry-picks in dependency order and pushes; single-WU waves commit in the main tree.
-5. Mark each WU's "Done When" checkboxes in the plan file.
+4. Commit and integrate per the Step 5 commit rules: each dispatch checkpoints with a `wip` commit, the orchestrator squashes the WU's checkpoints into one commit, cherry-picks it (worktree) or pushes it (main tree). A dispatch that dies mid-WU resumes per Step 5's resume procedure instead of restarting the WU, same in `--auto` as interactively.
+5. Mark each WU's "Done When" checkboxes in the plan file. This is the plan's static acceptance criteria, separate from the `wip`-commit checkpoints above: one records what the WU must achieve, the other records how far a dispatch got.
 
-**Error handling:** when a WU's verify fails or its output is wrong, apply the `playbook:systematic-debugging` skill before retrying: find the root cause first, don't stack blind fix attempts. If it still fails (verify fails, wrong output, or commit fails) after 3 fix retries, **stop**. Don't continue to dependent WUs. Report the failed WU, the root cause found so far, and the remaining WUs.
+**Error handling:** when a WU's verify fails or its output is wrong, apply the `playbook:systematic-debugging` skill before retrying: find the root cause first, don't stack blind fix attempts. If it still fails (verify fails, wrong output, or commit fails) after 3 fix retries, **stop**. Don't continue to dependent WUs. Report the failed WU, the root cause found so far, and the remaining WUs. This governs a scenario whose verify genuinely fails after a real attempt; a dispatch that died or went silent uses Step 5's resume procedure first, not this retry count.
 
 ## Step 7: Validate
 
@@ -344,6 +366,7 @@ Each lens gives severity-classified findings with `file:line` evidence and a fix
 | Touches auth/security code | Flag for extra review; be conservative |
 | Requires a DB migration | Execute the migration as its own unit with a rollback note |
 | Validation fails | Fix and re-validate before reporting done |
+| A WU dispatch goes idle, errors, or returns no report | `TaskStop` it if still alive, then resume from its `wip` commits (Step 5), don't restart the whole WU |
 | `--auto`: WU fails after 3 retries | Stop; report the failed WU and the remaining WUs |
 | `--auto`: validation fails after 3 fixes (including Step 8/9 re-validations) | Stop; report; do NOT open any PRs |
 | `--auto`: on the default branch | Create a feature branch before the first commit |
