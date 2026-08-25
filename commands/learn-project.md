@@ -69,6 +69,8 @@ Then, before collecting:
 
 ## Phase 1: Collect (parallel subagents)
 
+On `--refresh` only, read `$STORE/MEMORY.md` (if it exists) before dispatching: its titles and one-line hooks, not the full fact bodies. Include that index in each collector's prompt so it can flag what's already documented instead of silently re-discovering it, and note anything that looks stale against what it finds. Skip this on a fresh (non-`--refresh`) run: there's rarely anything in the store yet, and this command's job is building it, not consuming it.
+
 Dispatch these collectors in parallel with `subagent_type: collector`. `collector` pins Haiku, the cost win this phase is built for. Each returns a compact structured summary (tight JSON or markdown) that cites paths/refs, NOT raw command output. Spawn each collector with a stable `name`; the moment it returns its result, call `TaskStop` on it. A spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished collector, so leaving it unstopped keeps it running in the background.
 
 - **git-history**: contributors and ownership, churn hotspots (`git log --format= --name-only | sort | uniq -c | sort -rn`), commit-message and branch conventions, tags/releases, cadence.
