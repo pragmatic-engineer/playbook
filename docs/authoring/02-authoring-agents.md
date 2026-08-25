@@ -45,9 +45,9 @@ subagent_type: reviewer
 
 ## Model and tool policy
 
-The tiers follow the session-wide policy in [Model routing and memory](../internals/02-model-routing-and-memory.md): `haiku` is the default for spawned subagents doing mechanical, formatting, or search work, it's three times cheaper. Escalate to `sonnet` when the agent does real reasoning, implementation, or review, and to `opus` only for deep architectural judgment, kept under 20 percent of total usage.
+The tiers follow the session-wide policy in [Model routing and memory](../internals/02-model-routing-and-memory.md): `haiku` is the default for spawned subagents doing mechanical, formatting, or search work, it's three times cheaper. Escalate to `sonnet` when the agent does real reasoning or implementation, and to `opus` for PR review or deep architectural judgment, kept under 20 percent of total usage.
 
-The agents on disk show the range: `git` runs on `haiku` for mechanical staging and push work, `reviewer` runs on `sonnet` for review reasoning, `auditor` runs on `opus` at effort `max` for full-repo audits.
+The agents on disk show the range: `git` runs on `haiku` for mechanical staging and push work, `reviewer` runs on `opus` for PR review, `auditor` runs on `opus` at effort `high` for full-repo audits.
 
 Grant the smallest `tools` allowlist the role needs, and say so in the `description`. There are two read-only tiers, and the wording you pick decides which one the lint applies:
 

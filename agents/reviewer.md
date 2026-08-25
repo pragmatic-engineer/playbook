@@ -2,7 +2,7 @@
 name: reviewer
 description: "Isolated read-only code reviewer for the /playbook:deep-review swarm, /playbook:quick-review, and the /playbook:implement post-implementation review swarm. Each spawn takes a review focus from the orchestrator's prompt: a single named lens when it runs in a swarm (deep-review uses logic, test, security, data, types, perf, and conditional lenses; implement uses correctness, behaviour drift, principles, scope, and tests), or the entire diff for a quick-review single pass. The prompt names the lens, so the set is open rather than fixed. Returns findings in the exact shape that prompt specifies. Structurally read-only (no Edit/Write/Bash). Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
-model: sonnet
+model: opus
 effort: high
 ---
 
