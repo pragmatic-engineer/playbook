@@ -379,6 +379,42 @@ mod precompact_warn {
             lines[499]
         );
     }
+
+    #[test]
+    fn append_and_trim_succeed_when_the_lock_is_already_held() {
+        // Arrange: pre-create the lock directory to simulate another
+        // session's append-and-trim already in progress. The lock is
+        // advisory and fails open after its retry budget (a hook must never
+        // hang on contention), so this run must still append its own line
+        // and the log must still end up valid, not skipped or torn.
+        let home = scratch_home("pcw-lock-held");
+        let log = compactions_log(&home);
+        fs::create_dir_all(log.parent().expect("log path should have a parent")).unwrap();
+        fs::write(&log, "old line 1\n").unwrap();
+        let lock_dir = PathBuf::from(format!("{}.lock", log.display()));
+        fs::create_dir(&lock_dir).expect("pre-creating the lock dir should succeed");
+
+        // Act
+        let (_stdout, code) = run_hook("precompact-warn", &home, r#"{"trigger":"manual"}"#);
+
+        // Assert
+        assert_eq!(
+            code, 0,
+            "the hook must fail open, not hang or error, when the lock is already held"
+        );
+        let contents = fs::read_to_string(&log).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 2, "the append must still land: {contents}");
+        assert!(
+            lines[1].contains("trigger=manual"),
+            "the freshly appended line must be intact, got: {}",
+            lines[1]
+        );
+        assert!(
+            lock_dir.exists(),
+            "a writer that did not acquire the lock must not remove it"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------
