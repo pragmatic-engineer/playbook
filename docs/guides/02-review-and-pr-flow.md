@@ -63,7 +63,7 @@ Both review commands follow the same discipline, which covers:
 | `medium` | May merge; address soon. Maintainability or minor correctness. |
 | `low` | Informational. Style, naming. Safe to defer. |
 
-**Conventional Comments labels** go on every finding in plain text (no bold): `issue (blocking):`, `issue (non-blocking):`, `suggestion:`, `nitpick:`. Non-blocking findings are 1-2 sentences. Blocking ones may run longer when there's a decision to argue.
+**Conventional Comments labels** go on every finding in plain text (no bold): `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. `blocking` replaces `issue` for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. Every finding is one sentence when possible, two at most.
 
 Every review ends with a **Verification Summary** table listing each file, whether it was read, which lines were checked, and which findings it carries. Confidence is HIGH (every finding verified), MEDIUM (1-2 unverified), or LOW (multiple unverified).
 

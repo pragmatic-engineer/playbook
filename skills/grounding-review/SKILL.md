@@ -64,7 +64,7 @@ Both `/playbook:quick-review` and `/playbook:deep-review` render this exact stru
 <deep-review only: lens roll-up, e.g. "security 2 · logic 1 · perf 0 · tests 1">
 
 ### Findings
-<numbered finding blocks, ordered blocking, then non-blocking, then suggestion, then nitpick>
+<numbered finding blocks, ordered blocking, then issue, then suggestion, then nitpick, then question>
 
 ### Verification Summary
 | File | Read | Lines | Findings |
@@ -76,20 +76,20 @@ Verdict: <APPROVE | REQUEST_CHANGES | COMMENT | INCONCLUSIVE> · confidence <HIG
 ### Finding block
 
 ```
-N. <label> (<decoration>): <one-line subject naming the consequence>
+N. <label>: <one-line subject naming the consequence>
    `<file>:<line>` · <category> · <HIGH|MEDIUM|LOW>
-   <1 to 2 sentence body: the problem and the real-world consequence>
+   <1 sentence body when possible, 2 at most: the problem and the real-world consequence>
    Post:
    ```text
-   <label>: <exact GitHub comment body, 1 to 2 sentences>
+   <label>: <exact GitHub comment body, 1 sentence when possible, 2 at most>
    ```
 ```
 
-- Labels: `issue`, `suggestion`, `question`, `nitpick`. Decorations `(blocking)`/`(non-blocking)` mark `issue` findings in the report only: they set the finding order (line 67) and the report subject (line 79). Posted comments drop the decoration and start with the bare label, e.g. `issue:`.
+- Labels: `blocking`, `issue`, `suggestion`, `question`, `nitpick`. `blocking` replaces `issue` specifically for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. `suggestion`, `question`, and `nitpick` are non-blocking by definition, so they never take the `blocking` label. The label sets both the finding order (line 67) and the report subject (line 79); the posted comment uses the exact same bare label, no separate decoration needed.
 - Subject names the consequence, not a rule: "user input runs as SQL", not "SQL injection".
 - Location line: `` `file:line` `` then category (security, logic, perf, tests, types, data, maintainability, and so on) then confidence, `·`-separated.
-- Body: 1 to 2 sentences. The why is part of the sentence, not a separate paragraph. No bullet lists inside a finding.
-- `Post:` block: the exact comment that goes to GitHub. Plain text, bare label never `**bold**` and never decorated (`issue:`, not `issue (blocking):`; the blocking split lives in the report subject on line 79, not the posted body), 1 to 2 sentences, no `file:line` prefix (GitHub anchors it). It MAY contain a ```suggestion``` block when the fix is mechanical. The posting step sends this block verbatim as the comment body.
+- Body: 1 sentence when possible, 2 at most. State the problem plainly, skip restating what the code already shows (the reader can see the diff). The why is part of the sentence, not a separate paragraph. No bullet lists inside a finding.
+- `Post:` block: the exact comment that goes to GitHub. Plain text, bare label never `**bold**` (`blocking:` or `issue:`, matching whichever label the finding carries), 1 sentence when possible, 2 at most, no `file:line` prefix (GitHub anchors it). It MAY contain a ```suggestion``` block when the fix is mechanical. The posting step sends this block verbatim as the comment body.
 - Report-only finding (evidence not on a changed diff line, so no inline anchor): omit the `Post:` block and end with `Report-only: not on a changed line, no inline draft.`
 
 ## Severity
