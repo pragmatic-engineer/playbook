@@ -9,9 +9,9 @@ Language-specific engineering standards for JavaScript and TypeScript, derived f
 
 **REQUIRED BACKGROUND:** engineering-standards owns the general rules (PR readiness, size, test types and requirements, the mocking philosophy, deployment). Read it first. This skill adds only the JS/TS specifics and never restates the base.
 
-## Validation and parsing: use Zod
+## Validation and parsing: use a schema validator
 
-**Prefer Zod schemas for validation and parsing** over hand-written type guards, manual `if` checks, or casting with `as`. A schema is one source of truth: it validates at runtime and gives you the static type through `z.infer`, so the shape and the check can't drift.
+**Prefer a schema validator (Zod, Valibot, or whatever the project already uses) for validation and parsing** over hand-written type guards, manual `if` checks, or casting with `as`. A schema is one source of truth: it validates at runtime and gives you the static type (Zod's `z.infer`, Valibot's `v.InferOutput`), so the shape and the check can't drift.
 
 **Validate at the boundaries of the application.** Parse untrusted or untyped data the moment it enters the app, then work with typed values inside. Boundaries include:
 
@@ -24,6 +24,8 @@ Language-specific engineering standards for JavaScript and TypeScript, derived f
 Use `schema.parse(input)` when a bad value should throw and fail fast at the edge, or `schema.safeParse(input)` when you want to handle the error path yourself. Never cast across a boundary (`input as User`): `as` is a compile-time assertion with no runtime check, so malformed data flows straight in.
 
 ### Pattern
+
+Zod example (Valibot follows the same shape: define the schema, derive the type from it, parse at the edge):
 
 ```ts
 import { z } from 'zod';
@@ -77,8 +79,8 @@ test('charges the customer once', async () => {
 
 ## Common mistakes
 
-- Casting untrusted input with `as` instead of parsing it. The type says one thing, runtime does another. Parse at the boundary with Zod.
-- Keeping a hand-written TS `interface` and a separate runtime validator that drift apart. Derive the type from the schema with `z.infer`.
+- Casting untrusted input with `as` instead of parsing it. The type says one thing, runtime does another. Parse at the boundary with a schema validator.
+- Keeping a hand-written TS `interface` and a separate runtime validator that drift apart. Derive the type from the schema instead (Zod's `z.infer`, Valibot's `v.InferOutput`).
 - Rebuilding a typed object by hand with a `jest.fn()` per method. It drifts from the real type and rots silently. Use `mockDeep<T>()`.
 - Forgetting `mockReset` in `beforeEach`: call counts and return values leak between tests.
 - Reaching for `jest.mock()` when the dependency could be injected. It's global, harder to read, and hides the seam.
