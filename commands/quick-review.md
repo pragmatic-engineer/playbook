@@ -62,7 +62,7 @@ Invoke the `playbook:grounding-review` skill before drafting any finding, and lo
 
 Comment bodies are read by another engineer, so they use the humane `playbook:writing-style` register (warm, contractions, constructive), NOT the terse operator voice from the "Concise & Direct" output style or system prompt `## Output`. Where those would conflict, `playbook:writing-style` wins for anything posted to GitHub. The non-negotiable points for inline comments posted to GitHub:
 
-- **Conventional Comments label on every finding, PLAIN TEXT (no bold), bare.** Start the body with the bare label: `issue:`, `suggestion:`, `nitpick:`, `question:`. NEVER wrap in `**...**`. Per writing-style: "a human typing fast doesn't wrap labels in `**`." Valid labels: `issue`, `suggestion`, `nitpick`, `question`. The `(blocking)`/`(non-blocking)` split stays in the local review summary (it orders the findings); posted comments never carry the decoration.
+- **Conventional Comments label on every finding, PLAIN TEXT (no bold), bare.** Start the body with the bare label: `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. NEVER wrap in `**...**`. Per writing-style: "a human typing fast doesn't wrap labels in `**`." Valid labels: `blocking`, `issue`, `suggestion`, `nitpick`, `question`. `blocking` replaces `issue` for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. The label itself orders the findings and is what posts, no separate decoration.
 - **Two sentences by default: the problem, then what breaks.** State the defect and its failure, then stop. Earn a third sentence only when the mechanism is genuinely non-obvious. A finding that argues a real decision can run a little longer. Avoid jargon; plainest words available. Don't teach the author what they already know or recap the diff.
 - **Pick one pragmatic fix.** No "X, or Y" options. If both work, prefer the smallest diff and recommend that one.
 - **Paraphrase, don't quote.** Block-quoting the README or source code is almost always longer than restating it in your own words.
@@ -187,9 +187,16 @@ Relay the report to the user unchanged, then proceed to posting. Post findings v
 
 **Ask the user, one question at a time** (memory rule):
 
-**Q1**: "Post findings as a pending review? Which ones: all, a subset (list numbers), or none?"
+**Q1**: "Post which findings as a pending review?" Offer exactly these six tiers, each a strict superset of the one before, blocking and questions take precedence, suggestions and nitpicks stay optional:
 
-Wait for response. If `none` or `skip`, stop here.
+- `only blockers` (`blocking` findings only)
+- `all issues` (`blocking` + `issue`)
+- `all issues + questions` (`blocking` + `issue` + `question`)
+- `all except nitpicks` (`blocking` + `issue` + `question` + `suggestion`)
+- `all findings` (everything, `nitpick` included)
+- `none` (stop, nothing posted)
+
+Wait for response. If `none`, stop here.
 
 Build each inline comment from that finding's `Post:` block verbatim as the comment `body`, anchored to the finding's `file:line`. What the user read in the report is exactly what posts. Skip any finding marked `Report-only`.
 
@@ -199,7 +206,7 @@ Build a JSON payload at `$REVIEW_JSON` (`/tmp/<org>/<repo>/quick-review-<number>
 {
   "commit_id": "<HEAD_SHA>",
   "comments": [
-    {"path": "...", "line": N, "side": "RIGHT", "body": "label (decoration): ..."},
+    {"path": "...", "line": N, "side": "RIGHT", "body": "blocking: ..."},
     {"path": "...", "start_line": N, "start_side": "RIGHT", "line": M, "side": "RIGHT", "body": "..."}
   ]
 }
@@ -222,8 +229,14 @@ Confirm `state: PENDING` and capture the review id + html_url. Show the user the
 
 If `skip`, stop. The pending review stays for manual submit from the UI. Otherwise:
 
+**Q3**: "Add a comment for the review?" (optional free text, blank to skip). Leave `BODY` empty on a blank answer, except: on `approve` with a blank answer, default `BODY` to `LGTM`.
+
 ```bash
-gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES>
+if [ -n "$BODY" ]; then
+  gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES> -f body="$BODY"
+else
+  gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES>
+fi
 ```
 
 Confirm the returned `state` flipped from `PENDING` to the corresponding terminal state.

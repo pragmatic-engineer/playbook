@@ -51,7 +51,7 @@ A PR MUST meet these criteria before requesting review:
 
 ### Review Comments
 
-- Review comments SHOULD use Conventional Comments format with labels and decorations.
+- Review comments SHOULD use Conventional Comments format: a bare label per comment (`blocking`, `issue`, `suggestion`, `nitpick`, `question`). `blocking` replaces `issue` for a finding that must be fixed before merge.
 - Blocking comments are for issues that MUST be resolved before merge: quality gaps, undocumented tech debt, security or data integrity concerns, missing tests, or architectural issues affecting future maintenance.
 - Blocking comments SHOULD be treated as opportunities for discussion, not hard stops. Valid resolutions: fix immediately, create a follow-up ticket, document the limitation, agree the concern is out of scope, or escalate to a design discussion.
 - Non-blocking feedback SHOULD be framed as suggestions: "one option here..." or "worth considering...".
