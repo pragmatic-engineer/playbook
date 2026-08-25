@@ -117,8 +117,23 @@ Then write each approved fact:
 - Frontmatter: `name`, `description` (one-line when-to-use), `type`, `links:` with bare-basename edges (`supersedes`, `depends_on`, `relates_to`, `contradicts`), and `anchors:` listing the repo-relative code locations the fact describes (`src/auth/`, `src/auth/login.py`, or `src/auth/login.py#authenticate`).
 - Body: the fact, then **Why:** and **How to apply:**. Use absolute dates for anything time-bound (`date +%F`).
 - In the project store, do NOT name the repo in the fact text; it's implicit.
-- Add or refresh the `- [Title](file.md): one-line hook` line in the right `MEMORY.md`. Mark superseded index entries `(superseded)`.
+- Add or refresh the `- [Title](file.md): one-line hook` line in the right `MEMORY.md` (`$STORE/MEMORY.md` for a project fact, `~/.claude/memory/MEMORY.md` for a global one). Mark superseded index entries `(superseded)`.
 - Write a `project-overview` fact as the entry point, linked via `relates_to` to the main topic facts.
+
+**Locked index write (MUST).** Two `cc` sessions in the same repo, or two collector clusters in this same run, can touch the same `MEMORY.md` at once; a plain check-then-append or check-then-edit can silently drop or overwrite the other's line. Wrap the whole read-modify-write, append or in-place edit alike, in the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, make the edit regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
+
+```bash
+MEMORY_MD="<the MEMORY.md path resolved above>"
+LOCK="$MEMORY_MD.lock"
+ACQUIRED=0
+for _ in $(seq 1 20); do
+  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
+  sleep 0.05
+done
+# Inside the lock: append the new index line, or edit an existing one in
+# place (mark it (superseded), or refresh its one-line hook).
+[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
+```
 
 ## Phase 4.5: Rebuild the navigation graph
 

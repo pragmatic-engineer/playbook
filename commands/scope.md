@@ -140,6 +140,20 @@ Between questions, explore the codebase if the answer reveals new areas. Report 
 
 **Knowledge capture (memory).** When exploration reveals a durable convention or gotcha about the codebase (true regardless of this plan), and a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist it as a project memory fact right then: a kebab-case file in `~/.claude/memory/<owner>/<repo>/` with `name`/`description`/`type: project`/`links:`/`anchors:` (to the files), plus its `MEMORY.md` index line. When no project store is present, skip this step silently. Track each confirmed *plan decision* in the running plan draft; those are persisted at Step 7, not now.
 
+**Locked index append (MUST, whenever the index line is written, here or at Step 7).** Two `cc` sessions in the same repo can each persist a fact around the same moment; a plain check-then-append can silently drop one of the two lines. Append with the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
+
+```bash
+MEMORY_MD=~/.claude/memory/<owner>/<repo>/MEMORY.md
+LOCK="$MEMORY_MD.lock"
+ACQUIRED=0
+for _ in $(seq 1 20); do
+  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
+  sleep 0.05
+done
+printf '%s\n' "- [<kebab-title>](<file>.md): <one-line hook>" >> "$MEMORY_MD"
+[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
+```
+
 ### Step 3: Confirm Understanding
 
 When all branches are resolved, summarise:
@@ -324,18 +338,26 @@ Do NOT save until the user explicitly approves. If they request changes, revise 
 
 ### Step 7: Save & Next Steps
 
-Only after the user approves. First time in this repo, create the plans dir and ignore it (same pattern as memory):
+Only after the user approves. First time in this repo, create the plans dir and ignore it (same pattern as memory). Lock the `.gitignore` check-then-append too, same reason as the index above:
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
 mkdir -p "$ROOT/.claude/plans"
-grep -qxF '.claude/plans/' "$ROOT/.gitignore" 2>/dev/null || printf '.claude/plans/\n' >> "$ROOT/.gitignore"
+GI="$ROOT/.gitignore"
+LOCK="$GI.lock"
+ACQUIRED=0
+for _ in $(seq 1 20); do
+  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
+  sleep 0.05
+done
+grep -qxF '.claude/plans/' "$GI" 2>/dev/null || printf '.claude/plans/\n' >> "$GI"
+[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
 ```
 
 Then:
 
 1. Save the plan to `.claude/plans/<topic-slug>.md` and the gate reports to `.claude/plans/<topic-slug>-quality.md`.
-2. If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the plan's accepted key decisions as project memory facts (`type: project`, `anchors:` to the files they touch), and update `~/.claude/memory/<owner>/<repo>/MEMORY.md`. The graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip.
+2. If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the plan's accepted key decisions as project memory facts (`type: project`, `anchors:` to the files they touch), and update `~/.claude/memory/<owner>/<repo>/MEMORY.md` with the same locked append shown earlier. The graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip.
 3. Tell the user:
    - "Saved to `.claude/plans/<topic-slug>.md`"
    - "Run `/clear`, then implement it with a clean context: `/playbook:implement .claude/plans/<topic-slug>.md`." This interview's back-and-forth is exactly what a fresh execution phase shouldn't carry forward; there's no way to clear it from inside this session, so say so instead of leaving it implicit.
