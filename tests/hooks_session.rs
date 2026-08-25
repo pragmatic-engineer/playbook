@@ -352,11 +352,23 @@ fn project_slug(path: &str) -> String {
         .collect()
 }
 
+static HANDOFF_SUFFIX_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Write a handoff file the way `skills/session-handoff/SKILL.md` does:
+/// `<slug>-<unique-suffix>.md`, never a single fixed path, so two sessions
+/// in the same directory get distinct files. The counter (rather than a
+/// real timestamp+pid) keeps this deterministic and collision-free across
+/// repeated calls within one test.
 fn write_handoff(home: &Path, cwd: &Path, contents: &str) -> PathBuf {
+    let n = HANDOFF_SUFFIX_COUNTER.fetch_add(1, Ordering::Relaxed);
+    write_handoff_suffixed(home, cwd, contents, &format!("{n}-test"))
+}
+
+fn write_handoff_suffixed(home: &Path, cwd: &Path, contents: &str, suffix: &str) -> PathBuf {
     let slug = project_slug(&cwd.to_string_lossy());
     let dir = home.join(".claude").join("runtime").join("handoff");
     fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(format!("{slug}.md"));
+    let path = dir.join(format!("{slug}-{suffix}.md"));
     fs::write(&path, contents).unwrap();
     path
 }
@@ -501,7 +513,7 @@ fn session_init_never_reads_a_handoff_written_under_a_different_worktree() {
     let worktree_b = work.join("worktree-b");
     fs::create_dir_all(&worktree_a).unwrap();
     fs::create_dir_all(&worktree_b).unwrap();
-    write_handoff(
+    let path_a = write_handoff(
         &home,
         &worktree_a,
         "HANDOFFMARKER belongs only to worktree A",
@@ -518,15 +530,91 @@ fn session_init_never_reads_a_handoff_written_under_a_different_worktree() {
         "worktree B must never see worktree A's handoff: {context}"
     );
     // Worktree A's own handoff must be untouched by B's run: not read, not deleted.
-    let slug_a = project_slug(&worktree_a.to_string_lossy());
-    let path_a = home
-        .join(".claude")
-        .join("runtime")
-        .join("handoff")
-        .join(format!("{slug_a}.md"));
     assert!(
         path_a.exists(),
         "worktree B's SessionStart must not delete worktree A's handoff file"
+    );
+}
+
+#[test]
+fn session_init_injects_both_handoffs_from_two_concurrent_sessions_in_the_same_directory() {
+    // Arrange: two `cc` sessions working the same directory both ran
+    // /playbook:session-handoff close together. Each writes its own
+    // uniquely-suffixed file (skills/session-handoff/SKILL.md's design),
+    // so neither overwrites the other the way a single fixed path would.
+    let work = scratch_dir("handoff-concurrent");
+    let repo_dir = work.join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    let home = work.join("home");
+    let path_1 = write_handoff_suffixed(&home, &repo_dir, "HANDOFFMARKER-ONE", "1000-111");
+    let path_2 = write_handoff_suffixed(&home, &repo_dir, "HANDOFFMARKER-TWO", "1001-222");
+
+    // Act
+    let outcome = run_session_init_at(&repo_dir, &home);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert: both surface in one SessionStart, neither silently lost.
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("HANDOFFMARKER-ONE"),
+        "the first concurrent session's handoff should still surface: {context}"
+    );
+    assert!(
+        context.contains("HANDOFFMARKER-TWO"),
+        "the second concurrent session's handoff should still surface: {context}"
+    );
+    assert!(
+        context.contains("2 of 2 found"),
+        "more than one match should say so, not read like a single handoff: {context}"
+    );
+    assert!(
+        !path_1.exists() && !path_2.exists(),
+        "both matched files should be consumed (read-once, mirroring the single-handoff case)"
+    );
+}
+
+#[test]
+fn session_init_caps_injected_handoffs_but_still_deletes_every_match() {
+    // Arrange: four fresh handoffs in the same directory, more than
+    // HANDOFF_MAX_INJECTED (3). Explicit, spread-out mtimes make the
+    // freshest-first ordering deterministic instead of relying on write
+    // order landing in the same filesystem-time quantum.
+    let work = scratch_dir("handoff-cap");
+    let repo_dir = work.join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    let home = work.join("home");
+
+    let now = std::time::SystemTime::now();
+    let mut paths = Vec::new();
+    for (n, age_hours) in [(1, 4), (2, 3), (3, 2), (4, 1)] {
+        let marker = format!("HANDOFFMARKER-{n}");
+        let path = write_handoff_suffixed(&home, &repo_dir, &marker, &format!("cap-{n}"));
+        let file = fs::File::open(&path).unwrap();
+        file.set_modified(now - std::time::Duration::from_secs(age_hours * 3600))
+            .unwrap();
+        paths.push(path);
+    }
+
+    // Act
+    let outcome = run_session_init_at(&repo_dir, &home);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert: only the 3 freshest (4, 3, 2) are injected; the oldest (1) is
+    // not, but every file is still gone afterward.
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("HANDOFFMARKER-4")
+            && context.contains("HANDOFFMARKER-3")
+            && context.contains("HANDOFFMARKER-2"),
+        "the 3 freshest matches should be injected: {context}"
+    );
+    assert!(
+        !context.contains("HANDOFFMARKER-1"),
+        "a 4th match beyond the injection cap should not be injected: {context}"
+    );
+    assert!(
+        paths.iter().all(|p| !p.exists()),
+        "every matched file should still be deleted, capped or not"
     );
 }
 
