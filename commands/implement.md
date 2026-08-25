@@ -253,6 +253,12 @@ done
 
 Each `wip` commit is a checkpoint, not the delivered shape: see Commit per Work Unit, below, for the squash that turns them into the WU's one real commit.
 
+**RED anti-patterns to avoid (MUST).** A test that passes for the wrong reason is worse than no test:
+
+- **Testing through implementation details.** Mocking internals, calling a private method, or verifying via a side channel (e.g. querying a table directly) instead of the public interface the scenario describes. Test the behaviour, not how it's built.
+- **A tautological test.** The expected value is computed the same way the implementation computes it, including a hand-derived snapshot, so the test can't disagree with a wrong implementation. Derive the expectation independently.
+- **Writing every scenario's tests before any implementation.** The per-scenario RED/GREEN/REFACTOR loop above already prevents this structurally; don't defeat it by batching RED across scenarios.
+
 **Without TDD (`--no-tdd`).** For each logical file group: one `implementer` subagent (`subagent_type: implementer`) implements code + tests together (tests still encode the Gherkin scenarios); run verify; commit `wip(<wu-id>): <group-name>` on success; the orchestrator reviews as above.
 
 **Commit per Work Unit (MUST): small commits.** One coherent commit per WU, in the tree the WU used (worktree for a parallel wave, the Segment branch in the main tree for a single-WU wave). The `wip` commits above are checkpoints while the WU is in flight, not the delivered shape:

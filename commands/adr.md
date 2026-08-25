@@ -181,7 +181,7 @@ After the record is approved, write `{DIR}/{base}-blueprint.md` (`{base}` = file
 ## Confidence + open items
 
 - Confidence: HIGH | MEDIUM | LOW, <one line on what makes it that>
-- Open items (verify downstream):
+- Open items (verify downstream): each one MUST be stated precisely enough that whoever picks it up next knows exactly what to check or decide. If it can't be phrased that precisely yet, say so plainly instead of listing a vague placeholder that only looks actionable.
   - <blind spot or LOW-confidence premise>, <who verifies: /playbook:scope interview, /playbook:implement watch>
 ```
 
