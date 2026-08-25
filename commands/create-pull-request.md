@@ -8,7 +8,7 @@ agent: git
 
 # Create Pull Request
 
-Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `playbook:engineering-standards` (readiness, size) and `playbook:writing-style` (voice, banned words, no dashes). The PR opens as a **draft** by default; pass `--ready` to publish it for review.
+Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `playbook:engineering-standards` (readiness, size) and `playbook:writing-style` (voice, banned words, no dashes). Every PR opens as a **draft**, always: `--ready` no longer publishes it immediately, it marks it for promotion to ready once Step 9's self-review passes, since a human should never be the first reviewer of unreviewed code.
 
 This creates a **new** PR. If one already exists for the branch, this stops and points you at `/playbook:address-pr-comments` or `/playbook:quick-review`.
 
@@ -26,7 +26,7 @@ Parse these from `$ARGUMENTS` **once**, in Step 1, and persist them to `$PR_TMP/
 
 > **Why persisted to a file, not re-parsed per step:** each bash block runs in its own shell, so nothing set inline in one block reliably survives to the next (the Bash tool keeps the working directory but not shell state). An earlier version of this command told each step to "set FOO_ARG at the top of that block" from memory of `$ARGUMENTS`; in practice `--base` was silently dropped that way, three times in a row, and every PR opened against the repo default instead of the stacked branch it was pointed at. A file on disk survives regardless of how the executing agent batches its tool calls; re-deriving a value from a natural-language instruction each step does not.
 
-- `--ready` → open the PR ready for review instead of a draft. Parsed into `READY_FLAG` in Step 1.
+- `--ready` → promote the PR to ready once Step 9's self-review passes, instead of leaving it a draft. Parsed into `READY_FLAG` in Step 1. Does NOT skip the draft stage: every PR opens as a draft regardless of this flag.
 - `--base <branch>` → override the base branch. Parsed into `BASE_ARG` in Step 1.
 - `--ticket <ID>` → force the ticket, skipping branch auto-detect (`none` omits the line). Parsed into `TICKET_ARG` in Step 1.
 - `--help` → print the usage block above and stop.
@@ -289,7 +289,7 @@ echo "Body written: $PR_TMP/pr-body.md"
 
 ## Step 7: Push and create
 
-The PR opens as a **draft** unless `--ready` was passed. `READY_FLAG` came from `$PR_TMP/args.env` (parsed once, in Step 1); this step only translates it into the flag `gh pr create` expects, it does not re-parse `$ARGUMENTS`.
+Every PR opens as a **draft**, unconditionally. `READY_FLAG` (from `$PR_TMP/args.env`, parsed once in Step 1) is NOT used here: it's read by Step 9, after the self-review, to decide whether to promote the draft. This step never publishes a PR ready for review directly.
 
 ```bash
 CURRENT_BRANCH=$(git branch --show-current)
@@ -303,9 +303,8 @@ if [ "$TITLE_LEN" -gt 72 ]; then
   exit 1
 fi
 
-# Draft by default; --ready (READY_FLAG, from args.env) publishes for review.
+# Always draft: --ready (READY_FLAG) is Step 9's job, after the self-review, not this step's.
 DRAFT_ARG="--draft"
-[ -n "$READY_FLAG" ] && DRAFT_ARG=""
 
 echo "Creating PR: $CURRENT_BRANCH -> $BASE_BRANCH (draft: $([ -n "$DRAFT_ARG" ] && echo yes || echo no))"
 
@@ -342,4 +341,15 @@ PR_URL=$(gh pr view "$CURRENT_BRANCH" --json url -q .url 2>/dev/null || true)
 echo "PR: $PR_URL"
 ```
 
-Show the PR URL and a one-line summary (title, base, draft state). Done.
+Show the PR URL and a one-line summary (title, base, draft state). Include the `READY_FLAG` value from `$PR_TMP/args.env`: Step 9 below reads it to decide what happens next.
+
+## Step 9: Self-review before ready (for the orchestrating session, not this forked agent)
+
+This step is not executable from inside this command's own forked context: it runs as `context: fork, agent: git`, and the `git` agent's tools are `Bash, Read, Skill` only, no `Agent`. It cannot spawn `deep-review`'s reviewer swarm itself. This step is the instruction the orchestrating session (whoever invoked this skill) follows after it returns:
+
+1. Run `/clear`, then run `/playbook:deep-review --self` against the PR just created. A draft PR is a real PR, so this works; reviewing before any PR exists does not (`deep-review` needs `gh pr view`/`gh pr diff`).
+2. Fix any findings it surfaces. A push updates the draft automatically, no new PR needed.
+3. If `READY_FLAG` was `--ready` (the caller wanted this published, not left as a draft): run `gh pr ready <branch>` now, after the review and fixes, not before. `--ready` means "ready once self-reviewed," not "skip the review."
+4. If `READY_FLAG` was empty: stop after the review. The caller asked for a draft; leave it one.
+
+Never skip straight to `gh pr ready` on a fresh draft without running the review first.

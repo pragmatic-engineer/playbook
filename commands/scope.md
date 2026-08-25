@@ -338,7 +338,7 @@ Then:
 2. If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the plan's accepted key decisions as project memory facts (`type: project`, `anchors:` to the files they touch), and update `~/.claude/memory/<owner>/<repo>/MEMORY.md`. The graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip.
 3. Tell the user:
    - "Saved to `.claude/plans/<topic-slug>.md`"
-   - "Implement it when ready: `/playbook:implement .claude/plans/<topic-slug>.md`."
+   - "Run `/clear`, then implement it with a clean context: `/playbook:implement .claude/plans/<topic-slug>.md`." This interview's back-and-forth is exactly what a fresh execution phase shouldn't carry forward; there's no way to clear it from inside this session, so say so instead of leaving it implicit.
    - "Want to capture the key decisions in an ADR (`/playbook:adr`)?" (if architectural)
    - **In `--auto`:** also list the **Assumptions** made (especially any `OPEN` ones) so the user can audit the autonomous choices before running `/playbook:implement`.
 
