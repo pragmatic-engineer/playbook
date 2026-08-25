@@ -104,3 +104,74 @@ jobs:
 
       - name: cargo check (lib and bin)
         run: cargo check --bins --lib
+
+  # ADR 0007 WU-14 Done-When: a container built FROM debian:stable-slim with
+  # only git and the binary installed runs every hook successfully, asserted
+  # by CI, not by inspection. The 15 hooks in `HookName` are the whole
+  # contract `settings.json` invokes as a bare `playbook hook <name>`
+  # command; if any of them needed something setup-local.sh or install.sh
+  # used to provide (a shared library, a Python interpreter, anything beyond
+  # `git`), this job is where that would show up, on the platform the tool
+  # actually ships for, not on the dev machine that already has everything
+  # installed.
+  #
+  # Static musl, not the glibc dev build: the release binaries are musl, and
+  # a glibc build would silently pass here while failing on a real minimal
+  # container the way a user's actually would.
+  #
+  # Empty `{}` JSON input, not a real payload: every hook's own "never
+  # panic" contract (see SEGMENT-B-RULES.md) already means malformed or
+  # empty input degrades to silence or a best-effort no-op, verified locally
+  # before this job existed: all 15 exit 0 on `{}`. What this job checks is
+  # narrower and different, whether the compiled binary can even START in a
+  # container that has nothing but git, which `cargo test` never exercises
+  # since it always runs on a machine with the full toolchain already
+  # present.
+  container-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          # audit, not block: this job pulls the debian:stable-slim base
+          # image and apt-get installs git INSIDE that container, both
+          # against Docker Hub / Debian archive mirrors that rotate per
+          # runner placement, the same reasoning shell-ci.yml already
+          # documents for its own apt-get step.
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Add the musl target
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Build the release binary (static musl)
+        # rust-lld, not the system linker: matches release.yml's own musl
+        # legs exactly. The system cc/ld does not understand this target's
+        # linker flags on its own; rust-lld ships with the toolchain, so
+        # this needs no extra install.
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Run every hook inside a minimal debian container
+        run: |
+          docker run --rm \
+            -v "$PWD/target/x86_64-unknown-linux-musl/release/playbook:/usr/local/bin/playbook:ro" \
+            debian:stable-slim \
+            bash -c '
+              set -e
+              apt-get update -qq
+              apt-get install -y -qq git >/dev/null
+              for name in session-init preread-edit-check preread-size-check \
+                          search-counter memory-anchors post-edit-track \
+                          rebuild-memory-graph auto-model-detect precompact-warn \
+                          session-clean-exit memory-capture rm-workspace-guard \
+                          bg-await-guard no-dash-guard precommit-check; do
+                echo "== $name"
+                echo "{}" | HOME=/tmp playbook hook "$name" \
+                  || { echo "FAILED: $name did not exit 0 in a minimal container"; exit 1; }
+              done
+              echo "all 15 hooks ran without crashing"
+            '
