@@ -242,7 +242,15 @@ If `--self` (or self-review with nothing postable), stop here: the report IS the
 
 Otherwise ask **one question at a time**:
 
-- **Q1:** "Post which findings as a pending review? all / none / a subset (numbers)." If `none`, stop.
+- **Q1:** "Post which findings as a pending review?" Offer exactly these six tiers, each a strict superset of the one before, blocking and questions take precedence, suggestions and nitpicks stay optional:
+  - `only blockers` (`blocking` findings only)
+  - `all issues` (`blocking` + `issue`)
+  - `all issues + questions` (`blocking` + `issue` + `question`)
+  - `all except nitpicks` (`blocking` + `issue` + `question` + `suggestion`)
+  - `all findings` (everything, `nitpick` included)
+  - `none` (stop, nothing posted)
+
+  If `none`, stop.
 - Build the payload at `$REVIEW_JSON` (`{"commit_id": "<HEAD_SHA>", "comments": [{"path","line","side","body"}, ...]}`, body starting with the plain-text bare Conventional Comment label, `blocking:` for a merge-blocking finding, `issue:` otherwise, no review `body`). Build each inline comment's `body` from that finding's `Post:` block verbatim, anchored to the finding's `file:line`. What the user read in the report is exactly what posts. Skip any finding marked `Report-only`. Then create the pending review:
 
 ```bash
@@ -251,9 +259,14 @@ gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews --input "$REVIEW_JSON" --jq
 
 - **Pre-post verification (MUST):** before this call, re-read each selected finding's file at `HEAD_SHA`, confirm the evidence is at the cited line (correct silently if it drifted, drop if absent), and confirm the PR is still OPEN and not CONFLICTING (`gh pr view "$PR_NUMBER" --json state,mergeable`). Don't post on a merged/closed/conflicting PR.
 - **Q2:** "Submit verb? approve / comment / request-changes / skip." Self-review offers only `comment` / `skip` (GitHub rejects approve/request-changes from the author). On `skip`, leave it PENDING. Otherwise:
+- **Q3:** "Add a comment for the review?" (optional free text, blank to skip). Leave `BODY` empty on a blank answer, except: on `approve` with a blank answer, default `BODY` to `LGTM`.
 
 ```bash
-gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES>
+if [ -n "$BODY" ]; then
+  gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES> -f body="$BODY"
+else
+  gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES>
+fi
 ```
 
 Never fabricate URLs; use the `html_url` the API returns.

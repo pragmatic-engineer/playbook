@@ -187,9 +187,16 @@ Relay the report to the user unchanged, then proceed to posting. Post findings v
 
 **Ask the user, one question at a time** (memory rule):
 
-**Q1**: "Post findings as a pending review? Which ones: all, a subset (list numbers), or none?"
+**Q1**: "Post which findings as a pending review?" Offer exactly these six tiers, each a strict superset of the one before, blocking and questions take precedence, suggestions and nitpicks stay optional:
 
-Wait for response. If `none` or `skip`, stop here.
+- `only blockers` (`blocking` findings only)
+- `all issues` (`blocking` + `issue`)
+- `all issues + questions` (`blocking` + `issue` + `question`)
+- `all except nitpicks` (`blocking` + `issue` + `question` + `suggestion`)
+- `all findings` (everything, `nitpick` included)
+- `none` (stop, nothing posted)
+
+Wait for response. If `none`, stop here.
 
 Build each inline comment from that finding's `Post:` block verbatim as the comment `body`, anchored to the finding's `file:line`. What the user read in the report is exactly what posts. Skip any finding marked `Report-only`.
 
@@ -199,7 +206,7 @@ Build a JSON payload at `$REVIEW_JSON` (`/tmp/<org>/<repo>/quick-review-<number>
 {
   "commit_id": "<HEAD_SHA>",
   "comments": [
-    {"path": "...", "line": N, "side": "RIGHT", "body": "label (decoration): ..."},
+    {"path": "...", "line": N, "side": "RIGHT", "body": "blocking: ..."},
     {"path": "...", "start_line": N, "start_side": "RIGHT", "line": M, "side": "RIGHT", "body": "..."}
   ]
 }
@@ -222,8 +229,14 @@ Confirm `state: PENDING` and capture the review id + html_url. Show the user the
 
 If `skip`, stop. The pending review stays for manual submit from the UI. Otherwise:
 
+**Q3**: "Add a comment for the review?" (optional free text, blank to skip). Leave `BODY` empty on a blank answer, except: on `approve` with a blank answer, default `BODY` to `LGTM`.
+
 ```bash
-gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES>
+if [ -n "$BODY" ]; then
+  gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES> -f body="$BODY"
+else
+  gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES>
+fi
 ```
 
 Confirm the returned `state` flipped from `PENDING` to the corresponding terminal state.
