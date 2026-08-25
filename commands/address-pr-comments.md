@@ -3,7 +3,7 @@ description: Walk unresolved PR review comments one at a time, apply fixes or dr
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Skill
 argument-hint: "[PR number] [--bots] [--dry-run] [-y|--yes]"
 model: opus
-effort: max
+effort: high
 ---
 
 # Address PR Comments
