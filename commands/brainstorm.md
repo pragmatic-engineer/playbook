@@ -3,7 +3,7 @@ description: Divergent discovery session that explores a raw idea, weighs approa
 allowed-tools: Agent, Read, Bash, Grep, Glob, Skill, Write, Edit, WebFetch
 argument-hint: "[idea | PROJ-123 | ./prompt.md] [--ticket <id>] [--depth 0-2] [--adr] [--no-chain] [--help]"
 model: opus
-effort: xhigh
+effort: high
 ---
 
 # Brainstorm: Divergent Discovery

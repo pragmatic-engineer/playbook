@@ -3,7 +3,7 @@ description: Use when recording a significant, hard-to-reverse architectural dec
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
 argument-hint: "<topic> [--record-only] [--list] [--help]"
 model: opus
-effort: xhigh
+effort: high
 ---
 
 # ADR: Decision Records with Execution Blueprints

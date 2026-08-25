@@ -3,7 +3,7 @@ description: Interview-driven planning session with deep requirements gathering 
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
 argument-hint: "[topic | ./prompt.md | .claude/designs/*.md] [--auto] [--help]"
 model: opus
-effort: xhigh
+effort: high
 ---
 
 # Scope: Interactive Design Interview
