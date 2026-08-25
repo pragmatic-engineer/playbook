@@ -88,6 +88,8 @@ A PR MUST meet these criteria before requesting review:
 - Mock only where necessary, as close to the application boundary as possible.
 - Prefer dependency injection over global mocking for easier-to-understand tests.
 - For domain services: spy on the interface and verify call parameters; do NOT mock the database tables owned by another service.
+- Inject an external client as a constructor or function parameter rather than constructing it inside the function under test. A function that builds its own client can't be mocked without reaching into its internals.
+- Prefer a narrow, per-operation interface (one method per operation) over one generic call that branches on an argument. A mock over a narrow interface has a fixed shape, and a test visibly declares which operations it touches.
 
 ## Manual Testing
 
