@@ -48,7 +48,7 @@ EXAMPLES:
 | test | coverage gaps, missing scenarios, untested error paths, weak assertions, flakiness |
 | security | auth, PII handling, crypto, injection, IDOR, leaked secrets |
 | data | query/DAO correctness, N+1, missing indexes, transaction boundaries |
-| types | `any`, unsafe casts (`as`), non-null assertions (`!`), weak typing (language-appropriate) |
+| types | `any`, unsafe casts (`as`) instead of runtime parsing at a boundary, non-null assertions (`!`), weak typing (language-appropriate) |
 | perf | N+1, unbounded data, connection leaks, work inside loops |
 
 **Conditional reviewers** (added in `auto` mode when the diff shows the trigger):
