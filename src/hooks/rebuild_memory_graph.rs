@@ -10,12 +10,14 @@
 //! `memory-anchors.rs` (the sole reader of the file this hook writes) must
 //! change in lockstep with this one; they ship in the same commit on purpose.
 
+use crate::common::atomic::with_dir_lock;
 use crate::common::home_dir;
 use crate::common::payload::Payload;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub fn run(payload: &Payload) {
     if should_skip(payload) {
@@ -460,8 +462,28 @@ pub fn rebuild_now() {
     rebuild();
 }
 
+/// Serializes concurrent rebuilds (two sessions saving facts near the same
+/// moment) with an mkdir-based advisory lock at `graph.json.lock`, matching
+/// `atomic_append`'s convention in `common::atomic`. Without this, two
+/// rebuilds can interleave: the one that started from a staler view of the
+/// memory tree can still finish (and rename) after the fresher one, silently
+/// discarding whatever the fresher rebuild had just seen. The lock forces
+/// the full read-build-write cycle to run as one unit, so the rebuild that
+/// completes second always reads the tree as the first one left it. Fails
+/// open after the retry budget, same as every other lock in this codebase:
+/// a hook must never hang waiting on contention.
 fn rebuild() {
     let mem_dir = memory_dir();
+    let lock_path = mem_dir.join("graph.json.lock");
+    let (acquired, ()) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
+        rebuild_locked(&mem_dir);
+    });
+    if acquired {
+        let _ = fs::remove_dir(&lock_path);
+    }
+}
+
+fn rebuild_locked(mem_dir: &Path) {
     let mut nodes: Vec<Node> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
     let mut seen_code: HashSet<String> = HashSet::new();
@@ -469,8 +491,8 @@ fn rebuild() {
     // here, resolved in pass 2 once every node id is known.
     let mut pending_links: Vec<(String, String, String, Scope, Option<String>)> = Vec::new();
 
-    for fpath in walk_markdown_files(&mem_dir) {
-        let Ok(rel_path) = fpath.strip_prefix(&mem_dir) else {
+    for fpath in walk_markdown_files(mem_dir) {
+        let Ok(rel_path) = fpath.strip_prefix(mem_dir) else {
             continue;
         };
         let rel = rel_path.to_string_lossy().replace('\\', "/");
@@ -582,7 +604,7 @@ fn rebuild() {
         });
     }
 
-    write_graph_atomically(&mem_dir, &Graph { nodes, edges });
+    write_graph_atomically(mem_dir, &Graph { nodes, edges });
 }
 
 /// Recursively collect every `.md` file under `dir` except `MEMORY.md`,

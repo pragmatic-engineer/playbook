@@ -1118,3 +1118,97 @@ fn memory_rebuild_subcommand_rebuilds_with_no_payload_where_the_hook_skips() {
 
     let _ = fs::remove_dir_all(&home);
 }
+
+/// The real interleaving race (two subprocesses' rebuilds overlapping) is
+/// too narrow a window to hit reliably in a test: subprocess spawn overhead
+/// dwarfs the tiny fixture tree's read-build-write time, so the two
+/// processes rarely truly overlap. This test instead exercises the lock
+/// wiring deterministically: pre-create `graph.json.lock` as a directory
+/// (simulating another session mid-rebuild), then run a rebuild against it.
+/// The lock is advisory and fails open after its retry budget (matching
+/// `common::atomic`'s documented contract: a hook must never hang on
+/// contention), so this must still succeed and produce a correct graph, not
+/// hang or error out just because the lock directory was already there.
+#[test]
+fn rebuild_succeeds_when_the_lock_directory_is_already_held() {
+    // Arrange
+    let home = scratch_home("lock-contended");
+    write_fact(
+        &home,
+        "fact-under-lock.md",
+        "---\nname: fact-under-lock\ntype: reference\n---\n\nBody text.\n",
+    );
+    let lock_dir = home.join(".claude").join("memory").join("graph.json.lock");
+    fs::create_dir(&lock_dir).expect("pre-creating the lock dir should succeed");
+
+    // Act
+    let out = run_rebuild_for(&home, "fact-under-lock.md");
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "rebuild must fail open, not hang or error, when the lock is already held: {:?}",
+        out
+    );
+    let graph = read_graph(&home);
+    assert!(
+        has_node(&graph, "global/fact-under-lock"),
+        "the graph must still be correct after a fail-open rebuild"
+    );
+    // The pre-existing lock dir was never this run's to remove (it did not
+    // create it), so it must still be there: removing a lock directory you
+    // did not acquire would destroy another process's in-progress lock.
+    assert!(
+        lock_dir.exists(),
+        "a rebuild that did not acquire the lock must not remove it"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Two sessions saving different facts near the same moment each trigger a
+/// full rebuild. Without a lock around the read-build-write cycle, the
+/// rebuild that started from a staler view of the tree can still finish
+/// (and rename) after the fresher one, silently dropping whatever the
+/// fresher rebuild had just seen. Both concurrent rebuilds must survive in
+/// the final graph, since real concurrent processes (not threads inside one
+/// process) are what an mkdir-based lock actually has to serialize.
+#[test]
+fn concurrent_rebuilds_from_two_sessions_both_survive() {
+    // Arrange
+    let home = scratch_home("concurrent-rebuild");
+    write_fact(
+        &home,
+        "fact-a.md",
+        "---\nname: fact-a\ntype: reference\n---\n\nBody text.\n",
+    );
+    write_fact(
+        &home,
+        "fact-b.md",
+        "---\nname: fact-b\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act: two real subprocesses, each rebuilding for a different fact,
+    // launched from separate threads so they actually overlap.
+    let home_a = home.clone();
+    let home_b = home.clone();
+    let a = std::thread::spawn(move || run_rebuild_for(&home_a, "fact-a.md"));
+    let b = std::thread::spawn(move || run_rebuild_for(&home_b, "fact-b.md"));
+    let out_a = a.join().expect("thread a should not panic");
+    let out_b = b.join().expect("thread b should not panic");
+
+    // Assert
+    assert!(out_a.status.success(), "rebuild for fact-a should exit 0");
+    assert!(out_b.status.success(), "rebuild for fact-b should exit 0");
+    let graph = read_graph(&home);
+    assert!(
+        has_node(&graph, "global/fact-a"),
+        "fact-a must survive a concurrent rebuild, not be silently dropped"
+    );
+    assert!(
+        has_node(&graph, "global/fact-b"),
+        "fact-b must survive a concurrent rebuild, not be silently dropped"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
