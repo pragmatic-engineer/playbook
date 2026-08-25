@@ -33,7 +33,7 @@ OPTIONS:
                  links (default), 2 one more hop. Always bounded.
   --adr        Route to /playbook:adr at the end instead of /playbook:scope (the direction
                carries a weighty architectural decision worth a formal record).
-  --no-chain   Write the design doc and stop. Don't offer to run /playbook:scope.
+  --no-chain   Write the design doc and stop. Skip the /clear-and-continue suggestion too.
   --help       Show this help
 
 Asks one question at a time with a recommended answer. Given a ticket id, pulls the
@@ -260,9 +260,11 @@ Tell the user: **"PRD and design doc written to `<prd-path>` and `<design-path>`
 
 ### Step 10: Handoff
 
-Once approved, unless `--no-chain`:
+Never invoke the next command from inside this session: brainstorm's exploration, the interview, and the digest are exactly the accumulated context a fresh planning phase shouldn't inherit. There's no way to clear it from within a running turn (`/clear` is a user action, no hook or tool can trigger it), so the fix is not auto-chaining in the first place, only telling the user what to run next.
 
-- **`/playbook:scope` route:** ask **"Run `/playbook:scope` now? It'll read the PRD and design doc and skip what we already settled."** On yes, invoke `/playbook:scope` pointed at the design doc path (it follows the `PRD:` line for the rest).
-- **`/playbook:adr` route** (from Step 5 or `--adr`): ask **"Run `/playbook:adr` now to record that decision?"** On yes, invoke `/playbook:adr` with both docs as context.
+Once approved, unless `--no-chain`, tell the user:
 
-With `--no-chain`, print both doc paths and the suggested next command, then stop.
+- **`/playbook:scope` route:** **"Run `/clear`, then run `/playbook:scope <design-doc-path>` to continue with a clean context. It reads the PRD and design doc and skips what we already settled."**
+- **`/playbook:adr` route** (from Step 5 or `--adr`): **"Run `/clear`, then run `/playbook:adr <design-doc-path>` to record that decision with a clean context."**
+
+With `--no-chain`, print both doc paths and stop; skip the next-step suggestion entirely.

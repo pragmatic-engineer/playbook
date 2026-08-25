@@ -264,7 +264,7 @@ Lowercase all words, replace spaces and special characters with hyphens, collaps
 
 ## Implementing the Blueprint
 
-The blueprint is a self-contained implementation plan. Implement it with `/playbook:implement {DIR}/{base}-blueprint.md`.
+The blueprint is a self-contained implementation plan. Run `/clear` first, then implement it with a clean context: `/playbook:implement {DIR}/{base}-blueprint.md`. The record-drafting and quality-gate back-and-forth in this session is not something the execution phase needs to inherit.
 
 ## Teardown (MUST run, even on failure or abort)
 
