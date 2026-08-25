@@ -17,7 +17,7 @@
 use crate::common::{config_hash, home_dir, repo_slug, run_with_timeout, session_dir, Payload};
 use serde::Serialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -36,6 +36,14 @@ const MEMORY_BODY_CAP_CHARS: usize = 16000;
 /// would otherwise re-inject into every future session in that worktree
 /// indefinitely, with no backstop to end it.
 const HANDOFF_MAX_AGE_DAYS: u64 = 14;
+
+/// Cap on how many distinct handoffs a single `SessionStart` injects. The
+/// write side keys each handoff by `<slug>-<epoch>-<pid>.md`, not one fixed
+/// path per directory, so more than one can be waiting (two sessions in the
+/// same directory wrapped up close together). Injecting all of them
+/// unbounded would let a busy directory blow up the context; three is
+/// enough to catch "I cleared twice in a row" without that risk.
+const HANDOFF_MAX_INJECTED: usize = 3;
 
 /// The five per-session counter/state files zeroed at the start of every
 /// session. Matches hooks/session-init.py:88 exactly; anything else in the
@@ -235,47 +243,83 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, home: &str
     push_context(extra_context, &mem_ctx);
 }
 
-/// ADR 0008 WU-3: reload a persisted session-handoff (written by
+/// ADR 0008 WU-3: reload persisted session-handoffs (written by
 /// `skills/session-handoff/SKILL.md`) at every `SessionStart`, including
 /// `source: "clear"`: this function is called unconditionally regardless of
-/// `.source`, unlike `check_config_drift` which branches on it. Read-once,
-/// mirroring `to-learn`'s pattern exactly: the file is deleted whether it
-/// was injected or found stale, so a delete failure cannot make the same
-/// handoff re-inject forever. Never panics: a missing, unreadable, or
-/// permission-denied file degrades to "say nothing", the same invariant
-/// `read_legacy_memory` already holds for its own file.
+/// `.source`, unlike `check_config_drift` which branches on it.
+///
+/// The write side keys each handoff by `<slug>-<epoch>-<pid>.md`, not one
+/// fixed path per directory, so two sessions working the same directory
+/// never overwrite each other's handoff. That means this read side can find
+/// more than one match: it glob-matches every `<slug>-*.md`, injects up to
+/// `HANDOFF_MAX_INJECTED` of the freshest (most recently modified first),
+/// and deletes every match it finds, fresh or stale, injected or not. A
+/// delete failure can therefore never make the same handoff re-inject
+/// forever, the same invariant the old single-file version held, and a
+/// busy directory cannot accumulate handoffs past this one run. Never
+/// panics: a missing, unreadable, or permission-denied file degrades to
+/// "say nothing", the same invariant `read_legacy_memory` holds for its own
+/// file.
 fn append_handoff_slice(extra_context: &mut String, home: &str) {
     let slug = crate::cc::project_slug(&crate::cc::logical_cwd());
     if slug.is_empty() {
         return;
     }
-    let path = Path::new(home)
+    let dir = Path::new(home)
         .join(".claude")
         .join("runtime")
-        .join("handoff")
-        .join(format!("{slug}.md"));
+        .join("handoff");
+    let prefix = format!("{slug}-");
 
-    let Ok(metadata) = fs::metadata(&path) else {
+    let Ok(entries) = fs::read_dir(&dir) else {
         return;
     };
-    let is_fresh = metadata
-        .modified()
-        .ok()
-        .and_then(|m| m.elapsed().ok())
-        .map(|age| age.as_secs() <= HANDOFF_MAX_AGE_DAYS * 86400)
-        .unwrap_or(false);
+    let mut matches: Vec<(PathBuf, SystemTime)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            if !name.starts_with(&prefix) || !name.ends_with(".md") {
+                return None;
+            }
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((entry.path(), modified))
+        })
+        .collect();
+    if matches.is_empty() {
+        return;
+    }
+    // Freshest first, so the injected subset (when there are more matches
+    // than HANDOFF_MAX_INJECTED) is always the most recent ones.
+    matches.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
 
-    if is_fresh {
-        if let Ok(contents) = fs::read_to_string(&path) {
-            if !contents.is_empty() {
-                let ctx =
-                    format!("Handoff from your previous session in this directory:\n\n{contents}");
-                push_context(extra_context, &ctx);
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(HANDOFF_MAX_AGE_DAYS * 86400))
+        .unwrap_or(UNIX_EPOCH);
+    let total = matches.len();
+    let mut injected = 0usize;
+
+    for (path, modified) in &matches {
+        if injected < HANDOFF_MAX_INJECTED && *modified >= cutoff {
+            if let Ok(contents) = fs::read_to_string(path) {
+                if !contents.is_empty() {
+                    let ctx = if total > 1 {
+                        format!(
+                            "Handoff from a previous session in this directory \
+                            ({} of {total} found):\n\n{contents}",
+                            injected + 1
+                        )
+                    } else {
+                        format!(
+                            "Handoff from your previous session in this directory:\n\n{contents}"
+                        )
+                    };
+                    push_context(extra_context, &ctx);
+                    injected += 1;
+                }
             }
         }
+        let _ = fs::remove_file(path);
     }
-
-    let _ = fs::remove_file(&path);
 }
 
 /// Shell out to `shell/memory-context.sh --repo <slug>` and return its
