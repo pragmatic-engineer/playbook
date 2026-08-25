@@ -132,6 +132,20 @@ Scale the depth: 2-4 questions for a small idea, more for a broad one. Don't ove
 
 **Domain glossary (when a term is genuinely ambiguous or new).** If the conversation turns on a term that's overloaded, vague, or new to this codebase, don't just use it and move on: propose a precise definition and check it with the user. This isn't for every noun in a small idea, only for a term the design actually hinges on. Write it to `GLOSSARY.md` at the target repo's root (create the file only on its first real entry; it's tracked in git, not ignored, since its value is shared vocabulary across future sessions, not scratch). Each entry states what the term IS in one or two sentences, not what it does, plus a short list of synonyms to avoid so the disambiguation is recorded, not just implied. Write it the moment it resolves, don't batch it for later. If `GLOSSARY.md` already has a conflicting entry for the term, surface the conflict to the user instead of overwriting it silently.
 
+Append with the same locked-write shape `MEMORY.md`'s index uses (Step 7, below): a mkdir-based advisory lock, matching the Rust hooks' `with_dir_lock` (`src/common/atomic.rs`). Two concurrent sessions can each resolve a term at the same moment; a plain check-then-append can silently drop one of the two lines.
+
+```bash
+GLOSSARY_MD="$ROOT/GLOSSARY.md"
+LOCK="$GLOSSARY_MD.lock"
+ACQUIRED=0
+for _ in $(seq 1 20); do
+  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
+  sleep 0.05
+done
+printf '%s\n' "<term entry>" >> "$GLOSSARY_MD"
+[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
+```
+
 ### Step 3.5: Draft and confirm the PRD
 
 Synthesize a PRD from the Step 3 answers: Purpose and Success criteria become Problem and Goals, Non-goals stays Non-goals, and a new Requirements section states the user-facing capabilities this needs, in behavior terms, not implementation. Present it and ask: **"Does this capture the problem and what it needs to do? Anything to add or change?"** Revise until confirmed. This is the requirements gate: Step 4 designs approaches against a confirmed PRD, not an implicit one. Keep the PRD itself out of scope details, technical approach, or components: those are the design doc's job, not this one's.
@@ -161,16 +175,24 @@ The spike is disposable and scoped to one premise. It never becomes part of the 
 
 Present the design in sections scaled to complexity: a few sentences where it's straightforward, more where it's nuanced. The problem and requirements are already confirmed (Step 3.5); cover the chosen approach, the key components and their boundaries, and the main risks. Ask after each section whether it looks right. Revise until the user approves. Do NOT write the doc before approval.
 
-Keep applying the domain glossary discipline from Step 3 here too: a term that turns out ambiguous while presenting the design gets the same treatment, resolved and written to `GLOSSARY.md` immediately.
+Keep applying the domain glossary discipline from Step 3 here too: a term that turns out ambiguous while presenting the design gets the same treatment, resolved and written to `GLOSSARY.md` immediately, with the same locked append.
 
 ### Step 7: Write the PRD and the design doc
 
-On approval, save both to `.claude/designs/`. First time in this repo, create the dir and ignore it (same pattern as `/playbook:scope`'s plans):
+On approval, save both to `.claude/designs/`. First time in this repo, create the dir and ignore it (same pattern as `/playbook:scope`'s plans). Lock the `.gitignore` check-then-append too: two sessions bootstrapping it at the same moment can otherwise race, and one session's line gets lost.
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
 mkdir -p "$ROOT/.claude/designs"
-grep -qxF '.claude/designs/' "$ROOT/.gitignore" 2>/dev/null || printf '.claude/designs/\n' >> "$ROOT/.gitignore"
+GI="$ROOT/.gitignore"
+LOCK="$GI.lock"
+ACQUIRED=0
+for _ in $(seq 1 20); do
+  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
+  sleep 0.05
+done
+grep -qxF '.claude/designs/' "$GI" 2>/dev/null || printf '.claude/designs/\n' >> "$GI"
+[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
 ```
 
 **PRD** (from Step 3.5), `.claude/designs/<YYYY-MM-DD>-<slug>-prd.md`, product-facing:
@@ -239,6 +261,20 @@ See `<prd-path>` for the full problem statement, goals, and requirements.
 Save both files. Don't auto-commit.
 
 **Knowledge capture.** If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the chosen approach and each rejected approach (with the reasoning from Step 4's trade-offs) as project memory facts (`type: project`, `anchors:` to any files discussed), and update the project's `MEMORY.md` index. This is what Step 2's rejected-idea check reads on a future run; skipping it here means that check finds nothing. If no project store is present, skip silently.
+
+**Locked index append (MUST, whenever this step runs).** Append the new index line with a locked write, not a direct edit: two `cc` sessions in the same repo can each persist a fact around the same moment, and a plain check-then-append can silently drop one of the two lines. Same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
+
+```bash
+MEMORY_MD=~/.claude/memory/<owner>/<repo>/MEMORY.md
+LOCK="$MEMORY_MD.lock"
+ACQUIRED=0
+for _ in $(seq 1 20); do
+  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
+  sleep 0.05
+done
+printf '%s\n' "- [<kebab-title>](<file>.md): <one-line hook>" >> "$MEMORY_MD"
+[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
+```
 
 ### Step 8: Self-review
 

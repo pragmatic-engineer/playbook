@@ -121,6 +121,20 @@ If the plan or ADR blueprint ends with a "Confidence + open items" trailer, read
 
 **Knowledge capture:** when you discover a durable convention or gotcha, write it as a project memory fact only if a project store is present at `~/.claude/memory/<owner>/<repo>/`; otherwise skip silently.
 
+**Locked index append (MUST, every time this doc writes a `MEMORY.md` index line).** Two `cc` sessions in the same repo can each persist a fact around the same moment; a plain check-then-append can silently drop one of the two lines. Append with the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
+
+```bash
+MEMORY_MD=~/.claude/memory/<owner>/<repo>/MEMORY.md
+LOCK="$MEMORY_MD.lock"
+ACQUIRED=0
+for _ in $(seq 1 20); do
+  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
+  sleep 0.05
+done
+printf '%s\n' "- [<kebab-title>](<file>.md): <one-line hook>" >> "$MEMORY_MD"
+[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
+```
+
 ## Step 4: Quality Gate (conditional)
 
 If the plan came from `/playbook:scope` or `/playbook:adr` it already has a companion `*-quality.md` report; trust it and skip to Step 5. Otherwise (a file/issue/ticket spec), run the inlined 3-phase gate before executing:
@@ -129,7 +143,7 @@ If the plan came from `/playbook:scope` or `/playbook:adr` it already has a comp
 2. **Adversarial Review** (`critic` agent, focus `pre-exec`, + the fact-check report): simpler alternatives, scope creep, missing error paths, blast radius.
 3. **Test Review** (`test-reviewer` agent): regression-pinning, flakiness, independence, mock quality, assertion strength.
 
-Max 3 iterations per phase; revise on FAIL. A FAIL blocks execution unless the user explicitly overrides (or `--auto --force`). If a project store is present at `~/.claude/memory/<owner>/<repo>/`, record gotchas and rejected alternatives as memory facts; otherwise skip silently.
+Max 3 iterations per phase; revise on FAIL. A FAIL blocks execution unless the user explicitly overrides (or `--auto --force`). If a project store is present at `~/.claude/memory/<owner>/<repo>/`, record gotchas and rejected alternatives as memory facts, locked append as in Step 3; otherwise skip silently.
 
 ## Step 4.5: Delivery Strategy Gate (MUST, before executing)
 
@@ -231,14 +245,22 @@ This is not optional when the commit looks fine. The report is the only place a 
 
 **Verify-by-diff (MUST).** Never take the subagent's word. After a WU returns, confirm the work from git (`git show --stat <sha>`, review the diff against the brief) and the scoped verify. A `DONE` the diff doesn't support is a failure: re-dispatch or stop per Error handling. Git tells you whether the work landed; only the report tells you what the agent observed, so do both.
 
-**Progress ledger.** Record progress in `.claude/implement/<plan-slug>.progress.md` (gitignored). At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary) from Step 4.5. Per Segment, record its id, branch, whether it was re-split, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch. First use in a repo, create and ignore the dir:
+**Progress ledger.** Record progress in `.claude/implement/<plan-slug>.progress.md` (gitignored). At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary) from Step 4.5. Per Segment, record its id, branch, whether it was re-split, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch. First use in a repo, create and ignore the dir. Lock the `.gitignore` check-then-append: two sessions bootstrapping it at the same moment can otherwise race, and one session's line gets lost.
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
 mkdir -p "$ROOT/.claude/implement"
-for d in .claude/implement/ .claude/worktrees/; do
-  grep -qxF "$d" "$ROOT/.gitignore" 2>/dev/null || printf '%s\n' "$d" >> "$ROOT/.gitignore"
+GI="$ROOT/.gitignore"
+LOCK="$GI.lock"
+ACQUIRED=0
+for _ in $(seq 1 20); do
+  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
+  sleep 0.05
 done
+for d in .claude/implement/ .claude/worktrees/; do
+  grep -qxF "$d" "$GI" 2>/dev/null || printf '%s\n' "$d" >> "$GI"
+done
+[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
 ```
 
 **Model tiering (MUST, never omit `model`).** Implementer Tasks spawn the `implementer` agent, which pins `model: sonnet` itself, so you don't set the model on those calls. Brief drafting (the scheduler's step 3, above) is genuine content generation delegated off the orchestrator's own turn, so it runs `model: "haiku"` explicitly on that one Agent call per wave. Ledger writes stay a direct orchestrator action: a few-line append per WU, small enough that a separate dispatch would cost more in round-trip latency than it saves in tokens. Verification and the adversarial review (Step 9) run the capable tier. An omitted `model` on a non-typed call silently inherits the priciest default, so always set it there.
