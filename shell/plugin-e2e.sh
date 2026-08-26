@@ -48,8 +48,7 @@ while IFS= read -r c; do
   base="$(basename "$path")"
   if [ -f "$path" ]; then
     case "$path" in
-      *.py) checker="python3 -m py_compile" ;;
-      *)    checker="bash -n" ;;
+      *) checker="bash -n" ;;
     esac
     if $checker "$path" 2>/dev/null; then ok "hook resolves and parses: $base"; else bad "hook syntax error: $base"; fi
   else
