@@ -172,29 +172,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     }
 }
 
-/// Runs only the `hooks` step, skipping `settings`, `shim`, `statusline`,
-/// and `system-prompt` entirely. Backs `playbook init --hooks-only`, which
-/// `setup-local.sh` calls right after its own settings.json seed/merge.
-///
-/// That merge (`shell/merge-settings.py`) reconciles `.hooks` as one whole
-/// top-level key: when a user's `.hooks` differs at all from the frozen
-/// baseline, the WHOLE key is kept as a customisation, stale guard commands
-/// included, rather than adopting the template's fixed ones. `wire::wire`
-/// fixes this with a fine-grained per-entry upsert instead, which is exactly
-/// what this function runs, without also touching settings.json content
-/// unrelated to hooks, installing the shell launcher shim, or installing the
-/// system prompt: none of those may have been consented to at the point
-/// `setup-local.sh` calls this, and only `hooks_only`'s caller knows.
-pub fn run_hooks_only(paths: &InitPaths) -> InitOutcome {
-    let settings_path = paths.claude_home.join("settings.json");
-
-    let hooks_step = wire_hooks(&settings_path);
-
-    InitOutcome {
-        steps: vec![hooks_step],
-    }
-}
-
 /// Step 6: place `prompts/SYSTEM_PROMPT.md`, which is opt-in. See
 /// `init::system_prompt` for why `init` refreshes an existing copy but never
 /// installs one the user did not ask for.
