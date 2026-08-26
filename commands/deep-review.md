@@ -1,7 +1,7 @@
 ---
 description: Use for substantial, risky, or cross-cutting PRs. A swarm of specialist reviewer subagents (logic, test, security, data, types, perf, plus conditional) run in parallel, consolidated and fact-checked, then posted as a pending GitHub review. Heavier than /playbook:quick-review.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[PR number] [--all] [--quick] [--preset <name>] [--self] [--help]"
+argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--help]"
 model: opus
 effort: high
 ---
@@ -27,8 +27,7 @@ USAGE:
 OPTIONS:
   --help            Show this help
   --all             Run every reviewer regardless of diff content
-  --quick           Run only the core reviewers
-  --preset <name>   Named reviewer set: security | architecture | data | docs | thorough
+  --preset <name>   Named reviewer set: security | architecture | data | docs
   --self            Local self-review (never posts to GitHub)
 
 EXAMPLES:
@@ -64,7 +63,7 @@ EXAMPLES:
 | dedup | many similar files, or a large diff (>300 changed lines) |
 | adr | an Architecture Decision Record is added or affected |
 
-**Presets:** `security` = security+data+types+logic · `architecture` = architecture+complexity+big-o+dedup · `data` = data+migration+perf · `docs` = docs+adr · `thorough` = all.
+**Presets:** `security` = security+data+types+logic · `architecture` = architecture+complexity+big-o+dedup · `data` = data+migration+perf · `docs` = docs+adr. For every reviewer regardless of diff content, use `--all` directly.
 
 ## Execution rules (MUST)
 
@@ -148,7 +147,6 @@ In worktree mode, `WT` holds the absolute path to the isolated checkout and `WT_
 
 ## Step 2: Select reviewers
 
-- `--quick` → core reviewers only.
 - `--all` → every core + conditional reviewer.
 - `--preset <name>` → that preset's set.
 - otherwise (`auto`, default) → all core reviewers, plus each conditional reviewer whose trigger appears in the diff from Step 1 (grep the diff for migration dirs, schema files, feature flags, new modules, ADR files, >300 changed lines, etc.). Report which reviewers you selected and why.
@@ -189,7 +187,7 @@ Check whether a memory store exists: the global store at `~/.claude/memory/MEMOR
 
 ## Step 3: Spawn the reviewer swarm (parallel reviewer subagents)
 
-**Concurrency cap (MUST).** Dispatch at most 8 reviewers at once. When the selected set (Step 2) is 8 or fewer, dispatch it in one wave exactly as below. When it's larger (only possible under `--all` or the `thorough` preset, up to 14 lenses), split into waves of at most 8: issue the first wave's `Agent` calls in one message, wait for them to return, `TaskStop` each, then issue the remaining lenses as a second wave. This bounds concurrent spawns; it never drops a lens to stay under the cap; every selected reviewer still runs, just possibly across two waves instead of one.
+**Concurrency cap (MUST).** Dispatch at most 8 reviewers at once. When the selected set (Step 2) is 8 or fewer, dispatch it in one wave exactly as below. When it's larger (only possible under `--all`, up to 14 lenses), split into waves of at most 8: issue the first wave's `Agent` calls in one message, wait for them to return, `TaskStop` each, then issue the remaining lenses as a second wave. This bounds concurrent spawns; it never drops a lens to stay under the cap; every selected reviewer still runs, just possibly across two waves instead of one.
 
 Spawn each wave **in parallel** (one message, multiple `Agent` calls), each as a `reviewer` subagent (`subagent_type: reviewer`). The `reviewer` agent is structurally read-only (Read/Grep/Glob only, no Edit/Write/Bash) and pins its own model tier and the `playbook:grounding-review` + `playbook:grounding-research` discipline, so the orchestrator no longer sets `model` per call. Each reviewer prompt MUST include: its focus area (from the table), the PR diff and `HEAD_SHA`, the `playbook:grounding-review` + `playbook:grounding-research` discipline, the absolute `$WT` path (or a note that the tree is in-place if `WT` is empty) with the instruction "Read and grep files under <WT>; do not install or build anything.", the `CHECK_OUTPUT` captured in Step 2b verbatim under a heading "Check suite output (from orchestrator)", and, when Step 2c loaded anything, a memory slice: facts anchored to a file touched in the diff, or otherwise related to the lens's focus area (for example, security-tagged facts for the security lens), listed by one-line hook or short body under a heading "Relevant memory (from orchestrator)". No matching facts means no section, not an empty placeholder.
 

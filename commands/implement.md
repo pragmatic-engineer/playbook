@@ -38,7 +38,8 @@ OPTIONS:
   --auto     Autonomous: execute Segments in dependency order, each Work Unit
              committed as a savepoint, then open the PR set (no prompts;
              self-selects the recommended delivery strategy)
-  --no-tdd   Write tests alongside implementation instead of red/green/refactor
+  --no-tdd   Write tests alongside implementation instead of red/green/refactor;
+             also presets the TDD-approach question and skips it (default: ask)
   --force    In --auto mode, override quality-gate FAILs (logged)
   --pr-strategy=<stacked|independent|single>
              Preset the PR topology and skip that question (default: ask)
@@ -47,7 +48,7 @@ OPTIONS:
              (default: ask; recommended: savepoint)
 
 DELIVERY: /playbook:implement splits the plan into PR-sized Segments and, before
-executing, asks two things (unless preset by flag or running --auto):
+executing, asks three things (unless preset by flag or running --auto):
   - PR topology: stacked (default) | independent | single
   - Boundary:    savepoint (default) | pause
 It honors the plan's Segments but re-splits any whose real diff exceeds the
@@ -156,7 +157,7 @@ Max 3 iterations per phase; revise on FAIL. A FAIL blocks execution unless the u
 
 Either way, confirm the Segment ordering respects the WU `Requires` graph (no forward cross-Segment dependency) before continuing; reorder if needed.
 
-**2. Choose the delivery strategy.** In interactive mode you MUST ask the user before any code is written (this is the "always ask before implementing" gate). Do this by **calling the `AskUserQuestion` tool** with the two questions below in a single call, each option's recommended choice listed first and labelled, recommended per the plan's scope. Do NOT infer the answers, and do NOT start executing Step 5 until the user has answered. The two questions:
+**2. Choose the delivery strategy.** In interactive mode you MUST ask the user before any code is written (this is the "always ask before implementing" gate). Do this by **calling the `AskUserQuestion` tool** with the three questions below in a single call, each option's recommended choice listed first and labelled, recommended per the plan's scope. Do NOT infer the answers, and do NOT start executing Step 5 until the user has answered. The three questions:
 
 - **PR topology:**
   - **Stacked** (default recommendation): each Segment branches off the previous one; PR N targets Segment N-1's branch. Recommend when Segments form a dependency chain (the common case).
@@ -165,10 +166,13 @@ Either way, confirm the Segment ordering respects the WU `Requires` graph (no fo
 - **Segment-boundary behaviour** (always recommend **Savepoints**):
   - **Savepoint commits, PRs at end** (default recommendation, and the norm under `--auto`): implement every Segment as savepoint commits on their (unpushed) branches, run Steps 7-9 once over the full diff, then open the PR set at the end. Because nothing is pushed until then, Step 8's stack rebase stays local and each PR-open push is a first push, not a force-push.
   - **Pause after each PR:** finish a Segment, run Steps 7-9 scoped to just that Segment, open its PR, then stop for the user before the next Segment. No cross-Segment rebase happens (earlier PRs are already open), so a fix implicating an already-delivered Segment becomes a follow-up, not a rebased commit.
+- **TDD approach** (always recommend **red/green/refactor**):
+  - **Red/green/refactor** (default recommendation): each test scenario gets its own failing-test, minimal-implementation, and refactor dispatch, per Step 5's TDD flow below. Recommend whenever the plan's Work Units carry Gherkin scenarios (the common case).
+  - **Tests alongside implementation:** one dispatch per logical file group writes code and tests together (still encoding the plan's scenarios), skipping the three-dispatch cycle. Recommend for a plan that is mostly deletions/mechanical edits with little new logic (TDD adds dispatch overhead without adding rigor there).
 
-**Flag presets.** `--pr-strategy=<stacked|independent|single>` and `--boundary=<savepoint|pause>` preset a choice and skip its question. Absent (and not `--auto`) means ask; this preserves "ask every time" as the default. **Single** topology opens its one PR at the end regardless of boundary (it has a single PR, so "pause after each" is moot).
+**Flag presets.** `--pr-strategy=<stacked|independent|single>`, `--boundary=<savepoint|pause>`, and `--no-tdd` each preset a choice and skip its question. Absent (and not `--auto`) means ask; this preserves "ask every time" as the default. **Single** topology opens its one PR at the end regardless of boundary (it has a single PR, so "pause after each" is moot).
 
-**3. `--auto`:** do NOT ask. Self-select the recommended options (stacked topology, or independent when the Segments are disjoint; savepoints) and record them in the run's assumptions, surfaced in the final report / PR follow-ups. Flag presets still win over the auto default. `--force` still overrides quality-gate FAILs.
+**3. `--auto`:** do NOT ask. Self-select the recommended options (stacked topology, or independent when the Segments are disjoint; savepoints; red/green/refactor unless `--no-tdd` presets tests-alongside) and record them in the run's assumptions, surfaced in the final report / PR follow-ups. Flag presets still win over the auto default. `--force` still overrides quality-gate FAILs.
 
 Record the resolved Segments and the chosen strategy in the progress ledger (Step 5) so a resumed run continues with the same shape.
 
@@ -402,7 +406,7 @@ Each lens gives severity-classified findings with `file:line` evidence and a fix
 | `--auto`: commit/push fails | Stop; report (auth, hooks, etc.) |
 | Plan has no Segments (old plan/issue/spec) | Derive Segments targeting under 500 lines (never over 1500) in Step 4.5 |
 | Segment's real diff exceeds the 1500-line hard limit | Re-split at WU boundaries into a new trailing Segment/PR; note it (Step 5) |
-| Interactive, not `--auto`, no strategy flags | Ask the two Step 4.5 questions (topology + boundary), recommend per scope |
+| Interactive, not `--auto`, no strategy flags | Ask the three Step 4.5 questions (topology + boundary + TDD approach), recommend per scope |
 | `--auto` or a strategy flag set | Skip that question; self-select recommended (stacked + savepoint) and record as assumption |
 | Pause boundary chosen | Run Steps 7-9 scoped per Segment, open its PR, stop for the user before the next (Step 9) |
 | Refinement/adversarial fix, savepoint boundary | Commit on the owning Segment branch, locally rebase later branches before any push (Step 8) |
