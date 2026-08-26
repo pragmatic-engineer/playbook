@@ -149,7 +149,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     // Bound to locals rather than built inline in the vec so execution order
     // is the order written here.
     let settings_step = seed_or_merge_settings(self_root, &paths.claude_home, &settings_path);
-    let hooks_step = wire_hooks(&settings_path, &paths.claude_home);
+    let hooks_step = wire_hooks(&settings_path);
     let shim_step = install_shim_step(
         self_root,
         &paths.claude_home,
@@ -188,7 +188,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 pub fn run_hooks_only(paths: &InitPaths) -> InitOutcome {
     let settings_path = paths.claude_home.join("settings.json");
 
-    let hooks_step = wire_hooks(&settings_path, &paths.claude_home);
+    let hooks_step = wire_hooks(&settings_path);
 
     InitOutcome {
         steps: vec![hooks_step],
@@ -434,12 +434,13 @@ fn prune_family(dir: &Path, prefix: &str, suffix: &str) {
     }
 }
 
-/// Step 2: upsert the ported hooks and guards into `settings.json`. Passes
-/// `wire::wire` an empty `placed_guards` slice: every `GUARD_SPECS` entry is
-/// `ported: true` (WU-13), so `wire` wires every guard unconditionally and
-/// never consults it.
-fn wire_hooks(settings_path: &Path, claude_home: &Path) -> StepReport {
-    match wire::wire(settings_path, &[], claude_home) {
+/// Step 2: upsert the ported hooks and guards into `settings.json`. Every
+/// `GUARD_SPECS` entry is `ported: true` (WU-13), so `wire` wires every hook
+/// and guard unconditionally; WU-14 dropped the `placed_guards` and
+/// `claude_home` parameters `wire::wire` used to take, since the gate they
+/// fed had become permanently unreachable.
+fn wire_hooks(settings_path: &Path) -> StepReport {
+    match wire::wire(settings_path) {
         Ok(outcome) if outcome.changed => {
             StepReport::wired("hooks", "wired the ported hooks into settings.json")
         }
