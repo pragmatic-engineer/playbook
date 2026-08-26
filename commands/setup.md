@@ -55,11 +55,20 @@ Build the flag list. Note the names differ on purpose: this command takes
 `--install-aliases` and `--use-system-prompt`, while `setup-local.sh` takes
 `--aliases` and `--system-prompt`. Translate, don't pass through.
 
+`--yes` alone (no `--install-aliases`, no `--use-system-prompt`) means "don't
+ask, take the recommended answer to every question" - the standard meaning of
+`-y`/`--yes` on a CLI. Since both Q1 and Q2's recommended option is "Yes",
+bare `--yes` is equivalent to passing `--use-system-prompt` for the purposes
+of the two bullets below (which already cascades to `--aliases`, since
+installing the system prompt implies the launchers). It is NOT equivalent to
+passing neither flag: silently skipping both optional layers on a
+non-interactive run would contradict what `--yes` says it does.
+
 - Add `--aliases` if Q1 answer is "Yes (Recommended)" OR Q2 answer is
-  "Yes (Recommended)" OR `--install-aliases` or `--use-system-prompt` was in
-  `$ARGUMENTS`.
+  "Yes (Recommended)" OR `--install-aliases`, `--use-system-prompt`, or
+  `--yes` was in `$ARGUMENTS`.
 - Add `--system-prompt` if Q2 answer is "Yes (Recommended)" OR
-  `--use-system-prompt` was in `$ARGUMENTS`.
+  `--use-system-prompt` or `--yes` was in `$ARGUMENTS`.
 
 The script always runs (guards and settings run regardless of the answers):
 
