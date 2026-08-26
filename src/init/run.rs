@@ -362,7 +362,7 @@ fn finish_merge(settings_path: &Path, outcome: &merge::MergeOutcome) -> StepRepo
     if rendered == existing {
         return StepReport::already_correct("settings", "already matches the template");
     }
-    match backup_then_write(settings_path, &rendered) {
+    match backup_then_write(settings_path, &rendered, &outcome.skipped) {
         Ok(()) => StepReport::wired(
             "settings",
             format!(
@@ -384,7 +384,41 @@ fn finish_merge(settings_path: &Path, outcome: &merge::MergeOutcome) -> StepRepo
 /// other place in the crate that rewrites `settings.json` wholesale, so
 /// promoting them to `pub(crate)` would widen that module's surface for one
 /// caller.
-fn backup_then_write(path: &Path, content: &str) -> std::io::Result<()> {
+///
+/// Also writes `skipped` beside the backup, as
+/// `settings-merge-skipped.<epoch>.json`, using the SAME epoch as the backup
+/// so the two files one real write produces are easy to pair up by eye;
+/// written only when `skipped` is non-empty, since an idempotent re-run
+/// never reaches this function at all (`finish_merge` returns before calling
+/// it), and a real write that withheld nothing has no report worth keeping.
+/// Reuses `merge::render_skip_report` rather than re-deriving the shape, so
+/// this stays byte-for-byte the same shape `merge::merge`'s own SKIP_OUT
+/// would have written, without going through `merge::merge`'s `skip_out`
+/// parameter itself: that parameter writes unconditionally whenever `Some`,
+/// even an empty array (N3, pinned by `tests/init_merge.rs`'s
+/// `n3_zero_withheld_keys_writes_empty_skip_array`), and its target path
+/// would have to be decided before `merge::merge` runs, before this
+/// function's epoch even exists. `outcome.skipped` is already in memory by
+/// the time `finish_merge` calls this, so no second call or disk round-trip
+/// is needed to get it.
+///
+/// Both file families this function can produce are unbounded without
+/// pruning, so after writing, `prune_family` retains only the 5
+/// newest-epoch files in each: the `.bak.<epoch>` backups and the
+/// `settings-merge-skipped.<epoch>.json` reports. This runs only on this,
+/// the real-write path; `finish_merge`'s idempotent short-circuit means an
+/// idempotent re-run never prunes either family, matching the same "nothing
+/// changed, nothing happens" rule the write itself already follows.
+fn backup_then_write(
+    path: &Path,
+    content: &str,
+    skipped: &[merge::SkippedEntry],
+) -> std::io::Result<()> {
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
     if path.is_file() {
         let epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -398,11 +432,18 @@ fn backup_then_write(path: &Path, content: &str) -> std::io::Result<()> {
             path,
             path.with_file_name(format!("{file_name}.bak.{epoch}")),
         )?;
+
+        if !skipped.is_empty() {
+            fs::write(
+                path.with_file_name(format!("settings-merge-skipped.{epoch}.json")),
+                merge::render_skip_report(skipped),
+            )?;
+        }
+
+        prune_family(dir, &format!("{file_name}.bak."), "");
+        prune_family(dir, "settings-merge-skipped.", ".json");
     }
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
+
     fs::create_dir_all(dir)?;
     let tmp_path = dir.join(format!(".init-settings-{}.tmp", std::process::id()));
     if let Err(err) = fs::write(&tmp_path, content) {
@@ -414,6 +455,43 @@ fn backup_then_write(path: &Path, content: &str) -> std::io::Result<()> {
         return Err(err);
     }
     Ok(())
+}
+
+/// The retain-5 pruning policy for both of `backup_then_write`'s file
+/// families: keep only the 5 files directly in `dir` named
+/// `{prefix}<epoch>{suffix}` with the highest embedded epoch, deleting the
+/// rest. Parses the epoch back out of each matching file name rather than
+/// trusting file modification times, since a fabricated or copied file's
+/// mtime need not agree with the epoch its own name claims, and the epoch in
+/// the name is what both families are already keyed by everywhere else. A
+/// name matching `{prefix}...{suffix}` whose middle segment does not parse
+/// as a `u64` is left alone rather than guessed about; this only ever runs
+/// against files this crate itself named, so an unparsable match is not
+/// expected in practice. Best-effort like the rest of this module's writes:
+/// a `read_dir` or `remove_file` failure is swallowed rather than turned
+/// into a step failure, since a pruning miss leaves stale files behind
+/// rather than losing data.
+fn prune_family(dir: &Path, prefix: &str, suffix: &str) {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<(u64, PathBuf)> = read_dir
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let epoch_str = name.strip_prefix(prefix)?.strip_suffix(suffix)?;
+            let epoch: u64 = epoch_str.parse().ok()?;
+            Some((epoch, entry.path()))
+        })
+        .collect();
+    if entries.len() <= 5 {
+        return;
+    }
+    entries.sort_unstable_by_key(|(epoch, _)| *epoch);
+    let excess = entries.len() - 5;
+    for (_, stale_path) in entries.into_iter().take(excess) {
+        let _ = fs::remove_file(stale_path);
+    }
 }
 
 /// Step 2: upsert the ported hooks and the placed guards into

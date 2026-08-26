@@ -25,6 +25,19 @@
 //!   regression here would not be caught by "does the path exist"; only
 //!   "does the guard still take path form at all" catches it):
 //!   `zero_hook_commands_point_under_claude_hooks_dir_after_a_full_init`
+//! - WU-14 scenarios (bounding the backup scheme, adding the skip-report):
+//!   a withheld customisation produces a readable skip-report alongside the
+//!   backup:
+//!   `withheld_customisation_produces_a_skip_report_alongside_the_backup`;
+//!   stale backup and skip-report files beyond the retain-5 threshold, at
+//!   and past the boundary, are pruned by one real write:
+//!   `stale_backup_and_skip_report_files_beyond_five_are_pruned_after_a_real_merge`;
+//!   an idempotent re-run creates no new file in either family and prunes
+//!   nothing:
+//!   `idempotent_rerun_creates_no_backup_or_skip_report_and_prunes_nothing`;
+//!   a fresh install's placeholder-then-merge sequence produces exactly one
+//!   backup and no skip-report:
+//!   `fresh_install_placeholder_produces_exactly_one_backup_and_no_skip_report`
 //!
 //! Every test uses a scratch directory standing in for `$HOME`; none read or
 //! write the developer's real `~/.claude`.
@@ -130,6 +143,19 @@ const GUARD_HOOK_NAMES: &[&str] = &[
     "no-dash-guard",
     "precommit-check",
 ];
+
+/// File names directly under `dir` that start with `prefix`, for asserting
+/// on the WU-14 backup and skip-report families (`settings.json.bak.` and
+/// `settings-merge-skipped.`) without depending on directory iteration
+/// order.
+fn matching_entries(dir: &Path, prefix: &str) -> Vec<String> {
+    fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(prefix))
+        .collect()
+}
 
 fn find_step<'a>(outcome: &'a InitOutcome, name: &str) -> &'a StepReport {
     outcome
@@ -280,6 +306,247 @@ fn zero_hook_commands_point_under_claude_hooks_dir_after_a_full_init() {
             "no hook command may point under ~/.claude/hooks/ after a full init: {cmd}"
         );
     }
+}
+
+/// WU-14 scenario 1: a customisation that collides with a template update
+/// must produce a readable skip-report JSON file, not just a printed count,
+/// alongside the `.bak.<epoch>` backup the write itself already takes.
+#[test]
+fn withheld_customisation_produces_a_skip_report_alongside_the_backup() {
+    // Arrange: BASE differs from both what the template ships
+    // (`cleanupPeriodDays: 14` in `settings.shared.json`) and what the user
+    // customised, so the key is genuinely contested.
+    let home = scratch_home("skip-report");
+    let claude_home = claude_home_of(&home);
+    write_json(
+        &claude_home.join(".settings.base.json"),
+        &json!({"cleanupPeriodDays": 999}),
+    );
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({"cleanupPeriodDays": 500}),
+    );
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    assert!(
+        outcome.ok(),
+        "{:?}",
+        outcome
+            .steps
+            .iter()
+            .map(StepReport::render)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(find_step(&outcome, "settings").status, StepStatus::Wired);
+
+    let bak_files = matching_entries(&claude_home, "settings.json.bak.");
+    assert_eq!(
+        bak_files.len(),
+        1,
+        "expected exactly one backup file: {bak_files:?}"
+    );
+
+    let skip_files = matching_entries(&claude_home, "settings-merge-skipped.");
+    assert_eq!(
+        skip_files.len(),
+        1,
+        "expected exactly one skip-report file: {skip_files:?}"
+    );
+    let skip_content = fs::read_to_string(claude_home.join(&skip_files[0])).unwrap();
+    let skip_json: Value = serde_json::from_str(&skip_content)
+        .unwrap_or_else(|e| panic!("skip-report should be valid JSON: {e}: {skip_content}"));
+    let entries = skip_json
+        .as_array()
+        .expect("skip-report should be a JSON array");
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected exactly one withheld key: {entries:?}"
+    );
+    assert_eq!(entries[0]["key"], "cleanupPeriodDays");
+    assert_eq!(entries[0]["template_had"], 14);
+    assert_eq!(entries[0]["yours"], 500);
+}
+
+/// WU-14 scenarios 2, 3 and 4: table-driven, since all three share the same
+/// "seed N fabricated-epoch files, run one real merge, count survivors"
+/// shape and differ only in file family and prior count. Cases 1 and 2 pin
+/// the exact 5-to-6 boundary for the backup family (5 prior -> 5 survive,
+/// then 6 prior -> 5 survive); case 3 is the symmetric check for the
+/// skip-report family.
+#[test]
+fn stale_backup_and_skip_report_files_beyond_five_are_pruned_after_a_real_merge() {
+    struct Case {
+        tag: &'static str,
+        prior_count: u64,
+        prefix: &'static str,
+        suffix: &'static str,
+        seed_content: &'static str,
+    }
+
+    let cases = [
+        Case {
+            tag: "backups-at-threshold",
+            prior_count: 5,
+            prefix: "settings.json.bak.",
+            suffix: "",
+            seed_content: "stale",
+        },
+        Case {
+            tag: "backups-over-threshold",
+            prior_count: 6,
+            prefix: "settings.json.bak.",
+            suffix: "",
+            seed_content: "stale",
+        },
+        Case {
+            tag: "skip-reports-over-threshold",
+            prior_count: 6,
+            prefix: "settings-merge-skipped.",
+            suffix: ".json",
+            seed_content: "[]",
+        },
+    ];
+
+    for case in cases {
+        // Arrange: fabricated, distinct epochs seeded directly as file
+        // names, not by looping real writes, since `backup_then_write`'s
+        // epoch has 1-second granularity and a tight loop can collide on the
+        // same file name.
+        let home = scratch_home(case.tag);
+        let claude_home = claude_home_of(&home);
+        fs::create_dir_all(&claude_home).unwrap();
+        for i in 0..case.prior_count {
+            let epoch = 1_000_000_000u64 + i;
+            fs::write(
+                claude_home.join(format!("{}{epoch}{}", case.prefix, case.suffix)),
+                case.seed_content,
+            )
+            .unwrap();
+        }
+        // A genuinely contested key, so every case's run writes both a real
+        // backup and a real skip-report, regardless of which family the
+        // case is pinning.
+        write_json(
+            &claude_home.join(".settings.base.json"),
+            &json!({"cleanupPeriodDays": 999}),
+        );
+        write_json(
+            &claude_home.join("settings.json"),
+            &json!({"cleanupPeriodDays": 500}),
+        );
+        let paths = base_paths(&home, Some(ShellKind::Bash));
+
+        // Act
+        let outcome = run(&paths);
+
+        // Assert
+        assert!(
+            outcome.ok(),
+            "{}: {:?}",
+            case.tag,
+            outcome
+                .steps
+                .iter()
+                .map(StepReport::render)
+                .collect::<Vec<_>>()
+        );
+        let survivors = matching_entries(&claude_home, case.prefix);
+        assert_eq!(
+            survivors.len(),
+            5,
+            "{}: {} prior file(s) plus one new real write should retain exactly 5: {survivors:?}",
+            case.tag,
+            case.prior_count
+        );
+    }
+}
+
+/// WU-14 scenario 5: an idempotent re-run must create no new backup or
+/// skip-report file, and must not prune either family, even when both
+/// already sit well past the retain-5 threshold.
+#[test]
+fn idempotent_rerun_creates_no_backup_or_skip_report_and_prunes_nothing() {
+    // Arrange: run once to reach a stable, merged state (a real write, one
+    // backup taken, no skip-report since nothing was withheld on a fresh
+    // install), then seed extra stale files in both families beyond the
+    // retain-5 threshold.
+    let home = scratch_home("idempotent-skip");
+    let claude_home = claude_home_of(&home);
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let first = run(&paths);
+    assert!(first.ok());
+
+    for i in 0..6u64 {
+        let epoch = 1_000_000_000u64 + i;
+        fs::write(
+            claude_home.join(format!("settings.json.bak.{epoch}")),
+            "stale",
+        )
+        .unwrap();
+        fs::write(
+            claude_home.join(format!("settings-merge-skipped.{epoch}.json")),
+            "[]",
+        )
+        .unwrap();
+    }
+    let bak_count_before = matching_entries(&claude_home, "settings.json.bak.").len();
+    let skip_count_before = matching_entries(&claude_home, "settings-merge-skipped.").len();
+
+    // Act: a second, idempotent run.
+    let second = run(&paths);
+
+    // Assert: settings reports no change, and neither seeded family was
+    // touched at all, proving pruning did not fire.
+    assert!(second.ok());
+    assert_eq!(
+        find_step(&second, "settings").status,
+        StepStatus::AlreadyCorrect
+    );
+    let bak_count_after = matching_entries(&claude_home, "settings.json.bak.").len();
+    let skip_count_after = matching_entries(&claude_home, "settings-merge-skipped.").len();
+    assert_eq!(
+        bak_count_after, bak_count_before,
+        "an idempotent re-run must not create or prune backup files"
+    );
+    assert_eq!(
+        skip_count_after, skip_count_before,
+        "an idempotent re-run must not create or prune skip-report files"
+    );
+}
+
+/// WU-14 scenario 6: a fresh install's placeholder-then-merge sequence still
+/// backs up the placeholder (pre-existing behaviour, per `run.rs:336-345`),
+/// producing exactly one backup file; nothing is withheld on a fresh
+/// install, so no skip-report file is produced.
+#[test]
+fn fresh_install_placeholder_produces_exactly_one_backup_and_no_skip_report() {
+    // Arrange: no prior `~/.claude` at all.
+    let home = scratch_home("fresh-placeholder-backup");
+    let claude_home = claude_home_of(&home);
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    assert!(outcome.ok());
+    assert_eq!(find_step(&outcome, "settings").status, StepStatus::Wired);
+    let bak_files = matching_entries(&claude_home, "settings.json.bak.");
+    assert_eq!(
+        bak_files.len(),
+        1,
+        "expected exactly one backup file from the placeholder write: {bak_files:?}"
+    );
+    let skip_files = matching_entries(&claude_home, "settings-merge-skipped.");
+    assert!(
+        skip_files.is_empty(),
+        "a fresh install should withhold nothing: {skip_files:?}"
+    );
 }
 
 #[test]
