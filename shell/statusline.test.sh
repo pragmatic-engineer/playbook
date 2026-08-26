@@ -90,6 +90,22 @@ assert_eq "cache_color 49 (red)"     "$(cache_color 49)" "$_c_red"
 assert_eq "cost_per_min 0 0 (empty)"    "$(cost_per_min 0 0)"       ''
 assert_eq "cost_per_min 1.0 60000"      "$(cost_per_min 1.0 60000)" '1.0000'
 
+# ── fmt_tokens ────────────────────────────────────────────────────────────────
+# Bare integer under 1000; "NNNk" rounded to the nearest thousand at/above it.
+assert_eq "fmt_tokens 0 (bare)"              "$(fmt_tokens 0)"      '0'
+assert_eq "fmt_tokens 999 (bare, boundary)"  "$(fmt_tokens 999)"    '999'
+assert_eq "fmt_tokens 1000 (exact k)"        "$(fmt_tokens 1000)"   '1k'
+assert_eq "fmt_tokens 127000 (127k exact)"   "$(fmt_tokens 127000)" '127k'
+assert_eq "fmt_tokens 127600 (rounds up)"    "$(fmt_tokens 127600)" '128k'
+assert_eq "fmt_tokens 127400 (rounds down)"  "$(fmt_tokens 127400)" '127k'
+
+# ── context_rot_warning ──────────────────────────────────────────────────────
+# Empty below the threshold, and on empty input; '1' at and above it.
+assert_eq "context_rot_warning 99999 (below)"  "$(context_rot_warning 99999)"  ''
+assert_eq "context_rot_warning 100000 (at)"    "$(context_rot_warning 100000)" '1'
+assert_eq "context_rot_warning 150000 (above)" "$(context_rot_warning 150000)" '1'
+assert_eq "context_rot_warning '' (no data)"   "$(context_rot_warning '')"     ''
+
 # ── compact_gap ───────────────────────────────────────────────────────────────
 # Empty when used < 50%; otherwise (trigger - used), clamped to 0.
 # Pin CLAUDE_AUTOCOMPACT_PCT_OVERRIDE so results are deterministic regardless
@@ -251,6 +267,43 @@ fi
 assert_eq "glob-metachar HOME collapses to ~ in the rendered path" \
     "$t7_verdict" "collapsed"
 rm -rf "$t7_base"
+
+# 8. Context-rot warning renders at/above 100k total input tokens, and is
+#    absent below it. Full payload (session_id, rate limits, cost) so line 2
+#    and line 3 both have real content to assert on.
+_full_payload() {
+    local cwd="$1" tokens="$2" window="$3"
+    printf '{"session_id":"sess-rot","cwd":"%s","model":{"display_name":"Sonnet 4.5"},"context_window":{"used_percentage":50,"total_input_tokens":%s,"context_window_size":%s,"current_usage":{"cache_creation_input_tokens":1000,"cache_read_input_tokens":1000}},"cost":{"total_cost_usd":0.1,"total_duration_ms":60000},"rate_limits":{"five_hour":{"used_percentage":10}}}' \
+        "$cwd" "$tokens" "$window"
+}
+
+t8_home=$(mktemp -d)
+t8_out=$(HOME="$t8_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$(_full_payload "$t8_home" 127000 200000)" 2>&1)
+assert_eq "context-rot warning shown at 127k tokens" \
+    "$( [[ "$t8_out" == *"context rot risk"* ]] && echo yes || echo no )" "yes"
+assert_eq "token count shown as 127k/200k" \
+    "$( [[ "$t8_out" == *"127k/200k"* ]] && echo yes || echo no )" "yes"
+rm -rf "$t8_home"
+
+t9_home=$(mktemp -d)
+t9_out=$(HOME="$t9_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$(_full_payload "$t9_home" 45000 200000)" 2>&1)
+assert_eq "context-rot warning absent at 45k tokens" \
+    "$( [[ "$t9_out" == *"context rot risk"* ]] && echo yes || echo no )" "no"
+rm -rf "$t9_home"
+
+# 10. Line split: line 2 (model + context) never carries the 5h quota; line 3
+#     carries it instead. Asserted on the actual two printed lines, not a
+#     substring search over the whole output, so a regression that put 5h back
+#     on line 2 fails here even though the text "5h" is present somewhere.
+t10_home=$(mktemp -d)
+t10_out=$(HOME="$t10_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$(_full_payload "$t10_home" 45000 200000)" 2>&1)
+t10_line2=$(sed -n '2p' <<< "$t10_out")
+t10_line3=$(sed -n '3p' <<< "$t10_out")
+assert_eq "line 2 has no 5h quota" \
+    "$( [[ "$t10_line2" == *"5h"* ]] && echo yes || echo no )" "no"
+assert_eq "line 3 carries the 5h quota" \
+    "$( [[ "$t10_line3" == *"5h"* ]] && echo yes || echo no )" "yes"
+rm -rf "$t10_home"
 
 TOTAL=$(( PASS + FAIL ))
 echo ""

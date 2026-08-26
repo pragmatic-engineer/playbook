@@ -127,6 +127,32 @@ fmt_ago() {
     else printf '%dd' "$((s / 86400))"; fi
 }
 
+# Format a raw token count as a compact "NNNk" (rounded) or bare integer under
+# 1000. Usage: fmt_tokens 127483 -> 127k
+fmt_tokens() {
+    local n="${1:-0}"
+    [[ -z "$n" ]] && n=0
+    if [[ "$n" -ge 1000 ]]; then
+        printf '%dk' $(( (n + 500) / 1000 ))
+    else
+        printf '%d' "$n"
+    fi
+}
+
+# Context-rot threshold: once raw token usage crosses 100k, model quality is
+# known to degrade regardless of how much headroom remains in the window (a
+# 1M-context model at 100k tokens is nowhere near its own autocompact trigger
+# but has already crossed this). Independent of ctx_color's window-relative
+# percentage thresholds. Empty below the threshold so the marker only shows
+# once it's actionable.
+CONTEXT_ROT_THRESHOLD=100000
+context_rot_warning() {
+    local tokens="${1:-0}"
+    [[ -z "$tokens" ]] && return 0
+    [[ "$tokens" -lt "$CONTEXT_ROT_THRESHOLD" ]] && return 0
+    printf '1'
+}
+
 # Cache hit ratio as integer percent: read / (read + write). Empty if no cache
 # activity yet. High ratio = warm cache = cheap turns. Low ratio = paying full
 # input price each turn.
@@ -295,6 +321,8 @@ if command -v jq >/dev/null 2>&1 && [[ -n "$input" ]]; then
         @sh "session_id=\(.session_id // "")",
         @sh "model=\(.model.display_name // "")",
         @sh "used=\(.context_window.used_percentage // "")",
+        @sh "ctx_total_tokens=\(.context_window.total_input_tokens // "")",
+        @sh "ctx_window_size=\(.context_window.context_window_size // "")",
         @sh "cache_create=\(.context_window.current_usage.cache_creation_input_tokens // "")",
         @sh "cache_read=\(.context_window.current_usage.cache_read_input_tokens // "")",
         @sh "rl_5h=\(.rate_limits.five_hour.used_percentage // "")",
@@ -743,6 +771,16 @@ render_context() {
     local color; color="$(ctx_color "$used")"
     local bar; bar="$(ctx_bar "$used" "$CTX_BAR_WIDTH")"
     local out="${DIM}Ctx${RESET} ${color}[${bar}] ${pct_int}%${RESET}"
+    # Raw token count alongside the percentage, when the JSON carries it
+    # (absent before the first API call and briefly after /compact).
+    if [[ -n "$ctx_total_tokens" ]]; then
+        local tok_str; tok_str="$(fmt_tokens "$ctx_total_tokens")"
+        if [[ -n "$ctx_window_size" ]]; then
+            out="${out} ${DIM}(${tok_str}/$(fmt_tokens "$ctx_window_size"))${RESET}"
+        else
+            out="${out} ${DIM}(${tok_str})${RESET}"
+        fi
+    fi
     # Compaction proximity arrow only surfaces in the warning zone (>65%).
     local gap; gap="$(compact_gap "$used")"
     [[ "${pct_int:-0}" -le 65 ]] && gap=""
@@ -752,6 +790,12 @@ render_context() {
         else
             out="${out} ${DIM}→${RESET} ${color}${gap}%${RESET} ${DIM}to compact${RESET}"
         fi
+    fi
+    # Context-rot alert: independent of the compaction arrow above, fires on
+    # raw token count so it still warns on a 1M-context model far from its
+    # own autocompact trigger.
+    if [[ -n "$(context_rot_warning "$ctx_total_tokens")" ]]; then
+        out="${out} ${DIM}·${RESET} ${RED}⚠ context rot risk${RESET}"
     fi
     printf '%s' "$out"
 }
@@ -807,20 +851,29 @@ render_rate_7d() {
     printf '%s' "${DIM}Rate 7d:${RESET} $(rl_color "$rl_7d")$(printf '%.0f' "$rl_7d")%${RESET}"
 }
 
-# ── Compose line 2 ──
-# model · ctx bar · 5h quota · cost · cache · age · 7d-rate. Secondary segments
-# self-suppress; empties are skipped so separators never double up.
+# ── Compose line 2 and line 3 ──
+# Line 2: model · ctx bar. Line 3: cost · cache · 5h quota · age · 7d-rate,
+# 5h quota kept next to age since both are session-clock reads at a glance.
+# Split across two lines so line 2 never runs long enough to wrap in a narrow
+# terminal. Secondary segments self-suppress; empties are skipped so
+# separators never double up.
 line_2=""
 for seg in \
     "$(render_model)" \
-    "$(render_context)" \
-    "$(render_rate_5h)" \
-    "$(render_cost)" \
-    "$(render_cache_ratio)" \
-    "$(render_session_age)" \
-    "$(render_rate_7d)"; do
+    "$(render_context)"; do
     [[ -n "$seg" ]] && append_raw line_2 "$seg"
 done
 [[ -n "$line_2" ]] && printf '%b\n' "$line_2"
+
+line_3=""
+for seg in \
+    "$(render_cost)" \
+    "$(render_cache_ratio)" \
+    "$(render_rate_5h)" \
+    "$(render_session_age)" \
+    "$(render_rate_7d)"; do
+    [[ -n "$seg" ]] && append_raw line_3 "$seg"
+done
+[[ -n "$line_3" ]] && printf '%b\n' "$line_3"
 exit 0
 fi
