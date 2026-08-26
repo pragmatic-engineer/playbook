@@ -69,22 +69,6 @@ jobs:
         run: |
           for f in $(git ls-files '*.zsh'); do zsh -n "$f"; done
 
-      - name: Python syntax check
-        # Lint once, on Linux only: static checks are platform-independent,
-        # no need to burn the macOS leg.
-        if: runner.os == 'Linux'
-        run: git ls-files '*.py' | xargs -r -n1 python3 -m py_compile
-
-      - name: Python lint
-        # Lint once, on Linux only: static checks are platform-independent,
-        # no need to burn the macOS leg. Config (line-length ignore) lives
-        # in ruff.toml.
-        # `xargs -r`, not `ruff check $(...)`: bare `ruff check` lints the whole
-        # tree, so the substitution form silently widens to the entire repo once
-        # the last tracked .py goes away, which WU-14 does on purpose.
-        if: runner.os == 'Linux'
-        run: git ls-files '*.py' | xargs -r pipx run ruff check
-
       - name: Run behavioral test suites
         # Discover every suite so a new *.test.sh is picked up automatically.
         # The git identity is needed by the worktree suites, which commit.
