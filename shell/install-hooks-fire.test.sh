@@ -90,12 +90,15 @@ run_ported() {
   printf '%s' "$3" | HOME="$2" "$PLAYBOOK" hook "$1" 2>/dev/null
 }
 
-# run_guard <name> <payload> [cwd]: fires a guard script the same way
-# settings.json's `~/.claude/hooks/<name>.sh` resolves it, HOME fixed at the
-# install target so `~` expands to where install.sh actually placed it.
+# run_guard <name> <payload> [cwd]: fires a guard through the real binary,
+# the same way settings.json's bare `playbook hook <name>` resolves it.
+# Guards have been wired this way since WU-13 (v0.11.0), not as
+# `~/.claude/hooks/<name>.sh`. HOME fixed at the install target so guard
+# logic that reads HOME (e.g. rm-workspace-guard's safe roots) sees where
+# install.sh actually placed things.
 run_guard() {
   local name="$1" payload="$2" cwd="${3:-$TH}"
-  ( cd "$cwd" && printf '%s' "$payload" | HOME="$TH" bash "$CH/hooks/$name.sh" 2>/dev/null )
+  ( cd "$cwd" && printf '%s' "$payload" | HOME="$TH" "$PLAYBOOK" hook "$name" 2>/dev/null )
 }
 
 test_session_init() {
