@@ -63,7 +63,9 @@ fn run_guard_via_stdin(name: &str, command: &str) -> String {
         .expect("stdin should be piped")
         .write_all(payload.as_bytes())
         .expect("payload should write to stdin");
-    let out = child.wait_with_output().expect("playbook binary should exit");
+    let out = child
+        .wait_with_output()
+        .expect("playbook binary should exit");
     assert!(
         out.status.success(),
         "a guard must exit 0 even when denying, or it breaks the hook contract"
