@@ -305,19 +305,6 @@ pub struct WireOutcome {
     pub backup_path: Option<PathBuf>,
 }
 
-/// The guards `wire` still points at a `~/.claude/hooks/<name>.sh` path,
-/// derived from `GUARD_SPECS` rather than restated, so `init::guards` copies
-/// exactly the set this module wires and the two cannot drift. Empty today:
-/// WU-13 flipped every `GUARD_SPECS` entry's `ported` field to `true`, so
-/// nothing is unported any more. Kept for `init::guards` to keep calling
-/// until WU-14 deletes that module; see its doc comment for why it stays.
-pub(crate) fn unported_guard_names() -> impl Iterator<Item = &'static str> {
-    GUARD_SPECS
-        .iter()
-        .filter(|spec| !spec.ported)
-        .map(|spec| spec.name)
-}
-
 /// Writes every hook in `PORTED_HOOK_SPECS` and every guard in `GUARD_SPECS`
 /// to its bare `playbook hook <name>` command, creating `.hooks` and any
 /// event or matcher group it needs from scratch. Every `GUARD_SPECS` entry

@@ -215,19 +215,6 @@ fn fresh_config_gets_fully_wired() {
             );
             continue;
         }
-        // `guards` is a permanent no-op since WU-13 ported all four guards:
-        // `place_guards` never places anything any more, so it reports
-        // `AlreadyCorrect` even on the very first run. See
-        // `init::guards`'s doc comment for why the step stays until WU-14.
-        if step.name == "guards" {
-            assert_eq!(
-                step.status,
-                StepStatus::AlreadyCorrect,
-                "expected 'guards' to be a permanent no-op: {}",
-                step.detail
-            );
-            continue;
-        }
         assert_eq!(
             step.status,
             StepStatus::Wired,
@@ -765,7 +752,7 @@ fn hooks_only_wires_guards_and_hooks_and_skips_everything_else() {
     // Act
     let outcome = run_hooks_only(&paths);
 
-    // Assert: only `guards` and `hooks` ran, nothing else.
+    // Assert: only `hooks` ran, nothing else.
     assert!(
         outcome.ok(),
         "{:?}",
@@ -776,7 +763,7 @@ fn hooks_only_wires_guards_and_hooks_and_skips_everything_else() {
             .collect::<Vec<_>>()
     );
     let step_names: Vec<&str> = outcome.steps.iter().map(|s| s.name).collect();
-    assert_eq!(step_names, vec!["guards", "hooks"]);
+    assert_eq!(step_names, vec!["hooks"]);
 
     // Assert: every guard now has the bare `playbook hook <name>` command,
     // and the stale script-path form is gone.
@@ -986,14 +973,8 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
     let first_out = String::from_utf8_lossy(&first.stdout);
     let second_out = String::from_utf8_lossy(&second.stdout);
     assert!(
-        // `guards` is a permanent no-op since WU-13 (see `init::guards`'s
-        // doc comment), so it legitimately reports "ok -" even on the very
-        // first run; every other step should still report a real change.
-        first_out
-            .lines()
-            .filter(|l| !l.starts_with("guards:"))
-            .all(|l| !l.contains(": ok -")),
-        "first run should report only changes (guards excepted): {first_out}"
+        first_out.lines().all(|l| !l.contains(": ok -")),
+        "first run should report only changes: {first_out}"
     );
     assert!(
         second_out.lines().all(|l| !l.contains(": wired -")),
