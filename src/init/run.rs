@@ -409,6 +409,15 @@ fn finish_merge(settings_path: &Path, outcome: &merge::MergeOutcome) -> StepRepo
 /// the real-write path; `finish_merge`'s idempotent short-circuit means an
 /// idempotent re-run never prunes either family, matching the same "nothing
 /// changed, nothing happens" rule the write itself already follows.
+///
+/// Known limitation, accepted rather than guarded against: the epoch has
+/// one-second granularity, so two real writes landing in the same wall-clock
+/// second collide on the same filename and the second silently overwrites
+/// the first's backup (and skip-report, if any). This only loses a stale
+/// backup generation, never the live `settings.json`, and is unlikely for a
+/// single `playbook init` invocation. `tests/init_run.rs`'s fixture-seeding
+/// scenarios work around the same granularity with fabricated epochs rather
+/// than a real write loop, for the identical reason.
 fn backup_then_write(
     path: &Path,
     content: &str,
