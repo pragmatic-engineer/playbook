@@ -2,6 +2,46 @@
 
 `/playbook:scope` and `/playbook:implement` split feature work into two phases: a verified design session that produces a plan, then a delegated execution that builds it. Neither command does both jobs.
 
+## Overview
+
+The full chain starts before `/playbook:scope`, with `/playbook:brainstorm` finding the direction, and can branch to `/playbook:adr` when the decision is architectural. Both `/playbook:scope` and `/playbook:adr` hand `/playbook:implement` the same shape of work: Work Units grouped into Segments, where each Segment becomes one pull request and each Work Unit inside it becomes one commit.
+
+```mermaid
+flowchart TD
+  IDEA["idea, ticket, or file"] --> BS["/playbook:brainstorm<br/>divergent discovery"]
+  BS --> G1["Gate: PRD confirmed?"]
+  G1 -->|revise| BS
+  G1 -->|confirmed| G2["Gate: design doc approved?"]
+  G2 -->|revise| BS
+  G2 -->|"hard to reverse,<br/>genuine trade-off"| ADR["/playbook:adr<br/>decision record + blueprint"]
+  G2 -->|default| SCOPE["/playbook:scope<br/>interview-driven plan"]
+  IDEA -.->|skip brainstorm| SCOPE
+  IDEA -.->|skip brainstorm| ADR
+
+  SCOPE --> G3["Gate: quality gate passed,<br/>you approve"]
+  G3 -->|revise| SCOPE
+  G3 -->|approved| PLAN[("plan.md<br/>Work Units grouped into Segments")]
+  ADR --> BLUEPRINT[("blueprint.md<br/>Work Units")]
+
+  PLAN --> IMPL["/playbook:implement"]
+  BLUEPRINT --> IMPL
+
+  IMPL --> G4["Gate: Step 4.5, delivery strategy<br/>PR topology + Segment boundary"]
+
+  subgraph SEG1["Segment 1 = pull request 1"]
+    direction LR
+    WU1["Work Unit<br/>savepoint commit"] --> WU2["Work Unit<br/>savepoint commit"]
+  end
+  subgraph SEG2["Segment 2 = pull request 2"]
+    direction LR
+    WU3["Work Unit<br/>savepoint commit"] --> WU4["Work Unit<br/>savepoint commit"]
+  end
+
+  G4 --> SEG1 --> SEG2
+  SEG2 --> REFINE["refinement pass<br/>+ adversarial review"]
+  REFINE --> PRS[("pull requests open<br/>stacked, one per Segment")]
+```
+
 ## Planning with /playbook:scope
 
 Run `/playbook:scope` with an optional topic seed or file path:
