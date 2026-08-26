@@ -457,7 +457,7 @@ EOF
 # guard the old Step 2b already had, now widened to cover the settings merge
 # too, not just the hooks fix: the accepted regression is that a non-default
 # CLAUDE_HOME now skips the merge as well.
-scenario_l_hooks_only_skipped_for_non_default_claude_home() {
+scenario_l_init_skipped_for_non_default_claude_home() {
     local home="$WORK/l-home" ch="$WORK/l-claude" bin="$WORK/l-bin" record out
     mkdir -p "$home" "$ch" "$bin"
     record="$WORK/l-record"
@@ -654,7 +654,7 @@ run_scenario "H: migration of an old-form rc line preserves unrelated content an
 run_scenario "I: an existing binary in PLAYBOOK_BIN_DIR is detected, not re-downloaded"        scenario_i_binary_present
 run_scenario "J: a binary already on PATH is detected without touching PLAYBOOK_BIN_DIR"       scenario_j_binary_on_path
 run_scenario "K: playbook init is invoked with CLAUDE_PLUGIN_ROOT set"                          scenario_k_init_invoked
-run_scenario "L: playbook init is skipped for a non-default CLAUDE_HOME"                        scenario_l_hooks_only_skipped_for_non_default_claude_home
+run_scenario "L: playbook init is skipped for a non-default CLAUDE_HOME"                        scenario_l_init_skipped_for_non_default_claude_home
 run_scenario "M: a plain run refreshes an installed SYSTEM_PROMPT.md, leaves a never-installed one absent" scenario_m_system_prompt_refresh_without_flag
 run_scenario "N: golden differential, clean install (semantic diff)"                            scenario_n_golden_clean_install
 run_scenario "O: golden differential, skip-triggering (byte diff) + skip-report exists"         scenario_o_golden_skip_triggering
