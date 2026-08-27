@@ -29,16 +29,16 @@ OPTIONS:
   --all             Run every reviewer regardless of diff content
   --preset <name>   Named reviewer set: security | architecture | data | docs
   --self            Local self-review, never posts to GitHub (default when no
-                    PR number is given)
+                    PR number is given, or when the PR is yours)
 
 EXAMPLES:
   /playbook:deep-review               Review the current branch's PR, report only, never posts
-  /playbook:deep-review 123           Review and post to PR #123
-  /playbook:deep-review 123 --all     PR #123 with every reviewer, posts
+  /playbook:deep-review 123           Review and post to PR #123 (unless #123 is your own PR)
+  /playbook:deep-review 123 --all     PR #123 with every reviewer, posts (unless it's yours)
   /playbook:deep-review 123 --self    Review PR #123, report only, never posts
 ```
 
-No PR number given means no posting: with nothing to disambiguate which PR you meant to publish to, the safe default is a local report, same as passing `--self` explicitly. Pass a PR number to post.
+No PR number given means no posting: with nothing to disambiguate which PR you meant to publish to, the safe default is a local report, same as passing `--self` explicitly. A PR authored by you never posts either, even with a PR number given: GitHub blocks approve/request-changes from the author, and a comment-only review of your own PR has no independent reviewer behind it, so it gets the same report-only treatment as `--self`. Pass a PR number for someone else's PR to post.
 
 ## Reviewer Swarm
 
@@ -111,9 +111,13 @@ HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
 PR_AUTHOR=$(gh pr view "$PR_NUMBER" --json author -q .author.login)
 ME=$(gh api /user -q .login)
 SELF_REVIEW=$([ "$PR_AUTHOR" = "$ME" ] && echo true || echo false)
-# SELF_MODE: never posts, report only. True when --self is explicit, or when
-# no PR number/branch was given at all (nothing to post to on purpose).
-SELF_MODE=$([[ "$ARGS" == *"--self"* || "$IMPLICIT_SELF" == "true" ]] && echo true || echo false)
+# SELF_MODE: never posts, report only. True when --self is explicit, when no
+# PR number/branch was given at all (nothing to post to on purpose), or when
+# the resolved PR is authored by the caller: GitHub blocks APPROVE and
+# REQUEST_CHANGES from a PR's own author, and posting COMMENT-only findings
+# on your own PR has no independent reviewer behind them, so self-authorship
+# is treated the same as an explicit --self rather than a restricted post.
+SELF_MODE=$([[ "$ARGS" == *"--self"* || "$IMPLICIT_SELF" == "true" || "$SELF_REVIEW" == "true" ]] && echo true || echo false)
 
 REVIEW_JSON="/tmp/$REPO/deep-review-$PR_NUMBER.json"
 mkdir -p "$(dirname "$REVIEW_JSON")"
@@ -149,7 +153,7 @@ else
 fi
 ```
 
-Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, when `--self` is passed explicitly OR when no PR number/branch was given in `$ARGUMENTS` at all (nothing named to post to). `SELF_REVIEW` is the separate, narrower signal used only when `SELF_MODE` is false: whether the resolved PR happens to be authored by the current user, which restricts Q2's submit verbs in Step 6.
+Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, when `--self` is passed explicitly, when no PR number/branch was given in `$ARGUMENTS` at all (nothing named to post to), or when `SELF_REVIEW` is true (the resolved PR is authored by the caller). `SELF_REVIEW` stays a separate fact purely for logging (the status line prints it independently), but it never leaves posting partially enabled on its own: once it is true, `SELF_MODE` is true too, so Step 6 never reaches the submit-verb question in the first place.
 
 In worktree mode, `WT` holds the absolute path to the isolated checkout and `WT_CREATED=true`. In in-place mode, both are empty/false. Subagents use `$WT` for all reads; if empty, they read from the local working tree.
 
@@ -250,7 +254,7 @@ Present ALL surviving findings (rule 7). Render the `playbook:grounding-review` 
 
 ## Step 6: Orchestrate posting
 
-If `SELF_MODE` (`--self` passed explicitly, or no PR number/branch was given so `PR_NUMBER` came from the current-branch fallback), or self-review with nothing postable, stop here: the report IS the deliverable, no GitHub posting.
+If `SELF_MODE` (`--self` passed explicitly, no PR number/branch was given so `PR_NUMBER` came from the current-branch fallback, or the resolved PR is authored by the caller), or nothing postable, stop here: the report IS the deliverable, no GitHub posting.
 
 Otherwise ask **one question at a time**:
 
@@ -270,7 +274,7 @@ gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews --input "$REVIEW_JSON" --jq
 ```
 
 - **Pre-post verification (MUST):** before this call, re-read each selected finding's file at `HEAD_SHA`, confirm the evidence is at the cited line (correct silently if it drifted, drop if absent), and confirm the PR is still OPEN and not CONFLICTING (`gh pr view "$PR_NUMBER" --json state,mergeable`). Don't post on a merged/closed/conflicting PR.
-- **Q2:** "Submit verb? approve / comment / request-changes / skip." Self-review offers only `comment` / `skip` (GitHub rejects approve/request-changes from the author). On `skip`, leave it PENDING. Otherwise:
+- **Q2:** "Submit verb? approve / comment / request-changes / skip." Reaching this question already means `SELF_MODE` was false, so the PR is never self-authored here and all four verbs are always valid; GitHub's author restriction is exactly why `SELF_REVIEW` forces `SELF_MODE` earlier instead of trying to offer a narrower menu here. On `skip`, leave it PENDING. Otherwise:
 - **Q3:** "Add a comment for the review?" (optional free text, blank to skip). Leave `BODY` empty on a blank answer, except: on `approve` with a blank answer, default `BODY` to `LGTM`.
 
 ```bash
