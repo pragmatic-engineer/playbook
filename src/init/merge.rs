@@ -97,6 +97,21 @@ pub struct SkippedEntry {
     pub yours: Value,
 }
 
+/// Render `skipped` as SKIP_OUT's own JSON shape: a pretty-printed JSON
+/// array of `SkippedEntry` values, trailing newline included, matching every
+/// other JSON artifact this module writes to disk (see `merge`'s own
+/// `atomic_write` calls). `merge` uses this for SKIP_OUT itself when
+/// `skip_out` is `Some`; `init::run`'s `backup_then_write` reuses it verbatim
+/// for the same shape when it decides on its own whether and where to
+/// persist a skip report, since there the write is gated on "was this a
+/// real, non-idempotent settings.json write" rather than on whether a
+/// `skip_out` path was passed to `merge` at all.
+pub fn render_skip_report(skipped: &[SkippedEntry]) -> String {
+    let skip_json = serde_json::to_string_pretty(skipped)
+        .expect("a JSON value parsed from valid JSON always re-serializes");
+    format!("{skip_json}\n")
+}
+
 /// N2: load `path` as a JSON object, failing the merge if it is missing,
 /// unparsable, or not a JSON object. Used for TEMPLATE and USER, the two
 /// inputs a caller controls and must supply validly; unlike BASE (see
@@ -307,9 +322,7 @@ pub fn merge(
     atomic_write(newbase_out, &format!("{newbase_json}\n"))?;
 
     if let Some(skip_path) = skip_out {
-        let skip_json = serde_json::to_string_pretty(&skipped)
-            .expect("a JSON value parsed from valid JSON always re-serializes");
-        atomic_write(skip_path, &format!("{skip_json}\n"))?;
+        atomic_write(skip_path, &render_skip_report(&skipped))?;
     }
 
     let stdout = serde_json::to_string_pretty(&Value::Object(merged))

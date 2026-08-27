@@ -37,10 +37,14 @@
 //! - N3, omitted SKIP_OUT: `n3_omitting_skip_out_discards_skip_info_without_erroring`
 //! - Crash mid-write leaves the original file intact:
 //!   `crash_mid_write_leaves_the_original_settings_file_intact`
+//! - WU-14 (skip-report reuse): `merge::render_skip_report` reproduces
+//!   SKIP_OUT's own bytes exactly, since `init::run`'s pruned skip-report
+//!   writes reuse it instead of going through `merge`'s `skip_out`
+//!   parameter: `render_skip_report_matches_the_bytes_merge_writes_to_skip_out`
 
 #![allow(dead_code)]
 
-use playbook::init::merge::{merge, MergeError};
+use playbook::init::merge::{merge, render_skip_report, MergeError};
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -577,6 +581,44 @@ fn n3_omitting_skip_out_discards_skip_info_without_erroring() {
         entries.len(),
         4,
         "omitting SKIP_OUT should write no extra file: {entries:?}"
+    );
+}
+
+/// WU-14: `init::run`'s `backup_then_write` needs the exact same SKIP_OUT
+/// shape `merge` writes, but decided on its own timeline (gated on whether a
+/// real settings.json write happened, not on whether `skip_out` was passed
+/// to `merge`), so it renders the report itself via `render_skip_report`
+/// rather than re-calling `merge` with a `skip_out` path. Pins that the
+/// standalone renderer and `merge`'s own SKIP_OUT write never drift apart.
+#[test]
+fn render_skip_report_matches_the_bytes_merge_writes_to_skip_out() {
+    // Arrange: a genuinely contested key, so `skipped` is non-empty.
+    let dir = scratch_dir("render-skip-report");
+    let base_path = dir.join("base.json");
+    let template_path = dir.join("template.json");
+    let user_path = dir.join("user.json");
+    write_file(&base_path, r#"{"k":"base_val"}"#);
+    write_file(&template_path, r#"{"k":"tmpl_val"}"#);
+    write_file(&user_path, r#"{"k":"user_val"}"#);
+    let rs_newbase = dir.join("rs-newbase.json");
+    let rs_skip = dir.join("rs-skip.json");
+
+    // Act
+    let outcome = merge(
+        &base_path,
+        &template_path,
+        &user_path,
+        &rs_newbase,
+        Some(&rs_skip),
+    )
+    .expect("merge should succeed");
+
+    // Assert
+    let written = fs::read_to_string(&rs_skip).unwrap();
+    assert_eq!(
+        render_skip_report(&outcome.skipped),
+        written,
+        "the standalone renderer should match what merge's own SKIP_OUT write produced"
     );
 }
 
