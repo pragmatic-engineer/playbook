@@ -1,7 +1,7 @@
 ---
-description: Quick single-pass PR review (or current branch self-review) using grounding-review discipline + Conventional Comments. Posts findings as a pending GitHub review for human submit.
+description: Quick single-pass PR review using grounding-review discipline + Conventional Comments. Report-only with no PR number given or --self; otherwise posts findings as a pending GitHub review for human submit.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[PR number]"
+argument-hint: "[PR number] [--self]"
 model: sonnet
 effort: high
 ---
@@ -12,7 +12,7 @@ Review a pull request with grounding-review discipline. Output a structured repo
 
 ## Argument parsing
 
-Parse `$ARGUMENTS`:
+Parse `$ARGUMENTS` (strip `--self` before reading the rest, same as `--help`):
 
 - **Integer or `#N`** (e.g. `4265`, `#4265`) → explicit PR number; resolve `HEAD_SHA` via `gh pr view <PR_NUMBER> --json headRefOid -q .headRefOid`.
 - **Branch name** (anything that isn't an integer and isn't empty, and passes `git check-ref-format --branch <arg>`) → resolve to its open PR number via:
@@ -20,11 +20,16 @@ Parse `$ARGUMENTS`:
   PR_NUMBER=$(gh pr list --head <branch> --json number -q '.[0].number' 2>/dev/null)
   ```
   Error (abort) if no PR found: `error: no open PR for branch <name>; create one first or pass a PR number`.
-- **Empty** → self-review mode: resolve the current branch's PR via `gh pr view --json number,headRefOid,author,headRefName`, same as current.
+- **Empty (no PR number or branch left after stripping `--self`)** → resolve the current branch's PR via `gh pr view --json number,headRefOid,author,headRefName`, and set `SELF_MODE=true`: nothing was named to post to, so review report-only, same as passing `--self` explicitly.
+
+`--self` forces `SELF_MODE=true` regardless of whether a PR number was also given: review and report, skip Step 4's posting orchestration entirely. Without `--self`, an explicit PR number still posts even when it resolves to your own PR (see Self-review awareness below for that narrower, submit-verb-only restriction).
 
 ## Self-review awareness
 
-GitHub rejects `APPROVE` and `REQUEST_CHANGES` events from the PR author. In self-review mode, the submit-verb question MUST only offer `comment` or `skip`. Detect by comparing `gh pr view --json author -q .author.login` against `gh api /user -q .login`.
+GitHub rejects `APPROVE` and `REQUEST_CHANGES` events from the PR author. Two different things use the word self here, and they trigger different behaviour:
+
+- **`SELF_MODE`** (from an empty argument list, or explicit `--self`): skip posting entirely. The report is the deliverable; Step 4 never runs.
+- **`SELF_REVIEW`** (an explicit PR number that happens to be authored by you, `SELF_MODE` false): posting still happens, but Q2's submit-verb question MUST only offer `comment` or `skip`, since GitHub rejects the other two. Detect by comparing `gh pr view --json author -q .author.login` against `gh api /user -q .login`.
 
 ## Worktree vs in-place mode
 
@@ -34,7 +39,7 @@ After resolving `PR_NUMBER` and `HEAD_SHA`, decide how to read the PR's files:
 1. `git rev-parse HEAD` equals `HEAD_SHA`
 2. `git status --porcelain --untracked-files=no` is empty (no staged or unstaged tracked-file changes)
 
-In self-review mode (no argument), the in-place predicate runs the same check. If the current branch's HEAD matches `HEAD_SHA` and the tree is clean, review in place.
+With no argument (`SELF_MODE`), the in-place predicate runs the same check. If the current branch's HEAD matches `HEAD_SHA` and the tree is clean, review in place.
 
 **Worktree mode** (all other cases): set up an isolated worktree:
 
@@ -87,13 +92,17 @@ Comment bodies are read by another engineer, so they use the humane `playbook:wr
 
 ```bash
 ARGS="$ARGUMENTS"
+SELF_MODE=false
+[[ "$ARGS" == *"--self"* ]] && SELF_MODE=true
+ARGS="${ARGS//--self/}"
 ARGS="${ARGS// /}"
 
 if [ -z "$ARGS" ]; then
-  # Self-review mode: resolve current branch's PR
+  # Nothing named to post to: resolve current branch's PR, report-only.
   PR_JSON=$(gh pr view --json number,headRefOid,author,headRefName 2>/dev/null) || { echo "error: no PR found for current branch; create one first or pass a PR number" >&2; exit 1; }
   PR_NUMBER=$(echo "$PR_JSON" | jq -r .number)
   HEAD_SHA=$(echo "$PR_JSON" | jq -r .headRefOid)
+  SELF_MODE=true
 else
   ARGS="${ARGS#\#}"
   if [[ "$ARGS" =~ ^[0-9]+$ ]]; then
@@ -109,7 +118,7 @@ else
     fi
     HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
   else
-    echo "error: pass an integer PR number, a branch name, or no args (self-review)" >&2
+    echo "error: pass an integer PR number, a branch name, --self, or no args (report-only)" >&2
     exit 1
   fi
 fi
@@ -144,7 +153,7 @@ mkdir -p "$(dirname "$REVIEW_JSON")"
 
 echo "PR: $REPO#$PR_NUMBER"
 echo "Head SHA: $HEAD_SHA"
-echo "Author: $PR_AUTHOR (self-review: $SELF_REVIEW)"
+echo "Author: $PR_AUTHOR (self-review: $SELF_REVIEW, self-mode/report-only: $SELF_MODE)"
 echo "Review JSON: $REVIEW_JSON"
 
 gh pr view "$PR_NUMBER"
@@ -185,7 +194,9 @@ Relay the report to the user unchanged, then proceed to posting. Post findings v
 
 ## Step 4: Orchestrate posting
 
-**Ask the user, one question at a time** (memory rule):
+If `SELF_MODE` is true (explicit `--self`, or no PR number/branch was given), stop here: the report IS the deliverable, no GitHub posting.
+
+Otherwise, **ask the user, one question at a time** (memory rule):
 
 **Q1**: "Post which findings as a pending review?" Offer exactly these six tiers, each a strict superset of the one before, blocking and questions take precedence, suggestions and nitpicks stay optional:
 
@@ -245,6 +256,7 @@ Confirm the returned `state` flipped from `PENDING` to the corresponding termina
 
 Final user-facing message: one sentence per outcome.
 
+- `SELF_MODE`: "Report-only, nothing posted. N findings above."
 - "Pending review id `<id>` created, 7 inline comments queued. Submit from the UI when ready."
 - OR: "Submitted as `COMMENT` at <timestamp>. Author will get one notification."
 

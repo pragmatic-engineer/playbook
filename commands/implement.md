@@ -1,5 +1,5 @@
 ---
-description: Execute an approved plan or ADR blueprint (from /playbook:scope or /playbook:adr) on Sonnet, delegating edits to subagents and committing each Work Unit. Delivers the plan as PR-sized Segments (savepoint commits, one small pull request per Segment; stacked by default), asking the delivery strategy up front. Then runs one refinement pass (self quick-review + SOLID/DRY/KISS/YAGNI simplify, re-planned and executed autonomously) and an adversarial review. Execute-only; it does not design new scope.
+description: Execute an approved plan or ADR blueprint (from /playbook:scope or /playbook:adr) on Sonnet, delegating edits to subagents and committing each Work Unit. Delivers the plan as PR-sized Segments (savepoint commits, one small pull request per Segment; independent off the default branch when Segments are disjoint, stacked only when they truly depend on each other), asking the delivery strategy up front. Then runs one refinement pass (self quick-review + SOLID/DRY/KISS/YAGNI simplify, re-planned and executed autonomously) and an adversarial review. Execute-only; it does not design new scope.
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
 argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--no-tdd] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause>] [--help]"
 model: sonnet
@@ -10,7 +10,7 @@ effort: high
 
 Execute an approved implementation plan or ADR blueprint. **This command is execute-only: it does NOT design or plan new scope.** Produce the plan with `/playbook:scope` (or `/playbook:adr` for an architectural decision) first, then implement it here. The one exception is the Step 8 refinement pass, which re-plans and applies behaviour-preserving cleanups to the code it just wrote (never new features).
 
-**Incremental delivery.** `/playbook:implement` delivers the plan as PR-sized **Segments**, not one big change: it executes Segment by Segment, commits each Work Unit as a savepoint, and opens one small pull request per Segment (stacked by default). Before executing, it asks how to deliver (PR topology and Segment-boundary behaviour) and recommends an option based on the plan's scope; under `--auto` it self-selects the recommended options and records them as assumptions. This follows `playbook:engineering-standards`: PRs under 500 lines, one concern each, "ship a sequence of small PRs".
+**Incremental delivery.** `/playbook:implement` delivers the plan as PR-sized **Segments**, not one big change: it executes Segment by Segment, commits each Work Unit as a savepoint, and opens one small pull request per Segment (independent off the default branch when Segments are disjoint, stacked only when they truly depend on each other). Before executing, it asks how to deliver (PR topology and Segment-boundary behaviour) and recommends an option based on the plan's scope; under `--auto` it self-selects the recommended options and records them as assumptions. This follows `playbook:engineering-standards`: PRs under 500 lines, one concern each, "ship a sequence of small PRs".
 
 Invoked as `/playbook:implement`. The remaining arguments are the task reference and flags.
 
@@ -49,7 +49,7 @@ OPTIONS:
 
 DELIVERY: /playbook:implement splits the plan into PR-sized Segments and, before
 executing, asks three things (unless preset by flag or running --auto):
-  - PR topology: stacked (default) | independent | single
+  - PR topology: independent (default, disjoint Segments) | stacked (dependency chain) | single
   - Boundary:    savepoint (default) | pause
 It honors the plan's Segments but re-splits any whose real diff exceeds the
 1500-line hard limit (Segments target under 500). Each Segment becomes one small
@@ -160,8 +160,8 @@ Either way, confirm the Segment ordering respects the WU `Requires` graph (no fo
 **2. Choose the delivery strategy.** In interactive mode you MUST ask the user before any code is written (this is the "always ask before implementing" gate). Do this by **calling the `AskUserQuestion` tool** with the three questions below in a single call, each option's recommended choice listed first and labelled, recommended per the plan's scope. Do NOT infer the answers, and do NOT start executing Step 5 until the user has answered. The three questions:
 
 - **PR topology:**
-  - **Stacked** (default recommendation): each Segment branches off the previous one; PR N targets Segment N-1's branch. Recommend when Segments form a dependency chain (the common case).
-  - **Independent off the default branch:** recommend only when the Segments have disjoint files and no cross-Segment `Requires`.
+  - **Independent off the default branch** (default recommendation): each Segment branches directly off the default branch and opens its own PR against it, no PR based on another PR. Recommend whenever the Segments have disjoint files and no cross-Segment `Requires`.
+  - **Stacked:** each Segment branches off the previous one; PR N targets Segment N-1's branch. Recommend only when Segments form a genuine dependency chain (Segment N's code doesn't exist without Segment N-1). Caveat, confirmed 2026-08-26: GitHub's native PR-stack detection routes a base-chained PR set through its async merge API, which (unlike the classic merge API) has no admin/bypass-override parameter. On a repo whose branch protection requires a review the author can't self-grant, an agent can merge every other topology via bypass but cannot merge a stacked chain at all; it needs a human to click through each PR in order. Recommend stacked only when the dependency is real and the user is ready to merge by hand, or knows an independent equivalent isn't practical for this plan.
   - **Single PR:** the current whole-plan behaviour. Recommend for a one-Segment or tiny plan (escape hatch).
 - **Segment-boundary behaviour** (always recommend **Savepoints**):
   - **Savepoint commits, PRs at end** (default recommendation, and the norm under `--auto`): implement every Segment as savepoint commits on their (unpushed) branches, run Steps 7-9 once over the full diff, then open the PR set at the end. Because nothing is pushed until then, Step 8's stack rebase stays local and each PR-open push is a first push, not a force-push.
@@ -172,7 +172,7 @@ Either way, confirm the Segment ordering respects the WU `Requires` graph (no fo
 
 **Flag presets.** `--pr-strategy=<stacked|independent|single>`, `--boundary=<savepoint|pause>`, and `--no-tdd` each preset a choice and skip its question. Absent (and not `--auto`) means ask; this preserves "ask every time" as the default. **Single** topology opens its one PR at the end regardless of boundary (it has a single PR, so "pause after each" is moot).
 
-**3. `--auto`:** do NOT ask. Self-select the recommended options (stacked topology, or independent when the Segments are disjoint; savepoints; red/green/refactor unless `--no-tdd` presets tests-alongside) and record them in the run's assumptions, surfaced in the final report / PR follow-ups. Flag presets still win over the auto default. `--force` still overrides quality-gate FAILs.
+**3. `--auto`:** do NOT ask. Self-select the recommended options (independent topology when the Segments are disjoint, stacked otherwise; savepoints; red/green/refactor unless `--no-tdd` presets tests-alongside) and record them in the run's assumptions, surfaced in the final report / PR follow-ups. Flag presets still win over the auto default. `--force` still overrides quality-gate FAILs.
 
 Record the resolved Segments and the chosen strategy in the progress ledger (Step 5) so a resumed run continues with the same shape.
 
@@ -311,7 +311,7 @@ This mechanism doesn't apply to Step 8's refinement Work Units: they're synthesi
 
 ## Step 6: Autonomous Mode (`--auto`)
 
-`--auto` executes the Segments in dependency order, committing each Work Unit as a savepoint, then opens the PR set (Step 9). It self-selects the delivery strategy (Step 4.5: stacked topology, or independent when the Segments are disjoint; savepoints), records it as an assumption, and runs without pausing, so:
+`--auto` executes the Segments in dependency order, committing each Work Unit as a savepoint, then opens the PR set (Step 9). It self-selects the delivery strategy (Step 4.5: independent topology when the Segments are disjoint, stacked otherwise; savepoints), records it as an assumption, and runs without pausing, so:
 
 - **Branch first.** Each Segment is created on its own branch per Step 5's per-Segment setup (never commit to the default branch). Never `--no-verify`, never force-push.
 - A FAIL in Step 4 blocks; `--force` overrides it (logged to the quality report).
@@ -407,7 +407,7 @@ Each lens gives severity-classified findings with `file:line` evidence and a fix
 | Plan has no Segments (old plan/issue/spec) | Derive Segments targeting under 500 lines (never over 1500) in Step 4.5 |
 | Segment's real diff exceeds the 1500-line hard limit | Re-split at WU boundaries into a new trailing Segment/PR; note it (Step 5) |
 | Interactive, not `--auto`, no strategy flags | Ask the three Step 4.5 questions (topology + boundary + TDD approach), recommend per scope |
-| `--auto` or a strategy flag set | Skip that question; self-select recommended (stacked + savepoint) and record as assumption |
+| `--auto` or a strategy flag set | Skip that question; self-select recommended (independent when disjoint, else stacked, + savepoint) and record as assumption |
 | Pause boundary chosen | Run Steps 7-9 scoped per Segment, open its PR, stop for the user before the next (Step 9) |
 | Refinement/adversarial fix, savepoint boundary | Commit on the owning Segment branch, locally rebase later branches before any push (Step 8) |
 | Refinement/adversarial fix implicating an already-open PR (pause) | Record as a follow-up; don't rebase an open PR (Step 8) |

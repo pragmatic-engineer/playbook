@@ -28,14 +28,17 @@ OPTIONS:
   --help            Show this help
   --all             Run every reviewer regardless of diff content
   --preset <name>   Named reviewer set: security | architecture | data | docs
-  --self            Local self-review (never posts to GitHub)
+  --self            Local self-review, never posts to GitHub (default when no
+                    PR number is given)
 
 EXAMPLES:
-  /playbook:deep-review               Review the current branch's PR (auto-selects reviewers)
-  /playbook:deep-review 123           Review PR #123
-  /playbook:deep-review 123 --all     PR #123 with every reviewer
-  /playbook:deep-review --self        Self-review the current branch, no posting
+  /playbook:deep-review               Review the current branch's PR, report only, never posts
+  /playbook:deep-review 123           Review and post to PR #123
+  /playbook:deep-review 123 --all     PR #123 with every reviewer, posts
+  /playbook:deep-review 123 --self    Review PR #123, report only, never posts
 ```
+
+No PR number given means no posting: with nothing to disambiguate which PR you meant to publish to, the safe default is a local report, same as passing `--self` explicitly. Pass a PR number to post.
 
 ## Reviewer Swarm
 
@@ -86,6 +89,7 @@ Invoke the `playbook:grounding-review` and `playbook:writing-style` skills befor
 ARGS="$ARGUMENTS"
 PR_ARG=$(echo "$ARGS" | tr ' ' '\n' | grep -E '^#?[0-9]+$' | head -1 | tr -d '#')
 
+IMPLICIT_SELF=false
 if [[ -n "$PR_ARG" ]]; then
   # Integer or #N: explicit PR number
   PR_NUMBER="$PR_ARG"
@@ -96,8 +100,9 @@ else
     PR_NUMBER=$(gh pr list --head "$PR_ARG" --json number -q '.[0].number' 2>/dev/null)
     [[ -n "$PR_NUMBER" ]] || { echo "error: no open PR for branch $PR_ARG" >&2; exit 1; }
   else
-    # Empty: current branch's PR
+    # Nothing left to disambiguate: current branch's PR, implicit self mode.
     PR_NUMBER=$(gh pr view --json number -q .number 2>/dev/null) || { echo "error: no PR for current branch; pass a PR number" >&2; exit 1; }
+    IMPLICIT_SELF=true
   fi
 fi
 
@@ -106,6 +111,9 @@ HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
 PR_AUTHOR=$(gh pr view "$PR_NUMBER" --json author -q .author.login)
 ME=$(gh api /user -q .login)
 SELF_REVIEW=$([ "$PR_AUTHOR" = "$ME" ] && echo true || echo false)
+# SELF_MODE: never posts, report only. True when --self is explicit, or when
+# no PR number/branch was given at all (nothing to post to on purpose).
+SELF_MODE=$([[ "$ARGS" == *"--self"* || "$IMPLICIT_SELF" == "true" ]] && echo true || echo false)
 
 REVIEW_JSON="/tmp/$REPO/deep-review-$PR_NUMBER.json"
 mkdir -p "$(dirname "$REVIEW_JSON")"
@@ -141,7 +149,7 @@ else
 fi
 ```
 
-Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `REVIEW_JSON`. `--self` forces self-review mode (never posts), regardless of authorship.
+Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, when `--self` is passed explicitly OR when no PR number/branch was given in `$ARGUMENTS` at all (nothing named to post to). `SELF_REVIEW` is the separate, narrower signal used only when `SELF_MODE` is false: whether the resolved PR happens to be authored by the current user, which restricts Q2's submit verbs in Step 6.
 
 In worktree mode, `WT` holds the absolute path to the isolated checkout and `WT_CREATED=true`. In in-place mode, both are empty/false. Subagents use `$WT` for all reads; if empty, they read from the local working tree.
 
@@ -242,7 +250,7 @@ Present ALL surviving findings (rule 7). Render the `playbook:grounding-review` 
 
 ## Step 6: Orchestrate posting
 
-If `--self` (or self-review with nothing postable), stop here: the report IS the deliverable, no GitHub posting.
+If `SELF_MODE` (`--self` passed explicitly, or no PR number/branch was given so `PR_NUMBER` came from the current-branch fallback), or self-review with nothing postable, stop here: the report IS the deliverable, no GitHub posting.
 
 Otherwise ask **one question at a time**:
 
