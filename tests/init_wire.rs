@@ -3,9 +3,11 @@
 
 //! Integration tests for `playbook::init::wire`, the module that writes
 //! every hook Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command, retires `hooks/hooks.json`, and, for a
-//! guard not named in `placed_guards`, removes its legacy command when
-//! `claude_home` genuinely has no script for it left.
+//! `playbook hook <name>` command, retiring both `hooks/hooks.json` and the
+//! four safety guards' legacy `~/.claude/hooks/<name>.sh` commands. Every
+//! entry `wire` manages, hooks and guards alike, is upserted unconditionally
+//! now that all four guards' Rust ports are real (WU-13) and the
+//! placement-gate mechanism this used to sit behind is gone (WU-14).
 //!
 //! **Test isolation:** every test here operates on a fresh scratch directory
 //! under the OS temp dir (`scratch_settings_path`), never on a real
@@ -33,13 +35,6 @@
 //! - Regression pin for the defect itself: every hook name wired in binary
 //!   form has a real (non-stub) Rust implementation behind it:
 //!   `every_hook_wired_in_binary_form_has_a_non_stub_implementation`
-//! - THE SUBTLE PART pinned directly: a guard omitted from `placed_guards`,
-//!   with no script on `claude_home` either, is still wired in bare form.
-//!   A guard's `ported` flag alone decides this now; `placed_guards` and
-//!   script presence are irrelevant to it, so flipping the flag without
-//!   fixing the loop (the exact near-miss this Work Unit had to avoid)
-//!   would fail this test:
-//!   `guard_is_wired_in_bare_form_even_when_absent_from_placed_guards_and_script_missing`
 //! - A pre-existing legacy `~/.claude/hooks/<name>.sh` guard command is
 //!   REPLACED by the bare form, not left to coexist as a duplicate entry:
 //!   `legacy_guard_entry_is_replaced_by_bare_form_not_duplicated`
@@ -54,17 +49,6 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-
-/// The four guard names `wire` accepts as `placed_guards`. Every test below
-/// was written when `wire` always wired all four guards unconditionally, so
-/// passing the full set here reproduces that behaviour exactly and none of
-/// the existing assertions need to change.
-const ALL_GUARDS: &[&str] = &[
-    "rm-workspace-guard",
-    "bg-await-guard",
-    "no-dash-guard",
-    "precommit-check",
-];
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -86,16 +70,6 @@ fn scratch_dir(tag: &str) -> PathBuf {
 /// the fresh-install path).
 fn scratch_settings_path(tag: &str) -> PathBuf {
     scratch_dir(tag).join("settings.json")
-}
-
-/// A scratch `claude_home` with no guard scripts on disk, standing in for
-/// the third `wire()` argument in every test that does not care about the
-/// existence-check gate itself. `wire` treats every unplaced guard as
-/// genuinely dangling against a directory shaped like this one, which
-/// matches every existing test's assumption from before that argument
-/// existed.
-fn scratch_claude_home(tag: &str) -> PathBuf {
-    scratch_dir(tag)
 }
 
 fn write_json(path: &PathBuf, value: &Value) {
@@ -183,13 +157,12 @@ fn unwired_fixture() -> Value {
 fn running_wire_twice_writes_nothing_the_second_time() {
     // Arrange
     let path = scratch_settings_path("idempotence");
-    let claude_home = scratch_claude_home("idempotence-home");
     write_json(&path, &unwired_fixture());
 
     // Act
-    wire(&path, ALL_GUARDS, &claude_home).expect("first wire should succeed");
+    wire(&path).expect("first wire should succeed");
     let bytes_after_first = fs::read(&path).expect("settings.json should exist after wiring");
-    wire(&path, ALL_GUARDS, &claude_home).expect("second wire should succeed");
+    wire(&path).expect("second wire should succeed");
     let bytes_after_second = fs::read(&path).expect("settings.json should still exist");
 
     // Assert: file bytes, not a return value, per the brief's instruction.
@@ -203,12 +176,11 @@ fn running_wire_twice_writes_nothing_the_second_time() {
 fn running_wire_twice_from_a_fresh_install_writes_nothing_the_second_time() {
     // Arrange: no settings.json exists yet at all.
     let path = scratch_settings_path("idempotence-fresh");
-    let claude_home = scratch_claude_home("idempotence-fresh-home");
 
     // Act
-    wire(&path, ALL_GUARDS, &claude_home).expect("first wire should succeed on a fresh install");
+    wire(&path).expect("first wire should succeed on a fresh install");
     let bytes_after_first = fs::read(&path).expect("settings.json should now exist");
-    wire(&path, ALL_GUARDS, &claude_home).expect("second wire should succeed");
+    wire(&path).expect("second wire should succeed");
     let bytes_after_second = fs::read(&path).expect("settings.json should still exist");
 
     // Assert
@@ -222,11 +194,10 @@ fn running_wire_twice_from_a_fresh_install_writes_nothing_the_second_time() {
 fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() {
     // Arrange
     let path = scratch_settings_path("resolves");
-    let claude_home = scratch_claude_home("resolves-home");
     write_json(&path, &unwired_fixture());
 
     // Act
-    wire(&path, ALL_GUARDS, &claude_home).expect("wire should succeed");
+    wire(&path).expect("wire should succeed");
     let settings = read_json(&path);
     let commands = all_hook_commands(&settings);
 
@@ -302,11 +273,10 @@ fn pre_existing_user_hook_entry_is_preserved_not_clobbered() {
         }
     ]);
     let path = scratch_settings_path("preserve-user-entry");
-    let claude_home = scratch_claude_home("preserve-user-entry-home");
     write_json(&path, &fixture);
 
     // Act
-    wire(&path, ALL_GUARDS, &claude_home).expect("wire should succeed");
+    wire(&path).expect("wire should succeed");
     let settings = read_json(&path);
 
     // Assert
@@ -331,11 +301,10 @@ fn no_hook_command_points_under_claude_hooks_dir_after_wiring() {
     // ~/.claude/hooks/, so wiring has to actually rewrite something rather
     // than trivially finding nothing to fix.
     let path = scratch_settings_path("no-hooks-dir-paths");
-    let claude_home = scratch_claude_home("no-hooks-dir-paths-home");
     write_json(&path, &unwired_fixture());
 
     // Act
-    wire(&path, ALL_GUARDS, &claude_home).expect("wire should succeed");
+    wire(&path).expect("wire should succeed");
     let settings = read_json(&path);
     let commands = all_hook_commands(&settings);
 
@@ -367,11 +336,10 @@ fn no_hook_command_points_under_claude_hooks_dir_after_wiring() {
 fn bare_name_form_survives_write_then_read_round_trip() {
     // Arrange
     let path = scratch_settings_path("round-trip");
-    let claude_home = scratch_claude_home("round-trip-home");
     write_json(&path, &unwired_fixture());
 
     // Act
-    wire(&path, ALL_GUARDS, &claude_home).expect("wire should succeed");
+    wire(&path).expect("wire should succeed");
     let reread = read_json(&path);
 
     // Assert: settings.json accepts a bare-name hook command from a
@@ -390,12 +358,11 @@ fn settings_json_is_backed_up_before_a_real_change_and_not_on_a_no_op() {
     // Arrange
     let dir = scratch_dir("backup");
     let path = dir.join("settings.json");
-    let claude_home = scratch_claude_home("backup-home");
     write_json(&path, &unwired_fixture());
     let original_bytes = fs::read(&path).unwrap();
 
     // Act: first call changes the file, so it must back it up first.
-    let first = wire(&path, ALL_GUARDS, &claude_home).expect("first wire should succeed");
+    let first = wire(&path).expect("first wire should succeed");
 
     // Assert
     let backup_path = first
@@ -417,7 +384,7 @@ fn settings_json_is_backed_up_before_a_real_change_and_not_on_a_no_op() {
 
     // Act: second call is a no-op, so it must take no further backup.
     let entries_before = fs::read_dir(&dir).unwrap().count();
-    let second = wire(&path, ALL_GUARDS, &claude_home).expect("second wire should succeed");
+    let second = wire(&path).expect("second wire should succeed");
 
     // Assert
     assert!(
@@ -456,10 +423,9 @@ fn every_hook_wired_in_binary_form_has_a_non_stub_implementation() {
     // in binary form shows up in the output, without hardcoding which
     // those are.
     let path = scratch_settings_path("non-stub-binary-form");
-    let claude_home = scratch_claude_home("non-stub-binary-form-home");
 
     // Act
-    wire(&path, ALL_GUARDS, &claude_home).expect("wire should succeed on a fresh install");
+    wire(&path).expect("wire should succeed on a fresh install");
     let settings = read_json(&path);
     let commands = all_hook_commands(&settings);
 
@@ -492,49 +458,6 @@ fn every_hook_wired_in_binary_form_has_a_non_stub_implementation() {
     );
 }
 
-/// THE SUBTLE PART, pinned directly. Before this Work Unit, a guard was
-/// wired in `.sh` form only when its name was in `placed_guards`, and
-/// otherwise had that command actively removed if `claude_home` had no
-/// script for it. Flipping `GUARD_SPECS`'s `ported` field to `true` without
-/// also fixing `wire`'s loop would leave a ported guard falling into that
-/// same removal branch: nothing in `placed_guards` names it, no script
-/// exists, so its OLD `.sh` command would be removed and nothing would take
-/// its place, silently disabling the guard forever. This test constructs
-/// exactly that near-miss (`placed_guards` empty, no scripts on
-/// `claude_home` at all) and asserts every guard is wired in bare binary
-/// form anyway, since `ported` alone decides it now.
-#[test]
-fn guard_is_wired_in_bare_form_even_when_absent_from_placed_guards_and_script_missing() {
-    // Arrange: a fresh install, no settings.json, no placed guards, and a
-    // claude_home with no hooks/ directory at all.
-    let path = scratch_settings_path("guard-unconditional");
-    let claude_home = scratch_claude_home("guard-unconditional-home");
-
-    // Act: pass an empty placed_guards slice, the worst case for the old
-    // placement-gate behaviour.
-    wire(&path, &[], &claude_home).expect("wire should succeed");
-    let settings = read_json(&path);
-    let commands = all_hook_commands(&settings);
-
-    // Assert
-    for name in [
-        "rm-workspace-guard",
-        "bg-await-guard",
-        "no-dash-guard",
-        "precommit-check",
-    ] {
-        assert!(
-            commands.contains(&format!("playbook hook {name}")),
-            "guard '{name}' must be wired in bare form even when placed_guards is empty \
-             and no script exists on claude_home: {commands:?}"
-        );
-        assert!(
-            !commands.contains(&format!("~/.claude/hooks/{name}.sh")),
-            "guard '{name}' must not be left on or reverted to its legacy .sh command: {commands:?}"
-        );
-    }
-}
-
 /// The scenario the brief asked to be added explicitly: a user's
 /// pre-existing `settings.json` still carries a guard's legacy
 /// `~/.claude/hooks/<name>.sh` command from before this fix shipped.
@@ -545,11 +468,10 @@ fn guard_is_wired_in_bare_form_even_when_absent_from_placed_guards_and_script_mi
 fn legacy_guard_entry_is_replaced_by_bare_form_not_duplicated() {
     // Arrange: the unwired fixture, today's real pre-WU-13 shape.
     let path = scratch_settings_path("legacy-guard-replaced");
-    let claude_home = scratch_claude_home("legacy-guard-replaced-home");
     write_json(&path, &unwired_fixture());
 
     // Act
-    wire(&path, ALL_GUARDS, &claude_home).expect("wire should succeed");
+    wire(&path).expect("wire should succeed");
     let settings = read_json(&path);
     let bash_hooks_after = settings["hooks"]["PreToolUse"][0]["hooks"]
         .as_array()

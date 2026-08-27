@@ -21,16 +21,7 @@
 //! the merge after `wire` would risk the merge's coarser per-key policy
 //! discarding an entry `wire` just added. `statusline` runs after both
 //! because it depends on `settings.json` already naming a destination.
-//!
-//! `guards` runs BEFORE `hooks` for a second, sharper reason: it hands
-//! `wire` the set of guards it managed to place, and `wire` writes a
-//! `~/.claude/hooks/<name>.sh` command only for those. Reverse the two and
-//! `settings.json` can name a script that is not on disk, which fails open
-//! and silent, the failure `hook-rename-lockstep-settings` records. This is
-//! the one ordering constraint here that is a safety property rather than a
-//! correctness convenience, and `tests/init_guards.rs` pins it.
 
-use crate::init::guards;
 use crate::init::merge;
 use crate::init::shim::{self, ShellKind};
 use crate::init::statusline;
@@ -156,13 +147,9 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let self_root = paths.self_root.as_deref();
 
     // Bound to locals rather than built inline in the vec so execution order
-    // is the order written here, and so `guards` can hand `hooks` the set it
-    // actually placed. A vec literal would evaluate `place_guards_step` first
-    // no matter where its element sits, making the printed report lie about
-    // what ran when.
+    // is the order written here.
     let settings_step = seed_or_merge_settings(self_root, &paths.claude_home, &settings_path);
-    let (guards_step, placed_guards) = place_guards_step(self_root, &paths.claude_home);
-    let hooks_step = wire_hooks(&settings_path, &placed_guards, &paths.claude_home);
+    let hooks_step = wire_hooks(&settings_path);
     let shim_step = install_shim_step(
         self_root,
         &paths.claude_home,
@@ -177,7 +164,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     InitOutcome {
         steps: vec![
             settings_step,
-            guards_step,
             hooks_step,
             shim_step,
             statusline_step,
@@ -186,10 +172,9 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     }
 }
 
-/// Runs only the `guards` and `hooks` steps, skipping `settings`, `shim`,
-/// `statusline`, and `system-prompt` entirely. Backs `playbook init
-/// --hooks-only`, which `setup-local.sh` calls right after its own
-/// settings.json seed/merge.
+/// Runs only the `hooks` step, skipping `settings`, `shim`, `statusline`,
+/// and `system-prompt` entirely. Backs `playbook init --hooks-only`, which
+/// `setup-local.sh` calls right after its own settings.json seed/merge.
 ///
 /// That merge (`shell/merge-settings.py`) reconciles `.hooks` as one whole
 /// top-level key: when a user's `.hooks` differs at all from the frozen
@@ -202,13 +187,11 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 /// `setup-local.sh` calls this, and only `hooks_only`'s caller knows.
 pub fn run_hooks_only(paths: &InitPaths) -> InitOutcome {
     let settings_path = paths.claude_home.join("settings.json");
-    let self_root = paths.self_root.as_deref();
 
-    let (guards_step, placed_guards) = place_guards_step(self_root, &paths.claude_home);
-    let hooks_step = wire_hooks(&settings_path, &placed_guards, &paths.claude_home);
+    let hooks_step = wire_hooks(&settings_path);
 
     InitOutcome {
-        steps: vec![guards_step, hooks_step],
+        steps: vec![hooks_step],
     }
 }
 
@@ -244,58 +227,6 @@ fn place_system_prompt_step(
         ),
         Err(err) => StepReport::failed("system-prompt", err.to_string()),
     }
-}
-
-/// Step 2: copy the bash safety guards to the `~/.claude/hooks/` paths the
-/// next step is about to name in `settings.json`, and report which landed.
-///
-/// Runs BEFORE `wire_hooks`, and its second return value is the whole point:
-/// `wire` writes a guard command only for a guard in that list, so a guard
-/// that could not be placed never becomes a dangling `settings.json` entry.
-///
-/// `guards::place_guards` never stops at the first guard that cannot be
-/// placed, so a single missing source no longer costs the guards that did
-/// land: the step is `Failed`, rendering every failure rather than only the
-/// first, whenever `outcome.failures` is non-empty, `Wired` when nothing
-/// failed but something changed, and `AlreadyCorrect` otherwise. Either way
-/// `outcome.wired` (never an empty stand-in) is always the second value
-/// returned, so the guards that did land still reach `wire`, even on a
-/// `Failed` step.
-fn place_guards_step(
-    self_root: Option<&Path>,
-    claude_home: &Path,
-) -> (StepReport, Vec<&'static str>) {
-    let Some(self_root) = self_root else {
-        return (
-            StepReport::skipped(
-                "guards",
-                "CLAUDE_PLUGIN_ROOT is not set, no guards to place",
-            ),
-            Vec::new(),
-        );
-    };
-    let outcome = guards::place_guards(self_root, claude_home);
-    let wired = outcome.wired.clone();
-
-    if !outcome.failures.is_empty() {
-        let detail = outcome
-            .failures
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("; ");
-        return (StepReport::failed("guards", detail), wired);
-    }
-
-    let report = if outcome.changed() {
-        StepReport::wired("guards", format!("placed {}", outcome.placed.len()))
-    } else {
-        StepReport::already_correct(
-            "guards",
-            format!("{} already in place", outcome.already_current.len()),
-        )
-    };
-    (report, wired)
 }
 
 /// Step 1: seed a fresh `settings.json` from the shipped template, or
@@ -503,11 +434,13 @@ fn prune_family(dir: &Path, prefix: &str, suffix: &str) {
     }
 }
 
-/// Step 2: upsert the ported hooks and the placed guards into
-/// `settings.json`, and remove a guard's legacy command when it is not in
-/// `placed_guards` and `claude_home` genuinely has no script for it left.
-fn wire_hooks(settings_path: &Path, placed_guards: &[&str], claude_home: &Path) -> StepReport {
-    match wire::wire(settings_path, placed_guards, claude_home) {
+/// Step 2: upsert the ported hooks and guards into `settings.json`. Every
+/// `GUARD_SPECS` entry is `ported: true` (WU-13), so `wire` wires every hook
+/// and guard unconditionally; WU-14 dropped the `placed_guards` and
+/// `claude_home` parameters `wire::wire` used to take, since the gate they
+/// fed had become permanently unreachable.
+fn wire_hooks(settings_path: &Path) -> StepReport {
+    match wire::wire(settings_path) {
         Ok(outcome) if outcome.changed => {
             StepReport::wired("hooks", "wired the ported hooks into settings.json")
         }

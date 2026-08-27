@@ -5,20 +5,17 @@
 //! the `playbook init` subcommand:
 //!
 //! - `merge` ports `shell/merge-settings.py`'s three-way settings merge.
-//! - `guards` copies the four bash safety guards to the `~/.claude/hooks/`
-//!   paths `wire` names, and reports which ones landed.
 //! - `wire` writes the ported hook entries into `settings.json`, backing it up
-//!   first, and leaves the guards `guards` placed on their `.sh` paths until
-//!   WU-13.
+//!   first.
 //! - `shim` installs the bash and zsh launcher shim idempotently.
 //! - `statusline` places `statusline.sh` at the path `settings.json` names.
 //! - `system_prompt` places the opt-in `prompts/SYSTEM_PROMPT.md`.
-//! - `run` composes all six above into `Command::Init`'s dispatch arm.
+//! - `run` composes all five above into `Command::Init`'s dispatch arm.
 //!
-//! Four of those six place a file, and each places one that some other
+//! Three of those five place a file, and each places one that some other
 //! component names: `settings.json`'s `statusLine.command` names the
-//! statusline, `wire`'s guard commands name the guard scripts, and
-//! `commands/doctor.md`'s Layer 4 names the system prompt. That is the rule
+//! statusline, and `commands/doctor.md`'s Layer 4 names the system prompt.
+//! That is the rule
 //! this module enforces, **the component that names a path is the component
 //! that puts the file there**, learned twice the hard way (the 2026-08-12
 //! statusline outage, and the 2026-08-11 hook-rename incident that produced
@@ -33,7 +30,6 @@
 //! what a user's own `settings.json` looks like after they choose to run
 //! `playbook init`.
 
-pub mod guards;
 pub mod merge;
 pub mod run;
 pub mod shim;
