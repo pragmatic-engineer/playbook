@@ -26,6 +26,7 @@ Adopt these principles to what you write for review: the reviewer is the user, t
 - Use clear, simple language. Write like someone who learned English 5-8 years ago: common words, simple grammar, short connectors. No fancy vocabulary ("ameliorate", "exacerbate", "necessitate", "defensible", "notation"). No idioms ("at the end of the day", "low-hanging fruit"). Prefer common words over formal ones. If you wouldn't say it out loud to a teammate, rewrite it.
 - One instruction or claim per sentence. No phrasal verbs when one plain verb says the same thing: "start" not "spin up", "contact" not "reach out", "investigate" not "dive into". Prefer a verb over a noun built from one: "analyze" beats "perform an analysis".
 - Be spartan and informative. Every sentence adds information. Cut sentences that only add emphasis.
+- Say each point once. Don't restate it later in the same comment or reply in different words.
 - Use short sentences. Default to one line for a reply, a reaction, or a status update; a paragraph is the exception, earned by genuine complexity, not the default.
 - Use active voice. "This breaks the import" not "the import is broken by this."
 - Use data and examples to support claims.
@@ -47,7 +48,7 @@ Adopt these principles to what you write for review: the reviewer is the user, t
 
 - MUST NOT use em dashes (—) or en dashes (–) anywhere. Use commas, periods, or colons. Both dash types are strong AI tells.
 - MUST NOT use "not just X, but also Y" constructions. Say both things directly.
-- MUST NOT use metaphors or clichés. State facts.
+- MUST NOT use metaphors, clichés, or analogies. State facts.
 - MUST NOT use generalisations. Show specific impact with data.
 - MUST NOT use setup language: "It's worth noting", "In conclusion", "In closing", "To summarize".
 - MUST NOT end with vague optimism: "the future looks bright", "this sets us up well", "exciting times ahead". Say what's next concretely or stop.
@@ -139,6 +140,7 @@ Real engineers writing PR comments make small mistakes: typos, dropped words, ca
 - **One sentence when possible, two at most: the problem, then why.** Use a direct causal template: "this won't work because X, do Y instead" or "this will cause X because Y." State the defect and its cause, then stop. A second sentence only when the mechanism is genuinely non-obvious (a subtle race, a data-loss path you can't see from the diff). A dev skims a review comment for the gist, not an essay: plainest words available, short sentences, active voice, no filler.
 - **The `blocking:` label already argues priority. Don't argue it again.** State the defect and stop; never add a clause about why it is worth fixing, what it would cost to ignore, or why now is the right time. "blocking: this leaks the session token to the client" is enough. Not "blocking: this leaks the session token, which matters because an attacker could hijack the session, and it costs nothing to fix now." The label carries the urgency; the sentence only needs the defect.
 - **Avoid jargon.** Say things in plain words a teammate would use out loud. If a technical term is unavoidable, add what it means in a few words. Prefer "anyone can read another user's record" over "IDOR".
+- **No word that could mean more than one thing.** If a term is ambiguous in context, use the plainer, unambiguous one instead.
 - Assume the reader is a senior dev.
 - Do NOT pad with blank lines or formatting. The label + the comment is enough.
 - Lead with what you found, not with compliments. Skip "looks good" and "solid approach" openers.
