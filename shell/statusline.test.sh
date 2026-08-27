@@ -101,9 +101,9 @@ assert_eq "fmt_tokens 127400 (rounds down)"  "$(fmt_tokens 127400)" '127k'
 
 # ── context_rot_warning ──────────────────────────────────────────────────────
 # Empty below the threshold, and on empty input; '1' at and above it.
-assert_eq "context_rot_warning 99999 (below)"  "$(context_rot_warning 99999)"  ''
-assert_eq "context_rot_warning 100000 (at)"    "$(context_rot_warning 100000)" '1'
-assert_eq "context_rot_warning 150000 (above)" "$(context_rot_warning 150000)" '1'
+assert_eq "context_rot_warning 199999 (below)" "$(context_rot_warning 199999)" ''
+assert_eq "context_rot_warning 200000 (at)"    "$(context_rot_warning 200000)" '1'
+assert_eq "context_rot_warning 250000 (above)" "$(context_rot_warning 250000)" '1'
 assert_eq "context_rot_warning '' (no data)"   "$(context_rot_warning '')"     ''
 
 # ── compact_gap ───────────────────────────────────────────────────────────────
@@ -268,7 +268,7 @@ assert_eq "glob-metachar HOME collapses to ~ in the rendered path" \
     "$t7_verdict" "collapsed"
 rm -rf "$t7_base"
 
-# 8. Context-rot warning renders at/above 100k total input tokens, and is
+# 8. Context-rot warning renders at/above 200k total input tokens, and is
 #    absent below it. Full payload (session_id, rate limits, cost) so line 2
 #    and line 3 both have real content to assert on.
 _full_payload() {
@@ -278,11 +278,11 @@ _full_payload() {
 }
 
 t8_home=$(mktemp -d)
-t8_out=$(HOME="$t8_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$(_full_payload "$t8_home" 127000 200000)" 2>&1)
-assert_eq "context-rot warning shown at 127k tokens" \
+t8_out=$(HOME="$t8_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$(_full_payload "$t8_home" 250000 300000)" 2>&1)
+assert_eq "context-rot warning shown at 250k tokens" \
     "$( [[ "$t8_out" == *"context rot risk"* ]] && echo yes || echo no )" "yes"
-assert_eq "token count shown as 127k/200k" \
-    "$( [[ "$t8_out" == *"127k/200k"* ]] && echo yes || echo no )" "yes"
+assert_eq "token count shown as 250k/300k" \
+    "$( [[ "$t8_out" == *"250k/300k"* ]] && echo yes || echo no )" "yes"
 rm -rf "$t8_home"
 
 t9_home=$(mktemp -d)

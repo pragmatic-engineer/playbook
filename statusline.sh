@@ -139,13 +139,13 @@ fmt_tokens() {
     fi
 }
 
-# Context-rot threshold: once raw token usage crosses 100k, model quality is
+# Context-rot threshold: once raw token usage crosses 200k, model quality is
 # known to degrade regardless of how much headroom remains in the window (a
-# 1M-context model at 100k tokens is nowhere near its own autocompact trigger
+# 1M-context model at 200k tokens is nowhere near its own autocompact trigger
 # but has already crossed this). Independent of ctx_color's window-relative
 # percentage thresholds. Empty below the threshold so the marker only shows
 # once it's actionable.
-CONTEXT_ROT_THRESHOLD=100000
+CONTEXT_ROT_THRESHOLD=200000
 context_rot_warning() {
     local tokens="${1:-0}"
     [[ -z "$tokens" ]] && return 0
