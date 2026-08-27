@@ -1,5 +1,5 @@
 ---
-description: Quick single-pass PR review using grounding-review discipline + Conventional Comments. Report-only with no PR number given or --self; otherwise posts findings as a pending GitHub review for human submit.
+description: Quick single-pass PR review using grounding-review discipline + Conventional Comments. Report-only with no PR number given, --self, or when the resolved PR is yours; otherwise posts findings as a pending GitHub review for human submit.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
 argument-hint: "[PR number] [--self]"
 model: sonnet
@@ -22,14 +22,11 @@ Parse `$ARGUMENTS` (strip `--self` before reading the rest, same as `--help`):
   Error (abort) if no PR found: `error: no open PR for branch <name>; create one first or pass a PR number`.
 - **Empty (no PR number or branch left after stripping `--self`)** → resolve the current branch's PR via `gh pr view --json number,headRefOid,author,headRefName`, and set `SELF_MODE=true`: nothing was named to post to, so review report-only, same as passing `--self` explicitly.
 
-`--self` forces `SELF_MODE=true` regardless of whether a PR number was also given: review and report, skip Step 4's posting orchestration entirely. Without `--self`, an explicit PR number still posts even when it resolves to your own PR (see Self-review awareness below for that narrower, submit-verb-only restriction).
+`--self` forces `SELF_MODE=true` regardless of whether a PR number was also given: review and report, skip Step 4's posting orchestration entirely. `SELF_MODE` also becomes true whenever the resolved PR turns out to be authored by you, even with an explicit PR number: GitHub rejects `APPROVE` and `REQUEST_CHANGES` from a PR's own author, and a comment-only review of your own PR has no independent reviewer behind it, so self-authorship gets the same report-only treatment as `--self` rather than a narrower posting path.
 
 ## Self-review awareness
 
-GitHub rejects `APPROVE` and `REQUEST_CHANGES` events from the PR author. Two different things use the word self here, and they trigger different behaviour:
-
-- **`SELF_MODE`** (from an empty argument list, or explicit `--self`): skip posting entirely. The report is the deliverable; Step 4 never runs.
-- **`SELF_REVIEW`** (an explicit PR number that happens to be authored by you, `SELF_MODE` false): posting still happens, but Q2's submit-verb question MUST only offer `comment` or `skip`, since GitHub rejects the other two. Detect by comparing `gh pr view --json author -q .author.login` against `gh api /user -q .login`.
+`SELF_REVIEW` (the resolved PR is authored by you, detected by comparing `gh pr view --json author -q .author.login` against `gh api /user -q .login`) is computed for every run and is one of the three conditions that sets `SELF_MODE=true` (the others: an empty argument list, or explicit `--self`). It stays a distinct variable purely so the status line can log it independently, but it never posts a restricted review on its own: once `SELF_REVIEW` is true, `SELF_MODE` is true too, and Step 4 never runs.
 
 ## Worktree vs in-place mode
 
@@ -127,6 +124,10 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 PR_AUTHOR=$(gh pr view "$PR_NUMBER" --json author -q .author.login)
 ME=$(gh api /user -q .login)
 SELF_REVIEW=$([ "$PR_AUTHOR" = "$ME" ] && echo true || echo false)
+# A self-authored PR gets the same report-only treatment as --self: GitHub
+# blocks approve/request-changes from the author, and a comment-only review
+# of your own PR has no independent reviewer behind it.
+[[ "$SELF_REVIEW" == "true" ]] && SELF_MODE=true
 
 # Decide: review in-place or via isolated worktree
 LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null)
@@ -160,7 +161,7 @@ gh pr view "$PR_NUMBER"
 gh pr diff "$PR_NUMBER"
 ```
 
-Capture: `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `REVIEW_JSON`. You'll need them for the API calls in Step 4. `REVIEW_JSON` resolves to `/tmp/<org>/<repo>/quick-review-<number>.json`, and its directory is created here so the Step 4 write succeeds.
+Capture: `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. You'll need them for the API calls in Step 4. `REVIEW_JSON` resolves to `/tmp/<org>/<repo>/quick-review-<number>.json`, and its directory is created here so the Step 4 write succeeds.
 
 ## Step 2: Delegate the review pass (isolated reviewer subagent)
 
@@ -194,7 +195,7 @@ Relay the report to the user unchanged, then proceed to posting. Post findings v
 
 ## Step 4: Orchestrate posting
 
-If `SELF_MODE` is true (explicit `--self`, or no PR number/branch was given), stop here: the report IS the deliverable, no GitHub posting.
+If `SELF_MODE` is true (explicit `--self`, no PR number/branch was given, or the resolved PR is authored by you), stop here: the report IS the deliverable, no GitHub posting.
 
 Otherwise, **ask the user, one question at a time** (memory rule):
 
@@ -233,10 +234,7 @@ gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews --input "$REVIEW_JSON" --jq
 
 Confirm `state: PENDING` and capture the review id + html_url. Show the user the link.
 
-**Q2**: "Submit verb?"
-
-- Not self-review: offer `approve` / `comment` / `request-changes` / `skip`
-- Self-review: offer `comment` / `skip` only (GitHub rejects approve/request-changes from the author)
+**Q2**: "Submit verb? approve / comment / request-changes / skip." Reaching this question already means `SELF_MODE` was false, so the PR is never self-authored here and all four verbs are always valid; GitHub's author restriction is exactly why `SELF_REVIEW` forces `SELF_MODE` earlier instead of trying to offer a narrower menu here.
 
 If `skip`, stop. The pending review stays for manual submit from the UI. Otherwise:
 
