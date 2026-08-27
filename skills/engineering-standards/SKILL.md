@@ -23,7 +23,7 @@ Run `git diff --cached` and check:
 - Nothing secret: keys, tokens, `.env` files, real customer data.
 - The change does what you set out to do, and you can say why in one line.
 
-`hooks/precommit-check.sh` covers the mechanical half of this (secret-shaped
+`playbook hook precommit-check` covers the mechanical half of this (secret-shaped
 filenames, debug leftovers in added lines, oversized commits) and warns without
 blocking. It cannot tell whether the change is correct or whether it belongs in
 one commit. That part is yours.

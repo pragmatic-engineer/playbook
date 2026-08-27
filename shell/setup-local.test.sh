@@ -56,10 +56,15 @@ scenario_a_default() {
     run_setup "$home" "$claude_home"; rc=$?
     [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
 
-    # Guards must be installed.
+    # Step 1's copy loop still runs at this commit, but its source files
+    # (hooks/*.sh) are gone now that the guards are ported to Rust: the
+    # loop's `[ -f "$src_hook" ] || continue` guard makes every iteration a
+    # no-op, so no guard script lands in hooks/. Step 1 itself is dead code
+    # until it is deleted outright by the setup-local.sh rewrite that
+    # replaces the settings merge with `playbook init`.
     for g in rm-workspace-guard.sh bg-await-guard.sh no-dash-guard.sh; do
-        [ -f "$claude_home/hooks/$g" ] \
-            || { echo "  guard hook not copied: $g"; return 1; }
+        [ ! -f "$claude_home/hooks/$g" ] \
+            || { echo "  guard hook copied despite its source being deleted: $g"; return 1; }
     done
 
     # settings.json must be seeded.

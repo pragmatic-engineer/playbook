@@ -8,8 +8,9 @@
 //! one that only proves it allows can pass while guarding nothing.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -36,6 +37,35 @@ fn run_guard(name: &str, command: &str) -> String {
         .env("HOOK_INPUT", payload)
         .output()
         .expect("playbook binary should spawn");
+    assert!(
+        out.status.success(),
+        "a guard must exit 0 even when denying, or it breaks the hook contract"
+    );
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// Pipes the payload over stdin instead of setting `HOOK_INPUT`, the same
+/// contract `shell/plugin-e2e.sh` Section G exercises against the built
+/// binary. `HOOK_INPUT` is explicitly removed so a leftover in the test
+/// process's own environment cannot mask a stdin regression.
+fn run_guard_via_stdin(name: &str, command: &str) -> String {
+    let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["hook", name])
+        .env_remove("HOOK_INPUT")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("playbook binary should spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin should be piped")
+        .write_all(payload.as_bytes())
+        .expect("payload should write to stdin");
+    let out = child
+        .wait_with_output()
+        .expect("playbook binary should exit");
     assert!(
         out.status.success(),
         "a guard must exit 0 even when denying, or it breaks the hook contract"
@@ -938,6 +968,24 @@ mod no_dash_guard {
             .output()
             .expect("spawn");
         assert!(String::from_utf8_lossy(&out.stdout).trim().is_empty());
+    }
+
+    /// `shell/plugin-e2e.sh` Section G pipes the payload over stdin rather than
+    /// setting `HOOK_INPUT`. Every other case in this file goes through the env
+    /// var, so without this the stdin path would have no coverage in CI.
+    #[test]
+    fn stdin_piped_input_is_read_when_hook_input_is_unset() {
+        let deny = run_guard_via_stdin("no-dash-guard", "git commit -m \"fix: a \u{2014} b\"");
+        assert!(
+            deny.contains(r#""permissionDecision":"deny""#),
+            "stdin-piped input must still reach the guard and produce a deny: {deny}"
+        );
+
+        let allow = run_guard_via_stdin("no-dash-guard", "git commit -m \"fix: a clean message\"");
+        assert!(
+            allow.trim().is_empty(),
+            "stdin-piped input for a clean commit must stay silent: {allow}"
+        );
     }
 
     #[test]
