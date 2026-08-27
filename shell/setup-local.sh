@@ -3,9 +3,10 @@
 # SPDX-License-Identifier: MIT
 #
 # setup-local.sh: idempotent local wiring for pragmatic-engineer/playbook.
-# Copies the always-on safety-guard hooks, seeds or merges settings.json from
-# the shipped template, and optionally installs deps (brew), the shell
-# launchers (cc.sh/cc.zsh), and the system prompt.
+# Bootstraps the `playbook` binary, then seeds or merges settings.json and
+# wires every guard/functional hook via `playbook init`, and optionally
+# installs deps (brew), the shell launchers (cc.sh/cc.zsh), and the system
+# prompt.
 #
 # Self-locates its own source tree so it works when called from install.sh
 # (after the file-copy loop) or directly from the /playbook:setup plugin command.
@@ -14,9 +15,9 @@
 # Env:    CLAUDE_HOME  target directory (default: $HOME/.claude)
 #
 # Flags --skip-plugin and --skip-shell are accepted and silently ignored.
-# Default (no --aliases, no --system-prompt): copy the 3 guard hooks and
-# seed/merge settings.json only. The shell rc and launcher files are NOT
-# touched unless --aliases is given.
+# Default (no --aliases, no --system-prompt): seed/merge settings.json and
+# wire guards/hooks via `playbook init` only. The shell rc and launcher
+# files are NOT touched unless --aliases is given.
 set -euo pipefail
 
 SELF_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
@@ -130,120 +131,52 @@ ensure_playbook_binary ||
     warn "binary: missing; the 17 ported hooks will not run until it is installed"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP="$CLAUDE_HOME/backups/setup-$STAMP"
-backed_up=0
 
 # ---------------------------------------------------------------------------
-# 1. Copy the 3 always-on safety-guard hooks.
-#    Overwriting is fine: these are product files, not user files.
-#    Skip the copy if source and destination are the same physical file
-#    (e.g. when SELF_ROOT == CLAUDE_HOME after install.sh ran the copy loop).
-# ---------------------------------------------------------------------------
-mkdir -p "$CLAUDE_HOME/hooks"
-for g in rm-workspace-guard.sh bg-await-guard.sh no-dash-guard.sh; do
-    src_hook="$SELF_ROOT/hooks/$g"
-    dst_hook="$CLAUDE_HOME/hooks/$g"
-    [ -f "$src_hook" ] || continue
-    # -ef: same device + inode -> same file; self-copy would error on macOS.
-    if [ "$src_hook" -ef "$dst_hook" ] 2>/dev/null; then
-        continue
-    fi
-    cp "$src_hook" "$dst_hook"
-done
-log "Safety-guard hooks installed in $CLAUDE_HOME/hooks"
-
-# ---------------------------------------------------------------------------
-# 2. Seed or 3-way-merge settings.json from the shipped template.
-#    The template wires the always-on guards; functional hooks live in the
-#    plugin and must not be duplicated here (no double-fire).
+# 2. Seed or 3-way-merge settings.json from the shipped template, and rewire
+#    every guard and functional hook, in one `playbook init` call. This
+#    replaces both the old python 3-way merge (merge-settings.py) and the old
+#    `playbook init --hooks-only` patch-up: `playbook init`'s full pipeline
+#    already reconciles settings and hooks together in one pass, with hooks
+#    upserted per-entry rather than the python merge's whole-key policy
+#    (which kept a whole customised `.hooks` key, stale guard commands
+#    included, rather than adopting the template's fixed ones).
 #
-#    Fresh install (no existing settings.json):
-#      cp template -> settings.json; record as baseline in .settings.base.json.
-#    Existing install:
-#      3-way merge (baseline + template + user) preserving user customisations.
-#    No template: no-op.
-# ---------------------------------------------------------------------------
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-MERGE_TMP="$TMP/settings-merge"
-mkdir -p "$MERGE_TMP"
-
-if [ -f "$SELF_ROOT/settings.shared.json" ]; then
-    if [ ! -e "$CLAUDE_HOME/settings.json" ]; then
-        # Fresh install: seed settings.json and record the shipped baseline.
-        cp "$SELF_ROOT/settings.shared.json" "$CLAUDE_HOME/settings.json"
-        cp "$SELF_ROOT/settings.shared.json" "$CLAUDE_HOME/.settings.base.json"
-        log "Seeded default settings.json from settings.shared.json"
-    else
-        # Existing install: 3-way merge.
-        MERGE_BIN="$SELF_ROOT/shell/merge-settings.py"
-        MERGE_SKIP_TMP="$MERGE_TMP/settings-merge-skipped.json"
-        if merged="$(python3 "$MERGE_BIN" \
-                "$CLAUDE_HOME/.settings.base.json" \
-                "$SELF_ROOT/settings.shared.json" \
-                "$CLAUDE_HOME/settings.json" \
-                "$MERGE_TMP/newbase" \
-                "$MERGE_SKIP_TMP" 2>/dev/null)"; then
-            if printf '%s\n' "$merged" | cmp -s - "$CLAUDE_HOME/settings.json"; then
-                # Idempotent: refresh base only; do not touch settings.json.
-                mv "$MERGE_TMP/newbase" "$CLAUDE_HOME/.settings.base.json"
-                log "settings.json already up to date"
-            else
-                # Content changed: snapshot, write, move skip file into backup.
-                mkdir -p "$BACKUP"
-                cp "$CLAUDE_HOME/settings.json" "$BACKUP/"
-                mv "$MERGE_SKIP_TMP" "$BACKUP/settings-merge-skipped.json"
-                printf '%s\n' "$merged" > "$MERGE_TMP/settings.json.new"
-                mv "$MERGE_TMP/settings.json.new" "$CLAUDE_HOME/settings.json"
-                mv "$MERGE_TMP/newbase" "$CLAUDE_HOME/.settings.base.json"
-                backed_up=1
-                _nw="$(jq 'length' "$BACKUP/settings-merge-skipped.json" 2>/dev/null)" \
-                    || _nw='0'
-                log "Merged settings.json (${_nw} keys withheld; see $BACKUP/settings-merge-skipped.json)"
-                if [ "${_nw:-0}" -gt 0 ]; then
-                    warn "Some customised keys were also updated by the new template."
-                    warn "Review $BACKUP/settings-merge-skipped.json after setup."
-                fi
-            fi
-            # Prune setup backup dirs older than the newest 5.
-            find "$CLAUDE_HOME/backups" -maxdepth 1 -type d -name 'setup-*' \
-                2>/dev/null | sort -r | tail -n +6 \
-                | while IFS= read -r _old; do [ -n "$_old" ] && rm -rf "$_old"; done \
-                || true
-        else
-            warn "settings.json merge failed; settings.json left unchanged."
-            warn "If this persists, delete $CLAUDE_HOME/.settings.base.json to reset to additive merge."
-        fi
-    fi
-fi
-
-# ---------------------------------------------------------------------------
-# 2b. Rewire every guard and functional hook via `playbook init --hooks-only`.
+#    Disclosed side effects, all already accepted:
+#      1. Every default run now also places statusline.sh: the python merge
+#         never did, but `playbook init`'s full pipeline always does.
+#      2. A machine that ever opted into --system-prompt has its installed
+#         SYSTEM_PROMPT.md silently refreshed on every later plain (no-flag)
+#         run too, not just on --system-prompt runs.
+#      3. A fresh install's settings.json now has alphabetically-sorted
+#         top-level keys instead of the template's own insertion order,
+#         because `playbook init` always routes a missing settings.json
+#         through the merge algorithm rather than a verbatim template copy.
+#         Semantically identical (JSON objects are unordered by spec;
+#         nothing reads settings.json positionally) -- noted here so it is
+#         not rediscovered as a bug later.
 #
-#     Step 2's merge (merge-settings.py) reconciles `.hooks` as one whole
-#     top-level key: on an existing install where `.hooks` differs at all
-#     from the frozen baseline, the WHOLE key is kept as a user customisation,
-#     stale guard commands included, rather than adopting the template's
-#     fixed ones. That stranded `/playbook:doctor`'s guard check at "0 of 4"
-#     even right after setup. `playbook init --hooks-only` fixes it with a
-#     fine-grained per-entry upsert instead, and touches nothing else:
-#     `--hooks-only` skips `settings`, `shim`, and `system-prompt`, so it
-#     never installs the shell launcher or the system prompt without the
-#     separate consent `--aliases`/`--system-prompt` already gate below.
+#    `playbook init` has no `CLAUDE_HOME` override of its own; it always
+#    targets `$HOME/.claude`. Only run it when this script's own `CLAUDE_HOME`
+#    (which does support the override) resolves to that same default path,
+#    so a non-default `CLAUDE_HOME` is left unmerged rather than silently
+#    rewired at the wrong location. The accepted regression this widens: a
+#    non-default `CLAUDE_HOME` now skips the settings merge too, not just the
+#    hooks fix the old two-step dance used to still apply.
 #
-#     `playbook init` has no `CLAUDE_HOME` override of its own; it always
-#     targets `$HOME/.claude`. Only run it when this script's own `CLAUDE_HOME`
-#     (which does support the override) resolves to that same default path,
-#     so a non-default `CLAUDE_HOME` is left to the merge above rather than
-#     silently rewired at the wrong location.
+#    Wrapped with `|| warn`, not a bare call: `playbook init` exits 1 if ANY
+#    of its six internal steps fails (settings, guards, hooks, shim,
+#    statusline, system-prompt), and this script runs under `set -euo
+#    pipefail`, so a bare call would abort Steps 3/4/5 the moment one
+#    unrelated step errors.
 # ---------------------------------------------------------------------------
 if [ "$CLAUDE_HOME" != "$HOME/.claude" ]; then
-    warn "CLAUDE_HOME is not \$HOME/.claude; skipping playbook init --hooks-only (it has no CLAUDE_HOME override)"
+    warn "CLAUDE_HOME is not \$HOME/.claude; skipping playbook init (it has no CLAUDE_HOME override)"
 elif command -v playbook >/dev/null 2>&1; then
-    CLAUDE_PLUGIN_ROOT="$SELF_ROOT" playbook init --hooks-only \
-        || warn "playbook init --hooks-only reported errors; guards may be unwired"
+    CLAUDE_PLUGIN_ROOT="$SELF_ROOT" playbook init \
+        || warn "playbook init reported errors; settings merge and/or hooks may be incomplete"
 else
-    warn "playbook binary unavailable; guards may still be unwired. Re-run /playbook:setup once it is installed."
+    warn "playbook binary unavailable; settings.json and guards may be unwired. Re-run /playbook:setup once it is installed."
 fi
 
 # ---------------------------------------------------------------------------
@@ -401,4 +334,3 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 log "Setup complete."
-[ "$backed_up" -eq 1 ] && log "Replaced files backed up to: $BACKUP" || true

@@ -73,7 +73,7 @@ Each `install.sh` run merges the shipped template into your `settings.json` rath
 
 The merge tracks a baseline in `~/.claude/.settings.base.json`. On each install it compares that baseline against the new template and your live file to decide which keys to update and which to leave alone.
 
-After each install, check `backups/install-<stamp>/settings-merge-skipped.json`. It lists every key the new template tried to change but your customisation took precedence. Entries look like `{"key":"...", "template_had":..., "yours":...}`. Review them and decide whether to adopt the template value manually.
+After each install, check `$CLAUDE_HOME/settings-merge-skipped.<epoch>.json`. It lists every key the new template tried to change but your customisation took precedence. Entries look like `{"key":"...", "template_had":..., "yours":...}`. Review them and decide whether to adopt the template value manually.
 
 `permissions` is a single top-level key. If you have customised it (for example, added rules to `permissions.deny`), the whole `permissions` block is treated as contested and the template's version is withheld. Your custom rules take precedence. The skip file will show the entry so you can compare and merge manually if the template shipped new deny rules you want.
 
