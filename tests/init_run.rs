@@ -44,7 +44,7 @@
 
 #![allow(dead_code)]
 
-use playbook::init::run::{run, run_hooks_only, InitOutcome, InitPaths, StepReport, StepStatus};
+use playbook::init::run::{run, InitOutcome, InitPaths, StepReport, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::init::statusline::resolve_statusline_path;
 use serde_json::{json, Value};
@@ -716,109 +716,6 @@ fn unrecognised_shell_skips_shim_only() {
     assert!(!home.join(".zshrc").is_file());
 }
 
-/// `run_hooks_only` backs `playbook init --hooks-only`, which
-/// `setup-local.sh` calls right after its own settings.json merge. The merge
-/// treats `.hooks` as one whole top-level key (see `shell/merge-settings.py`'s
-/// module comment), so on an existing install where `.hooks` differs at all
-/// from the frozen baseline, the merge keeps the user's WHOLE `.hooks` value,
-/// stale guard commands included, rather than adopting the template's fixed
-/// commands. `run_hooks_only` closes that gap with `wire::wire`'s
-/// fine-grained per-entry upsert, without touching anything `--aliases` or
-/// `--system-prompt` would install, since neither was necessarily consented
-/// to at the point `setup-local.sh` calls this.
-#[test]
-fn hooks_only_wires_guards_and_hooks_and_skips_everything_else() {
-    // Arrange: a settings.json a stranded coarse merge would produce, guards
-    // still in their pre-WU-13 script-path form.
-    let home = scratch_home("hooks-only");
-    let claude_home = claude_home_of(&home);
-    write_json(
-        &claude_home.join("settings.json"),
-        &json!({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash",
-                        "hooks": [
-                            {"type": "command", "command": "~/.claude/hooks/rm-workspace-guard.sh"}
-                        ]
-                    }
-                ]
-            }
-        }),
-    );
-    let paths = base_paths(&home, Some(ShellKind::Bash));
-
-    // Act
-    let outcome = run_hooks_only(&paths);
-
-    // Assert: only `hooks` ran, nothing else.
-    assert!(
-        outcome.ok(),
-        "{:?}",
-        outcome
-            .steps
-            .iter()
-            .map(StepReport::render)
-            .collect::<Vec<_>>()
-    );
-    let step_names: Vec<&str> = outcome.steps.iter().map(|s| s.name).collect();
-    assert_eq!(step_names, vec!["hooks"]);
-
-    // Assert: every guard now has the bare `playbook hook <name>` command,
-    // and the stale script-path form is gone.
-    let settings = read_json(&claude_home.join("settings.json"));
-    let commands = all_hook_commands(&settings);
-    for name in GUARD_HOOK_NAMES {
-        let bare = format!("playbook hook {name}");
-        assert!(
-            commands.contains(&bare),
-            "expected {bare} among {commands:?}"
-        );
-    }
-    assert!(
-        !commands.iter().any(|c| c.contains("/.claude/hooks/")),
-        "stale script-path guard command survived: {commands:?}"
-    );
-
-    // Assert: settings/shim/statusline/system-prompt never ran.
-    assert!(!home.join(".bashrc").is_file());
-    assert!(!claude_home.join("statusline.sh").is_file());
-    assert!(!claude_home.join("prompts/SYSTEM_PROMPT.md").is_file());
-}
-
-#[test]
-fn hooks_only_is_idempotent() {
-    // Arrange
-    let home = scratch_home("hooks-only-idempotent");
-    let claude_home = claude_home_of(&home);
-    write_json(&claude_home.join("settings.json"), &json!({}));
-    let paths = base_paths(&home, Some(ShellKind::Bash));
-
-    // Act
-    let first = run_hooks_only(&paths);
-    assert!(first.ok());
-    let after_first = fs::read(claude_home.join("settings.json")).unwrap();
-    let second = run_hooks_only(&paths);
-
-    // Assert
-    assert!(second.ok());
-    for step in &second.steps {
-        assert_eq!(
-            step.status,
-            StepStatus::AlreadyCorrect,
-            "expected '{}' to report no change on a second run: {}",
-            step.name,
-            step.detail
-        );
-    }
-    let after_second = fs::read(claude_home.join("settings.json")).unwrap();
-    assert_eq!(
-        after_first, after_second,
-        "a second run must not rewrite settings.json"
-    );
-}
-
 /// `aliases: false` (the default, absent `--aliases`) must skip the `shim`
 /// step entirely, the same all-or-nothing gate `setup-local.sh`'s own Step 4
 /// uses, so a caller like `setup-local.sh` can call `playbook init` for
@@ -888,54 +785,6 @@ fn binary_malformed_settings_json_exits_non_zero() {
     assert!(stderr.contains("step(s) failed"), "{stderr}");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("FAILED"), "{stdout}");
-}
-
-/// The real CLI surface `setup-local.sh` calls: `playbook init --hooks-only`
-/// must wire the guards even against a settings.json a coarse merge left
-/// stranded on a stale command, and must never touch the shell rc file
-/// (proof it skipped `shim`, the step with no consent gate of its own).
-#[test]
-fn binary_hooks_only_wires_guards_without_touching_shell_rc() {
-    // Arrange
-    let home = scratch_home("binary-hooks-only");
-    let claude_home = claude_home_of(&home);
-    write_json(
-        &claude_home.join("settings.json"),
-        &json!({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash",
-                        "hooks": [
-                            {"type": "command", "command": "~/.claude/hooks/rm-workspace-guard.sh"}
-                        ]
-                    }
-                ]
-            }
-        }),
-    );
-
-    // Act
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .arg("init")
-        .arg("--hooks-only")
-        .env("HOME", &home)
-        .env("CLAUDE_PLUGIN_ROOT", self_root())
-        .env("SHELL", "/bin/bash")
-        .output()
-        .expect("playbook binary should spawn");
-
-    // Assert
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let settings = read_json(&claude_home.join("settings.json"));
-    let commands = all_hook_commands(&settings);
-    assert!(commands.contains(&"playbook hook rm-workspace-guard".to_string()));
-    assert!(!commands.iter().any(|c| c.contains("/.claude/hooks/")));
-    assert!(!home.join(".bashrc").is_file());
 }
 
 /// The other half of the "fully wired" and "idempotent" library-level tests,

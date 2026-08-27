@@ -50,7 +50,6 @@ fn main() {
         // comment for why running this wiring alone is still safe.
         Command::Init {
             system_prompt,
-            hooks_only,
             aliases,
         } => {
             let home = common::home_dir();
@@ -70,11 +69,7 @@ fn main() {
                 system_prompt,
                 aliases,
             };
-            let outcome = if hooks_only {
-                init::run::run_hooks_only(&paths)
-            } else {
-                init::run::run(&paths)
-            };
+            let outcome = init::run::run(&paths);
             for step in &outcome.steps {
                 println!("{}", step.render());
             }
