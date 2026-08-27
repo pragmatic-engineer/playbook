@@ -14,11 +14,11 @@ Real paths this plan touches, all confirmed present.
 
 **Registries.** `hooks/hooks.json` (plugin, retired by this work) and `settings.shared.json:99-129` (the seed that wires guards, extended to wire everything).
 
-**Installer to absorb.** `shell/setup-local.sh` (301), `shell/merge-settings.py` (160). `install.sh` (262) shrinks to a bootstrap. `shell/ensure-deps.sh` (89) loses `jq` and `python@3.13` from `Brewfile`.
+**Installer to absorb.** `shell/setup-local.sh` (301), `shell/merge-settings.py` (160). `install.sh` (262) shrinks to a bootstrap. `shell/ensure-deps.sh` (89) loses `python@3.13` from `Brewfile`; `jq` stays.
 
 **Launcher (release 2).** `shell/shared/`: `worktree.sh` (493), `dispatch.sh` (148), `clean-resume.sh` (91), `sessions.sh` (69), `retention.sh` (46), `config-drift.sh` (42), `bust-cache.sh` (27). Entry points `shell/bash/cc.sh` (36), `shell/zsh/cc.zsh` (32).
 
-**Validators that must change.** ~~`shell/check-manifest.sh:31-33`~~ (**amended 2026-08-20:** that file no longer exists; WU-21 ported it to `src/manifest/check.rs`, and `ls shell/check*` returns no matches), `shell/plugin-e2e.sh:45-58` (runs `bash -n` on any non-`.py` hook command; line numbers moved from `:51-54`, and **WU-11 now owns this edit**, not WU-14, because WU-11 deletes the `hooks/hooks.json` that `:37`, `:58` and `:88` read), `commands/doctor.md` (5 layers today, gains 2; Layer 5 checks the status line against the shipped copy and shipped ahead of WU-12).
+**Validators that must change.** ~~`shell/check-manifest.sh:31-33`~~ (**amended 2026-08-20:** that file no longer exists; WU-21 ported it to `src/manifest/check.rs`, and `ls shell/check*` returns no matches), `shell/plugin-e2e.sh:45-58` (runs `bash -n` on any non-`.py` hook command; line numbers moved from `:51-54`; this was assigned to WU-11 above on the reasoning that WU-11 deletes the `hooks/hooks.json` that `:37`, `:58` and `:88` read, but **amended 2026-08-26:** WU-11 never made the edit, and it was done as part of WU-14 instead, see WU-14's amendment below), `commands/doctor.md` (5 layers today, gains 2; Layer 5 checks the status line against the shipped copy and shipped ahead of WU-12).
 
 **CI.** `.github/workflows/shell-ci.yml` lints shell and python on an ubuntu plus macos matrix. No Rust lane exists. `.github/workflows/license.yml:76` already covers `*.rs`.
 
@@ -387,17 +387,25 @@ Three corrections, all verified against `commands/doctor.md` rather than assumed
 ### WU-14: delete the old runtime
 - Requires: WU-13
 - Goal: the python and bash runtime is removed and the validators updated to match.
+
+**Amended 2026-08-26, on executing it.** Four corrections, verified against the file plan and the live tree:
+
+1. **`shell/setup-local.sh` is slimmed, not deleted.** The Files list below previously read "delete | absorbed by `playbook init`". Running the deletion against `playbook init`'s actual step list turned up work `init` has no equivalent for: the binary bootstrap, the Homebrew dependency install, and the shell alias and `--system-prompt` steps. The script is slimmed to just those steps and kept.
+2. **The `Brewfile` correction is narrower than written.** The Files list below previously read "drop `jq` and `python@3.13`". `jq` stays: `shell/memory-context.sh`, `shell/plugin-e2e.sh`, `shell/setup-local.sh` (per the correction above), `shell/shared/clean-resume.sh` and `shell/shared/worktree.sh` all still call it. Only `python@3.13` drops.
+3. **The `shell/plugin-e2e.sh` `*.py` checker-arm removal happened here, not in WU-11.** The System Snapshot's Validators paragraph assigned that edit to WU-11. WU-11 never made it. It is done as part of this unit's own `shell/plugin-e2e.sh` edit, below.
+4. **The `install.sh`/`shell/setup-local.sh` consolidation and a plugin-packaging redesign are deliberately out of range.** Keeping a slimmed `setup-local.sh` alongside `install.sh` leaves two installers on disk. Folding them into one, or redesigning how the plugin packages its shell tooling, is a separable decision with its own tradeoffs and belongs in its own ADR, not as a rider on this deletion unit.
+
 - Files:
   - `hooks/*.py` | delete | all 11
   - `hooks/*.sh` | delete | the 4 guards
   - `hooks/lib/common.py`, `hooks/lib/common.sh` | delete | both shared libraries
   - `hooks/*.test.sh`, `hooks/lib/common.test.sh`, `hooks/incr-counter.test.sh` | delete | replaced by `cargo test`
-  - `shell/setup-local.sh` | delete | absorbed by `playbook init`, deferred from WU-11 so the fallback survived until `init` was proven
+  - `shell/setup-local.sh` | slim and keep | binary bootstrap, deps, and the alias/system-prompt steps have no full Rust equivalent
   - `shell/merge-settings.py` | delete | absorbed by WU-7, deleted only now that WU-7's comparison tests have passed and WU-12 verified the install
   - `docs/adr/0007-test-mapping.md` | edit | **already created on 2026-08-18** with the suite-level mapping measured and the per-scenario rows marked TODO. WU-14 completes those rows; it no longer starts from nothing. The file states which suites are highest risk, `rebuild-memory-graph.test.sh` at 61 old scenarios against 24 Rust tests being the widest, and it records why a lower Rust count is not lost coverage, since the Rust tests are table-driven and `tests/init_merge.rs` alone carries 17 cases across 8 test functions
   - `shell/plugin-e2e.sh` | edit | stop running `bash -n` on non-`.py` hook commands
-  - `Brewfile` | edit | drop `jq` and `python@3.13` from the core set
-  - `shell/ensure-deps.sh` | edit | drop the python and jq checks
+  - `Brewfile` | edit | drop `python@3.13` only, `jq` stays (still used by `memory-context.sh`, `plugin-e2e.sh`, `setup-local.sh`, `clean-resume.sh`, `worktree.sh`)
+  - `shell/ensure-deps.sh` | edit | drop the python check only, jq stays
   - `docs/authoring/01-commands-skills-hooks.md` | edit | rewrite the two-languages section for one binary
 - Verification: `bash shell/plugin-e2e.sh && bash shell/check-manifest.sh && cargo test`
 - Tests: no new tests. Acceptance is a **written mapping table**, committed as `docs/adr/0007-test-mapping.md`, with one row per assertion in every deleted `*.test.sh`: old file, old case description, new `cargo test` name. A row with no new-test counterpart blocks the deletion of that file. "Checked case by case" is not verifiable by itself, which is why the table exists.

@@ -73,38 +73,15 @@ The `description` field does all the targeting. Write it as a "use when..." sent
 
 ## Hooks
 
-Hooks are executable scripts registered in `settings.json` under the `hooks` key. Each entry maps an event to one or more commands.
+Hooks are commands registered in `settings.json` under the `hooks` key. Each entry maps an event to one or more commands.
 
 Events wired in this config: `SessionStart`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `PreCompact`, `Stop`, `SessionEnd`. `PreToolUse` and `PostToolUse` accept an optional `matcher` to filter by tool name (e.g., `"Bash"`, `"Read|Grep|Glob|Edit|Write|NotebookEdit"`).
 
-### Two languages: python hooks, bash guards
+### One binary, one module per hook
 
-The `hooks/` directory is deliberately mixed-language (ADR 0005):
+All fifteen hooks are Rust functions compiled into the single `playbook` binary, one module per hook under `src/hooks/<name>.rs`. `src/hooks/mod.rs` declares every module and an exhaustive `dispatch` match over the `HookName` enum in `src/lib.rs`, so adding a hook the CLI cannot invoke fails the build instead of silently doing nothing at runtime.
 
-- **The eleven non-guard hooks are python** (`hooks/*.py`), sharing `hooks/lib/common.py`. Python is the default for any new hook: the data-shaping hooks (memory graph rebuild, anchor lookup, frontmatter parsing) were carrying jq and awk that are far clearer as stdlib python, and one language for that work is easier to maintain.
-- **The four safety guards stay bash** (`hooks/rm-workspace-guard.sh`, `hooks/no-dash-guard.sh`, `hooks/bg-await-guard.sh`, `hooks/precommit-check.sh`). They fire on the `Bash`/`Edit` fast path and must fail safe. `bg-await-guard.sh`, `no-dash-guard.sh` and `precommit-check.sh` source `hooks/lib/common.sh`; `rm-workspace-guard.sh` deliberately does not, so a guard that blocks `rm` keeps working even if the shared library is broken or missing.
-
-Both `common.py` and `common.sh` exist on purpose and expose the same helpers (payload field extraction, session dir, atomic append, the `emit_*` JSON shapes). Edit the one your hook's language uses; keep the two in step when you change a shared behaviour.
-
-**Which language for a new hook?** Default to python on `common.py`. Choose bash only for a guard that must block on the `Bash` or `Edit` path and fail safe with the fewest dependencies. Do not choose bash for speed: see the timing note below, where a real guard measures 26 ms against python's 29 ms cold start.
-
-**Timing (re-measured 2026-08-12, macOS arm64, average of 10 fires each).** An earlier note here claimed bash costs 7 ms against python's 35 to 41 ms. That understated bash by roughly 4x. Real per-fire cost:
-
-| | ms |
-|---|---:|
-| `bash -c true` (floor) | 10 |
-| `bg-await-guard.sh` | 26 |
-| `python3` cold start | 29 |
-| `rebuild-memory-graph.py` | 41 |
-| `post-edit-track.py` | 46 |
-| `search-counter.py` | 46 |
-| `memory-anchors.py` | 53 |
-
-A real bash guard costs 26 ms, within 3 ms of a bare python cold start, because it shells out to `jq` per field through `common.sh`. The python-versus-bash gap is 15 to 27 ms, not the ~30 ms claimed before.
-
-**Hooks for one event run in parallel**, so an event costs about as much as its slowest hook, not the sum. Measured against live transcripts: `PreToolUse:Read` has a p50 of 57 ms over 731 recorded events while each of its three python hooks measures 46 to 53 ms alone. Serial would be ~145 ms.
-
-So "choose bash for speed" is weaker than it looks. Pick bash for a guard when you want it to fail safe with the fewest moving parts, not because it is meaningfully faster.
+There is no language split left to choose between. The data-shaping hooks (memory graph rebuild, anchor lookup, frontmatter parsing) and the fast safety guards (`rm-workspace-guard`, `no-dash-guard`, `bg-await-guard`, `precommit-check`) are all plain functions sharing the same `src/common/` helpers (payload field extraction, session dir, atomic append, the `emit_*` JSON shapes) and the same compiled binary, so there is no per-hook cold start to weigh a language choice against.
 
 **Registering a hook in `settings.json`:**
 
@@ -116,7 +93,7 @@ So "choose bash for speed" is weaker than it looks. Pick bash for a guard when y
       "hooks": [
         {
           "type": "command",
-          "command": "~/.claude/hooks/my-hook.py"
+          "command": "playbook hook rm-workspace-guard"
         }
       ]
     }
@@ -124,21 +101,19 @@ So "choose bash for speed" is weaker than it looks. Pick bash for a guard when y
 }
 ```
 
+`src/init/wire.rs` writes this bare `playbook hook <name>` form for every hook when it generates `settings.json`: no absolute path to a script, since the binary is already on `PATH`.
+
 **Input/output contract:**
 
-Hook scripts receive a JSON payload on stdin. A python hook imports `lib/common.py` and reads fields with `field`:
+Every hook receives a JSON payload on stdin. `main.rs` parses it once into a `Payload` and passes it to the dispatched module, which reads fields with `field`:
 
-```python
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-import common as c
-
-tool = c.field(".tool_name")               # PreToolUse: which tool fired
-path = c.field(".tool_input.file_path")    # Read: the file being read
-source = c.field(".source")                # SessionStart: "startup" or "resume"
+```rust
+let tool = payload.field(".tool_name");            // PreToolUse: which tool fired
+let path = payload.field(".tool_input.file_path"); // Read: the file being read
+let source = payload.field(".source");              // SessionStart: "startup" or "resume"
 ```
 
-A bash guard sources `lib/common.sh` instead and uses the same-named helper `hi_field '.tool_name'`. To inject output back to Claude, write JSON to stdout:
+To inject output back to Claude, write JSON to stdout:
 
 ```json
 {
@@ -150,36 +125,30 @@ A bash guard sources `lib/common.sh` instead and uses the same-named helper `hi_
 }
 ```
 
-The `common` helpers (`emit_pre_context`, `emit_pre_deny`, `emit_prompt_context`, `emit_system_message`) build this JSON for you. Exit 0 in all normal cases; a hook must never break Claude Code, so swallow errors and emit nothing rather than raising.
+The `src/common/emit.rs` helpers (`emit_pre_context`, `emit_pre_deny`, `emit_prompt_context`, `emit_system_message`, `emit_block`) build this JSON for you. A hook must never break Claude Code, so swallow errors and emit nothing rather than panicking; `hooks::dispatch` is tested against malformed and missing-field payloads for every hook name to hold that guarantee.
 
-**Minimal hook template (python, the default):**
+**Minimal hook template:**
 
-```python
-#!/usr/bin/env python3
-# SPDX-FileCopyrightText: 2026 Your Name
-# SPDX-License-Identifier: MIT
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-import common as c
+```rust
+// SPDX-FileCopyrightText: 2026 Your Name
+// SPDX-License-Identifier: MIT
 
+use crate::common::emit_pre_context;
+use crate::common::payload::Payload;
 
-def main() -> int:
-    tool = c.field(".tool_name")
+pub fn run(payload: &Payload) {
+    let tool = payload.field(".tool_name");
 
-    # Your logic here.
+    // Your logic here.
 
-    # Emit context when needed.
-    c.emit_pre_context("PreToolUse", "your message")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    // Emit context when needed.
+    emit_pre_context("PreToolUse", "your message");
+}
 ```
 
-Make it executable (`chmod +x`) and give it the `#!/usr/bin/env python3` shebang so `settings.json` can invoke it directly. A new safety guard instead uses `#!/usr/bin/env bash`, sources `lib/common.sh`, and builds output with `jq -cn`.
+Wire it in by adding a `pub mod` line and a match arm in `src/hooks/mod.rs`'s `dispatch`, plus a variant on `HookName` in `src/lib.rs`. Both are exhaustive, so a missing arm fails the build rather than the hook silently doing nothing.
 
-Hook and settings changes take effect on a fresh session, not a resumed one. After editing `settings.json` or a hook script, run `cc fresh` (or plain `claude`). Resumed sessions run the config snapshot from their original startup; `cc` warns you when the config has drifted.
+Hook and settings changes take effect on a fresh session, not a resumed one. After editing `settings.json` or rebuilding the binary, run `cc fresh` (or plain `claude`). Resumed sessions run the config snapshot from their original startup; `cc` warns you when the config has drifted.
 
 ## See also
 
