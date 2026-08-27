@@ -137,6 +137,7 @@ Real engineers writing PR comments make small mistakes: typos, dropped words, ca
 
 - **Trust the author.** Assume they know the language and the codebase. Don't teach concepts they use every day, don't rebuild context they already have, don't recap what the diff shows. Say the problem, not the background to it.
 - **One sentence when possible, two at most: the problem, then why.** Use a direct causal template: "this won't work because X, do Y instead" or "this will cause X because Y." State the defect and its cause, then stop. A second sentence only when the mechanism is genuinely non-obvious (a subtle race, a data-loss path you can't see from the diff). A dev skims a review comment for the gist, not an essay: plainest words available, short sentences, active voice, no filler.
+- **The `blocking:` label already argues priority. Don't argue it again.** State the defect and stop; never add a clause about why it is worth fixing, what it would cost to ignore, or why now is the right time. "blocking: this leaks the session token to the client" is enough. Not "blocking: this leaks the session token, which matters because an attacker could hijack the session, and it costs nothing to fix now." The label carries the urgency; the sentence only needs the defect.
 - **Avoid jargon.** Say things in plain words a teammate would use out loud. If a technical term is unavoidable, add what it means in a few words. Prefer "anyone can read another user's record" over "IDOR".
 - Assume the reader is a senior dev.
 - Do NOT pad with blank lines or formatting. The label + the comment is enough.
@@ -244,6 +245,14 @@ Patterns that flag content as non-human. NEVER appear in GitHub-posted content:
 **Review finding** (good: the problem, then the failure):
 
 > issue: this loads every row before filtering, so a large tenant OOMs the process. Push the filter into the query.
+
+**Review finding, blocking label** (bad: argues priority the label already carries):
+
+> blocking: the retry loop has no max attempt count, and since a stuck dependency means this runs forever, it's worth capping now while the change is small.
+
+**Review finding, blocking label** (good: the label already says urgent, the sentence only needs the defect):
+
+> blocking: the retry loop has no max attempt count, so a stuck dependency retries forever.
 
 **Review finding, complex fix** (bad: hands over a full working implementation):
 
