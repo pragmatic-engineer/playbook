@@ -39,7 +39,7 @@ After resolving `PR_NUMBER` and `HEAD_SHA`, decide how to read the PR's files:
 1. `git rev-parse HEAD` equals `HEAD_SHA`
 2. `git status --porcelain --untracked-files=no` is empty (no staged or unstaged tracked-file changes)
 
-In self-review mode (no argument), the in-place predicate runs the same check. If the current branch's HEAD matches `HEAD_SHA` and the tree is clean, review in place.
+With no argument (`SELF_MODE`), the in-place predicate runs the same check. If the current branch's HEAD matches `HEAD_SHA` and the tree is clean, review in place.
 
 **Worktree mode** (all other cases): set up an isolated worktree:
 
