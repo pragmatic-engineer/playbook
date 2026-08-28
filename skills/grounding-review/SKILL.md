@@ -61,7 +61,7 @@ Both `/playbook:quick-review` and `/playbook:deep-review` render this exact stru
 <1 to 3 sentences, human voice, why the verdict>
 
 ### Reviewers
-<deep-review only: lens roll-up, e.g. "security 2 · logic 1 · perf 0 · tests 1">
+<deep-review and implement Step 9 only: lens roll-up with tier, e.g. "security: full (2) · docs: cheap-check (0) · perf: skip">
 
 ### Findings
 <numbered finding blocks, ordered blocking, then issue, then suggestion, then nitpick, then question>
@@ -127,7 +127,11 @@ Not every category applies to every diff. Focus on what's relevant; skip categor
 - **Architecture:** references/architecture.md
 - **Scope Control:** references/scope-control.md
 
-Each path above is relative to THIS skill's own directory, the path the Skill tool reports as "Base directory for this skill" when `playbook:grounding-review` is invoked, not relative to the caller's working directory or any target repo being reviewed. A lens-scoped reviewer dispatched by `/playbook:deep-review` or `/playbook:implement` never invokes this skill directly for that dispatch; its orchestrator resolves the matching file to an absolute path (via `$CLAUDE_PLUGIN_ROOT`, the same env var `hooks/hooks.json`, `commands/doctor.md`, and `commands/setup.md` already use for plugin-bundled files) and hands that agent the resolved path, since a reviewer with no `Bash` cannot expand `$CLAUDE_PLUGIN_ROOT` itself and `Read` requires an absolute path. An unscoped reviewer (`/playbook:quick-review`'s single pass) invokes this skill directly, reads the base directory the Skill tool reports, and combines it with each relative path above to read all 7.
+Each path above is relative to THIS skill's own directory, the path the Skill tool reports as "Base directory for this skill" when `playbook:grounding-review` is invoked, not relative to the caller's working directory or any target repo being reviewed.
+
+A lens-scoped reviewer dispatched by `/playbook:deep-review` or `/playbook:implement` never invokes this skill directly for that dispatch. Its orchestrator resolves the matching file to an absolute path instead, via `$CLAUDE_PLUGIN_ROOT`, the same env var `hooks/hooks.json`, `commands/doctor.md`, and `commands/setup.md` already use for plugin-bundled files, and hands that agent the resolved path. This is necessary because a reviewer with no `Bash` cannot expand `$CLAUDE_PLUGIN_ROOT` itself, and `Read` requires an absolute path either way.
+
+An unscoped reviewer (`/playbook:quick-review`'s single pass) invokes this skill directly, reads the base directory the Skill tool reports, and combines it with each relative path above to read all 7.
 
 ## Known Rationalizations (Review)
 
