@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: MIT
+#
+# Runs shell/eval-review-triage.sh, the real, live-call regression eval for
+# the review-triage classifier (agents/review-triage.md), automatically on
+# any PR that touches the classifier or its eval inputs.
+# It costs one live `claude -p --model haiku` call plus one `gh pr diff`
+# fetch per fixture in shell/fixtures/review-triage-eval-set.json (11
+# fixtures as of writing), real money and real GitHub API calls every run,
+# so the `paths` filter below keeps it scoped to changes that can actually
+# move the classifier's accuracy (per the script's own "RE-RUN whenever
+# agents/review-triage.md's classification logic changes" header), and
+# draft PRs are skipped so it doesn't re-run on every WIP push.
+#
+# This is an ADVISORY check only: it is not in the branch ruleset's required
+# status checks, so a failure (including a flaky live-model call) reports
+# red on the PR but never blocks the merge queue. Add it to the ruleset's
+# required checks only after S6 has recorded a trusted-baseline passing run.
+#
+# Requires the CLAUDE_CODE_OAUTH_TOKEN repository secret: a long-lived OAuth
+# token from a Claude subscription, generated locally with `claude setup-token`
+# and stored via `gh secret set CLAUDE_CODE_OAUTH_TOKEN`. Without it, the
+# claude CLI has no credentials and every fixture's live call fails. The
+# script never passes `--bare`, so the CLI reads this variable normally.
+#
+# SECRET SAFETY: this workflow triggers on `pull_request` (never
+# `pull_request_target`), so a PR opened from a fork of this public repo
+# runs with no repository secrets and a read-only GITHUB_TOKEN, GitHub's
+# standard isolation for fork-originated runs. The "Run the review-triage
+# eval harness" step checks for the token before doing anything and exits
+# cleanly (not a failure) when it's absent, rather than surface a confusing
+# credential error on an external contributor's PR.
+
+name: eval-review-triage
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - agents/review-triage.md
+      - shell/eval-review-triage.sh
+      - shell/fixtures/review-triage-eval-set.json
+
+permissions: {}
+
+concurrency:
+  group: eval-review-triage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          # audit, not block: this step calls the Anthropic API (via the
+          # claude CLI, installed from claude.ai's bootstrap installer
+          # below) plus the GitHub API (via gh, for the PR diff fetches),
+          # across endpoints that can rotate. Matches shell-ci.yml's
+          # existing rationale for audit mode on this repo's other
+          # network-touching CI steps.
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install the claude CLI
+        # The official installer's PATH handling is delegated to `claude
+        # install` and isn't fully visible from the bootstrap script alone,
+        # and GitHub Actions steps don't source .bashrc/.profile between
+        # steps, so a shell-rc-only PATH change from the installer would
+        # not carry over to the next step. Locate the binary explicitly
+        # (command -v first, the common ~/.local/bin fallback second) and
+        # persist its directory via $GITHUB_PATH; fail loudly rather than
+        # let the next step hit a confusing "claude: command not found".
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          CLAUDE_BIN="$(command -v claude || true)"
+          if [[ -z "$CLAUDE_BIN" && -x "$HOME/.local/bin/claude" ]]; then
+            CLAUDE_BIN="$HOME/.local/bin/claude"
+          fi
+          if [[ -z "$CLAUDE_BIN" ]]; then
+            echo "::error::claude CLI not found on PATH or in ~/.local/bin after install" >&2
+            exit 1
+          fi
+          dirname "$CLAUDE_BIN" >> "$GITHUB_PATH"
+
+      - name: Run the review-triage eval harness
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+            echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not set (expected on fork PR runs, which get no repository secrets); skipping the live eval."
+            exit 0
+          fi
+          bash shell/eval-review-triage.sh
