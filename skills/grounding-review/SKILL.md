@@ -61,7 +61,7 @@ Both `/playbook:quick-review` and `/playbook:deep-review` render this exact stru
 <1 to 3 sentences, human voice, why the verdict>
 
 ### Reviewers
-<deep-review only: lens roll-up, e.g. "security 2 · logic 1 · perf 0 · tests 1">
+<deep-review and implement Step 9 only: lens roll-up with tier, e.g. "security: full (2) · docs: cheap-check (0) · perf: skip">
 
 ### Findings
 <numbered finding blocks, ordered blocking, then issue, then suggestion, then nitpick, then question>
@@ -119,65 +119,19 @@ The subject is the first thing the author reads. Describe the consequence or sit
 
 Not every category applies to every diff. Focus on what's relevant; skip categories where the change has no meaningful impact.
 
-### Security
+- **Security:** references/security.md
+- **Performance:** references/performance.md
+- **Reliability:** references/reliability.md
+- **Maintainability:** references/maintainability.md
+- **Functionality / Correctness:** references/correctness.md
+- **Architecture:** references/architecture.md
+- **Scope Control:** references/scope-control.md
 
-- Missing or insufficient authentication/authorisation checks.
-- Untrusted input flowing into SQL, shell, templates, or redirects without sanitisation.
-- Secrets, tokens, or credentials committed to source or logged in plain text.
-- Weak or outdated cryptographic primitives.
-- Overly permissive CORS, CSP, or IAM policies.
+Each path above is relative to THIS skill's own directory, the path the Skill tool reports as "Base directory for this skill" when `playbook:grounding-review` is invoked, not relative to the caller's working directory or any target repo being reviewed.
 
-### Performance
+A lens-scoped reviewer dispatched by `/playbook:deep-review` or `/playbook:implement` never invokes this skill directly for that dispatch. Its orchestrator resolves the matching file to an absolute path instead, via `$CLAUDE_PLUGIN_ROOT`, the same env var `hooks/hooks.json`, `commands/doctor.md`, and `commands/setup.md` already use for plugin-bundled files, and hands that agent the resolved path. This is necessary because a reviewer with no `Bash` cannot expand `$CLAUDE_PLUGIN_ROOT` itself, and `Read` requires an absolute path either way.
 
-- N+1 query patterns or unbounded result sets.
-- Large object copies or allocations in hot paths.
-- Blocking I/O on async threads or event loops.
-- Polling without backoff or jitter.
-- Unnecessary serialisation round-trips.
-- Bypassing existing caches, indexes, or helper functions that already solve the problem.
-
-### Reliability
-
-- Missing error handling on I/O, network calls, or external service interactions.
-- Silent catch blocks that swallow errors without logging or re-raising.
-- Unsafe retry logic (no backoff, no idempotency, no circuit breaker).
-- Unverified assumptions about external API behaviour. Claims about how a third-party API behaves MUST be verified against its documentation. "They likely send a Retry-After header" is not acceptable without a doc reference.
-- Logging gaps that would make production incidents harder to diagnose.
-- Resource leaks (connections, file handles, timers not cleaned up).
-- Don't stop at the function that skips error handling: trace up the call chain for a boundary that catches it. A repository or DB-access call is a boundary too, same weight as an API route taking external input; it's fine if it doesn't handle an error itself as long as the layer above it (the service) does. Flag it only when no layer in the chain handles it.
-- In TypeScript, external or untyped data (request bodies, config, third-party responses, DB rows) cast with `as` instead of parsed with a runtime schema validator (Zod, Valibot, or whatever the project already uses). A cast is a compile-time assertion only; nothing checks it at runtime, so malformed data flows straight through.
-
-### Maintainability
-
-- Mixed concerns in a single function, class, or module.
-- Magic numbers or string literals that should be named constants.
-- Inline types or schemas that duplicate existing definitions.
-- Naming that diverges from established project conventions.
-- Bypassing infrastructure helpers (logging, config, HTTP clients) with ad-hoc alternatives.
-- Injecting raw functions as dependencies when the function belongs to an existing service interface.
-
-### Functionality / Correctness
-
-- Logic that doesn't match the stated intent (PR description, ticket, comments).
-- Missing guard clauses for null, empty, or out-of-range inputs.
-- Silent fallbacks that hide incorrect behaviour (default values masking bugs).
-- Off-by-one errors, incorrect boundary conditions, race conditions.
-- Type coercion or implicit conversion that changes semantics.
-
-### Architecture
-
-- Acknowledged future risks without a concrete mitigation plan (no follow-up ticket, no retention strategy, no capacity estimate).
-- Unbounded growth patterns: tables, queues, caches, or logs that grow without expiry, partitioning, or archival.
-- Missing capacity or scaling considerations.
-- Trade-offs accepted without tracking the deferred work.
-- Schema designs that preclude future requirements mentioned in the PR.
-- Dependencies on concretions where established service interfaces exist for the same capability.
-
-### Scope Control
-
-- Unrelated changes bundled into the same PR (refactors, formatting, drive-by fixes).
-- Behaviour changes without corresponding test updates.
-- New dependencies or configuration changes not mentioned in the PR description.
+An unscoped reviewer (`/playbook:quick-review`'s single pass) invokes this skill directly, reads the base directory the Skill tool reports, and combines it with each relative path above to read all 7.
 
 ## Known Rationalizations (Review)
 
