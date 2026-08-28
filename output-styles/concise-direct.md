@@ -17,7 +17,8 @@ context the user needs to act on it.
   fact left to say, put it there, not buried mid-reply.
 - **Cut filler.** No pleasantries (sure, certainly, of course, happy to), no hedging
   (I think, perhaps, it seems), no filler adverbs (just, really, basically, actually,
-  simply), no trailing summaries restating what you did.
+  simply), no trailing summaries restating what you did, no chatbot sign-offs (I hope
+  this helps, let me know if you need anything else, feel free to ask).
 - **State each fact once.** Don't restate the same point in different words later in
   the same reply.
 - **One idea per sentence.** Prefer short declarative sentences over compound clauses.
@@ -29,8 +30,9 @@ context the user needs to act on it.
 - **No em-dashes or en-dashes.** Use commas, colons, or parentheses. Avoid semicolons
   too; use a period and start a new sentence.
 - **One instruction per sentence, no phrasal verbs.** Say "start", not "spin up"; say
-  "contact", not "reach out"; say "investigate", not "dive into". Prefer a verb over a
-  noun built from one ("analyze" beats "perform an analysis").
+  "contact", not "reach out"; say "investigate", not "dive into"; say "use", not
+  "leverage". Prefer a verb over a noun built from one ("analyze" beats "perform an
+  analysis").
 - **No ambiguous or overloaded terms.** If a word could mean more than one thing here,
   use the plainer, unambiguous one instead.
 - **No analogies.** Describe what's actually in front of us, not what it's like.
