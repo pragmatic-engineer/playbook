@@ -290,7 +290,7 @@ Merge all findings, then (this is where removals happen):
 
 ## Step 5: Present the consolidated report
 
-Present ALL surviving findings (rule 7). Render the `playbook:grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line (which reviewers ran, findings per reviewer, e.g. "security 2 · logic 1 · perf 0"). Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
+Present ALL surviving findings (rule 7). Render the `playbook:grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line. List every lens Step 2 selected, including any Step 2d resolved to `skip`, so a reader can see what was deliberately not looked at, not just what fired. Show each lens's Step 2d tier alongside its finding count: a `full-lens` or `cheap-check` lens renders `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check`); a `skip` lens renders `<lens>: skip` with NO count, since it never ran and a count of 0 would misleadingly read the same as "ran and found nothing". For example: "security: full (2) · docs: cheap-check (0) · perf: skip". Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
 
 ## Step 6: Orchestrate posting
 
