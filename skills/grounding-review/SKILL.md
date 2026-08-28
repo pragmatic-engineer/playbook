@@ -119,15 +119,15 @@ The subject is the first thing the author reads. Describe the consequence or sit
 
 Not every category applies to every diff. Focus on what's relevant; skip categories where the change has no meaningful impact.
 
-- **Security:** skills/grounding-review/references/security.md
-- **Performance:** skills/grounding-review/references/performance.md
-- **Reliability:** skills/grounding-review/references/reliability.md
-- **Maintainability:** skills/grounding-review/references/maintainability.md
-- **Functionality / Correctness:** skills/grounding-review/references/correctness.md
-- **Architecture:** skills/grounding-review/references/architecture.md
-- **Scope Control:** skills/grounding-review/references/scope-control.md
+- **Security:** references/security.md
+- **Performance:** references/performance.md
+- **Reliability:** references/reliability.md
+- **Maintainability:** references/maintainability.md
+- **Functionality / Correctness:** references/correctness.md
+- **Architecture:** references/architecture.md
+- **Scope Control:** references/scope-control.md
 
-A lens-scoped reviewer (one lens in a `/playbook:deep-review` or `/playbook:implement` swarm) reads only its own matching reference file(s). An unscoped reviewer (`/playbook:quick-review`'s single pass) reads all 7.
+Each path above is relative to THIS skill's own directory, the path the Skill tool reports as "Base directory for this skill" when `playbook:grounding-review` is invoked, not relative to the caller's working directory or any target repo being reviewed. A lens-scoped reviewer dispatched by `/playbook:deep-review` or `/playbook:implement` never invokes this skill directly for that dispatch; its orchestrator resolves the matching file to an absolute path (via `$CLAUDE_PLUGIN_ROOT`, the same env var `hooks/hooks.json`, `commands/doctor.md`, and `commands/setup.md` already use for plugin-bundled files) and hands that agent the resolved path, since a reviewer with no `Bash` cannot expand `$CLAUDE_PLUGIN_ROOT` itself and `Read` requires an absolute path. An unscoped reviewer (`/playbook:quick-review`'s single pass) invokes this skill directly, reads the base directory the Skill tool reports, and combines it with each relative path above to read all 7.
 
 ## Known Rationalizations (Review)
 
