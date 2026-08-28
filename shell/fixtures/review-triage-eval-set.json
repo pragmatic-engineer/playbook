@@ -1,0 +1,106 @@
+[
+  {
+    "id": "docs-only-voice-257",
+    "pr": 257,
+    "risk_tier": "docs-only",
+    "lenses": {
+      "security": { "found": false },
+      "correctness": { "found": false },
+      "scope-control": { "found": false }
+    },
+    "ground_truth_source": "gh pr view 257 --json comments,reviews returns empty comments and reviews arrays; gh api --paginate /repos/pragmatic-engineer/playbook/pulls/257/comments returns 0 review comments. This is the repo-wide pattern (checked across PRs 3-257): the only comments that ever appear on any PR here are automated bot messages (Dependency Review, PR Quality Gate, stale-lock notices), never a human or agent finding. gh pr diff 257 shows the change touches only output-styles/concise-direct.md, prompts/SYSTEM_PROMPT.md, and skills/writing-style/SKILL.md: prose additions folding in 'challenge assumptions' and 'no repetition' voice rules, no code, no config, no examples containing secrets or commands. Docs-only, mechanical, and self-contained to its stated scope, so found=false is the grounded default for every candidate lens. True-negative fixture: every declared lens is false."
+  },
+  {
+    "id": "docs-only-dispatch-comment-212",
+    "pr": 212,
+    "risk_tier": "docs-only",
+    "lenses": {
+      "security": { "found": false },
+      "maintainability": { "found": false }
+    },
+    "ground_truth_source": "gh pr view 212 --json comments,reviews and gh api .../pulls/212/comments both return empty/0 (same repo-wide pattern as the 257 fixture). gh pr diff 212 shows a single 3-line hunk in shell/shared/dispatch.sh: it replaces a real username with a placeholder inside a code COMMENT (the example illustrating the project-dir hashing scheme) and expands the comment to explain the resulting double dash. The diff's only executable line ('local project_dir=...') is unchanged context, not part of the +/- hunk. The PR's own title says it redacts a real username from the comment's example, i.e. it fixes exactly the kind of minor disclosure a security lens would flag, and the fix itself introduces no new code path, so found=false for security (the fix is clean) and maintainability (comment-only, no structural change)."
+  },
+  {
+    "id": "docs-writing-style-255",
+    "pr": 255,
+    "risk_tier": "docs-only",
+    "lenses": {
+      "correctness": { "found": false },
+      "scope-control": { "found": false }
+    },
+    "ground_truth_source": "gh pr view 255 --json comments,reviews and gh api .../pulls/255/comments both empty/0. gh api pulls/255/files confirms the entire diff is skills/writing-style/SKILL.md +9/-0: one new bullet plus two new before/after example blocks illustrating that a 'blocking:' label already argues priority. The addition sits in the same file and section as, and extends, the existing before/after example pattern two rules above it, and adds nothing outside the stated scope of the PR title, so found=false for correctness (nothing misstates the rule) and scope-control (nothing beyond the stated 9-line addition)."
+  },
+  {
+    "id": "security-rm-guard-tmp-exempt-206",
+    "pr": 206,
+    "risk_tier": "high-risk",
+    "lenses": {
+      "security": { "found": true }
+    },
+    "ground_truth_source": "gh pr view 206 --json comments,reviews and gh api .../pulls/206/comments both empty/0 (repo-wide pattern, see fixture docs-only-voice-257). Ground truth instead comes from git history on the touched file: git log --oneline -- hooks/rm-workspace-guard.sh shows PR 206 ('exempt paths inside /tmp from the rm workspace guard', merged 2026-08-22T09:49:45Z) is followed, about 19 hours later, by PR 207 ('treat quoted rm mentions as prose, not commands', merged 2026-08-23T04:57:44Z), which modifies the exact same guard file to close a different, still-open gap in the same rm-blocking regex logic. A second fix to the same security-critical guard landing within a day is real, verifiable evidence the guard's regex domain still had an unaddressed gap in this window, so found=true for security on PR 206's diff."
+  },
+  {
+    "id": "security-rm-guard-quoted-mentions-207",
+    "pr": 207,
+    "risk_tier": "high-risk",
+    "lenses": {
+      "security": { "found": true }
+    },
+    "ground_truth_source": "Same repo-wide empty-comments pattern (gh pr view/gh api both empty/0 for PR 207). git log --oneline -- hooks/rm-workspace-guard.sh shows PR 207 ('treat quoted rm mentions as prose, not commands', merged 2026-08-23T04:57:44Z) is followed, about 31 minutes later, by PR 209 ('block rm targets with unexpanded shell variables', merged 2026-08-23T05:28:57Z), again touching the same guard file to close a different gap (unexpanded-variable rm targets were not yet blocked). Consecutive same-file security-guard fixes 31 minutes apart is direct evidence the domain still had an open gap after 207, so found=true for security."
+  },
+  {
+    "id": "security-rm-guard-unexpanded-vars-209",
+    "pr": 209,
+    "risk_tier": "high-risk",
+    "lenses": {
+      "security": { "found": true }
+    },
+    "ground_truth_source": "Same repo-wide empty-comments pattern (gh pr view/gh api both empty/0 for PR 209). git log --oneline -- hooks/rm-workspace-guard.sh shows PR 209 ('block rm targets with unexpanded shell variables', merged 2026-08-23T05:28:57Z) is followed, about 36 minutes later, by PR 210 ('treat heredoc bodies as data in rm workspace guard', merged 2026-08-23T06:04:26Z), again touching the same guard file, this time for a heredoc-body gap. Consecutive same-file fixes 36 minutes apart is direct evidence the domain still had an open gap after 209, so found=true for security."
+  },
+  {
+    "id": "security-rm-guard-heredoc-210",
+    "pr": 210,
+    "risk_tier": "high-risk",
+    "lenses": {
+      "security": { "found": false }
+    },
+    "ground_truth_source": "Same repo-wide empty-comments pattern (gh pr view/gh api both empty/0 for PR 210). git log --oneline -- hooks/rm-workspace-guard.sh shows the next PR to touch this file after 210 is PR 214 ('allow rm inside the ~/.cache scratch tree', merged 2026-08-23T13:36:32Z, roughly 7.5 hours later), which is a 'feat' adding a new exemption, not a 'fix' closing a gap PR 210 left behind. Unlike the 206->207->209->210 chain, no subsequent fix-class PR revisits PR 210's own heredoc-handling change specifically, so there is no history evidence of a lingering gap in PR 210's own diff: found=false for security, distinguishing it from the three preceding fixtures in the same file, which do have that evidence."
+  },
+  {
+    "id": "reliability-serialize-writes-240",
+    "pr": 240,
+    "risk_tier": "medium",
+    "lenses": {
+      "reliability": { "found": false }
+    },
+    "ground_truth_source": "gh pr view 240 --json comments,reviews and gh api .../pulls/240/comments both empty/0. gh api pulls/240/files shows the change adds file-locking/serialization to three hook files plus three new regression-test files (tests/hooks_graph_writer.rs +94, tests/hooks_session.rs +44, tests/hooks_turn.rs +36) covering the new concurrent-write behaviour. git log --oneline -- src/hooks/session_clean_exit.rs shows no PR after 240 revisits this file for a further concurrency fix. Because the fix ships with dedicated regression tests and no later PR reopens the same file for a related gap, found=false for reliability."
+  },
+  {
+    "id": "reliability-lock-writes-242",
+    "pr": 242,
+    "risk_tier": "medium",
+    "lenses": {
+      "reliability": { "found": false }
+    },
+    "ground_truth_source": "gh pr view 242 --json comments,reviews and gh api .../pulls/242/comments both empty/0. gh pr diff 242 shows a uniform, mechanical change repeated across five command files (commands/adr.md, brainstorm.md, implement.md, learn-project.md, scope.md): the same file-locking guard pattern added to each file's MEMORY.md/.gitignore write step. git log --oneline -- commands/implement.md shows the only later touches to that file (Haiku triage, Step 9 report changes) are unrelated feature additions, not a fix revisiting the locking mechanism itself. No history evidence of a lingering gap in the locking pattern this PR introduced, so found=false for reliability."
+  },
+  {
+    "id": "correctness-create-pr-readiness-216",
+    "pr": 216,
+    "risk_tier": "medium",
+    "lenses": {
+      "correctness": { "found": false }
+    },
+    "ground_truth_source": "gh pr view 216 --json comments,reviews and gh api .../pulls/216/comments both empty/0. gh pr diff 216 shows a +38/-7 change to commands/create-pull-request.md's pre-flight step, moving readiness-verdict computation earlier in the flow. git log --oneline -- commands/create-pull-request.md shows the only PR to touch this file after 216 is PR 239 ('require self-review and /clear between phases'), an unrelated feature addition to a different part of the command, not a fix revisiting the readiness-verdict computation PR 216 introduced. No history evidence of a lingering gap in the moved logic, so found=false for correctness."
+  },
+  {
+    "id": "architecture-justfile-202",
+    "pr": 202,
+    "risk_tier": "medium",
+    "lenses": {
+      "architecture": { "found": false },
+      "maintainability": { "found": false }
+    },
+    "ground_truth_source": "gh pr view 202 --json comments,reviews and gh api .../pulls/202/comments both empty/0. gh api pulls/202/files shows a 15-file, wide-but-shallow diff replacing Makefile (-21 lines) with justfile (+95 lines) and updating every script/doc that referenced 'make' to reference 'just' instead (Brewfile, docs/adr/0007-*, hooks/*, shell/*, src/*, uninstall.sh); each individual file's own change is a small, mechanical target-name substitution. git log --oneline -- justfile shows no PR after 202 revisits the justfile itself for a correction. A same-purpose, consistently-applied rename across every caller with no later fix, so found=false for architecture and maintainability."
+  }
+]
