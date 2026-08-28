@@ -210,11 +210,12 @@ If approved (or `AUTO_COMMIT=true`):
 
 1. Invoke the `commit-and-push` skill with the `-A` flag and an extra hint that the commit message should reference the PR (e.g. "address review comments on #<PR_NUMBER>"). The skill handles staging, formatting, message generation, rebase, and push. Capture the resulting commit SHA from the skill's output.
 
-2. For each `both-queued` reply, finalise the body by substituting `<SHA>` and post it:
+2. For each `both-queued` reply, finalise the body by substituting `<SHA>`, then dispatch `patch-applier` (`subagent_type: patch-applier`) with the exact finalised body and the command shape to run:
    ```bash
    gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" \
      -f body="$REPLY_TEXT_WITH_SHA"
    ```
+   `patch-applier` posts it and reports back the exact body it posted, or a failure; print that returned body before moving to the next queued reply. This is the same delegation Step 4 uses for an immediate reply, applied here to the deferred post: Step 4's "who executes the post changes, not when" claim depends on this step actually dispatching `patch-applier` too, not the main session running `gh api` directly.
 
 3. Print a final summary:
    ```
