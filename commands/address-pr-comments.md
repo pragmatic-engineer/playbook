@@ -176,9 +176,11 @@ For each indexed item, do this loop:
    - `Edit-then-fix` means: user wants to write a different fix than what you proposed. Wait for them to describe it, then apply.
    - `Quit` means: stop iterating, jump straight to Step 5 with what you have so far.
 
-5. **Apply.** Everything above this sub-step (show context, verify the claim, choose the action, draft the exact diff or reply text, get user approval) stays in the main session unchanged. Once an action is approved and its content is fully decided, dispatch execution to `patch-applier` (`subagent_type: patch-applier`) rather than applying it directly:
-   - For **Fix** or **Both** (the fix half): dispatch `patch-applier` with the exact, already-approved diff. It applies the `Edit` and reports back the exact hunk it applied, or a failure. Print that returned hunk to the user immediately, before advancing to the next indexed item.
-   - For **Reply only** (no fix), or the reply half of **Both** once its content is decided: dispatch `patch-applier` with the exact reply text and the exact command shape to run, matching the two existing shapes below:
+5. **Apply.** Everything above this sub-step (show context, verify the claim, choose the action, draft the exact diff or reply text, get user approval) stays in the main session unchanged. Once an action is approved and its content is fully decided, dispatch execution to `patch-applier` (`subagent_type: patch-applier`) rather than applying it directly. `patch-applier` holds `Edit` and `Bash`, so per `playbook:delegating-subagents` it delivers its outcome by file, not by return value alone: every dispatch below names a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md` (`<N>` is this item's index), and the main session reads that file the moment the dispatch returns or goes idle, before trusting any outcome.
+
+   - **For Both, dispatch the fix half now and queue the reply text for Step 6.** The reply half of a **Both** action is NEVER dispatched here: only its content is decided now. Step 6 dispatches it after commit, once `<SHA>` is known. This deferred timing is the primary rule for Both, not a trailing exception to it.
+   - For **Fix**, or the fix half of **Both**: dispatch `patch-applier` with the exact, already-approved diff and the report file path. Read the report file; it names the exact hunk applied, or a failure. Print the applied hunk to the user immediately, before advancing to the next indexed item.
+   - For **Reply only** (no fix): dispatch `patch-applier` with the exact reply text, the exact command shape to run, and the report file path, matching the two existing shapes below:
      ```bash
      # Inline review-thread reply (use databaseId of the first comment in the thread)
      gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" \
@@ -186,18 +188,18 @@ For each indexed item, do this loop:
      # PR-level issue comment reply
      gh pr comment "$PR_NUMBER" --body "<reply text>"
      ```
-     `patch-applier` posts it and reports back the exact body it posted, or a failure. Print that returned body to the user immediately, before advancing to the next indexed item. For **Both**, the reply is still queued and posted after commit (Step 6) exactly as before; only who executes the post changes, not when.
+     Read the report file; it names the exact body posted, or a failure. Print the posted body to the user immediately, before advancing to the next indexed item.
    - One dispatch per approved item, applied immediately. Do not batch multiple items into one `patch-applier` call.
-   - If `patch-applier` reports a failure (the diff did not apply, the `gh api` call failed), surface the failure to the user plainly and do NOT mark the item `fixed`/`replied` in the tracked state below.
+   - If the report file is missing, or names a failure (the diff did not apply, the `gh api` call failed), surface it to the user plainly and mark the item `failed` in the tracked state below, never `fixed`/`replied`. A missing report file is its own distinct outcome from a reported failure: say which one happened, don't guess.
 
-6. **Track state.** Keep a running markdown list, one row per indexed item, with status `fixed | replied | both-queued | skipped`. This is the audit trail.
+6. **Track state.** Keep a running markdown list, one row per indexed item, with status `fixed | replied | both-queued | failed | skipped`. This is the audit trail.
 
 ## Step 5: Pre-commit confirmation
 
 Print a summary:
 
 ```
-Triaged N items: A fixed, B replied, C both-queued, D skipped.
+Triaged N items: A fixed, B replied, C both-queued, D skipped, E failed.
 Staged changes:
   <git diff --stat output>
 ```
@@ -210,18 +212,20 @@ If approved (or `AUTO_COMMIT=true`):
 
 1. Invoke the `commit-and-push` skill with the `-A` flag and an extra hint that the commit message should reference the PR (e.g. "address review comments on #<PR_NUMBER>"). The skill handles staging, formatting, message generation, rebase, and push. Capture the resulting commit SHA from the skill's output.
 
-2. For each `both-queued` reply, finalise the body by substituting `<SHA>`, then dispatch `patch-applier` (`subagent_type: patch-applier`) with the exact finalised body and the command shape to run:
+2. For each `both-queued` reply, finalise the body by substituting `<SHA>`, then dispatch `patch-applier` (`subagent_type: patch-applier`) with the exact finalised body, the command shape to run, and a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md`, the same convention Step 4 uses:
    ```bash
    gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" \
      -f body="$REPLY_TEXT_WITH_SHA"
    ```
-   `patch-applier` posts it and reports back the exact body it posted, or a failure; print that returned body before moving to the next queued reply. This is the same delegation Step 4 uses for an immediate reply, applied here to the deferred post: Step 4's "who executes the post changes, not when" claim depends on this step actually dispatching `patch-applier` too, not the main session running `gh api` directly.
+   Read the report file the moment the dispatch returns or goes idle; it names the exact body posted, or a failure. Print the posted body before moving to the next queued reply. On a missing report file or a reported failure, apply the SAME rule Step 4 sub-step 5 uses: surface it to the user plainly, mark the item `failed` (not `both-queued` anymore), and do not count it toward "posted P queued replies" below. This is the same delegation Step 4 uses for an immediate reply, applied here to the deferred post: Step 4's "who executes the post changes, not when" claim depends on this step actually dispatching `patch-applier` too, not the main session running `gh api` directly.
 
 3. Print a final summary:
    ```
-   Done. Committed <SHA>, posted P queued replies, skipped D items.
+   Done. Committed <SHA>, posted P queued replies, skipped D items, F failed posts.
    Skipped items needing follow-up:
      - <thread URL> author: comment-summary
+   Failed posts needing follow-up:
+     - <thread URL> author: reason
    ```
 
 ## Notes
