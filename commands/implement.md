@@ -1,7 +1,7 @@
 ---
 description: Execute an approved plan or ADR blueprint (from /playbook:scope or /playbook:adr) on Sonnet, delegating edits to subagents and committing each Work Unit. Delivers the plan as PR-sized Segments (savepoint commits, one small pull request per Segment; independent off the default branch when Segments are disjoint, stacked only when they truly depend on each other), asking the delivery strategy up front. Then runs one refinement pass (self quick-review + SOLID/DRY/KISS/YAGNI simplify, re-planned and executed autonomously) and an adversarial review. Execute-only; it does not design new scope.
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
-argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--no-tdd] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause>] [--help]"
+argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--no-tdd] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause>] [--all-lenses] [--help]"
 model: sonnet
 effort: high
 ---
@@ -46,6 +46,10 @@ OPTIONS:
   --boundary=<savepoint|pause>
              Preset the Segment-boundary behaviour and skip that question
              (default: ask; recommended: savepoint)
+  --all-lenses
+             Skip the Step 9 triage dispatch entirely: run all 5 lenses
+             (correctness, behaviour drift, principles, scope, tests) at
+             full-lens
 
 DELIVERY: /playbook:implement splits the plan into PR-sized Segments and, before
 executing, asks three things (unless preset by flag or running --auto):
@@ -365,7 +369,17 @@ Run this pass once. Don't loop: Step 9 is the backstop for whatever remains.
 
 ## Step 9: Adversarial Review (MUST)
 
-This reviews the IMPLEMENTED work, not the plan: Step 4's adversarial review ran before execution against the plan; this one runs after, against the diff. Dispatch it as a swarm of lens-specialized reviewers in parallel (each reads the diff, none writes, so parallel is always safe): issue one Agent call per lens in a single message, each a `reviewer` agent (`subagent_type: reviewer`), with its lens as the focus, the full branch diff, the plan, and the refinement notes. Each lens tries to break the work, not bless it:
+This reviews the IMPLEMENTED work, not the plan: Step 4's adversarial review ran before execution against the plan; this one runs after, against the diff.
+
+**Haiku triage, before the swarm.** Skip triage entirely when `--all-lenses` was passed: all 5 lenses (correctness, behaviour drift, principles, scope, tests) run `full-lens`, unchanged from today's fixed-5-lens-always-full swarm.
+
+Otherwise, dispatch `review-triage` (`subagent_type: review-triage`) exactly once, before the swarm, scoped to Step 9's fixed 5 lenses (`correctness`, `behaviour-drift`, `principles`, `scope`, `tests`), against the implemented diff (the same full branch diff the swarm dispatch below uses), the plan, and the refinement notes. Capture the returned tier map.
+
+Two fail-open rules apply: if the `review-triage` dispatch itself fails, times out, or returns nothing at all, every lens defaults to `full-lens`. If it returns a tier map missing one or more lenses, each missing lens individually defaults to `full-lens`, keeping the lenses present in the map at their returned tier.
+
+Report which lenses resolved to which tier as a one-line summary, e.g. "Triage: correctness=full-lens, tests=cheap-check, scope=skip", before the swarm dispatches.
+
+Dispatch it as a swarm of lens-specialized reviewers in parallel (each reads the diff, none writes, so parallel is always safe): issue one Agent call per lens in a single message, each a `reviewer` agent (`subagent_type: reviewer`), with its lens as the focus, the full branch diff, the plan, and the refinement notes. Each lens tries to break the work, not bless it:
 
 - **Correctness:** bugs, off-by-one, unhandled errors, regressions the tests miss.
 - **Behaviour drift:** did any simplification or refactor change observable behaviour?
