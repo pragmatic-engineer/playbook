@@ -9,7 +9,7 @@ Universal writing rules for all generated content intended for human readers: PR
 
 These rules are MUST-level unless marked SHOULD.
 
-> **IRON RULE:** MUST NEVER use em dashes or en dashes in any output, and MUST write in simple, plain English (common words, short sentences). This applies to every file, comment, commit message, and generated text. Use commas, colons, or periods instead of dashes. Both dash types are strong AI tells; fancy vocabulary and long sentences are too.
+> **IRON RULE:** MUST NEVER use em dashes or en dashes in any output, and MUST write in simple, plain English (common words, short sentences). This applies to every file, comment, commit message, and generated text. Use commas, colons, or periods instead of dashes. Both dash types are strong AI tells; fancy vocabulary and long sentences are too. Use straight quotes (`"`, `'`), never curly/smart quotes (`"`, `"`, `'`, `'`); same ASCII-only reasoning as the dash rule.
 
 ## Reviewer usability (adapted from "Don't Make Me Think")
 
@@ -70,7 +70,7 @@ Adopt these principles to what you write for review: the reviewer is the user, t
 
 These words are LLM vocabulary tells. MUST NOT appear in generated content:
 
-can, may, just, that, very, really, literally, actually, certainly, probably, basically, could, maybe, delve, embark, enlightening, esteemed, shed light, craft, crafting, imagine, realm, game-changer, unlock, discover, skyrocket, abyss, not alone, in a world where, revolutionize, disruptive, utilize, utilizing, dive deep, tapestry, illuminate, unveil, pivotal, intricate, elucidate, hence, furthermore, realm, however, harness, exciting, groundbreaking, cutting-edge, remarkable, it remains to be seen, glimpse into, navigating, landscape, stark, testament, in summary, in conclusion, moreover, boost, skyrocketing, opened up, powerful, inquiries, ever-evolving, serves as, stands as, functions as, nestled, vibrant, profound, enhancing, showcasing, underscoring, highlighting, fostering, garner, enduring, interplay, valuable, crucial.
+can, may, just, that, very, really, literally, actually, certainly, probably, basically, could, maybe, delve, embark, enlightening, esteemed, shed light, craft, crafting, imagine, realm, game-changer, unlock, discover, skyrocket, abyss, not alone, in a world where, revolutionize, disruptive, utilize, utilizing, leverage, dive deep, tapestry, illuminate, unveil, pivotal, intricate, elucidate, hence, furthermore, realm, however, harness, exciting, groundbreaking, cutting-edge, remarkable, it remains to be seen, glimpse into, navigating, landscape, stark, testament, in summary, in conclusion, moreover, boost, skyrocketing, opened up, powerful, inquiries, ever-evolving, serves as, stands as, functions as, nestled, vibrant, profound, enhancing, showcasing, underscoring, highlighting, fostering, garner, enduring, interplay, valuable, crucial.
 
 A second, distinct category: phrases that perform depth or authority instead of stating a fact ("smart-ass" tone, not flowery vocabulary). Never appear in generated content: "load-bearing", "worth stating plainly", "here's the honest truth", "the real tension", "carry the argument", "at its core", "what really matters", "the deeper issue". State the fact; don't announce that you're about to state it.
 
@@ -79,6 +79,9 @@ A second, distinct category: phrases that perform depth or authority instead of 
 | Banned | Use instead |
 |---|---|
 | utilize | use |
+| leverage | use |
+| in order to | to |
+| due to the fact that | because |
 | however | but (or start a new sentence) |
 | furthermore | and (or start a new sentence) |
 | moreover | and |
