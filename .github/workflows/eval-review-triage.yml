@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: MIT
+#
+# Manual-only trigger for shell/eval-review-triage.sh, the real, live-call
+# regression eval for the review-triage classifier (agents/review-triage.md).
+# NOT run on pull_request or push: it costs one live `claude -p --model
+# haiku` call plus one `gh pr diff` fetch per fixture in
+# shell/fixtures/review-triage-eval-set.json (11 fixtures as of writing),
+# real money and real GitHub API calls every run. Run by hand from the
+# Actions tab whenever agents/review-triage.md's classification logic
+# changes, per the script's own header comment.
+#
+# Requires the ANTHROPIC_API_KEY repository secret. Without it, the claude
+# CLI has no credentials and every fixture's live call fails.
+
+name: eval-review-triage
+
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          # audit, not block: this step calls the Anthropic API (via the
+          # claude CLI, installed from the npm registry below) plus the
+          # GitHub API (via gh, for the PR diff fetches), across endpoints
+          # that can rotate. Matches shell-ci.yml's existing rationale for
+          # audit mode on this repo's other network-touching CI steps.
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run the review-triage eval harness
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash shell/eval-review-triage.sh
