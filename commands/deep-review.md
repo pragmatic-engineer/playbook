@@ -197,6 +197,19 @@ If install or run fails, log the error in `CHECK_OUTPUT` and continue: never blo
 
 Check whether a memory store exists: the global store at `~/.claude/memory/MEMORY.md` and the project store at `~/.claude/memory/<owner>/<repo>/MEMORY.md` (`<owner>/<repo>` from `git remote get-url origin`). Load the relevant fact files from whichever exist. When neither exists, skip this step silently; Step 3's reviewers get no memory section and that's expected, not an error.
 
+## Step 2d: Haiku triage
+
+Skip this step entirely when `--all` was passed (check `$ARGUMENTS` the same way Step 2 does): every core + conditional reviewer Step 2 selected already runs `full-lens`, matching `--all`'s existing "run every reviewer regardless of diff content" guarantee, so there is nothing left for triage to narrow.
+
+Otherwise, dispatch `review-triage` (`subagent_type: review-triage`) exactly once per review run, regardless of how many lenses Step 2 selected. The prompt includes: the PR diff (the same diff Step 1 already captured via `gh pr diff "$PR_NUMBER"` and that Step 3's reviewer prompts also embed), `HEAD_SHA`, the absolute `$WT` path (or a note that the tree is in-place when `WT` is empty, same convention Step 3 uses), and the full set of lens names Step 2 selected (core reviewers plus any triggered conditional reviewers). Capture the returned tier map, a JSON object of `{lens: {tier, reason}}`, into context for Step 3 to read.
+
+Two distinct fail-open rules apply, not one:
+
+- **Total failure:** if the `review-triage` dispatch itself fails, times out, or returns nothing at all (per `playbook:delegating-subagents`, `review-triage` is structurally read-only so its return value is the only channel and can fail silently), every lens Step 2 selected defaults to `full-lens`.
+- **Partial response:** if the dispatch returns a tier map missing one or more of Step 2's selected lenses, each MISSING lens individually defaults to `full-lens`; lenses present in the returned map keep their returned tier. This mirrors the same discipline Step 3's existing "Returned findings / Returned empty array / Returned nothing" tracking table already applies one layer downstream (a silent lens is never folded into "found nothing"), applied here to triage's own output instead of the swarm's findings.
+
+Report which lenses resolved to which tier, a one-line summary, e.g. "Triage: security=full-lens, docs=cheap-check, perf=skip", the same way Step 2 already reports which reviewers it selected and why.
+
 ## Step 3: Spawn the reviewer swarm (parallel reviewer subagents)
 
 **Concurrency cap (MUST).** Dispatch at most 8 reviewers at once. When the selected set (Step 2) is 8 or fewer, dispatch it in one wave exactly as below. When it's larger (only possible under `--all`, up to 14 lenses), split into waves of at most 8: issue the first wave's `Agent` calls in one message, wait for them to return, `TaskStop` each, then issue the remaining lenses as a second wave. This bounds concurrent spawns; it never drops a lens to stay under the cap; every selected reviewer still runs, just possibly across two waves instead of one.
