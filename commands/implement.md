@@ -379,13 +379,29 @@ Two fail-open rules apply: if the `review-triage` dispatch itself fails, times o
 
 Report which lenses resolved to which tier as a one-line summary, e.g. "Triage: correctness=full-lens, tests=cheap-check, scope=skip", before the swarm dispatches.
 
-Dispatch it as a swarm of lens-specialized reviewers in parallel (each reads the diff, none writes, so parallel is always safe): issue one Agent call per lens in a single message, each a `reviewer` agent (`subagent_type: reviewer`), with its lens as the focus, the full branch diff, the plan, and the refinement notes. Each lens tries to break the work, not bless it:
+Dispatch it as a swarm of lens-specialized reviewers in parallel (each reads the diff, none writes, so parallel is always safe): for each of the 5 lenses, read its triage tier from the tier map captured above before dispatching; a lens absent from the map defaults to `full-lens`, per the fail-open-per-lens rule above. A `full-lens` lens dispatches a `reviewer` agent (`subagent_type: reviewer`) exactly as this step already did before tiered dispatch existed, issued as one Agent call per lens in a single message, with its lens as the focus, the full branch diff, the plan, and the refinement notes; do not change this prompt shape for this tier. Each lens tries to break the work, not bless it:
 
 - **Correctness:** bugs, off-by-one, unhandled errors, regressions the tests miss.
 - **Behaviour drift:** did any simplification or refactor change observable behaviour?
 - **Principles:** remaining SOLID/DRY/KISS/YAGNI violations, leftover speculative code, needless abstraction.
 - **Scope:** anything built beyond the plan; anything the plan required but is missing.
 - **Tests:** weak assertions, missing boundary or regression coverage, flakiness.
+
+A `cheap-check` lens dispatches a `cheap-checker` agent (`subagent_type: cheap-checker`) instead of `reviewer`. Its prompt names the lens's narrow concern, taken from the tier map's `reason` field for that lens, the full branch diff, the plan, the refinement notes, and ONE `skills/grounding-review/references/<file>.md` path to read for criteria, per this mapping (Step 9's 5 lenses carry different names from `/playbook:deep-review`'s lenses, so they need their own mapping, written here rather than reused from that command):
+
+| Lens | Reference file |
+|---|---|
+| correctness | correctness.md |
+| behaviour-drift | correctness.md |
+| principles | maintainability.md |
+| scope | scope-control.md |
+| tests | (none, no matching category) |
+
+This mapping was derived the same way `/playbook:deep-review`'s Step 3 mapping was: matching each lens's stated concern against the bullet content of `skills/grounding-review/SKILL.md`'s Evaluation Categories, now split into `skills/grounding-review/references/*.md`. `scope` maps to `scope-control.md` directly since the category names match exactly. Path resolution and fallback follow the same single rule as that mapping: if the mapped `skills/grounding-review/references/<file>.md` exists, point `cheap-checker` at that path; if a lens has no mapped file (`tests`) or the references directory doesn't exist, point it at the full `skills/grounding-review/SKILL.md` instead, one rule either way, not two. The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern.
+
+A `skip` lens dispatches nothing. Track it explicitly as skipped in the triage summary above, e.g. "Triage: correctness=full-lens, tests=cheap-check, scope=skip"; a skipped lens is never conflated with a dispatched lens that returned nothing below, since it was never dispatched at all and so has no return value to lose.
+
+**Trust gate.** This tiered dispatch mechanism ships and functions as soon as this Work Unit lands: a `full-lens` tier still gets the exact reviewer it always did, a `cheap-check` tier gets a real narrow-scope pass from `cheap-checker`, and a `skip` tier is a real, tracked decision to run nothing. But a `skip` or `cheap-check` decision should not be treated as validated judgment yet: `shell/eval-review-triage.sh` (a later Work Unit) has not yet recorded a pass verdict against a real fixture set. Until it has, treat triage's tier choices as best-effort, not proven: a `skip` verdict is not yet evidence a lens truly had nothing to find, and a `cheap-check` narrow pass is not yet guaranteed to have caught everything the full lens would have.
 
 Give each reviewer Task a stable `name` and call `TaskStop` on it the moment it returns its findings. Reviewer agents stay idle-alive after returning; this flow never reuses them, so stop each one immediately.
 
