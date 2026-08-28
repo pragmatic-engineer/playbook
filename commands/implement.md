@@ -375,7 +375,7 @@ This reviews the IMPLEMENTED work, not the plan: Step 4's adversarial review ran
 
 Otherwise, dispatch `review-triage` (`subagent_type: review-triage`) exactly once, before the swarm, scoped to Step 9's fixed 5 lenses (`correctness`, `behaviour-drift`, `principles`, `scope`, `tests`), against the implemented diff (the same full branch diff the swarm dispatch below uses), the plan, and the refinement notes. Capture the returned tier map.
 
-Two fail-open rules apply: if the `review-triage` dispatch itself fails, times out, or returns nothing at all, every lens defaults to `full-lens`. If it returns a tier map missing one or more lenses, each missing lens individually defaults to `full-lens`, keeping the lenses present in the map at their returned tier.
+Three fail-open rules apply: if the `review-triage` dispatch itself fails, times out, or returns nothing at all, every lens defaults to `full-lens`. If it returns a tier map missing one or more lenses, each missing lens individually defaults to `full-lens`, keeping the lenses present in the map at their returned tier. If a lens IS present in the map but its `tier` value is anything other than `skip`, `cheap-check`, or `full-lens` (a drifted or malformed classifier response), that lens defaults to `full-lens` too: it must never fall through the dispatch-by-tier branches below silently.
 
 Report which lenses resolved to which tier as a one-line summary, e.g. "Triage: correctness=full-lens, tests=cheap-check, scope=skip", before the swarm dispatches.
 
@@ -392,14 +392,23 @@ A `cheap-check` lens dispatches a `cheap-checker` agent (`subagent_type: cheap-c
 | Lens | Reference file |
 |---|---|
 | correctness | correctness.md |
-| behaviour-drift | correctness.md |
+| behaviour-drift | (none, no matching category) |
 | principles | (none, no matching category) |
 | scope | scope-control.md |
 | tests | (none, no matching category) |
 
 This mapping was derived the same way `/playbook:deep-review`'s Step 3 mapping was: matching each lens's stated concern against the bullet content of `skills/grounding-review/SKILL.md`'s Evaluation Categories, now split into `skills/grounding-review/references/*.md`. `scope` maps to `scope-control.md` directly since the category names match exactly. `principles` (SOLID/DRY/KISS/YAGNI violations, leftover speculative code, needless abstraction) has no matching category: `maintainability.md` covers mixed concerns, magic numbers, and naming, but never speculative code or unnecessary abstraction, the YAGNI half of this lens's own stated focus, so `principles` falls back to the full `SKILL.md` like `tests` does rather than pointing at a reference file that only partially covers its concern.
 
-Path resolution and fallback follow the same single rule as `/playbook:deep-review`'s Step 3 mapping: resolve the mapped file to an absolute path as `"${CLAUDE_PLUGIN_ROOT}/skills/grounding-review/references/<file>.md"` (the same env var `hooks/hooks.json`, `commands/doctor.md`, and `commands/setup.md` already use for plugin-bundled files) and confirm it exists; if a lens has no mapped file (`principles`, `tests`) or the resolved file doesn't exist, resolve `"${CLAUDE_PLUGIN_ROOT}/skills/grounding-review/SKILL.md"` instead, one rule either way, not two. Hand `cheap-checker` the resolved ABSOLUTE path, never the bare repo-relative string: it has no `Bash` to expand `$CLAUDE_PLUGIN_ROOT` itself. The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern.
+`behaviour-drift` (did a refactor change observable behaviour) also has no matching category: none of the 7 reference files ask whether a simplification changed behaviour, that is a distinct concern from the bug-pattern checks `correctness.md` covers, so it falls back to the full `SKILL.md` too rather than reusing a file that only partially fits.
+
+Path resolution and fallback follow the same single rule as `/playbook:deep-review`'s Step 3 mapping: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real bash step before building the string, the same way `commands/doctor.md:123` does, for example:
+
+```bash
+REF_FILE="${CLAUDE_PLUGIN_ROOT}/skills/grounding-review/references/<file>.md"
+[[ -f "$REF_FILE" ]] || REF_FILE="${CLAUDE_PLUGIN_ROOT}/skills/grounding-review/SKILL.md"
+```
+
+If the lens has a mapped file, resolve it this way and confirm it exists; if a lens has no mapped file (`principles`, `behaviour-drift`, `tests`) or the resolved file doesn't exist, resolve the full `SKILL.md` path instead, one rule either way, not two. Hand `cheap-checker` the resolved ABSOLUTE path this bash step produced, never the unexpanded placeholder or a bare repo-relative string: it has no `Bash` to expand `$CLAUDE_PLUGIN_ROOT` itself. The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern.
 
 A `skip` lens dispatches nothing. Track it explicitly as skipped in the triage summary above, e.g. "Triage: correctness=full-lens, tests=cheap-check, scope=skip"; a skipped lens is never conflated with a dispatched lens that returned nothing below, since it was never dispatched at all and so has no return value to lose.
 
@@ -419,7 +428,7 @@ Each lens gives severity-classified findings with `file:line` evidence and a fix
 
 **Boundary behaviour.** With **savepoint** (the default, and `--auto`), open the whole PR set here at the end. With **pause after each PR**, Step 9 has already run per Segment (its scoped review before the PR), so this step opens that one Segment's PR and stops for the user before the next Segment.
 
-**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings, the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:deep-review`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)`, a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Starting the next feature: run `/clear` before the next `/playbook:brainstorm` or `/playbook:scope`, so this run's plan, dispatch history, and fixes don't carry into it.
+**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings, the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:deep-review`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Starting the next feature: run `/clear` before the next `/playbook:brainstorm` or `/playbook:scope`, so this run's plan, dispatch history, and fixes don't carry into it.
 
 ## Decision Rules
 
