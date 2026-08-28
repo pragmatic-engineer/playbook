@@ -1,6 +1,6 @@
 ---
 description: Walk unresolved PR review comments one at a time, apply fixes or draft replies, then commit-and-push and post replies with the new SHA.
-allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Skill
+allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, Skill
 argument-hint: "[PR number] [--bots] [--dry-run] [-y|--yes]"
 model: opus
 effort: high
@@ -176,9 +176,9 @@ For each indexed item, do this loop:
    - `Edit-then-fix` means: user wants to write a different fix than what you proposed. Wait for them to describe it, then apply.
    - `Quit` means: stop iterating, jump straight to Step 5 with what you have so far.
 
-5. **Apply.**
-   - For **Fix** or **Both**: use the `Edit` tool. Read the file first (you may have already done so in step 1). Verify the file compiles or at least re-`Read` the changed region to confirm the edit landed.
-   - For **Reply only** (no fix): post the reply NOW via:
+5. **Apply.** Everything above this sub-step (show context, verify the claim, choose the action, draft the exact diff or reply text, get user approval) stays in the main session unchanged. Once an action is approved and its content is fully decided, dispatch execution to `patch-applier` (`subagent_type: patch-applier`) rather than applying it directly:
+   - For **Fix** or **Both** (the fix half): dispatch `patch-applier` with the exact, already-approved diff. It applies the `Edit` and reports back the exact hunk it applied, or a failure. Print that returned hunk to the user immediately, before advancing to the next indexed item.
+   - For **Reply only** (no fix), or the reply half of **Both** once its content is decided: dispatch `patch-applier` with the exact reply text and the exact command shape to run, matching the two existing shapes below:
      ```bash
      # Inline review-thread reply (use databaseId of the first comment in the thread)
      gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" \
@@ -186,7 +186,9 @@ For each indexed item, do this loop:
      # PR-level issue comment reply
      gh pr comment "$PR_NUMBER" --body "<reply text>"
      ```
-   - For **Both**: queue the reply text and the thread ID; you'll post after commit (Step 6).
+     `patch-applier` posts it and reports back the exact body it posted, or a failure. Print that returned body to the user immediately, before advancing to the next indexed item. For **Both**, the reply is still queued and posted after commit (Step 6) exactly as before; only who executes the post changes, not when.
+   - One dispatch per approved item, applied immediately. Do not batch multiple items into one `patch-applier` call.
+   - If `patch-applier` reports a failure (the diff did not apply, the `gh api` call failed), surface the failure to the user plainly and do NOT mark the item `fixed`/`replied` in the tracked state below.
 
 6. **Track state.** Keep a running markdown list, one row per indexed item, with status `fixed | replied | both-queued | skipped`. This is the audit trail.
 
@@ -224,6 +226,6 @@ If approved (or `AUTO_COMMIT=true`):
 ## Notes
 
 - **Threads with multiple comments.** A thread can have a back-and-forth. Display all comments in chronological order but treat the latest non-author comment as the prompt. If the latest comment is from `$ME` (you replied earlier), surface that and let the user decide if there's anything still pending.
-- **No silent edits.** Every file change must be visible to the user before the next iteration. If you `Edit` a file, print the resulting hunk.
+- **No silent edits.** Every file change must be visible to the user before the next iteration. If a file is edited (directly, or via `patch-applier`'s dispatch), print the resulting hunk.
 - **Failure handling.** If a reply POST fails (404 on the thread, 403 if you're not a collaborator), don't retry blindly. Print the error, leave the reply in the queue, and continue with the rest. Surface the failures in the final summary so the user can post them manually.
 - **Resuming after Quit.** If the user quits mid-iteration, print the remaining indexed items with their URLs so they can re-run `/playbook:address-pr-comments` later (the resolved/unresolved state on GitHub is still the source of truth).
