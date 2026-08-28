@@ -135,8 +135,11 @@ for (( i = 0; i < FIXTURE_COUNT; i++ )); do
   # Step 2: fetch the real diff. A fetch failure errors every lens this
   # fixture declares and moves on; one bad fixture never aborts the run.
   diff_text=""
-  if ! diff_text="$(gh pr diff "$pr_number" 2>&1)"; then
-    printf '  fetch failed: %s\n' "$diff_text"
+  diff_err=""
+  if ! diff_text="$(gh pr diff "$pr_number" 2>/tmp/eval-review-triage-gh-err.$$)"; then
+    diff_err="$(cat /tmp/eval-review-triage-gh-err.$$ 2>/dev/null)"
+    rm -f /tmp/eval-review-triage-gh-err.$$
+    printf '  fetch failed: %s\n' "$diff_err"
     while IFS= read -r lens; do
       [[ -n "$lens" ]] || continue
       _record_verdict "$lens" errored "gh pr diff $pr_number failed to fetch"
@@ -144,6 +147,7 @@ for (( i = 0; i < FIXTURE_COUNT; i++ )); do
     printf '\n'
     continue
   fi
+  rm -f /tmp/eval-review-triage-gh-err.$$
 
   # Step 3: the real, live classifier call. Same invocation shape as
   # shell/shared/worktree.sh:455's `command claude -p --model haiku "$prompt"`.
@@ -154,17 +158,28 @@ Candidate lenses to classify (return a tier for every one of these, and only the
 Diff to classify:
 $diff_text"
 
-  response="$(command claude -p --model haiku "$prompt" 2>/dev/null)"
+  response="$(command claude -p --model haiku "$prompt" 2>/tmp/eval-review-triage-claude-err.$$)"
+  claude_err="$(cat /tmp/eval-review-triage-claude-err.$$ 2>/dev/null)"
+  rm -f /tmp/eval-review-triage-claude-err.$$
 
   # Step 4: parse the tier map. A wholly unparseable response errors every
   # lens for this fixture; a parseable response missing individual lenses
   # errors only those (fixture, lens) pairs, the rest compare normally.
+  # A live-call failure (auth, network, rate limit) looks identical to a
+  # malformed response on stdout alone, so surface claude's stderr too:
+  # without it a FAIL run from a broken API key is indistinguishable from
+  # one caused by a real classification drift, and this script exists to
+  # be the trust gate that FAIL runs need to be debuggable.
   tier_map=""
   if ! tier_map="$(printf '%s' "$response" | jq -c '.' 2>/dev/null)"; then
-    printf '  unparseable classifier response; every lens errored\n'
+    if [[ -n "$claude_err" ]]; then
+      printf '  unparseable classifier response; every lens errored. claude stderr: %s\n' "$claude_err"
+    else
+      printf '  unparseable classifier response; every lens errored\n'
+    fi
     while IFS= read -r lens; do
       [[ -n "$lens" ]] || continue
-      _record_verdict "$lens" errored "classifier response was not valid JSON"
+      _record_verdict "$lens" errored "classifier response was not valid JSON${claude_err:+ (claude stderr: $claude_err)}"
     done < <(printf '%s' "$fixture_json" | jq -r '.lenses | keys[]')
     printf '\n'
     continue
@@ -196,7 +211,11 @@ $diff_text"
       false:cheap-check | false:full-lens)
         _record_verdict "$lens" "non-critical mismatch" "ground truth found=false, tier=$tier" ;;
       *)
-        _record_verdict "$lens" errored "unrecognised tier '$tier' for lens '$lens'" ;;
+        if [[ "$found" != "true" && "$found" != "false" ]]; then
+          _record_verdict "$lens" errored "fixture's found value '$found' for lens '$lens' is not true/false, check shell/fixtures/review-triage-eval-set.json"
+        else
+          _record_verdict "$lens" errored "unrecognised tier '$tier' for lens '$lens'"
+        fi ;;
     esac
   done < <(printf '%s' "$fixture_json" | jq -r '.lenses | keys[]')
 
