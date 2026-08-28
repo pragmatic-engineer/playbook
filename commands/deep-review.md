@@ -214,11 +214,36 @@ Report which lenses resolved to which tier, a one-line summary, e.g. "Triage: se
 
 **Concurrency cap (MUST).** Dispatch at most 8 reviewers at once. When the selected set (Step 2) is 8 or fewer, dispatch it in one wave exactly as below. When it's larger (only possible under `--all`, up to 14 lenses), split into waves of at most 8: issue the first wave's `Agent` calls in one message, wait for them to return, `TaskStop` each, then issue the remaining lenses as a second wave. This bounds concurrent spawns; it never drops a lens to stay under the cap; every selected reviewer still runs, just possibly across two waves instead of one.
 
-Spawn each wave **in parallel** (one message, multiple `Agent` calls), each as a `reviewer` subagent (`subagent_type: reviewer`). The `reviewer` agent is structurally read-only (Read/Grep/Glob only, no Edit/Write/Bash) and pins its own model tier and the `playbook:grounding-review` + `playbook:grounding-research` discipline, so the orchestrator no longer sets `model` per call. Each reviewer prompt MUST include: its focus area (from the table), the PR diff and `HEAD_SHA`, the `playbook:grounding-review` + `playbook:grounding-research` discipline, the absolute `$WT` path (or a note that the tree is in-place if `WT` is empty) with the instruction "Read and grep files under <WT>; do not install or build anything.", the `CHECK_OUTPUT` captured in Step 2b verbatim under a heading "Check suite output (from orchestrator)", and, when Step 2c loaded anything, a memory slice: facts anchored to a file touched in the diff, or otherwise related to the lens's focus area (for example, security-tagged facts for the security lens), listed by one-line hook or short body under a heading "Relevant memory (from orchestrator)". No matching facts means no section, not an empty placeholder.
+For each lens in a wave, read its Step 2d tier from the captured tier map before dispatching: a lens absent from the map defaults to `full-lens`, per Step 2d's fail-open-per-lens rule (a triage dispatch that returns a partial map never silently narrows a lens's coverage). Dispatch by tier:
+
+- **`full-lens`:** dispatch a `reviewer` subagent (`subagent_type: reviewer`) exactly as this step already did before tiered dispatch existed. Do not change the reviewer prompt shape at all for this tier; everything below through "Instruct each to" describes it unchanged.
+- **`cheap-check`:** dispatch a `cheap-checker` subagent (`subagent_type: cheap-checker`) instead of `reviewer`. Its prompt names: the lens's narrow concern, taken from the tier map's `reason` field for that lens (that field is already a short, grounded justification from `review-triage`, so it doubles as the concern statement); the PR diff and `HEAD_SHA`; the absolute `$WT` path (or the in-place note when `WT` is empty), same conventions as the `reviewer` dispatch below; and ONE reference file path to read for criteria, per this mapping:
+
+  | Lens | Reference file |
+  |---|---|
+  | security | security.md |
+  | perf | performance.md |
+  | data | performance.md |
+  | logic | correctness.md |
+  | types | correctness.md |
+  | architecture | architecture.md |
+  | migration | architecture.md |
+  | big-o | performance.md |
+  | complexity | maintainability.md |
+  | dedup | maintainability.md |
+  | integration | reliability.md |
+  | test | (none, no matching category) |
+  | docs | (none, no matching category) |
+  | adr | architecture.md |
+
+  This mapping was derived by matching each lens's stated focus (the Reviewer Swarm table near the top of this file) against the bullet content of `skills/grounding-review/SKILL.md`'s 7 Evaluation Categories, now split into `skills/grounding-review/references/*.md` by an earlier Work Unit in this plan; it is not an arbitrary guess. Path resolution: if `skills/grounding-review/references/<file>.md` exists (it does; an earlier Segment in this plan already shipped the split), point `cheap-checker` at that path. If a lens has no mapped file (`test`, `docs`), or the references directory doesn't exist for some reason (defensive fallback), point `cheap-checker` at the full `skills/grounding-review/SKILL.md` instead: the same fallback mechanism either way (no reference file to hand over), so it is one rule, not two. The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern, never the full skill's breadth.
+- **`skip`:** dispatch nothing for that lens. Track it explicitly as skipped, e.g. in the same one-line summary Step 2d already reports ("Triage: security=full-lens, docs=cheap-check, perf=skip"). A skipped lens is never conflated with "returned nothing" below: it was never dispatched at all, so it has no return value to lose.
+
+Spawn each wave **in parallel** (one message, multiple `Agent` calls). The `reviewer` agent is structurally read-only (Read/Grep/Glob only, no Edit/Write/Bash) and pins its own model tier and the `playbook:grounding-review` + `playbook:grounding-research` discipline, so the orchestrator no longer sets `model` per call; `cheap-checker` is the same shape (Read/Grep/Glob/Skill, its own pinned `haiku` model). Each reviewer prompt MUST include: its focus area (from the table), the PR diff and `HEAD_SHA`, the `playbook:grounding-review` + `playbook:grounding-research` discipline, the absolute `$WT` path (or a note that the tree is in-place if `WT` is empty) with the instruction "Read and grep files under <WT>; do not install or build anything.", the `CHECK_OUTPUT` captured in Step 2b verbatim under a heading "Check suite output (from orchestrator)", and, when Step 2c loaded anything, a memory slice: facts anchored to a file touched in the diff, or otherwise related to the lens's focus area (for example, security-tagged facts for the security lens), listed by one-line hook or short body under a heading "Relevant memory (from orchestrator)". No matching facts means no section, not an empty placeholder.
 
 In worktree mode, each reviewer prompt includes the absolute `$WT` path with the instruction "read and grep files under $WT; do not install or build." Subagents are read-only. The orchestrator has already run the checks once in Step 2b; subagents use the captured output as context, not as a trigger to re-run.
 
-Instruct each to:
+For full-lens dispatches, instruct the reviewer to:
 
 - Read every file it cites at `HEAD_SHA` (diff context alone is insufficient); quote exact code with `file:line`; tag anything unconfirmed `[unverified]`.
 - Stay within its focus; don't report issues another reviewer owns.
@@ -233,7 +258,7 @@ Instruct each to:
 
 The `reviewer` agent is structurally read-only (Read, Grep, Glob, Skill), so it cannot write its findings to a file. `playbook agents check` forbids `Write` and `Bash` for that tier by design, and granting them would fail CI, so the return value is the only channel there is. In measured use, Agent-tool return values have failed outright. Treat a swarm as likely to lose lenses.
 
-Track three outcomes per focus and carry them into Step 4's verdict:
+Track three outcomes per dispatched lens (whichever of `reviewer` or `cheap-checker` its tier actually sent) and carry them into Step 4's verdict:
 
 | Outcome | Meaning |
 |---|---|
@@ -241,13 +266,15 @@ Track three outcomes per focus and carry them into Step 4's verdict:
 | Returned an explicit empty array | Ran, found nothing. Safe. |
 | Returned nothing | **NOT RUN. Not a clean lens.** |
 
-Never fold "returned nothing" into "zero findings", and **never let a swarm with missing lenses produce an APPROVE.** Step 4 already requires INCONCLUSIVE when the swarm failed to run, and a missing security or logic lens is exactly that case. Name the missing lenses in the report and to the user.
+Never fold "returned nothing" into "zero findings", and **never let a swarm with missing lenses produce an APPROVE.** Step 4 already requires INCONCLUSIVE when the swarm failed to run, and a missing security or logic lens is exactly that case, whether it was dispatched as a `reviewer` or a `cheap-checker`. Name the missing lenses in the report and to the user, alongside any lens this run skipped by design at Step 2d's `skip` tier: a skipped lens is a deliberate triage decision, not a lost one, and the report should not blur the two.
 
 **Cover the gap while the swarm runs.** Start your own grounding pass on the highest-risk part of the diff as soon as the swarm is dispatched, rather than waiting to see what comes back. A lost swarm then costs latency instead of coverage, which is the difference between a slow review and a review that only looked thorough.
 
 After a reviewer's idle notification fires, one `SendMessage` asking for partial results is worth a single attempt. Do not spend more than one round per lens.
 
 **Close each reviewer once you have its findings or have given up (MUST).** Spawn each with a stable `name` (e.g. `dr-<focus>`: `dr-security`, `dr-logic`). The swarm is one-shot, so a finished reviewer is never reused; a spawned agent stays idle-alive for `SendMessage` follow-ups, so leaving it unstopped keeps a subagent running in the background. Track the spawned names so Step 8 can sweep any that never delivered. `TaskStop` is destructive and unrecoverable for a read-only agent, so do not use it until you have either taken the findings or made the one recovery attempt.
+
+**Trust gate.** This tiered dispatch mechanism ships and functions as soon as this Work Unit lands: a `full-lens` tier still gets the exact reviewer it always did, a `cheap-check` tier gets a real narrow-scope pass from `cheap-checker`, and a `skip` tier is a real, tracked decision to run nothing. But a `skip` or `cheap-check` decision should not be treated as validated judgment yet: `shell/eval-review-triage.sh` (a later Work Unit in this plan) has not yet recorded a pass verdict against a real fixture set. Until it has, treat triage's tier choices as best-effort, not proven: a `skip` verdict is not yet evidence a lens truly had nothing to find, and a `cheap-check` narrow pass is not yet guaranteed to have caught everything the full lens would have.
 
 ## Step 4: Consolidate and fact-check
 
