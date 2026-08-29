@@ -169,6 +169,17 @@ fn main() {
                     std::process::exit(1);
                 }
             },
+            GateCommand::Check {
+                plan_slug,
+                command,
+                phases,
+            } => match gate::check::run(&plan_slug, &command, &phases) {
+                Ok(output) => println!("{output}"),
+                Err(err) => {
+                    eprintln!("gate check: {err}");
+                    std::process::exit(1);
+                }
+            },
         },
     }
 }

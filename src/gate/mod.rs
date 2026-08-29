@@ -3,8 +3,9 @@
 
 //! `playbook gate` subcommand family, backed by a local SQLite database at
 //! `.claude/state.db`. This module holds the schema and connection layer
-//! (`db`) and the `gate record` CLI entry point (`record`); `check` lands in
-//! a later Work Unit.
+//! (`db`), the `gate record` CLI entry point (`record`), and the
+//! `gate check` CLI entry point (`check`).
 
+pub mod check;
 pub mod db;
 pub mod record;
