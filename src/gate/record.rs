@@ -92,17 +92,26 @@ pub fn run(plan_slug: &str, command: &str, phase: &str, input: &str) -> Result<(
     let repo_root =
         manifest::check::toplevel().ok_or_else(|| "not inside a git repository".to_string())?;
     let db_path = repo_root.join(".claude").join("state.db");
-    let conn = db::open_db(&db_path)?;
     let recorded_at = recorded_at_now();
-    db::upsert_phase(
-        &conn,
-        plan_slug,
-        phase,
-        verdict.as_str(),
-        &raw,
-        command,
-        &recorded_at,
-    )
+
+    // One runtime for the whole call: the connection is opened, used, and
+    // dropped entirely inside this one `block_on`, never split across more
+    // than one runtime. See `gate::db`'s module doc comment for why that
+    // matters (a real SIGSEGV on the musl release target, not a style
+    // preference).
+    db::new_runtime()?.block_on(async {
+        let conn = db::open_db(&db_path).await?;
+        db::upsert_phase(
+            &conn,
+            plan_slug,
+            phase,
+            verdict.as_str(),
+            &raw,
+            command,
+            &recorded_at,
+        )
+        .await
+    })
 }
 
 /// Read the whole of `input`: `"-"` means stdin, anything else is a file
