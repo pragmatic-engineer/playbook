@@ -2,24 +2,22 @@
 // SPDX-License-Identifier: MIT
 
 //! Schema and connection layer for the gate-check database at
-//! `.claude/state.db`. `libsql`'s Rust API is async (tokio-based); every
-//! function here is itself async, and the CALLER (one `block_on` per CLI
-//! invocation in `gate::record`/`gate::check`) owns the single runtime that
-//! opens the connection, does its work, and lets it drop, all inside that
-//! one runtime's lifetime. Nothing else in this binary becomes async as a
-//! result.
+//! `.claude/state.db`, backed by `rusqlite` (the `bundled` feature compiles
+//! SQLite from source, so no system SQLite install is required).
 //!
-//! An earlier version had each function build and drop its OWN runtime, so
-//! a `Connection` opened under one runtime could be used, and finally
-//! dropped, under no runtime at all. That built and passed everywhere in
-//! development (macOS, glibc Linux) and only crashed for real once shipped:
-//! `SIGSEGV` inside `sqlite3Close`, from `Connection`'s drop glue, on the
-//! actual musl release target, confirmed by running the real release binary
-//! under `gdb` (not guessed). glibc happened to tolerate the dangling
-//! runtime context; musl does not. Never split a `Connection`'s open, use,
-//! and drop across more than one runtime.
+//! An earlier version used `libsql` (tokio-based, async). `gate check`
+//! reliably segfaulted inside `sqlite3Close` on real musl release builds
+//! (x86_64 and aarch64 both, confirmed via `gdb`), even after fixing every
+//! runtime-lifecycle issue that could explain it: a `Connection`'s open,
+//! use, and drop were kept inside one tokio runtime, and every `Rows`
+//! cursor was drained to completion. Neither resolved it, and the crash
+//! matched an open, maintainer-filed bug in `libsql`'s own connection
+//! lifecycle code. `rusqlite` needs none of that: it is fully synchronous,
+//! is the de facto standard Rust SQLite binding, and this binary has no
+//! other reason to be async.
 
 use crate::common::atomic::with_dir_lock;
+use rusqlite::OptionalExtension;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -36,9 +34,8 @@ const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS gate_phases (
 ) WITHOUT ROWID";
 
 /// One row of `gate_phases`. Returned whole rather than just the verdict:
-/// `gate check` (a later Work Unit) needs the evidence and command text
-/// too, and a single-row lookup by primary key costs nothing extra to carry
-/// the full record.
+/// a single-row lookup by primary key costs nothing extra to carry the full
+/// record, and a future consumer (e.g. a `gate show`) can use it as-is.
 pub struct GatePhaseRow {
     pub verdict: String,
     pub evidence: String,
@@ -46,45 +43,39 @@ pub struct GatePhaseRow {
     pub recorded_at: String,
 }
 
-/// Open (creating if missing) the libsql database at `path`, ensure the
+/// Open (creating if missing) the SQLite database at `path`, ensure the
 /// `gate_phases` schema and pragmas are in place, and gitignore
-/// `.claude/state.db` the first time it is created there. The caller's
-/// `block_on` must still be active when the returned `Connection` is later
-/// dropped; see the module doc comment for why.
-pub async fn open_db(path: &Path) -> Result<libsql::Connection, String> {
+/// `.claude/state.db` the first time it is created there.
+pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
     }
     ensure_state_db_gitignored(path);
 
-    let db = libsql::Builder::new_local(path)
-        .build()
-        .await
+    let conn = rusqlite::Connection::open(path)
         .map_err(|e| format!("failed to open database at {}: {e}", path.display()))?;
-    let conn = db
-        .connect()
-        .map_err(|e| format!("failed to connect to database at {}: {e}", path.display()))?;
 
     // busy_timeout must be set BEFORE any statement that can contend for
     // the write lock (the schema creation below, and future callers
     // opening the same fresh file concurrently): a connection's default
-    // busy timeout is 0, so an SQLITE_BUSY hit before this pragma runs
-    // fails immediately instead of retrying. `commands/scope.md` fires
-    // two `gate record` processes in parallel (Phase 2 and Phase 3), so
-    // this ordering is load-bearing, not cosmetic.
-    run_pragma(&conn, "PRAGMA busy_timeout=5000").await?;
-    run_pragma(&conn, "PRAGMA journal_mode=WAL").await?;
-    conn.execute(SCHEMA_SQL, ())
-        .await
+    // busy timeout is 0, so an SQLITE_BUSY hit before this is set fails
+    // immediately instead of retrying. `commands/scope.md` fires two
+    // `gate record` processes in parallel (Phase 2 and Phase 3), so this
+    // ordering is load-bearing, not cosmetic.
+    conn.busy_timeout(Duration::from_millis(5000))
+        .map_err(|e| format!("failed to set busy_timeout: {e}"))?;
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(|e| format!("failed to set journal_mode=WAL: {e}"))?;
+    conn.execute_batch(SCHEMA_SQL)
         .map_err(|e| format!("failed to create gate_phases schema: {e}"))?;
 
     Ok(conn)
 }
 
 /// Insert or replace the `(plan_slug, phase)` row with the given values.
-pub async fn upsert_phase(
-    conn: &libsql::Connection,
+pub fn upsert_phase(
+    conn: &rusqlite::Connection,
     plan_slug: &str,
     phase: &str,
     verdict: &str,
@@ -96,93 +87,34 @@ pub async fn upsert_phase(
         "INSERT OR REPLACE INTO gate_phases \
          (plan_slug, phase, verdict, evidence, command, recorded_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        (plan_slug, phase, verdict, evidence, command, recorded_at),
+        rusqlite::params![plan_slug, phase, verdict, evidence, command, recorded_at],
     )
-    .await
     .map_err(|e| format!("failed to upsert gate phase {plan_slug}/{phase}: {e}"))?;
     Ok(())
 }
 
 /// Look up the row for `(plan_slug, phase)`, or `None` if it has never been
 /// recorded.
-pub async fn query_phase(
-    conn: &libsql::Connection,
+pub fn query_phase(
+    conn: &rusqlite::Connection,
     plan_slug: &str,
     phase: &str,
 ) -> Result<Option<GatePhaseRow>, String> {
-    let mut rows = conn
-        .query(
-            "SELECT verdict, evidence, command, recorded_at FROM gate_phases \
-             WHERE plan_slug = ?1 AND phase = ?2",
-            (plan_slug, phase),
-        )
-        .await
-        .map_err(|e| format!("failed to query gate phase {plan_slug}/{phase}: {e}"))?;
-
-    let row = rows
-        .next()
-        .await
-        .map_err(|e| format!("failed to read gate phase {plan_slug}/{phase}: {e}"))?;
-    let result = match row {
-        None => None,
-        Some(row) => Some(GatePhaseRow {
-            verdict: row
-                .get(0)
-                .map_err(|e| format!("failed to read verdict column: {e}"))?,
-            evidence: row
-                .get(1)
-                .map_err(|e| format!("failed to read evidence column: {e}"))?,
-            command: row
-                .get(2)
-                .map_err(|e| format!("failed to read command column: {e}"))?,
-            recorded_at: row
-                .get(3)
-                .map_err(|e| format!("failed to read recorded_at column: {e}"))?,
-        }),
-    };
-
-    // Drain the cursor to completion (the primary key means at most one row
-    // ever matches, so this is normally a single `None` read) before it
-    // drops. An un-drained `Rows` leaves its prepared statement unfinalized,
-    // which crashed `sqlite3Close` on the musl release target when the
-    // connection closed right after, confirmed by running the real release
-    // binary under `gdb` (not guessed). `run_pragma` below already drains
-    // fully for the same reason; this brings `query_phase` in line with it.
-    while rows
-        .next()
-        .await
-        .map_err(|e| format!("failed to drain gate phase {plan_slug}/{phase}: {e}"))?
-        .is_some()
-    {}
-
-    Ok(result)
-}
-
-/// One current-thread runtime for a whole CLI invocation. The caller must
-/// run everything that touches a `Connection`, including its final drop,
-/// inside this same runtime's `block_on`; see the module doc comment.
-pub fn new_runtime() -> Result<tokio::runtime::Runtime, String> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("failed to build async runtime: {e}"))
-}
-
-/// `PRAGMA` statements that return a row (`journal_mode`, `busy_timeout`)
-/// panic under `Connection::execute` with `ExecuteReturnedRows`, confirmed
-/// by spike. Run them with `query` instead and drain the row it hands back.
-async fn run_pragma(conn: &libsql::Connection, sql: &str) -> Result<(), String> {
-    let mut rows = conn
-        .query(sql, ())
-        .await
-        .map_err(|e| format!("failed to run `{sql}`: {e}"))?;
-    while rows
-        .next()
-        .await
-        .map_err(|e| format!("failed to read `{sql}` response: {e}"))?
-        .is_some()
-    {}
-    Ok(())
+    conn.query_row(
+        "SELECT verdict, evidence, command, recorded_at FROM gate_phases \
+         WHERE plan_slug = ?1 AND phase = ?2",
+        rusqlite::params![plan_slug, phase],
+        |row| {
+            Ok(GatePhaseRow {
+                verdict: row.get(0)?,
+                evidence: row.get(1)?,
+                command: row.get(2)?,
+                recorded_at: row.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("failed to query gate phase {plan_slug}/{phase}: {e}"))
 }
 
 /// Append `.claude/state.db` to the repo's `.gitignore` the first time a DB
@@ -253,27 +185,14 @@ mod tests {
 
     /// Count rows for a `(plan_slug, phase)` pair via a fresh connection to
     /// `path`, proving `INSERT OR REPLACE` never leaves a duplicate behind.
-    /// Opens, queries, and drops the connection all inside one `block_on`,
-    /// matching production's rule (see the module doc comment).
     fn count_rows(path: &Path, plan_slug: &str, phase: &str) -> i64 {
-        new_runtime()
-            .expect("runtime for count_rows")
-            .block_on(async {
-                let conn = open_db(path).await.expect("open_db for count_rows");
-                let mut rows = conn
-                    .query(
-                        "SELECT COUNT(*) FROM gate_phases WHERE plan_slug = ?1 AND phase = ?2",
-                        (plan_slug, phase),
-                    )
-                    .await
-                    .expect("count query");
-                let row = rows
-                    .next()
-                    .await
-                    .expect("count row read")
-                    .expect("count row present");
-                row.get::<i64>(0).expect("count column")
-            })
+        let conn = open_db(path).expect("open_db for count_rows");
+        conn.query_row(
+            "SELECT COUNT(*) FROM gate_phases WHERE plan_slug = ?1 AND phase = ?2",
+            rusqlite::params![plan_slug, phase],
+            |row| row.get(0),
+        )
+        .expect("count query")
     }
 
     #[test]
@@ -283,20 +202,14 @@ mod tests {
         let path = dir.join("state.db");
 
         // Act
-        let value: i64 = new_runtime().expect("runtime").block_on(async {
-            let conn = open_db(&path).await.expect("open");
-            let mut rows = conn.query("PRAGMA busy_timeout", ()).await.expect("query");
-            let row = rows
-                .next()
-                .await
-                .expect("row read")
-                .expect("busy_timeout row present");
-            row.get(0).expect("busy_timeout column")
-        });
+        let conn = open_db(&path).expect("open");
+        let value: i64 = conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .expect("busy_timeout query");
 
-        // Assert: pinned at the value open_db sets, proving the pragma ran
-        // (not the SQLite default of 0) and that it does not get shadowed by
-        // a later statement in open_db's own body.
+        // Assert: pinned at the value open_db sets, proving the call ran
+        // (not the SQLite default of 0) and that it does not get shadowed
+        // by a later statement in open_db's own body.
         assert_eq!(value, 5000);
 
         let _ = fs::remove_dir_all(&dir);
@@ -309,9 +222,7 @@ mod tests {
         let path = dir.join("state.db");
 
         // Act
-        let result = new_runtime()
-            .expect("runtime")
-            .block_on(async { open_db(&path).await.map(|_| ()) });
+        let result = open_db(&path);
 
         // Assert
         assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
@@ -325,35 +236,32 @@ mod tests {
         // Arrange
         let dir = scratch_dir("open-reopen");
         let path = dir.join("state.db");
-        new_runtime().expect("runtime").block_on(async {
-            let conn = open_db(&path).await.expect("first open");
-            upsert_phase(
-                &conn,
-                "plan-a",
-                "spec",
-                "PASS",
-                "ev",
-                "cmd",
-                "2026-01-01T00:00:00Z",
-            )
-            .await
-            .expect("upsert before reopen");
-        });
+        let conn = open_db(&path).expect("first open");
+        upsert_phase(
+            &conn,
+            "plan-a",
+            "spec",
+            "PASS",
+            "ev",
+            "cmd",
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("upsert before reopen");
+        drop(conn);
 
-        // Act, Assert
-        new_runtime().expect("runtime").block_on(async {
-            let reopened = open_db(&path).await;
-            assert!(
-                reopened.is_ok(),
-                "reopen should not error: {:?}",
-                reopened.err()
-            );
-            let row = query_phase(&reopened.unwrap(), "plan-a", "spec")
-                .await
-                .expect("query after reopen")
-                .expect("row should survive reopen");
-            assert_eq!(row.verdict, "PASS");
-        });
+        // Act
+        let reopened = open_db(&path);
+
+        // Assert
+        assert!(
+            reopened.is_ok(),
+            "reopen should not error: {:?}",
+            reopened.err()
+        );
+        let row = query_phase(&reopened.unwrap(), "plan-a", "spec")
+            .expect("query after reopen")
+            .expect("row should survive reopen");
+        assert_eq!(row.verdict, "PASS");
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -363,41 +271,36 @@ mod tests {
         // Arrange
         let dir = scratch_dir("upsert-twice");
         let path = dir.join("state.db");
+        let conn = open_db(&path).expect("open");
+        upsert_phase(
+            &conn,
+            "plan-a",
+            "spec",
+            "WARN",
+            "first evidence",
+            "cmd-1",
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("first upsert");
 
-        // Act, Assert
-        new_runtime().expect("runtime").block_on(async {
-            let conn = open_db(&path).await.expect("open");
-            upsert_phase(
-                &conn,
-                "plan-a",
-                "spec",
-                "WARN",
-                "first evidence",
-                "cmd-1",
-                "2026-01-01T00:00:00Z",
-            )
-            .await
-            .expect("first upsert");
+        // Act
+        upsert_phase(
+            &conn,
+            "plan-a",
+            "spec",
+            "PASS",
+            "second evidence",
+            "cmd-2",
+            "2026-01-02T00:00:00Z",
+        )
+        .expect("second upsert");
 
-            upsert_phase(
-                &conn,
-                "plan-a",
-                "spec",
-                "PASS",
-                "second evidence",
-                "cmd-2",
-                "2026-01-02T00:00:00Z",
-            )
-            .await
-            .expect("second upsert");
-
-            let row = query_phase(&conn, "plan-a", "spec")
-                .await
-                .expect("query")
-                .expect("row should exist");
-            assert_eq!(row.verdict, "PASS");
-            assert_eq!(row.evidence, "second evidence");
-        });
+        // Assert
+        let row = query_phase(&conn, "plan-a", "spec")
+            .expect("query")
+            .expect("row should exist");
+        assert_eq!(row.verdict, "PASS");
+        assert_eq!(row.evidence, "second evidence");
         assert_eq!(count_rows(&path, "plan-a", "spec"), 1);
 
         let _ = fs::remove_dir_all(&dir);
@@ -408,21 +311,18 @@ mod tests {
         // Arrange
         let dir = scratch_dir("bad-verdict");
         let path = dir.join("state.db");
+        let conn = open_db(&path).expect("open");
 
         // Act
-        let result = new_runtime().expect("runtime").block_on(async {
-            let conn = open_db(&path).await.expect("open");
-            upsert_phase(
-                &conn,
-                "plan-a",
-                "spec",
-                "NOPE",
-                "ev",
-                "cmd",
-                "2026-01-01T00:00:00Z",
-            )
-            .await
-        });
+        let result = upsert_phase(
+            &conn,
+            "plan-a",
+            "spec",
+            "NOPE",
+            "ev",
+            "cmd",
+            "2026-01-01T00:00:00Z",
+        );
 
         // Assert
         assert!(
@@ -438,46 +338,40 @@ mod tests {
         // Arrange
         let dir = scratch_dir("cross-plan");
         let path = dir.join("state.db");
+        let conn = open_db(&path).expect("open");
+        upsert_phase(
+            &conn,
+            "plan-a",
+            "spec",
+            "PASS",
+            "a-evidence",
+            "a-cmd",
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("upsert plan-a");
+        upsert_phase(
+            &conn,
+            "plan-b",
+            "spec",
+            "FAIL",
+            "b-evidence",
+            "b-cmd",
+            "2026-01-02T00:00:00Z",
+        )
+        .expect("upsert plan-b");
 
-        // Act, Assert
-        new_runtime().expect("runtime").block_on(async {
-            let conn = open_db(&path).await.expect("open");
-            upsert_phase(
-                &conn,
-                "plan-a",
-                "spec",
-                "PASS",
-                "a-evidence",
-                "a-cmd",
-                "2026-01-01T00:00:00Z",
-            )
-            .await
-            .expect("upsert plan-a");
-            upsert_phase(
-                &conn,
-                "plan-b",
-                "spec",
-                "FAIL",
-                "b-evidence",
-                "b-cmd",
-                "2026-01-02T00:00:00Z",
-            )
-            .await
-            .expect("upsert plan-b");
+        // Act
+        let row_a = query_phase(&conn, "plan-a", "spec")
+            .expect("query plan-a")
+            .expect("row a");
+        let row_b = query_phase(&conn, "plan-b", "spec")
+            .expect("query plan-b")
+            .expect("row b");
 
-            let row_a = query_phase(&conn, "plan-a", "spec")
-                .await
-                .expect("query plan-a")
-                .expect("row a");
-            let row_b = query_phase(&conn, "plan-b", "spec")
-                .await
-                .expect("query plan-b")
-                .expect("row b");
-
-            assert_eq!(row_a.verdict, "PASS");
-            assert_eq!(row_b.verdict, "FAIL");
-            assert_ne!(row_a.evidence, row_b.evidence);
-        });
+        // Assert
+        assert_eq!(row_a.verdict, "PASS");
+        assert_eq!(row_b.verdict, "FAIL");
+        assert_ne!(row_a.evidence, row_b.evidence);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -489,10 +383,7 @@ mod tests {
         let path = repo.join(".claude").join("state.db");
 
         // Act
-        new_runtime()
-            .expect("runtime")
-            .block_on(async { open_db(&path).await.map(|_| ()) })
-            .expect("open");
+        open_db(&path).expect("open");
 
         // Assert
         let gitignore =
