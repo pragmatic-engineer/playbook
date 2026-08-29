@@ -228,10 +228,7 @@ mod tests {
     /// `path`, proving `INSERT OR REPLACE` never leaves a duplicate behind.
     fn count_rows(path: &Path, plan_slug: &str, phase: &str) -> i64 {
         let conn = open_db(path).expect("open_db for count_rows");
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime for count_rows");
+        let runtime = new_runtime().expect("runtime for count_rows");
         runtime.block_on(async {
             let mut rows = conn
                 .query(
