@@ -187,3 +187,88 @@ jobs:
               done
               echo "all 15 hooks ran without crashing"
             '
+
+      - name: Exercise gate record/check end to end (libsql/SQLite smoke test)
+        # The 15-hook loop above predates libsql and never opens a database;
+        # a hook exiting 0 proves the binary STARTS in a minimal container,
+        # not that libsql's bundled SQLite actually works at runtime on this
+        # target. Round-trip a real verdict through the real CLI to prove
+        # that separately.
+        run: |
+          set -euo pipefail
+          bin="$PWD/target/x86_64-unknown-linux-musl/release/playbook"
+          work="$(mktemp -d)"
+          (cd "$work" && git init -q)
+          echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check -)
+          (cd "$work" && "$bin" gate check smoke-test ci fact-check)
+          echo "gate record/check round-tripped a real PASS through libsql"
+
+  # Same guarantee as container-smoke above, on real arm64 hardware instead
+  # of x86_64: this repo is public, so ubuntu-24.04-arm (GA since 2025-08,
+  # free for public repos) builds and runs the aarch64-unknown-linux-musl
+  # leg NATIVELY, no cross-compilation and no emulation. This is the only
+  # place that leg gets exercised before a real release tag: release.yml's
+  # aarch64 leg (which uses the identical musl-tools technique) only runs on
+  # a pushed tag or workflow_dispatch, never on a pull request, so without
+  # this job a broken aarch64 release build would stay invisible until the
+  # next actual release attempt.
+  container-smoke-arm64:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          # audit, not block: same reasoning as container-smoke above.
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Add the musl target
+        run: rustup target add aarch64-unknown-linux-musl
+
+      - name: Install the musl C compiler
+        run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
+
+      - name: Build the release binary (static musl)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+          CC_aarch64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --target aarch64-unknown-linux-musl
+
+      - name: Confirm the binary is static
+        run: |
+          set -euo pipefail
+          file -b target/aarch64-unknown-linux-musl/release/playbook | tee /tmp/f.txt
+          grep -qE 'static-pie linked|statically linked' /tmp/f.txt
+
+      - name: Run every hook inside a minimal debian container
+        run: |
+          docker run --rm \
+            -v "$PWD/target/aarch64-unknown-linux-musl/release/playbook:/usr/local/bin/playbook:ro" \
+            debian:stable-slim \
+            bash -c '
+              set -e
+              apt-get update -qq
+              apt-get install -y -qq git >/dev/null
+              for name in session-init preread-edit-check preread-size-check \
+                          search-counter memory-anchors post-edit-track \
+                          rebuild-memory-graph auto-model-detect precompact-warn \
+                          session-clean-exit memory-capture rm-workspace-guard \
+                          bg-await-guard no-dash-guard precommit-check; do
+                echo "== $name"
+                echo "{}" | HOME=/tmp playbook hook "$name" \
+                  || { echo "FAILED: $name did not exit 0 in a minimal container"; exit 1; }
+              done
+              echo "all 15 hooks ran without crashing"
+            '
+
+      - name: Exercise gate record/check end to end (libsql/SQLite smoke test)
+        run: |
+          set -euo pipefail
+          bin="$PWD/target/aarch64-unknown-linux-musl/release/playbook"
+          work="$(mktemp -d)"
+          (cd "$work" && git init -q)
+          echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check -)
+          (cd "$work" && "$bin" gate check smoke-test ci fact-check)
+          echo "gate record/check round-tripped a real PASS through libsql on arm64"
