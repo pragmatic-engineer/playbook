@@ -53,11 +53,18 @@ pub fn open_db(path: &Path) -> Result<libsql::Connection, String> {
             .connect()
             .map_err(|e| format!("failed to connect to database at {}: {e}", path.display()))?;
 
+        // busy_timeout must be set BEFORE any statement that can contend for
+        // the write lock (the schema creation below, and future callers
+        // opening the same fresh file concurrently): a connection's default
+        // busy timeout is 0, so an SQLITE_BUSY hit before this pragma runs
+        // fails immediately instead of retrying. `commands/scope.md` fires
+        // two `gate record` processes in parallel (Phase 2 and Phase 3), so
+        // this ordering is load-bearing, not cosmetic.
+        run_pragma(&conn, "PRAGMA busy_timeout=5000").await?;
+        run_pragma(&conn, "PRAGMA journal_mode=WAL").await?;
         conn.execute(SCHEMA_SQL, ())
             .await
             .map_err(|e| format!("failed to create gate_phases schema: {e}"))?;
-        run_pragma(&conn, "PRAGMA journal_mode=WAL").await?;
-        run_pragma(&conn, "PRAGMA busy_timeout=5000").await?;
 
         Ok(conn)
     })
@@ -244,6 +251,33 @@ mod tests {
                 .expect("count row present");
             row.get::<i64>(0).expect("count column")
         })
+    }
+
+    #[test]
+    fn open_db_sets_busy_timeout_before_returning() {
+        // Arrange
+        let dir = scratch_dir("busy-timeout");
+        let path = dir.join("state.db");
+
+        // Act
+        let conn = open_db(&path).expect("open");
+        let runtime = new_runtime().expect("runtime");
+        let value: i64 = runtime.block_on(async {
+            let mut rows = conn.query("PRAGMA busy_timeout", ()).await.expect("query");
+            let row = rows
+                .next()
+                .await
+                .expect("row read")
+                .expect("busy_timeout row present");
+            row.get(0).expect("busy_timeout column")
+        });
+
+        // Assert: pinned at the value open_db sets, proving the pragma ran
+        // (not the SQLite default of 0) and that it does not get shadowed by
+        // a later statement in open_db's own body.
+        assert_eq!(value, 5000);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
