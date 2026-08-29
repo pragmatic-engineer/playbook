@@ -147,10 +147,11 @@ jobs:
         run: rustup target add x86_64-unknown-linux-musl
 
       - name: Install the musl C cross-compiler
-        # libsql-ffi bundles SQLite's C source and needs a real C compiler to
-        # build it, unlike the rest of this crate graph (clap, serde,
-        # serde_json), which is why this step didn't exist before libsql.
-        # `musl-tools` gives us `musl-gcc`; cc-rs is told about it via
+        # rusqlite's `bundled` feature compiles SQLite's C source (via
+        # libsqlite3-sys) and needs a real C compiler to build it, unlike
+        # the rest of this crate graph (clap, serde, serde_json), which is
+        # why this step didn't exist before the gate DB. `musl-tools` gives
+        # us `musl-gcc`; cc-rs is told about it via
         # `CC_x86_64_unknown_linux_musl` below rather than a symlink, since
         # the binary it ships is named `musl-gcc`, not the
         # `x86_64-linux-musl-gcc` cc-rs guesses by default for this target.
@@ -158,10 +159,10 @@ jobs:
 
       - name: Build the release binary (static musl)
         # rust-lld still links the final binary (matches release.yml's own
-        # musl legs): musl-gcc only compiles libsql-ffi's bundled C source
-        # into object files, it never becomes the linker driver, so the
-        # musl target's self-contained sysroot linking that already worked
-        # for the pure-Rust build is unaffected.
+        # musl legs): musl-gcc only compiles the bundled sqlite3.c into
+        # object files, it never becomes the linker driver, so the musl
+        # target's self-contained sysroot linking that already worked for
+        # the pure-Rust build is unaffected.
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
           CC_x86_64_unknown_linux_musl: musl-gcc
@@ -188,12 +189,12 @@ jobs:
               echo "all 15 hooks ran without crashing"
             '
 
-      - name: Exercise gate record/check end to end (libsql/SQLite smoke test)
-        # The 15-hook loop above predates libsql and never opens a database;
-        # a hook exiting 0 proves the binary STARTS in a minimal container,
-        # not that libsql's bundled SQLite actually works at runtime on this
-        # target. Round-trip a real verdict through the real CLI to prove
-        # that separately.
+      - name: Exercise gate record/check end to end (rusqlite/SQLite smoke test)
+        # The 15-hook loop above predates the gate DB and never opens a
+        # database; a hook exiting 0 proves the binary STARTS in a minimal
+        # container, not that rusqlite's bundled SQLite actually works at
+        # runtime on this target. Round-trip a real verdict through the
+        # real CLI to prove that separately.
         run: |
           set -euo pipefail
           bin="$PWD/target/x86_64-unknown-linux-musl/release/playbook"
@@ -201,7 +202,7 @@ jobs:
           (cd "$work" && git init -q)
           echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check -)
           (cd "$work" && "$bin" gate check smoke-test ci fact-check)
-          echo "gate record/check round-tripped a real PASS through libsql"
+          echo "gate record/check round-tripped a real PASS through rusqlite"
 
   # Same guarantee as container-smoke above, on real arm64 hardware instead
   # of x86_64: this repo is public, so ubuntu-24.04-arm (GA since 2025-08,
@@ -263,7 +264,7 @@ jobs:
               echo "all 15 hooks ran without crashing"
             '
 
-      - name: Exercise gate record/check end to end (libsql/SQLite smoke test)
+      - name: Exercise gate record/check end to end (rusqlite/SQLite smoke test)
         run: |
           set -euo pipefail
           bin="$PWD/target/aarch64-unknown-linux-musl/release/playbook"
@@ -271,4 +272,4 @@ jobs:
           (cd "$work" && git init -q)
           echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check -)
           (cd "$work" && "$bin" gate check smoke-test ci fact-check)
-          echo "gate record/check round-tripped a real PASS through libsql on arm64"
+          echo "gate record/check round-tripped a real PASS through rusqlite on arm64"
