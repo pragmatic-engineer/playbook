@@ -107,7 +107,7 @@ Scale the fan-out to the idea: one agent for a tiny change, up to about four for
 - Integration points and the consumers a change would touch.
 - Constraints: config, conventions, and anything in the code that limits the options.
 
-Alongside the `Explore` agents, dispatch one independent `critic` agent (`subagent_type: critic`, focus `premise`), prompted to challenge the premise rather than explore code. Its return feeds the Step 2 digest and the Step 4 approach exploration, so premise-challenge isn't only in the orchestrator's head. Close it on return with the others (Step 2 teardown).
+Alongside the `Explore` agents, dispatch one independent `critic` agent (`subagent_type: playbook:critic`, focus `premise`), prompted to challenge the premise rather than explore code. Its return feeds the Step 2 digest and the Step 4 approach exploration, so premise-challenge isn't only in the orchestrator's head. Close it on return with the others (Step 2 teardown).
 
 Built-in `Explore` agents have been reliable at returning results; the `critic` is structurally read-only and has only the return channel, so it may deliver nothing (`playbook:delegating-subagents`). An area whose agent returned nothing was NOT explored: it does not mean there is nothing there. Say which areas are unexplored rather than treating the digest as complete, and if the premise-challenge came back empty, challenge the premise yourself before moving to Step 3.
 

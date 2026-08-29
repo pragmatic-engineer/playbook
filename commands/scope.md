@@ -263,7 +263,7 @@ After producing the plan, run the three-phase gate. Do NOT skip it. Do NOT ask t
 
 #### Phase 1: Fact-Check
 
-Spawn a `fact-checker` agent (`subagent_type: fact-checker`) with the full plan and these criteria:
+Spawn a `fact-checker` agent (`subagent_type: playbook:fact-checker`) with the full plan and these criteria:
 
 - Every referenced file path exists.
 - Function/type signatures and imports in the plan match the real code.
@@ -289,7 +289,7 @@ Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned a
 
 #### Phase 2: Adversarial Review
 
-Spawn a `critic` agent (`subagent_type: critic`, focus `plan`) with the full plan and the Phase 1 report. It challenges the design:
+Spawn a `critic` agent (`subagent_type: playbook:critic`, focus `plan`) with the full plan and the Phase 1 report. It challenges the design:
 
 - Is there a simpler alternative that meets the goal?
 - Scope creep or over-engineering?
@@ -301,7 +301,7 @@ Returns a structured report. Spawn it with a stable `name`; the moment it return
 
 #### Phase 3: Test Review
 
-Spawn a `test-reviewer` agent (`subagent_type: test-reviewer`) with the plan's Testing Strategy and the Phase 1 report (it runs in parallel with Phase 2, so it doesn't wait on the adversarial findings). It evaluates the proposed tests against `playbook:engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
+Spawn a `test-reviewer` agent (`subagent_type: playbook:test-reviewer`) with the plan's Testing Strategy and the Phase 1 report (it runs in parallel with Phase 2, so it doesn't wait on the adversarial findings). It evaluates the proposed tests against `playbook:engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
 
 Returns a structured report. Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **After it returns**, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist any durable test-quality pattern as a memory fact; otherwise skip. **If any FAILs:** revise the test plan and re-run Phase 3 (max 3 iterations).
 
