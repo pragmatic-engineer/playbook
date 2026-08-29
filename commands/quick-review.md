@@ -167,7 +167,7 @@ Capture: `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JS
 
 Reading and analysing the changed files is where main-context rot accumulates, so it runs in an isolated `reviewer` subagent, not the main session. The orchestrator keeps only the returned report, never the file contents.
 
-Spawn ONE `reviewer` subagent (`subagent_type: reviewer`); it pins its own model tier, so the orchestrator doesn't set `model` on this call. Because the review is single-pass, its focus is the ENTIRE diff (logic, tests, security, data, types, perf, docs), not one lens.
+Spawn ONE `reviewer` subagent (`subagent_type: playbook:reviewer`); it pins its own model tier, so the orchestrator doesn't set `model` on this call. Because the review is single-pass, its focus is the ENTIRE diff (logic, tests, security, data, types, perf, docs), not one lens.
 
 The subagent prompt MUST include:
 

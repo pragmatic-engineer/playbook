@@ -201,7 +201,7 @@ Check whether a memory store exists: the global store at `~/.claude/memory/MEMOR
 
 Skip this step entirely when `--all` was passed (check `$ARGUMENTS` the same way Step 2 does): every core + conditional reviewer Step 2 selected already runs `full-lens`, matching `--all`'s existing "run every reviewer regardless of diff content" guarantee, so there is nothing left for triage to narrow.
 
-Otherwise, dispatch `review-triage` (`subagent_type: review-triage`) exactly once per review run, regardless of how many lenses Step 2 selected. The prompt includes: the PR diff (the same diff Step 1 already captured via `gh pr diff "$PR_NUMBER"` and that Step 3's reviewer prompts also embed), `HEAD_SHA`, the absolute `$WT` path (or a note that the tree is in-place when `WT` is empty, same convention Step 3 uses), and the full set of lens names Step 2 selected (core reviewers plus any triggered conditional reviewers). Capture the returned tier map, a JSON object of `{lens: {tier, reason}}`, into context for Step 3 to read.
+Otherwise, dispatch `review-triage` (`subagent_type: playbook:review-triage`) exactly once per review run, regardless of how many lenses Step 2 selected. The prompt includes: the PR diff (the same diff Step 1 already captured via `gh pr diff "$PR_NUMBER"` and that Step 3's reviewer prompts also embed), `HEAD_SHA`, the absolute `$WT` path (or a note that the tree is in-place when `WT` is empty, same convention Step 3 uses), and the full set of lens names Step 2 selected (core reviewers plus any triggered conditional reviewers). Capture the returned tier map, a JSON object of `{lens: {tier, reason}}`, into context for Step 3 to read.
 
 Three distinct fail-open rules apply, not one:
 
@@ -217,8 +217,8 @@ Report which lenses resolved to which tier, a one-line summary, e.g. "Triage: se
 
 For each lens in a wave, read its Step 2d tier from the captured tier map before dispatching: a lens absent from the map defaults to `full-lens`, per Step 2d's fail-open-per-lens rule (a triage dispatch that returns a partial map never silently narrows a lens's coverage). Dispatch by tier:
 
-- **`full-lens`:** dispatch a `reviewer` subagent (`subagent_type: reviewer`) exactly as this step already did before tiered dispatch existed. Do not change the reviewer prompt shape at all for this tier; everything below through "Instruct each to" describes it unchanged.
-- **`cheap-check`:** dispatch a `cheap-checker` subagent (`subagent_type: cheap-checker`) instead of `reviewer`. Its prompt names: the lens's narrow concern, taken from the tier map's `reason` field for that lens (that field is already a short, grounded justification from `review-triage`, so it doubles as the concern statement); the PR diff and `HEAD_SHA`; the absolute `$WT` path (or the in-place note when `WT` is empty), same conventions as the `reviewer` dispatch below; and ONE reference file path to read for criteria, per this mapping:
+- **`full-lens`:** dispatch a `reviewer` subagent (`subagent_type: playbook:reviewer`) exactly as this step already did before tiered dispatch existed. Do not change the reviewer prompt shape at all for this tier; everything below through "Instruct each to" describes it unchanged.
+- **`cheap-check`:** dispatch a `cheap-checker` subagent (`subagent_type: playbook:cheap-checker`) instead of `reviewer`. Its prompt names: the lens's narrow concern, taken from the tier map's `reason` field for that lens (that field is already a short, grounded justification from `review-triage`, so it doubles as the concern statement); the PR diff and `HEAD_SHA`; the absolute `$WT` path (or the in-place note when `WT` is empty), same conventions as the `reviewer` dispatch below; and ONE reference file path to read for criteria, per this mapping:
 
   | Lens | Reference file |
   |---|---|

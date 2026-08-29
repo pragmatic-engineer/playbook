@@ -38,7 +38,7 @@ That is what `commands/repo-audit.md` adds to its frontmatter to route to `audit
 **Inline spawn.** The command keeps `Agent` in its `allowed-tools` and spawns the agent directly with `subagent_type: <name>`, often several at once. Pick this when the command orchestrates and the agent does one scoped piece of the work, or when you need a swarm.
 
 ```
-subagent_type: reviewer
+subagent_type: playbook:reviewer
 ```
 
 `commands/quick-review.md` spawns one `reviewer` for the whole diff in a single pass. `commands/deep-review.md` spawns several `reviewer` subagents in parallel, one per review lens.

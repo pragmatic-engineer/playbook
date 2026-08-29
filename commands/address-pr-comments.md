@@ -176,7 +176,7 @@ For each indexed item, do this loop:
    - `Edit-then-fix` means: user wants to write a different fix than what you proposed. Wait for them to describe it, then apply.
    - `Quit` means: stop iterating, jump straight to Step 5 with what you have so far.
 
-5. **Apply.** Everything above this sub-step (show context, verify the claim, choose the action, draft the exact diff or reply text, get user approval) stays in the main session unchanged. Once an action is approved and its content is fully decided, dispatch execution to `patch-applier` (`subagent_type: patch-applier`) rather than applying it directly. `patch-applier` holds `Edit` and `Bash`, so per `playbook:delegating-subagents` it delivers its outcome by file, not by return value alone: every dispatch below names a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md` (`<N>` is this item's index), and the main session reads that file the moment the dispatch returns or goes idle, before trusting any outcome.
+5. **Apply.** Everything above this sub-step (show context, verify the claim, choose the action, draft the exact diff or reply text, get user approval) stays in the main session unchanged. Once an action is approved and its content is fully decided, dispatch execution to `patch-applier` (`subagent_type: playbook:patch-applier`) rather than applying it directly. `patch-applier` holds `Edit` and `Bash`, so per `playbook:delegating-subagents` it delivers its outcome by file, not by return value alone: every dispatch below names a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md` (`<N>` is this item's index), and the main session reads that file the moment the dispatch returns or goes idle, before trusting any outcome.
 
    - **For Both, dispatch the fix half now and queue the reply text for Step 6.** The reply half of a **Both** action is NEVER dispatched here: only its content is decided now. Step 6 dispatches it after commit, once `<SHA>` is known. This deferred timing is the primary rule for Both, not a trailing exception to it.
    - For **Fix**, or the fix half of **Both**: dispatch `patch-applier` with the exact, already-approved diff and the report file path. Read the report file; it names the exact hunk applied, or a failure. Print the applied hunk to the user immediately, before advancing to the next indexed item.
@@ -212,7 +212,7 @@ If approved (or `AUTO_COMMIT=true`):
 
 1. Invoke the `commit-and-push` skill with the `-A` flag and an extra hint that the commit message should reference the PR (e.g. "address review comments on #<PR_NUMBER>"). The skill handles staging, formatting, message generation, rebase, and push. Capture the resulting commit SHA from the skill's output.
 
-2. For each `both-queued` reply, finalise the body by substituting `<SHA>`, then dispatch `patch-applier` (`subagent_type: patch-applier`) with the exact finalised body, the command shape to run, and a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md`, the same convention Step 4 uses:
+2. For each `both-queued` reply, finalise the body by substituting `<SHA>`, then dispatch `patch-applier` (`subagent_type: playbook:patch-applier`) with the exact finalised body, the command shape to run, and a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md`, the same convention Step 4 uses:
    ```bash
    gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" \
      -f body="$REPLY_TEXT_WITH_SHA"
