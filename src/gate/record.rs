@@ -94,24 +94,16 @@ pub fn run(plan_slug: &str, command: &str, phase: &str, input: &str) -> Result<(
     let db_path = repo_root.join(".claude").join("state.db");
     let recorded_at = recorded_at_now();
 
-    // One runtime for the whole call: the connection is opened, used, and
-    // dropped entirely inside this one `block_on`, never split across more
-    // than one runtime. See `gate::db`'s module doc comment for why that
-    // matters (a real SIGSEGV on the musl release target, not a style
-    // preference).
-    db::new_runtime()?.block_on(async {
-        let conn = db::open_db(&db_path).await?;
-        db::upsert_phase(
-            &conn,
-            plan_slug,
-            phase,
-            verdict.as_str(),
-            &raw,
-            command,
-            &recorded_at,
-        )
-        .await
-    })
+    let conn = db::open_db(&db_path)?;
+    db::upsert_phase(
+        &conn,
+        plan_slug,
+        phase,
+        verdict.as_str(),
+        &raw,
+        command,
+        &recorded_at,
+    )
 }
 
 /// Read the whole of `input`: `"-"` means stdin, anything else is a file
