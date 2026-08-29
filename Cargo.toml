@@ -10,5 +10,7 @@ license = "MIT"
 
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }
+libsql = { version = "=0.9.30", default-features = false, features = ["core"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["preserve_order"] }
+tokio = { version = "=1.53.1", default-features = false, features = ["rt"] }
