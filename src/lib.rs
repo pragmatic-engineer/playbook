@@ -8,6 +8,7 @@
 pub mod agents;
 pub mod cc;
 pub mod common;
+pub mod gate;
 pub mod hooks;
 pub mod init;
 pub mod manifest;
