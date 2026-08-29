@@ -10,24 +10,26 @@
 #   aarch64-apple-darwin        macos-latest, native
 #   x86_64-apple-darwin         macos-latest, cross
 #   x86_64-unknown-linux-musl   ubuntu-latest, native musl-gcc + rust-lld
-#   aarch64-unknown-linux-musl  ubuntu-latest, `cross` (Docker cross toolchain)
+#   aarch64-unknown-linux-musl  ubuntu-24.04-arm, native musl-gcc + rust-lld
 #   x86_64-pc-windows-msvc      windows-latest
 #
 # libsql-ffi bundles SQLite's C source and needs a real C compiler, unlike
-# the rest of this crate graph (clap, serde, serde_json), which is why the
-# two musl legs below are no longer pure-rust-lld-only. x86_64 stays simple:
-# `musl-tools` gives a native `musl-gcc` on the same-arch ubuntu-latest
-# runner, and rust-lld still does the final link, the same fix applied to
-# rust-ci.yml's container-smoke check. aarch64 is a genuine cross-compile of
-# C code, which
-# `musl-tools` cannot do (its `musl-gcc` only targets the host's own arch),
-# so that leg uses `cross` (a Docker image with a real aarch64-musl C
-# toolchain baked in) instead. UNVERIFIED as of this comment: `cross` was
-# never wired up before, and this leg can't be exercised without either a
-# real tag push or a manual `workflow_dispatch` run, since this workflow
-# doesn't run on pull requests. Watch the first real run of this leg
-# closely; the artefact upload and checksums steps below hard-require all 5
-# targets to succeed, so a silent regression here blocks every release.
+# the rest of this crate graph (clap, serde, serde_json), which is why both
+# musl legs below install `musl-tools` for a native `musl-gcc` and still
+# link with rust-lld. Neither leg cross-compiles C code: this repo is
+# public, so GitHub's arm64-hosted `ubuntu-24.04-arm` runner (GA since
+# 2025-08, free for public repos) builds the aarch64 leg NATIVELY on real
+# arm64 hardware instead of cross-compiling from an x86_64 host, the same
+# way the aarch64-apple-darwin leg already builds natively on Apple
+# Silicon. That sidesteps needing a musl cross C toolchain entirely, and
+# both Linux legs now use the exact same technique, verified in CI:
+# container-smoke and PRs #285-287's x86_64-unknown-linux-musl leg all pass
+# with this shape. The aarch64-unknown-linux-musl leg specifically still
+# hasn't run for real (this workflow only runs on a pushed tag or
+# `workflow_dispatch`), but it uses no new mechanism beyond "install
+# musl-tools, build", already proven on the x86_64 leg; watch its first run
+# anyway, since the artefact upload and checksums steps below hard-require
+# all 5 targets to succeed.
 #
 # Why `codesign --force`: on Apple Silicon the linker already ad-hoc signs the
 # native binary, while the cross-built x86_64 one comes out "not signed at
@@ -101,8 +103,9 @@ jobs:
             linker: rust-lld
             cc: musl-gcc
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
+            os: ubuntu-24.04-arm
+            linker: rust-lld
+            cc: musl-gcc
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             ext: .exe
@@ -125,34 +128,26 @@ jobs:
             static.crates.io:443
             static.rust-lang.org:443
             uploads.github.com:443
-            ghcr.io:443
-            pkg-containers.githubusercontent.com:443
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Add the target
-        # `cross` manages its own target/toolchain inside the Docker image;
-        # adding it via rustup here would be inert for that leg but harmless.
         run: rustup target add ${{ matrix.target }}
 
-      - name: Install the musl C cross-compiler
-        # Only the x86_64 musl leg needs this: libsql-ffi's bundled SQLite C
-        # source needs a real compiler, and musl-tools' `musl-gcc` targets
-        # the runner's own arch (x86_64), so it works here without crossing
-        # architectures. aarch64 needs an actual cross C toolchain instead,
-        # which `cross` (installed below) provides via Docker.
+      - name: Install the musl C compiler
+        # libsql-ffi bundles SQLite's C source and needs a real C compiler.
+        # `musl-tools` gives `musl-gcc`, which only ever targets the
+        # runner's OWN arch, so this only works because both musl legs now
+        # run on a same-arch runner (ubuntu-latest for x86_64,
+        # ubuntu-24.04-arm for aarch64): neither leg cross-compiles C.
         if: matrix.cc == 'musl-gcc'
         run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
-
-      - name: Install cross
-        if: matrix.cross == true
-        run: cargo install cross --locked
 
       - name: Build
         shell: bash
         env:
           RELEASE_LINKER: ${{ matrix.linker }}
-          CC_x86_64_unknown_linux_musl: ${{ matrix.cc == 'musl-gcc' && 'musl-gcc' || '' }}
+          RELEASE_CC: ${{ matrix.cc }}
         run: |
           set -euo pipefail
           if [ -n "${RELEASE_LINKER:-}" ]; then
@@ -160,14 +155,15 @@ jobs:
             tu="$(echo '${{ matrix.target }}' | tr 'a-z-' 'A-Z_')"
             export "CARGO_TARGET_${tu}_LINKER=${RELEASE_LINKER}"
           fi
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            # cross's own Docker image carries the right C toolchain, sysroot
-            # and linker for this target; forcing rust-lld here would fight
-            # its own configuration, so this leg never sets RELEASE_LINKER.
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
+          if [ -n "${RELEASE_CC:-}" ]; then
+            # cc-rs's own env var convention: lowercase target, underscores
+            # instead of dashes (distinct from cargo's CARGO_TARGET_* casing
+            # above). Verified in CI on the x86_64 leg (container-smoke and
+            # PRs #285-287).
+            tc="$(echo '${{ matrix.target }}' | tr '-' '_')"
+            export "CC_${tc}=${RELEASE_CC}"
           fi
+          cargo build --release --target ${{ matrix.target }}
 
       - name: Ad-hoc sign the macOS binaries
         if: runner.os == 'macOS'
