@@ -76,6 +76,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: AgentsCommand,
     },
+    /// Gate-check database subcommands, backing `src/gate/`.
+    Gate {
+        #[command(subcommand)]
+        sub: GateCommand,
+    },
 }
 
 /// `playbook settings` subcommands, backing `src/settings/`.
@@ -141,6 +146,23 @@ pub enum AgentsCommand {
         /// `check-agents.sh` did, via `git rev-parse --show-toplevel` from
         /// the current directory.
         agents_dir: Option<PathBuf>,
+    },
+}
+
+/// `playbook gate` subcommands, backing `src/gate/`.
+#[derive(Subcommand, Debug)]
+pub enum GateCommand {
+    /// Parse a phase agent's raw output for a `VERDICT:` line and upsert it
+    /// into the gate-check database at `.claude/state.db`.
+    Record {
+        /// Plan slug the recorded phase belongs to.
+        plan_slug: String,
+        /// The command that produced this verdict, stored alongside it.
+        command: String,
+        /// Which phase this verdict is for.
+        phase: String,
+        /// Path to the phase agent's raw output, or "-" to read stdin.
+        input: String,
     },
 }
 
