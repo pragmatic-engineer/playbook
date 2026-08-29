@@ -92,11 +92,13 @@ fn no_verdict_line_exits_nonzero_and_writes_nothing() {
         "got: {}",
         stderr_of(&out)
     );
-    let row = db::open_db(&f.db_path())
-        .and_then(|conn| db::query_phase(&conn, "plan-a", "spec"))
-        .expect("open/query should not error even though nothing was ever written");
+    let row = db::new_runtime().expect("runtime").block_on(async {
+        let conn = db::open_db(&f.db_path()).await?;
+        db::query_phase(&conn, "plan-a", "spec").await
+    });
     assert!(
-        row.is_none(),
+        row.expect("open/query should not error even though nothing was ever written")
+            .is_none(),
         "no row should have been written for an input with no VERDICT line"
     );
 }
@@ -118,11 +120,13 @@ fn invalid_verdict_value_exits_nonzero_and_writes_nothing() {
         out.status.code(),
         stderr_of(&out)
     );
-    let row = db::open_db(&f.db_path())
-        .and_then(|conn| db::query_phase(&conn, "plan-a", "spec"))
-        .expect("open/query should not error even though nothing was ever written");
+    let row = db::new_runtime().expect("runtime").block_on(async {
+        let conn = db::open_db(&f.db_path()).await?;
+        db::query_phase(&conn, "plan-a", "spec").await
+    });
     assert!(
-        row.is_none(),
+        row.expect("open/query should not error even though nothing was ever written")
+            .is_none(),
         "a value outside the 4 keywords must not be recorded"
     );
 }
@@ -151,10 +155,15 @@ fn re_recording_same_plan_and_phase_overwrites_not_duplicates() {
         "second record should succeed: {}",
         stderr_of(&second)
     );
-    let conn = db::open_db(&f.db_path()).expect("open db after two records");
-    let row = db::query_phase(&conn, "plan-a", "spec")
-        .expect("query should not error")
-        .expect("row should exist after recording");
+    let row = db::new_runtime().expect("runtime").block_on(async {
+        let conn = db::open_db(&f.db_path())
+            .await
+            .expect("open db after two records");
+        db::query_phase(&conn, "plan-a", "spec")
+            .await
+            .expect("query should not error")
+            .expect("row should exist after recording")
+    });
     assert_eq!(
         row.verdict, "PASS",
         "only the latest verdict should be present"
