@@ -75,35 +75,27 @@ pub fn run(plan_slug: &str, _command: &str, phases: &[String]) -> Result<String,
     let repo_root =
         manifest::check::toplevel().ok_or_else(|| "not inside a git repository".to_string())?;
     let db_path = repo_root.join(".claude").join("state.db");
+    let conn = db::open_db(&db_path)?;
 
-    // One runtime for the whole call, looping over every phase inside it:
-    // the connection is opened, queried however many times, and dropped
-    // entirely inside this one `block_on`. See `gate::db`'s module doc
-    // comment for why splitting a connection across runtimes crashes on
-    // musl.
-    db::new_runtime()?.block_on(async {
-        let conn = db::open_db(&db_path).await?;
-
-        let mut lines = Vec::with_capacity(phases.len());
-        let mut all_satisfied = true;
-        for phase in phases {
-            let state = match db::query_phase(&conn, plan_slug, phase).await? {
-                None => PhaseState::Missing,
-                Some(row) => PhaseState::from_verdict(&row.verdict),
-            };
-            if !state.satisfied() {
-                all_satisfied = false;
-            }
-            lines.push(format!("{phase}: {}", state.label()));
+    let mut lines = Vec::with_capacity(phases.len());
+    let mut all_satisfied = true;
+    for phase in phases {
+        let state = match db::query_phase(&conn, plan_slug, phase)? {
+            None => PhaseState::Missing,
+            Some(row) => PhaseState::from_verdict(&row.verdict),
+        };
+        if !state.satisfied() {
+            all_satisfied = false;
         }
-        let output = lines.join("\n");
+        lines.push(format!("{phase}: {}", state.label()));
+    }
+    let output = lines.join("\n");
 
-        if all_satisfied {
-            Ok(output)
-        } else {
-            Err(output)
-        }
-    })
+    if all_satisfied {
+        Ok(output)
+    } else {
+        Err(output)
+    }
 }
 
 #[cfg(test)]

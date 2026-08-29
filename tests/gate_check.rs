@@ -45,26 +45,19 @@ impl Fixture {
     }
 
     /// Seed a phase row directly through the library, bypassing `gate
-    /// record`'s CLI: `gate check` needs pre-existing rows to query. Opens,
-    /// writes, and drops its own connection inside one `block_on`, per
-    /// `gate::db`'s module doc comment.
+    /// record`'s CLI: `gate check` needs pre-existing rows to query.
     fn seed(&self, plan_slug: &str, phase: &str, verdict: &str) {
-        db::new_runtime().expect("runtime").block_on(async {
-            let conn = db::open_db(&self.db_path())
-                .await
-                .expect("open db for seed");
-            db::upsert_phase(
-                &conn,
-                plan_slug,
-                phase,
-                verdict,
-                "evidence",
-                "seed-cmd",
-                "2026-01-01T00:00:00Z",
-            )
-            .await
-            .expect("seed upsert");
-        });
+        let conn = db::open_db(&self.db_path()).expect("open db for seed");
+        db::upsert_phase(
+            &conn,
+            plan_slug,
+            phase,
+            verdict,
+            "evidence",
+            "seed-cmd",
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("seed upsert");
     }
 
     fn run(&self, plan_slug: &str, command: &str, phases: &[&str]) -> std::process::Output {
