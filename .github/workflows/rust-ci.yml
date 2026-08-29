@@ -146,13 +146,25 @@ jobs:
       - name: Add the musl target
         run: rustup target add x86_64-unknown-linux-musl
 
+      - name: Install the musl C cross-compiler
+        # libsql-ffi bundles SQLite's C source and needs a real C compiler to
+        # build it, unlike the rest of this crate graph (clap, serde,
+        # serde_json), which is why this step didn't exist before libsql.
+        # `musl-tools` gives us `musl-gcc`; cc-rs is told about it via
+        # `CC_x86_64_unknown_linux_musl` below rather than a symlink, since
+        # the binary it ships is named `musl-gcc`, not the
+        # `x86_64-linux-musl-gcc` cc-rs guesses by default for this target.
+        run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
+
       - name: Build the release binary (static musl)
-        # rust-lld, not the system linker: matches release.yml's own musl
-        # legs exactly. The system cc/ld does not understand this target's
-        # linker flags on its own; rust-lld ships with the toolchain, so
-        # this needs no extra install.
+        # rust-lld still links the final binary (matches release.yml's own
+        # musl legs): musl-gcc only compiles libsql-ffi's bundled C source
+        # into object files, it never becomes the linker driver, so the
+        # musl target's self-contained sysroot linking that already worked
+        # for the pure-Rust build is unaffected.
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+          CC_x86_64_unknown_linux_musl: musl-gcc
         run: cargo build --release --target x86_64-unknown-linux-musl
 
       - name: Run every hook inside a minimal debian container

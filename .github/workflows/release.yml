@@ -9,15 +9,25 @@
 # Five targets, built on the host that matches them:
 #   aarch64-apple-darwin        macos-latest, native
 #   x86_64-apple-darwin         macos-latest, cross
-#   x86_64-unknown-linux-musl   ubuntu-latest, static via rust-lld
-#   aarch64-unknown-linux-musl  ubuntu-latest, static via rust-lld
+#   x86_64-unknown-linux-musl   ubuntu-latest, native musl-gcc + rust-lld
+#   aarch64-unknown-linux-musl  ubuntu-latest, `cross` (Docker cross toolchain)
 #   x86_64-pc-windows-msvc      windows-latest
 #
-# Why `rust-lld` for the musl legs: the crate graph is pure Rust (clap, serde,
-# serde_json), so nothing needs a C toolchain, and rust-lld ships with the
-# toolchain. That removes any need for musl-tools or an aarch64 cross-gcc.
-# Verified locally: both musl targets link with rust-lld and `file` reports
-# them static (x86_64 as static-pie, aarch64 as statically linked).
+# libsql-ffi bundles SQLite's C source and needs a real C compiler, unlike
+# the rest of this crate graph (clap, serde, serde_json), which is why the
+# two musl legs below are no longer pure-rust-lld-only. x86_64 stays simple:
+# `musl-tools` gives a native `musl-gcc` on the same-arch ubuntu-latest
+# runner, and rust-lld still does the final link, the same fix applied to
+# rust-ci.yml's container-smoke check. aarch64 is a genuine cross-compile of
+# C code, which
+# `musl-tools` cannot do (its `musl-gcc` only targets the host's own arch),
+# so that leg uses `cross` (a Docker image with a real aarch64-musl C
+# toolchain baked in) instead. UNVERIFIED as of this comment: `cross` was
+# never wired up before, and this leg can't be exercised without either a
+# real tag push or a manual `workflow_dispatch` run, since this workflow
+# doesn't run on pull requests. Watch the first real run of this leg
+# closely; the artefact upload and checksums steps below hard-require all 5
+# targets to succeed, so a silent regression here blocks every release.
 #
 # Why `codesign --force`: on Apple Silicon the linker already ad-hoc signs the
 # native binary, while the cross-built x86_64 one comes out "not signed at
@@ -89,9 +99,10 @@ jobs:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             linker: rust-lld
+            cc: musl-gcc
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
-            linker: rust-lld
+            cross: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             ext: .exe
@@ -114,16 +125,34 @@ jobs:
             static.crates.io:443
             static.rust-lang.org:443
             uploads.github.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Add the target
+        # `cross` manages its own target/toolchain inside the Docker image;
+        # adding it via rustup here would be inert for that leg but harmless.
         run: rustup target add ${{ matrix.target }}
+
+      - name: Install the musl C cross-compiler
+        # Only the x86_64 musl leg needs this: libsql-ffi's bundled SQLite C
+        # source needs a real compiler, and musl-tools' `musl-gcc` targets
+        # the runner's own arch (x86_64), so it works here without crossing
+        # architectures. aarch64 needs an actual cross C toolchain instead,
+        # which `cross` (installed below) provides via Docker.
+        if: matrix.cc == 'musl-gcc'
+        run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
+
+      - name: Install cross
+        if: matrix.cross == true
+        run: cargo install cross --locked
 
       - name: Build
         shell: bash
         env:
           RELEASE_LINKER: ${{ matrix.linker }}
+          CC_x86_64_unknown_linux_musl: ${{ matrix.cc == 'musl-gcc' && 'musl-gcc' || '' }}
         run: |
           set -euo pipefail
           if [ -n "${RELEASE_LINKER:-}" ]; then
@@ -131,7 +160,14 @@ jobs:
             tu="$(echo '${{ matrix.target }}' | tr 'a-z-' 'A-Z_')"
             export "CARGO_TARGET_${tu}_LINKER=${RELEASE_LINKER}"
           fi
-          cargo build --release --target ${{ matrix.target }}
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            # cross's own Docker image carries the right C toolchain, sysroot
+            # and linker for this target; forcing rust-lld here would fight
+            # its own configuration, so this leg never sets RELEASE_LINKER.
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
 
       - name: Ad-hoc sign the macOS binaries
         if: runner.os == 'macOS'
