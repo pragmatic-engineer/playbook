@@ -55,13 +55,36 @@ read-only agents, so granting `Write` to a reviewer fails CI. That property is
 deliberate (ADR 0003): a code reviewer must not be able to modify the code it
 reviews.
 
-| Agent | Can deliver by file? |
-|---|---|
-| `implementer` | Yes, has `Write` |
-| `collector` | Yes, has `Bash` |
-| `reviewer`, `critic`, `fact-checker`, `test-reviewer`, `analyst` | **No. Read, Grep, Glob, Skill only** |
+| Agent | `subagent_type` to pass the `Agent` tool | Tools | Can deliver by file? |
+|---|---|---|---|
+| `implementer` | `playbook:implementer` | Read, Grep, Glob, Edit, Write, Bash, Skill | Yes, has `Write`/`Bash` |
+| `patch-applier` | `playbook:patch-applier` | Read, Edit, Bash | Yes, has `Bash` |
+| `collector` | `playbook:collector` | Bash, Read, Grep, Glob, WebFetch, Skill | Yes, has `Bash` |
+| `auditor` | `playbook:auditor` | Bash, Read, Grep, Glob, WebSearch, WebFetch | Yes, has `Bash` |
+| `git` | `playbook:git` | Bash, Read, Skill | Yes, has `Bash` |
+| `reviewer` | `playbook:reviewer` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `critic` | `playbook:critic` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `fact-checker` | `playbook:fact-checker` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `test-reviewer` | `playbook:test-reviewer` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `analyst` | `playbook:analyst` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `cheap-checker` | `playbook:cheap-checker` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `review-triage` | `playbook:review-triage` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 
-**For the read-only five there is no reliable delivery channel at all.** Their
+**Always pass the `playbook:` prefix as the `subagent_type` value**, not the
+bare name in the first column: these are plugin-provided agents, and a bare
+`subagent_type: critic` resolves to the wrong (or no) agent, the exact class
+of bug fixed repo-wide in #284. This table's own prose elsewhere ("a
+`critic` pass", "the `implementer` agent") uses the bare name only as a
+short-hand label when talking ABOUT the agent, never as literal invocation
+syntax; the second column above is the one to copy into an actual `Agent`
+tool call.
+
+(Full current roster, `agents/*.md`, cross-checked against each file's own `tools:`
+frontmatter, not assumed from memory: this table went stale once before, missing
+half the roster after `auditor`, `cheap-checker`, `patch-applier`, and
+`review-triage` were added.)
+
+**For the seven read-only agents there is no reliable delivery channel at all.** Their
 only route is the return value, and that is the route that fails. So:
 
 - **Do the pass inline instead.** For mechanical work this is simply better, not
