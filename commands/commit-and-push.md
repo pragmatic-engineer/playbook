@@ -50,6 +50,21 @@ AMEND_COMMIT=false
 STAGE_ALL=false
 STAGE_UPDATE=false
 
+# Hard stop on the repo's default/protected branch. This skill never commits
+# there, under any flag combination, even -y: an ambiguous invocation like
+# "branch off main" has been misread as "commit on main" before, and a
+# maintainer/admin role can make a protected-branch ruleset bypass a push
+# silently, with no visible error, so the ruleset is not a backstop
+# (commit-skill-needs-explicit-branch). If work genuinely belongs directly on
+# the default branch, that is a deliberate, informed decision to make with
+# raw git, not this skill's automated default.
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo main)
+if [ "$BRANCH" = "$DEFAULT_BRANCH" ] || [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  echo "ERROR: HEAD is on '$BRANCH', the repo's default/protected branch. This skill never commits there. Create a feature branch first (e.g. git checkout -b <name>) and re-run." >&2
+  exit 1
+fi
+
 # Auto-stage if requested
 if [ "$STAGE_ALL" = "true" ]; then
   git add -A
@@ -184,8 +199,23 @@ if [ -n "$BASE" ] && [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; then
   fi
 fi
 
-# Push. Force-with-lease when we amended OR when a rebase rewrote history.
-if [ "$AMEND_COMMIT" = "true" ] || [ "$REBASED_THIS_RUN" = "true" ]; then
+# Push. Never force on the shared default branch, under any condition: a
+# lease evaluated immediately after a rejected push can match the very
+# remote commit it was meant to protect (the failed push already refreshed
+# the local tracking ref as a side effect of reading the remote's advertised
+# refs), so --force-with-lease is not actually safe there. This force-pushed
+# main and silently discarded another actor's commit once
+# (commit-push-lease-force-loses-commits). Step 1's hard stop should make
+# BRANCH=main/master unreachable here already; this is the second,
+# independent layer in case that check is ever bypassed or this block runs
+# in isolation.
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  if ! git push origin "HEAD:refs/heads/$BRANCH" 2>&1; then
+    echo "ERROR: push to '$BRANCH' was rejected. This is the shared default branch: force-with-lease is never used here. Run 'git pull --rebase origin $BRANCH', resolve any conflict by hand, then push again." >&2
+    exit 1
+  fi
+elif [ "$AMEND_COMMIT" = "true" ] || [ "$REBASED_THIS_RUN" = "true" ]; then
+  # Force-with-lease when we amended OR when a rebase rewrote history.
   git push --force-with-lease origin "HEAD:refs/heads/$BRANCH" 2>&1
 else
   git push origin "HEAD:refs/heads/$BRANCH" 2>&1 || {

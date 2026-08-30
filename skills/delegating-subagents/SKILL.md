@@ -101,6 +101,32 @@ whose tests passed, and whose diffs looked correct. What they recorded was what
 they had chosen NOT to do, and why. That is exactly the information a passing
 test suite cannot give you.
 
+## Re-dispatching (a second pass is a new agent, not a continuation)
+
+Every `Agent` tool call is a fresh spawn with zero memory of any prior round,
+even one run earlier in the same session and even for the exact same
+`subagent_type`. When a quality-gate phase (`critic`, `test-reviewer`,
+`fact-checker`) FAILs, gets revised, and needs a second pass, send the
+COMPLETE current artifact again, not a "here's what changed since round 1"
+diff or changelist.
+
+**Why.** During one quality gate, round 1 of a `critic` pass found one real
+blocking defect and it got fixed. Round 2 was dispatched with only a
+"here's what changed" summary. It correctly re-verified the actual fix, then
+flagged two unrelated things as "unaddressed" that were genuinely already
+covered elsewhere in the plan, purely because the round-2 prompt never
+restated them. The agent was not lying or hallucinating: it reviewed exactly
+what it was shown, and what it was shown was incomplete. A third round with
+the full artifact confirmed both flags were false and surfaced the one thing
+that actually was new.
+
+**How to apply.** Budget for this on every re-dispatch: resend the complete,
+current version of whatever is under review, even if it feels redundant or
+the change was small. Treat a "still failing" or "new finding" from a
+partial re-prompt with suspicion; check whether the finding is actually
+already resolved somewhere in the artifact the agent wasn't shown before
+concluding it's real.
+
 ## Verifying delegated work
 
 Reading the report replaces neither check below; it tells you where to aim them.

@@ -116,7 +116,29 @@ git fetch origin "$BASE_BRANCH" --quiet 2>/dev/null || true
 echo "Resolved base: $BASE_BRANCH (source: $BASE_SOURCE)"
 ```
 
-**Before continuing to Step 2, sanity-check the echoed base against the actual request.** If `--base` appeared in `$ARGUMENTS` but `BASE_SOURCE` printed as "repo default", the edit to `args.env` was missed or wrong; fix `$PR_TMP/args.env` now and re-run the block above before proceeding. This is the exact failure mode the file-persistence design in this step exists to catch: silently opening a PR against the wrong base is a correctness bug, not a style nit, especially for stacked PRs where the base is load-bearing.
+**Hard check, not a sanity note (MUST run before continuing to Step 2).** A prior
+version of this step relied on the authoring agent noticing a mismatch and fixing
+it by hand; that still let `--base` silently drop on roughly a third of runs, per
+`feedback-create-pr-base-flag-drops`, because the check was prose the agent could
+skim past under momentum, not something that could fail the run. Run this as its
+own bash block, with the raw `$ARGUMENTS` text embedded literally (single-quoted,
+verbatim, by the authoring agent, not re-derived from memory):
+
+```bash
+RAW_ARGUMENTS='<the literal, unmodified $ARGUMENTS text for this invocation>'
+source "$PR_TMP/args.env"
+if echo "$RAW_ARGUMENTS" | grep -q -- '--base' && [ -z "$BASE_ARG" ]; then
+  echo "ERROR: --base is present in the invocation but BASE_ARG in args.env is empty. Re-open $PR_TMP/args.env with the Edit tool, set BASE_ARG to the branch named after --base, then re-run Step 1's base-resolution block before continuing." >&2
+  exit 1
+fi
+echo "Hard check passed: --base presence in \$ARGUMENTS matches BASE_ARG."
+```
+
+If this exits non-zero, fix `$PR_TMP/args.env` with the Edit tool and re-run the
+base-resolution block above; do not proceed to Step 2 on a non-zero exit here.
+This is the exact failure mode the file-persistence design in this step exists to
+catch: silently opening a PR against the wrong base is a correctness bug, not a
+style nit, especially for stacked PRs where the base is load-bearing.
 
 ## Step 2: Pre-flight checks (engineering-standards)
 
