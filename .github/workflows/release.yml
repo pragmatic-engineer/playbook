@@ -23,15 +23,16 @@
 # instead of cross-compiling from an x86_64 host, the same way the
 # aarch64-apple-darwin leg already builds natively on Apple Silicon. That
 # sidesteps needing a musl cross C toolchain entirely, and both Linux legs
-# use the exact same technique, verified in CI: container-smoke and
-# container-smoke-arm64 both pass on real hardware, including a real
-# `gate record`/`gate check` round trip through rusqlite (not just "the
-# binary starts"). The aarch64-unknown-linux-musl leg here in release.yml
-# specifically still hasn't run for real (this workflow only runs on a
-# pushed tag or `workflow_dispatch`), but it uses no new mechanism beyond
-# "install musl-tools, build", already proven on real arm64 hardware by
-# container-smoke-arm64; watch its first run anyway, since the artefact
-# upload and checksums steps below hard-require all 5 targets to succeed.
+# use the exact same technique, verified in CI: rust-ci.yml's container-smoke
+# matrix job runs both the x86_64 and aarch64 musl legs on real hardware,
+# including a real `gate record`/`gate check` round trip through rusqlite
+# (not just "the binary starts"). The aarch64-unknown-linux-musl leg here in
+# release.yml specifically still hasn't run for real (this workflow only
+# runs on a pushed tag or `workflow_dispatch`), but it uses no new mechanism
+# beyond "install musl-tools, build", already proven on real arm64 hardware
+# by that same container-smoke matrix leg; watch its first run anyway, since
+# the artefact upload and checksums steps below hard-require all 5 targets
+# to succeed.
 #
 # Why `codesign --force`: on Apple Silicon the linker already ad-hoc signs the
 # native binary, while the cross-built x86_64 one comes out "not signed at
