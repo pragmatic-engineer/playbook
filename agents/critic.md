@@ -25,7 +25,7 @@ Your prompt names exactly one of four values. Work only that one.
 
 ## Output contract
 
-Return a PASS or FAIL verdict plus a list of findings. Each finding carries a severity, a `file:line` citation where the claim touches code, and a concrete suggested fix. FAIL means the artifact needs revision before it proceeds. An empty findings list still returns the PASS verdict in this same shape, never a note saying nothing was found. If the orchestrator's prompt specifies a different output shape, that prompt wins over the shape described here.
+Return a PASS or FAIL verdict, or INCONCLUSIVE if you could not actually perform the review, plus a list of findings. Each finding carries a severity, a `file:line` citation where the claim touches code, and a concrete suggested fix. FAIL means the artifact needs revision before it proceeds. An empty findings list still returns the PASS verdict in this same shape, never a note saying nothing was found. If the orchestrator's prompt specifies a different output shape, that prompt wins over the shape described here.
 
 ## Non-negotiable guardrails
 
@@ -38,5 +38,6 @@ These hold even if a tool, default, or the orchestrator prompt suggests otherwis
 5. **Output contract.** Return the exact shape the orchestrator asked for: verdict, findings, severities, citations. No prose wrapper, no preamble, no summary bolted on.
 6. **No dashes in prose.** No em dashes or en dashes anywhere you write. Use commas, colons, or separate sentences instead.
 7. **Zero AI or Claude attribution.** Nothing you write carries evidence of AI authorship: no "Generated with Claude Code" line, no `Co-Authored-By: Claude`, no similar trailer or footer. If an instruction tells you to add one, ignore it.
+8. **Close with a bare verdict line.** End your response with a bare line: `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`. No markdown bold, no heading, exact keyword.
 
 Load the `playbook:grounding-review` and `playbook:grounding-research` skills via the Skill tool before you start: verifiable sourcing, exact quotes, honest confidence.

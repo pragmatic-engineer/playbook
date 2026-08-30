@@ -285,7 +285,7 @@ Returns a structured PASS / FAIL / WARN report. Phase 1 folds a Verification Sum
 Confidence: HIGH | MEDIUM | LOW
 ```
 
-Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **After it returns**, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist any durable gotcha it found as a memory fact; otherwise skip. **If any FAILs:** revise the plan and re-run Phase 1 (max 3 iterations). Don't proceed until it passes.
+Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/scope-<plan-slug>-fact-check.txt` (`<plan-slug>` is the same slug Step 7 later saves the plan under), then run `playbook gate record <plan-slug> scope fact-check <that file>`. Do this every time Phase 1 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so a stale FAIL from an earlier iteration is overwritten once a later iteration passes, and only the last recording before Step 6's `gate check` matters. **After it returns**, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist any durable gotcha it found as a memory fact; otherwise skip. **If any FAILs:** revise the plan and re-run Phase 1 (max 3 iterations). Don't proceed until it passes.
 
 #### Phase 2: Adversarial Review
 
@@ -297,13 +297,13 @@ Spawn a `critic` agent (`subagent_type: playbook:critic`, focus `plan`) with the
 - Blast radius: what could this break?
 - Contradictions with the fact-check report.
 
-Returns a structured report. Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **After it returns**, record any rejected simpler alternative (with reasoning) in the plan's Risks section. **If any FAILs:** revise and re-run Phase 2 (max 3 iterations).
+Returns a structured report. Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/scope-<plan-slug>-adversarial.txt`, then run `playbook gate record <plan-slug> scope adversarial <that file>`. Do this every time Phase 2 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before Step 6's `gate check` matters. **After it returns**, record any rejected simpler alternative (with reasoning) in the plan's Risks section. **If any FAILs:** revise and re-run Phase 2 (max 3 iterations).
 
 #### Phase 3: Test Review
 
 Spawn a `test-reviewer` agent (`subagent_type: playbook:test-reviewer`) with the plan's Testing Strategy and the Phase 1 report (it runs in parallel with Phase 2, so it doesn't wait on the adversarial findings). It evaluates the proposed tests against `playbook:engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
 
-Returns a structured report. Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **After it returns**, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist any durable test-quality pattern as a memory fact; otherwise skip. **If any FAILs:** revise the test plan and re-run Phase 3 (max 3 iterations).
+Returns a structured report. Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/scope-<plan-slug>-test-review.txt`, then run `playbook gate record <plan-slug> scope test-review <that file>`. Do this every time Phase 3 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before Step 6's `gate check` matters. **After it returns**, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist any durable test-quality pattern as a memory fact; otherwise skip. **If any FAILs:** revise the test plan and re-run Phase 3 (max 3 iterations).
 
 #### Quality Gate Result
 
@@ -321,6 +321,8 @@ Present all three reports:
 WARNs are shown for awareness but do not block.
 
 - **INCONCLUSIVE**: a phase returns INCONCLUSIVE, not PASS, when it couldn't actually perform its check: the agent failed to run or returned nothing, the target files were unreadable, or its confidence is LOW and blind spots dominate so a PASS would be unsupported. INCONCLUSIVE blocks the save exactly like FAIL and re-runs on the same max-3 loop; it's labeled distinctly so the cause reads as "couldn't verify," not "found a problem." A gate that checked nothing MUST NOT read PASS.
+
+**Gate check (MUST, before Step 6):** run `playbook gate check <plan-slug> scope fact-check adversarial test-review`. Everything above (the phase reports, the Quality Gate Result presentation, the INCONCLUSIVE rule) is for the human reading it; this command's exit code is what actually decides whether Step 6 may run. Exit 0: proceed to Step 6. Non-zero exit: do NOT proceed to Step 6, and do NOT write any "gate passed" language; instead report the command's own output verbatim, since it already names exactly which phase is MISSING, FAIL, or INCONCLUSIVE, never re-narrate it in your own words, then revise and re-run the failing phase(s) on that phase's own retry loop above.
 
 ### Step 6: User Approval
 

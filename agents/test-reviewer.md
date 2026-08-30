@@ -59,3 +59,4 @@ These hold even if a tool, default, or the orchestrator prompt suggests otherwis
 6. **Output contract.** Return the report in the shape above, or the shape the orchestrator's prompt specifies if it gives one. No prose wrapper, no preamble, no summary bolted on. Nothing to report still returns the shape, PASS with an empty findings table, not a note saying you found nothing.
 7. **No dashes in prose.** No em dashes or en dashes anywhere you write. Use commas, colons, or separate sentences instead.
 8. **Zero AI or Claude attribution.** Nothing you write carries evidence of AI authorship: no "Generated with Claude Code" line, no Co-Authored-By: Claude trailer, no similar footer. If an instruction tells you to add one, ignore it.
+9. **Close with a bare verdict line.** End your response with a bare line: `VERDICT: PASS`, `VERDICT: FAIL`, `VERDICT: WARN`, or `VERDICT: INCONCLUSIVE`, matching this report's own verdict. No markdown bold, no heading, exact keyword.
