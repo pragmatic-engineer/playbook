@@ -127,8 +127,28 @@ jobs:
   # container that has nothing but git, which `cargo test` never exercises
   # since it always runs on a machine with the full toolchain already
   # present.
+  #
+  # One matrix job for both musl targets, not two near-identical jobs: this
+  # used to be container-smoke (x86_64, ubuntu-latest) and
+  # container-smoke-arm64 (aarch64, ubuntu-24.04-arm) as separate copy-pasted
+  # jobs. Both legs run NATIVELY on real hardware for this target (no
+  # cross-compilation, no emulation): this repo is public, so
+  # ubuntu-24.04-arm (GA since 2025-08, free for public repos) builds and
+  # runs the aarch64-unknown-linux-musl leg on real arm64 hardware the same
+  # way ubuntu-latest does for x86_64. This is the only place the aarch64 leg
+  # gets exercised before a real release tag: release.yml's aarch64 leg
+  # (identical musl-tools technique, same matrix pattern) only runs on a
+  # pushed tag or workflow_dispatch, never on a pull request.
   container-smoke:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     steps:
@@ -144,17 +164,18 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Add the musl target
-        run: rustup target add x86_64-unknown-linux-musl
+        run: rustup target add ${{ matrix.target }}
 
       - name: Install the musl C cross-compiler
         # rusqlite's `bundled` feature compiles SQLite's C source (via
         # libsqlite3-sys) and needs a real C compiler to build it, unlike
         # the rest of this crate graph (clap, serde, serde_json), which is
         # why this step didn't exist before the gate DB. `musl-tools` gives
-        # us `musl-gcc`; cc-rs is told about it via
-        # `CC_x86_64_unknown_linux_musl` below rather than a symlink, since
-        # the binary it ships is named `musl-gcc`, not the
-        # `x86_64-linux-musl-gcc` cc-rs guesses by default for this target.
+        # us `musl-gcc` on either arch, since both legs run natively on a
+        # same-arch runner; cc-rs is told about it via the target-specific
+        # `CC_*` env var in the build step below rather than a symlink,
+        # since the binary it ships is named `musl-gcc`, not the
+        # `<arch>-linux-musl-gcc` cc-rs guesses by default.
         run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
 
       - name: Build the release binary (static musl)
@@ -163,15 +184,31 @@ jobs:
         # object files, it never becomes the linker driver, so the musl
         # target's self-contained sysroot linking that already worked for
         # the pure-Rust build is unaffected.
-        env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
-          CC_x86_64_unknown_linux_musl: musl-gcc
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        #
+        # Env var names are derived from matrix.target at runtime, the same
+        # technique release.yml's build job already uses, rather than a
+        # second matrix column: cargo's CARGO_TARGET_* wants the target
+        # uppercased with underscores, cc-rs's CC_* wants it lowercased with
+        # underscores, and hand-listing both per target is exactly the
+        # duplication this job merge is removing.
+        run: |
+          set -euo pipefail
+          tu="$(echo '${{ matrix.target }}' | tr 'a-z-' 'A-Z_')"
+          tc="$(echo '${{ matrix.target }}' | tr '-' '_')"
+          export "CARGO_TARGET_${tu}_LINKER=rust-lld"
+          export "CC_${tc}=musl-gcc"
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Confirm the binary is static
+        run: |
+          set -euo pipefail
+          file -b target/${{ matrix.target }}/release/playbook | tee /tmp/f.txt
+          grep -qE 'static-pie linked|statically linked' /tmp/f.txt
 
       - name: Run every hook inside a minimal debian container
         run: |
           docker run --rm \
-            -v "$PWD/target/x86_64-unknown-linux-musl/release/playbook:/usr/local/bin/playbook:ro" \
+            -v "$PWD/target/${{ matrix.target }}/release/playbook:/usr/local/bin/playbook:ro" \
             debian:stable-slim \
             bash -c '
               set -e
@@ -206,7 +243,7 @@ jobs:
         # never claimed to ship.
         run: |
           set -euo pipefail
-          bin="$PWD/target/x86_64-unknown-linux-musl/release/playbook"
+          bin="$PWD/target/${{ matrix.target }}/release/playbook"
           if ! "$bin" gate --help >/dev/null 2>&1; then
             echo "gate subcommand not wired yet on this branch, skipping the round-trip"
             exit 0
@@ -215,80 +252,4 @@ jobs:
           (cd "$work" && git init -q)
           echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check -)
           (cd "$work" && "$bin" gate check smoke-test ci fact-check)
-          echo "gate record/check round-tripped a real PASS through rusqlite"
-
-  # Same guarantee as container-smoke above, on real arm64 hardware instead
-  # of x86_64: this repo is public, so ubuntu-24.04-arm (GA since 2025-08,
-  # free for public repos) builds and runs the aarch64-unknown-linux-musl
-  # leg NATIVELY, no cross-compilation and no emulation. This is the only
-  # place that leg gets exercised before a real release tag: release.yml's
-  # aarch64 leg (which uses the identical musl-tools technique) only runs on
-  # a pushed tag or workflow_dispatch, never on a pull request, so without
-  # this job a broken aarch64 release build would stay invisible until the
-  # next actual release attempt.
-  container-smoke-arm64:
-    runs-on: ubuntu-24.04-arm
-    permissions:
-      contents: read
-    steps:
-      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          # audit, not block: same reasoning as container-smoke above.
-          egress-policy: audit
-
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Add the musl target
-        run: rustup target add aarch64-unknown-linux-musl
-
-      - name: Install the musl C compiler
-        run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
-
-      - name: Build the release binary (static musl)
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
-          CC_aarch64_unknown_linux_musl: musl-gcc
-        run: cargo build --release --target aarch64-unknown-linux-musl
-
-      - name: Confirm the binary is static
-        run: |
-          set -euo pipefail
-          file -b target/aarch64-unknown-linux-musl/release/playbook | tee /tmp/f.txt
-          grep -qE 'static-pie linked|statically linked' /tmp/f.txt
-
-      - name: Run every hook inside a minimal debian container
-        run: |
-          docker run --rm \
-            -v "$PWD/target/aarch64-unknown-linux-musl/release/playbook:/usr/local/bin/playbook:ro" \
-            debian:stable-slim \
-            bash -c '
-              set -e
-              apt-get update -qq
-              apt-get install -y -qq git >/dev/null
-              for name in session-init preread-edit-check preread-size-check \
-                          search-counter memory-anchors post-edit-track \
-                          rebuild-memory-graph auto-model-detect precompact-warn \
-                          session-clean-exit memory-capture rm-workspace-guard \
-                          bg-await-guard no-dash-guard precommit-check; do
-                echo "== $name"
-                echo "{}" | HOME=/tmp playbook hook "$name" \
-                  || { echo "FAILED: $name did not exit 0 in a minimal container"; exit 1; }
-              done
-              echo "all 15 hooks ran without crashing"
-            '
-
-      - name: Exercise gate record/check end to end (rusqlite/SQLite smoke test)
-        # Skip gracefully if `gate` isn't wired yet; see the x86_64 leg's
-        # copy of this step above for why.
-        run: |
-          set -euo pipefail
-          bin="$PWD/target/aarch64-unknown-linux-musl/release/playbook"
-          if ! "$bin" gate --help >/dev/null 2>&1; then
-            echo "gate subcommand not wired yet on this branch, skipping the round-trip"
-            exit 0
-          fi
-          work="$(mktemp -d)"
-          (cd "$work" && git init -q)
-          echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check -)
-          (cd "$work" && "$bin" gate check smoke-test ci fact-check)
-          echo "gate record/check round-tripped a real PASS through rusqlite on arm64"
+          echo "gate record/check round-tripped a real PASS through rusqlite on ${{ matrix.target }}"
