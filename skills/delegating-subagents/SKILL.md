@@ -82,7 +82,10 @@ tool call.
 (Full current roster, `agents/*.md`, cross-checked against each file's own `tools:`
 frontmatter, not assumed from memory: this table went stale once before, missing
 half the roster after `auditor`, `cheap-checker`, `patch-applier`, and
-`review-triage` were added.)
+`review-triage` were added. `tests/delegating_subagents_roster.rs` now enforces
+this table stays in sync with `agents/*.md` and that every row's `subagent_type`
+carries the `playbook:` prefix, so the next agent addition fails CI instead of
+quietly drifting again.)
 
 **For the seven read-only agents there is no reliable delivery channel at all.** Their
 only route is the return value, and that is the route that fails. So:
