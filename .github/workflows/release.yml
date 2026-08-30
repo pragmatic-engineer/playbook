@@ -31,8 +31,8 @@
 # runs on a pushed tag or `workflow_dispatch`), but it uses no new mechanism
 # beyond "install musl-tools, build", already proven on real arm64 hardware
 # by that same container-smoke matrix leg; watch its first run anyway, since
-# the artefact
-# upload and checksums steps below hard-require all 5 targets to succeed.
+# the artefact upload and checksums steps below hard-require all 5 targets
+# to succeed.
 #
 # Why `codesign --force`: on Apple Silicon the linker already ad-hoc signs the
 # native binary, while the cross-built x86_64 one comes out "not signed at
