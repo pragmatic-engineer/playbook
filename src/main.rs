@@ -6,8 +6,8 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, hooks, init, manifest, settings, AgentsCommand, CcCommand, Cli, Command,
-    ManifestCommand, MemoryCommand, SettingsCommand,
+    agents, cc, common, gate, hooks, init, manifest, settings, AgentsCommand, CcCommand, Cli,
+    Command, GateCommand, ManifestCommand, MemoryCommand, SettingsCommand,
 };
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
@@ -155,6 +155,31 @@ fn main() {
                     }
                 }
             }
+        },
+        Command::Gate { sub } => match sub {
+            GateCommand::Record {
+                plan_slug,
+                command,
+                phase,
+                input,
+            } => match gate::record::run(&plan_slug, &command, &phase, &input) {
+                Ok(()) => println!("gate record: recorded {phase} verdict for {plan_slug}"),
+                Err(err) => {
+                    eprintln!("gate record: {err}");
+                    std::process::exit(1);
+                }
+            },
+            GateCommand::Check {
+                plan_slug,
+                command,
+                phases,
+            } => match gate::check::run(&plan_slug, &command, &phases) {
+                Ok(output) => println!("{output}"),
+                Err(err) => {
+                    eprintln!("gate check: {err}");
+                    std::process::exit(1);
+                }
+            },
         },
     }
 }

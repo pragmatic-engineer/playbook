@@ -76,6 +76,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: AgentsCommand,
     },
+    /// Gate-check database subcommands, backing `src/gate/`.
+    Gate {
+        #[command(subcommand)]
+        sub: GateCommand,
+    },
 }
 
 /// `playbook settings` subcommands, backing `src/settings/`.
@@ -141,6 +146,39 @@ pub enum AgentsCommand {
         /// `check-agents.sh` did, via `git rev-parse --show-toplevel` from
         /// the current directory.
         agents_dir: Option<PathBuf>,
+    },
+}
+
+/// `playbook gate` subcommands, backing `src/gate/`.
+#[derive(Subcommand, Debug)]
+pub enum GateCommand {
+    /// Parse a phase agent's raw output for a `VERDICT:` line and upsert it
+    /// into the gate-check database at `.claude/state.db`.
+    Record {
+        /// Plan slug the recorded phase belongs to.
+        plan_slug: String,
+        /// The command that produced this verdict, stored alongside it.
+        command: String,
+        /// Which phase this verdict is for.
+        phase: String,
+        /// Path to the phase agent's raw output, or "-" to read stdin.
+        input: String,
+    },
+    /// Query one or more previously recorded phase verdicts for a plan;
+    /// exit 0 only if every named phase is PASS or WARN.
+    Check {
+        /// Plan slug to query recorded phases for.
+        plan_slug: String,
+        /// The command this check invocation is running under, accepted for
+        /// CLI-shape parity with `Record` though `check::run` does not use
+        /// it to look up rows.
+        command: String,
+        /// One or more phase names to check. `Vec<String>` with no minimum
+        /// `num_args`, so zero phase names still parses at the clap level;
+        /// `check::run` rejects an empty list itself with a pinned message
+        /// and exit code 1, since clap's own missing-argument usage error
+        /// exits with a different code (2) than the plan requires here.
+        phases: Vec<String>,
     },
 }
 
