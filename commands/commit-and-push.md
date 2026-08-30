@@ -50,6 +50,33 @@ AMEND_COMMIT=false
 STAGE_ALL=false
 STAGE_UPDATE=false
 
+# Hard stop on the repo's default/protected branch. This skill never commits
+# there, under any flag combination, even -y: an ambiguous invocation like
+# "branch off main" has been misread as "commit on main" before, and a
+# maintainer/admin role can make a protected-branch ruleset bypass a push
+# silently, with no visible error, so the ruleset is not a backstop
+# (commit-skill-needs-explicit-branch). If work genuinely belongs directly on
+# the default branch, that is a deliberate, informed decision to make with
+# raw git, not this skill's automated default.
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+# A pipe's exit status is its LAST command's (sed's, here), not
+# git symbolic-ref's, so `cmd | sed ... || fallback` never runs the
+# fallback even when `cmd` failed and produced empty output: sed still
+# exits 0 on nothing. Capture git's output first, THEN branch on whether
+# it was empty, so a repo with no local origin/HEAD (never ran
+# `git remote set-head origin -a`) doesn't silently end up with an empty
+# DEFAULT_BRANCH instead of a real fallback value.
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null)
+if [ -n "$DEFAULT_BRANCH" ]; then
+  DEFAULT_BRANCH="${DEFAULT_BRANCH#refs/remotes/origin/}"
+else
+  DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || echo main)
+fi
+if [ "$BRANCH" = "$DEFAULT_BRANCH" ] || [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  echo "ERROR: HEAD is on '$BRANCH', the repo's default/protected branch. This skill never commits there. Create a feature branch first (e.g. git checkout -b <name>) and re-run." >&2
+  exit 1
+fi
+
 # Auto-stage if requested
 if [ "$STAGE_ALL" = "true" ]; then
   git add -A
@@ -184,17 +211,28 @@ if [ -n "$BASE" ] && [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; then
   fi
 fi
 
-# Push. Force-with-lease when we amended OR when a rebase rewrote history.
+# Push. A rejected plain push is NEVER auto-escalated to a force-with-lease
+# fallback in this same block, on any branch: the lease is evaluated right
+# after the failed push, which has already refreshed the local tracking ref
+# to the very remote commit the lease is supposed to protect against, so it
+# silently matches and the force succeeds anyway
+# (commit-push-lease-force-loses-commits: force-pushed main this way once
+# and discarded another actor's commit). An earlier draft of this fix only
+# guarded main/master specifically; that left the identical failure
+# reachable on any other shared branch, so the guard now applies
+# universally instead of naming branches.
+#
+# Force-with-lease IS still used, deliberately, right when WE amended or
+# rebased THIS run (below): that lease is evaluated against a ref refreshed
+# by our own `git fetch` earlier in this same block, not by a just-failed
+# push, so it protects correctly rather than rubber-stamping a stale check.
 if [ "$AMEND_COMMIT" = "true" ] || [ "$REBASED_THIS_RUN" = "true" ]; then
   git push --force-with-lease origin "HEAD:refs/heads/$BRANCH" 2>&1
 else
-  git push origin "HEAD:refs/heads/$BRANCH" 2>&1 || {
-    # Fallback: if the regular push was rejected as non-fast-forward, the remote
-    # likely holds a pre-rebase ancestor (e.g. an earlier session pushed and then
-    # rebased locally). Retry with force-with-lease which refuses to push if
-    # someone else also moved the remote.
-    git push --force-with-lease origin "HEAD:refs/heads/$BRANCH" 2>&1
-  }
+  if ! git push origin "HEAD:refs/heads/$BRANCH" 2>&1; then
+    echo "ERROR: push to '$BRANCH' was rejected. Run 'git pull --rebase origin $BRANCH', resolve any conflict by hand, then push again. This command never auto-escalates a rejected push to force-with-lease." >&2
+    exit 1
+  fi
 fi
 
 echo "Pushed: $(git log -1 --oneline) -> origin/$BRANCH"
