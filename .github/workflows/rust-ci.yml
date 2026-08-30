@@ -32,6 +32,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+    env:
+      # Single source of truth for the cache key and the install command
+      # below, so they can't drift apart. Bump deliberately, not implicitly.
+      CARGO_AUDIT_VERSION: "0.22.2"
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         # Linux-only action; it self-skips on macOS with a confusing warning
@@ -80,9 +84,28 @@ jobs:
       - name: Validate agent definitions
         run: ./target/debug/playbook agents check
 
+      # cargo-audit's own `cargo install --locked` compiles it from source
+      # every run, ~2 minutes on ubuntu-latest, the single most expensive
+      # step in this job by far (measured: musl-tools + rustup target add
+      # combined cost 13 seconds in the container-smoke job, for comparison).
+      # Cache the compiled binary, keyed on a pinned version so a cache hit
+      # is always the exact version this job expects, never a stale one
+      # silently reused past its actual pin.
+      - name: Cache cargo-audit binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-${{ env.CARGO_AUDIT_VERSION }}
+
       - name: cargo audit
         run: |
-          cargo install cargo-audit --locked
+          if [ ! -x "$HOME/.cargo/bin/cargo-audit" ]; then
+            cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+          fi
+          # The advisory DATABASE still updates every run regardless of the
+          # cache: cargo-audit fetches it fresh from the rustsec advisory-db
+          # repo at scan time, so caching the binary doesn't freeze which
+          # CVEs get caught, only skips recompiling the same binary.
           cargo audit
 
   # release.yml builds five targets, but nothing else ever compiled for

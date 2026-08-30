@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: MIT
+#
+# Pins the exact Rust version for both CI and local dev. Before this file,
+# every CI leg used whatever rustc happened to be preinstalled on that day's
+# GitHub-hosted runner image, which changes over time with no warning here.
+# rustup reads this file automatically (local `cargo build`, and every CI
+# step that invokes cargo/rustc/rustup) and installs this exact version if
+# it isn't already present, no separate `rustup toolchain install` step
+# needed. Bump deliberately, not implicitly: pin to a new version alongside
+# a commit that says why.
+
+[toolchain]
+channel = "1.97.0"
