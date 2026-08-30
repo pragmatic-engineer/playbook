@@ -121,11 +121,18 @@ version of this step relied on the authoring agent noticing a mismatch and fixin
 it by hand; that still let `--base` silently drop on roughly a third of runs, per
 `feedback-create-pr-base-flag-drops`, because the check was prose the agent could
 skim past under momentum, not something that could fail the run. Run this as its
-own bash block, with the raw `$ARGUMENTS` text embedded literally (single-quoted,
-verbatim, by the authoring agent, not re-derived from memory):
+own bash block. Write the raw `$ARGUMENTS` text into a heredoc with a QUOTED
+delimiter (`<<'RAWARGS_EOF'`, not `<<RAWARGS_EOF`), not a single-quoted literal:
+a heredoc needs no escaping regardless of content, while an apostrophe or
+backtick in `$ARGUMENTS` breaks a single-quoted string open, which an earlier
+draft of this fix did not handle. Re-read the actual invocation text now if
+there is any doubt about transcribing it exactly:
 
 ```bash
-RAW_ARGUMENTS='<the literal, unmodified $ARGUMENTS text for this invocation>'
+RAW_ARGUMENTS=$(cat <<'RAWARGS_EOF'
+<the literal, unmodified $ARGUMENTS text for this invocation>
+RAWARGS_EOF
+)
 source "$PR_TMP/args.env"
 if echo "$RAW_ARGUMENTS" | grep -q -- '--base' && [ -z "$BASE_ARG" ]; then
   echo "ERROR: --base is present in the invocation but BASE_ARG in args.env is empty. Re-open $PR_TMP/args.env with the Edit tool, set BASE_ARG to the branch named after --base, then re-run Step 1's base-resolution block before continuing." >&2
@@ -133,6 +140,16 @@ if echo "$RAW_ARGUMENTS" | grep -q -- '--base' && [ -z "$BASE_ARG" ]; then
 fi
 echo "Hard check passed: --base presence in \$ARGUMENTS matches BASE_ARG."
 ```
+
+**This check is only as reliable as the `RAW_ARGUMENTS` transcription above
+it.** It closes the "prose skimmed past" failure mode, not a "the agent never
+actually looked at `$ARGUMENTS`" one: an authoring agent that mistranscribes or
+omits the flag there defeats the check the same way it dropped `BASE_ARG`
+before. A bare substring match on `--base` can also false-positive on argument
+text that merely mentions the string in prose (e.g. a `--ticket` description
+that quotes it); that fails safe (an overly-cautious hard-abort with a fixable
+error), not unsafe, so it's left as a known, accepted limitation rather than a
+more fragile boundary-matching regex.
 
 If this exits non-zero, fix `$PR_TMP/args.env` with the Edit tool and re-run the
 base-resolution block above; do not proceed to Step 2 on a non-zero exit here.
