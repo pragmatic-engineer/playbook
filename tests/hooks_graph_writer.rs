@@ -95,6 +95,20 @@ fn has_edge(graph: &Value, from: &str, to: &str, relation: &str) -> bool {
         .any(|e| e["from"] == from && e["to"] == to && e["relation"] == relation)
 }
 
+/// Find the `signals` array of the `possible_relates_to` edge between `a`
+/// and `b`, checked in either direction since which of the two facts ends
+/// up as `from` depends on filesystem walk order, which this suite does not
+/// control.
+fn possible_relates_to_signals<'a>(graph: &'a Value, a: &str, b: &str) -> Option<&'a Vec<Value>> {
+    edges(graph)
+        .iter()
+        .find(|e| {
+            e["relation"] == "possible_relates_to"
+                && ((e["from"] == a && e["to"] == b) || (e["from"] == b && e["to"] == a))
+        })
+        .and_then(|e| e["signals"].as_array())
+}
+
 // --- rebuild-memory-graph: mandatory frontmatter shape matrix --------------
 //
 // (1) top-level scalars, (2) block lists, (3) nested dict sub-keys,
@@ -530,8 +544,15 @@ fn inline_and_block_style_anchors_produce_the_same_code_nodes_and_edges() {
     let graph = read_graph(&home);
     // Both facts anchor the same two paths, so the code nodes are shared
     // (deduplicated by id) and each fact contributes one anchors edge per
-    // path: four edges total, but only two code nodes.
-    assert_eq!(edges(&graph).len(), 4);
+    // path: four edges total, but only two code nodes. The two facts also
+    // anchor the same parent directory, share a type and scope, and share a
+    // body, so the pairwise similarity check adds a fifth edge between them.
+    assert_eq!(edges(&graph).len(), 5);
+    assert!(
+        possible_relates_to_signals(&graph, "global/inline-style-fact", "global/block-style-fact")
+            .is_some(),
+        "two facts anchoring the same directory with a matching type, scope, and body should get a possible_relates_to edge"
+    );
     for path in ["src/shared.ts", "src/other.ts"] {
         let cid = format!("code:{path}");
         assert_eq!(
@@ -798,6 +819,13 @@ fn project_scoped_dangling_target_uses_same_scope_id() {
 
 /// hooks/rebuild-memory-graph.test.sh scenario 15: a global source resolves
 /// in the global scope, unaffected by the two-pass project resolution.
+///
+/// The two facts' bodies are deliberately distinct (not the usual "Body
+/// text." placeholder shared by most fixtures in this file): both are
+/// `type: reference` at the same (global) scope, so an identical body would
+/// also satisfy the pairwise similarity check added for
+/// `possible_relates_to` edges, adding a second edge this test does not
+/// expect.
 #[test]
 fn global_source_is_unaffected_by_project_scope_resolution() {
     // Arrange
@@ -810,7 +838,7 @@ fn global_source_is_unaffected_by_project_scope_resolution() {
     write_fact(
         &home,
         "global-target.md",
-        "---\nname: global-target\ntype: reference\n---\n\nBody text.\n",
+        "---\nname: global-target\ntype: reference\n---\n\nUnrelated placeholder content only.\n",
     );
 
     // Act
@@ -827,6 +855,12 @@ fn global_source_is_unaffected_by_project_scope_resolution() {
 
 /// hooks/rebuild-memory-graph.test.sh scenario 16: `anchors` and `links` on
 /// the same fact do not interfere with each other.
+///
+/// `combo-target`'s body is deliberately distinct from `combo-fact`'s (not
+/// the usual "Body text." placeholder): both are `type: reference` at the
+/// same (project) scope, so an identical body would also satisfy the
+/// pairwise similarity check added for `possible_relates_to` edges, adding
+/// a third edge this test does not expect.
 #[test]
 fn anchors_and_links_on_the_same_fact_are_independent() {
     // Arrange
@@ -839,7 +873,7 @@ fn anchors_and_links_on_the_same_fact_are_independent() {
     write_fact(
         &home,
         "acme/widget/combo-target.md",
-        "---\nname: combo-target\ntype: reference\n---\n\nBody text.\n",
+        "---\nname: combo-target\ntype: reference\n---\n\nUnrelated placeholder content only.\n",
     );
 
     // Act
@@ -1175,6 +1209,17 @@ fn rust_writer_matches_the_frozen_python_golden() {
         .expect("graph should be a JSON object")
         .remove("version");
 
+    // The frozen golden also predates possible_relates_to edges: the python
+    // original never computed a similarity signal, so the fixture tree's
+    // many same-type, same-scope, same-placeholder-body facts legitimately
+    // pick up possible_relates_to edges among themselves that the golden
+    // cannot know about. Stripped here for the same reason "version" is
+    // stripped above, not a weakening of the structural comparison for
+    // every relation the golden does cover.
+    if let Some(edges) = rust_graph.get_mut("edges").and_then(Value::as_array_mut) {
+        edges.retain(|e| e["relation"] != "possible_relates_to");
+    }
+
     let golden: Value = serde_json::from_str(include_str!(
         "fixtures/golden/rebuild-memory-graph.scalar-fact.json"
     ))
@@ -1343,6 +1388,197 @@ fn concurrent_rebuilds_from_two_sessions_both_survive() {
     assert!(
         has_node(&graph, "global/fact-b"),
         "fact-b must survive a concurrent rebuild, not be silently dropped"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+// --- possible_relates_to similarity edges -----------------------------------
+
+/// A pair sharing an anchor parent directory and matching type+scope gets a
+/// `possible_relates_to` edge naming exactly those two signals. The two
+/// bodies use entirely disjoint word sets, so the Jaccard signal cannot also
+/// fire, proving the edge comes from exactly 2 signals, not 3.
+#[test]
+fn pair_sharing_anchor_dir_and_type_scope_gets_the_edge_with_both_signals_named() {
+    // Arrange
+    let home = scratch_home("similarity-anchor-and-type-scope");
+    write_fact(
+        &home,
+        "shared-a.md",
+        "---\nname: shared-a\ntype: reference\nanchors: [src/foo/a.ts]\n---\n\nApples oranges bananas grapes melons.\n",
+    );
+    write_fact(
+        &home,
+        "shared-b.md",
+        "---\nname: shared-b\ntype: reference\nanchors: [src/foo/b.ts]\n---\n\nRockets satellites telescopes asteroids comets.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "shared-a.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    let signals = possible_relates_to_signals(&graph, "global/shared-a", "global/shared-b")
+        .expect("a possible_relates_to edge should exist between shared-a and shared-b");
+    assert_eq!(
+        signals,
+        &vec![json!("anchor_dir"), json!("type_scope")],
+        "the edge should name exactly the anchor-directory and type/scope signals"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A pair with at most 1 matching signal (here: matching type+scope alone)
+/// gets no `possible_relates_to` edge. Both facts share a type and scope,
+/// but neither anchor nor body text overlap, so the pair sits one signal
+/// short of the 2-of-3 threshold.
+#[test]
+fn dissimilar_pair_with_only_one_signal_gets_no_possible_relates_to_edge() {
+    // Arrange
+    let home = scratch_home("similarity-one-signal-only");
+    write_fact(
+        &home,
+        "solo-a.md",
+        "---\nname: solo-a\ntype: reference\n---\n\nApples oranges bananas grapes.\n",
+    );
+    write_fact(
+        &home,
+        "solo-b.md",
+        "---\nname: solo-b\ntype: reference\n---\n\nRockets satellites telescopes asteroids.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "solo-a.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert!(
+        possible_relates_to_signals(&graph, "global/solo-a", "global/solo-b").is_none(),
+        "a pair with only the type/scope signal matching should get no possible_relates_to edge"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A fact is never compared against itself. A lone fact, anchored and with
+/// a non-empty body, would trivially match all 3 signals against itself if
+/// the pairwise loop ever let `i == j`: same type and scope, its own
+/// anchors always share their own directory, and its body is identical to
+/// itself (Jaccard 1.0). No such self edge may appear.
+#[test]
+fn a_fact_is_never_compared_against_itself() {
+    // Arrange
+    let home = scratch_home("similarity-no-self-comparison");
+    write_fact(
+        &home,
+        "solo-fact.md",
+        "---\nname: solo-fact\ntype: reference\nanchors: [src/solo/x.ts]\n---\n\nSome meaningful text here for the solo fact only.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "solo-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert!(
+        edges(&graph).iter().all(|e| e["from"] != e["to"]),
+        "no edge should ever have from == to"
+    );
+    assert!(
+        !edges(&graph)
+            .iter()
+            .any(|e| e["relation"] == "possible_relates_to"),
+        "a single fact has no partner to compare against, so no possible_relates_to edge should exist"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Threshold boundary: two bodies whose Jaccard ratio lands exactly on
+/// `SIMILARITY_JACCARD_THRESHOLD` (0.35) still count as a hit, confirming
+/// the comparison is `>=`, not `>`.
+///
+/// Word-set arithmetic (checkable by hand): 7 words are shared by both
+/// bodies (alpha..eta), body A adds 3 more words found nowhere else
+/// (theta, iota, kappa: |A| = 10), body B adds 10 more words found nowhere
+/// else (lambda..upsilon: |B| = 17). Union = 7 shared + 3 A-only + 10 B-only
+/// = 20 distinct words. Intersection = the 7 shared words. 7 / 20 = 0.35,
+/// exactly `SIMILARITY_JACCARD_THRESHOLD`.
+///
+/// The two facts also share the same type and scope (a second, deliberate
+/// signal match), since a pair needs 2 of 3 signals to get an edge at all:
+/// this isolates whether the Jaccard signal itself counts at the exact
+/// boundary, without also needing an anchor-directory match (neither fact
+/// has anchors).
+#[test]
+fn threshold_boundary_jaccard_score_of_exactly_the_constant_counts_as_a_hit() {
+    // Arrange
+    let home = scratch_home("similarity-threshold-boundary");
+    write_fact(
+        &home,
+        "boundary-a.md",
+        "---\nname: boundary-a\ntype: reference\n---\n\nalpha beta gamma delta epsilon zeta eta theta iota kappa\n",
+    );
+    write_fact(
+        &home,
+        "boundary-b.md",
+        "---\nname: boundary-b\ntype: reference\n---\n\nalpha beta gamma delta epsilon zeta eta lambda mu nu xi omicron pi rho sigma tau upsilon\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "boundary-a.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    let signals = possible_relates_to_signals(&graph, "global/boundary-a", "global/boundary-b")
+        .expect("a Jaccard ratio exactly at the threshold should count as a hit");
+    assert_eq!(
+        signals,
+        &vec![json!("type_scope"), json!("body_overlap")],
+        "the edge should name exactly the type/scope and body-overlap signals"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A pair where both bodies are empty must not count the Jaccard signal: an
+/// empty union can never divide-by-zero-panic and can never default to a
+/// match. The other two signals (shared anchor directory, matching
+/// type+scope) both hit on their own, so the edge still appears, but its
+/// signals list proves the empty-body Jaccard check contributed nothing.
+#[test]
+fn empty_body_pair_does_not_count_as_a_jaccard_hit_and_does_not_crash() {
+    // Arrange
+    let home = scratch_home("similarity-empty-body");
+    write_fact(
+        &home,
+        "empty-a.md",
+        "---\nname: empty-a\ntype: reference\nanchors:\n  - src/empty/a.ts\n---\n",
+    );
+    write_fact(
+        &home,
+        "empty-b.md",
+        "---\nname: empty-b\ntype: reference\nanchors:\n  - src/empty/b.ts\n---\n",
+    );
+
+    // Act
+    let output = run_rebuild_for(&home, "empty-a.md");
+
+    // Assert
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "an empty-body pair must not crash the hook"
+    );
+    let graph = read_graph(&home);
+    let signals = possible_relates_to_signals(&graph, "global/empty-a", "global/empty-b")
+        .expect("the anchor-directory and type/scope signals alone should still produce an edge");
+    assert_eq!(
+        signals,
+        &vec![json!("anchor_dir"), json!("type_scope")],
+        "an empty-body pair must not count the body-overlap signal"
     );
 
     let _ = fs::remove_dir_all(&home);
