@@ -1,0 +1,153 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: MIT
+
+//! Behavioural tests for `memory_signals`, the `memory.signals.json` data
+//! layer. Unlike every other hook test file, there is no `HookName`/CLI
+//! entry point to invoke as a subprocess yet, so these call the module's
+//! `pub fn`s directly, in-process, through `playbook::hooks::memory_signals`.
+//!
+//! Each test gets its own scratch directory, unique per call, so tests stay
+//! parallel-safe under `cargo test`'s default concurrent execution.
+
+use playbook::hooks::memory_signals::{bump_hit, modify_locked};
+use serde_json::Value;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// --- Test infrastructure ---------------------------------------------------
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A fresh scratch directory standing in for `~/.claude/memory`, unique per
+/// call so parallel test threads never collide.
+fn scratch_home(tag: &str) -> PathBuf {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("playbook-wu1-{}-{tag}-{n}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn signals_path(mem_dir: &Path) -> PathBuf {
+    mem_dir.join("memory.signals.json")
+}
+
+fn read_store(mem_dir: &Path) -> Value {
+    let content =
+        fs::read_to_string(signals_path(mem_dir)).expect("memory.signals.json should exist");
+    serde_json::from_str(&content).expect("memory.signals.json should be valid JSON")
+}
+
+fn hits_for(store: &Value, node_id: &str) -> u64 {
+    store["nodes"][node_id]["hits"]
+        .as_u64()
+        .expect("node should have a numeric hits field")
+}
+
+// --- Scenario 1: round-trip plus missing-file default ----------------------
+
+#[test]
+fn bump_hit_round_trips_through_the_signals_file() {
+    // Arrange
+    let mem_dir = scratch_home("round-trip");
+
+    // Act
+    bump_hit(&mem_dir, "global/example-fact");
+
+    // Assert
+    let store = read_store(&mem_dir);
+    assert_eq!(hits_for(&store, "global/example-fact"), 1);
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+/// A scratch directory with no `memory.signals.json` present at all must
+/// still produce a valid, empty store rather than panicking: `modify_locked`
+/// hands its closure a default `SignalsStore` in that case, and the closure
+/// below records what it saw without mutating anything.
+#[test]
+fn modify_locked_defaults_to_an_empty_store_when_the_file_is_missing() {
+    // Arrange
+    let mem_dir = scratch_home("missing-file-default");
+
+    // Act
+    modify_locked(&mem_dir, |_store| {});
+
+    // Assert
+    let store = read_store(&mem_dir);
+    assert_eq!(
+        store["nodes"].as_object().map(|o| o.len()),
+        Some(0),
+        "a missing file should default to an empty store, not panic or leave nodes populated"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+// --- Scenario 2: two concurrent writers under normal contention ------------
+
+/// Two sessions bumping different nodes near the same moment must both land
+/// in the final store. Without a lock around the read-modify-write cycle,
+/// the write that finishes second overwrites whatever the other just wrote,
+/// silently dropping its bump.
+#[test]
+fn two_concurrent_bumps_for_different_nodes_both_survive() {
+    // Arrange
+    let mem_dir = scratch_home("concurrent-bumps");
+    let mem_dir_a = mem_dir.clone();
+    let mem_dir_b = mem_dir.clone();
+
+    // Act: two real threads, each bumping a different node, so their
+    // read-modify-write cycles actually overlap.
+    let a = std::thread::spawn(move || bump_hit(&mem_dir_a, "global/fact-a"));
+    let b = std::thread::spawn(move || bump_hit(&mem_dir_b, "global/fact-b"));
+    a.join().expect("thread a should not panic");
+    b.join().expect("thread b should not panic");
+
+    // Assert
+    let store = read_store(&mem_dir);
+    assert_eq!(
+        hits_for(&store, "global/fact-a"),
+        1,
+        "fact-a's bump must survive a concurrent write, not be silently dropped"
+    );
+    assert_eq!(
+        hits_for(&store, "global/fact-b"),
+        1,
+        "fact-b's bump must survive a concurrent write, not be silently dropped"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+// --- Scenario 3: lock-exhausted path ----------------------------------------
+
+/// `with_dir_lock` is deliberately fail-open: it always runs its closure,
+/// whether or not it acquired the lock. Pre-creating the lock directory
+/// simulates another process mid-write; the call under test must still
+/// complete without panicking, must leave a valid JSON file behind, and must
+/// not remove a lock directory it never created (removing it would destroy
+/// the other process's in-progress lock). The increment itself is not
+/// asserted: a lost update under exhaustion is the accepted, documented
+/// behavior, not a bug this test should hide by retrying until it passes.
+#[test]
+fn bump_hit_completes_without_panicking_when_the_lock_is_already_held() {
+    // Arrange
+    let mem_dir = scratch_home("lock-held");
+    let lock_dir = mem_dir.join("memory.signals.json.lock");
+    fs::create_dir(&lock_dir).expect("pre-creating the lock dir should succeed");
+
+    // Act
+    bump_hit(&mem_dir, "global/fact-under-lock");
+
+    // Assert
+    let content = fs::read_to_string(signals_path(&mem_dir))
+        .expect("a file should still be written under lock exhaustion");
+    let _: Value = serde_json::from_str(&content).expect("the written file must be valid JSON");
+    assert!(
+        lock_dir.exists(),
+        "a call that did not acquire the lock must not remove it"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
