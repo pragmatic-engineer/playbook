@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # memory-context.test.sh: scenarios for shell/memory-context.sh. Builds small
-# synthetic graph.json fixtures under a scratch dir; never reads or writes
+# synthetic memory.graph.json fixtures under a scratch dir; never reads or writes
 # the user's real memory store.
 #
 # Run:  bash shell/memory-context.test.sh
@@ -21,7 +21,7 @@ WORK="$(mktemp -d)"
 trap "rm -rf '${WORK}'" EXIT INT TERM
 
 # HOME isolation so a bug that falls back to the default graph path would
-# hit an empty scratch tree, never the user's real ~/.claude/memory/graph.json.
+# hit an empty scratch tree, never the user's real ~/.claude/memory/memory.graph.json.
 export HOME="${WORK}/home"
 mkdir -p "$HOME"
 
@@ -124,7 +124,7 @@ assert_contains "$OUT" "dependent-fact depends_on prerequisite-fact" "edges: pre
 
 # 4: missing graph is not an error.
 # Arrange: a graph path that does not exist.
-GRAPH4="${WORK}/does/not/exist/graph.json"
+GRAPH4="${WORK}/does/not/exist/memory.graph.json"
 # Act
 run_ctx --repo owner/repo --graph "$GRAPH4"
 # Assert

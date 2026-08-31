@@ -148,7 +148,7 @@ test_memory_anchors() {
   home="$(mktemp -d)"
   mkdir -p "$home/.claude/memory"
   target="$REPO_ROOT/hooks/lib/config-hash.sh"
-  cat > "$home/.claude/memory/graph.json" <<EOF
+  cat > "$home/.claude/memory/memory.graph.json" <<EOF
 {
   "nodes": [
     {"id": "global/fire-anchor-fact", "file": "fire-anchor-fact.md", "scope": "global", "type": "project", "name": "fire-anchor-fact", "description": "fixture fact"},
@@ -186,8 +186,8 @@ links:
 Body text.
 EOF
   run_ported rebuild-memory-graph "$home" "{\"tool_input\":{\"file_path\":\"$f\"}}" >/dev/null
-  [ -f "$home/.claude/memory/graph.json" ] \
-    && [ "$(jq '.edges|length' "$home/.claude/memory/graph.json" 2>/dev/null)" = "1" ]
+  [ -f "$home/.claude/memory/memory.graph.json" ] \
+    && [ "$(jq '.edges|length' "$home/.claude/memory/memory.graph.json" 2>/dev/null)" = "1" ]
 }
 
 test_auto_model_detect() {

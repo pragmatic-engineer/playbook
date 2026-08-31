@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Behavioural tests for the `rebuild-memory-graph` hook, the sole writer
-//! of `~/.claude/memory/graph.json`. Exercised black-box, through the
+//! of `~/.claude/memory/memory.graph.json`. Exercised black-box, through the
 //! compiled `playbook` binary, the same way
 //! `hooks/rebuild-memory-graph.test.sh` exercises the python original.
 //! Every assertion in that shell script has a corresponding case below,
@@ -42,12 +42,14 @@ fn write_fact(home: &Path, relpath: &str, content: &str) {
 }
 
 fn graph_path(home: &Path) -> PathBuf {
-    home.join(".claude").join("memory").join("graph.json")
+    home.join(".claude")
+        .join("memory")
+        .join("memory.graph.json")
 }
 
 fn read_graph(home: &Path) -> Value {
-    let content = fs::read_to_string(graph_path(home)).expect("graph.json should exist");
-    serde_json::from_str(&content).expect("graph.json should be valid JSON")
+    let content = fs::read_to_string(graph_path(home)).expect("memory.graph.json should exist");
+    serde_json::from_str(&content).expect("memory.graph.json should be valid JSON")
 }
 
 fn run_playbook(home: &Path, args: &[&str], hook_input: &str) -> Output {
@@ -123,6 +125,63 @@ fn top_level_scalar_description_flows_into_the_node() {
         .find(|n| n["id"] == "global/described-fact")
         .expect("node should exist");
     assert_eq!(node["description"], "A fact with an explicit description.");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Additive field: `pinned: true` in frontmatter round-trips onto the node
+/// as `"pinned":true`.
+#[test]
+fn pinned_true_frontmatter_flows_into_the_node() {
+    // Arrange
+    let home = scratch_home("pinned-true");
+    write_fact(
+        &home,
+        "pinned-fact.md",
+        "---\nname: pinned-fact\ntype: reference\npinned: true\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "pinned-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    let node = nodes(&graph)
+        .iter()
+        .find(|n| n["id"] == "global/pinned-fact")
+        .expect("node should exist");
+    assert_eq!(node["pinned"], true);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Additive field: a fact with no `pinned` key at all omits the field from
+/// the output JSON entirely, never `"pinned":false`. Checked against the raw
+/// JSON `Value`'s object keys, not a Rust-side `Option`, since the point of
+/// `skip_serializing_if` is what actually lands in the file.
+#[test]
+fn pinned_absent_frontmatter_omits_the_node_field() {
+    // Arrange
+    let home = scratch_home("pinned-absent");
+    write_fact(
+        &home,
+        "unpinned-fact.md",
+        "---\nname: unpinned-fact\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "unpinned-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    let node = nodes(&graph)
+        .iter()
+        .find(|n| n["id"] == "global/unpinned-fact")
+        .expect("node should exist");
+    assert!(
+        !node.as_object().unwrap().contains_key("pinned"),
+        "a fact with no pinned key should omit the field, not write pinned:false"
+    );
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -498,7 +557,7 @@ fn project_scoped_and_global_facts_get_distinct_ids() {
 
 /// hooks/rebuild-memory-graph.test.sh scenario 10 and the brief's "non-memory
 /// file edits are a no-op" done-when criterion: writing a file outside the
-/// memory dir leaves graph.json completely untouched, even when a second
+/// memory dir leaves memory.graph.json completely untouched, even when a second
 /// in-scope fact was added to disk (but not via a hook-triggering write)
 /// in between.
 #[test]
@@ -859,7 +918,7 @@ fn bare_carriage_return_does_not_corrupt_a_scalar_value() {
 /// Done-when: the graph write is atomic, so a write that cannot complete
 /// (stood in for a crash mid-write by making the memory dir read-only right
 /// before the rebuild, so the temp file this hook writes before any rename
-/// cannot even be created) leaves the previously written graph.json intact
+/// cannot even be created) leaves the previously written memory.graph.json intact
 /// rather than truncated.
 #[test]
 fn graph_write_is_atomic_a_failed_write_cannot_truncate_the_existing_file() {
@@ -871,7 +930,7 @@ fn graph_write_is_atomic_a_failed_write_cannot_truncate_the_existing_file() {
         "seed.md",
         "---\nname: seed\ntype: reference\n---\n\nBody.\n",
     );
-    run_rebuild_for(&home, "seed.md"); // establishes a real graph.json while the dir is still writable
+    run_rebuild_for(&home, "seed.md"); // establishes a real memory.graph.json while the dir is still writable
 
     if !permission_checks_are_enforced(&mem_dir) {
         eprintln!(
@@ -1001,11 +1060,12 @@ fn sort_key(v: &Value) -> String {
     )
 }
 
-/// Parse `graph.json` at `path` and sort its `nodes`/`edges` arrays by a
+/// Parse `memory.graph.json` at `path` and sort its `nodes`/`edges` arrays by a
 /// canonical key, for comparison that ignores array order.
 fn canonical_graph(path: &Path) -> Value {
-    let content = fs::read_to_string(path).expect("graph.json should exist");
-    let mut value: Value = serde_json::from_str(&content).expect("graph.json should be valid JSON");
+    let content = fs::read_to_string(path).expect("memory.graph.json should exist");
+    let mut value: Value =
+        serde_json::from_str(&content).expect("memory.graph.json should be valid JSON");
     if let Some(arr) = value.get_mut("nodes").and_then(Value::as_array_mut) {
         arr.sort_by_key(sort_key);
     }
@@ -1016,7 +1076,7 @@ fn canonical_graph(path: &Path) -> Value {
 }
 
 /// Run the python writer and the Rust writer over the same fixture memory
-/// tree and assert the two `graph.json` outputs are equal.
+/// tree and assert the two `memory.graph.json` outputs are equal.
 ///
 /// Byte-for-byte equality is not attempted here and would not be
 /// meaningful: python's `os.walk` and Rust's `fs::read_dir` both return
@@ -1042,14 +1102,25 @@ fn rust_writer_matches_the_frozen_python_golden() {
     // ADR 0007 WU-14, so its output is committed instead. This keeps the
     // cross-implementation check that a ported-only suite cannot give, since
     // a ported suite passes against an empty stub.
-    let rust_graph = canonical_graph(&graph_path(&home_rs));
+    let mut rust_graph = canonical_graph(&graph_path(&home_rs));
+    assert_eq!(
+        rust_graph["version"], 1,
+        "graph output should carry \"version\":1"
+    );
+    // The frozen golden predates the version field, so it is stripped before
+    // the structural comparison below; the assertion above already covers it.
+    rust_graph
+        .as_object_mut()
+        .expect("graph should be a JSON object")
+        .remove("version");
+
     let golden: Value = serde_json::from_str(include_str!(
         "fixtures/golden/rebuild-memory-graph.scalar-fact.json"
     ))
     .expect("golden fixture should be valid JSON");
     assert_eq!(
         golden, rust_graph,
-        "rust graph.json drifted from the frozen python output"
+        "rust memory.graph.json drifted from the frozen python output"
     );
 
     let _ = fs::remove_dir_all(&home_rs);
@@ -1123,7 +1194,7 @@ fn memory_rebuild_subcommand_rebuilds_with_no_payload_where_the_hook_skips() {
 /// too narrow a window to hit reliably in a test: subprocess spawn overhead
 /// dwarfs the tiny fixture tree's read-build-write time, so the two
 /// processes rarely truly overlap. This test instead exercises the lock
-/// wiring deterministically: pre-create `graph.json.lock` as a directory
+/// wiring deterministically: pre-create `memory.graph.json.lock` as a directory
 /// (simulating another session mid-rebuild), then run a rebuild against it.
 /// The lock is advisory and fails open after its retry budget (matching
 /// `common::atomic`'s documented contract: a hook must never hang on
@@ -1138,7 +1209,10 @@ fn rebuild_succeeds_when_the_lock_directory_is_already_held() {
         "fact-under-lock.md",
         "---\nname: fact-under-lock\ntype: reference\n---\n\nBody text.\n",
     );
-    let lock_dir = home.join(".claude").join("memory").join("graph.json.lock");
+    let lock_dir = home
+        .join(".claude")
+        .join("memory")
+        .join("memory.graph.json.lock");
     fs::create_dir(&lock_dir).expect("pre-creating the lock dir should succeed");
 
     // Act

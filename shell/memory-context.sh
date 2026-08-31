@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # memory-context.sh: render a compact, repo-scoped markdown slice of the
-# graph-first memory store (~/.claude/memory/graph.json) for injection into
+# graph-first memory store (~/.claude/memory/memory.graph.json) for injection into
 # a session's context. Three parts: the facts in scope (every global fact
 # plus every fact whose project matches the repo), the typed edges among
 # those facts (supersedes, depends_on, relates_to, contradicts; anchors
@@ -17,13 +17,13 @@
 #   --repo   defaults to the origin remote slug, derived the same way as
 #            the hook library repo_slug (src/common/repo.rs): strip protocol,
 #            user, host, and the trailing .git suffix from `git remote get-url origin`.
-#   --graph  defaults to $HOME/.claude/memory/graph.json
+#   --graph  defaults to $HOME/.claude/memory/memory.graph.json
 set -u
 
 die() { echo "memory-context: $*" >&2; exit 1; }
 
 REPO=""
-GRAPH="${HOME}/.claude/memory/graph.json"
+GRAPH="${HOME}/.claude/memory/memory.graph.json"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
