@@ -18,7 +18,7 @@ Adopt these principles to what you write for review: the reviewer is the user, t
 - Commit messages: conventional imperative subject under ~50 chars, one change. Add a body only when the why isn't obvious; a sentence or two, or tight bullets.
 - PR descriptions: one line of what and why is the target, not the floor. Add a short bulleted "what changed" only when the diff needs it to be reviewable; link to detail instead of inlining it. Aim for the gist in under 30 seconds, most PRs need fewer words than feel natural to write.
 - Review findings: default to one sentence, two at most (the problem, then what breaks). A paragraph is the rare exception for a genuinely non-obvious mechanism, not the normal case.
-- Block and doc comments: only when the why isn't obvious from the code. Explain why, never restate what the code shows.
+- Block and doc comments: only when the why isn't obvious from the code. Explain why, never restate what the code shows. Write for the code's future reader, not this session: never name a plan, brief, Work Unit, or ticket number in a comment. An already-committed, durable reference (an ADR, a documented convention) is fine.
 - When clarity and consistency conflict, choose clarity.
 
 ## Voice

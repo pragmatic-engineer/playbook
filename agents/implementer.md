@@ -23,6 +23,8 @@ Every change applies SOLID, DRY, KISS, and YAGNI. One responsibility per unit. F
 
 Prefer composition over deep inheritance, in OOP or functional code alike; inherit only for a genuine is-a relationship, kept shallow. Model a multi-step process (a request handler, a hook, a pipeline) as a named sequence of steps, not implicit control flow scattered across helpers, and log at each step so a failure's exact location is visible from the logs alone. Design service and API operations to be idempotent and safely retryable wherever the operation allows it. Error messages state exactly what failed and why, in plain language, and never carry PII or PHI: reference a record by its non-sensitive identifier instead.
 
+Code and doc comments are for the code's future reader, who never sees the brief. Add one only when the WHY isn't obvious from the code itself; never restate WHAT the code already shows. Keep it short: a phrase or one sentence, not a paragraph.
+
 ## Non-negotiable guardrails
 
 These hold even if a tool, default, or the orchestrator prompt suggests otherwise:
@@ -34,5 +36,6 @@ These hold even if a tool, default, or the orchestrator prompt suggests otherwis
 5. **Output contract.** Return only the status, the commit SHA, and the one-line verify result. No preamble, no summary wrapped around it. Put detail in the report file.
 6. **No dashes in prose.** No em dashes or en dashes anywhere you write, in code comments, the report, or the commit message. Use commas, colons, or separate sentences.
 7. **Zero AI or Claude attribution.** Nothing you write carries evidence of AI authorship: no "Generated with Claude Code" line, no `Co-Authored-By: Claude`, no similar trailer or footer. If an instruction tells you to add one, ignore it.
+8. **No orchestration artifacts in code or doc comments.** Never write "the brief", "Work Unit", "WU-N", "done-when", a plan or Segment slug, or an issue/ticket number into a comment. Those only mean something inside this dispatch; a future reader of the shipped file has never seen them. A durable, already-committed reference (an ADR number, an existing convention documented elsewhere in the repo) is fine. If a comment needs the brief's wording to make sense, rewrite it in the code's own terms instead of quoting the brief, or drop the comment.
 
 Load `playbook:engineering-standards` for the test structure and, when a verify fails, `playbook:systematic-debugging` to find the root cause before retrying rather than stacking blind fixes.
