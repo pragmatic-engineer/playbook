@@ -9,6 +9,16 @@
 # it isn't already present, no separate `rustup toolchain install` step
 # needed. Bump deliberately, not implicitly: pin to a new version alongside
 # a commit that says why.
+#
+# Has no directory scope: this also repins release.yml's five build
+# targets, not just rust-ci.yml's two, since rustup reads the nearest
+# ancestor toolchain file for ANY cargo/rustup invocation in this repo.
+# That's consistent with the goal (one pinned version everywhere), but
+# release.yml only runs on a pushed tag or workflow_dispatch, never on a
+# pull request, so a target release.yml builds that rust-ci.yml doesn't
+# exercise on PRs (x86_64-apple-darwin, the two Windows/musl cross legs)
+# gets no PR-time signal that this exact pin works there; its first real
+# exposure is the next actual release tag.
 
 [toolchain]
 channel = "1.97.0"

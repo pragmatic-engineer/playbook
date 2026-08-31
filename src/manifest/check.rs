@@ -147,6 +147,16 @@ mod tests {
         assert!(violations(&tracked).is_empty());
     }
 
+    /// Pins the specific ALLOW_FILES entry this array's last bump added, so
+    /// a future edit that drops or typos it fails here directly instead of
+    /// only being caught by `playbook manifest check .` against the real
+    /// repo, which `cargo test` never runs.
+    #[test]
+    fn rust_toolchain_toml_is_allowlisted() {
+        let tracked = vec!["rust-toolchain.toml".to_string()];
+        assert!(violations(&tracked).is_empty());
+    }
+
     #[test]
     fn allowlisted_top_level_directory_passes() {
         let tracked = vec!["shell/worktree.zsh".to_string()];

@@ -54,6 +54,12 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # Prints the version rust-toolchain.toml actually resolved to, so a
+      # reviewer can confirm the pin took effect from the job log instead of
+      # trusting rustup's documented override behavior on faith.
+      - name: rustc --version
+        run: rustc --version
+
       - name: Ensure rustfmt and clippy components
         run: rustup component add rustfmt clippy
 
@@ -91,6 +97,18 @@ jobs:
       # Cache the compiled binary, keyed on a pinned version so a cache hit
       # is always the exact version this job expects, never a stale one
       # silently reused past its actual pin.
+      #
+      # No allowed-endpoints entry needed for the cache backend, unlike
+      # scorecard.yml (stays on audit mode) and osv-scan.yml (allowlists
+      # results-receiver.actions.githubusercontent.com): those two are about
+      # the Actions RESULTS/artifact-upload backend, a different subsystem
+      # with rotating regional endpoints harden-runner can't allowlist
+      # statically. actions/cache itself gets special-cased: harden-runner
+      # v1.5.0+ auto-detects and allows its endpoint at runtime even in
+      # block mode, no config needed (confirmed via StepSecurity's own
+      # docs). This job pins v2.19.4, well above that floor. Watch the
+      # first real run's harden-runner insights to confirm the cache
+      # actually populates rather than assuming this holds forever.
       - name: Cache cargo-audit binary
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
