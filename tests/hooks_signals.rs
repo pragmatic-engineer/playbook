@@ -57,6 +57,32 @@ fn bump_hit_round_trips_through_the_signals_file() {
     // Assert
     let store = read_store(&mem_dir);
     assert_eq!(hits_for(&store, "global/example-fact"), 1);
+    assert!(
+        !mem_dir.join("memory.signals.json.lock").exists(),
+        "a call that acquired the lock must remove its own lock directory"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+/// A file that exists but fails to parse must be left untouched, not
+/// silently replaced with an empty store: this store accumulates state
+/// nothing else can rebuild, unlike the fully-regenerable memory graph.
+#[test]
+fn a_corrupt_signals_file_is_left_untouched_rather_than_wiped() {
+    // Arrange
+    let mem_dir = scratch_home("corrupt-file");
+    fs::write(signals_path(&mem_dir), "not valid json").unwrap();
+
+    // Act
+    bump_hit(&mem_dir, "global/example-fact");
+
+    // Assert
+    let content = fs::read_to_string(signals_path(&mem_dir)).unwrap();
+    assert_eq!(
+        content, "not valid json",
+        "a corrupt file must be left exactly as-is, not overwritten with an empty store"
+    );
 
     let _ = fs::remove_dir_all(&mem_dir);
 }
@@ -115,6 +141,34 @@ fn two_concurrent_bumps_for_different_nodes_both_survive() {
         hits_for(&store, "global/fact-b"),
         1,
         "fact-b's bump must survive a concurrent write, not be silently dropped"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+/// Two concurrent bumps to the SAME node, the actual hit-counter use case,
+/// must both land as a count of 2, not 1: the disjoint-node scenario above
+/// proves the lock serializes access, but can't catch a read-modify-write bug
+/// that only shows up when two writers touch the same map entry.
+#[test]
+fn two_concurrent_bumps_for_the_same_node_both_count() {
+    // Arrange
+    let mem_dir = scratch_home("concurrent-same-node");
+    let mem_dir_a = mem_dir.clone();
+    let mem_dir_b = mem_dir.clone();
+
+    // Act
+    let a = std::thread::spawn(move || bump_hit(&mem_dir_a, "global/shared-fact"));
+    let b = std::thread::spawn(move || bump_hit(&mem_dir_b, "global/shared-fact"));
+    a.join().expect("thread a should not panic");
+    b.join().expect("thread b should not panic");
+
+    // Assert
+    let store = read_store(&mem_dir);
+    assert_eq!(
+        hits_for(&store, "global/shared-fact"),
+        2,
+        "two concurrent bumps to the same node must both count, not overwrite each other"
     );
 
     let _ = fs::remove_dir_all(&mem_dir);

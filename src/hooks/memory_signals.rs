@@ -58,19 +58,24 @@ struct NodeSignals {
 }
 
 /// Run `f` against the current store loaded from `mem_dir`'s
-/// `memory.signals.json` (or an empty default if the file is missing or
-/// fails to parse), then write the mutated store back atomically. Serializes
-/// concurrent callers with an mkdir-based advisory lock at
-/// `memory.signals.json.lock`, mirroring `rebuild_memory_graph.rs`'s
-/// `rebuild()`: without it, two callers racing to bump different nodes can
-/// each read the same starting snapshot, and whichever write finishes second
-/// silently discards the other's change.
+/// `memory.signals.json` (an empty default if the file is missing, the
+/// normal first-run case), then write the mutated store back atomically. A
+/// file that exists but fails to read or parse is left untouched instead:
+/// unlike `memory.graph.json`, this store accumulates state nothing else can
+/// rebuild, so silently replacing a corrupt file with an empty one would be
+/// permanent, unrecoverable data loss. Serializes concurrent callers with an
+/// mkdir-based advisory lock at `memory.signals.json.lock`, mirroring
+/// `rebuild_memory_graph.rs`'s `rebuild()`: without it, two callers racing to
+/// bump different nodes can each read the same starting snapshot, and
+/// whichever write finishes second silently discards the other's change.
 pub fn modify_locked(mem_dir: &Path, f: impl FnOnce(&mut SignalsStore)) {
     let lock_path = mem_dir.join("memory.signals.json.lock");
     let (acquired, ()) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
-        let mut store = read_store(mem_dir);
-        f(&mut store);
-        write_store_atomically(mem_dir, &store);
+        if let Some(mut store) = read_store(mem_dir) {
+            store.version = 1;
+            f(&mut store);
+            write_store_atomically(mem_dir, &store);
+        }
     });
     if acquired {
         let _ = fs::remove_dir(&lock_path);
@@ -84,11 +89,15 @@ pub fn bump_hit(mem_dir: &Path, node_id: &str) {
     });
 }
 
-fn read_store(mem_dir: &Path) -> SignalsStore {
-    fs::read_to_string(mem_dir.join("memory.signals.json"))
-        .ok()
-        .and_then(|content| serde_json::from_str(&content).ok())
-        .unwrap_or_default()
+/// A missing file returns an empty default store. A file that exists but
+/// fails to read or parse returns `None`, so the caller can leave it on disk
+/// untouched rather than overwriting possibly-recoverable data.
+fn read_store(mem_dir: &Path) -> Option<SignalsStore> {
+    match fs::read_to_string(mem_dir.join("memory.signals.json")) {
+        Ok(content) => serde_json::from_str(&content).ok(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(SignalsStore::default()),
+        Err(_) => None,
+    }
 }
 
 /// Write `store` to `memory.signals.json` inside `mem_dir` via a temp file in
