@@ -15,6 +15,7 @@ pub mod auto_model_detect;
 pub mod bg_await_guard;
 pub mod memory_anchors;
 pub mod memory_capture;
+pub mod memory_signals;
 pub mod no_dash_guard;
 pub mod post_edit_track;
 pub mod precommit_check;
