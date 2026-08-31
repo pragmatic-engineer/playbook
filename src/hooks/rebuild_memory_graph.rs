@@ -63,6 +63,36 @@ fn memory_dir() -> PathBuf {
     home_dir().join(".claude").join("memory")
 }
 
+/// Return the fact's markdown body: everything after the closing `---` line
+/// of its frontmatter block. Walks lines the same way
+/// `extract_frontmatter_block` does (an opening `---` line, then lines up to
+/// a closing `---` line that must itself be followed by another line), so
+/// the two helpers agree on exactly where a frontmatter block ends. A file
+/// with no valid frontmatter block has no body to strip, so the whole
+/// content is returned unchanged.
+fn extract_body(content: &str) -> &str {
+    let mut lines = content.split('\n').peekable();
+    let Some(first) = lines.next() else {
+        return content;
+    };
+    if !is_delimiter_line(first) {
+        return content;
+    }
+    let mut consumed = first.len() + 1;
+    for line in lines.by_ref() {
+        if is_delimiter_line(line) {
+            consumed += line.len() + 1;
+            return if lines.peek().is_some() {
+                &content[consumed..]
+            } else {
+                content
+            };
+        }
+        consumed += line.len() + 1;
+    }
+    content
+}
+
 // --- Frontmatter parsing (hand-rolled YAML subset, no yaml crate) ---------
 
 /// A single top-level frontmatter value: a bare scalar, a block or inline
@@ -452,6 +482,77 @@ struct Edge {
     from: String,
     to: String,
     relation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signals: Option<Vec<String>>,
+}
+
+// --- Similarity signals for possible_relates_to edges -----------------------
+
+/// Names for the 3 pairwise-similarity signals a `possible_relates_to` edge
+/// can carry in its `signals` list: a shared anchor parent directory,
+/// matching `type` and `scope` together (one signal, not two), and a
+/// Jaccard word-overlap over `SIMILARITY_JACCARD_THRESHOLD` on the two
+/// facts' bodies.
+const SIGNAL_ANCHOR_DIR: &str = "anchor_dir";
+const SIGNAL_TYPE_SCOPE: &str = "type_scope";
+const SIGNAL_BODY_OVERLAP: &str = "body_overlap";
+
+/// A pair sharing 2 or more of the 3 signals gets a `possible_relates_to`
+/// edge. This is never auto-promoted to a real `relates_to` edge; that
+/// judgement call is left to a human or model later.
+const SIMILARITY_SIGNAL_HIT_THRESHOLD: usize = 2;
+
+/// A fact body's word set counts as similar to another's once their Jaccard
+/// ratio reaches this value.
+const SIMILARITY_JACCARD_THRESHOLD: f64 = 0.35;
+
+/// A fact's data reduced to what the pairwise similarity check needs.
+/// Deliberately not stored on `Node`: nothing else reads an anchor list or a
+/// body back from the graph, so keeping this internal to the rebuild avoids
+/// growing the public graph schema for an implementation detail.
+struct SimilarityInfo {
+    id: String,
+    scope: Scope,
+    kind: String,
+    anchor_dirs: HashSet<String>,
+    body_words: HashSet<String>,
+}
+
+/// Parent directory of an anchor path, e.g. `src/foo/a.ts` -> `src/foo`. An
+/// anchor with no parent (a bare filename) yields an empty string.
+fn anchor_parent_dir(anchor: &str) -> String {
+    Path::new(anchor)
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Signal 1: the two facts' anchor lists share at least one NON-EMPTY parent
+/// directory. A fact with no anchors has an empty `anchor_dirs` set, so it
+/// never contributes this signal for either side of a pair. The empty string
+/// (a bare top-level filename with no parent) is excluded from the overlap
+/// check on purpose: otherwise any two facts each anchoring a different
+/// top-level file (e.g. `README.md` and `package.json`) would share
+/// "directory" `""` and falsely count as a hit despite anchoring unrelated
+/// files.
+fn shares_anchor_dir(a: &SimilarityInfo, b: &SimilarityInfo) -> bool {
+    a.anchor_dirs
+        .intersection(&b.anchor_dirs)
+        .any(|dir| !dir.is_empty())
+}
+
+/// `|intersection| / |union|` over two word sets. A pair where either body
+/// has zero words has an empty union, handled explicitly here so the check
+/// never divides by zero and never treats two bodyless facts as similar by
+/// default.
+fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
+    let union = a.union(b).count();
+    if union == 0 {
+        0.0
+    } else {
+        let intersection = a.intersection(b).count();
+        intersection as f64 / union as f64
+    }
 }
 
 /// Rebuild the graph unconditionally, with no payload and no skip check.
@@ -495,6 +596,9 @@ fn rebuild_locked(mem_dir: &Path) {
     // (from_id, relation, raw_target, source_scope, source_project): buffered
     // here, resolved in pass 2 once every node id is known.
     let mut pending_links: Vec<(String, String, String, Scope, Option<String>)> = Vec::new();
+    // One entry per fact (never per code-anchor node), consumed by the
+    // pairwise similarity check in pass 3, once every fact has been walked.
+    let mut infos: Vec<SimilarityInfo> = Vec::new();
 
     for fpath in walk_markdown_files(mem_dir) {
         let Ok(rel_path) = fpath.strip_prefix(mem_dir) else {
@@ -527,6 +631,23 @@ fn rebuild_locked(mem_dir: &Path) {
         // Exact, case-sensitive match against the literal `true`: anything else
         // (quoted, a different case, `false`, or absent) is treated as unset.
         let pinned = (fm.scalar("pinned").map(String::as_str) == Some("true")).then_some(true);
+
+        let anchor_dirs: HashSet<String> = fm
+            .list("anchors")
+            .map(|anchors| anchors.iter().map(|a| anchor_parent_dir(a)).collect())
+            .unwrap_or_default();
+        let body_words: HashSet<String> = extract_body(&content)
+            .to_lowercase()
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        infos.push(SimilarityInfo {
+            id: nid.clone(),
+            scope,
+            kind: node_type.clone(),
+            anchor_dirs,
+            body_words,
+        });
 
         nodes.push(Node {
             id: nid.clone(),
@@ -580,6 +701,7 @@ fn rebuild_locked(mem_dir: &Path) {
                     from: nid.clone(),
                     to: cid,
                     relation: "anchors".to_string(),
+                    signals: None,
                 });
             }
         }
@@ -611,7 +733,38 @@ fn rebuild_locked(mem_dir: &Path) {
             from: from_id,
             to: target_id,
             relation,
+            signals: None,
         });
+    }
+
+    // Pass 3: pairwise similarity check between every two distinct facts.
+    // `i < j` visits each unordered pair exactly once and never compares a
+    // fact to itself, so no separate dedup step is needed. A pair sharing 2
+    // or more of the 3 signals gets a `possible_relates_to` edge naming
+    // which signals matched.
+    for i in 0..infos.len() {
+        for j in (i + 1)..infos.len() {
+            let a = &infos[i];
+            let b = &infos[j];
+            let mut signals = Vec::new();
+            if shares_anchor_dir(a, b) {
+                signals.push(SIGNAL_ANCHOR_DIR.to_string());
+            }
+            if a.kind == b.kind && a.scope == b.scope {
+                signals.push(SIGNAL_TYPE_SCOPE.to_string());
+            }
+            if jaccard_similarity(&a.body_words, &b.body_words) >= SIMILARITY_JACCARD_THRESHOLD {
+                signals.push(SIGNAL_BODY_OVERLAP.to_string());
+            }
+            if signals.len() >= SIMILARITY_SIGNAL_HIT_THRESHOLD {
+                edges.push(Edge {
+                    from: a.id.clone(),
+                    to: b.id.clone(),
+                    relation: "possible_relates_to".to_string(),
+                    signals: Some(signals),
+                });
+            }
+        }
     }
 
     write_graph_atomically(
