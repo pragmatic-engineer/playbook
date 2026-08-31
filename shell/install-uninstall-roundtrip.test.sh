@@ -96,10 +96,20 @@ after_install="$(entries)"
 # Guard against a vacuous pass. If the install did nothing, every "was it
 # removed" assertion below would be trivially satisfied and the suite would go
 # green while testing nothing.
+#
+# install.sh now places exactly three entries itself (install.sh, uninstall.sh,
+# hooks/lib/config-hash.sh); everything else a real install adds (settings.json,
+# the shell launcher runtime, the system prompt, the statusline) is
+# `playbook init`'s job, and the stub above only reproduces its two
+# settings-file writes. A generic entry-count threshold would have to be
+# re-guessed every time that split shifts, so this asserts install.sh's own
+# three entries by name instead -- an exact regression pin, not a magic number.
 if [ "$install_rc" -ne 0 ]; then
     fail "install.sh exits 0" "exit $install_rc"
-elif [ "$(printf '%s\n' "$after_install" | grep -c .)" -lt 10 ]; then
-    fail "install.sh populates CLAUDE_HOME" "only $(printf '%s\n' "$after_install" | grep -c .) entries"
+elif [ ! -f "$CLAUDE_DIR/install.sh" ] || [ ! -f "$CLAUDE_DIR/uninstall.sh" ] \
+    || [ ! -f "$CLAUDE_DIR/hooks/lib/config-hash.sh" ]; then
+    fail "install.sh populates CLAUDE_HOME" \
+        "missing one of install.sh, uninstall.sh, hooks/lib/config-hash.sh; got: $(printf '%s' "$after_install" | tr '\n' ' ')"
 else
     pass "install.sh populates CLAUDE_HOME"
 fi

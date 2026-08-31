@@ -55,8 +55,8 @@ What is removed (allowlist only):
   .claude-plugin  .gitignore  agents  Brewfile  Cargo.lock  Cargo.toml
   CODE_OF_CONDUCT.md  commands  CONTRIBUTING.md  docs  hooks  install.sh
   LICENSE  justfile  Makefile  output-styles  permissions.shared.json  prompts
-  README.md  ruff.toml  SECURITY.md  settings.shared.json  shell  skills
-  src  statusline.sh  tests  uninstall.sh
+  README.md  ruff.toml  rust-toolchain.toml  SECURITY.md  settings.shared.json
+  shell  skills  src  statusline.sh  tests  uninstall.sh
 
 What is preserved by default:
   settings.json  .settings.base.json  backups/  sessions/  projects/
@@ -100,14 +100,20 @@ fi
 
 # --- Shipped-entry allowlist ---
 # Only these entries are ever removed.  CLAUDE_HOME itself is never touched.
-# Must list everything install.sh copies, or an uninstall strands it. install.sh
-# derives its copy set dynamically while this is hardcoded, so the two drift on
-# every new repo-root file; six had already accumulated. Drift is now caught by
+# Must list everything install.sh has ever copied, or an uninstall strands it.
+# This is deliberately a superset of install.sh's CURRENT copy set (now a
+# small explicit allowlist: install.sh, uninstall.sh, hooks/lib/config-hash.sh):
+# a machine installed by an older install.sh -- back when it copied the whole
+# extracted source tree minus a short denylist -- still needs every one of
+# those entries removed too. Drift between the two is caught by
 # shell/install-uninstall-roundtrip.test.sh, which runs the real pair.
 #
 # agents, commands and skills are deliberately still here even though install.sh
 # no longer copies them: they are plugin-owned now, and this clears the residue
-# of older direct installs.
+# of older direct installs. Same reasoning for Cargo.toml, Cargo.lock, src,
+# tests, docs, README.md, LICENSE, and the rest below: every one of these was
+# copied by the pre-allowlist install.sh, so they must stay listed until no
+# installed machine can still be carrying them.
 SHIPPED=(
     .claude-plugin
     .gitignore
@@ -132,6 +138,12 @@ SHIPPED=(
     prompts
     README.md
     ruff.toml
+    # rust-toolchain.toml stays listed for the same reason Makefile does: it
+    # was never in this allowlist, so a machine installed while install.sh
+    # still bulk-copied the source tree had it stranded on every uninstall
+    # (the bug shell/install-uninstall-roundtrip.test.sh caught). Cleans that
+    # residue up; install.sh has never placed it deliberately.
+    rust-toolchain.toml
     SECURITY.md
     settings.shared.json
     shell
