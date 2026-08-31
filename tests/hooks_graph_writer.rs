@@ -1496,6 +1496,42 @@ fn a_fact_is_never_compared_against_itself() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// Two facts each anchoring a different bare top-level file (no parent
+/// directory) must NOT count as sharing an anchor directory. Both anchors
+/// parent to the empty string, but that is not a real shared directory: the
+/// anchor_dir signal must exclude the empty-string bucket, or any two
+/// top-level-anchored facts would falsely match on this signal alone.
+#[test]
+fn top_level_anchors_with_no_shared_directory_do_not_match_the_anchor_dir_signal() {
+    // Arrange
+    let home = scratch_home("similarity-top-level-anchors");
+    write_fact(
+        &home,
+        "readme-fact.md",
+        "---\nname: readme-fact\ntype: reference\nanchors: [README.md]\n---\n\nDescribes the project setup and layout.\n",
+    );
+    write_fact(
+        &home,
+        "package-fact.md",
+        "---\nname: package-fact\ntype: reference\nanchors: [package.json]\n---\n\nLists dependencies and build scripts.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "readme-fact.md");
+    run_rebuild_for(&home, "package-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert!(
+        !edges(&graph)
+            .iter()
+            .any(|e| e["relation"] == "possible_relates_to"),
+        "two facts anchoring unrelated top-level files must not match on anchor_dir alone"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// Threshold boundary: two bodies whose Jaccard ratio lands exactly on
 /// `SIMILARITY_JACCARD_THRESHOLD` (0.35) still count as a hit, confirming
 /// the comparison is `>=`, not `>`.

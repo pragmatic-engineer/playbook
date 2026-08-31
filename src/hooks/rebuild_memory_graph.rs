@@ -519,8 +519,7 @@ struct SimilarityInfo {
 }
 
 /// Parent directory of an anchor path, e.g. `src/foo/a.ts` -> `src/foo`. An
-/// anchor with no parent (a bare filename) yields an empty string, which
-/// still participates in the overlap check as its own directory.
+/// anchor with no parent (a bare filename) yields an empty string.
 fn anchor_parent_dir(anchor: &str) -> String {
     Path::new(anchor)
         .parent()
@@ -528,11 +527,18 @@ fn anchor_parent_dir(anchor: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Signal 1: the two facts' anchor lists share at least one parent
+/// Signal 1: the two facts' anchor lists share at least one NON-EMPTY parent
 /// directory. A fact with no anchors has an empty `anchor_dirs` set, so it
-/// never contributes this signal for either side of a pair.
+/// never contributes this signal for either side of a pair. The empty string
+/// (a bare top-level filename with no parent) is excluded from the overlap
+/// check on purpose: otherwise any two facts each anchoring a different
+/// top-level file (e.g. `README.md` and `package.json`) would share
+/// "directory" `""` and falsely count as a hit despite anchoring unrelated
+/// files.
 fn shares_anchor_dir(a: &SimilarityInfo, b: &SimilarityInfo) -> bool {
-    a.anchor_dirs.intersection(&b.anchor_dirs).next().is_some()
+    a.anchor_dirs
+        .intersection(&b.anchor_dirs)
+        .any(|dir| !dir.is_empty())
 }
 
 /// `|intersection| / |union|` over two word sets. A pair where either body
