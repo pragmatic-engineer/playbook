@@ -186,6 +186,67 @@ fn pinned_absent_frontmatter_omits_the_node_field() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// Additive field: `pinned: false` omits the field too, same as absent. This
+/// pins the parser's exact match against the literal `true`, not a general
+/// boolean parse, as a deliberate contract rather than an untested side effect.
+#[test]
+fn pinned_false_frontmatter_omits_the_node_field() {
+    // Arrange
+    let home = scratch_home("pinned-false");
+    write_fact(
+        &home,
+        "unpinned-fact.md",
+        "---\nname: unpinned-fact\ntype: reference\npinned: false\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "unpinned-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    let node = nodes(&graph)
+        .iter()
+        .find(|n| n["id"] == "global/unpinned-fact")
+        .expect("node should exist");
+    assert!(
+        !node.as_object().unwrap().contains_key("pinned"),
+        "pinned: false should omit the field, not write pinned:false"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Additive field: a value other than the literal `true` (quoted, a different
+/// case, or a YAML-style yes) is not matched and omits the field, same as
+/// absent. Pins the exact-match contract against a value that isn't a clean
+/// boolean.
+#[test]
+fn pinned_non_literal_true_value_omits_the_node_field() {
+    // Arrange
+    let home = scratch_home("pinned-non-literal");
+    write_fact(
+        &home,
+        "unpinned-fact.md",
+        "---\nname: unpinned-fact\ntype: reference\npinned: yes\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "unpinned-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    let node = nodes(&graph)
+        .iter()
+        .find(|n| n["id"] == "global/unpinned-fact")
+        .expect("node should exist");
+    assert!(
+        !node.as_object().unwrap().contains_key("pinned"),
+        "a non-literal-true pinned value should omit the field, not match loosely"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// Shape (3): a dict sub-key (`links.relates_to`) holding a bare scalar.
 /// hooks/rebuild-memory-graph.test.sh scenario 1.
 #[test]

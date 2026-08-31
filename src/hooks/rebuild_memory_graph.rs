@@ -421,6 +421,8 @@ fn node_id(rel: &str, scope: Scope, project: Option<&str>) -> String {
 
 // --- Graph shape and rebuild ------------------------------------------------
 
+// `version` and `pinned` (below) have no reader yet; both are written for a
+// future consumer described in ADR-0011.
 #[derive(Serialize)]
 struct Graph {
     nodes: Vec<Node>,
@@ -522,6 +524,8 @@ fn rebuild_locked(mem_dir: &Path) {
             .unwrap_or_else(|| "reference".to_string());
         let name = fm.scalar("name").cloned().unwrap_or(default_name);
         let description = fm.scalar("description").cloned().unwrap_or_default();
+        // Exact, case-sensitive match against the literal `true`: anything else
+        // (quoted, a different case, `false`, or absent) is treated as unset.
         let pinned = (fm.scalar("pinned").map(String::as_str) == Some("true")).then_some(true);
 
         nodes.push(Node {
