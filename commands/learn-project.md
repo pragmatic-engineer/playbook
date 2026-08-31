@@ -1,5 +1,5 @@
 ---
-description: Deeply learn the current project (git history, PRs, JIRA, Confluence), store distilled topics in the memory system (routed per-project vs global), and export a navigable graph.json of the memory graph.
+description: Deeply learn the current project (git history, PRs, JIRA, Confluence), store distilled topics in the memory system (routed per-project vs global), and export a navigable memory.graph.json of the memory graph.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, WebFetch
 argument-hint: "[--refresh] [--graph-only] [--stage] [--from-staged] [--max-prs N] [--max-commits N]"
 model: opus
@@ -8,14 +8,14 @@ effort: high
 
 # Learn Project
 
-Build a durable mental model of the repo you're in and persist it as memory facts. Read broadly (code, git history, PRs, and JIRA/Confluence when reachable), distill into topics, classify each fact as repo-specific or cross-project, and write it in the memory format from the system prompt's **Memory** section. Read-only on the project: the only writes are under `~/.claude/memory/` (fact files, plus `~/.claude/memory/graph.json` when the graph rebuilds).
+Build a durable mental model of the repo you're in and persist it as memory facts. Read broadly (code, git history, PRs, and JIRA/Confluence when reachable), distill into topics, classify each fact as repo-specific or cross-project, and write it in the memory format from the system prompt's **Memory** section. Read-only on the project: the only writes are under `~/.claude/memory/` (fact files, plus `~/.claude/memory/memory.graph.json` when the graph rebuilds).
 
 ## Argument parsing
 
 Parse `$ARGUMENTS`:
 
 - `--refresh` → re-derive and supersede existing learned facts instead of skipping them.
-- `--graph-only` → skip Phases 1-3; rebuild the single `~/.claude/memory/graph.json` from current memory (Phase 4.5), then report. Use after hand-editing facts.
+- `--graph-only` → skip Phases 1-3; rebuild the single `~/.claude/memory/memory.graph.json` from current memory (Phase 4.5), then report. Use after hand-editing facts.
 - `--stage` → run collection and analysis (Phases 0-2) but don't write to the live store or ask for confirmation. Write candidate facts to `~/.claude/memory/<owner>/<repo>/staging/` for later review, then stop. See **Staging mode**. Use for unattended or session-end runs.
 - `--from-staged` → skip collection; load candidates from `~/.claude/memory/<owner>/<repo>/staging/`, run the normal confirm-and-write flow (Phases 3-4.5), then clear the staging area.
 - `--max-prs N` (default 200) and `--max-commits N` (default: all, summarized) → bound scope on large repos.
@@ -137,7 +137,7 @@ done
 
 ## Phase 4.5: Rebuild the navigation graph
 
-`~/.claude/memory/graph.json` is a single graph covering every fact, global and project. It rebuilds automatically: the `rebuild-memory-graph.py` PostToolUse hook fires whenever a fact file under `~/.claude/memory/` is saved, so once Phase 4 has written the facts the graph is already current. Normally you skip this phase.
+`~/.claude/memory/memory.graph.json` is a single graph covering every fact, global and project. It rebuilds automatically: the `rebuild-memory-graph.py` PostToolUse hook fires whenever a fact file under `~/.claude/memory/` is saved, so once Phase 4 has written the facts the graph is already current. Normally you skip this phase.
 
 `--graph-only` forces a rebuild without re-collecting, for use after hand-editing fact files:
 
@@ -147,7 +147,7 @@ playbook memory rebuild
 
 **Why a dedicated subcommand rather than invoking the hook.** The hook skips unless the write it was told about is under `~/.claude/memory/`, which is right for a PostToolUse hook and leaves no way to force a full rebuild. This used to run `python3 hooks/rebuild-memory-graph.py < /dev/null`, because that script treated empty stdin as "rebuild everything". The Rust port dropped that branch deliberately (see `should_skip` in `src/hooks/rebuild_memory_graph.rs`), judging it unexercised by the hook's test suite. It was exercised, by this command. Faking a `tool_input` payload that names a path inside the memory dir would also work and is what the port's own doc calls the more fragile option, since it breaks silently the next time the skip logic changes.
 
-It walks every fact under `~/.claude/memory/`, derives each fact's scope (`global`, or `project` with its `owner/repo`), and writes `~/.claude/memory/graph.json` atomically. Nodes are facts plus their `anchors:` code locations; edges are the `links:` between facts and the fact→code anchors. Report the node and edge counts, and flag any dangling edge.
+It walks every fact under `~/.claude/memory/`, derives each fact's scope (`global`, or `project` with its `owner/repo`), and writes `~/.claude/memory/memory.graph.json` atomically. Nodes are facts plus their `anchors:` code locations; edges are the `links:` between facts and the fact→code anchors. Report the node and edge counts, and flag any dangling edge.
 
 ## Staging mode (`--stage` and `--from-staged`)
 
@@ -158,14 +158,14 @@ These split collection from the write decision, so a run can happen unattended (
 1. Run Phases 0-2 as normal to produce candidate facts.
 2. Skip Phase 3's confirmation and Phase 4's live writes. Create `$STORE/staging/`, then write each candidate to `$STORE/staging/<kebab>.md` in the normal fact format, plus two extra frontmatter fields: `status: pending` and `staged: <date +%F>`, a `scope:` (`repo` | `global`), and, when it would update an existing fact, a `supersedes:` note.
 3. Write or refresh `$STORE/staging/STAGED.md` with one `- [Title](file.md): one-line hook` line per candidate.
-4. Do NOT touch the live `MEMORY.md` or `graph.json`.
+4. Do NOT touch the live `MEMORY.md` or `memory.graph.json`.
 5. Report the count staged, the staging path, and: "Review with `/playbook:learn-project --from-staged`."
 
 **`--from-staged`** (review and promote):
 
 1. Skip Phases 0-2. Read every candidate in `$STORE/staging/`.
 2. Run Phase 3 against them: show the candidate table, dedupe against the live stores, and ask once "Write these to memory?" (honor a subset).
-3. For approved candidates, run Phase 4 (write to the live store, dropping the `status`/`staged` staging fields; apply `supersedes`/updates; refresh `MEMORY.md`) and Phase 4.5 (rebuild `graph.json`).
+3. For approved candidates, run Phase 4 (write to the live store, dropping the `status`/`staged` staging fields; apply `supersedes`/updates; refresh `MEMORY.md`) and Phase 4.5 (rebuild `memory.graph.json`).
 4. Remove promoted candidates from staging. Leave any the user skipped; delete any the user rejects.
 5. Report as in Phase 5.
 
@@ -176,7 +176,7 @@ One tight summary:
 - Facts written / updated / superseded, per cluster and per store.
 - Sources used, and **sources skipped with the reason** (e.g. "Confluence: no MCP and acli absent").
 - The path to each store's `MEMORY.md`.
-- The `graph.json` path, node and edge counts, and any dangling anchors or edges flagged during the build.
+- The `memory.graph.json` path, node and edge counts, and any dangling anchors or edges flagged during the build.
 
 ## Teardown (MUST run, even on failure or abort)
 
@@ -190,4 +190,4 @@ One tight summary:
 4. Writing repo-specific detail into the global store, or cross-project facts into the project store.
 5. Editing project code or config. Memory files under `~/.claude/memory/` are the only writes.
 6. Persisting secrets or tokens pulled from configs or CI.
-7. Leaving `graph.json` stale or non-deterministic. Rebuild it whenever facts change, and sort nodes/edges so reruns produce clean diffs.
+7. Leaving `memory.graph.json` stale or non-deterministic. Rebuild it whenever facts change, and sort nodes/edges so reruns produce clean diffs.

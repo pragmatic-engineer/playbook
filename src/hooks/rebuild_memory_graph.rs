@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! PostToolUse hook: rebuild `~/.claude/memory/graph.json` after any
+//! PostToolUse hook: rebuild `~/.claude/memory/memory.graph.json` after any
 //! fact-file save. Ports `hooks/rebuild-memory-graph.py`. No-op unless the
 //! edited file is inside `~/.claude/memory`. Walks the whole memory tree
 //! (not incremental), writes atomically (temp file plus rename), and emits
@@ -421,10 +421,13 @@ fn node_id(rel: &str, scope: Scope, project: Option<&str>) -> String {
 
 // --- Graph shape and rebuild ------------------------------------------------
 
+// `version` and `pinned` (below) have no reader yet; both are written for a
+// future consumer described in ADR-0011.
 #[derive(Serialize)]
 struct Graph {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
+    version: u32,
 }
 
 #[derive(Serialize)]
@@ -440,6 +443,8 @@ struct Node {
     description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pinned: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -463,7 +468,7 @@ pub fn rebuild_now() {
 }
 
 /// Serializes concurrent rebuilds (two sessions saving facts near the same
-/// moment) with an mkdir-based advisory lock at `graph.json.lock`, matching
+/// moment) with an mkdir-based advisory lock at `memory.graph.json.lock`, matching
 /// `atomic_append`'s convention in `common::atomic`. Without this, two
 /// rebuilds can interleave: the one that started from a staler view of the
 /// memory tree can still finish (and rename) after the fresher one, silently
@@ -474,7 +479,7 @@ pub fn rebuild_now() {
 /// a hook must never hang waiting on contention.
 fn rebuild() {
     let mem_dir = memory_dir();
-    let lock_path = mem_dir.join("graph.json.lock");
+    let lock_path = mem_dir.join("memory.graph.json.lock");
     let (acquired, ()) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
         rebuild_locked(&mem_dir);
     });
@@ -519,6 +524,9 @@ fn rebuild_locked(mem_dir: &Path) {
             .unwrap_or_else(|| "reference".to_string());
         let name = fm.scalar("name").cloned().unwrap_or(default_name);
         let description = fm.scalar("description").cloned().unwrap_or_default();
+        // Exact, case-sensitive match against the literal `true`: anything else
+        // (quoted, a different case, `false`, or absent) is treated as unset.
+        let pinned = (fm.scalar("pinned").map(String::as_str) == Some("true")).then_some(true);
 
         nodes.push(Node {
             id: nid.clone(),
@@ -528,6 +536,7 @@ fn rebuild_locked(mem_dir: &Path) {
             name: Some(name),
             description: Some(description),
             project: proj.clone(),
+            pinned,
         });
 
         if let Some(links) = fm.dict("links") {
@@ -563,6 +572,7 @@ fn rebuild_locked(mem_dir: &Path) {
                         name: None,
                         description: None,
                         project: proj.clone(),
+                        pinned: None,
                     });
                     seen_code.insert(cid.clone());
                 }
@@ -604,7 +614,14 @@ fn rebuild_locked(mem_dir: &Path) {
         });
     }
 
-    write_graph_atomically(mem_dir, &Graph { nodes, edges });
+    write_graph_atomically(
+        mem_dir,
+        &Graph {
+            nodes,
+            edges,
+            version: 1,
+        },
+    );
 }
 
 /// Recursively collect every `.md` file under `dir` except `MEMORY.md`,
@@ -634,10 +651,10 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Write `graph` to `graph.json` inside `mem_dir` via a temp file in the
-/// same directory plus a rename, so a reader (or a crash mid-write) never
+/// Write `graph` to `memory.graph.json` inside `mem_dir` via a temp file in
+/// the same directory plus a rename, so a reader (or a crash mid-write) never
 /// observes a partially written file, and a failed write leaves the
-/// previous `graph.json` untouched. Mirrors
+/// previous `memory.graph.json` untouched. Mirrors
 /// `tempfile.mkstemp(dir=MEMORY_DIR, ...)` plus `os.replace`.
 fn write_graph_atomically(mem_dir: &Path, graph: &Graph) {
     let Ok(rendered) = serde_json::to_string_pretty(graph) else {
@@ -652,7 +669,7 @@ fn write_graph_atomically(mem_dir: &Path, graph: &Graph) {
         let _ = fs::remove_file(&tmp_path);
         return;
     }
-    if fs::rename(&tmp_path, mem_dir.join("graph.json")).is_err() {
+    if fs::rename(&tmp_path, mem_dir.join("memory.graph.json")).is_err() {
         let _ = fs::remove_file(&tmp_path);
     }
 }

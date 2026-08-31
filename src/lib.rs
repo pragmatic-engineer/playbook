@@ -109,7 +109,7 @@ pub enum SettingsCommand {
 /// `playbook memory` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum MemoryCommand {
-    /// Rebuild `~/.claude/memory/graph.json` from every fact on disk.
+    /// Rebuild `~/.claude/memory/memory.graph.json` from every fact on disk.
     ///
     /// The PostToolUse hook rebuilds automatically when a fact is saved, so
     /// this is only needed after hand-editing fact files. Forcing it through

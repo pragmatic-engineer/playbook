@@ -74,7 +74,7 @@ Both paths produce the same file format and land in the right scope of the store
 
 Facts reach context three ways, described in full in [ADR 0004](../adr/0004-graph-first-memory.md) and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md).
 
-**At session start**, the `session-init` hook injects a slice of `graph.json`: every global fact plus every fact scoped to the current repo, as names and one-line descriptions, not full bodies. The slice is capped at 16000 characters, so it cannot grow without bound as the store grows. If the graph is unavailable, `session-init` falls back to the legacy `MEMORY.md` index (capped the same way); if neither exists, it injects nothing.
+**At session start**, the `session-init` hook injects a slice of `memory.graph.json`: every global fact plus every fact scoped to the current repo, as names and one-line descriptions, not full bodies. The slice is capped at 16000 characters, so it cannot grow without bound as the store grows. If the graph is unavailable, `session-init` falls back to the legacy `MEMORY.md` index (capped the same way); if neither exists, it injects nothing.
 
 **Editing or writing a file** surfaces the facts anchored to it: the `memory-anchors` hook matches the edited path against the graph's anchor index and injects the matching facts' names, descriptions, and `depends_on`/`contradicts` neighbours.
 
@@ -86,9 +86,9 @@ The planning and execution commands (`/playbook:scope`, `/playbook:adr`, `/playb
 
 **Across a session boundary**, `/playbook:session-handoff` persists a handoff document to disk; `session-init` reloads and deletes it automatically at the next `SessionStart`, including after `/clear`, so `/clear` no longer discards what the session had figured out. The `memory-capture` hook also fires once per context-usage threshold crossing during a session (a `Stop` hook, not a `SessionEnd` one), prompting you to write down durable facts and, since ADR 0008, to run a handoff too, in case the session runs long enough to approach compaction.
 
-## graph.json
+## memory.graph.json
 
-A single `graph.json` lives at `~/.claude/memory/graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It is the primary retrieval path, not just a navigation aid: every mechanism in "How Facts Are Loaded" above, the SessionStart slice, the edit-time anchor lookup, and prompt-time recall, reads this file. See [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision, and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) for what was added on top of it.
+A single `memory.graph.json` lives at `~/.claude/memory/memory.graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It is the primary retrieval path, not just a navigation aid: every mechanism in "How Facts Are Loaded" above, the SessionStart slice, the edit-time anchor lookup, and prompt-time recall, reads this file. See [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision, and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) for what was added on top of it.
 
 The graph rebuilds automatically. The `rebuild-memory-graph` hook fires whenever a file under `~/.claude/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
 

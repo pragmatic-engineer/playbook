@@ -75,14 +75,14 @@ The real mechanism is Rust code. `playbook init` runs a `wire` step (`src/init/w
 | `Read` | `preread-edit-check` | When the target file was edited by this session in the last 30 minutes, injects a reminder that the post-edit state is already in context. Info only; never blocks. |
 | `Read` | `preread-size-check` | Denies a full-file read of a large file (over the line or byte limit) when no `offset`/`limit` is set, pushing toward grep-first, then a targeted read. Allowlists a small set of config and docs files usually needed whole. The only hook in the toolkit that returns a deny decision. |
 | `Read`, `Grep`, `Glob`, `Edit`, `Write`, `NotebookEdit` | `search-counter` | Tracks exploration breadth. Nudges Claude toward the Explore subagent at thresholds 4, 8, and 12 unique file reads or searches. |
-| `Edit`, `Write` | `memory-anchors` | When the target path is anchored in the graph-first memory store (`~/.claude/memory/graph.json`), surfaces the facts that describe it, plus their `depends_on` and `contradicts` neighbours, as `additionalContext` before the edit lands. Never blocks. Also fires on `UserPromptSubmit`; see below. |
+| `Edit`, `Write` | `memory-anchors` | When the target path is anchored in the graph-first memory store (`~/.claude/memory/memory.graph.json`), surfaces the facts that describe it, plus their `depends_on` and `contradicts` neighbours, as `additionalContext` before the edit lands. Never blocks. Also fires on `UserPromptSubmit`; see below. |
 
 ### PostToolUse
 
 | Matcher | Hook | Purpose |
 |---|---|---|
 | `Edit`, `Write`, `NotebookEdit` | `post-edit-track` | Records the edited file's absolute path and a timestamp to `edits.jsonl` in the session runtime dir. Feeds `preread-edit-check` and the statusline. |
-| `Edit`, `Write`, `NotebookEdit` | `rebuild-memory-graph` | Rebuilds `~/.claude/memory/graph.json` after any fact-file save. No-op unless the edited file is inside `~/.claude/memory`. |
+| `Edit`, `Write`, `NotebookEdit` | `rebuild-memory-graph` | Rebuilds `~/.claude/memory/memory.graph.json` after any fact-file save. No-op unless the edited file is inside `~/.claude/memory`. |
 
 ### UserPromptSubmit
 

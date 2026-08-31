@@ -49,7 +49,7 @@ Sources it reads (when available):
 
 It collects in parallel, then analyses findings into clusters: architecture, conventions, domain glossary, decisions, infrastructure, setup, scripts, database, and data access patterns. Before writing anything, it shows you a table of candidate facts and asks once. It won't write without your confirmation.
 
-The result: one fact file per topic in `~/.claude/memory/<owner>/<repo>/`. The single `~/.claude/memory/graph.json` rebuilds automatically after each fact save. Run with `--refresh` to re-derive and supersede existing facts. Run with `--graph-only` after hand-editing facts to rebuild the graph without re-collecting.
+The result: one fact file per topic in `~/.claude/memory/<owner>/<repo>/`. The single `~/.claude/memory/memory.graph.json` rebuilds automatically after each fact save. Run with `--refresh` to re-derive and supersede existing facts. Run with `--graph-only` after hand-editing facts to rebuild the graph without re-collecting.
 
 ## The Memory Model
 

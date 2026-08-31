@@ -107,7 +107,7 @@ fn main() {
         Command::Memory { sub } => match sub {
             MemoryCommand::Rebuild => {
                 hooks::rebuild_memory_graph::rebuild_now();
-                println!("memory: graph.json rebuilt");
+                println!("memory: memory.graph.json rebuilt");
             }
         },
         Command::Manifest { sub } => match sub {

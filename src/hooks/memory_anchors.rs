@@ -3,7 +3,7 @@
 
 //! Two events, one cache. `PreToolUse` on Edit|Write: when the target path
 //! is anchored in the graph-first memory store
-//! (`~/.claude/memory/graph.json`), surface the facts that describe it, plus
+//! (`~/.claude/memory/memory.graph.json`), surface the facts that describe it, plus
 //! their `depends_on` and `contradicts` neighbours, as `additionalContext`
 //! before the edit lands. `UserPromptSubmit` (ADR 0008 WU-0): match prompt
 //! text and this-session touched files against the same index, injecting
@@ -350,7 +350,7 @@ fn format_message(relpath: &str, matches: &[Vec<String>]) -> String {
     msg
 }
 
-/// Build the tab-separated anchor index from `graph.json` for the current
+/// Build the tab-separated anchor index from `memory.graph.json` for the current
 /// repo scope. One row per in-scope `anchors` edge, columns anchor, from_id,
 /// name, description, neighbours, file. The `file` column exists solely for
 /// `run_prompt`'s body reads; `PreToolUse`'s `format_message` only reads
@@ -366,7 +366,10 @@ fn build_index(idx_path: &Path) {
 }
 
 fn memory_graph_path() -> PathBuf {
-    home_dir().join(".claude").join("memory").join("graph.json")
+    home_dir()
+        .join(".claude")
+        .join("memory")
+        .join("memory.graph.json")
 }
 
 fn compute_index_rows(graph_path: &Path, repo: &str) -> Vec<String> {
@@ -447,7 +450,7 @@ fn in_scope(node: &Value, repo: &str) -> bool {
 }
 
 /// `depends_on`/`contradicts` neighbours, keyed by source node id, in the
-/// order their edges appear in `graph.json`.
+/// order their edges appear in `memory.graph.json`.
 fn collect_neighbours<'a>(
     edges: &'a [Value],
     byid: &HashMap<&'a str, &'a Value>,

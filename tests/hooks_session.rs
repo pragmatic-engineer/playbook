@@ -141,7 +141,7 @@ fn system_message(stdout: &str) -> String {
 
 #[test]
 fn session_init_injects_the_graph_backed_slice() {
-    // Arrange: a fake HOME with a graph.json carrying one fact in scope for
+    // Arrange: a fake HOME with a memory.graph.json carrying one fact in scope for
     // a repo whose origin matches REPO_SLUG.
     let work = scratch_dir("graph-slice");
     let repo_slug = "acme/widget";
@@ -152,7 +152,7 @@ fn session_init_injects_the_graph_backed_slice() {
     let memory_dir = home.join(".claude").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
-        memory_dir.join("graph.json"),
+        memory_dir.join("memory.graph.json"),
         format!(
             r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"widget-fact-one","description":"The widget module talks to the sprocket service.","project":"{repo_slug}"}}],"edges":[]}}"#
         ),
@@ -211,7 +211,7 @@ fn session_init_caps_the_graph_backed_slice_like_the_legacy_fallback() {
         })
         .collect();
     fs::write(
-        memory_dir.join("graph.json"),
+        memory_dir.join("memory.graph.json"),
         format!(r#"{{"nodes":[{}],"edges":[]}}"#, nodes.join(",")),
     )
     .unwrap();
@@ -240,7 +240,7 @@ fn session_init_caps_the_graph_backed_slice_like_the_legacy_fallback() {
 
 #[test]
 fn session_init_falls_back_to_the_legacy_memory_index() {
-    // Arrange: a fake HOME with the legacy MEMORY.md index but no graph.json.
+    // Arrange: a fake HOME with the legacy MEMORY.md index but no memory.graph.json.
     let work = scratch_dir("legacy-index");
     let repo_slug = "acme/widget";
     let repo_dir = work.join("repo");
@@ -312,7 +312,7 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
     let memory_dir = home.join(".claude").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
-        memory_dir.join("graph.json"),
+        memory_dir.join("memory.graph.json"),
         r#"{"nodes":[{"id":"acme/widget/f1","file":"acme/widget/f1.md","scope":"project","type":"project","name":"widget-fact-one","description":"desc","project":"acme/widget"}],"edges":[]}"#,
     )
     .unwrap();

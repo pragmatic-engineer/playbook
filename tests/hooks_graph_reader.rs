@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Behavioural tests for the `memory-anchors` hook, the sole reader of
-//! `~/.claude/memory/graph.json`. Exercised black-box, through the
+//! `~/.claude/memory/memory.graph.json`. Exercised black-box, through the
 //! compiled `playbook` binary, the same way
 //! `hooks/memory-anchors.test.sh` exercises the python original. Every
 //! assertion in that shell script has a corresponding case below.
@@ -51,7 +51,9 @@ fn repo_dir(home: &Path) -> PathBuf {
 }
 
 fn graph_path(home: &Path) -> PathBuf {
-    home.join(".claude").join("memory").join("graph.json")
+    home.join(".claude")
+        .join("memory")
+        .join("memory.graph.json")
 }
 
 fn write_graph(home: &Path, content: &str) {
@@ -174,7 +176,7 @@ fn unanchored_path_emits_nothing() {
 }
 
 /// hooks/memory-anchors.test.sh scenario 5: the hook never blocks, on a
-/// malformed payload, a missing `file_path`, or a missing graph.json.
+/// malformed payload, a missing `file_path`, or a missing memory.graph.json.
 #[test]
 fn never_blocks_on_malformed_payload_missing_file_path_or_missing_graph() {
     // 5a: malformed payload
@@ -211,7 +213,7 @@ fn never_blocks_on_malformed_payload_missing_file_path_or_missing_graph() {
     );
     let _ = fs::remove_dir_all(&home_b);
 
-    // 5c: missing graph.json entirely (fresh store, no graph ever written)
+    // 5c: missing memory.graph.json entirely (fresh store, no graph ever written)
     let home_c = scratch_home("anchors-missing-graph");
     let out_c = run_anchors_hook(&home_c, &edit_path(&home_c, "src/a.py"), "s5c");
     assert_eq!(out_c.status.code(), Some(0), "missing graph should exit 0");
@@ -692,7 +694,7 @@ fn a_fact_with_a_deleted_file_path_is_skipped_without_blocking_a_real_match() {
 /// script's output, see tests/fixtures/golden/README.md);
 /// this is the equivalent cross-implementation comparison against
 /// hooks/memory-anchors.py, feeding both implementations the same
-/// graph.json fixture and the same edit.
+/// memory.graph.json fixture and the same edit.
 #[test]
 fn python_and_rust_readers_agree_on_the_same_fixture() {
     // Arrange
