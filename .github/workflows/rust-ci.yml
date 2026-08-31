@@ -32,6 +32,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+    env:
+      # Single source of truth for the cache key and the install command
+      # below, so they can't drift apart. Bump deliberately, not implicitly.
+      CARGO_AUDIT_VERSION: "0.22.2"
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         # Linux-only action; it self-skips on macOS with a confusing warning
@@ -49,6 +53,12 @@ jobs:
             static.rust-lang.org:443
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Prints the version rust-toolchain.toml actually resolved to, so a
+      # reviewer can confirm the pin took effect from the job log instead of
+      # trusting rustup's documented override behavior on faith.
+      - name: rustc --version
+        run: rustc --version
 
       - name: Ensure rustfmt and clippy components
         run: rustup component add rustfmt clippy
@@ -80,9 +90,40 @@ jobs:
       - name: Validate agent definitions
         run: ./target/debug/playbook agents check
 
+      # cargo-audit's own `cargo install --locked` compiles it from source
+      # every run, ~2 minutes on ubuntu-latest, the single most expensive
+      # step in this job by far (measured: musl-tools + rustup target add
+      # combined cost 13 seconds in the container-smoke job, for comparison).
+      # Cache the compiled binary, keyed on a pinned version so a cache hit
+      # is always the exact version this job expects, never a stale one
+      # silently reused past its actual pin.
+      #
+      # No allowed-endpoints entry needed for the cache backend, unlike
+      # scorecard.yml (stays on audit mode) and osv-scan.yml (allowlists
+      # results-receiver.actions.githubusercontent.com): those two are about
+      # the Actions RESULTS/artifact-upload backend, a different subsystem
+      # with rotating regional endpoints harden-runner can't allowlist
+      # statically. actions/cache itself gets special-cased: harden-runner
+      # v1.5.0+ auto-detects and allows its endpoint at runtime even in
+      # block mode, no config needed (confirmed via StepSecurity's own
+      # docs). This job pins v2.19.4, well above that floor. Watch the
+      # first real run's harden-runner insights to confirm the cache
+      # actually populates rather than assuming this holds forever.
+      - name: Cache cargo-audit binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-${{ env.CARGO_AUDIT_VERSION }}
+
       - name: cargo audit
         run: |
-          cargo install cargo-audit --locked
+          if [ ! -x "$HOME/.cargo/bin/cargo-audit" ]; then
+            cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+          fi
+          # The advisory DATABASE still updates every run regardless of the
+          # cache: cargo-audit fetches it fresh from the rustsec advisory-db
+          # repo at scan time, so caching the binary doesn't freeze which
+          # CVEs get caught, only skips recompiling the same binary.
           cargo audit
 
   # release.yml builds five targets, but nothing else ever compiled for

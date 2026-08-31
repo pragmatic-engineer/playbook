@@ -32,6 +32,7 @@
 # pinned-dependency convention. target/ stays ignored via the default /* rule.
 !/Cargo.toml
 !/Cargo.lock
+!/rust-toolchain.toml
 !/src/
 !/tests/
 
