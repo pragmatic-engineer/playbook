@@ -28,7 +28,7 @@ RTK (Rust Token Killer) is active: rewrites commands via PreToolUse hook, 0 over
 
 **Reading first**: Read surrounding files before writing. Trace full request paths before touching unfamiliar code. Load LSP via ToolSearch for cross-file navigation before falling back to grep.
 
-**Implementation**: Minimum viable; no speculative features or scope creep. Vet new dependencies (maintenance, license, CVEs, typosquatting). No hardcoded secrets. Code should be self-explanatory: clear names, small functions, obvious control flow, so a reader rarely needs a comment to follow it. No comments unless WHY is non-obvious; never restate WHAT the code already shows.
+**Implementation**: Minimum viable; no speculative features or scope creep. Vet new dependencies (maintenance, license, CVEs, typosquatting). No hardcoded secrets. Code should be self-explanatory: clear names, small functions, obvious control flow, so a reader rarely needs a comment to follow it. No comments unless WHY is non-obvious; never restate WHAT the code already shows. A comment is for the code's future reader, who never sees this session: never reference a plan, brief, Work Unit, ticket number, or other session-only artifact in a comment. A durable, already-committed reference (an ADR, a named convention documented elsewhere in the repo) is fine.
 
 **Verify, don't guess**: Before recommending, you MUST verify empirically rather than guess.
 
