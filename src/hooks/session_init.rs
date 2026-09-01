@@ -189,6 +189,15 @@ fn check_config_drift(payload: &Payload, dir: &str, plugin_root: &str) -> (Strin
     (system_message, extra_context)
 }
 
+/// Independent cap for `append_promoted_facts`'s own block, deliberately
+/// smaller than `MEMORY_BODY_CAP_CHARS`: this block is meant to guarantee a
+/// small, curated set of facts survives `append_memory_slice`'s truncation,
+/// not to duplicate that block's own full budget. Reusing the full
+/// `MEMORY_BODY_CAP_CHARS` here would let the two blocks together inject up
+/// to double that constant's own limit, close to the store size that
+/// motivated adding the limit in the first place (see `cap_memory_body`).
+const PROMOTED_FACTS_CAP_CHARS: usize = 4000;
+
 /// Inject facts pinned or usage-promoted for this repo, unconditionally: no
 /// anchor match, prompt match, or hit count is required. Runs before
 /// `append_memory_slice` so a pinned or promoted fact lands in the
@@ -223,6 +232,12 @@ fn append_promoted_facts(extra_context: &mut String, home: &str, repo_root: &str
         .cloned()
         .unwrap_or_default();
 
+    // One read of memory.signals.json for the whole pass, rather than one
+    // per node: memory_signals::is_promoted re-reads and re-parses the file
+    // on every call, which would otherwise cost one file read and JSON
+    // parse per in-scope node on every SessionStart.
+    let promoted = memory_signals::promoted_ids(&mem_dir);
+
     let mut lines = Vec::new();
     for node in &nodes {
         if !in_promotion_scope(node, &mem_slug) {
@@ -232,7 +247,7 @@ fn append_promoted_facts(extra_context: &mut String, home: &str, repo_root: &str
             continue;
         };
         let pinned = node.get("pinned").and_then(serde_json::Value::as_bool) == Some(true);
-        if !pinned && !memory_signals::is_promoted(&mem_dir, id) {
+        if !pinned && !promoted.contains(id) {
             continue;
         }
         let name = node
@@ -259,7 +274,7 @@ fn append_promoted_facts(extra_context: &mut String, home: &str, repo_root: &str
     let body: String = lines
         .join("\n")
         .chars()
-        .take(MEMORY_BODY_CAP_CHARS)
+        .take(PROMOTED_FACTS_CAP_CHARS)
         .collect();
     let ctx = format!("Facts pinned or frequently used in this repo:\n{body}");
     push_context(extra_context, &ctx);

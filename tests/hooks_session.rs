@@ -427,6 +427,80 @@ fn session_init_injects_a_promoted_fact_independent_of_general_memory_slice() {
     );
 }
 
+/// A pinned fact belonging to a DIFFERENT repo than the current session must
+/// not inject: `pinned`/`promoted` are still subject to the same
+/// global-or-matching-project scope check every other memory injection path
+/// in this codebase applies. A regression that dropped that check would
+/// leak one project's pinned facts into every other repo's sessions.
+#[test]
+fn a_pinned_fact_from_a_different_repo_does_not_inject() {
+    // Arrange
+    let work = scratch_dir("pinned-fact-other-repo");
+    let repo_slug = "acme/widget";
+    let other_slug = "acme/other-repo";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-pinned-other-repo");
+    let memory_dir = home.join(".claude").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"{other_slug}/other-repo-fact","file":"{other_slug}/other-repo-fact.md","scope":"project","type":"project","name":"other-repo-fact-name","description":"Should never appear here.","project":"{other_slug}","pinned":true}}],"edges":[]}}"#
+        ),
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        !context.contains("other-repo-fact-name"),
+        "a pinned fact scoped to a different repo must not leak into this session: {context}"
+    );
+}
+
+/// A global-scope promoted fact injects regardless of which repo the
+/// session is in, the same global-always-in-scope rule every other memory
+/// injection path in this codebase already follows.
+#[test]
+fn a_global_promoted_fact_injects_regardless_of_repo() {
+    // Arrange
+    let work = scratch_dir("promoted-fact-global");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-promoted-global");
+    let memory_dir = home.join(".claude").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        r#"{"nodes":[{"id":"global/global-promoted-fact","file":"global-promoted-fact.md","scope":"global","type":"reference","name":"global-promoted-fact-name","description":"Global fact, any repo."}],"edges":[]}"#,
+    )
+    .unwrap();
+    fs::write(
+        memory_dir.join("memory.signals.json"),
+        r#"{"nodes":{"global/global-promoted-fact":{"hits":3,"promoted":true}}}"#,
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("global-promoted-fact-name"),
+        "a global-scope promoted fact should inject regardless of repo: {context}"
+    );
+}
+
 // ---------------------------------------------------------------------
 // session-init: ADR 0008 WU-3, reload a persisted handoff at SessionStart
 // ---------------------------------------------------------------------

@@ -722,6 +722,42 @@ fn anchor_match_bumps_the_matched_facts_hit_count() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// Editing the same anchored file three times in one session must NOT
+/// promote the fact: that is repetition within a single sitting, not the
+/// cross-session recurrence the promotion threshold exists to catch. The
+/// same session id is reused across all three calls (matching what a real
+/// session looks like: one `session_id` for the whole run), so the second
+/// and third bumps must be suppressed by the same per-session dedup the
+/// prompt-match path already had.
+#[test]
+fn repeated_edits_in_one_session_do_not_promote_the_fact() {
+    // Arrange
+    let home = scratch_home("anchor-bump-same-session");
+    write_graph(&home, BASE_GRAPH);
+    let path = edit_path(&home, "src/a.py");
+
+    // Act
+    run_anchors_hook(&home, &path, "ssame1");
+    run_anchors_hook(&home, &path, "ssame1");
+    run_anchors_hook(&home, &path, "ssame1");
+
+    // Assert
+    assert_eq!(
+        hits_for(&home, "global/fact-a"),
+        1,
+        "three edits in one session should count as one hit, not three"
+    );
+    let content =
+        fs::read_to_string(signals_path(&home)).expect("memory.signals.json should exist");
+    let parsed: Value = serde_json::from_str(&content).expect("memory.signals.json should parse");
+    assert_eq!(
+        parsed["nodes"]["global/fact-a"]["promoted"], false,
+        "one real hit must not promote a fact whose threshold is 3"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// A prompt match on `UserPromptSubmit` bumps the matched fact's hit count
 /// in `memory.signals.json`, the same as the `PreToolUse` anchor match.
 #[test]

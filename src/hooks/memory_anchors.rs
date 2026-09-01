@@ -82,11 +82,19 @@ pub fn run(payload: &Payload) {
         return;
     }
 
+    let bump_seen_path = Path::new(&dir).join("anchor-bump-seen.tsv");
+    let bump_seen = read_seen(&bump_seen_path);
+    let mut newly_bumped = Vec::new();
     for row in &matches {
         let from_id = row.get(1).map(String::as_str).unwrap_or("");
-        if !from_id.is_empty() {
-            memory_signals::bump_hit(&mem_dir(), from_id);
+        if from_id.is_empty() || bump_seen.contains(from_id) {
+            continue;
         }
+        memory_signals::bump_hit(&mem_dir(), from_id);
+        newly_bumped.push(from_id.to_string());
+    }
+    if !newly_bumped.is_empty() {
+        append_seen(&bump_seen_path, &newly_bumped);
     }
 
     let msg = format_message(&relpath, &matches);

@@ -139,6 +139,24 @@ pub fn is_promoted(mem_dir: &Path, node_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Every promoted node id, in one read. A caller checking many ids (e.g.
+/// every node in a graph at SessionStart) should call this once instead of
+/// `is_promoted` per id, since each call to `is_promoted` re-reads and
+/// re-parses the whole file. A missing or unparsable file returns an empty
+/// set, matching `is_promoted`'s own fail-open contract.
+pub fn promoted_ids(mem_dir: &Path) -> std::collections::HashSet<String> {
+    read_store(mem_dir)
+        .map(|store| {
+            store
+                .nodes
+                .into_iter()
+                .filter(|(_, signals)| signals.promoted)
+                .map(|(id, _)| id)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A missing file returns an empty default store. A file that exists but
 /// fails to read or parse returns `None`, so the caller can leave it on disk
 /// untouched rather than overwriting possibly-recoverable data.
