@@ -340,6 +340,94 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
 }
 
 // ---------------------------------------------------------------------
+// session-init: pinned and usage-promoted facts, injected unconditionally
+// ---------------------------------------------------------------------
+
+/// A fact marked `pinned: true` in `memory.graph.json` must inject even
+/// though nothing anchors or prompt-matches it, and even with the general
+/// memory-slice machinery entirely inactive (no `CLAUDE_PLUGIN_ROOT`, no
+/// legacy `MEMORY.md`): the pinned/promoted block reads the graph directly
+/// and does not depend on that machinery at all.
+#[test]
+fn session_init_injects_a_pinned_fact_independent_of_general_memory_slice() {
+    // Arrange
+    let work = scratch_dir("pinned-fact");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-pinned");
+    let memory_dir = home.join(".claude").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"{repo_slug}/pinned-fact","file":"{repo_slug}/pinned-fact.md","scope":"project","type":"project","name":"pinned-fact-name","description":"Pinned fact description text.","project":"{repo_slug}","pinned":true}}],"edges":[]}}"#
+        ),
+    )
+    .unwrap();
+
+    // Act: no CLAUDE_PLUGIN_ROOT, so the general memory-slice machinery
+    // never fires and cannot be the reason this fact shows up.
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("pinned-fact-name"),
+        "a pinned fact should inject with no general memory slice active: {context}"
+    );
+    assert!(
+        context.contains("Pinned fact description text."),
+        "the pinned fact's description should be included: {context}"
+    );
+}
+
+/// A fact marked `promoted: true` in `memory.signals.json` injects the same
+/// way a pinned fact does, with the general memory-slice machinery entirely
+/// inactive.
+#[test]
+fn session_init_injects_a_promoted_fact_independent_of_general_memory_slice() {
+    // Arrange
+    let work = scratch_dir("promoted-fact");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-promoted");
+    let memory_dir = home.join(".claude").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"{repo_slug}/promoted-fact","file":"{repo_slug}/promoted-fact.md","scope":"project","type":"project","name":"promoted-fact-name","description":"Promoted fact description text.","project":"{repo_slug}"}}],"edges":[]}}"#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        memory_dir.join("memory.signals.json"),
+        format!(r#"{{"nodes":{{"{repo_slug}/promoted-fact":{{"hits":3,"promoted":true}}}}}}"#),
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("promoted-fact-name"),
+        "a promoted fact should inject with no general memory slice active: {context}"
+    );
+    assert!(
+        context.contains("Promoted fact description text."),
+        "the promoted fact's description should be included: {context}"
+    );
+}
+
+// ---------------------------------------------------------------------
 // session-init: ADR 0008 WU-3, reload a persisted handoff at SessionStart
 // ---------------------------------------------------------------------
 

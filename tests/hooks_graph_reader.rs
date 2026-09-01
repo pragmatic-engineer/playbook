@@ -689,6 +689,74 @@ fn a_fact_with_a_deleted_file_path_is_skipped_without_blocking_a_real_match() {
     let _ = fs::remove_dir_all(&home);
 }
 
+// --- memory-anchors: usage-based promotion signals -------------------------
+
+fn signals_path(home: &Path) -> PathBuf {
+    home.join(".claude")
+        .join("memory")
+        .join("memory.signals.json")
+}
+
+fn hits_for(home: &Path, node_id: &str) -> u64 {
+    let content = fs::read_to_string(signals_path(home)).expect("memory.signals.json should exist");
+    let parsed: Value = serde_json::from_str(&content).expect("memory.signals.json should parse");
+    parsed["nodes"][node_id]["hits"]
+        .as_u64()
+        .expect("node should have a numeric hits field")
+}
+
+/// An anchor match on `PreToolUse` bumps the matched fact's hit count in
+/// `memory.signals.json`.
+#[test]
+fn anchor_match_bumps_the_matched_facts_hit_count() {
+    // Arrange
+    let home = scratch_home("anchor-bump");
+    write_graph(&home, BASE_GRAPH);
+
+    // Act
+    run_anchors_hook(&home, &edit_path(&home, "src/a.py"), "sbump1");
+
+    // Assert
+    assert_eq!(hits_for(&home, "global/fact-a"), 1);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A prompt match on `UserPromptSubmit` bumps the matched fact's hit count
+/// in `memory.signals.json`, the same as the `PreToolUse` anchor match.
+#[test]
+fn prompt_match_bumps_the_matched_facts_hit_count() {
+    // Arrange
+    let home = scratch_home("prompt-bump");
+    let graph = json!({
+        "nodes": [
+            {"id": "global/guard-fact", "file": "guard-fact.md", "scope": "global",
+             "type": "feedback", "name": "guard-default-roots-untested",
+             "description": "A test helper hid the zero-config fallback."}
+        ],
+        "edges": []
+    })
+    .to_string();
+    write_graph(&home, &graph);
+    write_fact_body(
+        &home,
+        "guard-fact.md",
+        "Body mentions PLAYBOOK_SAFE_ROOTS explicitly.\n",
+    );
+
+    // Act
+    run_prompt_hook(
+        &home,
+        "why does guard-default-roots-untested happen",
+        "pbump1",
+    );
+
+    // Assert
+    assert_eq!(hits_for(&home, "global/guard-fact"), 1);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// No shell equivalent for this hook (unlike rebuild-memory-graph, which
 /// hooks/graph_writer's tests compare against a frozen golden of that
 /// script's output, see tests/fixtures/golden/README.md);

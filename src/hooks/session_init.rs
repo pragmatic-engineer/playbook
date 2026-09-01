@@ -15,6 +15,7 @@
 //! rather than breaking the hook.
 
 use crate::common::{config_hash, home_dir, repo_slug, run_with_timeout, session_dir, Payload};
+use crate::hooks::memory_signals;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -100,6 +101,7 @@ pub fn run(payload: &Payload) {
 
     let (system_message, mut extra_context) = check_config_drift(payload, &dir, &plugin_root);
 
+    append_promoted_facts(&mut extra_context, &home, &repo_root);
     append_memory_slice(&mut extra_context, &plugin_root, &home, &repo_root);
     append_handoff_slice(&mut extra_context, &home);
     append_auto_learn_nudge(&mut extra_context, &home, &repo_root);
@@ -185,6 +187,95 @@ fn check_config_drift(payload: &Payload, dir: &str, plugin_root: &str) -> (Strin
     }
 
     (system_message, extra_context)
+}
+
+/// Inject facts pinned or usage-promoted for this repo, unconditionally: no
+/// anchor match, prompt match, or hit count is required. Runs before
+/// `append_memory_slice` so a pinned or promoted fact lands in the
+/// transcript ahead of the block that raw-truncates at
+/// `MEMORY_BODY_CAP_CHARS`, guaranteeing it survives that truncation rather
+/// than depending on where it happens to sort within it. Reads
+/// `memory.graph.json` directly rather than going through
+/// `memory_anchors.rs`'s anchor index, since that index only covers
+/// anchored facts and its row-building functions are private to that
+/// module.
+///
+/// A fact that also fits within the general slice below appears twice in
+/// the final context, once here and once there. Deduplicating across two
+/// structurally different sources, a direct graph read here versus a shell
+/// script's stdout there, for a minor cosmetic redundancy is not worth the
+/// added complexity, so this overlap is left as a known, accepted tradeoff.
+fn append_promoted_facts(extra_context: &mut String, home: &str, repo_root: &str) {
+    let mem_slug = repo_slug();
+    if repo_root.is_empty() || mem_slug.is_empty() {
+        return;
+    }
+    let mem_dir = Path::new(home).join(".claude").join("memory");
+    let Ok(content) = fs::read_to_string(mem_dir.join("memory.graph.json")) else {
+        return;
+    };
+    let Ok(graph) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return;
+    };
+    let nodes = graph
+        .get("nodes")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut lines = Vec::new();
+    for node in &nodes {
+        if !in_promotion_scope(node, &mem_slug) {
+            continue;
+        }
+        let Some(id) = node.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let pinned = node.get("pinned").and_then(serde_json::Value::as_bool) == Some(true);
+        if !pinned && !memory_signals::is_promoted(&mem_dir, id) {
+            continue;
+        }
+        let name = node
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if name.is_empty() {
+            continue;
+        }
+        let desc = node
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        lines.push(if desc.is_empty() {
+            format!("- {name}")
+        } else {
+            format!("- {name}: {desc}")
+        });
+    }
+    if lines.is_empty() {
+        return;
+    }
+
+    let body: String = lines
+        .join("\n")
+        .chars()
+        .take(MEMORY_BODY_CAP_CHARS)
+        .collect();
+    let ctx = format!("Facts pinned or frequently used in this repo:\n{body}");
+    push_context(extra_context, &ctx);
+}
+
+/// Whether `node` is in scope for this repo: global facts always are,
+/// project facts only when they belong to `repo`. Matches
+/// `memory_anchors.rs`'s private `in_scope`, reimplemented locally rather
+/// than made `pub` for this one caller, per this codebase's established
+/// per-module-duplication convention.
+fn in_promotion_scope(node: &serde_json::Value, repo: &str) -> bool {
+    match node.get("scope").and_then(serde_json::Value::as_str) {
+        Some("global") => true,
+        Some("project") => node.get("project").and_then(serde_json::Value::as_str) == Some(repo),
+        _ => false,
+    }
 }
 
 /// Inject the project memory slice into `extra_context`: the graph-backed
