@@ -177,9 +177,12 @@ DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
 # Does the diff touch any test files?
 # Anchor the directory patterns with (^|/): git returns repo-relative paths with
 # no leading slash, so a bare `/tests?/` never matches a top-level `tests/` dir
-# and every Rust PR reads as "no tests". Also count Rust inline `#[cfg(test)]`.
+# and every Rust PR reads as "no tests". Also count Rust inline `#[cfg(test)]`
+# AND `#[test]`: a new test module adds the former, but the far more common
+# case, a new test function dropped into an already-existing `mod tests`
+# block, adds only the latter and was previously invisible to this check.
 TESTS=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" | grep -ciE '(\.test\.|\.spec\.|_test\.|test_|(^|/)tests?/|(^|/)__tests__/)' || true)
-INLINE_TESTS=$(git diff -U0 "origin/$BASE_BRANCH...HEAD" -- '*.rs' | grep -c '^+.*#\[cfg(test)\]' || true)
+INLINE_TESTS=$(git diff -U0 "origin/$BASE_BRANCH...HEAD" -- '*.rs' | grep -cE '^\+.*#\[(cfg\(test\)|test)\]' || true)
 TESTS=$((TESTS + INLINE_TESTS))
 
 echo "commits_ahead=$AHEAD changed_lines=${CHANGED:-0} dirty_files=$DIRTY test_files_touched=$TESTS"
