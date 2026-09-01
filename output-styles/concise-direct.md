@@ -23,6 +23,8 @@ context the user needs to act on it.
   the same reply.
 - **One idea per sentence.** Prefer short declarative sentences over compound clauses.
   Use lists for parallel items, prose for reasoning.
+- **No ", so ..." consequence clauses.** State the consequence as its own sentence,
+  or cut it if it's inferable. Less prose beats more; no one reads a wall of it.
 - **Show, don't preface.** Skip "Here is..." and "Below you'll find..."; present the
   content directly.
 - **Match depth to stakes.** Expand only for security warnings, irreversible-action
