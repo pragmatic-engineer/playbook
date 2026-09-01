@@ -31,6 +31,7 @@ use crate::common::{
     emit_pre_context, emit_prompt_context, home_dir, repo_slug, run_with_timeout, session_dir,
 };
 use crate::hooks::memory_signals;
+use crate::hooks::staleness::{self, check_staleness};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -159,6 +160,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
     let seen_path = Path::new(dir).join("prompt-recall-seen.tsv");
     let seen = read_seen(&seen_path);
 
+    let root = git_toplevel();
     let mut newly_seen = Vec::new();
     let mut bodies = Vec::new();
     for row in &matches {
@@ -176,7 +178,9 @@ fn run_prompt(payload: &Payload, dir: &str) {
         let Some(body) = read_fact_body(&file) else {
             continue;
         };
-        bodies.push(format!("### {name}\n{body}"));
+        let anchor = row.first().cloned().unwrap_or_default();
+        let note = staleness_note(&root, &from_id, &anchor);
+        bodies.push(format!("### {name}{note}\n{body}"));
         newly_seen.push(from_id);
     }
     if bodies.is_empty() {
@@ -358,6 +362,7 @@ fn matching_rows(idx_contents: &str, relpath: &str) -> Vec<Vec<String>> {
 }
 
 fn format_message(relpath: &str, matches: &[Vec<String>]) -> String {
+    let root = git_toplevel();
     let mut msg = format!("Memory facts anchored to {relpath}:");
     for cols in matches {
         let name = cols.get(2).map(String::as_str).unwrap_or("");
@@ -366,6 +371,8 @@ fn format_message(relpath: &str, matches: &[Vec<String>]) -> String {
         }
         let desc = cols.get(3).map(String::as_str).unwrap_or("");
         let neigh = cols.get(4).map(String::as_str).unwrap_or("");
+        let from_id = cols.get(1).map(String::as_str).unwrap_or("");
+        let anchor = cols.first().map(String::as_str).unwrap_or("");
         let mut line = format!("- {name}");
         if !desc.is_empty() {
             line = format!("{line}: {desc}");
@@ -373,10 +380,46 @@ fn format_message(relpath: &str, matches: &[Vec<String>]) -> String {
         if !neigh.is_empty() {
             line = format!("{line} ({neigh})");
         }
+        line.push_str(staleness_note(&root, from_id, anchor));
         msg.push('\n');
         msg.push_str(&line);
     }
     msg
+}
+
+/// Appends a soft note if `anchor_relpath` drifted since `from_id` was last
+/// touched. An empty `root`, `from_id`, or anchor just skips the marker.
+fn staleness_note(root: &str, from_id: &str, anchor_relpath: &str) -> &'static str {
+    if root.is_empty() || anchor_relpath.is_empty() || from_id.is_empty() {
+        return "";
+    }
+    let anchor_path = Path::new(root).join(anchor_relpath);
+    let result = check_staleness(&mem_dir(), from_id, &anchor_path, &git_last_commit_epoch);
+    if result.stale {
+        " (may be stale: the anchor changed since this fact was last touched)"
+    } else {
+        ""
+    }
+}
+
+/// The default `git_lookup`: the anchor's last commit date, or `None` if
+/// untracked, uncommitted, or the clone has no history for that path.
+fn git_last_commit_epoch(path: &Path) -> Option<staleness::DateTime> {
+    let dir = path.parent()?;
+    let mut command = Command::new("git");
+    command
+        .current_dir(dir)
+        .args(["--no-optional-locks", "log", "-1", "--format=%ct", "--"])
+        .arg(path);
+    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
+    if !out.status.success() {
+        return None;
+    }
+    let trimmed = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed.parse::<i64>().ok()
 }
 
 /// Build the tab-separated anchor index from `memory.graph.json` for the current
