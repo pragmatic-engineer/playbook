@@ -85,7 +85,7 @@ pub struct StepReport {
 }
 
 impl StepReport {
-    fn wired(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn wired(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: StepStatus::Wired,
@@ -93,7 +93,7 @@ impl StepReport {
         }
     }
 
-    fn already_correct(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn already_correct(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: StepStatus::AlreadyCorrect,
@@ -101,7 +101,7 @@ impl StepReport {
         }
     }
 
-    fn skipped(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn skipped(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: StepStatus::Skipped,
@@ -109,7 +109,7 @@ impl StepReport {
         }
     }
 
-    fn failed(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn failed(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: StepStatus::Failed,

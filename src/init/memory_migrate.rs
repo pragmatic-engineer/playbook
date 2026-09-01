@@ -4,10 +4,11 @@
 //! Migrates `~/.claude/memory/graph.json` (the pre-rename filename) to
 //! `memory.graph.json`, backing `playbook init`'s sixth step.
 
-use crate::init::run::{StepReport, StepStatus};
+use crate::init::run::StepReport;
 use std::fs;
 use std::path::Path;
 
+const STEP_NAME: &str = "memory-migrate";
 const OLD_FILE_NAME: &str = "graph.json";
 const NEW_FILE_NAME: &str = "memory.graph.json";
 const OLD_LOCK_NAME: &str = "graph.json.lock";
@@ -21,31 +22,25 @@ pub fn migrate_memory_store(claude_home: &Path) -> StepReport {
     let new_path = mem_dir.join(NEW_FILE_NAME);
 
     if new_path.exists() {
-        return StepReport {
-            name: "memory-migrate",
-            status: StepStatus::AlreadyCorrect,
-            detail: format!("already at {}", new_path.display()),
-        };
+        return StepReport::already_correct(
+            STEP_NAME,
+            format!("already at {}", new_path.display()),
+        );
     }
 
     if !old_path.exists() {
-        return StepReport {
-            name: "memory-migrate",
-            status: StepStatus::Skipped,
-            detail: "no legacy graph.json to migrate".to_string(),
-        };
+        return StepReport::skipped(STEP_NAME, "no legacy graph.json to migrate");
     }
 
     if let Err(err) = fs::rename(&old_path, &new_path) {
-        return StepReport {
-            name: "memory-migrate",
-            status: StepStatus::Failed,
-            detail: format!(
+        return StepReport::failed(
+            STEP_NAME,
+            format!(
                 "could not rename {} to {}: {err}",
                 old_path.display(),
                 new_path.display()
             ),
-        };
+        );
     }
 
     let old_lock = mem_dir.join(OLD_LOCK_NAME);
@@ -53,9 +48,8 @@ pub fn migrate_memory_store(claude_home: &Path) -> StepReport {
         let _ = fs::rename(&old_lock, mem_dir.join(NEW_LOCK_NAME));
     }
 
-    StepReport {
-        name: "memory-migrate",
-        status: StepStatus::Wired,
-        detail: format!("renamed {} to {}", old_path.display(), new_path.display()),
-    }
+    StepReport::wired(
+        STEP_NAME,
+        format!("renamed {} to {}", old_path.display(), new_path.display()),
+    )
 }
