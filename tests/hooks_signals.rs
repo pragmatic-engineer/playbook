@@ -9,7 +9,7 @@
 //! Each test gets its own scratch directory, unique per call, so tests stay
 //! parallel-safe under `cargo test`'s default concurrent execution.
 
-use playbook::hooks::memory_signals::{bump_hit, modify_locked};
+use playbook::hooks::memory_signals::{bump_hit, is_promoted, modify_locked};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -204,4 +204,94 @@ fn bump_hit_completes_without_panicking_when_the_lock_is_already_held() {
     );
 
     let _ = fs::remove_dir_all(&mem_dir);
+}
+
+// --- Scenario 4: usage-based promotion --------------------------------------
+
+/// Fewer hits than the promotion threshold must never promote a node.
+#[test]
+fn hits_below_the_threshold_do_not_promote() {
+    // Arrange
+    let mem_dir = scratch_home("below-threshold");
+
+    // Act
+    bump_hit(&mem_dir, "global/rarely-hit-fact");
+    bump_hit(&mem_dir, "global/rarely-hit-fact");
+
+    // Assert
+    assert!(
+        !is_promoted(&mem_dir, "global/rarely-hit-fact"),
+        "two hits should not cross the promotion threshold"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+/// A hit landing exactly on the threshold promotes: the boundary is `>=`,
+/// not `>`.
+#[test]
+fn a_hit_landing_exactly_on_the_threshold_promotes() {
+    // Arrange
+    let mem_dir = scratch_home("exact-threshold");
+
+    // Act
+    bump_hit(&mem_dir, "global/threshold-fact");
+    bump_hit(&mem_dir, "global/threshold-fact");
+    assert!(
+        !is_promoted(&mem_dir, "global/threshold-fact"),
+        "two hits, one short of the threshold, must not promote yet"
+    );
+    bump_hit(&mem_dir, "global/threshold-fact");
+
+    // Assert
+    assert!(
+        is_promoted(&mem_dir, "global/threshold-fact"),
+        "the third hit, landing exactly on the threshold, should promote"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+/// Hits recorded outside the promotion window reset rather than accumulate:
+/// three matches inside a week is a real, active pattern, three matches
+/// spread across six months is not the same signal. `NodeSignals` has no
+/// public constructor, so the fixture is written directly as JSON, matching
+/// what `bump_hit` itself would have produced two hits and a week-plus ago.
+#[test]
+fn hits_outside_an_expired_window_reset_rather_than_accumulate() {
+    // Arrange: a window_start well past the 7-day promotion window, with two
+    // hits already recorded under it.
+    let mem_dir = scratch_home("expired-window");
+    let seven_days_and_a_bit_ago = now_epoch_secs() - (7 * 24 * 60 * 60) - 60;
+    fs::write(
+        signals_path(&mem_dir),
+        format!(
+            r#"{{"nodes":{{"global/stale-window-fact":{{"hits":2,"window_start":"{seven_days_and_a_bit_ago}","promoted":false}}}}}}"#
+        ),
+    )
+    .unwrap();
+
+    // Act
+    bump_hit(&mem_dir, "global/stale-window-fact");
+
+    // Assert
+    let store = read_store(&mem_dir);
+    assert_eq!(
+        hits_for(&store, "global/stale-window-fact"),
+        1,
+        "a hit outside the expired window should reset the count, not accumulate to 3"
+    );
+    assert!(
+        !is_promoted(&mem_dir, "global/stale-window-fact"),
+        "a reset count of 1 must not be promoted"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+fn now_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }

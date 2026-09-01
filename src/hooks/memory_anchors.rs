@@ -30,6 +30,7 @@ use crate::common::payload::Payload;
 use crate::common::{
     emit_pre_context, emit_prompt_context, home_dir, repo_slug, run_with_timeout, session_dir,
 };
+use crate::hooks::memory_signals;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -81,8 +82,27 @@ pub fn run(payload: &Payload) {
         return;
     }
 
+    let bump_seen_path = Path::new(&dir).join("anchor-bump-seen.tsv");
+    let bump_seen = read_seen(&bump_seen_path);
+    let mut newly_bumped = Vec::new();
+    for row in &matches {
+        let from_id = row.get(1).map(String::as_str).unwrap_or("");
+        if from_id.is_empty() || bump_seen.contains(from_id) {
+            continue;
+        }
+        memory_signals::bump_hit(&mem_dir(), from_id);
+        newly_bumped.push(from_id.to_string());
+    }
+    if !newly_bumped.is_empty() {
+        append_seen(&bump_seen_path, &newly_bumped);
+    }
+
     let msg = format_message(&relpath, &matches);
     emit_pre_context("PreToolUse", &msg);
+}
+
+fn mem_dir() -> PathBuf {
+    home_dir().join(".claude").join("memory")
 }
 
 /// `UserPromptSubmit` branch: match prompt text and this-session touched
@@ -161,6 +181,15 @@ fn run_prompt(payload: &Payload, dir: &str) {
     }
     if bodies.is_empty() {
         return;
+    }
+
+    // Only ids that are genuinely new this session, not every raw match: a
+    // fact already injected earlier this session and matched again should
+    // not keep re-bumping every prompt for the rest of the session, or the
+    // promotion threshold would be trivially easy to cross from repetition
+    // within one session rather than genuine cross-session recurrence.
+    for id in &newly_seen {
+        memory_signals::bump_hit(&mem_dir(), id);
     }
 
     append_seen(&seen_path, &newly_seen);
