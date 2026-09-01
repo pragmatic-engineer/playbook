@@ -2,13 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! `~/.claude/memory/memory.signals.json` data layer: hit counters, staleness
-//! verification stamps, and a consolidation cursor, one entry per memory
-//! node. Owns the whole read/modify/write cycle under its own mkdir-based
-//! advisory lock, mirroring `rebuild_memory_graph.rs`'s
-//! `write_graph_atomically`/`rebuild` pattern. `bump_hit` also promotes a
-//! node once its hits cross a threshold within a rolling window; staleness
-//! caching and consolidation have no reader or writer yet, and remain a
-//! later consumer's work to build on top of this store.
+//! stamps, and a consolidation cursor. Every reader/writer of this file goes through this module's lock, so no caller's update is silently dropped by another's.
 
 use crate::common::atomic::with_dir_lock;
 use serde::{Deserialize, Serialize};
@@ -51,11 +45,8 @@ struct Cursor {
     last_run_at: Option<String>,
 }
 
-/// Per-node signals: hit count, the window it was counted over, whether the
-/// node has been promoted, and staleness verification stamps. `hits`,
-/// `window_start`, and `promoted` are read and written by `bump_hit` and
-/// `is_promoted`; `verified_hash`/`verified_at` exist so a later staleness
-/// consumer has somewhere to store them without a schema change.
+/// Per-node signals: hit count and promotion state (`bump_hit`/`is_promoted`),
+/// plus `stale`/`verified_hash`/`verified_at` (`cached_stale`/`set_staleness`).
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct NodeSignals {
     #[serde(default)]
@@ -64,6 +55,8 @@ struct NodeSignals {
     window_start: Option<String>,
     #[serde(default)]
     promoted: bool,
+    #[serde(default)]
+    stale: Option<bool>,
     #[serde(default)]
     verified_hash: Option<String>,
     #[serde(default)]
@@ -119,6 +112,26 @@ pub fn bump_hit(mem_dir: &Path, node_id: &str) {
         }
         if entry.hits >= PROMOTION_HIT_THRESHOLD {
             entry.promoted = true;
+        }
+    });
+}
+
+/// `node_id`'s cached staleness verdict. `None` on a genuine miss (no entry
+/// yet) or an unparsable file; a parse failure never reads as "not stale".
+pub fn cached_stale(mem_dir: &Path, node_id: &str) -> Option<bool> {
+    read_store(mem_dir)?.nodes.get(node_id)?.stale
+}
+
+/// Caches `node_id`'s fresh staleness verdict and signature, leaving its hit
+/// count and promotion state untouched.
+pub fn set_staleness(mem_dir: &Path, node_id: &str, stale: bool, verified_hash: Option<String>) {
+    let now = current_epoch_secs().to_string();
+    modify_locked(mem_dir, |store| {
+        let entry = store.nodes.entry(node_id.to_string()).or_default();
+        entry.stale = Some(stale);
+        entry.verified_at = Some(now);
+        if let Some(hash) = verified_hash {
+            entry.verified_hash = Some(hash);
         }
     });
 }

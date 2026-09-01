@@ -9,7 +9,9 @@
 //! Each test gets its own scratch directory, unique per call, so tests stay
 //! parallel-safe under `cargo test`'s default concurrent execution.
 
-use playbook::hooks::memory_signals::{bump_hit, is_promoted, modify_locked};
+use playbook::hooks::memory_signals::{
+    bump_hit, cached_stale, is_promoted, modify_locked, set_staleness,
+};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -284,6 +286,75 @@ fn hits_outside_an_expired_window_reset_rather_than_accumulate() {
     assert!(
         !is_promoted(&mem_dir, "global/stale-window-fact"),
         "a reset count of 1 must not be promoted"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+// --- Scenario 5: staleness caching shares the typed store, not a second one -
+
+/// A cached verdict round-trips through `cached_stale` unchanged.
+#[test]
+fn set_staleness_then_cached_stale_round_trips() {
+    // Arrange
+    let mem_dir = scratch_home("staleness-round-trip");
+
+    // Act
+    set_staleness(
+        &mem_dir,
+        "global/anchor-fact",
+        true,
+        Some("abc123".to_string()),
+    );
+
+    // Assert
+    assert_eq!(cached_stale(&mem_dir, "global/anchor-fact"), Some(true));
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+/// Regression pin: a hit bump for the same node must not erase its cached
+/// staleness verdict, since both now round-trip through one typed struct.
+#[test]
+fn a_bump_hit_after_set_staleness_does_not_erase_the_cached_verdict() {
+    // Arrange
+    let mem_dir = scratch_home("staleness-survives-bump");
+    set_staleness(&mem_dir, "global/anchor-fact", true, None);
+
+    // Act
+    bump_hit(&mem_dir, "global/anchor-fact");
+
+    // Assert
+    assert_eq!(
+        cached_stale(&mem_dir, "global/anchor-fact"),
+        Some(true),
+        "a hit bump for the same node must not drop its cached staleness verdict"
+    );
+    let store = read_store(&mem_dir);
+    assert_eq!(
+        hits_for(&store, "global/anchor-fact"),
+        1,
+        "the bump itself must still have counted"
+    );
+
+    let _ = fs::remove_dir_all(&mem_dir);
+}
+
+/// A corrupt file must read as a genuine miss (`None`), never a false
+/// "not stale" (`Some(false)`).
+#[test]
+fn cached_stale_on_a_corrupt_file_reads_as_a_miss_not_false() {
+    // Arrange
+    let mem_dir = scratch_home("staleness-corrupt-file");
+    fs::write(signals_path(&mem_dir), "not valid json").unwrap();
+
+    // Act
+    let result = cached_stale(&mem_dir, "global/anchor-fact");
+
+    // Assert
+    assert_eq!(
+        result, None,
+        "a corrupt file must read as a cache miss, not a false verdict"
     );
 
     let _ = fs::remove_dir_all(&mem_dir);
