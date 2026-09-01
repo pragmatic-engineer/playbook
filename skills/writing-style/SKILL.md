@@ -50,6 +50,7 @@ Adopt these principles to what you write for review: the reviewer is the user, t
 
 - MUST NOT use em dashes (—) or en dashes (–) anywhere. Use commas, periods, or colons. Both dash types are strong AI tells.
 - MUST NOT use "not just X, but also Y" constructions. Say both things directly.
+- MUST NOT tack a ", so ..." consequence clause onto a sentence. State the consequence as its own sentence, or cut it if the reader can infer it. Simple, direct English: short sentences beat long ones, and less prose is better than more.
 - MUST NOT use metaphors, clichés, or analogies. State facts.
 - MUST NOT use generalisations. Show specific impact with data.
 - MUST NOT use setup language: "It's worth noting", "In conclusion", "In closing", "To summarize".
