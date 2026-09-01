@@ -10,7 +10,6 @@ use playbook::{
     Command, GateCommand, ManifestCommand, MemoryCommand, SettingsCommand,
 };
 use std::io::{IsTerminal, Read};
-use std::path::PathBuf;
 
 fn main() {
     let cli = Cli::parse();
@@ -54,9 +53,10 @@ fn main() {
         } => {
             let home = common::home_dir();
             let claude_home = home.join(".claude");
-            let self_root = std::env::var_os("CLAUDE_PLUGIN_ROOT")
-                .map(PathBuf::from)
-                .filter(|p| !p.as_os_str().is_empty());
+            let self_root = init::self_root::resolve(
+                std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
+                &claude_home,
+            );
             let shell_kind = std::env::var("SHELL")
                 .ok()
                 .and_then(|shell| ShellKind::detect(&shell));

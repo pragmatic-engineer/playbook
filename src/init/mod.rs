@@ -32,6 +32,7 @@
 
 pub mod merge;
 pub mod run;
+pub mod self_root;
 pub mod shim;
 pub mod statusline;
 pub mod system_prompt;
