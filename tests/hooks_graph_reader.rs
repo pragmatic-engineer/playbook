@@ -821,3 +821,55 @@ fn python_and_rust_readers_agree_on_the_same_fixture() {
 
     let _ = fs::remove_dir_all(&home_rs);
 }
+
+// --- session-init: legacy graph.json fallback -------------------------------
+
+fn old_graph_path(home: &Path) -> PathBuf {
+    home.join(".claude").join("memory").join("graph.json")
+}
+
+fn run_session_init_hook(home: &Path, session_id: &str) -> Output {
+    let hook_input = json!({"session_id": session_id, "source": "startup"}).to_string();
+    run_playbook(home, &["hook", "session-init"], &hook_input)
+}
+
+/// The `session-init` hook's own fallback covers a session starting before
+/// `playbook init` is re-run after an upgrade, and stays idempotent.
+#[test]
+fn session_init_fallback_migrates_legacy_graph_file_and_is_idempotent() {
+    // Arrange: only the pre-rename filename exists.
+    let home = scratch_home("session-init-fallback");
+    fs::write(old_graph_path(&home), BASE_GRAPH).unwrap();
+
+    // Act
+    let first = run_session_init_hook(&home, "sfallback1");
+
+    // Assert: the fallback renamed the file in place, no data lost.
+    assert_eq!(first.status.code(), Some(0), "session-init should exit 0");
+    assert!(
+        !old_graph_path(&home).is_file(),
+        "the legacy graph.json should be renamed away, not left behind"
+    );
+    assert_eq!(
+        fs::read_to_string(graph_path(&home)).expect("memory.graph.json should now exist"),
+        BASE_GRAPH,
+        "the fallback must preserve the old file's content exactly"
+    );
+
+    // Act: a second session start, now that only the new filename remains.
+    let second = run_session_init_hook(&home, "sfallback2");
+
+    // Assert: idempotent, no crash, content untouched.
+    assert_eq!(
+        second.status.code(),
+        Some(0),
+        "a second session-init run must not fail once the store is already migrated"
+    );
+    assert_eq!(
+        fs::read_to_string(graph_path(&home)).expect("memory.graph.json should still exist"),
+        BASE_GRAPH,
+        "a second run must not alter the already-migrated store"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}

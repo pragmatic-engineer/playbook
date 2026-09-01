@@ -214,6 +214,16 @@ fn fresh_config_gets_fully_wired() {
             );
             continue;
         }
+        // `memory-migrate` has nothing to migrate on a fresh machine.
+        if step.name == "memory-migrate" {
+            assert_eq!(
+                step.status,
+                StepStatus::Skipped,
+                "expected 'memory-migrate' to be skipped with no legacy graph.json present: {}",
+                step.detail
+            );
+            continue;
+        }
         assert_eq!(
             step.status,
             StepStatus::Wired,
@@ -561,9 +571,9 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     // Assert: nothing is reported as a change the second time.
     assert!(second.ok());
     for step in &second.steps {
-        // `system-prompt` stays `Skipped` on both runs: `system_prompt: false`
-        // and no file ever appears, since it was never opted into.
-        let expected = if step.name == "system-prompt" {
+        // `system-prompt` and `memory-migrate` stay `Skipped` on both runs:
+        // neither has anything to act on in this fixture.
+        let expected = if step.name == "system-prompt" || step.name == "memory-migrate" {
             StepStatus::Skipped
         } else {
             StepStatus::AlreadyCorrect
@@ -828,4 +838,18 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
         second_out.lines().all(|l| !l.contains(": wired -")),
         "second run should report no changes: {second_out}"
     );
+}
+
+/// The `memory-migrate` step must appear in `run()`'s reported steps.
+#[test]
+fn memory_migrate_step_appears_in_reported_steps() {
+    // Arrange
+    let home = scratch_home("memory-migrate-presence");
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    find_step(&outcome, "memory-migrate");
 }

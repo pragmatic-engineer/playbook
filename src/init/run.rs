@@ -21,7 +21,9 @@
 //! the merge after `wire` would risk the merge's coarser per-key policy
 //! discarding an entry `wire` just added. `statusline` runs after both
 //! because it depends on `settings.json` already naming a destination.
+//! `memory-migrate` touches neither file, so it has no ordering dependency on the other five.
 
+use crate::init::memory_migrate;
 use crate::init::merge;
 use crate::init::shim::{self, ShellKind};
 use crate::init::statusline;
@@ -160,6 +162,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let statusline_step = place_statusline_step(self_root, &settings_path, &paths.home);
     let system_prompt_step =
         place_system_prompt_step(self_root, &paths.claude_home, paths.system_prompt);
+    let memory_migrate_step = memory_migrate::migrate_memory_store(&paths.claude_home);
 
     InitOutcome {
         steps: vec![
@@ -168,6 +171,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
             shim_step,
             statusline_step,
             system_prompt_step,
+            memory_migrate_step,
         ],
     }
 }
