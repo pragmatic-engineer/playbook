@@ -27,6 +27,7 @@ pub mod rm_workspace_guard;
 pub mod search_counter;
 pub mod session_clean_exit;
 pub mod session_init;
+pub mod staleness;
 
 /// Dispatch a parsed hook payload to the named hook's entry point.
 /// Exhaustive over `HookName`, so adding a new variant fails the build here

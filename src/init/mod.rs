@@ -30,6 +30,7 @@
 //! what a user's own `settings.json` looks like after they choose to run
 //! `playbook init`.
 
+pub mod memory_migrate;
 pub mod merge;
 pub mod run;
 pub mod self_root;
