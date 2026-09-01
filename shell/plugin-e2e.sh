@@ -111,12 +111,12 @@ fi
 [ -f "$CH/settings.json" ] && ok "settings.json seeded" || bad "settings.json not seeded"
 [ -f "$CH/.settings.base.json" ] && ok ".settings.base.json baseline written" || bad "baseline missing"
 if [ -f "$CH/settings.json" ]; then
-  guards="$(jq -r '[.hooks.PreToolUse[]?.hooks[]?.command] | map(select(test("rm-workspace-guard|bg-await-guard|no-dash-guard|precommit-check"))) | length' "$CH/settings.json" 2>/dev/null)"
+  guards="$(jq -r '[.hooks.PreToolUse[]?.hooks[]?.command] | map(select(test("rm-workspace-guard|bg-await-guard|no-slop-guard|precommit-check"))) | length' "$CH/settings.json" 2>/dev/null)"
   [ "${guards:-0}" -ge 4 ] && ok "4 safety guards wired in settings.json" || bad "safety guards not wired (found ${guards:-0})"
   func="$(jq -r '[.hooks[]?[]?.hooks[]?.command] | map(select(test("^playbook hook (session-init|search-counter|post-edit-track)$"))) | length' "$CH/settings.json" 2>/dev/null)"
   [ "${func:-0}" = "3" ] && ok "functional hooks ARE in settings, wired to the binary (no plugin registry left to double-fire)" || bad "functional hooks not wired in settings (found ${func:-0})"
 fi
-for g in rm-workspace-guard bg-await-guard no-dash-guard precommit-check; do
+for g in rm-workspace-guard bg-await-guard no-slop-guard precommit-check; do
   # WU-13 ported all four guards into the binary, so `playbook init` no
   # longer places a per-guard script; a script showing up here would mean a
   # stale leftover from before that change, not a healthy install.
@@ -128,10 +128,10 @@ rm -rf "$TH"
 
 hdr "G. Safety guards behave (deny/allow)"
 emdash="$(printf '\xe2\x80\x94')"
-out="$(printf '{"tool_input":{"command":"git commit -m \\"x %s y\\""}}' "$emdash" | "$BIN_SRC" hook no-dash-guard 2>/dev/null)"
-[ -n "$out" ] && ok "no-dash-guard blocks em dash in git commit" || bad "no-dash-guard did not block"
-out="$(printf '{"tool_input":{"command":"git commit -m \\"clean message\\""}}' | "$BIN_SRC" hook no-dash-guard 2>/dev/null)"
-[ -z "$out" ] && ok "no-dash-guard allows a clean commit" || bad "no-dash-guard false positive"
+out="$(printf '{"tool_input":{"command":"git commit -m \\"x %s y\\""}}' "$emdash" | "$BIN_SRC" hook no-slop-guard 2>/dev/null)"
+[ -n "$out" ] && ok "no-slop-guard blocks em dash in git commit" || bad "no-slop-guard did not block"
+out="$(printf '{"tool_input":{"command":"git commit -m \\"clean message\\""}}' | "$BIN_SRC" hook no-slop-guard 2>/dev/null)"
+[ -z "$out" ] && ok "no-slop-guard allows a clean commit" || bad "no-slop-guard false positive"
 out="$(printf '{"tool_input":{"command":"rm -rf /etc/hosts"}}' | "$BIN_SRC" hook rm-workspace-guard 2>/dev/null)"
 [ -n "$out" ] && ok "rm-workspace-guard blocks rm outside the allowlist" || bad "rm-workspace-guard did not block"
 

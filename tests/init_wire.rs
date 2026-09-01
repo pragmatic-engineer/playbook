@@ -4,29 +4,26 @@
 //! Integration tests for `playbook::init::wire`, the module that writes
 //! every hook Claude Code can invoke into `settings.json` as a bare
 //! `playbook hook <name>` command, retiring both `hooks/hooks.json` and the
-//! four safety guards' legacy `~/.claude/hooks/<name>.sh` commands. Every
-//! entry `wire` manages, hooks and guards alike, is upserted unconditionally
-//! now that all four guards' Rust ports are real (WU-13) and the
-//! placement-gate mechanism this used to sit behind is gone (WU-14).
+//! safety guards' legacy `~/.claude/hooks/<name>.sh` commands. Every entry
+//! `wire` manages, hooks and guards alike, is upserted unconditionally.
 //!
 //! **Test isolation:** every test here operates on a fresh scratch directory
 //! under the OS temp dir (`scratch_settings_path`), never on a real
 //! `~/.claude/settings.json`. A test that wrote a developer's live settings
 //! file would be a defect regardless of whether it passed.
 //!
-//! Coverage map, so every scenario named in the Work Unit brief is
-//! traceable to one place below:
+//! Coverage map:
 //! - Idempotence (assert on file bytes, not a return value):
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
 //!   and all 15 ported hooks (the 11 functional hooks plus the 4 safety
-//!   guards, all ported as of WU-13) are exactly the ones wired that way:
+//!   guards) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
 //!   `pre_existing_user_hook_entry_is_preserved_not_clobbered`
-//! - Done-When pin: no command anywhere under `.hooks` points under
-//!   `~/.claude/hooks/` after wiring, now that all four guards are ported:
+//! - No command anywhere under `.hooks` points under `~/.claude/hooks/`
+//!   after wiring:
 //!   `no_hook_command_points_under_claude_hooks_dir_after_wiring`
 //! - The bare-name form survives a write-then-read round trip:
 //!   `bare_name_form_survives_write_then_read_round_trip`
@@ -165,7 +162,7 @@ fn running_wire_twice_writes_nothing_the_second_time() {
     wire(&path).expect("second wire should succeed");
     let bytes_after_second = fs::read(&path).expect("settings.json should still exist");
 
-    // Assert: file bytes, not a return value, per the brief's instruction.
+    // Assert: file bytes, not a return value.
     assert_eq!(
         bytes_after_first, bytes_after_second,
         "a second wire() call must not change settings.json at all"
@@ -204,8 +201,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
     // Assert: every command that takes the bare form is bare (no path
     // separator, no absolute path, no legacy python/shell script suffix)
     // and its hook name resolves to a real HookName the same way clap would
-    // parse `playbook hook <name>`. The four guards now take this form too,
-    // since WU-13 ported all four to real Rust bodies.
+    // parse `playbook hook <name>`. Every guard takes this form too.
     assert!(!commands.is_empty(), "wiring should write hook commands");
     let mut resolved_names = std::collections::HashSet::new();
     for cmd in &commands {
@@ -221,10 +217,9 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.insert(name.to_string());
     }
 
-    // All 15 HookName variants should be wired in binary form at least
-    // once: this is the pivot the whole Work Unit exists for, so pin it
-    // directly rather than only checking the commands that happen to be
-    // present.
+    // Every HookName variant should be wired in binary form at least once,
+    // so pin it directly rather than only checking the commands that happen
+    // to be present.
     let expected: std::collections::HashSet<&str> = [
         "session-init",
         "preread-edit-check",
@@ -239,7 +234,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "memory-capture",
         "rm-workspace-guard",
         "bg-await-guard",
-        "no-dash-guard",
+        "no-slop-guard",
         "precommit-check",
     ]
     .into_iter()
@@ -297,9 +292,9 @@ fn pre_existing_user_hook_entry_is_preserved_not_clobbered() {
 
 #[test]
 fn no_hook_command_points_under_claude_hooks_dir_after_wiring() {
-    // Arrange: today's real pre-WU-13 shape, all four guards under
-    // ~/.claude/hooks/, so wiring has to actually rewrite something rather
-    // than trivially finding nothing to fix.
+    // Arrange: a fixture with legacy guards still under ~/.claude/hooks/, so
+    // wiring has to actually rewrite something rather than trivially
+    // finding nothing to fix.
     let path = scratch_settings_path("no-hooks-dir-paths");
     write_json(&path, &unwired_fixture());
 
@@ -308,11 +303,8 @@ fn no_hook_command_points_under_claude_hooks_dir_after_wiring() {
     let settings = read_json(&path);
     let commands = all_hook_commands(&settings);
 
-    // Assert: the Done-When pin this Work Unit exists to satisfy. The
-    // 2026-08-16 ADR amendment moved the original "no command may point
-    // under ~/.claude/hooks/" pin to WU-13, the unit where all four guards
-    // are ported and it becomes true unconditionally; there is no longer an
-    // exception for the guards.
+    // Assert: no command may point under ~/.claude/hooks/ after wiring,
+    // with no exception for any guard.
     for cmd in &commands {
         assert!(
             !cmd.contains("/.claude/hooks/"),
@@ -322,7 +314,7 @@ fn no_hook_command_points_under_claude_hooks_dir_after_wiring() {
     for name in [
         "rm-workspace-guard",
         "bg-await-guard",
-        "no-dash-guard",
+        "no-slop-guard",
         "precommit-check",
     ] {
         assert!(
@@ -405,18 +397,15 @@ fn settings_json_is_backed_up_before_a_real_change_and_not_on_a_no_op() {
 /// what `wire()` claims to route it to.
 const STUB_HOOK_BODY: &str = "pub fn run(_payload: &Payload) {}";
 
-/// Regression pin for the defect this fix addresses: WU-8 wired every hook,
-/// guards included, to the bare `playbook hook <name>` binary form while
-/// the four guards' Rust modules were still empty stubs, which silently
-/// disabled them (a shell guard denies a dangerous command; the Rust stub
-/// prints nothing and exits 0). A test asserting only the command STRING
-/// that was written would not have caught this, since the string was
-/// correct; only the module behind it was not. This test instead reads
-/// wire()'s own output back and checks each hook it wired in binary form
-/// against its actual Rust source, so it keeps working unmodified once
-/// WU-13 ports the guards and `GUARD_SPECS` starts wiring them the same
-/// way: the moment a `HookSpec` flips to `ported: true`, this test starts
-/// checking it too, with no hardcoded hook-name list to update by hand.
+/// Regression pin: wiring a hook to the bare `playbook hook <name>` binary
+/// form while its Rust module is still an empty stub silently disables it
+/// (a shell guard denies a dangerous command; the Rust stub prints nothing
+/// and exits 0). A test asserting only the command STRING that was written
+/// would not catch this, since the string is correct even when the module
+/// behind it is not. This test instead reads `wire()`'s own output back and
+/// checks each hook it wired in binary form against its actual Rust source,
+/// with no hardcoded hook-name list to keep in sync: the moment a
+/// `HookSpec` flips to `ported: true`, this test starts checking it too.
 #[test]
 fn every_hook_wired_in_binary_form_has_a_non_stub_implementation() {
     // Arrange: wire a fresh install, so every hook wire() currently wires
@@ -447,8 +436,7 @@ fn every_hook_wired_in_binary_form_has_a_non_stub_implementation() {
             !source.contains(STUB_HOOK_BODY),
             "'{name}' is wired to `playbook hook {name}` in settings.json, but \
              {module_path:?} is still the empty stub. Wiring a hook to its binary \
-             form before its Rust port lands silently disables it: this is the \
-             exact WU-8 defect the 2026-08-16 ADR amendment records. Either port \
+             form before its Rust port lands silently disables it. Either port \
              the hook first, or leave it on its legacy command until the port lands."
         );
     }
@@ -458,15 +446,14 @@ fn every_hook_wired_in_binary_form_has_a_non_stub_implementation() {
     );
 }
 
-/// The scenario the brief asked to be added explicitly: a user's
-/// pre-existing `settings.json` still carries a guard's legacy
-/// `~/.claude/hooks/<name>.sh` command from before this fix shipped.
+/// A user's pre-existing `settings.json` still carries a guard's legacy
+/// `~/.claude/hooks/<name>.sh` command from before the Rust port shipped.
 /// Wiring must REPLACE that entry with the bare form, not add a second
 /// entry alongside it, since a guard firing twice on the same event is as
 /// much a defect as it not firing at all.
 #[test]
 fn legacy_guard_entry_is_replaced_by_bare_form_not_duplicated() {
-    // Arrange: the unwired fixture, today's real pre-WU-13 shape.
+    // Arrange: a fixture with legacy guard commands still in place.
     let path = scratch_settings_path("legacy-guard-replaced");
     write_json(&path, &unwired_fixture());
 
@@ -477,29 +464,68 @@ fn legacy_guard_entry_is_replaced_by_bare_form_not_duplicated() {
         .as_array()
         .unwrap();
 
-    // Assert: exactly one entry per guard, and it is the bare form.
-    for name in [
-        "rm-workspace-guard",
-        "bg-await-guard",
-        "no-dash-guard",
-        "precommit-check",
+    // Assert: exactly one entry per guard, bare form. Pairs the fixture's
+    // legacy name with today's wired name, since no-dash-guard renamed.
+    for (legacy_name, wired_name) in [
+        ("rm-workspace-guard", "rm-workspace-guard"),
+        ("bg-await-guard", "bg-await-guard"),
+        ("no-dash-guard", "no-slop-guard"),
+        ("precommit-check", "precommit-check"),
     ] {
-        let bare = format!("playbook hook {name}");
+        let bare = format!("playbook hook {wired_name}");
         let matching: Vec<&Value> = bash_hooks_after
             .iter()
             .filter(|h| {
-                h["command"] == bare || h["command"] == format!("~/.claude/hooks/{name}.sh")
+                h["command"] == bare || h["command"] == format!("~/.claude/hooks/{legacy_name}.sh")
             })
             .collect();
         assert_eq!(
             matching.len(),
             1,
-            "guard '{name}' should have exactly one entry after wiring, not a duplicate: \
+            "guard '{legacy_name}' should have exactly one entry after wiring, not a duplicate: \
              {bash_hooks_after:?}"
         );
         assert_eq!(
             matching[0]["command"], bare,
-            "guard '{name}'s single entry should be the bare form: {matching:?}"
+            "guard '{legacy_name}'s single entry should be the bare form: {matching:?}"
         );
     }
+}
+
+/// A rename must heal an install already wired to the OLD bare name, not
+/// just the ancient `.sh` path: `also_replaces` makes that possible.
+#[test]
+fn renamed_guard_replaces_an_already_bare_old_name_not_orphan_it() {
+    // Arrange: a settings.json already wired to the pre-rename bare form.
+    let path = scratch_settings_path("renamed-guard");
+    write_json(
+        &path,
+        &json!({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {"type": "command", "command": "playbook hook no-dash-guard", "timeout": 10}
+                        ]
+                    }
+                ]
+            }
+        }),
+    );
+
+    // Act
+    wire(&path).expect("wire should succeed");
+    let settings = read_json(&path);
+    let commands = all_hook_commands(&settings);
+
+    // Assert
+    assert!(
+        !commands.contains(&"playbook hook no-dash-guard".to_string()),
+        "the old bare name must not survive as an orphan: {commands:?}"
+    );
+    assert!(
+        commands.contains(&"playbook hook no-slop-guard".to_string()),
+        "the renamed guard must be wired: {commands:?}"
+    );
 }

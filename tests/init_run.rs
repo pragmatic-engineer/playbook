@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Integration tests for `playbook::init::run`, the module that composes
-//! `merge`, `wire`, `shim` and `statusline` into `Command::Init`. Every
-//! scenario the Work Unit brief named:
+//! `merge`, `wire`, `shim` and `statusline` into `Command::Init`. Coverage
+//! map:
 //! - a fresh config gets fully wired: `fresh_config_gets_fully_wired`
 //! - running twice is idempotent, no second-run changes:
 //!   `running_init_twice_is_idempotent_with_no_second_run_changes`
@@ -18,14 +18,14 @@
 //!   `missing_self_root_skips_template_dependent_steps` and
 //!   `unrecognised_shell_skips_shim_only` for the two ways a step is
 //!   legitimately skipped rather than wired or failed
-//! - regression pin: since WU-13 ported all four safety guards, a full
-//!   composed `init` on a clean scratch HOME must never write a guard command
+//! - regression pin: a full composed `init` on a clean scratch HOME must
+//!   never write a guard command
 //!   in its old `~/.claude/hooks/<name>.sh` path form, even when that form
 //!   would itself resolve (a guard's script still ships in this repo, so a
 //!   regression here would not be caught by "does the path exist"; only
 //!   "does the guard still take path form at all" catches it):
 //!   `zero_hook_commands_point_under_claude_hooks_dir_after_a_full_init`
-//! - WU-14 scenarios (bounding the backup scheme, adding the skip-report):
+//! - the backup scheme and skip-report:
 //!   a withheld customisation produces a readable skip-report alongside the
 //!   backup:
 //!   `withheld_customisation_produces_a_skip_report_alongside_the_backup`;
@@ -135,17 +135,16 @@ const PORTED_HOOK_NAMES: &[&str] = &[
     "memory-capture",
 ];
 
-/// The 4 safety guards, wired the same as `PORTED_HOOK_NAMES` since WU-13
-/// ported all four Rust bodies.
+/// The 4 safety guards, wired the same as `PORTED_HOOK_NAMES`.
 const GUARD_HOOK_NAMES: &[&str] = &[
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-dash-guard",
+    "no-slop-guard",
     "precommit-check",
 ];
 
 /// File names directly under `dir` that start with `prefix`, for asserting
-/// on the WU-14 backup and skip-report families (`settings.json.bak.` and
+/// on the backup and skip-report families (`settings.json.bak.` and
 /// `settings-merge-skipped.`) without depending on directory iteration
 /// order.
 fn matching_entries(dir: &Path, prefix: &str) -> Vec<String> {
@@ -261,7 +260,7 @@ fn fresh_config_gets_fully_wired() {
 /// `playbook hook <name>` form on whether `init::guards` had actually placed
 /// a script for it, so flipping a `GUARD_SPECS` entry's `ported` field to
 /// `true` would have silently done nothing, since a ported guard is never
-/// placed. All four guards are ported now, so this must hold unconditionally
+/// placed. All guards are ported now, so this must hold unconditionally
 /// on a fresh install: not one `.hooks` command may name a path under
 /// `~/.claude/hooks/`, regardless of whether that path happens to exist.
 /// Asserting only "every command that IS a path resolves" would miss this

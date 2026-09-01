@@ -1,46 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Wires the 15 hooks Claude Code can invoke, all of them now ported to
-//! Rust, straight into `settings.json` as a bare `playbook hook <name>`
-//! command, retiring both `hooks/hooks.json` (source of truth for the 11
-//! functional hooks) and a guard's own `~/.claude/hooks/<name>.sh` path
-//! (source of truth for the 4 safety guards). Before this module lands,
-//! `hooks/hooks.json` points all 15 hooks at python scripts under
-//! `${CLAUDE_PLUGIN_ROOT}/hooks/`, so the Rust binary this crate builds
-//! dispatches nothing in production; `wire` is the pivot that makes every
-//! ported hook live.
+//! Wires the 15 hooks Claude Code can invoke into `settings.json` as a bare
+//! `playbook hook <name>` command: 11 functional hooks plus 4 guards.
 //!
-//! The four safety guards (`rm-workspace-guard`, `bg-await-guard`,
-//! `no-dash-guard`, `precommit-check`) stayed on their legacy
-//! `~/.claude/hooks/<name>.sh` command for two Segments after the other 11
-//! hooks moved, because their Rust modules (`src/hooks/*_guard.rs`) were
-//! still the empty stub `pub fn run(_payload: &Payload) {}`. Wiring one of
-//! them to `playbook hook <name>` before its Rust body existed would have
-//! silently disabled a live safety guard, since the stub runs, emits no
-//! permission decision, and exits 0: the exact defect the 2026-08-16 ADR
-//! amendment to WU-8 records. WU-13 ports all four guard bodies and flips
-//! every `GUARD_SPECS` entry's `ported` field to `true`, so they are now
-//! wired exactly like `PORTED_HOOK_SPECS`: unconditionally, in bare form. A
-//! guard's pre-existing legacy command, if a user still has one, is REPLACED
-//! in place rather than left to coexist with the new bare command
+//! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
+//! two mirror different sources: `PORTED_HOOK_SPECS` is the 11 hooks
+//! `hooks/hooks.json` used to register, while `GUARD_SPECS` is the guards
+//! `settings.json` wires directly, carrying their own `if` and `timeout`
+//! fields hooks.json never had. `wire` treats both lists identically: every
+//! entry in either is upserted unconditionally through `upsert_hook`. A
+//! pre-existing legacy command for an entry, if a user still has one, is
+//! replaced in place rather than left to coexist with the new bare command
 //! (`entry_targets` recognises both forms as targeting the same hook, so
 //! `upsert_hook` rewrites the same array slot rather than appending a second
 //! entry).
-//!
-//! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS`, purely
-//! because the two mirror different sources: `PORTED_HOOK_SPECS` is the 11
-//! hooks `hooks/hooks.json` used to register, while `GUARD_SPECS` is the 4
-//! guards `settings.json` already wired directly, carrying their own `if`
-//! and `timeout` fields hooks.json never had. `wire` no longer treats the
-//! two lists any differently: it loops over both the same way and every
-//! entry in either is upserted unconditionally through `upsert_hook`. WU-14
-//! deleted `init::guards` and the four legacy `.sh` guard scripts once no
-//! installed machine could still depend on them, and removed the
-//! placement-gate branch `wire`'s loop used to carry for a `GUARD_SPECS`
-//! entry that was not yet `ported`: with every guard's Rust port real since
-//! WU-13, that branch had become permanently unreachable, so this module no
-//! longer has one.
 //!
 //! `wire` is mostly an upsert into whatever `settings.json` already has,
 //! never a wholesale replace: a hand-added hook entry a user placed
@@ -52,8 +26,7 @@
 //!
 //! The bare-name form (`playbook hook session-init`, not an absolute path)
 //! is deliberate: Claude Code already accepts a bare command resolved on
-//! PATH for a hand-written hook entry (`~/.claude/settings.json.bak` line
-//! 167: `"command": "rtk hook claude"`), so `playbook`, installed the same
+//! PATH for a hand-written hook entry, so `playbook`, installed the same
 //! way, resolves the same way. `tests/init_wire.rs` asserts this rather than
 //! trusting it.
 
@@ -74,6 +47,9 @@ struct HookSpec {
     name: &'static str,
     if_cond: Option<&'static str>,
     timeout: Option<u64>,
+    /// A prior hook name this spec's install also replaces in place, so a
+    /// rename never leaves an orphaned entry behind.
+    also_replaces: Option<&'static str>,
     ported: bool,
 }
 
@@ -100,6 +76,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "PreToolUse",
@@ -108,6 +85,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "PreToolUse",
@@ -116,6 +94,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "PreToolUse",
@@ -124,6 +103,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "PreToolUse",
@@ -132,18 +112,18 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "UserPromptSubmit",
         matcher: None,
-        // ADR 0008 WU-0: prompt-time recall, same hook name and binary as
-        // the PreToolUse entry above, following the exact two-event
-        // precedent `session-clean-exit` already uses across Stop and
-        // SessionEnd (see its entries below).
+        // ADR 0008: prompt-time recall, same hook name and binary as the
+        // PreToolUse entry above.
         name: "memory-anchors",
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "PostToolUse",
@@ -152,6 +132,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "PostToolUse",
@@ -160,6 +141,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "UserPromptSubmit",
@@ -168,6 +150,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "PreCompact",
@@ -176,6 +159,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "Stop",
@@ -184,6 +168,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "Stop",
@@ -192,6 +177,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "SessionEnd",
@@ -200,22 +186,18 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: None,
         ported: true,
+        also_replaces: None,
     },
 ];
 
-/// The 4 always-on safety guards, now wired identically to
-/// `PORTED_HOOK_SPECS`: every entry here is `ported: true`, since WU-13
-/// ported all four Rust modules (`src/hooks/rm_workspace_guard.rs` and the
-/// three siblings beside it) to real bodies. `wire` upserts each one
-/// unconditionally in bare `playbook hook <name>` form, the same as any
-/// `PORTED_HOOK_SPECS` entry; a pre-existing legacy
-/// `~/.claude/hooks/<name>.sh` command is replaced, not left to coexist.
-/// Kept as a list separate from `PORTED_HOOK_SPECS`, rather than merged into
-/// it, simply because the two mirror different sources (see the module doc
-/// comment): these four came from `settings.json`'s own pre-existing guard
-/// entries, not from `hooks/hooks.json`. There is no longer a placement gate
-/// in `wire`'s loop that this separation feeds; WU-14 removed it once every
-/// entry here reached `ported: true`.
+/// The always-on safety guards, wired identically to `PORTED_HOOK_SPECS`:
+/// every entry here is `ported: true`, so `wire` upserts each one
+/// unconditionally in bare `playbook hook <name>` form. A pre-existing
+/// legacy `~/.claude/hooks/<name>.sh` command is replaced, not left to
+/// coexist. Kept as a list separate from `PORTED_HOOK_SPECS`, rather than
+/// merged into it, because the two mirror different sources (see the module
+/// doc comment): these guards came from `settings.json`'s own pre-existing
+/// guard entries, not from `hooks/hooks.json`.
 const GUARD_SPECS: &[HookSpec] = &[
     HookSpec {
         event: "PreToolUse",
@@ -224,6 +206,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         if_cond: Some("Bash(rm:*)"),
         timeout: Some(10),
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "PreToolUse",
@@ -232,14 +215,16 @@ const GUARD_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: Some(10),
         ported: true,
+        also_replaces: None,
     },
     HookSpec {
         event: "PreToolUse",
         matcher: Some("Bash"),
-        name: "no-dash-guard",
+        name: "no-slop-guard",
         if_cond: None,
         timeout: Some(10),
         ported: true,
+        also_replaces: Some("no-dash-guard"),
     },
     HookSpec {
         event: "PreToolUse",
@@ -248,6 +233,16 @@ const GUARD_SPECS: &[HookSpec] = &[
         if_cond: Some("Bash(git commit:*)"),
         timeout: Some(10),
         ported: true,
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "PreToolUse",
+        matcher: Some("Edit|Write"),
+        name: "no-slop-guard",
+        if_cond: None,
+        timeout: Some(10),
+        ported: true,
+        also_replaces: None,
     },
 ];
 
@@ -310,28 +305,15 @@ pub struct WireOutcome {
 /// Writes every hook in `PORTED_HOOK_SPECS` and every guard in `GUARD_SPECS`
 /// to its bare `playbook hook <name>` command, creating `.hooks` and any
 /// event or matcher group it needs from scratch. Every entry in both lists
-/// is upserted unconditionally: every `GUARD_SPECS` entry is `ported: true`
-/// as of WU-13, so there is no case left where a hook or guard is wired any
-/// other way. A guard's pre-existing legacy `~/.claude/hooks/<name>.sh`
-/// command, if a user still has one, is replaced in place rather than left
-/// to coexist alongside the new bare command (`entry_targets` recognises
-/// both forms as targeting the same hook). Every other key in the file, and
-/// every hook entry not managed here, is left untouched. Idempotent: calling
-/// this twice in a row writes nothing the second time, since the second
-/// call's freshly rendered content is compared byte for byte against what is
-/// already on disk before anything is written.
-///
-/// Before WU-14, this function also took a `placed_guards` slice and a
-/// `claude_home` path, live only for a `GUARD_SPECS` entry that was not yet
-/// `ported`: such a guard was wired only when its name was in
-/// `placed_guards`, and otherwise had its legacy command actively removed,
-/// but only when `claude_home` genuinely had no `.sh` script for it left.
-/// That was the mechanism `init::guards::place_guards` and this module used
-/// for every guard before WU-13 ported their Rust bodies. With every
-/// `GUARD_SPECS` entry `ported: true` since WU-13, the branch those two
-/// parameters fed had become permanently unreachable; WU-14 deleted
-/// `init::guards`, the legacy `.sh` guard scripts, and that branch together,
-/// which is why `wire` no longer takes them.
+/// is upserted unconditionally. A guard's pre-existing legacy
+/// `~/.claude/hooks/<name>.sh` command, if a user still has one, is replaced
+/// in place rather than left to coexist alongside the new bare command
+/// (`entry_targets` recognises both forms as targeting the same hook).
+/// Every other key in the file, and every hook entry not managed here, is
+/// left untouched. Idempotent: calling this twice in a row writes nothing
+/// the second time, since the second call's freshly rendered content is
+/// compared byte for byte against what is already on disk before anything
+/// is written.
 ///
 /// Backs `settings_path` up first, timestamped, whenever a change is about
 /// to land; a no-op call takes no backup. This guards the same failure the
@@ -469,7 +451,10 @@ fn upsert_hook(
         })?;
 
     let entry = canonical_entry(spec);
-    match hooks_array.iter().position(|h| entry_targets(h, spec.name)) {
+    let existing = hooks_array.iter().position(|h| {
+        entry_targets(h, spec.name) || spec.also_replaces.is_some_and(|old| entry_targets(h, old))
+    });
+    match existing {
         Some(idx) => hooks_array[idx] = entry,
         None => hooks_array.push(entry),
     }
@@ -523,8 +508,8 @@ fn bare_command(name: &str) -> String {
 }
 
 /// The pre-Rust shell command `wire` keeps an unported hook pointed at:
-/// `~/.claude/hooks/<name>.sh`, the same path `settings.json` already wires
-/// directly today for each of the four guards in `GUARD_SPECS`.
+/// `~/.claude/hooks/<name>.sh`, the path `settings.json` wired a guard to
+/// directly before its Rust port existed.
 fn legacy_shell_command(name: &str) -> String {
     format!("~/.claude/hooks/{name}.sh")
 }
@@ -532,7 +517,7 @@ fn legacy_shell_command(name: &str) -> String {
 /// The command `wire` writes for `spec`: the bare `playbook hook <name>`
 /// binary form when its Rust port is real (`spec.ported`), or the legacy
 /// `~/.claude/hooks/<name>.sh` script when it is not, so an unported hook
-/// (today, the four guards in `GUARD_SPECS`) never gets pointed at a stub.
+/// never gets pointed at a stub.
 fn target_command(spec: &HookSpec) -> String {
     if spec.ported {
         bare_command(spec.name)
@@ -578,10 +563,8 @@ fn timestamped_backup_path(settings_path: &Path) -> PathBuf {
 /// Writes `content` to `path` via a sibling temp file plus rename, so a
 /// reader of `path` never observes a half-written `settings.json`. Mirrors
 /// `merge::atomic_write`'s approach exactly, but is not shared with it:
-/// `src/init/merge.rs` is outside this Work Unit's file plan (WU-7 owns it,
-/// concurrent with this one), so promoting its private helper to `pub(crate)`
-/// would be an edit outside scope. Duplicating a five-line function is
-/// cheaper than that.
+/// promoting `src/init/merge.rs`'s private helper to `pub(crate)` for one
+/// caller is not worth it. Duplicating a five-line function is cheaper.
 fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
     let dir = path
         .parent()

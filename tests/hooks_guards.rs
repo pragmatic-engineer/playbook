@@ -74,7 +74,7 @@ fn run_guard_via_stdin(name: &str, command: &str) -> String {
 }
 
 fn blocks(command: &str) -> bool {
-    let out = run_guard("no-dash-guard", command);
+    let out = run_guard("no-slop-guard", command);
     if out.trim().is_empty() {
         return false;
     }
@@ -864,7 +864,7 @@ mod bg_await_guard {
     }
 }
 
-mod no_dash_guard {
+mod no_slop_guard {
     use super::*;
 
     /// U+2012 figure, U+2013 en, U+2014 em, U+2015 horizontal bar. The shell
@@ -957,31 +957,30 @@ mod no_dash_guard {
     }
 
     #[test]
-    fn the_env_switch_disables_the_guard() {
+    fn the_env_switch_disables_the_dash_check() {
         let payload =
             serde_json::json!({ "tool_input": { "command": "git commit -m \"a \u{2014} b\"" } })
                 .to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-            .args(["hook", "no-dash-guard"])
+            .args(["hook", "no-slop-guard"])
             .env("HOOK_INPUT", payload)
-            .env("NO_DASH_GUARD", "0")
+            .env("NO_SLOP_GUARD", "0")
             .output()
             .expect("spawn");
         assert!(String::from_utf8_lossy(&out.stdout).trim().is_empty());
     }
 
-    /// `shell/plugin-e2e.sh` Section G pipes the payload over stdin rather than
-    /// setting `HOOK_INPUT`. Every other case in this file goes through the env
-    /// var, so without this the stdin path would have no coverage in CI.
+    /// `shell/plugin-e2e.sh` Section G exercises this over stdin; see also
+    /// the comment-slop stdin test below.
     #[test]
     fn stdin_piped_input_is_read_when_hook_input_is_unset() {
-        let deny = run_guard_via_stdin("no-dash-guard", "git commit -m \"fix: a \u{2014} b\"");
+        let deny = run_guard_via_stdin("no-slop-guard", "git commit -m \"fix: a \u{2014} b\"");
         assert!(
             deny.contains(r#""permissionDecision":"deny""#),
             "stdin-piped input must still reach the guard and produce a deny: {deny}"
         );
 
-        let allow = run_guard_via_stdin("no-dash-guard", "git commit -m \"fix: a clean message\"");
+        let allow = run_guard_via_stdin("no-slop-guard", "git commit -m \"fix: a clean message\"");
         assert!(
             allow.trim().is_empty(),
             "stdin-piped input for a clean commit must stay silent: {allow}"
@@ -990,8 +989,7 @@ mod no_dash_guard {
 
     #[test]
     fn malformed_and_empty_payloads_exit_silently() {
-        // These run on the PreToolUse hot path, so a panic breaks a live
-        // session. Anything unparseable must pass rather than fail.
+        // Anything unparseable must pass rather than fail on the hot path.
         for raw in [
             "",
             "{",
@@ -1000,7 +998,7 @@ mod no_dash_guard {
             r#"{"tool_input":null}"#,
         ] {
             let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-                .args(["hook", "no-dash-guard"])
+                .args(["hook", "no-slop-guard"])
                 .env("HOOK_INPUT", raw)
                 .output()
                 .expect("spawn");
@@ -1010,5 +1008,185 @@ mod no_dash_guard {
                 "must stay silent on: {raw:?}"
             );
         }
+    }
+
+    // --- comment-slop side: PreToolUse(Edit|Write) --------------------------
+
+    fn run_edit(file_path: &str, new_string: &str) -> String {
+        let payload = serde_json::json!({
+            "tool_input": { "file_path": file_path, "new_string": new_string }
+        })
+        .to_string();
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hook", "no-slop-guard"])
+            .env("HOOK_INPUT", payload)
+            .output()
+            .expect("playbook binary should spawn");
+        assert!(
+            out.status.success(),
+            "a guard must exit 0 even when denying"
+        );
+        String::from_utf8_lossy(&out.stdout).to_string()
+    }
+
+    fn run_write(file_path: &str, content: &str) -> String {
+        let payload = serde_json::json!({
+            "tool_input": { "file_path": file_path, "content": content }
+        })
+        .to_string();
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hook", "no-slop-guard"])
+            .env("HOOK_INPUT", payload)
+            .output()
+            .expect("playbook binary should spawn");
+        assert!(
+            out.status.success(),
+            "a guard must exit 0 even when denying"
+        );
+        String::from_utf8_lossy(&out.stdout).to_string()
+    }
+
+    fn is_denied(out: &str) -> bool {
+        if out.trim().is_empty() {
+            return false;
+        }
+        assert!(
+            out.contains(r#""permissionDecision":"deny""#),
+            "non-empty output must be a deny decision: {out}"
+        );
+        true
+    }
+
+    #[test]
+    fn three_line_comment_run_in_an_edit_blocks() {
+        let new_string = "//! line one\n//! line two\n//! line three\nfn f() {}\n";
+        assert!(is_denied(&run_edit("src/lib.rs", new_string)));
+    }
+
+    #[test]
+    fn two_line_comment_run_in_an_edit_is_allowed() {
+        let new_string = "// line one\n// line two\nfn f() {}\n";
+        assert!(!is_denied(&run_edit("src/lib.rs", new_string)));
+    }
+
+    #[test]
+    fn orchestration_vocabulary_in_a_comment_blocks() {
+        for new_string in [
+            "// this Work Unit's file plan covers only this module\n",
+            "// ported alongside WU-13's other guard bodies\n",
+            "// see the brief for the full rationale\n",
+            "// not done-when the tests pass, done when reviewed\n",
+        ] {
+            assert!(
+                is_denied(&run_edit("src/hooks/example.rs", new_string)),
+                "should block: {new_string}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_new_file_written_with_a_long_module_doc_comment_blocks() {
+        let content = "// SPDX-FileCopyrightText: 2026 Igor Santos\n// SPDX-License-Identifier: MIT\n\n//! line one\n//! line two\n//! line three\n\nfn f() {}\n";
+        assert!(is_denied(&run_write("src/hooks/example.rs", content)));
+    }
+
+    #[test]
+    fn a_normal_two_line_spdx_header_write_is_allowed() {
+        let content =
+            "// SPDX-FileCopyrightText: 2026 Igor Santos\n// SPDX-License-Identifier: MIT\n\nfn f() {}\n";
+        assert!(!is_denied(&run_write("src/hooks/example.rs", content)));
+    }
+
+    #[test]
+    fn shell_and_python_files_use_hash_comments() {
+        assert!(is_denied(&run_edit(
+            "shell/example.sh",
+            "# line one\n# line two\n# line three\n"
+        )));
+        assert!(is_denied(&run_edit(
+            "shell/example.py",
+            "# line one\n# line two\n# line three\n"
+        )));
+    }
+
+    #[test]
+    fn extensions_without_a_known_comment_marker_are_never_blocked() {
+        assert!(!is_denied(&run_edit(
+            "README.md",
+            "line one\nline two\nline three\nline four\n"
+        )));
+        assert!(!is_denied(&run_edit(
+            "settings.shared.json",
+            "// line one\n// line two\n// line three\n"
+        )));
+    }
+
+    #[test]
+    fn the_env_switch_disables_the_comment_check() {
+        let payload = serde_json::json!({
+            "tool_input": {
+                "file_path": "src/lib.rs",
+                "new_string": "//! a\n//! b\n//! c\n"
+            }
+        })
+        .to_string();
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hook", "no-slop-guard"])
+            .env("HOOK_INPUT", payload)
+            .env("NO_SLOP_GUARD", "0")
+            .output()
+            .expect("spawn");
+        assert!(String::from_utf8_lossy(&out.stdout).trim().is_empty());
+    }
+
+    #[test]
+    fn edit_payload_malformed_and_empty_exit_silently() {
+        for raw in [
+            "",
+            "{",
+            "null",
+            r#"{"tool_input":{}}"#,
+            r#"{"tool_input":{"file_path":"src/lib.rs"}}"#,
+        ] {
+            let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+                .args(["hook", "no-slop-guard"])
+                .env("HOOK_INPUT", raw)
+                .output()
+                .expect("spawn");
+            assert!(out.status.success(), "must exit 0 on: {raw:?}");
+            assert!(
+                String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+                "must stay silent on: {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn edit_payload_stdin_piped_input_is_read_when_hook_input_is_unset() {
+        let payload = serde_json::json!({
+            "tool_input": {
+                "file_path": "src/lib.rs",
+                "new_string": "//! a\n//! b\n//! c\n"
+            }
+        })
+        .to_string();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hook", "no-slop-guard"])
+            .env_remove("HOOK_INPUT")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("playbook binary should spawn");
+        child
+            .stdin
+            .take()
+            .expect("stdin should be piped")
+            .write_all(payload.as_bytes())
+            .expect("payload should write to stdin");
+        let out = child
+            .wait_with_output()
+            .expect("playbook binary should exit");
+        assert!(out.status.success());
+        assert!(is_denied(&String::from_utf8_lossy(&out.stdout)));
     }
 }

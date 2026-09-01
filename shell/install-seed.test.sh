@@ -54,7 +54,7 @@ chmod 0755 "$BIN_DIR/playbook"
 seed_shipped_extras() {
   local src="$1"
   mkdir -p "$src/hooks"
-  for g in rm-workspace-guard bg-await-guard no-dash-guard precommit-check; do
+  for g in rm-workspace-guard bg-await-guard no-slop-guard precommit-check; do
     cp "$REPO_ROOT/hooks/$g.sh" "$src/hooks/$g.sh"
   done
   printf '#!/bin/sh\necho ok\n' > "$src/statusline.sh"

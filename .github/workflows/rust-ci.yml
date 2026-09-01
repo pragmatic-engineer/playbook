@@ -146,10 +146,10 @@ jobs:
       - name: cargo check (lib and bin)
         run: cargo check --bins --lib
 
-  # ADR 0007 WU-14 Done-When: a container built FROM debian:stable-slim with
-  # only git and the binary installed runs every hook successfully, asserted
-  # by CI, not by inspection. The 15 hooks in `HookName` are the whole
-  # contract `settings.json` invokes as a bare `playbook hook <name>`
+  # ADR 0007: a container built FROM debian:stable-slim with only git and
+  # the binary installed runs every hook successfully, asserted by CI, not
+  # by inspection. The 15 hooks in `HookName` are the whole contract
+  # `settings.json` invokes as a bare `playbook hook <name>`
   # command; if any of them needed something setup-local.sh or install.sh
   # used to provide (a shared library, a Python interpreter, anything beyond
   # `git`), this job is where that would show up, on the platform the tool
@@ -259,7 +259,7 @@ jobs:
                           search-counter memory-anchors post-edit-track \
                           rebuild-memory-graph auto-model-detect precompact-warn \
                           session-clean-exit memory-capture rm-workspace-guard \
-                          bg-await-guard no-dash-guard precommit-check; do
+                          bg-await-guard no-slop-guard precommit-check; do
                 echo "== $name"
                 echo "{}" | HOME=/tmp playbook hook "$name" \
                   || { echo "FAILED: $name did not exit 0 in a minimal container"; exit 1; }

@@ -23,26 +23,17 @@ Remediation hint on miss: "run: claude plugin marketplace add pragmatic-engineer
 
 ## Layer 2: Safety guards wired
 
-Before WU-13 ported the four safety guards into the Rust binary, each was a
-`.sh` script `settings.json` invoked by path, so "wired" and "present on
-disk" were two different facts, and a command naming a missing script failed
-**open**: the hook was invoked, the file was not there, nothing ran, and
-nothing was reported. That was the failure the `hook-rename-lockstep-settings`
-note records, roughly 110 silent errors over 28 hours on 2026-08-11, and this
-layer used to check both halves for exactly that reason.
-
-Now that all four guards run inside the compiled binary
-(`src/hooks/*_guard.rs`), there is no per-guard script to check presence for
-any more: `settings.json` names `playbook hook <name>`, the same bare form
-every other ported hook uses, and whether that name resolves is purely a
-question of whether the `playbook` binary itself is on PATH, which Layer 6
-already checks once for every ported hook, guards included. This layer's job
-narrows to the one question that is still specific to the guards: is each one
-actually wired to that bare form?
+Every guard runs inside the compiled binary (`src/hooks/*_guard.rs`), so
+there is no per-guard script to check presence for: `settings.json` names
+`playbook hook <name>`, the same bare form every other ported hook uses, and
+whether that name resolves is purely a question of whether the `playbook`
+binary itself is on PATH, which Layer 6 already checks once for every ported
+hook, guards included. This layer's job narrows to the one question that is
+still specific to the guards: is each one actually wired to that bare form?
 
 ```bash
 wired=0; problems=""
-for g in rm-workspace-guard bg-await-guard no-dash-guard precommit-check; do
+for g in rm-workspace-guard bg-await-guard no-slop-guard precommit-check; do
   n=$(jq -r --arg cmd "playbook hook $g" \
       '[.hooks.PreToolUse[]?.hooks[]?.command // ""] | map(select(. == $cmd)) | length' \
       ~/.claude/settings.json 2>/dev/null)
@@ -64,12 +55,6 @@ Report:
   the binary. Remediation: `playbook init`, which rewrites every guard's
   command to its bare form unconditionally, or `/playbook:setup` on a
   machine without the binary.
-
-**Four guards, not three.** The previous check matched only
-`rm-workspace-guard|bg-await-guard|no-dash-guard` and passed on "3 or more", so
-`precommit-check` was never counted. `settings.shared.json` has seeded all four
-since before this check was written, and `src/init/wire.rs` wires all four, so
-the count was simply wrong and a missing fourth guard read as healthy.
 
 ## Layer 3: Launcher (opt-in)
 
@@ -221,7 +206,7 @@ a duplicate check under a second number.
 A hook command that names a file path fails **open** when that path does not
 exist: `settings.json` still fires it, nothing runs, and nothing is
 reported. That is the same silent-failure shape Layer 2 and Layer 6 both
-guard against for the four guards and the `playbook` binary, but neither
+guard against for the guards and the `playbook` binary, but neither
 covers a one-off stray entry, such as a leftover Python hook from before this
 project's Rust migration that a settings merge never removed (`wire()` only
 manages the entries it recognises, so an entry for a retired hook name is

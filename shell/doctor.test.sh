@@ -73,7 +73,7 @@ done
 
 # ── Layer 2: safety guards wired ────────────────────────────────────────────
 
-GUARDS=(rm-workspace-guard bg-await-guard no-dash-guard precommit-check)
+GUARDS=(rm-workspace-guard bg-await-guard no-slop-guard precommit-check)
 
 # Args: home dir, then one "name:command" pair per hooks.PreToolUse entry to
 # write. Lets a scenario wire a guard to an arbitrary command string (its
@@ -124,7 +124,7 @@ scenario_layer2_legacy_command_not_wired() {
   write_wired_settings_raw "$home" \
     "rm-workspace-guard:playbook hook rm-workspace-guard" \
     "bg-await-guard:playbook hook bg-await-guard" \
-    "no-dash-guard:playbook hook no-dash-guard" \
+    "no-slop-guard:playbook hook no-slop-guard" \
     "precommit-check:~/.claude/hooks/precommit-check.sh"
   out="$(run_layer2 "$home")"
   [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
@@ -139,7 +139,7 @@ scenario_layer2_near_miss_command_not_wired() {
   write_wired_settings_raw "$home" \
     "rm-workspace-guard:playbook hook rm-workspace-guard-legacy" \
     "bg-await-guard:playbook hook bg-await-guard" \
-    "no-dash-guard:playbook hook no-dash-guard" \
+    "no-slop-guard:playbook hook no-slop-guard" \
     "precommit-check:playbook hook precommit-check"
   out="$(run_layer2 "$home")"
   [[ "$out" == *"rm-workspace-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
@@ -148,7 +148,7 @@ scenario_layer2_near_miss_command_not_wired() {
 # D: bg-await-guard is not wired into settings.json at all.
 scenario_layer2_not_wired() {
   local home="$WORK/l2-d" out
-  write_wired_settings "$home" rm-workspace-guard no-dash-guard precommit-check
+  write_wired_settings "$home" rm-workspace-guard no-slop-guard precommit-check
   out="$(run_layer2 "$home")"
   [[ "$out" == *"bg-await-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
@@ -161,7 +161,7 @@ scenario_layer2_not_wired() {
 # exact regression back in.
 scenario_layer2_precommit_check_counted() {
   local home="$WORK/l2-e" out
-  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-dash-guard
+  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard
   out="$(run_layer2 "$home")"
   [[ "$out" == "wired=3/4"* ]] || { echo "  wired count did not drop: $out"; return 1; }
   [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }

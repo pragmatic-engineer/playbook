@@ -201,7 +201,7 @@ pub enum HookName {
     MemoryCapture,
     RmWorkspaceGuard,
     BgAwaitGuard,
-    NoDashGuard,
+    NoSlopGuard,
     PrecommitCheck,
 }
 
@@ -269,7 +269,7 @@ mod tests {
             "memory-capture",
             "rm-workspace-guard",
             "bg-await-guard",
-            "no-dash-guard",
+            "no-slop-guard",
             "precommit-check",
         ];
 

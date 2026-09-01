@@ -233,12 +233,12 @@ test_bg_await_guard() {
   [ -n "$out" ]
 }
 
-test_no_dash_guard() {
+test_no_slop_guard() {
   local emdash cmd payload out
   emdash="$(printf '\xe2\x80\x94')"
   cmd="git commit -m \"x ${emdash} y\""
   payload="$(printf '{"tool_input":{"command":%s}}' "$(json_str "$cmd")")"
-  out="$(run_guard no-dash-guard "$payload")"
+  out="$(run_guard no-slop-guard "$payload")"
   [[ "$out" == *'"permissionDecision":"deny"'* ]]
 }
 
@@ -273,7 +273,7 @@ run_case_for() {  # <name>: dispatches to the matching test_*, or returns 9
     memory-capture)       test_memory_capture ;;
     rm-workspace-guard)   test_rm_workspace_guard ;;
     bg-await-guard)       test_bg_await_guard ;;
-    no-dash-guard)        test_no_dash_guard ;;
+    no-slop-guard)        test_no_slop_guard ;;
     precommit-check)      test_precommit_check ;;
     *) return 9 ;;
   esac

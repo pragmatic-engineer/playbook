@@ -88,7 +88,7 @@ scenario_a_default() {
     [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
 
     # The guard .sh copy loop is gone: no guard script lands in hooks/.
-    for g in rm-workspace-guard.sh bg-await-guard.sh no-dash-guard.sh; do
+    for g in rm-workspace-guard.sh bg-await-guard.sh no-slop-guard.sh; do
         [ ! -f "$claude_home/hooks/$g" ] \
             || { echo "  guard hook copied despite Step 1's removal: $g"; return 1; }
     done
@@ -100,7 +100,7 @@ scenario_a_default() {
         || { echo "  .settings.base.json not created"; return 1; }
 
     guards="$(jq '[.hooks.PreToolUse[]?.hooks[]?.command]
-                  | map(select(test("rm-workspace-guard|bg-await-guard|no-dash-guard")))
+                  | map(select(test("rm-workspace-guard|bg-await-guard|no-slop-guard")))
                   | length' \
                 "$claude_home/settings.json" 2>/dev/null || echo 0)"
     [ "${guards:-0}" -ge 3 ] \

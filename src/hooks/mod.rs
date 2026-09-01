@@ -16,7 +16,7 @@ pub mod bg_await_guard;
 pub mod memory_anchors;
 pub mod memory_capture;
 pub mod memory_signals;
-pub mod no_dash_guard;
+pub mod no_slop_guard;
 pub mod post_edit_track;
 pub mod precommit_check;
 pub mod precompact_warn;
@@ -46,7 +46,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::MemoryCapture => memory_capture::run(payload),
         HookName::RmWorkspaceGuard => rm_workspace_guard::run(payload),
         HookName::BgAwaitGuard => bg_await_guard::run(payload),
-        HookName::NoDashGuard => no_dash_guard::run(payload),
+        HookName::NoSlopGuard => no_slop_guard::run(payload),
         HookName::PrecommitCheck => precommit_check::run(payload),
     }
 }
