@@ -58,7 +58,8 @@ pub fn run(payload: &Payload) {
     if raw_path.is_empty() {
         return;
     }
-    let relpath = repo_relative_path(&raw_path);
+    let root = git_toplevel();
+    let relpath = repo_relative_path(&root, &raw_path);
     if relpath.is_empty() {
         return;
     }
@@ -98,7 +99,7 @@ pub fn run(payload: &Payload) {
         append_seen(&bump_seen_path, &newly_bumped);
     }
 
-    let msg = format_message(&relpath, &matches);
+    let msg = format_message(&root, &relpath, &matches);
     emit_pre_context("PreToolUse", &msg);
 }
 
@@ -137,9 +138,10 @@ fn run_prompt(payload: &Payload, dir: &str) {
         prompt = payload.field(".user_prompt");
     }
 
+    let root = git_toplevel();
     let mut matches = prompt_token_matches(&contents, &prompt);
     for touched_abs in touched_paths(dir) {
-        let relpath = repo_relative_path(&touched_abs);
+        let relpath = repo_relative_path(&root, &touched_abs);
         if relpath.is_empty() {
             continue;
         }
@@ -160,7 +162,6 @@ fn run_prompt(payload: &Payload, dir: &str) {
     let seen_path = Path::new(dir).join("prompt-recall-seen.tsv");
     let seen = read_seen(&seen_path);
 
-    let root = git_toplevel();
     let mut newly_seen = Vec::new();
     let mut bodies = Vec::new();
     for row in &matches {
@@ -309,8 +310,7 @@ fn read_fact_body(file: &str) -> Option<String> {
 /// (usually absolute) `file_path`, so strip the git worktree root off it. No
 /// worktree root, or a `file_path` outside it: fall back to stripping a
 /// single leading slash, matching `hooks/memory-anchors.py`.
-fn repo_relative_path(raw_path: &str) -> String {
-    let root = git_toplevel();
+fn repo_relative_path(root: &str, raw_path: &str) -> String {
     let prefix = format!("{root}/");
     if !root.is_empty() {
         if let Some(stripped) = raw_path.strip_prefix(&prefix) {
@@ -361,8 +361,7 @@ fn matching_rows(idx_contents: &str, relpath: &str) -> Vec<Vec<String>> {
     matches
 }
 
-fn format_message(relpath: &str, matches: &[Vec<String>]) -> String {
-    let root = git_toplevel();
+fn format_message(root: &str, relpath: &str, matches: &[Vec<String>]) -> String {
     let mut msg = format!("Memory facts anchored to {relpath}:");
     for cols in matches {
         let name = cols.get(2).map(String::as_str).unwrap_or("");
@@ -380,7 +379,7 @@ fn format_message(relpath: &str, matches: &[Vec<String>]) -> String {
         if !neigh.is_empty() {
             line = format!("{line} ({neigh})");
         }
-        line.push_str(staleness_note(&root, from_id, anchor));
+        line.push_str(staleness_note(root, from_id, anchor));
         msg.push('\n');
         msg.push_str(&line);
     }
