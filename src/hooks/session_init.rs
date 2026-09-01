@@ -96,6 +96,7 @@ pub fn run(payload: &Payload) {
     let dir = session_dir(payload);
     let repo_root = git_toplevel();
 
+    migrate_legacy_graph_file(&home);
     zero_session_state(&dir);
     clear_statusline_cache();
 
@@ -111,9 +112,18 @@ pub fn run(payload: &Payload) {
     emit(&system_message, &extra_context);
 }
 
-/// Zero the five per-session counter files and stamp `start-ts`, matching
-/// hooks/session-init.py:86-98. A no-op when there is no session directory
-/// (no session id in the payload).
+/// Defensive fallback for a session starting before `playbook init` is re-run after an upgrade: renames a pre-rename `graph.json` to `memory.graph.json` if present. Silently does nothing on any failure.
+fn migrate_legacy_graph_file(home: &str) {
+    let mem_dir = Path::new(home).join(".claude").join("memory");
+    let old_path = mem_dir.join("graph.json");
+    let new_path = mem_dir.join("memory.graph.json");
+    if new_path.exists() || !old_path.is_file() {
+        return;
+    }
+    let _ = fs::rename(&old_path, &new_path);
+}
+
+/// Zeroes the five per-session counter files and stamps `start-ts`, matching hooks/session-init.py:86-98. A no-op when there is no session directory (no session id in the payload).
 fn zero_session_state(dir: &str) {
     if dir.is_empty() {
         return;
