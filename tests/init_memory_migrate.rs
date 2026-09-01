@@ -109,7 +109,12 @@ fn new_file_present_without_old_file_reports_already_correct() {
     let report = migrate_memory_store(&claude_home);
 
     // Assert
-    assert_eq!(report.status, StepStatus::AlreadyCorrect, "{}", report.detail);
+    assert_eq!(
+        report.status,
+        StepStatus::AlreadyCorrect,
+        "{}",
+        report.detail
+    );
     assert!(!old_graph_path(&claude_home).exists());
 }
 
@@ -120,13 +125,22 @@ fn new_file_present_with_old_file_also_present_leaves_old_untouched() {
     let claude_home = claude_home_of(&home);
     fs::create_dir_all(mem_dir_of(&claude_home)).unwrap();
     fs::write(new_graph_path(&claude_home), "new content").unwrap();
-    fs::write(old_graph_path(&claude_home), "old content, must stay untouched").unwrap();
+    fs::write(
+        old_graph_path(&claude_home),
+        "old content, must stay untouched",
+    )
+    .unwrap();
 
     // Act
     let report = migrate_memory_store(&claude_home);
 
     // Assert
-    assert_eq!(report.status, StepStatus::AlreadyCorrect, "{}", report.detail);
+    assert_eq!(
+        report.status,
+        StepStatus::AlreadyCorrect,
+        "{}",
+        report.detail
+    );
     assert_eq!(
         fs::read_to_string(old_graph_path(&claude_home)).unwrap(),
         "old content, must stay untouched",
@@ -152,7 +166,12 @@ fn migrate_memory_store_is_idempotent_on_repeated_calls() {
 
     // Assert
     assert_eq!(first.status, StepStatus::Wired, "{}", first.detail);
-    assert_eq!(second.status, StepStatus::AlreadyCorrect, "{}", second.detail);
+    assert_eq!(
+        second.status,
+        StepStatus::AlreadyCorrect,
+        "{}",
+        second.detail
+    );
     assert_eq!(
         fs::read_to_string(new_graph_path(&claude_home)).unwrap(),
         GRAPH_CONTENT,

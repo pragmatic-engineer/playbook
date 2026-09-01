@@ -43,9 +43,7 @@ fn seed_repo_with_anchor(repo_root: &Path, content: &str) -> PathBuf {
 }
 
 /// A call-counting fake git lookup returning a fixed date every call.
-fn counting_lookup(
-    fixed_date: Option<i64>,
-) -> (impl Fn(&Path) -> Option<i64>, Rc<Cell<u32>>) {
+fn counting_lookup(fixed_date: Option<i64>) -> (impl Fn(&Path) -> Option<i64>, Rc<Cell<u32>>) {
     let calls = Rc::new(Cell::new(0u32));
     let calls_inner = calls.clone();
     let lookup = move |_: &Path| -> Option<i64> {
