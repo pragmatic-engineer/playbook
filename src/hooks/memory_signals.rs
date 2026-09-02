@@ -136,6 +136,24 @@ pub fn set_staleness(mem_dir: &Path, node_id: &str, stale: bool, verified_hash: 
     });
 }
 
+/// The consolidation cursor's last recorded pass time, in epoch seconds.
+/// `None` before the first pass ever ran, or on a missing/unparsable file.
+pub fn read_cursor(mem_dir: &Path) -> Option<u64> {
+    read_store(mem_dir)?
+        .cursor
+        .last_run_at
+        .and_then(|s| s.parse::<u64>().ok())
+}
+
+/// Stamps the consolidation cursor with the current time, so the next pass
+/// only considers facts touched since.
+pub fn advance_cursor(mem_dir: &Path) {
+    let now = current_epoch_secs().to_string();
+    modify_locked(mem_dir, |store| {
+        store.cursor.last_run_at = Some(now.clone());
+    });
+}
+
 fn current_epoch_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

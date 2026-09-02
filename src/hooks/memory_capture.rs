@@ -37,6 +37,7 @@
 use crate::cc::{logical_cwd, project_slug};
 use crate::common::session::memory_dir;
 use crate::common::{emit_block, home_dir, session_dir, Payload};
+use crate::hooks::memory_signals;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
@@ -67,6 +68,13 @@ const STRONG_HANDOFF_NUDGE: &str = "\n\nThis session has crossed the capture thr
 times with no handoff saved yet; run /playbook:session-handoff now, before continuing, so the \
 next session does not have to re-read this one.";
 
+/// `memory.graph.json` node count at or above which a re-block also scans
+/// for consolidation candidates.
+const CONSOLIDATION_NODE_THRESHOLD: usize = 10;
+
+/// A fact file's size in bytes above which it counts as oversized.
+const OVERSIZED_FACT_BYTES: u64 = 2000;
+
 /// Stop entry point. A detected write releases the marker silently;
 /// otherwise it re-blocks up to `REBLOCK_CAP` times, then fails open.
 pub fn run(payload: &Payload) {
@@ -87,7 +95,8 @@ pub fn run(payload: &Payload) {
         Err(_) => return release(&marker, &attempts_path),
     };
 
-    let graph_path = memory_dir().join("memory.graph.json");
+    let mem_dir = memory_dir();
+    let graph_path = mem_dir.join("memory.graph.json");
     let write_detected = match fs::metadata(&graph_path) {
         Ok(meta) => match meta.modified() {
             Ok(graph_mtime) => graph_mtime > marker_mtime,
@@ -115,7 +124,13 @@ pub fn run(payload: &Payload) {
     let edits_path = dir_path.join("edits.jsonl");
     let unique = unique_paths_recent_first(&edits_path);
     let escalate_handoff = should_escalate_handoff(dir_path);
-    emit_block(&build_block_body(&unique, next_attempt, escalate_handoff));
+    let consolidation = consolidation_mention(&mem_dir);
+    emit_block(&build_block_body(
+        &unique,
+        next_attempt,
+        escalate_handoff,
+        consolidation.as_deref(),
+    ));
 }
 
 /// Best-effort remove both state files, releasing without blocking. Used by
@@ -136,8 +151,13 @@ fn read_attempts(path: &Path) -> Option<i64> {
 }
 
 /// Build a no-write re-block reason: `INTRO`, the edited-path listing,
-/// `HANDOFF_NUDGE`, the attempt count, then `STRONG_HANDOFF_NUDGE` if escalated.
-fn build_block_body(unique: &[String], attempt: i64, escalate_handoff: bool) -> String {
+/// `HANDOFF_NUDGE`, the attempt count, then `escalate_handoff`/`consolidation` if present.
+fn build_block_body(
+    unique: &[String],
+    attempt: i64,
+    escalate_handoff: bool,
+    consolidation: Option<&str>,
+) -> String {
     let mut body = String::from(INTRO);
     if !unique.is_empty() {
         let total = unique.len();
@@ -161,6 +181,9 @@ threshold; still no new memory fact detected."
     ));
     if escalate_handoff {
         body.push_str(STRONG_HANDOFF_NUDGE);
+    }
+    if let Some(text) = consolidation {
+        body.push_str(text);
     }
     body
 }
@@ -218,6 +241,99 @@ fn freshest_handoff_mtime() -> Option<SystemTime> {
             entry.metadata().ok()?.modified().ok()
         })
         .max()
+}
+
+/// Scans facts touched since `memory.signals.json`'s cursor for
+/// consolidation candidates, once the store is at or above `CONSOLIDATION_NODE_THRESHOLD`.
+fn consolidation_mention(mem_dir: &Path) -> Option<String> {
+    let content = fs::read_to_string(mem_dir.join("memory.graph.json")).ok()?;
+    let graph: Value = serde_json::from_str(&content).ok()?;
+    let nodes = graph.get("nodes").and_then(Value::as_array)?;
+    if nodes.len() < CONSOLIDATION_NODE_THRESHOLD {
+        return None;
+    }
+
+    let cursor_since = memory_signals::read_cursor(mem_dir);
+    let touched: HashSet<String> = nodes
+        .iter()
+        .filter_map(|n| touched_node_id(mem_dir, n, cursor_since))
+        .collect();
+
+    let superseded_count = graph
+        .get("edges")
+        .and_then(Value::as_array)
+        .map(|edges| count_touched_superseded(edges, &touched))
+        .unwrap_or(0);
+    let oversized_count = nodes
+        .iter()
+        .filter(|n| is_touched_oversized(mem_dir, n, &touched))
+        .count();
+
+    memory_signals::advance_cursor(mem_dir);
+
+    if superseded_count == 0 && oversized_count == 0 {
+        return None;
+    }
+    Some(build_consolidation_text(superseded_count, oversized_count))
+}
+
+/// `node`'s id, if its fact file's mtime is newer than `cursor_since`
+/// (or `cursor_since` is `None`, meaning no pass has ever run).
+fn touched_node_id(mem_dir: &Path, node: &Value, cursor_since: Option<u64>) -> Option<String> {
+    let id = node.get("id").and_then(Value::as_str)?;
+    let file = node.get("file").and_then(Value::as_str)?;
+    let mtime = fs::metadata(mem_dir.join(file)).ok()?.modified().ok()?;
+    let touched = match cursor_since {
+        Some(since) => mtime.duration_since(UNIX_EPOCH).ok()?.as_secs() > since,
+        None => true,
+    };
+    touched.then(|| id.to_string())
+}
+
+/// Count of `supersedes` edges whose superseded (`to`) node is in `touched`.
+fn count_touched_superseded(edges: &[Value], touched: &HashSet<String>) -> usize {
+    edges
+        .iter()
+        .filter(|e| e.get("relation").and_then(Value::as_str) == Some("supersedes"))
+        .filter_map(|e| e.get("to").and_then(Value::as_str))
+        .filter(|to| touched.contains(*to))
+        .count()
+}
+
+/// Whether `node` is touched and its fact file exceeds `OVERSIZED_FACT_BYTES`.
+fn is_touched_oversized(mem_dir: &Path, node: &Value, touched: &HashSet<String>) -> bool {
+    let Some(id) = node.get("id").and_then(Value::as_str) else {
+        return false;
+    };
+    if !touched.contains(id) {
+        return false;
+    }
+    node.get("file")
+        .and_then(Value::as_str)
+        .and_then(|file| fs::metadata(mem_dir.join(file)).ok())
+        .is_some_and(|meta| meta.len() > OVERSIZED_FACT_BYTES)
+}
+
+/// The consolidation-mention sentence naming whichever candidate kinds were found.
+fn build_consolidation_text(superseded_count: usize, oversized_count: usize) -> String {
+    let mut parts = Vec::new();
+    if superseded_count > 0 {
+        parts.push(format!(
+            "{superseded_count} superseded fact{} still in the store",
+            if superseded_count == 1 { "" } else { "s" }
+        ));
+    }
+    if oversized_count > 0 {
+        parts.push(format!(
+            "{oversized_count} fact{} grown large enough to split",
+            if oversized_count == 1 { "" } else { "s" }
+        ));
+    }
+    format!(
+        "\n\nThe memory store has also grown large enough to flag a consolidation candidate \
+from recent activity: {}. Worth a pass before it grows further.",
+        parts.join(" and ")
+    )
 }
 
 /// Unique edited paths from `edits.jsonl`, most recently edited first.

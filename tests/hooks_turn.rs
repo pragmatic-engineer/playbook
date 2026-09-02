@@ -1209,4 +1209,250 @@ mod memory_capture {
             "unparseable crossings should default to 0, not nudge: {reason}"
         );
     }
+
+    // ── consolidation nudge ──────────────────────────────────────────────
+
+    /// Matches `memory_capture.rs::CONSOLIDATION_NODE_THRESHOLD`.
+    const CONSOLIDATION_NODE_THRESHOLD: usize = 10;
+
+    /// Matches `memory_capture.rs::OVERSIZED_FACT_BYTES`.
+    const OVERSIZED_FACT_BYTES: usize = 2000;
+
+    /// The substring common to every consolidation-mention sentence.
+    const CONSOLIDATION_MARKER: &str = "consolidation candidate";
+
+    /// Writes `memory.graph.json` with one node per id (each pointing at
+    /// `<id>.md`) plus the given edges, then writes each `<id>.md` file.
+    fn write_graph(
+        mem_dir: &Path,
+        node_ids: &[&str],
+        edges: &[(&str, &str, &str)],
+        body_bytes: usize,
+    ) {
+        fs::create_dir_all(mem_dir).unwrap();
+        let nodes: Vec<serde_json::Value> = node_ids
+            .iter()
+            .map(|id| serde_json::json!({"id": id, "file": format!("{id}.md")}))
+            .collect();
+        let edges: Vec<serde_json::Value> = edges
+            .iter()
+            .map(|(from, to, relation)| {
+                serde_json::json!({"from": from, "to": to, "relation": relation})
+            })
+            .collect();
+        let graph = serde_json::json!({"nodes": nodes, "edges": edges, "version": 1});
+        fs::write(
+            mem_dir.join("memory.graph.json"),
+            serde_json::to_string(&graph).unwrap(),
+        )
+        .unwrap();
+        for id in node_ids {
+            fs::write(mem_dir.join(format!("{id}.md")), "a".repeat(body_bytes)).unwrap();
+        }
+    }
+
+    /// Writes `memory.signals.json` with only a cursor set to `epoch_secs`.
+    fn write_cursor(mem_dir: &Path, epoch_secs: u64) {
+        fs::create_dir_all(mem_dir).unwrap();
+        let signals = serde_json::json!({"version": 1, "cursor": {"last_run_at": epoch_secs.to_string()}, "nodes": {}});
+        fs::write(
+            mem_dir.join("memory.signals.json"),
+            serde_json::to_string(&signals).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// Auto-generated node ids `fact-0..count`.
+    fn node_ids(count: usize) -> Vec<String> {
+        (0..count).map(|i| format!("fact-{i}")).collect()
+    }
+
+    #[test]
+    fn consolidation_mention_absent_below_node_threshold() {
+        // Arrange: one node short of the threshold, with a supersedes edge
+        // that would otherwise qualify, pinning the count gate itself.
+        let home = scratch_home("mc-consolidation-below-threshold");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let mem_dir = memory_dir_for(&home);
+        let ids = node_ids(CONSOLIDATION_NODE_THRESHOLD - 1);
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        write_graph(
+            &mem_dir,
+            &id_refs,
+            &[("fact-0", "fact-1", "supersedes")],
+            10,
+        );
+        let marker = dir.join("capture-due");
+        fs::write(&marker, "").unwrap();
+
+        // Act
+        let (stdout, _code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert: baseline reblock reason, unchanged.
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("re-block 1 of 2"), "reason: {reason}");
+        assert!(
+            !reason.contains(CONSOLIDATION_MARKER),
+            "reason should not mention consolidation below the node threshold: {reason}"
+        );
+    }
+
+    #[test]
+    fn consolidation_mention_appears_at_threshold_for_touched_superseded_fact() {
+        // Arrange: node count exactly at the threshold, a supersedes edge
+        // whose target is touched (no cursor yet, so everything counts).
+        let home = scratch_home("mc-consolidation-at-threshold");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let mem_dir = memory_dir_for(&home);
+        let ids = node_ids(CONSOLIDATION_NODE_THRESHOLD);
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        write_graph(
+            &mem_dir,
+            &id_refs,
+            &[("fact-0", "fact-1", "supersedes")],
+            10,
+        );
+        fs::write(dir.join("capture-due"), "").unwrap();
+
+        // Act
+        let (stdout, _code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(
+            reason.contains(CONSOLIDATION_MARKER),
+            "reason should mention a consolidation candidate at the threshold: {reason}"
+        );
+    }
+
+    #[test]
+    fn consolidation_mention_absent_for_facts_untouched_since_cursor() {
+        // Arrange: same qualifying store, cursor stamped far in the future.
+        let home = scratch_home("mc-consolidation-untouched");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let mem_dir = memory_dir_for(&home);
+        let ids = node_ids(CONSOLIDATION_NODE_THRESHOLD);
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        write_graph(
+            &mem_dir,
+            &id_refs,
+            &[("fact-0", "fact-1", "supersedes")],
+            10,
+        );
+        write_cursor(&mem_dir, 4_102_444_800);
+        fs::write(dir.join("capture-due"), "").unwrap();
+
+        // Act
+        let (stdout, _code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(
+            !reason.contains(CONSOLIDATION_MARKER),
+            "reason should not mention a candidate untouched since the cursor: {reason}"
+        );
+    }
+
+    #[test]
+    fn consolidation_mention_appears_for_touched_oversized_fact() {
+        // Arrange: no supersedes edge, one fact's body past the byte cap.
+        let home = scratch_home("mc-consolidation-oversized");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let mem_dir = memory_dir_for(&home);
+        let ids = node_ids(CONSOLIDATION_NODE_THRESHOLD);
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        write_graph(&mem_dir, &id_refs, &[], 10);
+        fs::write(
+            mem_dir.join("fact-0.md"),
+            "a".repeat(OVERSIZED_FACT_BYTES + 1),
+        )
+        .unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+
+        // Act
+        let (stdout, _code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(
+            reason.contains(CONSOLIDATION_MARKER),
+            "reason should mention the oversized fact: {reason}"
+        );
+    }
+
+    #[test]
+    fn consolidation_scan_advances_the_cursor() {
+        // Arrange: a qualifying store, no cursor written yet.
+        let home = scratch_home("mc-consolidation-cursor-advance");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let mem_dir = memory_dir_for(&home);
+        let ids = node_ids(CONSOLIDATION_NODE_THRESHOLD);
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        write_graph(
+            &mem_dir,
+            &id_refs,
+            &[("fact-0", "fact-1", "supersedes")],
+            10,
+        );
+        fs::write(dir.join("capture-due"), "").unwrap();
+        assert!(!mem_dir.join("memory.signals.json").exists());
+
+        // Act
+        run_hook("memory-capture", &home, &payload());
+
+        // Assert: the scan wrote a fresh cursor back.
+        let signals: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(mem_dir.join("memory.signals.json"))
+                .expect("consolidation scan should have written memory.signals.json"),
+        )
+        .expect("memory.signals.json should be valid JSON");
+        let last_run_at = signals["cursor"]["last_run_at"]
+            .as_str()
+            .expect("cursor.last_run_at should be a string");
+        assert!(
+            last_run_at.parse::<u64>().is_ok(),
+            "cursor.last_run_at should parse as an epoch-seconds timestamp, got {last_run_at}"
+        );
+    }
+
+    #[test]
+    fn consolidation_scan_never_blocks_reblock_cap_from_releasing() {
+        // Arrange: a qualifying, candidate-bearing store, attempts at cap.
+        let home = scratch_home("mc-consolidation-cap-releases");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let mem_dir = memory_dir_for(&home);
+        let ids = node_ids(CONSOLIDATION_NODE_THRESHOLD);
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        write_graph(
+            &mem_dir,
+            &id_refs,
+            &[("fact-0", "fact-1", "supersedes")],
+            10,
+        );
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-attempts"), "2").unwrap();
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert: released, no block, regardless of the qualifying store.
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+        assert!(!dir.join("capture-due").exists());
+        assert!(!dir.join("capture-attempts").exists());
+    }
 }
