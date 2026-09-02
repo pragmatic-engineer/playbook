@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/memory-capture.py: a Stop hook that, when statusline.sh has
-//! dropped a `capture-due` marker in the session dir, pauses the turn with
-//! `{"decision":"block","reason":<text>}` asking the model to write down
-//! durable facts before continuing. It fires once per threshold crossing:
-//! the marker is consumed (deleted) as soon as it is seen, before the
-//! reason text is even built, so a run that fails partway through still
-//! leaves the marker gone rather than stuck blocking every future turn.
+//! Ports hooks/memory-capture.py: a Stop hook that pauses the turn once
+//! statusline.sh's `capture-due` marker fires.
+
+//! `{"decision":"block","reason":<text>}` asks the model to write down
+//! durable facts before continuing.
+
+//! The marker releases silently once a fact write is detected, otherwise
+//! it retains for a bounded re-block; see `REBLOCK_CAP`.
 //!
 //! Two divergences from the python source, both driven by the "never panic"
 //! rule in SEGMENT-B-RULES.md rather than a behaviour choice:
@@ -34,13 +35,18 @@
 //!    this toolkit's own trusted writer touches the file.
 
 use crate::common::payload::Payload;
+use crate::common::session::memory_dir;
 use crate::common::{emit_block, session_dir};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
+use std::io;
 use std::path::Path;
 
 const MAX_PATHS: usize = 5;
+/// How many times a no-write invocation retains the marker and re-blocks
+/// before it releases unconditionally.
+const REBLOCK_CAP: i64 = 2;
 
 const INTRO: &str = "Context usage in this session just crossed the capture threshold. This \
 is a good moment to pause, not a problem: write down anything from this \
@@ -52,30 +58,76 @@ const HANDOFF_NUDGE: &str = "\n\nAlso worth doing now: if this feels like a natu
 point, run /playbook:session-handoff so the next session can pick up without re-reading \
 this one.";
 
-const OUTRO: &str = "\n\nThis prompt fires once per threshold crossing, so it will not \
-interrupt the next turn unless usage climbs past the threshold again.";
-
-/// Stop entry point. Never panics: a missing session id, a missing marker,
-/// or a missing/malformed edit log all resolve to either silence or a
-/// best-effort reason text.
+/// Stop entry point. A detected write releases the marker silently;
+/// otherwise it re-blocks up to `REBLOCK_CAP` times, then fails open.
 pub fn run(payload: &Payload) {
     let dir = session_dir(payload);
     if dir.is_empty() {
         return;
     }
     let dir_path = Path::new(&dir);
-
     let marker = dir_path.join("capture-due");
-    if !marker.is_file() {
-        return;
+    let attempts_path = dir_path.join("capture-attempts");
+
+    let marker_mtime = match fs::metadata(&marker) {
+        Ok(meta) => match meta.modified() {
+            Ok(t) => t,
+            Err(_) => return release(&marker, &attempts_path),
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return,
+        Err(_) => return release(&marker, &attempts_path),
+    };
+
+    let graph_path = memory_dir().join("memory.graph.json");
+    let write_detected = match fs::metadata(&graph_path) {
+        Ok(meta) => match meta.modified() {
+            Ok(graph_mtime) => graph_mtime > marker_mtime,
+            Err(_) => return release(&marker, &attempts_path),
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => false,
+        Err(_) => return release(&marker, &attempts_path),
+    };
+    if write_detected {
+        return release(&marker, &attempts_path);
     }
-    // Consume the marker before building the reason text: a marker that
-    // survives a later failure would block every turn after this one.
-    let _ = fs::remove_file(&marker);
+
+    let attempts = match read_attempts(&attempts_path) {
+        Some(n) => n,
+        None => return release(&marker, &attempts_path),
+    };
+    if attempts >= REBLOCK_CAP {
+        eprintln!("memory-capture: capture skipped, re-block cap reached");
+        return release(&marker, &attempts_path);
+    }
+
+    let next_attempt = attempts + 1;
+    let _ = fs::write(&attempts_path, next_attempt.to_string());
 
     let edits_path = dir_path.join("edits.jsonl");
     let unique = unique_paths_recent_first(&edits_path);
+    emit_block(&build_block_body(&unique, next_attempt));
+}
 
+/// Best-effort remove both state files, releasing without blocking. Used by
+/// every release path: a detected write, a fail-open error, and the cap.
+fn release(marker: &Path, attempts_path: &Path) {
+    let _ = fs::remove_file(marker);
+    let _ = fs::remove_file(attempts_path);
+}
+
+/// Parse `capture-attempts`'s integer contents. Absent means no attempt yet
+/// (`Some(0)`); unparseable or unreadable is `None`, the fail-open signal.
+fn read_attempts(path: &Path) -> Option<i64> {
+    match fs::read_to_string(path) {
+        Ok(contents) => contents.trim().parse::<i64>().ok(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Some(0),
+        Err(_) => None,
+    }
+}
+
+/// Build a no-write re-block reason: `INTRO`, the edited-path listing,
+/// `HANDOFF_NUDGE`, then a sentence naming this attempt out of `REBLOCK_CAP`.
+fn build_block_body(unique: &[String], attempt: i64) -> String {
     let mut body = String::from(INTRO);
     if !unique.is_empty() {
         let total = unique.len();
@@ -93,9 +145,11 @@ for capture worthy facts:\n",
         }
     }
     body.push_str(HANDOFF_NUDGE);
-    body.push_str(OUTRO);
-
-    emit_block(&body);
+    body.push_str(&format!(
+        "\n\nThis is re-block {attempt} of {REBLOCK_CAP} since context usage crossed the \
+threshold; still no new memory fact detected."
+    ));
+    body
 }
 
 /// Unique edited paths from `edits.jsonl`, most recently edited first.

@@ -13,6 +13,7 @@
 use crate::common::atomic::with_dir_lock;
 use crate::common::home_dir;
 use crate::common::payload::Payload;
+use crate::common::session::memory_dir;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -57,10 +58,6 @@ fn expand_tilde(path: &str) -> String {
         Some(rest) => format!("{}{rest}", home_dir().to_string_lossy()),
         None => path.to_string(),
     }
-}
-
-fn memory_dir() -> PathBuf {
-    home_dir().join(".claude").join("memory")
 }
 
 /// Return the fact's markdown body: everything after the closing `---` line

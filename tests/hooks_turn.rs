@@ -430,39 +430,77 @@ mod memory_capture {
         format!(r#"{{"session_id":"{SID}"}}"#)
     }
 
+    /// `$HOME/.claude/memory`, matching how the hooks derive the shared
+    /// memory root.
+    fn memory_dir_for(home: &Path) -> PathBuf {
+        home.join(".claude").join("memory")
+    }
+
+    /// Write `older_path`, sleep briefly, write `newer_path`, then poll up
+    /// to 500ms confirming the mtime ordering actually holds.
+    fn write_with_older_then_newer_mtime(older_path: &Path, newer_path: &Path) {
+        fs::write(older_path, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(newer_path, "{}").unwrap();
+
+        let older_mtime = fs::metadata(older_path).unwrap().modified().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        loop {
+            let newer_mtime = fs::metadata(newer_path).unwrap().modified().unwrap();
+            if newer_mtime > older_mtime {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!(
+                    "filesystem mtime resolution could not distinguish {} from {} within 500ms",
+                    older_path.display(),
+                    newer_path.display()
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn marker_present_fires_once_and_clears_the_marker() {
-        // Arrange
+        // Arrange: graph.json mtime newer than the marker's, so this hits
+        // the write-detected release path, not the retain-and-reblock path.
         let home = scratch_home("mc-fires");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        let marker = dir.join("capture-due");
+        let mem_dir = memory_dir_for(&home);
+        fs::create_dir_all(&mem_dir).unwrap();
+        let graph = mem_dir.join("memory.graph.json");
+        write_with_older_then_newer_mtime(&marker, &graph);
 
         // Act
         let (stdout, code) = run_hook("memory-capture", &home, &payload());
 
-        // Assert
+        // Assert: a detected write releases silently and consumes the marker.
         assert_eq!(code, 0);
-        let value: serde_json::Value =
-            serde_json::from_str(&stdout).expect("output should be valid JSON");
-        assert_eq!(value["decision"], "block");
-        assert!(!value["reason"].as_str().unwrap_or_default().is_empty());
+        assert_eq!(stdout, "");
         assert!(
-            !dir.join("capture-due").exists(),
-            "marker should be cleared after firing"
+            !marker.exists(),
+            "marker should be cleared once a write is detected"
         );
     }
 
     #[test]
     fn second_call_with_marker_already_consumed_is_silent() {
-        // Arrange
+        // Arrange: same write-detected precondition, so the first call
+        // consumes the marker via the silent-release path.
         let home = scratch_home("mc-second-call");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        let marker = dir.join("capture-due");
+        let mem_dir = memory_dir_for(&home);
+        fs::create_dir_all(&mem_dir).unwrap();
+        let graph = mem_dir.join("memory.graph.json");
+        write_with_older_then_newer_mtime(&marker, &graph);
         run_hook("memory-capture", &home, &payload());
 
-        // Act: the first call already deleted the marker, so a second run
+        // Act: the first call already consumed the marker, so a second run
         // in the same session must emit nothing.
         let (stdout, code) = run_hook("memory-capture", &home, &payload());
 
@@ -686,5 +724,253 @@ mod memory_capture {
             serde_json::from_str(&stdout).expect("output should be valid JSON");
         assert_eq!(value["decision"], "block");
         assert!(!value["reason"].as_str().unwrap_or_default().is_empty());
+    }
+
+    #[test]
+    fn write_detected_releases_marker_silently() {
+        // Arrange: capture-attempts pre-seeded, simulating a prior
+        // re-block, plus a graph write newer than the marker.
+        let home = scratch_home("mc-write-detected");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("capture-due");
+        let attempts = dir.join("capture-attempts");
+        fs::write(&attempts, "1").unwrap();
+        let mem_dir = memory_dir_for(&home);
+        fs::create_dir_all(&mem_dir).unwrap();
+        let graph = mem_dir.join("memory.graph.json");
+        write_with_older_then_newer_mtime(&marker, &graph);
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert: no block, and the stale attempts state is cleared too.
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+        assert!(!marker.exists());
+        assert!(!attempts.exists());
+    }
+
+    #[test]
+    fn no_graph_file_present_retains_marker_and_reblocks() {
+        // Arrange: no memory.graph.json at all.
+        let home = scratch_home("mc-no-graph");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("capture-due");
+        fs::write(&marker, "").unwrap();
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        assert_eq!(value["decision"], "block");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("re-block 1 of 2"), "reason: {reason}");
+        assert!(marker.exists(), "marker should be retained for a re-block");
+        assert_eq!(
+            fs::read_to_string(dir.join("capture-attempts"))
+                .unwrap()
+                .trim(),
+            "1"
+        );
+    }
+
+    #[test]
+    fn graph_file_older_than_marker_retains_marker_and_reblocks() {
+        // Arrange: a stale graph from before this crossing.
+        let home = scratch_home("mc-stale-graph");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let mem_dir = memory_dir_for(&home);
+        fs::create_dir_all(&mem_dir).unwrap();
+        let graph = mem_dir.join("memory.graph.json");
+        let marker = dir.join("capture-due");
+        write_with_older_then_newer_mtime(&graph, &marker);
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        assert_eq!(value["decision"], "block");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("re-block 1 of 2"), "reason: {reason}");
+        assert!(marker.exists());
+        assert_eq!(
+            fs::read_to_string(dir.join("capture-attempts"))
+                .unwrap()
+                .trim(),
+            "1"
+        );
+    }
+
+    #[test]
+    fn no_write_at_cap_minus_one_still_reblocks() {
+        // Arrange
+        let home = scratch_home("mc-cap-minus-one");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-attempts"), "1").unwrap();
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        assert_eq!(value["decision"], "block");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("re-block 2 of 2"), "reason: {reason}");
+        assert_eq!(
+            fs::read_to_string(dir.join("capture-attempts"))
+                .unwrap()
+                .trim(),
+            "2"
+        );
+    }
+
+    #[test]
+    fn no_write_at_cap_releases_without_blocking() {
+        // Arrange
+        let home = scratch_home("mc-at-cap");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-attempts"), "2").unwrap();
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+        assert!(!dir.join("capture-due").exists());
+        assert!(!dir.join("capture-attempts").exists());
+    }
+
+    /// Restores a directory's permissions on drop, so a panic between the
+    /// chmod and the restore still leaves the fixture cleaned up.
+    #[cfg(unix)]
+    struct RestorePerms {
+        path: PathBuf,
+        mode: u32,
+    }
+
+    #[cfg(unix)]
+    impl Drop for RestorePerms {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(self.mode));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_marker_mtime_fails_open() {
+        use std::io::ErrorKind;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Arrange: strip the session dir's own permissions so stat'ing the
+        // marker fails with PermissionDenied, not NotFound.
+        let home = scratch_home("mc-unreadable-marker");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("capture-due");
+        fs::write(&marker, "").unwrap();
+
+        let original_mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
+        let _guard = RestorePerms {
+            path: dir.clone(),
+            mode: original_mode,
+        };
+
+        match fs::metadata(&marker) {
+            Ok(_) => {
+                eprintln!("skipping: chmod 000 was bypassed (root or CAP_DAC_OVERRIDE)");
+                return;
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                panic!("fixture broke: expected PermissionDenied, got NotFound");
+            }
+            Err(_) => {}
+        }
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "", "an unreadable marker must fail open, not block");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_graph_mtime_fails_open() {
+        use std::io::ErrorKind;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Arrange: the marker reads fine; only the memory dir is
+        // restricted, so stat'ing memory.graph.json fails.
+        let home = scratch_home("mc-unreadable-graph");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        let mem_dir = memory_dir_for(&home);
+        fs::create_dir_all(&mem_dir).unwrap();
+
+        let original_mode = fs::metadata(&mem_dir).unwrap().permissions().mode() & 0o777;
+        fs::set_permissions(&mem_dir, fs::Permissions::from_mode(0o000)).unwrap();
+        let _guard = RestorePerms {
+            path: mem_dir.clone(),
+            mode: original_mode,
+        };
+
+        let graph = mem_dir.join("memory.graph.json");
+        match fs::metadata(&graph) {
+            Ok(_) => {
+                eprintln!("skipping: chmod 000 was bypassed (root or CAP_DAC_OVERRIDE)");
+                return;
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                panic!("fixture broke: expected PermissionDenied, got NotFound");
+            }
+            Err(_) => {}
+        }
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        assert_eq!(
+            stdout, "",
+            "an unreadable memory.graph.json must fail open, not block"
+        );
+    }
+
+    #[test]
+    fn corrupt_attempts_file_fails_open() {
+        // Arrange
+        let home = scratch_home("mc-corrupt-attempts");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-attempts"), "garbage").unwrap();
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert: fail open, not "treated as 0 and re-blocked".
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
     }
 }
