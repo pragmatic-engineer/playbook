@@ -46,17 +46,10 @@ mkdir -p "$BIN_DIR"
 cp "$BIN_SRC" "$BIN_DIR/playbook"
 chmod 0755 "$BIN_DIR/playbook"
 
-# seed_shipped_extras <src>: the files every scenario needs `playbook init`
-# to complete WITHOUT a guards/statusline failure -- the 4 guard scripts and a
-# stub statusline.sh -- so a scenario's own assertions are not drowned out by
-# an unrelated step failing. Scenarios that want to test a missing template
-# skip calling this for settings.shared.json specifically.
+# seed_shipped_extras <src>: the stub statusline.sh every scenario needs so
+# `playbook init` completes. Guards are `playbook hook <name>` commands built into the binary, nothing to stage under hooks/.
 seed_shipped_extras() {
   local src="$1"
-  mkdir -p "$src/hooks"
-  for g in rm-workspace-guard bg-await-guard no-slop-guard precommit-check; do
-    cp "$REPO_ROOT/hooks/$g.sh" "$src/hooks/$g.sh"
-  done
   printf '#!/bin/sh\necho ok\n' > "$src/statusline.sh"
 }
 
@@ -76,13 +69,8 @@ run_scenario() {
   if "$fn"; then pass "$name"; else fail "$name"; fi
 }
 
-# (A) Fresh install: settings.json is valid JSON, every non-hooks key matches
-# the template (compared as parsed JSON, not bytes: merge::merge serialises
-# with sorted keys, so a raw template copy is never byte-identical to it once
-# a real settings.json exists), and all 15 ported hooks (11 functional plus
-# the 4 safety guards, ported as of WU-13) are wired on top, 17 entries since
-# session-clean-exit fires on both Stop and SessionEnd, and, since ADR 0008,
-# memory-anchors fires on both PreToolUse and UserPromptSubmit too.
+# (A) Fresh install: settings.json is valid JSON, matches the template on
+# every non-hooks key, and wires 15 distinct hooks as 18 entries (3 fire on two matchers each).
 scenario_fresh() {
   local d src home log rc
   d="$(mktemp -d "$WORK/fresh.XXXXXX")"
@@ -101,7 +89,7 @@ scenario_fresh() {
     || { echo "  non-hooks keys differ from the template"; return 1; }
   local n_ported
   n_ported="$(jq '[.hooks[]?[]?.hooks[]?.command] | map(select(startswith("playbook hook "))) | length' "$settings")"
-  [ "$n_ported" = "17" ] || { echo "  expected 17 ported hook commands (15 distinct), got $n_ported"; return 1; }
+  [ "$n_ported" = "18" ] || { echo "  expected 18 ported hook commands (15 distinct), got $n_ported"; return 1; }
 }
 
 # (B) A user-authored hook entry in a pre-existing settings.json survives a
@@ -135,7 +123,7 @@ EOF
     || { echo "  user-authored hook entry lost: $(jq -c .hooks.Notification "$settings" 2>/dev/null)"; return 1; }
   local n_ported
   n_ported="$(jq '[.hooks[]?[]?.hooks[]?.command] | map(select(startswith("playbook hook "))) | length' "$settings")"
-  [ "$n_ported" = "17" ] || { echo "  ported hooks not wired alongside the user entry (got $n_ported)"; return 1; }
+  [ "$n_ported" = "18" ] || { echo "  ported hooks not wired alongside the user entry (got $n_ported)"; return 1; }
 }
 
 # (C) install.sh's own file-copy loop still skips a settings.json shipped in
