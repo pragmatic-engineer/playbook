@@ -217,6 +217,22 @@ assert_eq "crossing again after dropping under the line fires once more" \
     "$(_file_exists "$t4b_dir/capture-due")" "yes"
 rm -rf "$t4b_home"
 
+# 4c. capture-crossings tallies one per threshold CROSSING, not per render.
+t4c_home=$(mktemp -d)
+t4c_sid="sess-crossings"
+t4c_dir="$t4c_home/.claude/runtime/$t4c_sid"
+t4c_high=$(_telemetry_payload "$t4c_sid" 75 0.1 "$t4c_home")
+t4c_low=$(_telemetry_payload "$t4c_sid" 40 0.1 "$t4c_home")
+
+for _ in 1 2 3; do
+    HOME="$t4c_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4c_high" >/dev/null 2>&1
+    HOME="$t4c_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4c_high" >/dev/null 2>&1
+    HOME="$t4c_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4c_low" >/dev/null 2>&1
+done
+assert_eq "capture-crossings reads exactly 3 after three cross/drop/re-cross cycles" \
+    "$(cat "$t4c_dir/capture-crossings" 2>/dev/null)" "3"
+rm -rf "$t4c_home"
+
 # 5. Render survives an unwritable session dir (the ADR's safety pin).
 t5_home=$(mktemp -d)
 t5_sid="sess-unwritable"

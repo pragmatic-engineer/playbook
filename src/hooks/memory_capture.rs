@@ -34,14 +34,15 @@
 //!    that a corrupted `edits.jsonl` only happens if something other than
 //!    this toolkit's own trusted writer touches the file.
 
-use crate::common::payload::Payload;
+use crate::cc::{logical_cwd, project_slug};
 use crate::common::session::memory_dir;
-use crate::common::{emit_block, session_dir};
+use crate::common::{emit_block, home_dir, session_dir, Payload};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MAX_PATHS: usize = 5;
 /// How many times a no-write invocation retains the marker and re-blocks
@@ -57,6 +58,14 @@ project keeps. Then continue with the rest of the turn.";
 const HANDOFF_NUDGE: &str = "\n\nAlso worth doing now: if this feels like a natural stopping \
 point, run /playbook:session-handoff so the next session can pick up without re-reading \
 this one.";
+
+/// `capture-crossings` value at or above which a re-block escalates with
+/// `STRONG_HANDOFF_NUDGE`, once no handoff has been written this session.
+const CROSSING_ESCALATION_THRESHOLD: i64 = 3;
+
+const STRONG_HANDOFF_NUDGE: &str = "\n\nThis session has crossed the capture threshold several \
+times with no handoff saved yet; run /playbook:session-handoff now, before continuing, so the \
+next session does not have to re-read this one.";
 
 /// Stop entry point. A detected write releases the marker silently;
 /// otherwise it re-blocks up to `REBLOCK_CAP` times, then fails open.
@@ -105,7 +114,8 @@ pub fn run(payload: &Payload) {
 
     let edits_path = dir_path.join("edits.jsonl");
     let unique = unique_paths_recent_first(&edits_path);
-    emit_block(&build_block_body(&unique, next_attempt));
+    let escalate_handoff = should_escalate_handoff(dir_path);
+    emit_block(&build_block_body(&unique, next_attempt, escalate_handoff));
 }
 
 /// Best-effort remove both state files, releasing without blocking. Used by
@@ -126,8 +136,8 @@ fn read_attempts(path: &Path) -> Option<i64> {
 }
 
 /// Build a no-write re-block reason: `INTRO`, the edited-path listing,
-/// `HANDOFF_NUDGE`, then a sentence naming this attempt out of `REBLOCK_CAP`.
-fn build_block_body(unique: &[String], attempt: i64) -> String {
+/// `HANDOFF_NUDGE`, the attempt count, then `STRONG_HANDOFF_NUDGE` if escalated.
+fn build_block_body(unique: &[String], attempt: i64, escalate_handoff: bool) -> String {
     let mut body = String::from(INTRO);
     if !unique.is_empty() {
         let total = unique.len();
@@ -149,7 +159,65 @@ for capture worthy facts:\n",
         "\n\nThis is re-block {attempt} of {REBLOCK_CAP} since context usage crossed the \
 threshold; still no new memory fact detected."
     ));
+    if escalate_handoff {
+        body.push_str(STRONG_HANDOFF_NUDGE);
+    }
     body
+}
+
+/// Whether a re-block reason should escalate with `STRONG_HANDOFF_NUDGE`:
+/// crossings at or above the threshold, and no fresher handoff file.
+fn should_escalate_handoff(session_dir: &Path) -> bool {
+    let crossings = read_crossings(&session_dir.join("capture-crossings"));
+    if crossings < CROSSING_ESCALATION_THRESHOLD {
+        return false;
+    }
+    let start = read_start_ts(session_dir);
+    match freshest_handoff_mtime() {
+        Some(mtime) => mtime <= start,
+        None => true,
+    }
+}
+
+/// Parse `capture-crossings`'s integer contents; a missing or unparseable
+/// file starts from 0, matching `counter.rs::incr_counter`'s own fallback.
+fn read_crossings(path: &Path) -> i64 {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| contents.trim().parse::<i64>().ok())
+        .unwrap_or(0)
+}
+
+/// The session's recorded `start-ts`, or `SystemTime::now()` when missing or
+/// unparseable, so a broken start-ts can never swallow a nudge that should show.
+fn read_start_ts(session_dir: &Path) -> SystemTime {
+    fs::read_to_string(session_dir.join("start-ts"))
+        .ok()
+        .and_then(|contents| contents.trim().parse::<u64>().ok())
+        .map(|secs| UNIX_EPOCH + Duration::from_secs(secs))
+        .unwrap_or_else(SystemTime::now)
+}
+
+/// Freshest mtime among this worktree's handoff files (`<slug>-*.md` under
+/// `~/.claude/runtime/handoff`), read-only; `None` on no match or unreadable dir.
+fn freshest_handoff_mtime() -> Option<SystemTime> {
+    let slug = project_slug(&logical_cwd());
+    if slug.is_empty() {
+        return None;
+    }
+    let dir = home_dir().join(".claude").join("runtime").join("handoff");
+    let prefix = format!("{slug}-");
+    let entries = fs::read_dir(&dir).ok()?;
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            if !name.starts_with(&prefix) || !name.ends_with(".md") {
+                return None;
+            }
+            entry.metadata().ok()?.modified().ok()
+        })
+        .max()
 }
 
 /// Unique edited paths from `edits.jsonl`, most recently edited first.

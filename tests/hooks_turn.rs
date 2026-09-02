@@ -973,4 +973,240 @@ mod memory_capture {
         assert_eq!(code, 0);
         assert_eq!(stdout, "");
     }
+
+    // ── handoff nudge escalation ──────────────────────────────────────────
+
+    /// Matches `src/cc/mod.rs::project_slug`, duplicated here since this is
+    /// a black-box test of the compiled binary.
+    fn project_slug(path: &str) -> String {
+        path.chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect()
+    }
+
+    /// `Command::current_dir` alone does not set the child's `PWD`, and
+    /// `logical_cwd()` prefers `PWD`, so this sets both explicitly.
+    fn run_hook_at(cwd: &Path, home: &Path, stdin: &str) -> (String, i32) {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hook", "memory-capture"])
+            .current_dir(cwd)
+            .env("HOME", home)
+            .env("PWD", cwd)
+            .env_remove("HOOK_INPUT")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("playbook binary should spawn");
+        child
+            .stdin
+            .take()
+            .expect("child stdin should be piped")
+            .write_all(stdin.as_bytes())
+            .expect("writing hook input should succeed");
+        let output = child.wait_with_output().expect("child process should exit");
+        let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf8");
+        (
+            stdout.trim_end_matches('\n').to_string(),
+            output.status.code().unwrap_or(-1),
+        )
+    }
+
+    fn write_start_ts(dir: &Path, epoch_secs: u64) {
+        fs::write(dir.join("start-ts"), epoch_secs.to_string()).unwrap();
+    }
+
+    /// Writes a handoff file the way `skills/session-handoff/SKILL.md` does:
+    /// `<slug>-<suffix>.md` under `~/.claude/runtime/handoff`.
+    fn write_handoff(home: &Path, cwd: &Path) -> PathBuf {
+        let slug = project_slug(&cwd.to_string_lossy());
+        let dir = home.join(".claude").join("runtime").join("handoff");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{slug}-test.md"));
+        fs::write(&path, "HANDOFF").unwrap();
+        path
+    }
+
+    /// The marker string unique to the stronger escalation sentence, absent
+    /// from every other block reason this hook builds.
+    const STRONG_NUDGE_MARKER: &str = "no handoff saved yet";
+
+    #[test]
+    fn handoff_nudge_appears_when_crossings_at_threshold_and_no_handoff_written() {
+        // Arrange: no memory.graph.json (the no-write precondition),
+        // crossings at the escalation threshold, no handoff file at all.
+        let home = scratch_home("mc-nudge-at-threshold");
+        let cwd = scratch_home("mc-nudge-at-threshold-cwd");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-crossings"), "3").unwrap();
+        write_start_ts(&dir, 1_000_000_000);
+
+        // Act
+        let (stdout, _code) = run_hook_at(&cwd, &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(
+            reason.contains(STRONG_NUDGE_MARKER),
+            "reason should include the stronger handoff nudge: {reason}"
+        );
+    }
+
+    #[test]
+    fn handoff_nudge_appears_when_crossings_above_threshold() {
+        // Arrange: same preconditions, crossings past the threshold, guards
+        // a `== 3` implementation instead of `>= 3`.
+        let home = scratch_home("mc-nudge-above-threshold");
+        let cwd = scratch_home("mc-nudge-above-threshold-cwd");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-crossings"), "5").unwrap();
+        write_start_ts(&dir, 1_000_000_000);
+
+        // Act
+        let (stdout, _code) = run_hook_at(&cwd, &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(
+            reason.contains(STRONG_NUDGE_MARKER),
+            "reason should include the stronger handoff nudge: {reason}"
+        );
+    }
+
+    #[test]
+    fn handoff_nudge_absent_below_crossing_threshold() {
+        // Arrange: same preconditions, crossings below the threshold.
+        let home = scratch_home("mc-nudge-below-threshold");
+        let cwd = scratch_home("mc-nudge-below-threshold-cwd");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-crossings"), "2").unwrap();
+        write_start_ts(&dir, 1_000_000_000);
+
+        // Act
+        let (stdout, _code) = run_hook_at(&cwd, &home, &payload());
+
+        // Assert: the baseline reblock reason, unchanged.
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("re-block 1 of 2"), "reason: {reason}");
+        assert!(
+            !reason.contains(STRONG_NUDGE_MARKER),
+            "reason should not include the stronger handoff nudge below threshold: {reason}"
+        );
+    }
+
+    #[test]
+    fn handoff_nudge_absent_when_handoff_already_written() {
+        // Arrange: start-ts far in the past, so the handoff file (written
+        // with a real, current mtime) is newer than it.
+        let home = scratch_home("mc-nudge-handoff-written");
+        let cwd = scratch_home("mc-nudge-handoff-written-cwd");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-crossings"), "3").unwrap();
+        write_start_ts(&dir, 1);
+        write_handoff(&home, &cwd);
+
+        // Act
+        let (stdout, _code) = run_hook_at(&cwd, &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(
+            !reason.contains(STRONG_NUDGE_MARKER),
+            "reason should not nudge once a fresh handoff exists: {reason}"
+        );
+    }
+
+    #[test]
+    fn handoff_nudge_appears_when_handoff_is_stale() {
+        // Arrange: start-ts far in the future, so a handoff written with a
+        // real, current mtime reads as older than it, i.e. stale.
+        let home = scratch_home("mc-nudge-handoff-stale");
+        let cwd = scratch_home("mc-nudge-handoff-stale-cwd");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-crossings"), "3").unwrap();
+        write_start_ts(&dir, 4_102_444_800);
+        write_handoff(&home, &cwd);
+
+        // Act
+        let (stdout, _code) = run_hook_at(&cwd, &home, &payload());
+
+        // Assert
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(
+            reason.contains(STRONG_NUDGE_MARKER),
+            "reason should nudge when the only handoff found is stale: {reason}"
+        );
+    }
+
+    #[test]
+    fn handoff_nudge_never_fires_without_a_reblock() {
+        // Arrange: a detected write (the silent-release path), crossings
+        // well above the threshold.
+        let home = scratch_home("mc-nudge-no-reblock");
+        let cwd = scratch_home("mc-nudge-no-reblock-cwd");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("capture-due");
+        let mem_dir = memory_dir_for(&home);
+        fs::create_dir_all(&mem_dir).unwrap();
+        let graph = mem_dir.join("memory.graph.json");
+        write_with_older_then_newer_mtime(&marker, &graph);
+        fs::write(dir.join("capture-crossings"), "5").unwrap();
+        write_start_ts(&dir, 1);
+
+        // Act
+        let (stdout, code) = run_hook_at(&cwd, &home, &payload());
+
+        // Assert: still no block at all.
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+    }
+
+    #[test]
+    fn crossings_unparseable_treated_as_zero_no_nudge() {
+        // Arrange: no-write preconditions met, capture-crossings holds
+        // non-numeric content.
+        let home = scratch_home("mc-nudge-crossings-unparseable");
+        let cwd = scratch_home("mc-nudge-crossings-unparseable-cwd");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+        fs::write(dir.join("capture-crossings"), "not-a-number").unwrap();
+        write_start_ts(&dir, 1);
+
+        // Act
+        let (stdout, code) = run_hook_at(&cwd, &home, &payload());
+
+        // Assert: reblock still happens, but without the handoff sentence,
+        // per the fail-safe rule.
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        let reason = value["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("re-block 1 of 2"), "reason: {reason}");
+        assert!(
+            !reason.contains(STRONG_NUDGE_MARKER),
+            "unparseable crossings should default to 0, not nudge: {reason}"
+        );
+    }
 }
