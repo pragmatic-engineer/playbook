@@ -16,7 +16,7 @@
 //! events are told apart from inside one script.
 
 use crate::common::atomic::with_dir_lock;
-use crate::common::{home_dir, run_with_timeout, session_dir, session_id, Payload};
+use crate::common::{run_with_timeout, session_dir, session_id, Payload};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -90,7 +90,7 @@ fn queue_auto_learn(payload: &Payload, dir: &str) {
         return;
     }
 
-    let qdir = home_dir().join(".claude").join("runtime").join("to-learn");
+    let qdir = crate::common::paths::runtime_root().join("to-learn");
     if fs::create_dir_all(&qdir).is_err() {
         return;
     }

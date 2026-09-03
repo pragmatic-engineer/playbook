@@ -119,7 +119,7 @@ assert_eq "compact_gap 80 (gap=10, trigger=90)" \
 # The telemetry write lives inside the run-guard, right after the stdin parse,
 # so it only fires when the script is executed, not sourced. These scenarios
 # run statusline.sh as a subprocess with an isolated HOME (never the real
-# ~/.claude/runtime/) and inspect what it wrote and whether it still rendered.
+# ~/.config/playbook/runtime/) and inspect what it wrote and whether it still rendered.
 
 # Build the minimal stdin payload statusline.sh expects. cwd points at the
 # fake HOME (never a real git repo) so the run stays fast and offline.
@@ -152,7 +152,7 @@ t1_sid="sess-sample"
 t1_payload=$(_telemetry_payload "$t1_sid" 42 1.5 "$t1_home")
 HOME="$t1_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t1_payload" >/dev/null 2>&1
 assert_eq "telemetry sample has cost and usage" \
-    "$(_file_has_both "$t1_home/.claude/runtime/$t1_sid/telemetry.jsonl" '"cost_usd":1.5' '"used_pct":42')" \
+    "$(_file_has_both "$t1_home/.config/playbook/runtime/$t1_sid/telemetry.jsonl" '"cost_usd":1.5' '"used_pct":42')" \
     "yes"
 rm -rf "$t1_home"
 
@@ -162,7 +162,7 @@ t2_sid="sess-over"
 t2_payload=$(_telemetry_payload "$t2_sid" 75 0.1 "$t2_home")
 HOME="$t2_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t2_payload" >/dev/null 2>&1
 assert_eq "capture-due set at 75 percent (default threshold)" \
-    "$(_file_exists "$t2_home/.claude/runtime/$t2_sid/capture-due")" "yes"
+    "$(_file_exists "$t2_home/.config/playbook/runtime/$t2_sid/capture-due")" "yes"
 rm -rf "$t2_home"
 
 # 3. Below threshold: 40 leaves no marker.
@@ -171,7 +171,7 @@ t3_sid="sess-under"
 t3_payload=$(_telemetry_payload "$t3_sid" 40 0.1 "$t3_home")
 HOME="$t3_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t3_payload" >/dev/null 2>&1
 assert_eq "capture-due absent at 40 percent" \
-    "$(_file_exists "$t3_home/.claude/runtime/$t3_sid/capture-due")" "no"
+    "$(_file_exists "$t3_home/.config/playbook/runtime/$t3_sid/capture-due")" "no"
 rm -rf "$t3_home"
 
 # 4. Threshold is overridable: CC_CAPTURE_AT=30 with usage of 40.
@@ -180,7 +180,7 @@ t4_sid="sess-override"
 t4_payload=$(_telemetry_payload "$t4_sid" 40 0.1 "$t4_home")
 CC_CAPTURE_AT=30 HOME="$t4_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4_payload" >/dev/null 2>&1
 assert_eq "capture-due honours CC_CAPTURE_AT override" \
-    "$(_file_exists "$t4_home/.claude/runtime/$t4_sid/capture-due")" "yes"
+    "$(_file_exists "$t4_home/.config/playbook/runtime/$t4_sid/capture-due")" "yes"
 rm -rf "$t4_home"
 
 # 4b. REGRESSION: staying above the threshold fires exactly ONCE, not per render.
@@ -192,7 +192,7 @@ rm -rf "$t4_home"
 # times in a row with a byte identical edited-files list.
 t4b_home=$(mktemp -d)
 t4b_sid="sess-latch"
-t4b_dir="$t4b_home/.claude/runtime/$t4b_sid"
+t4b_dir="$t4b_home/.config/playbook/runtime/$t4b_sid"
 t4b_payload=$(_telemetry_payload "$t4b_sid" 75 0.1 "$t4b_home")
 
 HOME="$t4b_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "$t4b_payload" >/dev/null 2>&1
@@ -220,7 +220,7 @@ rm -rf "$t4b_home"
 # 4c. capture-crossings tallies one per threshold CROSSING, not per render.
 t4c_home=$(mktemp -d)
 t4c_sid="sess-crossings"
-t4c_dir="$t4c_home/.claude/runtime/$t4c_sid"
+t4c_dir="$t4c_home/.config/playbook/runtime/$t4c_sid"
 t4c_high=$(_telemetry_payload "$t4c_sid" 75 0.1 "$t4c_home")
 t4c_low=$(_telemetry_payload "$t4c_sid" 40 0.1 "$t4c_home")
 
@@ -236,7 +236,7 @@ rm -rf "$t4c_home"
 # 5. Render survives an unwritable session dir (the ADR's safety pin).
 t5_home=$(mktemp -d)
 t5_sid="sess-unwritable"
-t5_dir="$t5_home/.claude/runtime/$t5_sid"
+t5_dir="$t5_home/.config/playbook/runtime/$t5_sid"
 mkdir -p "$t5_dir"
 chmod 500 "$t5_dir"
 t5_payload=$(_telemetry_payload "$t5_sid" 80 2.0 "$t5_home")
@@ -257,7 +257,7 @@ assert_eq "render exits 0 with no session_id" "$t6_status" "0"
 assert_eq "render still prints with no session_id" \
     "$( [[ -n "$t6_out" ]] && echo yes || echo no )" "yes"
 assert_eq "no runtime dir created with no session_id" \
-    "$( [[ -d "$t6_home/.claude/runtime" ]] && echo yes || echo no )" "no"
+    "$( [[ -d "$t6_home/.config/playbook/runtime" ]] && echo yes || echo no )" "no"
 rm -rf "$t6_home"
 
 # 7. A HOME holding glob metacharacters still collapses to ~ in the rendered

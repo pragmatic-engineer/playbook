@@ -104,8 +104,8 @@ pub fn run(payload: &Payload) {
 
     append_promoted_facts(&mut extra_context, &repo_root);
     append_memory_slice(&mut extra_context, &plugin_root, &repo_root);
-    append_handoff_slice(&mut extra_context, &home);
-    append_auto_learn_nudge(&mut extra_context, &home, &repo_root);
+    append_handoff_slice(&mut extra_context);
+    append_auto_learn_nudge(&mut extra_context, &repo_root);
     append_skills_primer(&mut extra_context, &home);
     append_async_discipline(&mut extra_context);
 
@@ -374,15 +374,12 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, repo_root:
 /// panics: a missing, unreadable, or permission-denied file degrades to
 /// "say nothing", the same invariant `read_legacy_memory` holds for its own
 /// file.
-fn append_handoff_slice(extra_context: &mut String, home: &str) {
+fn append_handoff_slice(extra_context: &mut String) {
     let slug = crate::cc::project_slug(&crate::cc::logical_cwd());
     if slug.is_empty() {
         return;
     }
-    let dir = Path::new(home)
-        .join(".claude")
-        .join("runtime")
-        .join("handoff");
+    let dir = crate::common::paths::runtime_root().join("handoff");
     let prefix = format!("{slug}-");
 
     let Ok(entries) = fs::read_dir(&dir) else {
@@ -473,17 +470,14 @@ fn cap_memory_body(body: String) -> String {
 /// Nudge the user to refresh project memory if a previous session queued an
 /// auto-learn flag for this repo. Prunes stale flags first. Matches
 /// hooks/session-init.py:190-211.
-fn append_auto_learn_nudge(extra_context: &mut String, home: &str, repo_root: &str) {
+fn append_auto_learn_nudge(extra_context: &mut String, repo_root: &str) {
     if std::env::var("AUTO_LEARN_NUDGE").unwrap_or_else(|_| "1".to_string()) == "0" {
         return;
     }
     if repo_root.is_empty() {
         return;
     }
-    let qdir = Path::new(home)
-        .join(".claude")
-        .join("runtime")
-        .join("to-learn");
+    let qdir = crate::common::paths::runtime_root().join("to-learn");
     // Trim before parsing: python's `int(...)` strips surrounding
     // whitespace, so a padded value must parse the same way here rather
     // than silently falling back to the default. Matches

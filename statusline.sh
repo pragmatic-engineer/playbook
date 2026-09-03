@@ -348,7 +348,7 @@ cwd="${cwd:-$PWD}"
 # └──────────────────────────────────────────────────────────────────────────────┘
 
 if [[ -n "${session_id:-}" ]]; then
-    telemetry_dir="$HOME/.claude/runtime/${session_id}"
+    telemetry_dir="$HOME/.config/playbook/runtime/${session_id}"
     mkdir -p "$telemetry_dir" 2>/dev/null
     if [[ -d "$telemetry_dir" && -w "$telemetry_dir" ]]; then
         printf '{"ts":%s,"cost_usd":%s,"used_pct":%s}\n' \
@@ -808,7 +808,7 @@ render_context() {
 
 render_session_age() {
     [[ "$SHOW_SESSION_AGE" == true && -n "${session_id:-}" ]] || return 0
-    local start_file="$HOME/.claude/runtime/${session_id}/start-ts"
+    local start_file="$HOME/.config/playbook/runtime/${session_id}/start-ts"
     [[ -s "$start_file" ]] || return 0
     local start; start=$(cat "$start_file" 2>/dev/null || echo 0)
     [[ "$start" -gt 0 ]] || return 0

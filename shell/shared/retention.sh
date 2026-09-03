@@ -41,6 +41,6 @@ _cc_prune() {
         [ "$i" -le "$keep" ] && continue
         sid="${f##*/}"; sid="${sid%.jsonl}"
         rm -f "$f" 2>/dev/null
-        rm -rf "${pd:?}/${sid:?}" "$HOME/.claude/runtime/${sid:?}" 2>/dev/null
+        rm -rf "${pd:?}/${sid:?}" "$HOME/.config/playbook/runtime/${sid:?}" 2>/dev/null
     done
 }

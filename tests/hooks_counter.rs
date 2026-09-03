@@ -55,7 +55,8 @@ fn fire(hook_name: &str, home: &Path, payload: &str) -> (String, i32) {
 /// when the file (or the directory) does not exist.
 fn read_state_file(home: &Path, session_id: &str, name: &str) -> Option<String> {
     std::fs::read_to_string(
-        home.join(".claude")
+        home.join(".config")
+            .join("playbook")
             .join("runtime")
             .join(session_id)
             .join(name),

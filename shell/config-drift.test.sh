@@ -43,7 +43,7 @@ SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT INT TERM
 
 mkdir -p "$SCRATCH/.claude/hooks/lib"
-mkdir -p "$SCRATCH/.claude/cc-state"
+mkdir -p "$SCRATCH/.config/playbook/cc-state"
 printf '{"model":"claude-opus-4-5"}\n' > "$SCRATCH/.claude/settings.json"
 printf '#!/bin/sh\n# hook a\n'         > "$SCRATCH/.claude/hooks/a.sh"
 printf '#!/bin/sh\n# hook b\n'         > "$SCRATCH/.claude/hooks/b.sh"
