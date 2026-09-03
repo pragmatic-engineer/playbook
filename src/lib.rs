@@ -81,6 +81,34 @@ pub enum Command {
         #[command(subcommand)]
         sub: GateCommand,
     },
+    /// Print the resolved absolute path to one of this repo's
+    /// worktree-scoped storage directories.
+    Path {
+        /// Which worktree-scoped directory to resolve.
+        kind: PathKind,
+    },
+}
+
+/// Which worktree-scoped storage directory `playbook path` resolves under
+/// `repo_scoped_dir(RepoScope::Worktree)`.
+#[derive(ValueEnum, Debug, Clone, Copy)]
+pub enum PathKind {
+    Plans,
+    Designs,
+    Implement,
+    Worktrees,
+}
+
+impl PathKind {
+    /// The exact subdirectory name under the worktree-scoped root.
+    pub fn dir_name(&self) -> &'static str {
+        match self {
+            PathKind::Plans => "plans",
+            PathKind::Designs => "designs",
+            PathKind::Implement => "implement",
+            PathKind::Worktrees => "worktrees",
+        }
+    }
 }
 
 /// `playbook settings` subcommands, backing `src/settings/`.
@@ -282,6 +310,31 @@ mod tests {
         for name in names {
             assert!(help.contains(name), "hook --help is missing '{name}'");
         }
+    }
+
+    #[test]
+    fn path_help_lists_all_four_kinds() {
+        // Arrange
+        let kinds = ["plans", "designs", "implement", "worktrees"];
+
+        // Act
+        let result = Cli::command().try_get_matches_from(["playbook", "path", "--help"]);
+
+        // Assert
+        let err = result.expect_err("--help should short-circuit parsing with a help message");
+        let help = err.to_string();
+        for kind in kinds {
+            assert!(help.contains(kind), "path --help is missing '{kind}'");
+        }
+    }
+
+    #[test]
+    fn path_kind_dir_name_matches_each_variant() {
+        // Arrange, Act, Assert
+        assert_eq!(PathKind::Plans.dir_name(), "plans");
+        assert_eq!(PathKind::Designs.dir_name(), "designs");
+        assert_eq!(PathKind::Implement.dir_name(), "implement");
+        assert_eq!(PathKind::Worktrees.dir_name(), "worktrees");
     }
 
     #[test]
