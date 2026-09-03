@@ -163,6 +163,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let system_prompt_step =
         place_system_prompt_step(self_root, &paths.claude_home, paths.system_prompt);
     let memory_migrate_step = memory_migrate::migrate_memory_store(&paths.claude_home);
+    let memory_root_migrate_step =
+        memory_migrate::migrate_memory_root(&paths.home, &paths.claude_home);
 
     InitOutcome {
         steps: vec![
@@ -172,6 +174,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
             statusline_step,
             system_prompt_step,
             memory_migrate_step,
+            memory_root_migrate_step,
         ],
     }
 }
