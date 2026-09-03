@@ -25,16 +25,10 @@ pub fn home_dir() -> PathBuf {
     std::env::home_dir().unwrap_or_default()
 }
 
-/// Return the per-session state directory under `$HOME/.claude/runtime`,
+/// Return the per-session state directory under the playbook runtime root,
 /// creating it on demand with mode 0700. Empty when no session id is present.
 pub fn session_dir(payload: &Payload) -> String {
-    session_dir_in(&runtime_root(), payload)
-}
-
-/// Stays `.claude`-rooted, unlike `paths::runtime_root()`: other consumers
-/// of a session's runtime files still resolve this same old root today.
-fn runtime_root() -> PathBuf {
-    home_dir().join(".claude").join("runtime")
+    session_dir_in(&crate::common::paths::runtime_root(), payload)
 }
 
 /// Core of `session_dir`, taking the runtime root explicitly so tests can
@@ -184,7 +178,11 @@ mod tests {
         let got = session_dir(&payload);
 
         // Assert
-        let expected = root.join(".claude").join("runtime").join("envsid");
+        let expected = root
+            .join(".config")
+            .join("playbook")
+            .join("runtime")
+            .join("envsid");
         assert_eq!(got, expected.to_string_lossy());
         assert!(expected.is_dir());
 

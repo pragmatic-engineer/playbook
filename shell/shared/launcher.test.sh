@@ -25,8 +25,8 @@ trap cleanup EXIT
 # ─── fake HOME setup ─────────────────────────────────────────────────────────
 
 mkdir -p "$TESTHOME/.claude/hooks/lib"
-mkdir -p "$TESTHOME/.claude/cc-state"
-mkdir -p "$TESTHOME/.claude/runtime"
+mkdir -p "$TESTHOME/.config/playbook/cc-state"
+mkdir -p "$TESTHOME/.config/playbook/runtime"
 mkdir -p "$TESTHOME/.claude/projects"
 printf '{}' > "$TESTHOME/.claude/settings.json"
 

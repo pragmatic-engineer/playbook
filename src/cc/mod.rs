@@ -27,6 +27,8 @@ pub fn project_slug(path: &str) -> String {
         .collect()
 }
 
+/// `$HOME/.claude`, the tree Claude Code itself owns, distinct from
+/// `common::paths::playbook_root()`.
 pub fn claude_dir() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude")
 }

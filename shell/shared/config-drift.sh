@@ -7,7 +7,7 @@
 #
 # Determines whether runtime config changed since a project last launched, so
 # the default resume can fork to reload settings/plugins/hooks only when needed.
-# Baseline is stored per-project under ~/.claude/cc-state/<project-slug>.
+# Baseline is stored per-project under ~/.config/playbook/cc-state/<project-slug>.
 # Sourceable in bash and zsh. No zsh-only builtins.
 
 # Shared config hash (settings.json + hook scripts, excluding tests).
@@ -18,7 +18,7 @@ command -v config_hash >/dev/null 2>&1 \
 
 # Per-project marker holding the config hash the project's session last ran.
 _cc_config_marker() {
-    printf '%s\n' "$HOME/.claude/cc-state/${PWD//[^a-zA-Z0-9]/-}"
+    printf '%s\n' "$HOME/.config/playbook/cc-state/${PWD//[^a-zA-Z0-9]/-}"
 }
 
 # Record current config as this project's baseline (call when launching a

@@ -5,10 +5,10 @@
 //! since a project last launched, so the default resume can fork to reload
 //! settings, plugins and hooks only when it has to.
 //!
-//! The baseline is one file per project under `~/.claude/cc-state/`.
+//! The baseline is one file per project under `~/.config/playbook/cc-state/`.
 
 use super::{claude_dir, project_slug};
-use crate::common::config_hash;
+use crate::common::{config_hash, paths};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -19,7 +19,7 @@ use std::time::Duration;
 const HASH_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn marker_path(cwd: &str) -> PathBuf {
-    claude_dir().join("cc-state").join(project_slug(cwd))
+    paths::cc_state_dir().join(project_slug(cwd))
 }
 
 /// Records the current config as this project's baseline. Called when launching
