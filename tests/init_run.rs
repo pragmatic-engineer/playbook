@@ -214,12 +214,14 @@ fn fresh_config_gets_fully_wired() {
             );
             continue;
         }
-        // `memory-migrate` has nothing to migrate on a fresh machine.
-        if step.name == "memory-migrate" {
+        // `memory-migrate` and `memory-root-migrate` have nothing to
+        // migrate on a fresh machine with no legacy `~/.claude/memory`.
+        if step.name == "memory-migrate" || step.name == "memory-root-migrate" {
             assert_eq!(
                 step.status,
                 StepStatus::Skipped,
-                "expected 'memory-migrate' to be skipped with no legacy graph.json present: {}",
+                "expected '{}' to be skipped with no legacy memory present: {}",
+                step.name,
                 step.detail
             );
             continue;
@@ -571,9 +573,12 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     // Assert: nothing is reported as a change the second time.
     assert!(second.ok());
     for step in &second.steps {
-        // `system-prompt` and `memory-migrate` stay `Skipped` on both runs:
-        // neither has anything to act on in this fixture.
-        let expected = if step.name == "system-prompt" || step.name == "memory-migrate" {
+        // `system-prompt`, `memory-migrate` and `memory-root-migrate` stay
+        // `Skipped` on both runs: none has anything to act on in this fixture.
+        let expected = if step.name == "system-prompt"
+            || step.name == "memory-migrate"
+            || step.name == "memory-root-migrate"
+        {
             StepStatus::Skipped
         } else {
             StepStatus::AlreadyCorrect
