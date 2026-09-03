@@ -36,9 +36,8 @@ pub struct SignalsStore {
     nodes: HashMap<String, NodeSignals>,
 }
 
-/// Where the consolidation pass last left off. A placeholder shape: only a
-/// single optional timestamp exists today because nothing in this module
-/// reads or writes it yet, a later consolidation pass defines what it means.
+/// Where the consolidation pass last left off, read and advanced by
+/// `read_cursor`/`advance_cursor` below.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Cursor {
     #[serde(default)]

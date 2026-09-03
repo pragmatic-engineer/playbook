@@ -222,7 +222,7 @@ fn read_start_ts(session_dir: &Path) -> SystemTime {
 }
 
 /// Freshest mtime among this worktree's handoff files (`<slug>-*.md` under
-/// `~/.claude/runtime/handoff`), read-only; `None` on no match or unreadable dir.
+/// `~/.claude/runtime/handoff`), directory-scoped like `session_init.rs`'s read side, so a sibling session's handoff can suppress this nudge, accepted deliberately.
 fn freshest_handoff_mtime() -> Option<SystemTime> {
     let slug = project_slug(&logical_cwd());
     if slug.is_empty() {

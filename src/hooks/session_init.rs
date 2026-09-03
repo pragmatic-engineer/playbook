@@ -123,7 +123,7 @@ fn migrate_legacy_graph_file(home: &str) {
     let _ = fs::rename(&old_path, &new_path);
 }
 
-/// Zeroes the five per-session counter files and stamps `start-ts`, matching hooks/session-init.py:86-98. A no-op when there is no session directory (no session id in the payload).
+/// Zeroes the per-session counter files and stamps `start-ts`. A no-op when there is no session directory (no session id in the payload).
 fn zero_session_state(dir: &str) {
     if dir.is_empty() {
         return;
