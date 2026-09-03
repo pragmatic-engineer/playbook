@@ -16,9 +16,9 @@ pub fn playbook_root() -> PathBuf {
     playbook_root_from(&home_dir())
 }
 
-/// Core of `playbook_root`, taking `home` explicitly so tests can assert the
-/// shape without touching the real `$HOME` env var.
-fn playbook_root_from(home: &Path) -> PathBuf {
+/// Core of `playbook_root`, taking `home` explicitly so tests, and `init`'s
+/// own home-parameterised modules, can resolve it without the real `$HOME`.
+pub(crate) fn playbook_root_from(home: &Path) -> PathBuf {
     home.join(".config").join("playbook")
 }
 

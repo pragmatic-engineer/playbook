@@ -12,7 +12,7 @@
 
 # Shared config hash (settings.json + hook scripts, excluding tests).
 # shellcheck source=hooks/lib/config-hash.sh
-source "$HOME/.claude/hooks/lib/config-hash.sh"
+source "$HOME/.config/playbook/hooks/lib/config-hash.sh"
 command -v config_hash >/dev/null 2>&1 \
     || printf '%s\n' "cc: config-hash.sh failed to load; config-drift disabled" >&2
 

@@ -7,7 +7,7 @@
 //!
 //! The baseline is one file per project under `~/.config/playbook/cc-state/`.
 
-use super::{claude_dir, project_slug};
+use super::project_slug;
 use crate::common::{config_hash, paths};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,7 +44,7 @@ pub fn drifted(cwd: &str) -> bool {
 }
 
 fn current_hash() -> String {
-    config_hash(&claude_dir(), HASH_TIMEOUT)
+    config_hash(&paths::playbook_root(), HASH_TIMEOUT)
 }
 
 /// Trailing newline included, because the shell wrote with `printf '%s\n'` and

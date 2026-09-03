@@ -36,17 +36,18 @@ chmod +x "$TMPBIN/claude"
 
 # Build a full fake install under $TESTHOME so an entry point can source every
 # shared module the way it does in production.
-mkdir -p "$TESTHOME/.claude/shell/shared" "$TESTHOME/.claude/shell/bash" \
-         "$TESTHOME/.claude/shell/zsh" "$TESTHOME/.claude/hooks/lib"
-cp "$REPO_DIR"/shell/shared/*.sh "$TESTHOME/.claude/shell/shared/"
-cp "$REPO_DIR"/shell/bash/cc.sh  "$TESTHOME/.claude/shell/bash/"
-cp "$REPO_DIR"/shell/zsh/cc.zsh  "$TESTHOME/.claude/shell/zsh/"
+PLAYBOOK_HOME="$TESTHOME/.config/playbook"
+mkdir -p "$PLAYBOOK_HOME/shell/shared" "$PLAYBOOK_HOME/shell/bash" \
+         "$PLAYBOOK_HOME/shell/zsh" "$PLAYBOOK_HOME/hooks/lib"
+cp "$REPO_DIR"/shell/shared/*.sh "$PLAYBOOK_HOME/shell/shared/"
+cp "$REPO_DIR"/shell/bash/cc.sh  "$PLAYBOOK_HOME/shell/bash/"
+cp "$REPO_DIR"/shell/zsh/cc.zsh  "$PLAYBOOK_HOME/shell/zsh/"
 # Stub config-hash so config-drift loads without real settings.
 printf 'config_hash() { printf "testhash\\n"; }\n' \
-    > "$TESTHOME/.claude/hooks/lib/config-hash.sh"
+    > "$PLAYBOOK_HOME/hooks/lib/config-hash.sh"
 
-BASH_ENTRY="$TESTHOME/.claude/shell/bash/cc.sh"
-ZSH_ENTRY="$TESTHOME/.claude/shell/zsh/cc.zsh"
+BASH_ENTRY="$PLAYBOOK_HOME/shell/bash/cc.sh"
+ZSH_ENTRY="$PLAYBOOK_HOME/shell/zsh/cc.zsh"
 
 # The full function set both shells must expose after sourcing their entry.
 FNS="cc ccd _claude _cc_prune _cc_clean_resume _cc_find_session_by_title _cc_config_drifted _cc_worktree _cc_bust_cache"
@@ -69,7 +70,7 @@ check_defines() {
 check_prompt_guard() {
     local sh="$1" entry="$2" label="$3" args
     # Without the prompt file.
-    rm -f "$TESTHOME/.claude/prompts/SYSTEM_PROMPT.md"
+    rm -f "$PLAYBOOK_HOME/prompts/SYSTEM_PROMPT.md"
     args=$(mktemp)
     HOME="$TESTHOME" PATH="$TMPBIN:$PATH" CC_TEST_ARGS_FILE="$args" \
         "$sh" -c "source '$entry'; cc fresh" >/dev/null 2>&1 || true
@@ -80,8 +81,8 @@ check_prompt_guard() {
     fi
     rm -f "$args"
     # With the prompt file.
-    mkdir -p "$TESTHOME/.claude/prompts"
-    printf '# test system prompt\n' > "$TESTHOME/.claude/prompts/SYSTEM_PROMPT.md"
+    mkdir -p "$PLAYBOOK_HOME/prompts"
+    printf '# test system prompt\n' > "$PLAYBOOK_HOME/prompts/SYSTEM_PROMPT.md"
     args=$(mktemp)
     HOME="$TESTHOME" PATH="$TMPBIN:$PATH" CC_TEST_ARGS_FILE="$args" \
         "$sh" -c "source '$entry'; cc fresh" >/dev/null 2>&1 || true
@@ -90,7 +91,7 @@ check_prompt_guard() {
     else
         fail "$label: with SYSTEM_PROMPT.md should pass --system-prompt-file"
     fi
-    rm -f "$args" "$TESTHOME/.claude/prompts/SYSTEM_PROMPT.md"
+    rm -f "$args" "$PLAYBOOK_HOME/prompts/SYSTEM_PROMPT.md"
 }
 
 printf '\n=== bash entry ===\n'

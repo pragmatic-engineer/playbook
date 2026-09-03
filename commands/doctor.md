@@ -66,11 +66,11 @@ basename "${SHELL:-}"
 
 For zsh: pass if BOTH conditions hold:
 1. `grep -qF 'shell/zsh/cc.zsh' ~/.zshrc 2>/dev/null`
-2. `test -f ~/.claude/shell/zsh/cc.zsh`
+2. `test -f ~/.config/playbook/shell/zsh/cc.zsh`
 
 For bash: pass if BOTH conditions hold:
 1. `grep -qF 'shell/bash/cc.sh' ~/.bashrc 2>/dev/null`
-2. `test -f ~/.claude/shell/bash/cc.sh`
+2. `test -f ~/.config/playbook/shell/bash/cc.sh`
 
 For any other shell: report "shell not detected" and skip this check.
 
@@ -82,7 +82,7 @@ Remediation hint when not installed: "run /playbook:setup and choose Yes for the
 ## Layer 4: System prompt (opt-in)
 
 ```bash
-test -f ~/.claude/prompts/SYSTEM_PROMPT.md
+test -f ~/.config/playbook/prompts/SYSTEM_PROMPT.md
 ```
 
 This layer is opt-in. Report "not installed (opt-in, recommended)" rather than
