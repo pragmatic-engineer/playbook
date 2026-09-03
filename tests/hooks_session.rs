@@ -278,6 +278,57 @@ fn session_init_falls_back_to_the_legacy_memory_index() {
 }
 
 #[test]
+fn session_init_migrates_legacy_home_memory_root_before_recall() {
+    // Arrange: memory still sitting at the pre-ADR-0012 ~/.claude/memory
+    // location, nothing yet under ~/.config/playbook/memory.
+    let work = scratch_dir("legacy-root");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-legacy-root");
+    let legacy_dir = home.join(".claude").join("memory").join(repo_slug);
+    fs::create_dir_all(&legacy_dir).unwrap();
+    fs::write(
+        legacy_dir.join("MEMORY.md"),
+        "- legacy-root-fact: still under the old home tree\n",
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        "{}",
+        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
+    );
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("legacy-root-fact"),
+        "the hook should migrate ~/.claude/memory before reading it, so the fact still surfaces: {context}"
+    );
+    let new_index = home
+        .join(".config")
+        .join("playbook")
+        .join("memory")
+        .join(repo_slug)
+        .join("MEMORY.md");
+    assert!(
+        new_index.is_file(),
+        "the index should now live at the new location: {}",
+        new_index.display()
+    );
+    assert!(
+        !home.join(".claude").join("memory").exists(),
+        "the legacy memory tree should be gone after a completed migration"
+    );
+}
+
+#[test]
 fn session_init_no_memory_store_emits_no_memory_block() {
     // Arrange: a fake HOME with no memory dir whatsoever.
     let work = scratch_dir("no-store");
