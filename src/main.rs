@@ -181,6 +181,27 @@ fn main() {
                 }
             },
         },
+        Command::Path { kind } => match common::repo_scoped_dir(common::RepoScope::Worktree) {
+            Some(base) => {
+                if let Some(repo_root) = playbook::manifest::check::toplevel() {
+                    if let Err(err) =
+                        playbook::gate::db::migrate_legacy_repo_local(&repo_root, &base)
+                    {
+                        eprintln!("playbook path: {err}");
+                        std::process::exit(1);
+                    }
+                }
+                println!("{}", base.join(kind.dir_name()).display());
+            }
+            None => {
+                eprintln!(
+                    "playbook path: could not resolve a worktree-scoped storage location; \
+                     this repo needs a git 'origin' remote and a resolvable worktree \
+                     toplevel, refusing to fall back to a repo-local path"
+                );
+                std::process::exit(1);
+            }
+        },
     }
 }
 

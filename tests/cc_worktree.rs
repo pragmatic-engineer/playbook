@@ -51,6 +51,92 @@ fn repo(tag: &str) -> PathBuf {
     dir
 }
 
+/// Disables the machine's global/system git config for the duration of `f`. Hoisted to file level so more than one module below can share it.
+fn with_isolated_git_env<T>(f: impl FnOnce() -> T) -> T {
+    let _guard = lock_env();
+    let prev_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+    let prev_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+    std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+    std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+    let out = f();
+    match prev_global {
+        Some(v) => std::env::set_var("GIT_CONFIG_GLOBAL", v),
+        None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
+    }
+    match prev_system {
+        Some(v) => std::env::set_var("GIT_CONFIG_SYSTEM", v),
+        None => std::env::remove_var("GIT_CONFIG_SYSTEM"),
+    }
+    out
+}
+
+fn git(repo_path: &Path, args: &[&str]) -> std::process::Output {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(args)
+        .output()
+        .expect("git command should spawn")
+}
+
+fn git_ok(repo_path: &Path, args: &[&str]) {
+    let out = git(repo_path, args);
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn git_stdout(repo_path: &Path, args: &[&str]) -> String {
+    let output = git(repo_path, args);
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// A repo with one commit on `main` and a hand-built `refs/remotes/origin/*`, canonicalized since macOS resolves `/tmp` through `/private/tmp`.
+fn seeded_repo(tag: &str) -> PathBuf {
+    let dir = scratch(tag);
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec!["config", "user.email", "t@t"],
+        vec!["config", "user.name", "T"],
+    ] {
+        git_ok(&dir, &args);
+    }
+    fs::write(dir.join("README.md"), "seed\n").expect("write");
+    git_ok(&dir, &["add", "."]);
+    git_ok(&dir, &["commit", "-q", "-m", "seed"]);
+    let sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
+    git_ok(&dir, &["update-ref", "refs/remotes/origin/main", &sha]);
+    git_ok(
+        &dir,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+    );
+    dir.canonicalize().expect("seeded repo should resolve")
+}
+
+/// Adds a linked worktree on a new branch created from `main`. Returns its canonical path.
+fn add_worktree(repo_root: &Path, branch: &str) -> PathBuf {
+    let dest = repo_root.join(format!("wt-{branch}"));
+    git_ok(
+        repo_root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            branch,
+            dest.to_str().expect("utf8 path"),
+            "main",
+        ],
+    );
+    dest.canonicalize().expect("worktree should resolve")
+}
+
 mod conflict_decision {
     use super::*;
 
@@ -1642,49 +1728,7 @@ mod cleanup_stale_execution {
 
     const NOW: i64 = 1_800_000_000;
 
-    /// Disables the machine's global/system git config for the duration of
-    /// `f`. Duplicated rather than shared with `create_worktree_ladder`, per
-    /// this file's own convention that each module owns its harness.
-    fn with_isolated_git_env<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = lock_env();
-        let prev_global = std::env::var_os("GIT_CONFIG_GLOBAL");
-        let prev_system = std::env::var_os("GIT_CONFIG_SYSTEM");
-        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
-        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
-        let out = f();
-        match prev_global {
-            Some(v) => std::env::set_var("GIT_CONFIG_GLOBAL", v),
-            None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
-        }
-        match prev_system {
-            Some(v) => std::env::set_var("GIT_CONFIG_SYSTEM", v),
-            None => std::env::remove_var("GIT_CONFIG_SYSTEM"),
-        }
-        out
-    }
-
-    fn git(repo_path: &Path, args: &[&str]) -> std::process::Output {
-        Command::new("git")
-            .arg("-C")
-            .arg(repo_path)
-            .args(args)
-            .output()
-            .expect("git command should spawn")
-    }
-
-    fn git_ok(repo_path: &Path, args: &[&str]) {
-        let out = git(repo_path, args);
-        assert!(
-            out.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-
-    fn git_stdout(repo_path: &Path, args: &[&str]) -> String {
-        let output = git(repo_path, args);
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
-    }
+    // The git worktree fixtures below now live at file level, reached here via `use super::*`.
 
     fn branch_exists(repo_root: &Path, branch: &str) -> bool {
         git(
@@ -1700,62 +1744,7 @@ mod cleanup_stale_execution {
         .success()
     }
 
-    /// A repo with one commit on `main`, and a hand-built
-    /// `refs/remotes/origin/*` (no real remote, no network) so `base_branch`
-    /// resolves to `origin/main` the same way it would against a real clone.
-    ///
-    /// Canonicalized before returning: macOS resolves `/tmp` through
-    /// `/private/tmp`, and `git worktree list` reports the resolved path, so
-    /// every path comparison in these tests needs to start from a canonical
-    /// root or it fails for a reason that has nothing to do with the port.
-    fn seeded_repo(tag: &str) -> PathBuf {
-        let dir = scratch(tag);
-        for args in [
-            vec!["init", "-q", "-b", "main"],
-            vec!["config", "user.email", "t@t"],
-            vec!["config", "user.name", "T"],
-        ] {
-            git_ok(&dir, &args);
-        }
-        fs::write(dir.join("README.md"), "seed\n").expect("write");
-        git_ok(&dir, &["add", "."]);
-        git_ok(&dir, &["commit", "-q", "-m", "seed"]);
-        let sha = git_stdout(&dir, &["rev-parse", "HEAD"]);
-        git_ok(&dir, &["update-ref", "refs/remotes/origin/main", &sha]);
-        git_ok(
-            &dir,
-            &[
-                "symbolic-ref",
-                "refs/remotes/origin/HEAD",
-                "refs/remotes/origin/main",
-            ],
-        );
-        dir.canonicalize().expect("seeded repo should resolve")
-    }
-
-    /// Adds a linked worktree on a new branch created from `main`, so it
-    /// starts out merged into `origin/main`, i.e. it would look stale by
-    /// default unless something else spares it. Returns its canonical path.
-    fn add_worktree(repo_root: &Path, branch: &str) -> PathBuf {
-        let dest = repo_root.join(format!("wt-{branch}"));
-        git_ok(
-            repo_root,
-            &[
-                "worktree",
-                "add",
-                "-q",
-                "-b",
-                branch,
-                dest.to_str().expect("utf8 path"),
-                "main",
-            ],
-        );
-        dest.canonicalize().expect("worktree should resolve")
-    }
-
-    /// A marker path under the repo's own scratch dir, absent by default (so
-    /// `cleanup_due` reads it as due), never the shared `/tmp` path a real
-    /// run would use.
+    /// Absent by default, so `cleanup_due` always reads it as due.
     fn due_marker(repo_root: &Path) -> PathBuf {
         repo_root.join(".cleanup-marker-test")
     }
@@ -1952,6 +1941,110 @@ mod cleanup_stale_execution {
                 "the marker must be written before the failing git work, not after, \
                  so a crash partway through still rate-limits the next run"
             );
+        });
+    }
+}
+
+/// `gate record` from two real worktrees, same `plan_slug`, must never let one worktree's write clobber the other's.
+mod gate_worktree_scoping {
+    use super::*;
+    use playbook::gate::db;
+
+    /// Mirrors `paths::worktree_id`'s slugify rule independently, so this stays a real check, not a tautology.
+    fn worktree_id(repo: &Path) -> String {
+        repo.to_string_lossy()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect()
+    }
+
+    fn run_gate_record(
+        repo: &Path,
+        home: &Path,
+        plan_slug: &str,
+        phase: &str,
+        input: &Path,
+    ) -> std::process::Output {
+        Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["gate", "record", plan_slug, "gate-run", phase])
+            .arg(input)
+            .current_dir(repo)
+            .env("HOME", home)
+            .output()
+            .expect("playbook binary should spawn")
+    }
+
+    #[test]
+    fn two_worktrees_writing_the_same_plan_slug_do_not_clobber_each_others_verdicts() {
+        with_isolated_git_env(|| {
+            // Arrange: one repo, an origin remote, two real linked worktrees, one shared scratch HOME.
+            let repo_root = seeded_repo("collision-main");
+            git_ok(
+                &repo_root,
+                &[
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/collision-owner/collision-repo.git",
+                ],
+            );
+            let wt_a = add_worktree(&repo_root, "wt-a");
+            let wt_b = add_worktree(&repo_root, "wt-b");
+            let home = scratch("collision-home");
+
+            let input_a = wt_a.join("report.md");
+            fs::write(&input_a, "VERDICT: PASS").expect("write input a");
+            let input_b = wt_b.join("report.md");
+            fs::write(&input_b, "VERDICT: FAIL").expect("write input b");
+
+            // Act: the identical plan_slug, distinct content, from two distinct worktrees.
+            let out_a = run_gate_record(&wt_a, &home, "shared-plan", "spec", &input_a);
+            let out_b = run_gate_record(&wt_b, &home, "shared-plan", "spec", &input_b);
+
+            // Assert
+            assert_eq!(
+                out_a.status.code(),
+                Some(0),
+                "record from wt_a should succeed: {}",
+                String::from_utf8_lossy(&out_a.stderr)
+            );
+            assert_eq!(
+                out_b.status.code(),
+                Some(0),
+                "record from wt_b should succeed: {}",
+                String::from_utf8_lossy(&out_b.stderr)
+            );
+
+            let repos_root = home
+                .join(".config")
+                .join("playbook")
+                .join("repos")
+                .join("collision-owner")
+                .join("collision-repo");
+            let db_path_a = repos_root.join(worktree_id(&wt_a)).join("state.db");
+            let db_path_b = repos_root.join(worktree_id(&wt_b)).join("state.db");
+            assert_ne!(
+                db_path_a, db_path_b,
+                "the two worktrees must resolve to distinct db files"
+            );
+
+            let conn_a = db::open_db(&db_path_a).expect("open wt_a's db");
+            let row_a = db::query_phase(&conn_a, "shared-plan", "spec")
+                .expect("query wt_a's db")
+                .expect("wt_a's own row should be present");
+            assert_eq!(row_a.verdict, "PASS", "wt_a must keep its own verdict");
+
+            let conn_b = db::open_db(&db_path_b).expect("open wt_b's db");
+            let row_b = db::query_phase(&conn_b, "shared-plan", "spec")
+                .expect("query wt_b's db")
+                .expect("wt_b's own row should be present");
+            assert_eq!(
+                row_b.verdict, "FAIL",
+                "wt_b must keep its own verdict, not wt_a's PASS"
+            );
+
+            let _ = fs::remove_dir_all(&repo_root);
+            let _ = fs::remove_dir_all(&home);
         });
     }
 }

@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Schema and connection layer for the gate-check database at
-//! `.claude/state.db`, backed by `rusqlite` (the `bundled` feature compiles
-//! SQLite from source, so no system SQLite install is required).
+//! Schema and connection layer for the gate-check database at the repo and worktree-scoped path under `$HOME/.config/playbook`, backed by `rusqlite` (the `bundled` feature compiles SQLite from source, so no system SQLite install is required).
 //!
 //! An earlier version used `libsql` (tokio-based, async). `gate check`
 //! reliably segfaulted inside `sqlite3Close` on real musl release builds
@@ -19,7 +17,6 @@
 use crate::common::atomic::with_dir_lock;
 use rusqlite::OptionalExtension;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -43,15 +40,13 @@ pub struct GatePhaseRow {
     pub recorded_at: String,
 }
 
-/// Open (creating if missing) the SQLite database at `path`, ensure the
-/// `gate_phases` schema and pragmas are in place, and gitignore
-/// `.claude/state.db` the first time it is created there.
+/// Open (creating if missing) the SQLite database at `path`, ensuring the
+/// `gate_phases` schema and pragmas are in place.
 pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
     }
-    ensure_state_db_gitignored(path);
 
     let conn = rusqlite::Connection::open(path)
         .map_err(|e| format!("failed to open database at {}: {e}", path.display()))?;
@@ -117,63 +112,156 @@ pub fn query_phase(
     .map_err(|e| format!("failed to query gate phase {plan_slug}/{phase}: {e}"))
 }
 
-/// Append `.claude/state.db` to the repo's `.gitignore` the first time a DB
-/// is created at that exact shape of path (a `state.db` file directly under
-/// a `.claude` directory), so it never needs a separate manual step. Any
-/// other `path` is left alone: this DB has exactly one real caller path, so
-/// there is nothing else to generalize for yet.
-fn ensure_state_db_gitignored(path: &Path) {
-    let (Some(file_name), Some(claude_dir)) = (path.file_name(), path.parent()) else {
-        return;
-    };
-    if file_name != "state.db" {
-        return;
+/// Marks a completed [`migrate_legacy_repo_local`] run; absent means resume.
+const MIGRATION_SENTINEL: &str = ".migration-complete";
+
+/// The legacy items a pre-ADR-0012 checkout held under its own `.claude/`.
+const LEGACY_ITEMS: &[&str] = &["state.db", "plans", "designs", "implement", "worktrees"];
+
+/// Moves legacy `.claude/{state.db,plans,designs,implement,worktrees}` items under `repo_root` to `dest_base`, once, locked against scope.md's two parallel `gate record` calls.
+pub fn migrate_legacy_repo_local(repo_root: &Path, dest_base: &Path) -> Result<(), String> {
+    let legacy_root = repo_root.join(".claude");
+    let sentinel = dest_base.join(MIGRATION_SENTINEL);
+    if sentinel.is_file() {
+        return Ok(());
     }
-    let Some(claude_dir_name) = claude_dir.file_name() else {
-        return;
-    };
-    if claude_dir_name != ".claude" {
-        return;
+    // Nothing legacy present means `.claude/` may not even exist, so skip
+    // locking rather than retry into a lock path with a missing parent.
+    if !LEGACY_ITEMS
+        .iter()
+        .any(|name| legacy_root.join(name).exists())
+    {
+        return Ok(());
     }
-    let Some(repo_root) = claude_dir.parent() else {
-        return;
-    };
 
-    let entry = format!(
-        "{}/{}",
-        claude_dir_name.to_string_lossy(),
-        file_name.to_string_lossy()
-    );
-    append_gitignore_entry(&repo_root.join(".gitignore"), &entry);
-}
-
-/// Locked, idempotent check-then-append: skip the append if `entry` is
-/// already present, matching the shell pattern `grep -qxF "$d" .gitignore
-/// || printf '%s\n' "$d" >> .gitignore` used elsewhere in this repo. Mirrors
-/// `atomic_append`'s locking (`src/common/atomic.rs:77-93`): only removes
-/// the lock directory this call created, and fails soft, never panics.
-fn append_gitignore_entry(gitignore_path: &Path, entry: &str) {
-    let mut lock_os = gitignore_path.as_os_str().to_owned();
-    lock_os.push(".lock");
-    let lock_path = PathBuf::from(lock_os);
-
-    let (acquired, ()) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
-        let already_present = fs::read_to_string(gitignore_path)
-            .map(|contents| contents.lines().any(|line| line == entry))
-            .unwrap_or(false);
-        if already_present {
-            return;
-        }
-        if let Ok(mut file) = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(gitignore_path)
-        {
-            let _ = writeln!(file, "{entry}");
-        }
+    let lock_path = legacy_root.join(".migrate.lock");
+    let (acquired, result) = with_dir_lock(&lock_path, 50, Duration::from_millis(100), || {
+        migrate_legacy_repo_local_locked(&legacy_root, dest_base, &sentinel)
     });
     if acquired {
         let _ = fs::remove_dir(&lock_path);
+        // Harmless no-op if anything else still lives under `.claude`.
+        let _ = fs::remove_dir(&legacy_root);
+    }
+    if !acquired {
+        if sentinel.is_file() {
+            return Ok(());
+        }
+        return Err(format!(
+            "legacy migration to {} is already in progress in another process; retry shortly",
+            dest_base.display()
+        ));
+    }
+    result
+}
+
+/// The actual migration, run once `migrate_legacy_repo_local` holds its lock.
+fn migrate_legacy_repo_local_locked(
+    legacy_root: &Path,
+    dest_base: &Path,
+    sentinel: &Path,
+) -> Result<(), String> {
+    if sentinel.is_file() {
+        return Ok(());
+    }
+
+    let present: Vec<&str> = LEGACY_ITEMS
+        .iter()
+        .copied()
+        .filter(|name| legacy_root.join(name).exists())
+        .collect();
+    if present.is_empty() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(dest_base)
+        .map_err(|e| format!("failed to create {}: {e}", dest_base.display()))?;
+
+    let mut files = Vec::new();
+    for name in &present {
+        let item = legacy_root.join(name);
+        if item.is_dir() {
+            collect_relative_files(&item, Path::new(name), &mut files);
+        } else {
+            files.push(PathBuf::from(name));
+        }
+    }
+
+    copy_all(legacy_root, dest_base, &files).map_err(|e| {
+        format!(
+            "legacy migration copy to {} failed, the original is untouched: {e}",
+            dest_base.display()
+        )
+    })?;
+
+    if !all_copied_and_verified(legacy_root, dest_base, &files) {
+        return Err(format!(
+            "legacy migration verification failed after copying to {}, the original is untouched",
+            dest_base.display()
+        ));
+    }
+
+    write_migration_sentinel(sentinel).map_err(|e| {
+        format!("legacy migration copy verified but could not write completion marker: {e}")
+    })?;
+
+    // Removed only now that the destination is verified complete. The
+    // lock dir is still present, so the wrapper does the final rmdir.
+    for name in &present {
+        remove_legacy_item(&legacy_root.join(name));
+    }
+    Ok(())
+}
+
+/// Every regular file under `dir`, recursively, relative to `prefix`.
+fn collect_relative_files(dir: &Path, prefix: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let rel = prefix.join(entry.file_name());
+        if path.is_dir() {
+            collect_relative_files(&path, &rel, out);
+        } else {
+            out.push(rel);
+        }
+    }
+}
+
+/// Copies each of `files` from `old_root` to `new_root`, stopping at the first failure so a partial copy is never marked done.
+fn copy_all(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> std::io::Result<()> {
+    for rel in files {
+        let dest = new_root.join(rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(old_root.join(rel), &dest)?;
+    }
+    Ok(())
+}
+
+/// Every source file exists at the destination with a matching size.
+fn all_copied_and_verified(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> bool {
+    files.iter().all(|rel| {
+        let source_len = fs::metadata(old_root.join(rel)).ok().map(|m| m.len());
+        let dest_len = fs::metadata(new_root.join(rel)).ok().map(|m| m.len());
+        source_len.is_some() && source_len == dest_len
+    })
+}
+
+fn write_migration_sentinel(sentinel: &Path) -> std::io::Result<()> {
+    if let Some(parent) = sentinel.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(sentinel, "migrated\n")
+}
+
+fn remove_legacy_item(path: &Path) {
+    if path.is_dir() {
+        let _ = fs::remove_dir_all(path);
+    } else {
+        let _ = fs::remove_file(path);
     }
 }
 
@@ -182,6 +270,8 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     /// Count rows for a `(plan_slug, phase)` pair via a fresh connection to
     /// `path`, proving `INSERT OR REPLACE` never leaves a duplicate behind.
@@ -376,23 +466,178 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    fn write_file(path: &Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, content).unwrap();
+    }
+
     #[test]
-    fn open_db_gitignores_claude_state_db_path() {
-        // Arrange
-        let repo = scratch_dir("gitignore-repo");
-        let path = repo.join(".claude").join("state.db");
+    fn legacy_migration_moves_state_db_plans_designs_implement_worktrees() {
+        // Arrange: every legacy item present, `plans`/`designs` holding real
+        // nested content, matching the Done-When's content-preserving claim.
+        let base = scratch_dir("legacy-migrate-full-set");
+        let repo_root = base.join("repo");
+        let legacy = repo_root.join(".claude");
+        write_file(&legacy.join("state.db"), "sqlite bytes");
+        write_file(&legacy.join("plans").join("topic.md"), "plan content");
+        write_file(&legacy.join("designs").join("topic.md"), "design content");
+        write_file(&legacy.join("implement").join("topic.progress.md"), "wip");
+        write_file(&legacy.join("worktrees").join(".keep"), "");
+        let dest_base = base.join("dest");
 
         // Act
-        open_db(&path).expect("open");
+        let result = migrate_legacy_repo_local(&repo_root, &dest_base);
 
         // Assert
-        let gitignore =
-            fs::read_to_string(repo.join(".gitignore")).expect("gitignore should be created");
+        assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
+        assert_eq!(
+            fs::read_to_string(dest_base.join("state.db")).unwrap(),
+            "sqlite bytes"
+        );
+        assert_eq!(
+            fs::read_to_string(dest_base.join("plans").join("topic.md")).unwrap(),
+            "plan content"
+        );
+        assert_eq!(
+            fs::read_to_string(dest_base.join("designs").join("topic.md")).unwrap(),
+            "design content"
+        );
+        assert_eq!(
+            fs::read_to_string(dest_base.join("implement").join("topic.progress.md")).unwrap(),
+            "wip"
+        );
+        assert!(dest_base.join(MIGRATION_SENTINEL).is_file());
         assert!(
-            gitignore.lines().any(|l| l == ".claude/state.db"),
-            "gitignore should list .claude/state.db, got: {gitignore:?}"
+            !legacy.exists(),
+            "the legacy .claude dir's migrated items should be gone"
         );
 
-        let _ = fs::remove_dir_all(&repo);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn legacy_migration_is_idempotent_second_call_finds_nothing() {
+        // Arrange: a sentinel already present, plus stray content on both
+        // sides that a no-op second call must not touch.
+        let base = scratch_dir("legacy-migrate-idempotent");
+        let repo_root = base.join("repo");
+        let legacy = repo_root.join(".claude");
+        write_file(&legacy.join("state.db"), "leftover legacy bytes");
+        let dest_base = base.join("dest");
+        write_file(&dest_base.join("state.db"), "already migrated bytes");
+        write_file(&dest_base.join(MIGRATION_SENTINEL), "migrated\n");
+
+        // Act
+        let result = migrate_legacy_repo_local(&repo_root, &dest_base);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
+        assert_eq!(
+            fs::read_to_string(legacy.join("state.db")).unwrap(),
+            "leftover legacy bytes",
+            "a no-op second call must not touch the untouched legacy leftovers"
+        );
+        assert_eq!(
+            fs::read_to_string(dest_base.join("state.db")).unwrap(),
+            "already migrated bytes"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_migration_leaves_source_untouched_on_simulated_failure() {
+        // Arrange: a read-only destination so the very first copy write
+        // fails, simulating a crash partway through.
+        let base = scratch_dir("legacy-migrate-crash");
+        let repo_root = base.join("repo");
+        let legacy = repo_root.join(".claude");
+        write_file(&legacy.join("state.db"), "must survive a crash");
+        let dest_base = base.join("dest");
+        fs::create_dir_all(&dest_base).unwrap();
+        fs::set_permissions(&dest_base, fs::Permissions::from_mode(0o555)).unwrap();
+        let probe = dest_base.join(".write-probe");
+        let permissions_are_enforced = fs::write(&probe, "x").is_err();
+        let _ = fs::set_permissions(&dest_base, fs::Permissions::from_mode(0o755));
+        let _ = fs::remove_file(&probe);
+        if !permissions_are_enforced {
+            eprintln!(
+                "skipping legacy_migration_leaves_source_untouched_on_simulated_failure: \
+                 running as a user that bypasses directory permissions"
+            );
+            return;
+        }
+        fs::set_permissions(&dest_base, fs::Permissions::from_mode(0o555)).unwrap();
+
+        // Act
+        let result = migrate_legacy_repo_local(&repo_root, &dest_base);
+
+        // Assert
+        fs::set_permissions(&dest_base, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err(), "expected Err on a simulated write failure");
+        assert_eq!(
+            fs::read_to_string(legacy.join("state.db")).unwrap(),
+            "must survive a crash"
+        );
+        assert!(legacy.join("state.db").exists());
+        assert!(!dest_base.join(MIGRATION_SENTINEL).exists());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_migration_resumes_correctly_after_simulated_kill_mid_copy() {
+        // Arrange: `plans/` partially copied already (one of two files), no
+        // sentinel, simulating a process killed mid-copy on a prior attempt.
+        let base = scratch_dir("legacy-migrate-resume");
+        let repo_root = base.join("repo");
+        let legacy = repo_root.join(".claude");
+        write_file(&legacy.join("plans").join("a.md"), "plan a content");
+        write_file(&legacy.join("plans").join("b.md"), "plan b content");
+        let dest_base = base.join("dest");
+        write_file(&dest_base.join("plans").join("a.md"), "plan a content");
+
+        // Act
+        let result = migrate_legacy_repo_local(&repo_root, &dest_base);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
+        assert_eq!(
+            fs::read_to_string(dest_base.join("plans").join("a.md")).unwrap(),
+            "plan a content"
+        );
+        assert_eq!(
+            fs::read_to_string(dest_base.join("plans").join("b.md")).unwrap(),
+            "plan b content"
+        );
+        assert!(dest_base.join(MIGRATION_SENTINEL).is_file());
+        assert!(
+            !legacy.exists(),
+            "a completed resume should remove the original"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn legacy_migration_is_a_noop_when_nothing_legacy_exists() {
+        // Arrange: a fresh checkout with no `.claude` at all.
+        let base = scratch_dir("legacy-migrate-fresh");
+        let repo_root = base.join("repo");
+        fs::create_dir_all(&repo_root).unwrap();
+        let dest_base = base.join("dest");
+
+        // Act
+        let result = migrate_legacy_repo_local(&repo_root, &dest_base);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
+        assert!(!dest_base.exists());
+
+        let _ = fs::remove_dir_all(&base);
     }
 }
