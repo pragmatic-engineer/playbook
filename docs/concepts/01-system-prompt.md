@@ -7,8 +7,8 @@
 The `cc` launcher (`shell/zsh/cc.zsh`) passes the file to `claude` via `--system-prompt-file`:
 
 ```zsh
-cc()  { _claude --system-prompt-file "$HOME/.claude/prompts/SYSTEM_PROMPT.md" "$@"; ... }
-ccd() { _claude --dangerously-skip-permissions --system-prompt-file "$HOME/.claude/prompts/SYSTEM_PROMPT.md" "$@"; ... }
+cc()  { _claude --system-prompt-file "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md" "$@"; ... }
+ccd() { _claude --dangerously-skip-permissions --system-prompt-file "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md" "$@"; ... }
 ```
 
 Both wrappers carry the flag. `ccd` adds `--dangerously-skip-permissions` for unattended work; otherwise they're identical. If you invoke `claude` directly (bypassing `cc`), the system prompt won't load.
