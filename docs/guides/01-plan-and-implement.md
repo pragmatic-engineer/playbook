@@ -51,7 +51,7 @@ Run `/playbook:scope` with an optional topic seed or file path:
 /playbook:scope ./tasks/feature-brief.md
 ```
 
-`/playbook:scope` runs on Opus. It interviews you one question at a time, each with a recommended answer and a reason. Before asking anything, it reads the codebase, the global memory store at `~/.claude/memory/`, and the project store at `.claude/memory/` (if present). Anything it finds there, it answers itself instead of asking you.
+`/playbook:scope` runs on Opus. It interviews you one question at a time, each with a recommended answer and a reason. Before asking anything, it reads the codebase, the global memory store at `~/.config/playbook/memory/`, and the project store at `~/.config/playbook/memory/<owner>/<repo>/` (if present). Anything it finds there, it answers itself instead of asking you.
 
 Each answer opens new branches. `/playbook:scope` walks them in dependency order and won't jump topics while a branch has unresolved decisions.
 
@@ -63,7 +63,7 @@ When all branches are resolved, it runs a three-phase quality gate:
 
 Each phase retries up to three times on FAIL before blocking. WARNs are surfaced but don't block.
 
-After the gate passes and you approve, `/playbook:scope` saves the plan to `.claude/plans/<slug>.md` and the quality report to `.claude/plans/<slug>-quality.md`. It also persists the key decisions as project memory facts.
+After the gate passes and you approve, `/playbook:scope` saves the plan to `<plans-dir>/<slug>.md` and the quality report to `<plans-dir>/<slug>-quality.md`, where `<plans-dir>` is `playbook path plans`'s resolved path. It also persists the key decisions as project memory facts.
 
 ### Plan structure
 
@@ -98,7 +98,7 @@ A Segment targets under 500 changed lines (a Segment over 1000 needs justificati
 `/playbook:implement` is execute-only. Pass it a plan file, a GitHub issue, a Jira ticket, a file spec, or plain text:
 
 ```bash
-/playbook:implement .claude/plans/add-json-flag.md
+/playbook:implement $(playbook path plans)/add-json-flag.md
 /playbook:implement #42
 /playbook:implement PROJ-123
 ```
@@ -133,7 +133,7 @@ Pass `--no-tdd` to write tests and implementation together instead.
 ### Autonomous mode (--auto)
 
 ```bash
-/playbook:implement .claude/plans/add-json-flag.md --auto
+/playbook:implement $(playbook path plans)/add-json-flag.md --auto
 ```
 
 `--auto` executes the Segments in dependency order without pausing, committing each Work Unit as a savepoint, then opens the PR set once the adversarial review passes. It self-selects the delivery strategy (stacked topology, or independent when Segments are disjoint; savepoints) and records it as an assumption. Each Segment lands on its own branch off the default branch (or the previous Segment, when stacked). A gate FAIL blocks unless you also pass `--force` (logged to the quality report).

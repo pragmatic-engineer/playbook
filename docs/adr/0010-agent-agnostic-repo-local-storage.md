@@ -1,8 +1,8 @@
 # ADR-0010: Agent-Agnostic Repo-Local Storage
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0012
 - **Date created:** 2026-08-30
-- **Date modified:** 2026-08-30
+- **Date modified:** 2026-09-03
 
 ## Context
 
@@ -230,6 +230,8 @@ Revisiting that is a separate, larger decision with a different and much
 larger set of readers (`statusline.sh`, `/playbook:learn-project`, every
 hook), and amending ADR 0001 is not something this ADR does implicitly by
 touching a different, repo-local tree.
+
+**Superseded by ADR 0012.** [ADR 0012: Unify state under `~/.config/playbook/`](0012-unify-state-under-config-playbook.md) is that separate, larger decision: it amends ADR 0001's home-level constraint and supersedes this ADR's Decision, moving repo-local storage from the `.playbook/<name>` rename chosen here to `$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/`, unified with the home-level stores. This ADR's own investigation (the worktree-isolation evidence, the `plan_slug` collision risk, the rejection of Alternatives B and D) remains valid and is inherited directly by ADR 0012, not redone.
 
 ## Consequences
 

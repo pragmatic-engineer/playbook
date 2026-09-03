@@ -77,15 +77,15 @@ Build understanding before writing. Skipping this produces records that don't su
 
 1. **Read existing records** in `docs/adr/` (if it exists) for precedent and numbering.
 2. **Explore the codebase** with Read/Glob/Grep: modules and services affected by the topic, database schemas and migration history (if relevant), test patterns, configuration and deployment.
-3. **Read memory stores if present** (optional enhancement, not required): if `~/.claude/memory/MEMORY.md` exists, read it for cross-project preferences, corrections, and conventions. If `~/.claude/memory/<owner>/<repo>/MEMORY.md` exists (`<owner>/<repo>` derived from `git remote get-url origin`), read it for project-level decisions, conventions, gotchas, and patterns. Load the relevant fact files from each store that is present. Use what you find to inform Considered Alternatives (reference a named pattern where one applies) and to avoid re-proposing something already rejected. If both stores are present: a project fact that contradicts a global one wins for this repo; surface any conflict bearing on the decision rather than silently choosing. If no memory store is present, skip this step silently and proceed on the codebase alone.
+3. **Read memory stores if present** (optional enhancement, not required): if `~/.config/playbook/memory/MEMORY.md` exists, read it for cross-project preferences, corrections, and conventions. If `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` exists (`<owner>/<repo>` derived from `git remote get-url origin`), read it for project-level decisions, conventions, gotchas, and patterns. Load the relevant fact files from each store that is present. Use what you find to inform Considered Alternatives (reference a named pattern where one applies) and to avoid re-proposing something already rejected. If both stores are present: a project fact that contradicts a global one wins for this repo; surface any conflict bearing on the decision rather than silently choosing. If no memory store is present, skip this step silently and proceed on the codebase alone.
 4. **Summarise findings to the user:** what's relevant to the topic, which areas are affected, existing patterns/constraints, and applicable patterns from memory if a memory store was present (with brief rationale).
 
-**Knowledge capture:** if a project store is present at `~/.claude/memory/<owner>/<repo>/`, write any durable convention or gotcha revealed by exploration as a project memory fact now. If no project store is present, skip this step silently.
+**Knowledge capture:** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, write any durable convention or gotcha revealed by exploration as a project memory fact now. If no project store is present, skip this step silently.
 
 **Locked index append (MUST, every time this doc writes a `MEMORY.md` index line).** Two `cc` sessions in the same repo can each persist a fact around the same moment; a plain check-then-append can silently drop one of the two lines. Append with the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
 
 ```bash
-MEMORY_MD=~/.claude/memory/<owner>/<repo>/MEMORY.md
+MEMORY_MD=~/.config/playbook/memory/<owner>/<repo>/MEMORY.md
 LOCK="$MEMORY_MD.lock"
 ACQUIRED=0
 for _ in $(seq 1 20); do
@@ -152,7 +152,7 @@ Requirements:
 - The Decision section gives the reasoning for rejecting each alternative.
 - **Diagrams:** keep them readable, label nodes meaningfully, pick the right type (flowchart for components, sequence for interactions, state for lifecycles, ER for schemas). Always include current-state and proposed-state.
 
-**Knowledge capture:** if a project store is present at `~/.claude/memory/<owner>/<repo>/`, record the decision and each rejected alternative as memory facts (so future planning, including `/playbook:scope`, doesn't re-propose them), with the same locked `MEMORY.md` append shown in Stage 1. If no project store is present, skip this step silently.
+**Knowledge capture:** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record the decision and each rejected alternative as memory facts (so future planning, including `/playbook:scope`, doesn't re-propose them), with the same locked `MEMORY.md` append shown in Stage 1. If no project store is present, skip this step silently.
 
 Present the draft. Revise in place on feedback. Repeat until the user explicitly approves.
 
@@ -229,11 +229,11 @@ Spawn a `fact-checker` agent with the record (and blueprint, if any). It verifie
 Confidence: HIGH | MEDIUM | LOW
 ```
 
-After it returns, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist any durable gotcha as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).**
+After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).**
 
 ### Phase 2: Adversarial Review
 
-Spawn a `critic` agent with focus `decision`, given the record, blueprint, and the Phase 1 report. It challenges the decision: simpler alternatives, scope creep, over-engineering, missing error paths, blast radius, contradictions with the fact-check. After it returns, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, record any rejected simpler alternative (with reasoning) as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).**
+Spawn a `critic` agent with focus `decision`, given the record, blueprint, and the Phase 1 report. It challenges the decision: simpler alternatives, scope creep, over-engineering, missing error paths, blast radius, contradictions with the fact-check. After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record any rejected simpler alternative (with reasoning) as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).**
 
 ### Phase 3: Test Review
 
@@ -269,7 +269,7 @@ After the gate passes (or is overridden):
 1. **Update the record:** Status Proposed → Accepted, and bump Date modified to today.
 2. **Verify the blueprint** (if any): its Parent ADR reference points to the correct record path.
 3. **Save the quality report** to `{DIR}/{base}-quality.md`.
-4. **Memory graph:** if a project store is present at `~/.claude/memory/<owner>/<repo>/` and you wrote any memory facts for this decision, the graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip silently.
+4. **Memory graph:** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/` and you wrote any memory facts for this decision, the graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip silently.
 5. **Report** the final file paths to the user.
 
 ### Kebab Title Convention

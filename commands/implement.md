@@ -26,7 +26,7 @@ USAGE:
   /playbook:implement <task-reference> [options]
 
 TASK SOURCES:
-  Plan file      /playbook:implement .claude/plans/user-avatar-upload.md
+  Plan file      /playbook:implement $(playbook path plans)/user-avatar-upload.md
   ADR blueprint  /playbook:implement docs/adr/0001-websocket-push-blueprint.md
   GitHub issue   /playbook:implement #42   |   /playbook:implement https://github.com/org/repo/issues/42
   Jira ticket    /playbook:implement PROJ-123   (via Atlassian MCP/acli, when reachable)
@@ -83,8 +83,12 @@ review, before opening the PR set (or finishing, per the chosen boundary).
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+if ! PLANS_DIR=$(playbook path plans 2>&1); then
+  echo "PLAN_PATH_ERROR: $PLANS_DIR"
+  exit 1
+fi
 found=0
-for f in "$ROOT"/.claude/plans/*.md "$ROOT"/docs/adr/*-blueprint.md; do
+for f in "$PLANS_DIR"/*.md "$ROOT"/docs/adr/*-blueprint.md; do
   [ -f "$f" ] || continue
   case "$f" in *-quality.md) continue;; esac
   found=1
@@ -95,11 +99,11 @@ done
 [ "$found" = 0 ] && echo "NO_PLANS"
 ```
 
-Present the rows as a numbered menu (index, status, title, path), listing unexecuted entries (`Proposed`/`Accepted`) first and `Implemented` last. Ask the user to pick a number, or to preview one first (Read it, show the summary, then re-ask). If the output is `NO_PLANS`, stop and tell the user to run `/playbook:scope` or `/playbook:adr` to create one. Use the chosen file as the task reference, then continue below. Any flags passed (e.g. `--auto`) still apply to the chosen plan.
+Present the rows as a numbered menu (index, status, title, path), listing unexecuted entries (`Proposed`/`Accepted`) first and `Implemented` last. Ask the user to pick a number, or to preview one first (Read it, show the summary, then re-ask). If the output is `NO_PLANS`, stop and tell the user to run `/playbook:scope` or `/playbook:adr` to create one. If the output starts with `PLAN_PATH_ERROR:`, stop and show the user that error verbatim (most likely no git `origin` remote); do NOT suggest running `/playbook:scope`, since the problem isn't an absence of plans. Use the chosen file as the task reference, then continue below. Any flags passed (e.g. `--auto`) still apply to the chosen plan.
 
 Otherwise, resolve `$ARGUMENTS` (minus flags) by format:
 
-- **Plan/blueprint file** (`.claude/plans/*.md` or `docs/adr/*-blueprint.md`, or any path ending `.md`): Read it. This is the plan.
+- **Plan/blueprint file** (a file under `playbook path plans`, `docs/adr/*-blueprint.md`, or any path ending `.md`): Read it. This is the plan.
 - **GitHub issue** (`#N`, or a github.com issue URL): `gh issue view <N> --json title,body,url,labels,state`.
 - **Jira ticket** (`ABC-123`): use `mcp__atlassian__*` tools if available, else `acli` if present, else ask the user to paste the ticket. (Same availability rule as `/playbook:learn-project`.)
 - **Other file path:** Read it.
@@ -120,17 +124,17 @@ If the plan or ADR blueprint ends with a "Confidence + open items" trailer, read
 ## Step 3: Load Standards and Context
 
 - Invoke the `playbook:engineering-standards` skill (testing requirements, mocking, PR readiness, deployment), the `playbook:grounding-research` skill (verify before asserting), `playbook:delegating-subagents` (every dispatch names an output file and the orchestrator reads it; this command delegates every Work Unit, so it governs the whole run), and `playbook:writing-style` (for any prose, e.g. commit messages and the PR body).
-- If a memory store is present, load it: check whether `~/.claude/memory/MEMORY.md` exists and, if so, read it (cross-project preferences, corrections, conventions); check whether `~/.claude/memory/<owner>/<repo>/MEMORY.md` exists (`<owner>/<repo>` derived from `git remote get-url origin`) and, if so, read it, loading the relevant fact files for conventions, gotchas, and prior decisions. Honor the typed edges: a project fact that contradicts a global one wins for this repo, and surface any conflict bearing on the work rather than silently choosing. If neither store is present, skip this step silently and proceed on the codebase and the plan alone.
-- **Cost baseline:** find the most recently written `telemetry.jsonl` under `~/.claude/runtime/` (one per session, populated by `statusline.sh` on each render), read its last line, and record the `cost_usd` field as this run's starting cost. No file yet (statusline hasn't rendered this session) means no baseline: Step 7 then reports the cost as unavailable rather than a delta.
+- If a memory store is present, load it: check whether `~/.config/playbook/memory/MEMORY.md` exists and, if so, read it (cross-project preferences, corrections, conventions); check whether `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` exists (`<owner>/<repo>` derived from `git remote get-url origin`) and, if so, read it, loading the relevant fact files for conventions, gotchas, and prior decisions. Honor the typed edges: a project fact that contradicts a global one wins for this repo, and surface any conflict bearing on the work rather than silently choosing. If neither store is present, skip this step silently and proceed on the codebase and the plan alone.
+- **Cost baseline:** find the most recently written `telemetry.jsonl` under `~/.config/playbook/runtime/` (one per session, populated by `statusline.sh` on each render), read its last line, and record the `cost_usd` field as this run's starting cost. No file yet (statusline hasn't rendered this session) means no baseline: Step 7 then reports the cost as unavailable rather than a delta.
 - Read every file the plan references before changing it (grounding).
 - **Detect the stack** to know the verify commands: check `tsconfig.json` / `package.json` (TS/JS), `pyproject.toml` / `setup.py` (Python), `go.mod` (Go), `Cargo.toml` (Rust). Derive the type-check / lint / test commands from what you find.
 
-**Knowledge capture:** when you discover a durable convention or gotcha, write it as a project memory fact only if a project store is present at `~/.claude/memory/<owner>/<repo>/`; otherwise skip silently.
+**Knowledge capture:** when you discover a durable convention or gotcha, write it as a project memory fact only if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`; otherwise skip silently.
 
 **Locked index append (MUST, every time this doc writes a `MEMORY.md` index line).** Two `cc` sessions in the same repo can each persist a fact around the same moment; a plain check-then-append can silently drop one of the two lines. Append with the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
 
 ```bash
-MEMORY_MD=~/.claude/memory/<owner>/<repo>/MEMORY.md
+MEMORY_MD=~/.config/playbook/memory/<owner>/<repo>/MEMORY.md
 LOCK="$MEMORY_MD.lock"
 ACQUIRED=0
 for _ in $(seq 1 20); do
@@ -151,7 +155,7 @@ If the plan came from `/playbook:scope` or `/playbook:adr` it already has a comp
 
 Max 3 iterations per phase; revise on FAIL, recording again after every retry's return so a later PASS overwrites an earlier FAIL (`gate record` upserts on `(plan_slug, phase)`; only the last recorded value before the check below matters).
 
-Before proceeding past this gate, run `playbook gate check <plan-slug> implement fact-check adversarial test-review`. Only continue to Step 4.5 if it exits 0; on a non-zero exit, report exactly which phase(s) are missing or failed, per `gate check`'s own output (copy it verbatim rather than re-narrating it). A FAIL blocks execution unless the user explicitly overrides (or `--auto --force`): the override never changes or fakes `gate check`'s result, it is an explicit, recorded decision to proceed despite a real, honestly reported non-zero exit, not a claim that the gate actually passed. `--force` overrides the block; it must never write a fake PASS into the database. If a project store is present at `~/.claude/memory/<owner>/<repo>/`, record gotchas and rejected alternatives as memory facts, locked append as in Step 3; otherwise skip silently.
+Before proceeding past this gate, run `playbook gate check <plan-slug> implement fact-check adversarial test-review`. Only continue to Step 4.5 if it exits 0; on a non-zero exit, report exactly which phase(s) are missing or failed, per `gate check`'s own output (copy it verbatim rather than re-narrating it). A FAIL blocks execution unless the user explicitly overrides (or `--auto --force`): the override never changes or fakes `gate check`'s result, it is an explicit, recorded decision to proceed despite a real, honestly reported non-zero exit, not a claim that the gate actually passed. `--force` overrides the block; it must never write a fake PASS into the database. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record gotchas and rejected alternatives as memory facts, locked append as in Step 3; otherwise skip silently.
 
 ## Step 4.5: Delivery Strategy Gate (MUST, before executing)
 
@@ -238,7 +242,7 @@ Scope each WU's verify command to its own test files (the full suite runs in Ste
 
 **Worktree isolation (parallel waves).** For each WU in a multi-WU wave:
 
-- `git worktree add "$ROOT/.claude/worktrees/<plan-slug>/<wu-id>" HEAD` off the current branch, one per WU. Record this as the WU's base SHA in the ledger (Progress ledger, below): it's the anchor `git log` resumes against.
+- `git worktree add "$(playbook path worktrees)/<plan-slug>/<wu-id>" HEAD` off the current branch, one per WU. Record this as the WU's base SHA in the ledger (Progress ledger, below): it's the anchor `git log` resumes against.
 - Dispatch the implementer to work in that worktree path (absolute paths in its brief). A Work Unit with several test scenarios means several dispatches into the same worktree (see "With TDD" below); each commits its own step there. It does NOT push.
 - **Integrate:** squash the WU's step commits into one (Commit per Work Unit, below), then cherry-pick that commit onto the current Segment branch (the run's branch, never the default branch) in dependency order. Disjoint files make this conflict-free. If a cherry-pick conflicts, the safety test was violated: STOP, keep the worktrees, and report. Then `git worktree remove` each.
 - Single-WU waves skip the worktree and run in the main tree, on the Segment branch directly; the WU's base SHA is that branch's tip when the WU starts. The commit and resume mechanics below are the same either way: only the tree differs.
@@ -247,7 +251,7 @@ Scope each WU's verify command to its own test files (the full suite runs in Ste
 
 **File-based handoff.** Keep the orchestrator's context clean over long runs:
 
-- Each WU's brief (its `Files`, `Changes`, `Test scenarios`, `Done When`, the worktree path, and the scoped verify command) is written to `.claude/implement/<plan-slug>/<wu-id>.brief.md` by the wave's haiku drafting call (the scheduler's step 3, above), which points the implementer subagent at that file instead of pasting the whole plan into every prompt. Before that call, select a memory slice per WU from what Step 3 already loaded: facts whose `anchors:` overlap the WU's `Files`, plus any fact whose `MEMORY.md` one-line hook mentions the WU's title keywords. Hand the drafting call each WU's slice to include as a "Relevant memory" section in its brief. A WU touching nothing anchored gets no section, not an empty placeholder.
+- Each WU's brief (its `Files`, `Changes`, `Test scenarios`, `Done When`, the worktree path, and the scoped verify command) is written to `$(playbook path implement)/<plan-slug>/<wu-id>.brief.md` by the wave's haiku drafting call (the scheduler's step 3, above), which points the implementer subagent at that file instead of pasting the whole plan into every prompt. Before that call, select a memory slice per WU from what Step 3 already loaded: facts whose `anchors:` overlap the WU's `Files`, plus any fact whose `MEMORY.md` one-line hook mentions the WU's title keywords. Hand the drafting call each WU's slice to include as a "Relevant memory" section in its brief. A WU touching nothing anchored gets no section, not an empty placeholder.
 - A WU dispatches once per step (RED, GREEN, REFACTOR per scenario, or once per file group under `--no-tdd`), so its report path is scoped per dispatch: `<wu-id>.<step-slug>.report.md`, e.g. `wu-3.s2-red.report.md`. A shared `<wu-id>.report.md` would let GREEN's report clobber RED's before it's ever read. Each dispatch writes its full report there and returns ONLY: a status (`DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, or `NEEDS_CONTEXT`), its commit SHA, and a one-line test result.
 
 **Read the report file (MUST, per `playbook:delegating-subagents`).** The dispatch's report file is the deliverable; the returned status is a courtesy. The moment a dispatch finishes, goes idle, or is given up on, **read its report file before doing anything else with that WU**, including before deciding it produced nothing. Agent-tool spawns frequently complete their work and return no result at all, so a silent agent is not an empty one. If the file is missing, say so explicitly rather than inferring what it would have said.
@@ -256,22 +260,18 @@ This is not optional when the commit looks fine. The report is the only place a 
 
 **Verify-by-diff (MUST).** Never take the subagent's word. After a WU returns, confirm the work from git (`git show --stat <sha>`, review the diff against the brief) and the scoped verify. A `DONE` the diff doesn't support is a failure: re-dispatch or stop per Error handling. Git tells you whether the work landed; only the report tells you what the agent observed, so do both.
 
-**Progress ledger.** Record progress in `.claude/implement/<plan-slug>.progress.md` (gitignored). At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary) from Step 4.5. Per Segment, record its id, branch, whether it was re-split, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch. First use in a repo, create and ignore the dir. Lock the `.gitignore` check-then-append: two sessions bootstrapping it at the same moment can otherwise race, and one session's line gets lost.
+**Progress ledger.** Record progress in `$(playbook path implement)/<plan-slug>.progress.md`. This directory lives outside the repo checkout (`$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/implement/`), so there is nothing to gitignore. At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary) from Step 4.5. Per Segment, record its id, branch, whether it was re-split, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch. First use in a repo, create the dir:
 
 ```bash
-ROOT=$(git rev-parse --show-toplevel)
-mkdir -p "$ROOT/.claude/implement"
-GI="$ROOT/.gitignore"
-LOCK="$GI.lock"
-ACQUIRED=0
-for _ in $(seq 1 20); do
-  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
-  sleep 0.05
-done
-for d in .claude/implement/ .claude/worktrees/; do
-  grep -qxF "$d" "$GI" 2>/dev/null || printf '%s\n' "$d" >> "$GI"
-done
-[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
+if ! IMPLEMENT_DIR=$(playbook path implement 2>&1); then
+  echo "error: playbook path implement failed: $IMPLEMENT_DIR" >&2
+  exit 1
+fi
+if ! WORKTREES_DIR=$(playbook path worktrees 2>&1); then
+  echo "error: playbook path worktrees failed: $WORKTREES_DIR" >&2
+  exit 1
+fi
+mkdir -p "$IMPLEMENT_DIR" "$WORKTREES_DIR"
 ```
 
 **Model tiering (MUST, never omit `model`).** Implementer Tasks spawn the `implementer` agent, which pins `model: sonnet` itself, so you don't set the model on those calls. Brief drafting (the scheduler's step 3, above) is genuine content generation delegated off the orchestrator's own turn, so it runs `model: "haiku"` explicitly on that one Agent call per wave. Ledger writes stay a direct orchestrator action: a few-line append per WU, small enough that a separate dispatch would cost more in round-trip latency than it saves in tokens. Verification and the adversarial review (Step 9) run the capable tier. An omitted `model` on a non-typed call silently inherits the priciest default, so always set it there.
@@ -349,7 +349,7 @@ Run the project's checks (from Step 3 detection), e.g. type-check, lint, and tes
 - Fix and re-validate until green.
 - **Doc audit:** every new/modified function has a doc comment explaining WHY; add any that are missing.
 - **Update status:** change the plan's `Status: Proposed` to `Status: Implemented`.
-- **Memory capture (MUST):** if a project store is present at `~/.claude/memory/<owner>/<repo>/`, write every durable fact this run produced: notable errors and their fixes, conventions or gotchas discovered, and decisions made under ambiguity, the same categories the system prompt's Memory section scopes to feedback and project facts. This is required, not conditional on the model remembering to do it: `/playbook:implement` is the one capture path in this design that a command executes and checks, rather than a hook that only prompts. No project store means skip silently. The graph rebuilds automatically on fact save via the PostToolUse hook.
+- **Memory capture (MUST):** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, write every durable fact this run produced: notable errors and their fixes, conventions or gotchas discovered, and decisions made under ambiguity, the same categories the system prompt's Memory section scopes to feedback and project facts. This is required, not conditional on the model remembering to do it: `/playbook:implement` is the one capture path in this design that a command executes and checks, rather than a hook that only prompts. No project store means skip silently. The graph rebuilds automatically on fact save via the PostToolUse hook.
 - **Cost delta:** read the run's current sample from the same `telemetry.jsonl` and report `cost_usd` minus the Step 3 baseline as this run's cost; if Step 3 recorded no baseline, report the cost as unavailable rather than guess. This is a session-level delta between two telemetry samples, not per-agent token accounting: no hook payload exposes per-agent tokens, so don't present it as more precise than that.
 
 In `--auto`, after validation passes, continue to the refinement pass (Step 8). The PR opens at the end of Step 9, after the refinement and adversarial review pass, not here.

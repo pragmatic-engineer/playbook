@@ -1,7 +1,7 @@
 ---
 description: Interview-driven planning session with deep requirements gathering that produces a verified implementation plan, its Work Units grouped into suggested PR-sized Segments.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[topic | ./prompt.md | .claude/designs/*.md] [--auto] [--help]"
+argument-hint: "[topic | ./prompt.md | <design-doc-path>] [--auto] [--help]"
 model: opus
 effort: high
 ---
@@ -23,7 +23,7 @@ USAGE:
   /playbook:scope [topic]              Start interactive planning
   /playbook:scope "user auth system"   Start with a topic seed
   /playbook:scope ./prompt.md          Load topic seed from a file
-  /playbook:scope .claude/designs/x.md Plan from a /playbook:brainstorm design doc
+  /playbook:scope $(playbook path designs)/x.md   Plan from a /playbook:brainstorm design doc
 
 ARGUMENTS:
   If the argument is a file path (starts with ./ or / and the file exists),
@@ -37,7 +37,7 @@ OPTIONS:
   --help   Show this help
 
 Asks one question at a time with a recommended answer. Explores the codebase
-and the memory store (`~/.claude/memory/` for global facts, `~/.claude/memory/<owner>/<repo>/` for project facts, `<owner>/<repo>` derived from the git remote) when it exists to answer
+and the memory store (`~/.config/playbook/memory/` for global facts, `~/.config/playbook/memory/<owner>/<repo>/` for project facts, `<owner>/<repo>` derived from the git remote) when it exists to answer
 questions itself before asking you. Memory is optional: when neither store is present, it relies on the codebase alone. Walks decision trees, runs a 3-phase
 quality gate, and produces a verified, self-contained plan broken into small
 Work Units (some flagged parallel-safe), grouped into ordered PR-sized Segments
@@ -64,7 +64,7 @@ If the argument looks like a file path (starts with `./`, `../`, `/`, or `~`, or
 
 This happens before Step 1. The loaded content replaces the raw argument as the topic seed.
 
-**When a file path is provided, the file IS the context (MUST).** Do NOT explore the repo beyond what the file explicitly references. Skip the general repo exploration in Step 1 (no git log, no TODO scan, no manifest scan). If a memory store is present, read it (global `~/.claude/memory/` and/or project `~/.claude/memory/<owner>/<repo>/`); when neither exists, skip this and proceed with the file content alone. Beyond memory, read ONLY the file, then go straight to your first question based on its content. If the file references specific source files, modules, or APIs by name, you may read those, but do NOT go looking for things the file does not mention.
+**When a file path is provided, the file IS the context (MUST).** Do NOT explore the repo beyond what the file explicitly references. Skip the general repo exploration in Step 1 (no git log, no TODO scan, no manifest scan). If a memory store is present, read it (global `~/.config/playbook/memory/` and/or project `~/.config/playbook/memory/<owner>/<repo>/`); when neither exists, skip this and proceed with the file content alone. Beyond memory, read ONLY the file, then go straight to your first question based on its content. If the file references specific source files, modules, or APIs by name, you may read those, but do NOT go looking for things the file does not mention.
 
 **Ignore `.gitignore`d files (MUST).** Don't read files matched by `.gitignore` (PDFs, build artefacts, binaries, vendor dirs, `.env`), even if the prompt file mentions them. Only read tracked source files.
 
@@ -76,14 +76,14 @@ Enable when `--auto` appears in the arguments; strip it (like `--help`) before r
 - **Record assumptions.** Every self-made decision goes into an **Assumptions** list with its rationale, so the user can audit what was chosen for them. When you're genuinely split on a decision, record it as an `OPEN` assumption (with the leading option and why) rather than silently picking.
 - **Skip the confirmation gates.** Do not pause at Step 3 ("Does this capture everything?") or Step 6 ("Does this plan look right?"). Fold the Design Summary and the Assumptions list into the saved plan instead.
 - **Quality gate still runs (Step 5).** It needs no user input. If a phase still FAILs after its 3 iterations, STOP: do not save; report the failing checks and the assumptions made. No user is present to override a FAIL in `--auto`.
-- **Save and report (Step 7).** On a passing gate, save the plan and quality report, then tell the user the paths, the assumptions made (flag any `OPEN` ones), and to run `/playbook:implement` when ready. If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the accepted decisions there; otherwise skip.
+- **Save and report (Step 7).** On a passing gate, save the plan and quality report, then tell the user the paths, the assumptions made (flag any `OPEN` ones), and to run `/playbook:implement` when ready. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist the accepted decisions there; otherwise skip.
 
 ## Design Doc Handoff (from `/playbook:brainstorm`)
 
-`/playbook:brainstorm` produces a design doc under `.claude/designs/` and can chain straight into `/playbook:scope`. Before Step 1, check for one:
+`/playbook:brainstorm` produces a design doc under the resolved designs directory (`playbook path designs`) and can chain straight into `/playbook:scope`. Before Step 1, check for one:
 
-- **Explicit:** if the argument resolves (per Argument Resolution) to a file under `.claude/designs/`, that file IS the design doc.
-- **Implicit:** if no topic or file argument was given and `.claude/designs/` has entries, take the newest and ask once: "Base this plan on the design doc `<path>` (from `<date>`)? **I'd recommend yes** because it captures the agreed direction." If the user declines, proceed with a normal topic seed.
+- **Explicit:** if the argument resolves (per Argument Resolution) to a file under `$(playbook path designs)`, that file IS the design doc.
+- **Implicit:** if no topic or file argument was given and `$(playbook path designs)` has entries, take the newest and ask once: "Base this plan on the design doc `<path>` (from `<date>`)? **I'd recommend yes** because it captures the agreed direction." If the user declines, proceed with a normal topic seed.
 
 When a design doc is in play, it's the authoritative context, not a raw seed:
 
@@ -102,7 +102,7 @@ With no design doc, `/playbook:scope` behaves exactly as before.
 
 With a plain-text topic seed, silently research before asking anything:
 
-- If a memory store is present, read it: check for the global store at `~/.claude/memory/MEMORY.md` (cross-project preferences, corrections, conventions) and the project store at `~/.claude/memory/<owner>/<repo>/MEMORY.md` (`<owner>/<repo>` derived from `git remote get-url origin`). Load the relevant fact files from whichever stores exist. This is the durable knowledge: architecture, conventions, decisions, gotchas. Honor the typed edges; when a project fact contradicts a global one it wins for this repo, and surface any conflict bearing on the plan rather than silently choosing. When neither store exists, skip this bullet and proceed on the codebase alone.
+- If a memory store is present, read it: check for the global store at `~/.config/playbook/memory/MEMORY.md` (cross-project preferences, corrections, conventions) and the project store at `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` (`<owner>/<repo>` derived from `git remote get-url origin`). Load the relevant fact files from whichever stores exist. This is the durable knowledge: architecture, conventions, decisions, gotchas. Honor the typed edges; when a project fact contradicts a global one it wins for this repo, and surface any conflict bearing on the plan rather than silently choosing. When neither store exists, skip this bullet and proceed on the codebase alone.
 - Check recent git log for context.
 - If the topic seed mentions files, modules, or features, read them.
 - Read the README and whatever build manifest exists (`package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, etc.) for project context.
@@ -138,12 +138,12 @@ Types of questions, in roughly this order (adapt):
 
 Between questions, explore the codebase if the answer reveals new areas. Report what you found before asking the next question.
 
-**Knowledge capture (memory).** When exploration reveals a durable convention or gotcha about the codebase (true regardless of this plan), and a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist it as a project memory fact right then: a kebab-case file in `~/.claude/memory/<owner>/<repo>/` with `name`/`description`/`type: project`/`links:`/`anchors:` (to the files), plus its `MEMORY.md` index line. When no project store is present, skip this step silently. Track each confirmed *plan decision* in the running plan draft; those are persisted at Step 7, not now.
+**Knowledge capture (memory).** When exploration reveals a durable convention or gotcha about the codebase (true regardless of this plan), and a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist it as a project memory fact right then: a kebab-case file in `~/.config/playbook/memory/<owner>/<repo>/` with `name`/`description`/`type: project`/`links:`/`anchors:` (to the files), plus its `MEMORY.md` index line. When no project store is present, skip this step silently. Track each confirmed *plan decision* in the running plan draft; those are persisted at Step 7, not now.
 
 **Locked index append (MUST, whenever the index line is written, here or at Step 7).** Two `cc` sessions in the same repo can each persist a fact around the same moment; a plain check-then-append can silently drop one of the two lines. Append with the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
 
 ```bash
-MEMORY_MD=~/.claude/memory/<owner>/<repo>/MEMORY.md
+MEMORY_MD=~/.config/playbook/memory/<owner>/<repo>/MEMORY.md
 LOCK="$MEMORY_MD.lock"
 ACQUIRED=0
 for _ in $(seq 1 20); do
@@ -285,7 +285,7 @@ Returns a structured PASS / FAIL / WARN report. Phase 1 folds a Verification Sum
 Confidence: HIGH | MEDIUM | LOW
 ```
 
-Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/scope-<plan-slug>-fact-check.txt` (`<plan-slug>` is the same slug Step 7 later saves the plan under), then run `playbook gate record <plan-slug> scope fact-check <that file>`. Do this every time Phase 1 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so a stale FAIL from an earlier iteration is overwritten once a later iteration passes, and only the last recording before Step 6's `gate check` matters. **After it returns**, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist any durable gotcha it found as a memory fact; otherwise skip. **If any FAILs:** revise the plan and re-run Phase 1 (max 3 iterations). Don't proceed until it passes.
+Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/scope-<plan-slug>-fact-check.txt` (`<plan-slug>` is the same slug Step 7 later saves the plan under), then run `playbook gate record <plan-slug> scope fact-check <that file>`. Do this every time Phase 1 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so a stale FAIL from an earlier iteration is overwritten once a later iteration passes, and only the last recording before Step 6's `gate check` matters. **After it returns**, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha it found as a memory fact; otherwise skip. **If any FAILs:** revise the plan and re-run Phase 1 (max 3 iterations). Don't proceed until it passes.
 
 #### Phase 2: Adversarial Review
 
@@ -303,7 +303,7 @@ Returns a structured report. Spawn it with a stable `name`; the moment it return
 
 Spawn a `test-reviewer` agent (`subagent_type: playbook:test-reviewer`) with the plan's Testing Strategy and the Phase 1 report (it runs in parallel with Phase 2, so it doesn't wait on the adversarial findings). It evaluates the proposed tests against `playbook:engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
 
-Returns a structured report. Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/scope-<plan-slug>-test-review.txt`, then run `playbook gate record <plan-slug> scope test-review <that file>`. Do this every time Phase 3 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before Step 6's `gate check` matters. **After it returns**, if a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist any durable test-quality pattern as a memory fact; otherwise skip. **If any FAILs:** revise the test plan and re-run Phase 3 (max 3 iterations).
+Returns a structured report. Spawn it with a stable `name`; the moment it returns, `TaskStop` it: a spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background. **Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/scope-<plan-slug>-test-review.txt`, then run `playbook gate record <plan-slug> scope test-review <that file>`. Do this every time Phase 3 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before Step 6's `gate check` matters. **After it returns**, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable test-quality pattern as a memory fact; otherwise skip. **If any FAILs:** revise the test plan and re-run Phase 3 (max 3 iterations).
 
 #### Quality Gate Result
 
@@ -340,29 +340,23 @@ Do NOT save until the user explicitly approves. If they request changes, revise 
 
 ### Step 7: Save & Next Steps
 
-Only after the user approves. First time in this repo, create the plans dir and ignore it (same pattern as memory). Lock the `.gitignore` check-then-append too, same reason as the index above:
+Only after the user approves. The plans directory lives outside this repo checkout (`$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/plans/`), resolved via the CLI, not gitignored: there is nothing repo-local left to ignore.
 
 ```bash
-ROOT=$(git rev-parse --show-toplevel)
-mkdir -p "$ROOT/.claude/plans"
-GI="$ROOT/.gitignore"
-LOCK="$GI.lock"
-ACQUIRED=0
-for _ in $(seq 1 20); do
-  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
-  sleep 0.05
-done
-grep -qxF '.claude/plans/' "$GI" 2>/dev/null || printf '.claude/plans/\n' >> "$GI"
-[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
+if ! PLANS_DIR=$(playbook path plans 2>&1); then
+  echo "error: playbook path plans failed: $PLANS_DIR" >&2
+  exit 1
+fi
+mkdir -p "$PLANS_DIR"
 ```
 
 Then:
 
-1. Save the plan to `.claude/plans/<topic-slug>.md` and the gate reports to `.claude/plans/<topic-slug>-quality.md`.
-2. If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the plan's accepted key decisions as project memory facts (`type: project`, `anchors:` to the files they touch), and update `~/.claude/memory/<owner>/<repo>/MEMORY.md` with the same locked append shown earlier. The graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip.
+1. Save the plan to `$PLANS_DIR/<topic-slug>.md` and the gate reports to `$PLANS_DIR/<topic-slug>-quality.md`.
+2. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist the plan's accepted key decisions as project memory facts (`type: project`, `anchors:` to the files they touch), and update `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` with the same locked append shown earlier. The graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip.
 3. Tell the user:
-   - "Saved to `.claude/plans/<topic-slug>.md`"
-   - "Run `/clear`, then implement it with a clean context: `/playbook:implement .claude/plans/<topic-slug>.md`." This interview's back-and-forth is exactly what a fresh execution phase shouldn't carry forward; there's no way to clear it from inside this session, so say so instead of leaving it implicit.
+   - "Saved to `<plans-dir>/<topic-slug>.md`" (`<plans-dir>` is `playbook path plans`'s resolved path)
+   - "Run `/clear`, then implement it with a clean context: `/playbook:implement <plans-dir>/<topic-slug>.md`." This interview's back-and-forth is exactly what a fresh execution phase shouldn't carry forward; there's no way to clear it from inside this session, so say so instead of leaving it implicit.
    - "Want to capture the key decisions in an ADR (`/playbook:adr`)?" (if architectural)
    - **In `--auto`:** also list the **Assumptions** made (especially any `OPEN` ones) so the user can audit the autonomous choices before running `/playbook:implement`.
 
