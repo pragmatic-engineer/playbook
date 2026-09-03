@@ -181,6 +181,17 @@ fn main() {
                 }
             },
         },
+        Command::Path { kind } => match common::repo_scoped_dir(common::RepoScope::Worktree) {
+            Some(base) => println!("{}", base.join(kind.dir_name()).display()),
+            None => {
+                eprintln!(
+                    "playbook path: could not resolve a worktree-scoped storage location; \
+                     this repo needs a git 'origin' remote and a resolvable worktree \
+                     toplevel, refusing to fall back to a repo-local path"
+                );
+                std::process::exit(1);
+            }
+        },
     }
 }
 
