@@ -3,7 +3,7 @@
 
 //! `playbook gate record` CLI entry point: parse a phase agent's raw output
 //! for a `VERDICT: PASS|FAIL|WARN|INCONCLUSIVE` line and upsert it into the
-//! gate-check database at `.claude/state.db`.
+//! gate-check database at the repo and worktree-scoped path under `$HOME/.config/playbook`.
 
 use crate::common::paths::{repo_scoped_dir, RepoScope};
 use crate::gate::db;
