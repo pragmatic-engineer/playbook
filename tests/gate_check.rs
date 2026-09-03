@@ -17,12 +17,12 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 struct Fixture {
     repo: PathBuf,
+    home: PathBuf,
 }
 
 impl Fixture {
-    /// A scratch git repo: `gate check` resolves the DB path via
-    /// `git rev-parse --show-toplevel` from cwd, so every fixture needs to
-    /// actually be a git repository, not just a plain directory.
+    /// A scratch git repo with an `origin` remote, plus its own scratch
+    /// `$HOME`, so every fixture is isolated from the real machine and every other fixture.
     fn new(tag: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
@@ -36,12 +36,49 @@ impl Fixture {
             .status()
             .expect("git init should run");
         assert!(init.success(), "git init should succeed");
+        let remote = Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/test-owner/test-repo.git",
+            ])
+            .current_dir(&dir)
+            .status()
+            .expect("git remote add should run");
+        assert!(remote.success(), "git remote add should succeed");
+        let repo = dir.canonicalize().expect("scratch repo should resolve");
 
-        Self { repo: dir }
+        let home = std::env::temp_dir().join(format!(
+            "playbook-gate-check-home-{tag}-{}-{n}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&home).expect("scratch home should be creatable");
+
+        Self { repo, home }
+    }
+
+    /// A repo fixture with no `origin` remote, so worktree scoping cannot resolve: covers the silent-fallback error path.
+    fn new_without_origin(tag: &str) -> Self {
+        let f = Self::new(tag);
+        let remove = Command::new("git")
+            .args(["remote", "remove", "origin"])
+            .current_dir(&f.repo)
+            .status()
+            .expect("git remote remove should run");
+        assert!(remove.success(), "git remote remove should succeed");
+        f
     }
 
     fn db_path(&self) -> PathBuf {
-        self.repo.join(".claude").join("state.db")
+        self.home
+            .join(".config")
+            .join("playbook")
+            .join("repos")
+            .join("test-owner")
+            .join("test-repo")
+            .join(worktree_id(&self.repo))
+            .join("state.db")
     }
 
     /// Seed a phase row directly through the library, bypassing `gate
@@ -65,9 +102,19 @@ impl Fixture {
             .args(["gate", "check", plan_slug, command])
             .args(phases)
             .current_dir(&self.repo)
+            .env("HOME", &self.home)
             .output()
             .expect("playbook binary should spawn")
     }
+}
+
+/// Mirrors `paths::worktree_id`'s slugify rule independently (not by
+/// calling the production function), so this stays a real check, not a tautology.
+fn worktree_id(repo: &std::path::Path) -> String {
+    repo.to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 fn stdout_of(out: &std::process::Output) -> String {
@@ -213,5 +260,27 @@ fn zero_phase_arguments_exits_one_with_a_pinned_message() {
         stderr_of(&out).contains("no phases specified"),
         "got: {}",
         stderr_of(&out)
+    );
+}
+
+#[test]
+fn gate_check_errors_when_worktree_scoping_cannot_resolve() {
+    // Arrange: no `origin` remote configured, `gate check`'s own
+    // independent path-construction call site.
+    let f = Fixture::new_without_origin("no-origin");
+
+    // Act
+    let out = f.run("plan-a", "gate-run", &["spec"]);
+
+    // Assert
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected a hard error, not a silent repo-local fallback: {}",
+        stderr_of(&out)
+    );
+    assert!(
+        !f.repo.join(".claude").join("state.db").exists(),
+        "must never fall back to reading/writing a repo-local state.db"
     );
 }
