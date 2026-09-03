@@ -147,17 +147,24 @@ fn replace_exact_line(content: &str, legacy: &str, shell_kind: ShellKind) -> Opt
     Some(out)
 }
 
-/// Overwrite `rc_file` via a sibling temp file plus rename.
+/// Overwrite `rc_file` via a sibling temp file plus rename, preserving the original file's permission bits.
 fn atomic_write_rc_file(rc_file: &Path, content: &str) -> io::Result<()> {
     let dir = rc_file
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(dir)?;
+    let original_permissions = fs::metadata(rc_file).ok().map(|m| m.permissions());
     let tmp_path = dir.join(format!(".rc-rewire-{}.tmp", std::process::id()));
     if let Err(err) = fs::write(&tmp_path, content) {
         let _ = fs::remove_file(&tmp_path);
         return Err(err);
+    }
+    if let Some(permissions) = original_permissions {
+        if let Err(err) = fs::set_permissions(&tmp_path, permissions) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(err);
+        }
     }
     if let Err(err) = fs::rename(&tmp_path, rc_file) {
         let _ = fs::remove_file(&tmp_path);
