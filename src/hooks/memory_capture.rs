@@ -36,7 +36,7 @@
 
 use crate::cc::{logical_cwd, project_slug};
 use crate::common::paths::memory_dir;
-use crate::common::{emit_block, home_dir, session_dir, Payload};
+use crate::common::{emit_block, session_dir, Payload};
 use crate::hooks::memory_signals;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -222,13 +222,13 @@ fn read_start_ts(session_dir: &Path) -> SystemTime {
 }
 
 /// Freshest mtime among this worktree's handoff files (`<slug>-*.md` under
-/// `~/.claude/runtime/handoff`), directory-scoped like `session_init.rs`'s read side, so a sibling session's handoff can suppress this nudge, accepted deliberately.
+/// the playbook runtime root), directory-scoped like `session_init.rs`'s read side.
 fn freshest_handoff_mtime() -> Option<SystemTime> {
     let slug = project_slug(&logical_cwd());
     if slug.is_empty() {
         return None;
     }
-    let dir = home_dir().join(".claude").join("runtime").join("handoff");
+    let dir = crate::common::paths::runtime_root().join("handoff");
     let prefix = format!("{slug}-");
     let entries = fs::read_dir(&dir).ok()?;
     entries

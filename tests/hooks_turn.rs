@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A fresh, empty directory to use as `$HOME` for one test, so no test ever
-/// touches the real `~/.claude/runtime`.
+/// touches the real `~/.config/playbook/runtime`.
 fn scratch_home(tag: &str) -> PathBuf {
     let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir =
@@ -55,10 +55,13 @@ fn run_hook(name: &str, home: &Path, stdin: &str) -> (String, i32) {
     )
 }
 
-/// `$HOME/.claude/runtime/<session_id>`, matching how the hooks derive
-/// their per-session state directory.
+/// `$HOME/.config/playbook/runtime/<session_id>`, matching how the hooks
+/// derive their per-session state directory.
 fn session_dir_for(home: &Path, session_id: &str) -> PathBuf {
-    home.join(".claude").join("runtime").join(session_id)
+    home.join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(session_id)
 }
 
 // ---------------------------------------------------------------------
@@ -268,7 +271,10 @@ mod precompact_warn {
     use super::*;
 
     fn compactions_log(home: &Path) -> PathBuf {
-        home.join(".claude").join("runtime").join("compactions.log")
+        home.join(".config")
+            .join("playbook")
+            .join("runtime")
+            .join("compactions.log")
     }
 
     #[test]
@@ -1017,10 +1023,14 @@ mod memory_capture {
     }
 
     /// Writes a handoff file the way `skills/session-handoff/SKILL.md` does:
-    /// `<slug>-<suffix>.md` under `~/.claude/runtime/handoff`.
+    /// `<slug>-<suffix>.md` under `~/.config/playbook/runtime/handoff`.
     fn write_handoff(home: &Path, cwd: &Path) -> PathBuf {
         let slug = project_slug(&cwd.to_string_lossy());
-        let dir = home.join(".claude").join("runtime").join("handoff");
+        let dir = home
+            .join(".config")
+            .join("playbook")
+            .join("runtime")
+            .join("handoff");
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(format!("{slug}-test.md"));
         fs::write(&path, "HANDOFF").unwrap();

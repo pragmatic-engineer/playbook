@@ -5,18 +5,8 @@
 //! compaction event and warns the user, since PreCompact has no
 //! `additionalContext` channel to speak to Claude directly.
 //!
-//! Two divergences from the python source, both non-observable:
-//! - `hooks/lib/common.py` exposes a module-private `RUNTIME_ROOT`
-//!   (`$HOME/.claude/runtime`), and `src/common/session.rs` computes the
-//!   same path but keeps it private to that module (SEGMENT-B-RULES.md
-//!   forbids editing `src/common/**`), so this file re-derives the same two
-//!   path segments locally rather than reusing a shared constant.
-//! - The python hook appends to the log with a bare `open(log, "a")`,
-//!   skipping its own `atomic_append` helper (which the hook itself never
-//!   imports for this call). This port uses `common::atomic_append`
-//!   instead, since `src/common/mod.rs` documents it as the one
-//!   implementation every hook should share; the on-disk line format is
-//!   identical either way.
+//! One divergence from the python source, non-observable: this port uses
+//! `common::atomic_append` where the python hook appends with a bare `open`.
 //!
 //! Local system time (via the `date` command, mirroring how
 //! `common::repo_slug` already shells out to `git`) stands in for python's
@@ -25,7 +15,7 @@
 
 use crate::common::atomic::with_dir_lock;
 use crate::common::payload::Payload;
-use crate::common::{emit_system_message, home_dir, run_with_timeout, session_id};
+use crate::common::{emit_system_message, run_with_timeout, session_id};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -52,7 +42,7 @@ pub fn run(payload: &Payload) {
     };
     let line = format!("{ts}\tsession={sid}\ttrigger={log_trigger}");
 
-    let log_path = runtime_root().join("compactions.log");
+    let log_path = crate::common::paths::runtime_root().join("compactions.log");
     if let Some(log_path_str) = log_path.to_str() {
         // The append and the trim must serialize together, not just each
         // against itself: `common::atomic_append` releases its own lock the
@@ -92,12 +82,6 @@ savings are gone. Strongly consider: finish the current step, ask me to \
 wrap up (a session handoff), then /clear for a fresh session."
     );
     emit_system_message(&user_msg);
-}
-
-/// `$HOME/.claude/runtime`, matching `RUNTIME_ROOT` in hooks/lib/common.py
-/// and the private `runtime_root` in `src/common/session.rs`.
-fn runtime_root() -> PathBuf {
-    home_dir().join(".claude").join("runtime")
 }
 
 /// Current local time as `%Y-%m-%d %H:%M:%S`. Empty on any failure; never

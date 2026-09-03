@@ -532,7 +532,11 @@ fn write_handoff(home: &Path, cwd: &Path, contents: &str) -> PathBuf {
 
 fn write_handoff_suffixed(home: &Path, cwd: &Path, contents: &str, suffix: &str) -> PathBuf {
     let slug = project_slug(&cwd.to_string_lossy());
-    let dir = home.join(".claude").join("runtime").join("handoff");
+    let dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join("handoff");
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join(format!("{slug}-{suffix}.md"));
     fs::write(&path, contents).unwrap();
@@ -795,7 +799,11 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
     // must survive untouched.
     let home = scratch_dir("zero-counters");
     let session_id = "sid-zero";
-    let session_dir = home.join(".claude").join("runtime").join(session_id);
+    let session_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(session_id);
     fs::create_dir_all(&session_dir).unwrap();
     for name in [
         "search-count",
@@ -880,7 +888,11 @@ fn session_init_drift_warning_fires_only_on_resume() {
     let home = scratch_dir("drift-resume");
     let repo_dir = scratch_dir("drift-resume-repo");
     let session_id = "sid-resume";
-    let session_dir = home.join(".claude").join("runtime").join(session_id);
+    let session_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(session_id);
     fs::create_dir_all(&session_dir).unwrap();
     fs::write(session_dir.join("config-hash"), "stale0000stale00").unwrap();
     let expected_hash = empty_config_hash(&home);
@@ -947,7 +959,11 @@ fn session_init_resume_with_matching_hash_emits_no_drift_warning() {
     let home = scratch_dir("drift-resume-match");
     let repo_dir = scratch_dir("drift-resume-match-repo");
     let session_id = "sid-resume-match";
-    let session_dir = home.join(".claude").join("runtime").join(session_id);
+    let session_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(session_id);
     fs::create_dir_all(&session_dir).unwrap();
     let current_hash = empty_config_hash(&home);
     fs::write(session_dir.join("config-hash"), &current_hash).unwrap();
@@ -1016,13 +1032,83 @@ fn session_init_degrades_quietly_when_both_shell_outs_are_unreachable() {
     );
 }
 
+// session-init: a runtime write lands under the new playbook-owned root.
+#[test]
+fn runtime_and_cc_state_migration_leaves_old_root_untouched() {
+    // Arrange: seed the OLD and NEW runtime/cc-state trees with distinct
+    // content, so a byte comparison proves the old tree stays untouched.
+    let home = scratch_dir("legacy-untouched");
+    let session_id = "sid-legacy";
+
+    let old_runtime = home.join(".claude").join("runtime").join(session_id);
+    fs::create_dir_all(&old_runtime).unwrap();
+    fs::write(old_runtime.join("start-ts"), "1111111111").unwrap();
+
+    let old_cc_state = home.join(".claude").join("cc-state");
+    fs::create_dir_all(&old_cc_state).unwrap();
+    fs::write(old_cc_state.join("legacy-project"), "old-hash-content").unwrap();
+
+    let new_runtime_root = home.join(".config").join("playbook").join("runtime");
+    fs::create_dir_all(&new_runtime_root).unwrap();
+    fs::write(new_runtime_root.join("sentinel"), "new-root-marker").unwrap();
+
+    let new_cc_state = home.join(".config").join("playbook").join("cc-state");
+    fs::create_dir_all(&new_cc_state).unwrap();
+    fs::write(new_cc_state.join("other-project"), "new-hash-content").unwrap();
+
+    let repo_dir = scratch_dir("legacy-untouched-repo");
+
+    // Act: a real session write, at the new root.
+    let outcome = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        &format!(r#"{{"session_id":"{session_id}"}}"#),
+        &[],
+    );
+
+    // Assert: the write landed at the NEW runtime root.
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    let new_session_dir = new_runtime_root.join(session_id);
+    assert!(
+        new_session_dir.join("start-ts").is_file(),
+        "session-init should write start-ts under the NEW runtime root"
+    );
+    assert_eq!(
+        fs::read_to_string(new_runtime_root.join("sentinel")).unwrap(),
+        "new-root-marker",
+        "unrelated pre-existing content at the new root must survive untouched"
+    );
+    assert_eq!(
+        fs::read_to_string(new_cc_state.join("other-project")).unwrap(),
+        "new-hash-content",
+        "the new cc-state tree must be left byte-unchanged by a runtime-only write"
+    );
+
+    // Assert: the OLD tree is byte-unchanged.
+    assert_eq!(
+        fs::read_to_string(old_runtime.join("start-ts")).unwrap(),
+        "1111111111",
+        "the old .claude/runtime tree must be left byte-unchanged"
+    );
+    assert_eq!(
+        fs::read_to_string(old_cc_state.join("legacy-project")).unwrap(),
+        "old-hash-content",
+        "the old .claude/cc-state tree must be left byte-unchanged"
+    );
+}
+
 // ---------------------------------------------------------------------
 // session-clean-exit: the three `.reason` cases
 // (hooks/session-clean-exit.test.sh cases 1-2, plus the absent case)
 // ---------------------------------------------------------------------
 
 fn seeded_session_dir(home: &Path, session_id: &str) -> PathBuf {
-    let dir = home.join(".claude").join("runtime").join(session_id);
+    let dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(session_id);
     fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -1168,7 +1254,11 @@ fn session_clean_exit_queues_auto_learn_flag_with_expected_shape() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    let to_learn_dir = home.join(".claude").join("runtime").join("to-learn");
+    let to_learn_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join("to-learn");
     let entries: Vec<_> = fs::read_dir(&to_learn_dir)
         .expect("to-learn dir should exist")
         .flatten()
@@ -1203,7 +1293,11 @@ fn session_clean_exit_queues_correctly_when_the_lock_is_already_held() {
     let repo_dir = scratch_dir("auto-learn-lock-held-repo");
     init_repo_with_origin(&repo_dir, "https://github.com/acme/widget.git");
     let slug = slugify(&git_toplevel(&repo_dir));
-    let to_learn_dir = home.join(".claude").join("runtime").join("to-learn");
+    let to_learn_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join("to-learn");
     fs::create_dir_all(&to_learn_dir).unwrap();
     let lock_dir = to_learn_dir.join(format!("{slug}.json.lock"));
     fs::create_dir(&lock_dir).expect("pre-creating the lock dir should succeed");
@@ -1255,7 +1349,11 @@ fn session_clean_exit_at_default_threshold_queues_a_flag() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    let to_learn_dir = home.join(".claude").join("runtime").join("to-learn");
+    let to_learn_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join("to-learn");
     let entries: Vec<_> = fs::read_dir(&to_learn_dir)
         .expect("to-learn dir should exist")
         .flatten()
@@ -1287,7 +1385,11 @@ fn session_clean_exit_below_threshold_queues_no_flag() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    let to_learn_dir = home.join(".claude").join("runtime").join("to-learn");
+    let to_learn_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join("to-learn");
     assert!(
         !to_learn_dir.is_dir() || fs::read_dir(&to_learn_dir).unwrap().next().is_none(),
         "below the threshold, no flag should be queued"
@@ -1317,7 +1419,11 @@ fn session_clean_exit_padded_min_edits_env_var_still_parses() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    let to_learn_dir = home.join(".claude").join("runtime").join("to-learn");
+    let to_learn_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join("to-learn");
     let entries: Vec<_> = fs::read_dir(&to_learn_dir)
         .expect("to-learn dir should exist")
         .flatten()
@@ -1349,7 +1455,11 @@ fn session_clean_exit_auto_learn_nudge_disabled_skips_queue() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    let to_learn_dir = home.join(".claude").join("runtime").join("to-learn");
+    let to_learn_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join("to-learn");
     assert!(
         !to_learn_dir.is_dir() || fs::read_dir(&to_learn_dir).unwrap().next().is_none(),
         "AUTO_LEARN_NUDGE=0 should disable the queue even above threshold"
