@@ -178,6 +178,17 @@ for entry in "${SHIPPED[@]}"; do
     fi
 done
 
+# install.sh now copies shell/, statusline.sh, prompts/ and hooks/lib/config-hash.sh
+# to $HOME/.config/playbook instead of CLAUDE_HOME, so the SHIPPED sweep above cannot reach them.
+PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
+log "Removing shipped entries from $PLAYBOOK_CONFIG_DIR"
+for entry in shell statusline.sh prompts hooks; do
+    target="$PLAYBOOK_CONFIG_DIR/$entry"
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        rm -rf "$target"
+    fi
+done
+
 # --- Purge user config (--purge only) ---
 if [ "$PURGE" -eq 1 ]; then
     log "Purging user config"
