@@ -6,6 +6,7 @@
 //! path and confirm no error and no duplicate rows.
 
 use playbook::gate::db::{open_db, query_phase, upsert_phase};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -99,4 +100,24 @@ fn cross_plan_isolation_holds_through_real_open_db() {
     assert_eq!(row_a.verdict, "PASS");
     assert_eq!(row_b.verdict, "FAIL");
     assert_ne!(row_a.evidence, row_b.evidence);
+}
+
+/// Reads `src/gate/db.rs` from disk, greps for the deleted gitignore shape-check by name, proving it is gone, not just unreferenced.
+#[test]
+fn gitignore_shape_check_function_and_call_site_fully_removed() {
+    // Arrange
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/gate/db.rs");
+
+    // Act
+    let source = fs::read_to_string(&path).expect("src/gate/db.rs should read");
+
+    // Assert
+    assert!(
+        !source.contains("ensure_state_db_gitignored"),
+        "ensure_state_db_gitignored must be fully removed from {path:?}, not just unreferenced"
+    );
+    assert!(
+        !source.contains("append_gitignore_entry"),
+        "its gitignore-append helper must be fully removed from {path:?} too"
+    );
 }

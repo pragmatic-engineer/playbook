@@ -17,12 +17,12 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 struct Fixture {
     repo: PathBuf,
+    home: PathBuf,
 }
 
 impl Fixture {
-    /// A scratch git repo: `gate record` resolves the DB path via
-    /// `git rev-parse --show-toplevel` from cwd, so every fixture needs to
-    /// actually be a git repository, not just a plain directory.
+    /// A scratch git repo with an `origin` remote, plus its own scratch
+    /// `$HOME`, so every fixture is isolated from the real machine and every other fixture.
     fn new(tag: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
@@ -36,8 +36,38 @@ impl Fixture {
             .status()
             .expect("git init should run");
         assert!(init.success(), "git init should succeed");
+        let remote = Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/test-owner/test-repo.git",
+            ])
+            .current_dir(&dir)
+            .status()
+            .expect("git remote add should run");
+        assert!(remote.success(), "git remote add should succeed");
+        let repo = dir.canonicalize().expect("scratch repo should resolve");
 
-        Self { repo: dir }
+        let home = std::env::temp_dir().join(format!(
+            "playbook-gate-record-home-{tag}-{}-{n}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&home).expect("scratch home should be creatable");
+
+        Self { repo, home }
+    }
+
+    /// A repo fixture with no `origin` remote, so worktree scoping cannot resolve: covers the silent-fallback error path.
+    fn new_without_origin(tag: &str) -> Self {
+        let f = Self::new(tag);
+        let remove = Command::new("git")
+            .args(["remote", "remove", "origin"])
+            .current_dir(&f.repo)
+            .status()
+            .expect("git remote remove should run");
+        assert!(remove.success(), "git remote remove should succeed");
+        f
     }
 
     fn write_input(&self, name: &str, contents: &str) -> PathBuf {
@@ -57,13 +87,30 @@ impl Fixture {
             .args(["gate", "record", plan_slug, command, phase])
             .arg(input)
             .current_dir(&self.repo)
+            .env("HOME", &self.home)
             .output()
             .expect("playbook binary should spawn")
     }
 
     fn db_path(&self) -> PathBuf {
-        self.repo.join(".claude").join("state.db")
+        self.home
+            .join(".config")
+            .join("playbook")
+            .join("repos")
+            .join("test-owner")
+            .join("test-repo")
+            .join(worktree_id(&self.repo))
+            .join("state.db")
     }
+}
+
+/// Mirrors `paths::worktree_id`'s slugify rule independently (not by
+/// calling the production function), so this stays a real check, not a tautology.
+fn worktree_id(repo: &std::path::Path) -> String {
+    repo.to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 fn stderr_of(out: &std::process::Output) -> String {
@@ -159,4 +206,102 @@ fn re_recording_same_plan_and_phase_overwrites_not_duplicates() {
         row.verdict, "PASS",
         "only the latest verdict should be present"
     );
+}
+
+#[test]
+fn state_db_resolves_under_the_new_repo_and_worktree_scoped_path() {
+    // Arrange
+    let f = Fixture::new("resolves-scoped-path");
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act
+    let out = f.run("plan-a", "spec-review", "spec", &input);
+
+    // Assert
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expected exit 0: {}",
+        stderr_of(&out)
+    );
+    assert!(
+        f.db_path().is_file(),
+        "expected state.db at the worktree-scoped path {:?}",
+        f.db_path()
+    );
+}
+
+#[test]
+fn gate_record_errors_when_worktree_scoping_cannot_resolve() {
+    // Arrange: no `origin` remote configured.
+    let f = Fixture::new_without_origin("no-origin");
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act
+    let out = f.run("plan-a", "spec-review", "spec", &input);
+
+    // Assert
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected a hard error, not a silent repo-local fallback: {}",
+        stderr_of(&out)
+    );
+    assert!(
+        !f.repo.join(".claude").join("state.db").exists(),
+        "must never fall back to writing a repo-local state.db"
+    );
+}
+
+#[test]
+fn legacy_claude_state_db_migrates_on_first_gate_record_call() {
+    // Arrange: a legacy `.claude/state.db` and `.claude/plans/` from a
+    // pre-ADR-0012 install, seeded directly on disk.
+    let f = Fixture::new("legacy-migrates");
+    let legacy = f.repo.join(".claude");
+    let legacy_db_path = legacy.join("state.db");
+    let legacy_conn = db::open_db(&legacy_db_path).expect("seed a real legacy state.db");
+    db::upsert_phase(
+        &legacy_conn,
+        "plan-old",
+        "spec",
+        "PASS",
+        "pre-migration evidence",
+        "old-cmd",
+        "2026-01-01T00:00:00Z",
+    )
+    .expect("seed pre-migration row");
+    drop(legacy_conn);
+    fs::create_dir_all(legacy.join("plans")).expect("mkdir legacy plans");
+    fs::write(legacy.join("plans").join("x.md"), "plan content").expect("seed legacy plan");
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act
+    let out = f.run("plan-a", "spec-review", "spec", &input);
+
+    // Assert
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expected exit 0: {}",
+        stderr_of(&out)
+    );
+    assert!(
+        !legacy_db_path.exists(),
+        "the legacy state.db should have been moved, not left behind"
+    );
+    assert_eq!(
+        fs::read_to_string(f.db_path().parent().unwrap().join("plans").join("x.md")).unwrap(),
+        "plan content",
+        "plans/ content must survive the migration"
+    );
+    let conn = db::open_db(&f.db_path()).expect("open migrated+recorded db");
+    let old_row = db::query_phase(&conn, "plan-old", "spec")
+        .expect("query")
+        .expect("the pre-migration row must survive the move");
+    assert_eq!(old_row.verdict, "PASS");
+    let new_row = db::query_phase(&conn, "plan-a", "spec")
+        .expect("query")
+        .expect("this call's own recording should still have landed");
+    assert_eq!(new_row.verdict, "PASS");
 }
