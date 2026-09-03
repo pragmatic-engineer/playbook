@@ -8,16 +8,16 @@ effort: high
 
 # Learn Project
 
-Build a durable mental model of the repo you're in and persist it as memory facts. Read broadly (code, git history, PRs, and JIRA/Confluence when reachable), distill into topics, classify each fact as repo-specific or cross-project, and write it in the memory format from the system prompt's **Memory** section. Read-only on the project: the only writes are under `~/.claude/memory/` (fact files, plus `~/.claude/memory/memory.graph.json` when the graph rebuilds).
+Build a durable mental model of the repo you're in and persist it as memory facts. Read broadly (code, git history, PRs, and JIRA/Confluence when reachable), distill into topics, classify each fact as repo-specific or cross-project, and write it in the memory format from the system prompt's **Memory** section. Read-only on the project: the only writes are under `~/.config/playbook/memory/` (fact files, plus `~/.config/playbook/memory/memory.graph.json` when the graph rebuilds).
 
 ## Argument parsing
 
 Parse `$ARGUMENTS`:
 
 - `--refresh` → re-derive and supersede existing learned facts instead of skipping them.
-- `--graph-only` → skip Phases 1-3; rebuild the single `~/.claude/memory/memory.graph.json` from current memory (Phase 4.5), then report. Use after hand-editing facts.
-- `--stage` → run collection and analysis (Phases 0-2) but don't write to the live store or ask for confirmation. Write candidate facts to `~/.claude/memory/<owner>/<repo>/staging/` for later review, then stop. See **Staging mode**. Use for unattended or session-end runs.
-- `--from-staged` → skip collection; load candidates from `~/.claude/memory/<owner>/<repo>/staging/`, run the normal confirm-and-write flow (Phases 3-4.5), then clear the staging area.
+- `--graph-only` → skip Phases 1-3; rebuild the single `~/.config/playbook/memory/memory.graph.json` from current memory (Phase 4.5), then report. Use after hand-editing facts.
+- `--stage` → run collection and analysis (Phases 0-2) but don't write to the live store or ask for confirmation. Write candidate facts to `~/.config/playbook/memory/<owner>/<repo>/staging/` for later review, then stop. See **Staging mode**. Use for unattended or session-end runs.
+- `--from-staged` → skip collection; load candidates from `~/.config/playbook/memory/<owner>/<repo>/staging/`, run the normal confirm-and-write flow (Phases 3-4.5), then clear the staging area.
 - `--max-prs N` (default 200) and `--max-commits N` (default: all, summarized) → bound scope on large repos.
 - Anything else → ignore with a one-line warning; don't abort.
 
@@ -26,7 +26,7 @@ Parse `$ARGUMENTS`:
 1. Run every bash block for real. Don't simulate.
 2. Read files before asserting facts about them (grounding).
 3. Combine independent bash calls into a single tool call.
-4. Never edit project code or config. Writes are limited to `~/.claude/memory/` files.
+4. Never edit project code or config. Writes are limited to `~/.config/playbook/memory/` files.
 5. Dispatch subagents for collection and analysis with the Agent tool, `collector` for Phase 1 and `analyst` for Phase 2: issue the independent Agent calls in a single message so they run in parallel. Subagents produce distilled structured findings, never raw dumps.
 6. **Delivery differs per agent tier, per `playbook:delegating-subagents` (invoke it before dispatching).** `collector` holds `Bash`, so it MUST write its findings to a named absolute path under `/tmp/learn-project/<owner>-<repo>/` (`mkdir -p` it first) and return only a one-line count; read those files after each collector finishes, goes idle, or is given up on, because an Agent-tool spawn often completes and returns nothing. `analyst` is structurally read-only and cannot write a file, so its candidate facts come back only by return value, which may not arrive. Either way, an agent that delivered nothing did NOT run: name it as missing rather than proceeding with a partial picture, since a fact written from a half-collected repo is worse than a missing one and much harder to notice later.
 7. No silent truncation. If you cap commits/PRs or skip a source, the final report says so.
@@ -39,7 +39,7 @@ set -e
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "error: not in a git repo" >&2; exit 1; }
 cd "$ROOT"
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) || { u=$(git remote get-url origin 2>/dev/null); u=${u%.git}; REPO="$(basename "$(dirname "$u")")/$(basename "$u")"; }
-STORE="$HOME/.claude/memory/$REPO"
+STORE="$HOME/.config/playbook/memory/$REPO"
 COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 0)
 echo "Repo:    $REPO"
 echo "Root:    $ROOT"
@@ -100,7 +100,7 @@ Keep facts atomic: one concept per fact. Drop low-signal or self-evident facts.
 ## Phase 3: Classify, dedupe, plan
 
 - **Scope routing:** default `repo`. Mark `global` only when the fact is org/account-wide and not tied to this repo (company tooling, the Atlassian instance, standards seen across repos). A repo fact that contradicts a global one wins for this repo; note it with a `contradicts` edge.
-- **Dedupe:** read the existing indexes (`$STORE/MEMORY.md` and `~/.claude/memory/MEMORY.md`) and the relevant fact files. If a fact already exists: skip it, unless `--refresh`, in which case update the file or write a successor carrying a `supersedes` edge. Never blind-duplicate.
+- **Dedupe:** read the existing indexes (`$STORE/MEMORY.md` and `~/.config/playbook/memory/MEMORY.md`) and the relevant fact files. If a fact already exists: skip it, unless `--refresh`, in which case update the file or write a successor carrying a `supersedes` edge. Never blind-duplicate.
 - **Plan:** show the user a concise table of candidate facts (title · scope · type · new/update/supersede). Ask once: "Write these to memory?" Proceed only on yes; honor a subset selection.
 
 ## Phase 4: Write memory
@@ -113,11 +113,11 @@ mkdir -p "$STORE"
 
 Then write each approved fact:
 
-- One fact per file, kebab-case name, in the chosen store (`$STORE/` or `~/.claude/memory/`).
+- One fact per file, kebab-case name, in the chosen store (`$STORE/` or `~/.config/playbook/memory/`).
 - Frontmatter: `name`, `description` (one-line when-to-use), `type`, `links:` with bare-basename edges (`supersedes`, `depends_on`, `relates_to`, `contradicts`), and `anchors:` listing the repo-relative code locations the fact describes (`src/auth/`, `src/auth/login.py`, or `src/auth/login.py#authenticate`).
 - Body: the fact, then **Why:** and **How to apply:**. Use absolute dates for anything time-bound (`date +%F`).
 - In the project store, do NOT name the repo in the fact text; it's implicit.
-- Add or refresh the `- [Title](file.md): one-line hook` line in the right `MEMORY.md` (`$STORE/MEMORY.md` for a project fact, `~/.claude/memory/MEMORY.md` for a global one). Mark superseded index entries `(superseded)`.
+- Add or refresh the `- [Title](file.md): one-line hook` line in the right `MEMORY.md` (`$STORE/MEMORY.md` for a project fact, `~/.config/playbook/memory/MEMORY.md` for a global one). Mark superseded index entries `(superseded)`.
 - Write a `project-overview` fact as the entry point, linked via `relates_to` to the main topic facts.
 
 **Locked index write (MUST).** Two `cc` sessions in the same repo, or two collector clusters in this same run, can touch the same `MEMORY.md` at once; a plain check-then-append or check-then-edit can silently drop or overwrite the other's line. Wrap the whole read-modify-write, append or in-place edit alike, in the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, make the edit regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
@@ -137,7 +137,7 @@ done
 
 ## Phase 4.5: Rebuild the navigation graph
 
-`~/.claude/memory/memory.graph.json` is a single graph covering every fact, global and project. It rebuilds automatically: the `rebuild-memory-graph.py` PostToolUse hook fires whenever a fact file under `~/.claude/memory/` is saved, so once Phase 4 has written the facts the graph is already current. Normally you skip this phase.
+`~/.config/playbook/memory/memory.graph.json` is a single graph covering every fact, global and project. It rebuilds automatically: the `rebuild-memory-graph.py` PostToolUse hook fires whenever a fact file under `~/.config/playbook/memory/` is saved, so once Phase 4 has written the facts the graph is already current. Normally you skip this phase.
 
 `--graph-only` forces a rebuild without re-collecting, for use after hand-editing fact files:
 
@@ -145,9 +145,9 @@ done
 playbook memory rebuild
 ```
 
-**Why a dedicated subcommand rather than invoking the hook.** The hook skips unless the write it was told about is under `~/.claude/memory/`, which is right for a PostToolUse hook and leaves no way to force a full rebuild. This used to run `python3 hooks/rebuild-memory-graph.py < /dev/null`, because that script treated empty stdin as "rebuild everything". The Rust port dropped that branch deliberately (see `should_skip` in `src/hooks/rebuild_memory_graph.rs`), judging it unexercised by the hook's test suite. It was exercised, by this command. Faking a `tool_input` payload that names a path inside the memory dir would also work and is what the port's own doc calls the more fragile option, since it breaks silently the next time the skip logic changes.
+**Why a dedicated subcommand rather than invoking the hook.** The hook skips unless the write it was told about is under `~/.config/playbook/memory/`, which is right for a PostToolUse hook and leaves no way to force a full rebuild. This used to run `python3 hooks/rebuild-memory-graph.py < /dev/null`, because that script treated empty stdin as "rebuild everything". The Rust port dropped that branch deliberately (see `should_skip` in `src/hooks/rebuild_memory_graph.rs`), judging it unexercised by the hook's test suite. It was exercised, by this command. Faking a `tool_input` payload that names a path inside the memory dir would also work and is what the port's own doc calls the more fragile option, since it breaks silently the next time the skip logic changes.
 
-It walks every fact under `~/.claude/memory/`, derives each fact's scope (`global`, or `project` with its `owner/repo`), and writes `~/.claude/memory/memory.graph.json` atomically. Nodes are facts plus their `anchors:` code locations; edges are the `links:` between facts and the fact→code anchors. Report the node and edge counts, and flag any dangling edge.
+It walks every fact under `~/.config/playbook/memory/`, derives each fact's scope (`global`, or `project` with its `owner/repo`), and writes `~/.config/playbook/memory/memory.graph.json` atomically. Nodes are facts plus their `anchors:` code locations; edges are the `links:` between facts and the fact→code anchors. Report the node and edge counts, and flag any dangling edge.
 
 ## Staging mode (`--stage` and `--from-staged`)
 
@@ -188,6 +188,6 @@ One tight summary:
 2. Silent skips. An unreachable source or applied cap must appear in the report.
 3. Duplicating an existing fact instead of superseding or updating it.
 4. Writing repo-specific detail into the global store, or cross-project facts into the project store.
-5. Editing project code or config. Memory files under `~/.claude/memory/` are the only writes.
+5. Editing project code or config. Memory files under `~/.config/playbook/memory/` are the only writes.
 6. Persisting secrets or tokens pulled from configs or CI.
 7. Leaving `memory.graph.json` stale or non-deterministic. Rebuild it whenever facts change, and sort nodes/edges so reruns produce clean diffs.

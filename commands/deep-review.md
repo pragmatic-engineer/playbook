@@ -195,7 +195,7 @@ If install or run fails, log the error in `CHECK_OUTPUT` and continue: never blo
 
 ## Step 2c: Load memory (best-effort)
 
-Check whether a memory store exists: the global store at `~/.claude/memory/MEMORY.md` and the project store at `~/.claude/memory/<owner>/<repo>/MEMORY.md` (`<owner>/<repo>` from `git remote get-url origin`). Load the relevant fact files from whichever exist. When neither exists, skip this step silently; Step 3's reviewers get no memory section and that's expected, not an error.
+Check whether a memory store exists: the global store at `~/.config/playbook/memory/MEMORY.md` and the project store at `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` (`<owner>/<repo>` from `git remote get-url origin`). Load the relevant fact files from whichever exist. When neither exists, skip this step silently; Step 3's reviewers get no memory section and that's expected, not an error.
 
 ## Step 2d: Haiku triage
 
@@ -339,7 +339,7 @@ Never fabricate URLs; use the `html_url` the API returns.
 
 ## Step 7: Capture and wrap up
 
-- If a project store is present at `~/.claude/memory/<owner>/<repo>/` (derive `<owner>/<repo>` from `git remote get-url origin`), persist each POSTED blocking/non-blocking finding as a project memory fact (`type: project`, tag it a review gotcha, `anchors:` to the file), deduping against existing memory first. Skip suggestions/nitpicks and anything not posted; if there's no project store, skip silently.
+- If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/` (derive `<owner>/<repo>` from `git remote get-url origin`), persist each POSTED blocking/non-blocking finding as a project memory fact (`type: project`, tag it a review gotcha, `anchors:` to the file), deduping against existing memory first. Skip suggestions/nitpicks and anything not posted; if there's no project store, skip silently.
 - If non-self-review and the PR has unaddressed review threads, offer to run `/playbook:address-pr-comments $PR_NUMBER`.
 - Final message: one line per outcome (pending review id + count, or submitted verb + timestamp).
 

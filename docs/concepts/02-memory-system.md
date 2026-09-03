@@ -12,9 +12,9 @@ Memory breaks that loop. Facts get written once and loaded on demand. The system
 
 Both scopes use the same file format and the same index structure. The only differences are scope and when the index is loaded.
 
-**Global** at `~/.claude/memory/`: cross-project facts. Your preferences, corrections, and pointers to external resources. These apply in every repo. The index is read on demand, not at session start.
+**Global** at `~/.config/playbook/memory/`: cross-project facts. Your preferences, corrections, and pointers to external resources. These apply in every repo. The index is read on demand, not at session start.
 
-**Project** under `~/.claude/memory/<owner>/<repo>/`: facts true only inside one repo, namespaced by the repo's git remote (`<owner>/<repo>` from `git remote get-url origin`). Each project subfolder has its own `MEMORY.md` index. The whole `~/.claude/memory/` store is git-ignored at the `.claude` level, so these files stay on your machine and never get committed.
+**Project** under `~/.config/playbook/memory/<owner>/<repo>/`: facts true only inside one repo, namespaced by the repo's git remote (`<owner>/<repo>` from `git remote get-url origin`). Each project subfolder has its own `MEMORY.md` index. The whole `~/.config/playbook/memory/` store lives outside any repo checkout, so these files stay on your machine and never get committed.
 
 The split exists because the two categories are genuinely different. A preference for a coding style applies everywhere. The auth layer's token flow is meaningless outside one service. Namespacing project facts by repo also keeps them from polluting the global root, so the global index stays small enough to load efficiently.
 
@@ -88,15 +88,15 @@ The planning and execution commands (`/playbook:scope`, `/playbook:adr`, `/playb
 
 ## memory.graph.json
 
-A single `memory.graph.json` lives at `~/.claude/memory/memory.graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It is the primary retrieval path, not just a navigation aid: every mechanism in "How Facts Are Loaded" above, the SessionStart slice, the edit-time anchor lookup, and prompt-time recall, reads this file. See [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision, and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) for what was added on top of it.
+A single `memory.graph.json` lives at `~/.config/playbook/memory/memory.graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It is the primary retrieval path, not just a navigation aid: every mechanism in "How Facts Are Loaded" above, the SessionStart slice, the edit-time anchor lookup, and prompt-time recall, reads this file. See [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision, and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) for what was added on top of it.
 
-The graph rebuilds automatically. The `rebuild-memory-graph` hook fires whenever a file under `~/.claude/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
+The graph rebuilds automatically. The `rebuild-memory-graph` hook fires whenever a file under `~/.config/playbook/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
 
 ## The Auto-Learn Loop
 
-When a session ends after making at least five edits in a repo, the `session-clean-exit` hook drops a flag in `~/.claude/runtime/to-learn/`. The next time you open a session in that repo, `session-init` reads the flag and surfaces a nudge: consider running `/playbook:learn-project` to refresh project memory, or `/playbook:learn-project --stage` to queue candidate facts for review.
+When a session ends after making at least five edits in a repo, the `session-clean-exit` hook drops a flag in `~/.config/playbook/runtime/to-learn/`. The next time you open a session in that repo, `session-init` reads the flag and surfaces a nudge: consider running `/playbook:learn-project` to refresh project memory, or `/playbook:learn-project --stage` to queue candidate facts for review.
 
-`--stage` collects candidates into `~/.claude/memory/<owner>/<repo>/staging/` without touching the live store. `--from-staged` reviews them and promotes confirmed facts through the normal write flow.
+`--stage` collects candidates into `~/.config/playbook/memory/<owner>/<repo>/staging/` without touching the live store. `--from-staged` reviews them and promotes confirmed facts through the normal write flow.
 
 This loop is nudge-and-approve by design. Memory is durable. A bad fact, a duplicate, or an outdated convention in the store gets loaded and acted on in future sessions. Automatic writes let errors compound unattended. The confirmation gate keeps the human in the loop, every time.
 

@@ -39,7 +39,7 @@ During investigation, any durable conventions or gotchas discovered get written 
 
 ## /playbook:learn-project: Building Project Knowledge
 
-`/playbook:learn-project` reads the repo broadly, distils what it finds into atomic facts, and writes them to memory. It's read-only on the project: the only writes are fact files under `~/.claude/memory/`.
+`/playbook:learn-project` reads the repo broadly, distils what it finds into atomic facts, and writes them to memory. It's read-only on the project: the only writes are fact files under `~/.config/playbook/memory/`.
 
 Sources it reads (when available):
 - Git history: churn hotspots, commit conventions, contributors.
@@ -49,17 +49,17 @@ Sources it reads (when available):
 
 It collects in parallel, then analyses findings into clusters: architecture, conventions, domain glossary, decisions, infrastructure, setup, scripts, database, and data access patterns. Before writing anything, it shows you a table of candidate facts and asks once. It won't write without your confirmation.
 
-The result: one fact file per topic in `~/.claude/memory/<owner>/<repo>/`. The single `~/.claude/memory/memory.graph.json` rebuilds automatically after each fact save. Run with `--refresh` to re-derive and supersede existing facts. Run with `--graph-only` after hand-editing facts to rebuild the graph without re-collecting.
+The result: one fact file per topic in `~/.config/playbook/memory/<owner>/<repo>/`. The single `~/.config/playbook/memory/memory.graph.json` rebuilds automatically after each fact save. Run with `--refresh` to re-derive and supersede existing facts. Run with `--graph-only` after hand-editing facts to rebuild the graph without re-collecting.
 
 ## The Memory Model
 
 One store, two scopes.
 
-**Global**: flat files directly in `~/.claude/memory/`, indexed by `~/.claude/memory/MEMORY.md`. Facts that apply across all repos, like preferences, cross-project conventions, and external pointers.
+**Global**: flat files directly in `~/.config/playbook/memory/`, indexed by `~/.config/playbook/memory/MEMORY.md`. Facts that apply across all repos, like preferences, cross-project conventions, and external pointers.
 
-**Project**: files under `~/.claude/memory/<owner>/<repo>/`, where `<owner>/<repo>` is derived from `git remote get-url origin`. Facts true only inside that repo. The project index gets injected at session start, making those facts available without manual loading.
+**Project**: files under `~/.config/playbook/memory/<owner>/<repo>/`, where `<owner>/<repo>` is derived from `git remote get-url origin`. Facts true only inside that repo. The project index gets injected at session start, making those facts available without manual loading.
 
-The whole `~/.claude/memory/` tree is git-ignored, so no facts are ever committed.
+The whole `~/.config/playbook/memory/` tree lives outside any repo checkout, so no facts are ever committed.
 
 Both scopes use the same format: one fact per file, kebab-case filename, with frontmatter and a structured body.
 
@@ -112,7 +112,7 @@ A decision record for a small, realistic choice.
 
 **Context**
 
-Facts under `~/.claude/memory/` are written by multiple commands and referenced by name from `MEMORY.md` index entries. Three naming styles appeared in early practice: `snake_case`, `camelCase`, and `kebab-case`.
+Facts under `~/.config/playbook/memory/` are written by multiple commands and referenced by name from `MEMORY.md` index entries. Three naming styles appeared in early practice: `snake_case`, `camelCase`, and `kebab-case`.
 
 **Decision Drivers**
 

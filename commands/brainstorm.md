@@ -40,9 +40,10 @@ Asks one question at a time with a recommended answer. Given a ticket id, pulls 
 ticket (description, comments, attachments, linked items) via a connected MCP or a
 configured provider command, then explores the codebase in parallel before asking
 you. Checks memory and past design docs for a similar idea already rejected. Confirms
-a PRD before proposing 2-3 approaches, then captures both in
-.claude/designs/<date>-<slug>-prd.md and .claude/designs/<date>-<slug>.md,
-then offers to chain into /playbook:scope (which reads the docs and skips what they already settled).
+a PRD before proposing 2-3 approaches, then captures both in the resolved
+designs directory (`playbook path designs`) as <date>-<slug>-prd.md and
+<date>-<slug>.md, then offers to chain into /playbook:scope (which reads the
+docs and skips what they already settled).
 ```
 
 ## Core Rules (MUST)
@@ -111,7 +112,7 @@ Alongside the `Explore` agents, dispatch one independent `critic` agent (`subage
 
 Built-in `Explore` agents have been reliable at returning results; the `critic` is structurally read-only and has only the return channel, so it may deliver nothing (`playbook:delegating-subagents`). An area whose agent returned nothing was NOT explored: it does not mean there is nothing there. Say which areas are unexplored rather than treating the digest as complete, and if the premise-challenge came back empty, challenge the premise yourself before moving to Step 3.
 
-**Check memory and prior designs.** Alongside the `Explore` agents, check whether a memory store exists: the global store at `~/.claude/memory/MEMORY.md` and the project store at `~/.claude/memory/<owner>/<repo>/MEMORY.md` (`<owner>/<repo>` from `git remote get-url origin`). Load the relevant fact files from whichever exist. Also scan `.claude/designs/*.md` for a prior design doc whose title or topic overlaps this idea (a cheap keyword match, not semantic search). When neither has anything relevant, skip this silently. When either surfaces a plausible match, a decision already made or an idea already rejected, say so in the digest: what was decided, when, and why. Ask directly whether anything has changed before diverging into new approaches, rather than re-litigating a settled call from scratch.
+**Check memory and prior designs.** Alongside the `Explore` agents, check whether a memory store exists: the global store at `~/.config/playbook/memory/MEMORY.md` and the project store at `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` (`<owner>/<repo>` from `git remote get-url origin`). Load the relevant fact files from whichever exist. Also scan `$(playbook path designs)/*.md` for a prior design doc whose title or topic overlaps this idea (a cheap keyword match, not semantic search). When neither has anything relevant, skip this silently. When either surfaces a plausible match, a decision already made or an idea already rejected, say so in the digest: what was decided, when, and why. Ask directly whether anything has changed before diverging into new approaches, rather than re-litigating a settled call from scratch.
 
 Consolidate into a short cited digest (a few bullets, each with `file:line`). This grounds the questions that follow so you ask about intent, not about facts the code already holds. In ticket mode, fold the Step 1.5 ticket findings into the same digest, citing the source id or url for those. Assign each `Explore` agent a stable `name` at spawn and `TaskStop` it as soon as it returns. A spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps a subagent running in the background.
 
@@ -179,23 +180,14 @@ Keep applying the domain glossary discipline from Step 3 here too: a term that t
 
 ### Step 7: Write the PRD and the design doc
 
-On approval, save both to `.claude/designs/`. First time in this repo, create the dir and ignore it (same pattern as `/playbook:scope`'s plans). Lock the `.gitignore` check-then-append too: two sessions bootstrapping it at the same moment can otherwise race, and one session's line gets lost.
+On approval, save both to the resolved designs directory. This directory lives outside the repo checkout (`$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/designs/`, same pattern as `/playbook:scope`'s plans), so there is nothing to gitignore. First time in this repo, create the dir:
 
 ```bash
-ROOT=$(git rev-parse --show-toplevel)
-mkdir -p "$ROOT/.claude/designs"
-GI="$ROOT/.gitignore"
-LOCK="$GI.lock"
-ACQUIRED=0
-for _ in $(seq 1 20); do
-  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
-  sleep 0.05
-done
-grep -qxF '.claude/designs/' "$GI" 2>/dev/null || printf '.claude/designs/\n' >> "$GI"
-[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
+DESIGNS_DIR=$(playbook path designs)
+mkdir -p "$DESIGNS_DIR"
 ```
 
-**PRD** (from Step 3.5), `.claude/designs/<YYYY-MM-DD>-<slug>-prd.md`, product-facing:
+**PRD** (from Step 3.5), `$DESIGNS_DIR/<YYYY-MM-DD>-<slug>-prd.md`, product-facing:
 
 ```markdown
 # PRD: <title>
@@ -220,7 +212,7 @@ Design doc: <path to the paired design doc below>
 <how we'll know it worked>
 ```
 
-**Design doc**, `.claude/designs/<YYYY-MM-DD>-<slug>.md`, engineering-facing:
+**Design doc**, `$DESIGNS_DIR/<YYYY-MM-DD>-<slug>.md`, engineering-facing:
 
 ```markdown
 # <title>
@@ -260,12 +252,12 @@ See `<prd-path>` for the full problem statement, goals, and requirements.
 
 Save both files. Don't auto-commit.
 
-**Knowledge capture.** If a project store is present at `~/.claude/memory/<owner>/<repo>/`, persist the chosen approach and each rejected approach (with the reasoning from Step 4's trade-offs) as project memory facts (`type: project`, `anchors:` to any files discussed), and update the project's `MEMORY.md` index. This is what Step 2's rejected-idea check reads on a future run; skipping it here means that check finds nothing. If no project store is present, skip silently.
+**Knowledge capture.** If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist the chosen approach and each rejected approach (with the reasoning from Step 4's trade-offs) as project memory facts (`type: project`, `anchors:` to any files discussed), and update the project's `MEMORY.md` index. This is what Step 2's rejected-idea check reads on a future run; skipping it here means that check finds nothing. If no project store is present, skip silently.
 
 **Locked index append (MUST, whenever this step runs).** Append the new index line with a locked write, not a direct edit: two `cc` sessions in the same repo can each persist a fact around the same moment, and a plain check-then-append can silently drop one of the two lines. Same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
 
 ```bash
-MEMORY_MD=~/.claude/memory/<owner>/<repo>/MEMORY.md
+MEMORY_MD=~/.config/playbook/memory/<owner>/<repo>/MEMORY.md
 LOCK="$MEMORY_MD.lock"
 ACQUIRED=0
 for _ in $(seq 1 20); do
