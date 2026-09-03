@@ -1,20 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Places `statusline.sh` at whatever path `settings.json`'s
-//! `statusLine.command` names, then confirms the placement actually
-//! resolves rather than assuming the write succeeded.
-//!
-//! This closes the gap behind the 2026-08-12 outage: the ADR 0006
-//! relocation moved `statusline.sh` out of `~/.claude` while
-//! `settings.shared.json` still pointed `statusLine.command` at the old
-//! path. Two clean `/playbook:setup` runs and a four-layer `/playbook:doctor`
-//! pass all reported healthy while the status line rendered nothing, because
-//! nothing in the install path ever read the path back out of
-//! `settings.json` and checked it. `place_statusline` reads the destination
-//! FROM `settings.json` rather than assuming a fixed location, so the script
-//! and the setting naming it cannot drift apart the way they did then.
+//! Places `statusline.sh` at `$HOME/.config/playbook/statusline.sh`, a fixed
+//! path shared with `settings.shared.json`'s committed `statusLine.command`.
 
+use crate::common::paths::playbook_root_from;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -64,17 +54,16 @@ pub fn resolve_statusline_path(
     })
 }
 
-/// Place `statusline.sh` (shipped at `self_root/statusline.sh`) at the path
-/// `settings.json` (at `settings_path`) actually names, then read that
-/// destination back and confirm it is a readable regular file rather than
-/// trusting the copy above succeeded. `home` expands a literal `$HOME` token
-/// in the command string. Returns the destination path on success.
-pub fn place_statusline(
-    self_root: &Path,
-    settings_path: &Path,
-    home: &Path,
-) -> Result<PathBuf, StatuslineError> {
-    let dest = resolve_statusline_path(settings_path, home)?;
+/// `$HOME/.config/playbook/statusline.sh`, the fixed destination both this
+/// module and `settings.shared.json`'s `statusLine.command` derive from.
+pub fn playbook_statusline_path(home: &Path) -> PathBuf {
+    playbook_root_from(home).join("statusline.sh")
+}
+
+/// Place `statusline.sh` at `playbook_statusline_path(home)`, then read it
+/// back to confirm it is readable rather than trusting the copy succeeded.
+pub fn place_statusline(self_root: &Path, home: &Path) -> Result<PathBuf, StatuslineError> {
+    let dest = playbook_statusline_path(home);
     copy_statusline_atomically(&self_root.join("statusline.sh"), &dest)?;
     verify_placed(&dest)?;
     Ok(dest)
@@ -105,14 +94,8 @@ fn read_statusline_command(settings_path: &Path) -> Result<String, StatuslineErr
         })
 }
 
-/// Extract the script path a `statusLine.command` shell command invokes,
-/// expanding a literal `$HOME` token to `home`. The command is a plain
-/// interpreter invocation (`"bash $HOME/.claude/statusline.sh"`, confirmed
-/// in both `settings.shared.json:135` and the live `~/.claude/settings.json`
-/// this module regression-pins), never a quoted argument or a multi-token
-/// argument list, so the last whitespace-separated token is the path. A
-/// general shell command-line parser is not built for a shape nothing here
-/// exercises.
+/// Extract the script path a plain interpreter `statusLine.command` invokes,
+/// expanding a literal `$HOME` token to `home`. Last token wins; not a parser.
 fn resolve_command_path(command: &str, home: &Path) -> Option<PathBuf> {
     let last_token = command.split_whitespace().last()?;
     let expanded = last_token.replace("$HOME", &home.to_string_lossy());

@@ -60,9 +60,7 @@ fn claude_home_of(home: &Path) -> PathBuf {
 }
 
 fn dest_path(home: &Path) -> PathBuf {
-    claude_home_of(home)
-        .join("prompts")
-        .join("SYSTEM_PROMPT.md")
+    home.join(".config/playbook/prompts/SYSTEM_PROMPT.md")
 }
 
 fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {

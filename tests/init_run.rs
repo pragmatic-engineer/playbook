@@ -88,6 +88,13 @@ fn write_json(path: &Path, value: &Value) {
         .expect("scratch settings.json should be writable");
 }
 
+fn write_text(path: &Path, content: &str) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("parent dir should be creatable");
+    }
+    fs::write(path, content).expect("scratch file should be writable");
+}
+
 fn read_json(path: &Path) -> Value {
     let text = fs::read_to_string(path).expect("settings.json should be readable");
     serde_json::from_str(&text).expect("settings.json should be valid JSON")
@@ -257,8 +264,8 @@ fn fresh_config_gets_fully_wired() {
     // Assert: the merge baseline, the shim, and the statusline all landed.
     assert!(claude_home.join(".settings.base.json").is_file());
     let rc = fs::read_to_string(home.join(".bashrc")).expect(".bashrc should exist");
-    assert!(rc.contains("shell/bash/cc.sh"));
-    assert!(claude_home.join("shell/bash/cc.sh").is_file());
+    assert!(rc.contains(".config/playbook/shell/bash/cc.sh"));
+    assert!(home.join(".config/playbook/shell/bash/cc.sh").is_file());
     let statusline_dest =
         resolve_statusline_path(&settings_path, &home).expect("statusLine.command should resolve");
     assert_eq!(
@@ -555,7 +562,7 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     let settings_path = claude_home.join("settings.json");
     let base_path = claude_home.join(".settings.base.json");
     let rc_path = home.join(".bashrc");
-    let statusline_dest = claude_home.join("statusline.sh");
+    let statusline_dest = home.join(".config/playbook/statusline.sh");
 
     // Act: first run wires everything.
     let first = run(&base_paths(&home, Some(ShellKind::Bash)));
@@ -857,4 +864,161 @@ fn memory_migrate_step_appears_in_reported_steps() {
 
     // Assert
     find_step(&outcome, "memory-migrate");
+}
+
+/// A full pre-ADR-0012 install migrates in one `run()` call.
+#[test]
+fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift() {
+    // Arrange: old files under `~/.claude`, settings.json naming the old
+    // statusline path, an rc file sourcing the old shell runtime path.
+    let home = scratch_home("existing-install-migrates");
+    let claude_home = claude_home_of(&home);
+    write_text(&claude_home.join("statusline.sh"), "#!/bin/sh\necho old\n");
+    write_text(&claude_home.join("shell/bash/cc.sh"), "# old cc.sh\n");
+    let old_status_line = json!({
+        "type": "command",
+        "command": "bash $HOME/.claude/statusline.sh",
+        "refreshInterval": 30
+    });
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({ "statusLine": old_status_line.clone() }),
+    );
+    // BASE agrees with settings.json, as a real pre-existing install would.
+    write_json(
+        &claude_home.join(".settings.base.json"),
+        &json!({ "statusLine": old_status_line }),
+    );
+    write_text(
+        &home.join(".bashrc"),
+        "export EDITOR=vim\n\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/bash/cc.sh\"\n",
+    );
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert: migration succeeded end to end.
+    assert!(
+        outcome.ok(),
+        "{:?}",
+        outcome
+            .steps
+            .iter()
+            .map(StepReport::render)
+            .collect::<Vec<_>>()
+    );
+
+    // Doctor Layer 3 shape: the rc file names the new location.
+    let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
+    assert!(rc.contains(".config/playbook/shell/bash/cc.sh"));
+    assert!(!rc.contains("$HOME/.claude/shell/bash/cc.sh"));
+    assert!(home.join(".config/playbook/shell/bash/cc.sh").is_file());
+
+    // Doctor Layer 5 shape: statusLine.command resolves and MATCHes.
+    let settings_path = claude_home.join("settings.json");
+    let settings = read_json(&settings_path);
+    assert_eq!(
+        settings["statusLine"]["command"],
+        "bash $HOME/.config/playbook/statusline.sh"
+    );
+    let statusline_dest =
+        resolve_statusline_path(&settings_path, &home).expect("statusLine.command should resolve");
+    assert_eq!(
+        fs::read(&statusline_dest).unwrap(),
+        fs::read(self_root().join("statusline.sh")).unwrap(),
+        "the migrated statusline.sh should MATCH the shipped copy"
+    );
+
+    // Doctor Layer 7 shape: every hook command is bare, so nothing dangles.
+    let commands = all_hook_commands(&settings);
+    assert!(!commands.is_empty());
+    for cmd in &commands {
+        assert!(
+            cmd.starts_with("playbook hook "),
+            "no lingering path-shaped hook command: {cmd}"
+        );
+    }
+}
+
+/// A copy step that cannot even start must leave `settings.json` and the rc
+/// file pointing at the fully-intact OLD location.
+#[cfg(unix)]
+#[test]
+fn crash_between_file_copy_and_settings_rewrite_leaves_old_wiring_intact() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Arrange: a full pre-migration install, fully functional.
+    let home = scratch_home("crash-copy-before-settings");
+    let claude_home = claude_home_of(&home);
+    let old_statusline_content = "#!/bin/sh\necho old-statusline\n";
+    write_text(&claude_home.join("statusline.sh"), old_statusline_content);
+    write_text(&claude_home.join("shell/bash/cc.sh"), "# old cc.sh\n");
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({
+            "statusLine": {
+                "type": "command",
+                "command": "bash $HOME/.claude/statusline.sh",
+                "refreshInterval": 30
+            }
+        }),
+    );
+    let old_rc_line = "source \"$HOME/.claude/shell/bash/cc.sh\"\n";
+    write_text(&home.join(".bashrc"), old_rc_line);
+
+    // Simulate a crash mid-copy: the new destination's parent is unwritable.
+    let config_dir = home.join(".config");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let probe = config_dir.join(".write-probe");
+    let permissions_are_enforced = fs::write(&probe, "x").is_err();
+    let _ = fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o755));
+    let _ = fs::remove_file(&probe);
+    if !permissions_are_enforced {
+        eprintln!(
+            "skipping crash_between_file_copy_and_settings_rewrite_leaves_old_wiring_intact: \
+             running as a user that bypasses directory permissions"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    let outcome = run(&paths);
+
+    // Restore permissions before any assertion can panic and skip cleanup.
+    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+    // Assert: the blocked copy is reported, both dependent writes skipped.
+    assert!(
+        !outcome.ok(),
+        "a blocked copy step must be reported as a failure"
+    );
+    assert_eq!(find_step(&outcome, "statusline").status, StepStatus::Failed);
+    assert_eq!(find_step(&outcome, "settings").status, StepStatus::Skipped);
+    assert_eq!(find_step(&outcome, "shim").status, StepStatus::Skipped);
+
+    let settings = read_json(&claude_home.join("settings.json"));
+    assert_eq!(
+        settings["statusLine"]["command"], "bash $HOME/.claude/statusline.sh",
+        "settings.json must not be repointed while the copy is unconfirmed"
+    );
+    assert_eq!(
+        fs::read_to_string(claude_home.join("statusline.sh")).unwrap(),
+        old_statusline_content,
+        "the old statusline.sh must remain untouched and fully functional"
+    );
+
+    let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
+    assert_eq!(
+        rc, old_rc_line,
+        "the rc file must still source only the old, working location"
+    );
+
+    let _ = fs::remove_dir_all(&home);
 }

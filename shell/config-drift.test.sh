@@ -42,13 +42,14 @@ fail() { echo "FAIL: $1"; (( FAIL++ )) || true; }
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT INT TERM
 
-mkdir -p "$SCRATCH/.claude/hooks/lib"
+mkdir -p "$SCRATCH/.claude/hooks"
+mkdir -p "$SCRATCH/.config/playbook/hooks/lib"
 mkdir -p "$SCRATCH/.config/playbook/cc-state"
 printf '{"model":"claude-opus-4-5"}\n' > "$SCRATCH/.claude/settings.json"
 printf '#!/bin/sh\n# hook a\n'         > "$SCRATCH/.claude/hooks/a.sh"
 printf '#!/bin/sh\n# hook b\n'         > "$SCRATCH/.claude/hooks/b.sh"
-# Copy the shared lib so config-drift.zsh can source it from $HOME/.claude/hooks/lib/
-cp "$CONFIG_HASH_SH" "$SCRATCH/.claude/hooks/lib/config-hash.sh"
+# Copy the shared lib so config-drift.sh can source it from $HOME/.config/playbook/hooks/lib/
+cp "$CONFIG_HASH_SH" "$SCRATCH/.config/playbook/hooks/lib/config-hash.sh"
 
 # Fake project dir so _cc_config_marker produces a stable path.
 mkdir -p "$SCRATCH/project"
