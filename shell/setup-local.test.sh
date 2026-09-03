@@ -106,9 +106,8 @@ scenario_a_default() {
     [ "${guards:-0}" -ge 3 ] \
         || { echo "  guards=${guards:-0} (expected >=3)"; return 1; }
 
-    # statusline.sh must be placed: new behaviour, since a plain `playbook
-    # init` call dispatches the full pipeline, not a merge-only subset.
-    [ -f "$claude_home/statusline.sh" ] \
+    # statusline.sh must be placed under $HOME/.config/playbook/, playbook's own state root, independent of any CLAUDE_HOME override.
+    [ -f "$home/.config/playbook/statusline.sh" ] \
         || { echo "  statusline.sh not placed by a default run"; return 1; }
 
     # No rc file must have been written.
@@ -493,8 +492,8 @@ scenario_m_system_prompt_refresh_without_flag() {
     d="$(mktemp -d "$WORK/sysprompt_refresh.XXXXXX")"
     home="$d/home"
     claude_home="$home/.claude"
-    dest="$claude_home/prompts/SYSTEM_PROMPT.md"
-    mkdir -p "$claude_home/prompts"
+    dest="$home/.config/playbook/prompts/SYSTEM_PROMPT.md"
+    mkdir -p "$home/.config/playbook/prompts"
     printf 'a stale, hand-edited copy that predates the shipped prompt\n' > "$dest"
 
     PATH="$REAL_BIN_PATH" run_setup "$home" "$claude_home"; rc=$?
@@ -512,7 +511,7 @@ scenario_m_system_prompt_refresh_without_flag() {
     PATH="$REAL_BIN_PATH" run_setup "$home" "$claude_home"; rc=$?
     [ "$rc" -eq 0 ] || { echo "  fresh run rc=$rc"; return 1; }
 
-    [ ! -f "$claude_home/prompts/SYSTEM_PROMPT.md" ] \
+    [ ! -f "$home/.config/playbook/prompts/SYSTEM_PROMPT.md" ] \
         || { echo "  SYSTEM_PROMPT.md installed on a plain run with no prior copy"; return 1; }
 }
 
