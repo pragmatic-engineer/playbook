@@ -43,7 +43,7 @@ pub enum Command {
     Statusline,
     /// Install or repair the local Claude Code configuration.
     Init {
-        /// Also install `prompts/SYSTEM_PROMPT.md` into `~/.claude/prompts/`.
+        /// Also install `prompts/SYSTEM_PROMPT.md` into `~/.config/playbook/prompts/`.
         /// Opt-in, matching `shell/setup-local.sh`'s flag of the same name:
         /// without it an already-installed copy is still refreshed, but one
         /// is never installed for a user who did not ask.

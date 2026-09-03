@@ -212,17 +212,19 @@ mod config_drift_tests {
     use super::*;
     use playbook::cc::config_drift;
 
-    /// A sandbox HOME carrying the real config-hash.sh and a settings.json the
-    /// hash covers, so editing settings genuinely changes the hash.
+    /// A sandbox HOME carrying the real config-hash.sh at the ADR 0012
+    /// location and a settings.json the hash covers.
     fn sandbox_with_hasher(tag: &str) -> Sandbox {
         let sb = Sandbox::new(tag);
-        let lib = sb.mkdir("hooks/lib");
+        let lib = sb.home.join(".config/playbook/hooks/lib");
+        fs::create_dir_all(&lib).expect("mkdir config-hash lib");
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         fs::copy(
             repo_root.join("hooks/lib/config-hash.sh"),
             lib.join("config-hash.sh"),
         )
         .expect("copy config-hash.sh");
+        fs::create_dir_all(sb.claude()).expect("mkdir .claude");
         fs::write(sb.claude().join("settings.json"), "{\"a\":1}\n").expect("write settings");
         sb
     }

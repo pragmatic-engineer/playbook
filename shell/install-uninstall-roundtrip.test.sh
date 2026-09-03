@@ -107,9 +107,9 @@ after_install="$(entries)"
 if [ "$install_rc" -ne 0 ]; then
     fail "install.sh exits 0" "exit $install_rc"
 elif [ ! -f "$CLAUDE_DIR/install.sh" ] || [ ! -f "$CLAUDE_DIR/uninstall.sh" ] \
-    || [ ! -f "$CLAUDE_DIR/hooks/lib/config-hash.sh" ]; then
+    || [ ! -f "$HOME_DIR/.config/playbook/hooks/lib/config-hash.sh" ]; then
     fail "install.sh populates CLAUDE_HOME" \
-        "missing one of install.sh, uninstall.sh, hooks/lib/config-hash.sh; got: $(printf '%s' "$after_install" | tr '\n' ' ')"
+        "missing one of install.sh, uninstall.sh, .config/playbook/hooks/lib/config-hash.sh; got: $(printf '%s' "$after_install" | tr '\n' ' ')"
 else
     pass "install.sh populates CLAUDE_HOME"
 fi
