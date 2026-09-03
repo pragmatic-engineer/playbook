@@ -343,7 +343,10 @@ Do NOT save until the user explicitly approves. If they request changes, revise 
 Only after the user approves. The plans directory lives outside this repo checkout (`$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/plans/`), resolved via the CLI, not gitignored: there is nothing repo-local left to ignore.
 
 ```bash
-PLANS_DIR=$(playbook path plans)
+if ! PLANS_DIR=$(playbook path plans 2>&1); then
+  echo "error: playbook path plans failed: $PLANS_DIR" >&2
+  exit 1
+fi
 mkdir -p "$PLANS_DIR"
 ```
 
