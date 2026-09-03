@@ -493,6 +493,38 @@ mod memory_capture {
     }
 
     #[test]
+    fn legacy_home_memory_root_is_migrated_before_checking_for_a_write() {
+        // Arrange: memory still sitting at the pre-ADR-0012 ~/.claude/memory location.
+        let home = scratch_home("mc-legacy-root");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("capture-due");
+        let legacy_mem_dir = home.join(".claude").join("memory");
+        fs::create_dir_all(&legacy_mem_dir).unwrap();
+        let legacy_graph = legacy_mem_dir.join("memory.graph.json");
+        write_with_older_then_newer_mtime(&marker, &legacy_graph);
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert: migration ran before the write check, so it sees the graph at the new location.
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+        assert!(
+            !marker.exists(),
+            "marker should be cleared once the migrated write is detected"
+        );
+        assert!(
+            memory_dir_for(&home).join("memory.graph.json").is_file(),
+            "the graph should now live at the new location"
+        );
+        assert!(
+            !home.join(".claude").join("memory").exists(),
+            "the legacy memory tree should be gone after a completed migration"
+        );
+    }
+
+    #[test]
     fn second_call_with_marker_already_consumed_is_silent() {
         // Arrange: same write-detected precondition, so the first call
         // consumes the marker via the silent-release path.

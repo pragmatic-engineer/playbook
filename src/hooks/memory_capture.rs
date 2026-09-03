@@ -36,7 +36,7 @@
 
 use crate::cc::{logical_cwd, project_slug};
 use crate::common::paths::memory_dir;
-use crate::common::{emit_block, session_dir, Payload};
+use crate::common::{emit_block, home_dir, session_dir, Payload};
 use crate::hooks::memory_signals;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -95,7 +95,11 @@ pub fn run(payload: &Payload) {
         Err(_) => return release(&marker, &attempts_path),
     };
 
+    let home = home_dir();
+    let _ = crate::init::memory_migrate::migrate_memory_root(&home, &home.join(".claude"));
+
     let mem_dir = memory_dir();
+    let _ = fs::create_dir_all(&mem_dir);
     let graph_path = mem_dir.join("memory.graph.json");
     let write_detected = match fs::metadata(&graph_path) {
         Ok(meta) => match meta.modified() {
