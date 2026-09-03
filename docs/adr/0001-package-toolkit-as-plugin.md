@@ -1,6 +1,6 @@
 # ADR 0001: Package the toolkit as an opt-in Claude Code plugin
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-23
 
 ## Context
