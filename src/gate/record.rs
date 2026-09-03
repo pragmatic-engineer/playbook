@@ -5,6 +5,7 @@
 //! for a `VERDICT: PASS|FAIL|WARN|INCONCLUSIVE` line and upsert it into the
 //! gate-check database at `.claude/state.db`.
 
+use crate::common::paths::{repo_scoped_dir, RepoScope};
 use crate::gate::db;
 use crate::manifest;
 use std::fmt;
@@ -78,11 +79,8 @@ pub fn extract_verdict(raw: &str) -> Option<Verdict> {
     result
 }
 
-/// Read `input` (a file path, or `"-"` for stdin), extract its verdict, and
-/// upsert it into the gate-check database at `<repo root>/.claude/state.db`.
-/// Returns `Err` without ever calling [`db::upsert_phase`] when no valid
-/// `VERDICT:` line is found, so a bad report never overwrites a prior good
-/// recording.
+/// Read `input`, extract its verdict, and upsert it into the worktree-scoped
+/// gate-check database. `Err` without ever calling [`db::upsert_phase`] when no valid `VERDICT:` line is found, so a bad report never overwrites a good one.
 pub fn run(plan_slug: &str, command: &str, phase: &str, input: &str) -> Result<(), String> {
     let raw = read_input(input)?;
     let Some(verdict) = extract_verdict(&raw) else {
@@ -91,7 +89,14 @@ pub fn run(plan_slug: &str, command: &str, phase: &str, input: &str) -> Result<(
 
     let repo_root =
         manifest::check::toplevel().ok_or_else(|| "not inside a git repository".to_string())?;
-    let db_path = repo_root.join(".claude").join("state.db");
+    let dest_base = repo_scoped_dir(RepoScope::Worktree).ok_or_else(|| {
+        "could not resolve a worktree-scoped storage location; this repo needs a git \
+         'origin' remote and a resolvable worktree toplevel, refusing to fall back to a \
+         repo-local path"
+            .to_string()
+    })?;
+    db::migrate_legacy_repo_local(&repo_root, &dest_base)?;
+    let db_path = dest_base.join("state.db");
     let recorded_at = recorded_at_now();
 
     let conn = db::open_db(&db_path)?;

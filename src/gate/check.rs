@@ -5,6 +5,7 @@
 //! recorded phase verdicts for a plan and succeed only when every named
 //! phase is PASS or WARN.
 
+use crate::common::paths::{repo_scoped_dir, RepoScope};
 use crate::gate::db;
 use crate::manifest;
 
@@ -74,7 +75,14 @@ pub fn run(plan_slug: &str, _command: &str, phases: &[String]) -> Result<String,
 
     let repo_root =
         manifest::check::toplevel().ok_or_else(|| "not inside a git repository".to_string())?;
-    let db_path = repo_root.join(".claude").join("state.db");
+    let dest_base = repo_scoped_dir(RepoScope::Worktree).ok_or_else(|| {
+        "could not resolve a worktree-scoped storage location; this repo needs a git \
+         'origin' remote and a resolvable worktree toplevel, refusing to fall back to a \
+         repo-local path"
+            .to_string()
+    })?;
+    db::migrate_legacy_repo_local(&repo_root, &dest_base)?;
+    let db_path = dest_base.join("state.db");
     let conn = db::open_db(&db_path)?;
 
     let mut lines = Vec::with_capacity(phases.len());
