@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! PostToolUse hook: rebuild `~/.claude/memory/memory.graph.json` after any
+//! PostToolUse hook: rebuild `~/.config/playbook/memory/memory.graph.json` after any
 //! fact-file save. Ports `hooks/rebuild-memory-graph.py`. No-op unless the
-//! edited file is inside `~/.claude/memory`. Walks the whole memory tree
+//! edited file is inside `~/.config/playbook/memory`. Walks the whole memory tree
 //! (not incremental), writes atomically (temp file plus rename), and emits
 //! nothing on stdout.
 //!

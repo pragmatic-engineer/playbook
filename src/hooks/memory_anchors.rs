@@ -3,7 +3,7 @@
 
 //! Two events, one cache. `PreToolUse` on Edit|Write: when the target path
 //! is anchored in the graph-first memory store
-//! (`~/.claude/memory/memory.graph.json`), surface the facts that describe it, plus
+//! (`~/.config/playbook/memory/memory.graph.json`), surface the facts that describe it, plus
 //! their `depends_on` and `contradicts` neighbours, as `additionalContext`
 //! before the edit lands. `UserPromptSubmit` (ADR 0008 WU-0): match prompt
 //! text and this-session touched files against the same index, injecting
@@ -295,7 +295,7 @@ fn append_seen(path: &Path, ids: &[String]) {
     let _ = fs::write(path, content);
 }
 
-/// Reads a fact's markdown body from `~/.claude/memory/<file>` (`file` is
+/// Reads a fact's markdown body from `~/.config/playbook/memory/<file>` (`file` is
 /// relative to that root, per `rebuild_memory_graph.rs`'s node construction).
 /// Capped at 16000 chars, matching the legacy `MEMORY.md` fallback cap
 /// (`session_init.rs:246`), so one huge fact cannot dominate a turn. `None`
