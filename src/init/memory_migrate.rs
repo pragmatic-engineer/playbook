@@ -237,12 +237,12 @@ fn copy_all(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> io::Result<(
 }
 
 /// The completion check the sentinel's presence promises: every source
-/// file exists at the destination with a matching size.
+/// file exists at the destination with byte-identical content, not just a matching size.
 fn all_copied_and_verified(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> bool {
     files.iter().all(|rel| {
-        let source_len = fs::metadata(old_root.join(rel)).ok().map(|m| m.len());
-        let dest_len = fs::metadata(new_root.join(rel)).ok().map(|m| m.len());
-        source_len.is_some() && source_len == dest_len
+        let source = fs::read(old_root.join(rel));
+        let dest = fs::read(new_root.join(rel));
+        matches!((source, dest), (Ok(s), Ok(d)) if s == d)
     })
 }
 
