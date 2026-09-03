@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Schema and connection layer for the gate-check database at
-//! `.claude/state.db`, backed by `rusqlite` (the `bundled` feature compiles
-//! SQLite from source, so no system SQLite install is required).
+//! Schema and connection layer for the gate-check database at the repo and worktree-scoped path under `$HOME/.config/playbook`, backed by `rusqlite` (the `bundled` feature compiles SQLite from source, so no system SQLite install is required).
 //!
 //! An earlier version used `libsql` (tokio-based, async). `gate check`
 //! reliably segfaulted inside `sqlite3Close` on real musl release builds
@@ -16,6 +14,7 @@
 //! is the de facto standard Rust SQLite binding, and this binary has no
 //! other reason to be async.
 
+use crate::common::atomic::with_dir_lock;
 use rusqlite::OptionalExtension;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -119,11 +118,49 @@ const MIGRATION_SENTINEL: &str = ".migration-complete";
 /// The legacy items a pre-ADR-0012 checkout held under its own `.claude/`.
 const LEGACY_ITEMS: &[&str] = &["state.db", "plans", "designs", "implement", "worktrees"];
 
-/// Moves legacy `.claude/{state.db,plans,designs,implement,worktrees}` items
-/// under `repo_root` to `dest_base`, once. Copies and verifies before deleting the source, so any error leaves the original untouched.
-pub(crate) fn migrate_legacy_repo_local(repo_root: &Path, dest_base: &Path) -> Result<(), String> {
+/// Moves legacy `.claude/{state.db,plans,designs,implement,worktrees}` items under `repo_root` to `dest_base`, once, locked against scope.md's two parallel `gate record` calls.
+pub fn migrate_legacy_repo_local(repo_root: &Path, dest_base: &Path) -> Result<(), String> {
     let legacy_root = repo_root.join(".claude");
     let sentinel = dest_base.join(MIGRATION_SENTINEL);
+    if sentinel.is_file() {
+        return Ok(());
+    }
+    // Nothing legacy present means `.claude/` may not even exist, so skip
+    // locking rather than retry into a lock path with a missing parent.
+    if !LEGACY_ITEMS
+        .iter()
+        .any(|name| legacy_root.join(name).exists())
+    {
+        return Ok(());
+    }
+
+    let lock_path = legacy_root.join(".migrate.lock");
+    let (acquired, result) = with_dir_lock(&lock_path, 50, Duration::from_millis(100), || {
+        migrate_legacy_repo_local_locked(&legacy_root, dest_base, &sentinel)
+    });
+    if acquired {
+        let _ = fs::remove_dir(&lock_path);
+        // Harmless no-op if anything else still lives under `.claude`.
+        let _ = fs::remove_dir(&legacy_root);
+    }
+    if !acquired {
+        if sentinel.is_file() {
+            return Ok(());
+        }
+        return Err(format!(
+            "legacy migration to {} is already in progress in another process; retry shortly",
+            dest_base.display()
+        ));
+    }
+    result
+}
+
+/// The actual migration, run once `migrate_legacy_repo_local` holds its lock.
+fn migrate_legacy_repo_local_locked(
+    legacy_root: &Path,
+    dest_base: &Path,
+    sentinel: &Path,
+) -> Result<(), String> {
     if sentinel.is_file() {
         return Ok(());
     }
@@ -150,30 +187,29 @@ pub(crate) fn migrate_legacy_repo_local(repo_root: &Path, dest_base: &Path) -> R
         }
     }
 
-    copy_all(&legacy_root, dest_base, &files).map_err(|e| {
+    copy_all(legacy_root, dest_base, &files).map_err(|e| {
         format!(
             "legacy migration copy to {} failed, the original is untouched: {e}",
             dest_base.display()
         )
     })?;
 
-    if !all_copied_and_verified(&legacy_root, dest_base, &files) {
+    if !all_copied_and_verified(legacy_root, dest_base, &files) {
         return Err(format!(
             "legacy migration verification failed after copying to {}, the original is untouched",
             dest_base.display()
         ));
     }
 
-    write_migration_sentinel(&sentinel).map_err(|e| {
+    write_migration_sentinel(sentinel).map_err(|e| {
         format!("legacy migration copy verified but could not write completion marker: {e}")
     })?;
 
-    // Removed only now that the destination is verified complete.
+    // Removed only now that the destination is verified complete. The
+    // lock dir is still present, so the wrapper does the final rmdir.
     for name in &present {
         remove_legacy_item(&legacy_root.join(name));
     }
-    // Harmless no-op if anything else still lives under `.claude`.
-    let _ = fs::remove_dir(&legacy_root);
     Ok(())
 }
 
