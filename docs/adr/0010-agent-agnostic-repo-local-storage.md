@@ -2,7 +2,7 @@
 
 - **Status:** Superseded by ADR-0012
 - **Date created:** 2026-08-30
-- **Date modified:** 2026-08-30
+- **Date modified:** 2026-09-03
 
 ## Context
 

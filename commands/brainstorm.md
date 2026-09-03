@@ -183,7 +183,10 @@ Keep applying the domain glossary discipline from Step 3 here too: a term that t
 On approval, save both to the resolved designs directory. This directory lives outside the repo checkout (`$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/designs/`, same pattern as `/playbook:scope`'s plans), so there is nothing to gitignore. First time in this repo, create the dir:
 
 ```bash
-DESIGNS_DIR=$(playbook path designs)
+if ! DESIGNS_DIR=$(playbook path designs 2>&1); then
+  echo "error: playbook path designs failed: $DESIGNS_DIR" >&2
+  exit 1
+fi
 mkdir -p "$DESIGNS_DIR"
 ```
 

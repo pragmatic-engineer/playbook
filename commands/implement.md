@@ -83,7 +83,10 @@ review, before opening the PR set (or finishing, per the chosen boundary).
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-PLANS_DIR=$(playbook path plans)
+if ! PLANS_DIR=$(playbook path plans 2>&1); then
+  echo "PLAN_PATH_ERROR: $PLANS_DIR"
+  exit 1
+fi
 found=0
 for f in "$PLANS_DIR"/*.md "$ROOT"/docs/adr/*-blueprint.md; do
   [ -f "$f" ] || continue
@@ -96,7 +99,7 @@ done
 [ "$found" = 0 ] && echo "NO_PLANS"
 ```
 
-Present the rows as a numbered menu (index, status, title, path), listing unexecuted entries (`Proposed`/`Accepted`) first and `Implemented` last. Ask the user to pick a number, or to preview one first (Read it, show the summary, then re-ask). If the output is `NO_PLANS`, stop and tell the user to run `/playbook:scope` or `/playbook:adr` to create one. Use the chosen file as the task reference, then continue below. Any flags passed (e.g. `--auto`) still apply to the chosen plan.
+Present the rows as a numbered menu (index, status, title, path), listing unexecuted entries (`Proposed`/`Accepted`) first and `Implemented` last. Ask the user to pick a number, or to preview one first (Read it, show the summary, then re-ask). If the output is `NO_PLANS`, stop and tell the user to run `/playbook:scope` or `/playbook:adr` to create one. If the output starts with `PLAN_PATH_ERROR:`, stop and show the user that error verbatim (most likely no git `origin` remote); do NOT suggest running `/playbook:scope`, since the problem isn't an absence of plans. Use the chosen file as the task reference, then continue below. Any flags passed (e.g. `--auto`) still apply to the chosen plan.
 
 Otherwise, resolve `$ARGUMENTS` (minus flags) by format:
 
@@ -260,7 +263,15 @@ This is not optional when the commit looks fine. The report is the only place a 
 **Progress ledger.** Record progress in `$(playbook path implement)/<plan-slug>.progress.md`. This directory lives outside the repo checkout (`$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/implement/`), so there is nothing to gitignore. At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary) from Step 4.5. Per Segment, record its id, branch, whether it was re-split, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch. First use in a repo, create the dir:
 
 ```bash
-mkdir -p "$(playbook path implement)" "$(playbook path worktrees)"
+if ! IMPLEMENT_DIR=$(playbook path implement 2>&1); then
+  echo "error: playbook path implement failed: $IMPLEMENT_DIR" >&2
+  exit 1
+fi
+if ! WORKTREES_DIR=$(playbook path worktrees 2>&1); then
+  echo "error: playbook path worktrees failed: $WORKTREES_DIR" >&2
+  exit 1
+fi
+mkdir -p "$IMPLEMENT_DIR" "$WORKTREES_DIR"
 ```
 
 **Model tiering (MUST, never omit `model`).** Implementer Tasks spawn the `implementer` agent, which pins `model: sonnet` itself, so you don't set the model on those calls. Brief drafting (the scheduler's step 3, above) is genuine content generation delegated off the orchestrator's own turn, so it runs `model: "haiku"` explicitly on that one Agent call per wave. Ledger writes stay a direct orchestrator action: a few-line append per WU, small enough that a separate dispatch would cost more in round-trip latency than it saves in tokens. Verification and the adversarial review (Step 9) run the capable tier. An omitted `model` on a non-typed call silently inherits the priciest default, so always set it there.
