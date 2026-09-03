@@ -3,7 +3,7 @@
 
 //! Two events, one cache. `PreToolUse` on Edit|Write: when the target path
 //! is anchored in the graph-first memory store
-//! (`~/.claude/memory/memory.graph.json`), surface the facts that describe it, plus
+//! (`~/.config/playbook/memory/memory.graph.json`), surface the facts that describe it, plus
 //! their `depends_on` and `contradicts` neighbours, as `additionalContext`
 //! before the edit lands. `UserPromptSubmit` (ADR 0008 WU-0): match prompt
 //! text and this-session touched files against the same index, injecting
@@ -26,9 +26,10 @@
 //! cache scenario in `hooks/memory-anchors.test.sh`; see that file's own
 //! comment for the full rationale.
 
+use crate::common::paths::memory_dir;
 use crate::common::payload::Payload;
 use crate::common::{
-    emit_pre_context, emit_prompt_context, home_dir, repo_slug, run_with_timeout, session_dir,
+    emit_pre_context, emit_prompt_context, repo_slug, run_with_timeout, session_dir,
 };
 use crate::hooks::memory_signals;
 use crate::hooks::staleness::{self, check_staleness};
@@ -104,7 +105,7 @@ pub fn run(payload: &Payload) {
 }
 
 fn mem_dir() -> PathBuf {
-    home_dir().join(".claude").join("memory")
+    memory_dir()
 }
 
 /// `UserPromptSubmit` branch: match prompt text and this-session touched
@@ -294,14 +295,14 @@ fn append_seen(path: &Path, ids: &[String]) {
     let _ = fs::write(path, content);
 }
 
-/// Reads a fact's markdown body from `~/.claude/memory/<file>` (`file` is
+/// Reads a fact's markdown body from `~/.config/playbook/memory/<file>` (`file` is
 /// relative to that root, per `rebuild_memory_graph.rs`'s node construction).
 /// Capped at 16000 chars, matching the legacy `MEMORY.md` fallback cap
 /// (`session_init.rs:246`), so one huge fact cannot dominate a turn. `None`
 /// on any read failure (deleted, unreadable): the caller skips this one
 /// fact rather than treating it as fatal.
 fn read_fact_body(file: &str) -> Option<String> {
-    let path = home_dir().join(".claude").join("memory").join(file);
+    let path = memory_dir().join(file);
     let contents = fs::read_to_string(path).ok()?;
     Some(contents.chars().take(16000).collect())
 }
@@ -437,10 +438,7 @@ fn build_index(idx_path: &Path) {
 }
 
 fn memory_graph_path() -> PathBuf {
-    home_dir()
-        .join(".claude")
-        .join("memory")
-        .join("memory.graph.json")
+    memory_dir().join("memory.graph.json")
 }
 
 fn compute_index_rows(graph_path: &Path, repo: &str) -> Vec<String> {

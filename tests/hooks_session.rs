@@ -149,7 +149,7 @@ fn session_init_injects_the_graph_backed_slice() {
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
     let home = work.join("home-graph");
-    let memory_dir = home.join(".claude").join("memory");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
         memory_dir.join("memory.graph.json"),
@@ -200,7 +200,7 @@ fn session_init_caps_the_graph_backed_slice_like_the_legacy_fallback() {
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
     let home = work.join("home-cap");
-    let memory_dir = home.join(".claude").join("memory");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
     let padding = "x".repeat(140);
     let nodes: Vec<String> = (1..=120)
@@ -247,7 +247,11 @@ fn session_init_falls_back_to_the_legacy_memory_index() {
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
     let home = work.join("home-index");
-    let legacy_dir = home.join(".claude").join("memory").join(repo_slug);
+    let legacy_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("memory")
+        .join(repo_slug);
     fs::create_dir_all(&legacy_dir).unwrap();
     fs::write(
         legacy_dir.join("MEMORY.md"),
@@ -309,7 +313,7 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
     fs::create_dir_all(&non_repo_dir).unwrap();
 
     let home = work.join("home-graph");
-    let memory_dir = home.join(".claude").join("memory");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
         memory_dir.join("memory.graph.json"),
@@ -357,7 +361,7 @@ fn session_init_injects_a_pinned_fact_independent_of_general_memory_slice() {
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
     let home = work.join("home-pinned");
-    let memory_dir = home.join(".claude").join("memory");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
         memory_dir.join("memory.graph.json"),
@@ -396,7 +400,7 @@ fn session_init_injects_a_promoted_fact_independent_of_general_memory_slice() {
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
     let home = work.join("home-promoted");
-    let memory_dir = home.join(".claude").join("memory");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
         memory_dir.join("memory.graph.json"),
@@ -442,7 +446,7 @@ fn a_pinned_fact_from_a_different_repo_does_not_inject() {
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
     let home = work.join("home-pinned-other-repo");
-    let memory_dir = home.join(".claude").join("memory");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
         memory_dir.join("memory.graph.json"),
@@ -476,7 +480,7 @@ fn a_global_promoted_fact_injects_regardless_of_repo() {
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
     let home = work.join("home-promoted-global");
-    let memory_dir = home.join(".claude").join("memory");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
         memory_dir.join("memory.graph.json"),

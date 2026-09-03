@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Behavioural tests for the `memory-anchors` hook, the sole reader of
-//! `~/.claude/memory/memory.graph.json`. Exercised black-box, through the
+//! `~/.config/playbook/memory/memory.graph.json`. Exercised black-box, through the
 //! compiled `playbook` binary, the same way
 //! `hooks/memory-anchors.test.sh` exercises the python original. Every
 //! assertion in that shell script has a corresponding case below.
@@ -22,12 +22,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// A fresh scratch directory, with `.claude/memory` already created, unique
+/// A fresh scratch directory, with `.config/playbook/memory` already created, unique
 /// per call so parallel test threads never collide.
 fn scratch_home(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let home = std::env::temp_dir().join(format!("playbook-wu5-{}-{tag}-{n}", std::process::id()));
-    fs::create_dir_all(home.join(".claude").join("memory")).unwrap();
+    fs::create_dir_all(home.join(".config").join("playbook").join("memory")).unwrap();
     // The hook relativises the edited path with `git rev-parse --show-toplevel`,
     // so it needs a real repo. Giving each scratch home its own removes the
     // dependency on THIS tree being a checkout, which is what made all eight
@@ -51,7 +51,8 @@ fn repo_dir(home: &Path) -> PathBuf {
 }
 
 fn graph_path(home: &Path) -> PathBuf {
-    home.join(".claude")
+    home.join(".config")
+        .join("playbook")
         .join("memory")
         .join("memory.graph.json")
 }
@@ -345,11 +346,15 @@ fn additional_context_output_is_valid_json_with_pretooluse_event_name() {
 // Scenario numbering follows the WU-0 brief in
 // docs/adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity-blueprint.md.
 
-/// Writes a fact's markdown body under `~/.claude/memory/<relpath>`, the
+/// Writes a fact's markdown body under `~/.config/playbook/memory/<relpath>`, the
 /// path `Node.file` is relative to (`rebuild_memory_graph.rs` builds it via
 /// `strip_prefix` against the memory root). Creates parent dirs as needed.
 fn write_fact_body(home: &Path, relpath: &str, content: &str) {
-    let path = home.join(".claude").join("memory").join(relpath);
+    let path = home
+        .join(".config")
+        .join("playbook")
+        .join("memory")
+        .join(relpath);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, content).unwrap();
 }
@@ -692,7 +697,8 @@ fn a_fact_with_a_deleted_file_path_is_skipped_without_blocking_a_real_match() {
 // --- memory-anchors: usage-based promotion signals -------------------------
 
 fn signals_path(home: &Path) -> PathBuf {
-    home.join(".claude")
+    home.join(".config")
+        .join("playbook")
         .join("memory")
         .join("memory.signals.json")
 }
@@ -825,7 +831,10 @@ fn python_and_rust_readers_agree_on_the_same_fixture() {
 // --- session-init: legacy graph.json fallback -------------------------------
 
 fn old_graph_path(home: &Path) -> PathBuf {
-    home.join(".claude").join("memory").join("graph.json")
+    home.join(".config")
+        .join("playbook")
+        .join("memory")
+        .join("graph.json")
 }
 
 fn run_session_init_hook(home: &Path, session_id: &str) -> Output {

@@ -96,14 +96,14 @@ pub fn run(payload: &Payload) {
     let dir = session_dir(payload);
     let repo_root = git_toplevel();
 
-    migrate_legacy_graph_file(&home);
+    migrate_legacy_graph_file();
     zero_session_state(&dir);
     clear_statusline_cache();
 
     let (system_message, mut extra_context) = check_config_drift(payload, &dir, &plugin_root);
 
-    append_promoted_facts(&mut extra_context, &home, &repo_root);
-    append_memory_slice(&mut extra_context, &plugin_root, &home, &repo_root);
+    append_promoted_facts(&mut extra_context, &repo_root);
+    append_memory_slice(&mut extra_context, &plugin_root, &repo_root);
     append_handoff_slice(&mut extra_context, &home);
     append_auto_learn_nudge(&mut extra_context, &home, &repo_root);
     append_skills_primer(&mut extra_context, &home);
@@ -113,8 +113,8 @@ pub fn run(payload: &Payload) {
 }
 
 /// Defensive fallback for a session starting before `playbook init` is re-run after an upgrade: renames a pre-rename `graph.json` to `memory.graph.json` if present. Silently does nothing on any failure.
-fn migrate_legacy_graph_file(home: &str) {
-    let mem_dir = Path::new(home).join(".claude").join("memory");
+fn migrate_legacy_graph_file() {
+    let mem_dir = crate::common::paths::memory_dir();
     let old_path = mem_dir.join("graph.json");
     let new_path = mem_dir.join("memory.graph.json");
     if new_path.exists() || !old_path.is_file() {
@@ -224,12 +224,12 @@ const PROMOTED_FACTS_CAP_CHARS: usize = 4000;
 /// structurally different sources, a direct graph read here versus a shell
 /// script's stdout there, for a minor cosmetic redundancy is not worth the
 /// added complexity, so this overlap is left as a known, accepted tradeoff.
-fn append_promoted_facts(extra_context: &mut String, home: &str, repo_root: &str) {
+fn append_promoted_facts(extra_context: &mut String, repo_root: &str) {
     let mem_slug = repo_slug();
     if repo_root.is_empty() || mem_slug.is_empty() {
         return;
     }
-    let mem_dir = Path::new(home).join(".claude").join("memory");
+    let mem_dir = crate::common::paths::memory_dir();
     let Ok(content) = fs::read_to_string(mem_dir.join("memory.graph.json")) else {
         return;
     };
@@ -306,7 +306,7 @@ fn in_promotion_scope(node: &serde_json::Value, repo: &str) -> bool {
 /// Inject the project memory slice into `extra_context`: the graph-backed
 /// slice from `shell/memory-context.sh` when available, else the legacy
 /// `MEMORY.md` index, else nothing. Matches hooks/session-init.py:154-188.
-fn append_memory_slice(extra_context: &mut String, plugin_root: &str, home: &str, repo_root: &str) {
+fn append_memory_slice(extra_context: &mut String, plugin_root: &str, repo_root: &str) {
     let mem_slug = repo_slug();
     if repo_root.is_empty() || mem_slug.is_empty() {
         return;
@@ -332,14 +332,12 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, home: &str
     let mem_preamble = if !mem_body.is_empty() {
         format!(
             "Project memory for this repo ({mem_slug}), stored in the central memory store at \
-            ~/.claude/memory/{mem_slug}/. A scoped slice: facts in scope, their typed edges, \
-            and an anchor index mapping code paths to the facts that describe them. Fact \
+            ~/.config/playbook/memory/{mem_slug}/. A scoped slice: facts in scope, their typed \
+            edges, and an anchor index mapping code paths to the facts that describe them. Fact \
             bodies are read on demand."
         )
     } else {
-        let legacy = Path::new(home)
-            .join(".claude")
-            .join("memory")
+        let legacy = crate::common::paths::memory_dir()
             .join(&mem_slug)
             .join("MEMORY.md");
         if legacy.is_file() {
@@ -347,8 +345,8 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, home: &str
         }
         format!(
             "Project memory for this repo ({mem_slug}), stored in the central memory store at \
-            ~/.claude/memory/{mem_slug}/. These facts apply only in this repo; read the \
-            referenced fact files on demand. Index:"
+            ~/.config/playbook/memory/{mem_slug}/. These facts apply only in this repo; read \
+            the referenced fact files on demand. Index:"
         )
     };
 

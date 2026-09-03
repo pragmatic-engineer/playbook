@@ -146,9 +146,9 @@ test_search_counter() {
 test_memory_anchors() {
   local sid="fire-memory-anchors" home target out
   home="$(mktemp -d)"
-  mkdir -p "$home/.claude/memory"
+  mkdir -p "$home/.config/playbook/memory"
   target="$REPO_ROOT/hooks/lib/config-hash.sh"
-  cat > "$home/.claude/memory/memory.graph.json" <<EOF
+  cat > "$home/.config/playbook/memory/memory.graph.json" <<EOF
 {
   "nodes": [
     {"id": "global/fire-anchor-fact", "file": "fire-anchor-fact.md", "scope": "global", "type": "project", "name": "fire-anchor-fact", "description": "fixture fact"},
@@ -173,8 +173,8 @@ test_post_edit_track() {
 test_rebuild_memory_graph() {
   local home f
   home="$(mktemp -d)"
-  mkdir -p "$home/.claude/memory"
-  f="$home/.claude/memory/fire-fact.md"
+  mkdir -p "$home/.config/playbook/memory"
+  f="$home/.config/playbook/memory/fire-fact.md"
   cat > "$f" <<'EOF'
 ---
 name: fire-fact
@@ -186,8 +186,8 @@ links:
 Body text.
 EOF
   run_ported rebuild-memory-graph "$home" "{\"tool_input\":{\"file_path\":\"$f\"}}" >/dev/null
-  [ -f "$home/.claude/memory/memory.graph.json" ] \
-    && [ "$(jq '.edges|length' "$home/.claude/memory/memory.graph.json" 2>/dev/null)" = "1" ]
+  [ -f "$home/.config/playbook/memory/memory.graph.json" ] \
+    && [ "$(jq '.edges|length' "$home/.config/playbook/memory/memory.graph.json" 2>/dev/null)" = "1" ]
 }
 
 test_auto_model_detect() {

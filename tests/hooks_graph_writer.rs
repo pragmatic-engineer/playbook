@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Behavioural tests for the `rebuild-memory-graph` hook, the sole writer
-//! of `~/.claude/memory/memory.graph.json`. Exercised black-box, through the
+//! of `~/.config/playbook/memory/memory.graph.json`. Exercised black-box, through the
 //! compiled `playbook` binary, the same way
 //! `hooks/rebuild-memory-graph.test.sh` exercises the python original.
 //! Every assertion in that shell script has a corresponding case below,
@@ -24,25 +24,30 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// A fresh scratch directory, with `.claude/memory` already created, unique
+/// A fresh scratch directory, with `.config/playbook/memory` already created, unique
 /// per call so parallel test threads never collide.
 fn scratch_home(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let home = std::env::temp_dir().join(format!("playbook-wu5-{}-{tag}-{n}", std::process::id()));
-    fs::create_dir_all(home.join(".claude").join("memory")).unwrap();
+    fs::create_dir_all(home.join(".config").join("playbook").join("memory")).unwrap();
     home
 }
 
-/// Write `content` to `<home>/.claude/memory/<relpath>`, creating parent
+/// Write `content` to `<home>/.config/playbook/memory/<relpath>`, creating parent
 /// directories as needed.
 fn write_fact(home: &Path, relpath: &str, content: &str) {
-    let full = home.join(".claude").join("memory").join(relpath);
+    let full = home
+        .join(".config")
+        .join("playbook")
+        .join("memory")
+        .join(relpath);
     fs::create_dir_all(full.parent().unwrap()).unwrap();
     fs::write(full, content).unwrap();
 }
 
 fn graph_path(home: &Path) -> PathBuf {
-    home.join(".claude")
+    home.join(".config")
+        .join("playbook")
         .join("memory")
         .join("memory.graph.json")
 }
@@ -64,9 +69,13 @@ fn run_playbook(home: &Path, args: &[&str], hook_input: &str) -> Output {
 }
 
 /// Run the rebuild-memory-graph hook with a synthetic `tool_input.file_path`
-/// under `<home>/.claude/memory/<relpath>`.
+/// under `<home>/.config/playbook/memory/<relpath>`.
 fn run_rebuild_for(home: &Path, relpath: &str) -> Output {
-    let file_path = home.join(".claude").join("memory").join(relpath);
+    let file_path = home
+        .join(".config")
+        .join("playbook")
+        .join("memory")
+        .join(relpath);
     run_rebuild_for_path(home, &file_path.to_string_lossy())
 }
 
@@ -1019,7 +1028,7 @@ fn bare_carriage_return_does_not_corrupt_a_scalar_value() {
 fn graph_write_is_atomic_a_failed_write_cannot_truncate_the_existing_file() {
     // Arrange
     let home = scratch_home("atomic-write");
-    let mem_dir = home.join(".claude").join("memory");
+    let mem_dir = home.join(".config").join("playbook").join("memory");
     write_fact(
         &home,
         "seed.md",
@@ -1316,7 +1325,8 @@ fn rebuild_succeeds_when_the_lock_directory_is_already_held() {
         "---\nname: fact-under-lock\ntype: reference\n---\n\nBody text.\n",
     );
     let lock_dir = home
-        .join(".claude")
+        .join(".config")
+        .join("playbook")
         .join("memory")
         .join("memory.graph.json.lock");
     fs::create_dir(&lock_dir).expect("pre-creating the lock dir should succeed");

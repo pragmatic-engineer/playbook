@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! PostToolUse hook: rebuild `~/.claude/memory/memory.graph.json` after any
+//! PostToolUse hook: rebuild `~/.config/playbook/memory/memory.graph.json` after any
 //! fact-file save. Ports `hooks/rebuild-memory-graph.py`. No-op unless the
-//! edited file is inside `~/.claude/memory`. Walks the whole memory tree
+//! edited file is inside `~/.config/playbook/memory`. Walks the whole memory tree
 //! (not incremental), writes atomically (temp file plus rename), and emits
 //! nothing on stdout.
 //!
@@ -12,8 +12,8 @@
 
 use crate::common::atomic::with_dir_lock;
 use crate::common::home_dir;
+use crate::common::paths::memory_dir;
 use crate::common::payload::Payload;
-use crate::common::session::memory_dir;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
