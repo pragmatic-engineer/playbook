@@ -72,7 +72,11 @@ mod preread_edit_check {
     /// Write a single-record edits.jsonl for `session_id` under `home`,
     /// mirroring the bash suite's `seed()` helper.
     fn seed_edits(home: &Path, session_id: &str, path: &str, ts: i64) {
-        let dir = home.join(".claude").join("runtime").join(session_id);
+        let dir = home
+            .join(".config")
+            .join("playbook")
+            .join("runtime")
+            .join(session_id);
         fs::create_dir_all(&dir).expect("session dir should be creatable");
         fs::write(
             dir.join("edits.jsonl"),
@@ -95,7 +99,11 @@ mod preread_edit_check {
     /// scenarios that need more than one record or a non-integer `ts`,
     /// which `seed_edits` above cannot express.
     fn seed_edits_raw(home: &Path, session_id: &str, content: &str) {
-        let dir = home.join(".claude").join("runtime").join(session_id);
+        let dir = home
+            .join(".config")
+            .join("playbook")
+            .join("runtime")
+            .join(session_id);
         fs::create_dir_all(&dir).expect("session dir should be creatable");
         fs::write(dir.join("edits.jsonl"), content).expect("edits.jsonl should be writable");
     }

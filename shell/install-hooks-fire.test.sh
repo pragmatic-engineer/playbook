@@ -105,7 +105,7 @@ test_session_init() {
   local sid="fire-session-init" home f
   home="$(mktemp -d)"
   run_ported session-init "$home" "{\"session_id\":\"$sid\"}" >/dev/null
-  f="$home/.claude/runtime/$sid/start-ts"
+  f="$home/.config/playbook/runtime/$sid/start-ts"
   [ -s "$f" ] && grep -qE '^[0-9]+$' "$f"
 }
 
@@ -119,9 +119,9 @@ test_preread_edit_check() {
   home="$(cd "$home" && pwd -P)"
   f="$home/target.txt"
   printf 'hello\n' > "$f"
-  mkdir -p "$home/.claude/runtime/$sid"
+  mkdir -p "$home/.config/playbook/runtime/$sid"
   ts=$(( $(date +%s) - 10 ))
-  printf '{"path":"%s","ts":%s}\n' "$f" "$ts" > "$home/.claude/runtime/$sid/edits.jsonl"
+  printf '{"path":"%s","ts":%s}\n' "$f" "$ts" > "$home/.config/playbook/runtime/$sid/edits.jsonl"
   out="$(run_ported preread-edit-check "$home" "{\"session_id\":\"$sid\",\"tool_input\":{\"file_path\":\"$f\"}}")"
   [[ "$out" == *"ago"* ]]
 }
@@ -140,7 +140,7 @@ test_search_counter() {
   home="$(mktemp -d)"
   payload="{\"session_id\":\"$sid\",\"tool_name\":\"Grep\"}"
   for _ in 1 2 3 4; do run_ported search-counter "$home" "$payload" >/dev/null; done
-  [ "$(cat "$home/.claude/runtime/$sid/search-count" 2>/dev/null)" = "4" ]
+  [ "$(cat "$home/.config/playbook/runtime/$sid/search-count" 2>/dev/null)" = "4" ]
 }
 
 test_memory_anchors() {
@@ -167,7 +167,7 @@ test_post_edit_track() {
   local sid="fire-post-edit-track" home
   home="$(mktemp -d)"
   run_ported post-edit-track "$home" "{\"session_id\":\"$sid\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/tmp/fire-x.txt\"}}" >/dev/null
-  [ "$(cat "$home/.claude/runtime/$sid/edit-count" 2>/dev/null)" = "1" ]
+  [ "$(cat "$home/.config/playbook/runtime/$sid/edit-count" 2>/dev/null)" = "1" ]
 }
 
 test_rebuild_memory_graph() {
@@ -208,13 +208,13 @@ test_session_clean_exit() {
   local sid="fire-clean-exit" home
   home="$(mktemp -d)"
   run_ported session-clean-exit "$home" "{\"session_id\":\"$sid\",\"reason\":\"logout\"}" >/dev/null
-  [ "$(cat "$home/.claude/runtime/$sid/clean-exit" 2>/dev/null)" = "logout" ]
+  [ "$(cat "$home/.config/playbook/runtime/$sid/clean-exit" 2>/dev/null)" = "logout" ]
 }
 
 test_memory_capture() {
   local sid="fire-memory-capture" home dir out
   home="$(mktemp -d)"
-  dir="$home/.claude/runtime/$sid"
+  dir="$home/.config/playbook/runtime/$sid"
   mkdir -p "$dir"
   : > "$dir/capture-due"
   out="$(run_ported memory-capture "$home" "{\"session_id\":\"$sid\"}")"

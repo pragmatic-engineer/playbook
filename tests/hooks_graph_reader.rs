@@ -236,7 +236,8 @@ fn anchor_index_is_built_once_and_reused_on_second_edit() {
 
     // Assert: index was built and is non-empty
     let idx = home
-        .join(".claude")
+        .join(".config")
+        .join("playbook")
         .join("runtime")
         .join(sid)
         .join("memory-anchor-index.tsv");
@@ -363,7 +364,11 @@ fn write_fact_body(home: &Path, relpath: &str, content: &str) {
 /// writes (`EditRecord { path, ts }`), under this session's runtime dir, so
 /// the touched-file signal has something real to match against.
 fn write_edit_record(home: &Path, session_id: &str, abs_path: &str, ts: u64) {
-    let dir = home.join(".claude").join("runtime").join(session_id);
+    let dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(session_id);
     fs::create_dir_all(&dir).unwrap();
     let line = json!({"path": abs_path, "ts": ts}).to_string();
     let mut contents = fs::read_to_string(dir.join("edits.jsonl")).unwrap_or_default();
@@ -624,7 +629,11 @@ fn corrupted_anchor_index_degrades_to_silence_not_a_crash() {
     .to_string();
     write_graph(&home, &graph);
     let sid = "p5";
-    let idx_dir = home.join(".claude").join("runtime").join(sid);
+    let idx_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(sid);
     fs::create_dir_all(&idx_dir).unwrap();
     fs::write(
         idx_dir.join("memory-anchor-index.tsv"),

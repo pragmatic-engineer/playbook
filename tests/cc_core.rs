@@ -329,7 +329,12 @@ mod config_drift_tests {
 
         with_home(&rs.home, || config_drift::stamp(&cwd));
 
-        let shell_marker = sh.claude().join("cc-state").join(project_slug(&cwd));
+        let shell_marker = sh
+            .home
+            .join(".config")
+            .join("playbook")
+            .join("cc-state")
+            .join(project_slug(&cwd));
         let rust_marker = with_home(&rs.home, || config_drift::marker_path(&cwd));
 
         assert_eq!(
