@@ -142,7 +142,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "bash $HOME/.claude/statusline.sh",
+    "command": "bash $HOME/.config/playbook/statusline.sh",
     "refreshInterval": 30
   },
   "enabledPlugins": {

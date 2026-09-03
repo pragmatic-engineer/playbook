@@ -345,23 +345,8 @@ BACKUP="$CLAUDE_HOME/backups/install-$STAMP"
 backed_up=0
 
 log "Installing config into $CLAUDE_HOME"
-# `playbook init` (below) already copies everything else it needs -- the
-# settings template, the launcher runtime, the system prompt, the statusline
-# -- narrowly and directly from $SRC via CLAUDE_PLUGIN_ROOT (src/init/*.rs).
-# This step places only the handful of files init does not own:
-#   - install.sh / uninstall.sh, so the documented `bash ~/.claude/uninstall.sh`
-#     (docs/guides/00-install.md) works offline, without a fresh network fetch;
-#   - hooks/lib/config-hash.sh, the one script the cc launcher's
-#     shell/shared/config-drift.sh unconditionally sources from
-#     $HOME/.claude (not from CLAUDE_PLUGIN_ROOT, since the launcher runs
-#     outside any plugin context).
-# A prior version of this loop copied the ENTIRE extracted source tree minus
-# a short denylist (.git, .github, .DS_Store, settings.json, skills,
-# commands, agents), which meant Cargo.toml, Cargo.lock, src/, tests/,
-# docs/, and every other repo-development-only file landed in a user's
-# ~/.claude too, and silently grew again with every new repo-root file
-# (see uninstall.sh's SHIPPED comment). This allowlist is the fix.
-CONFIG_FILES="install.sh uninstall.sh hooks/lib/config-hash.sh"
+# `playbook init` (below) copies everything else it needs on its own.
+CONFIG_FILES="install.sh uninstall.sh"
 for rel in $CONFIG_FILES; do
     src="$SRC/$rel"
     [ -e "$src" ] || continue
@@ -375,6 +360,21 @@ for rel in $CONFIG_FILES; do
     mkdir -p "$(dirname "$dest")"
     cp "$src" "$dest"
 done
+
+# config-hash.sh: sourced by the launcher outside any plugin context, so it
+# lives under $HOME/.config/playbook, not $CLAUDE_HOME.
+CONFIG_HASH_SRC="$SRC/hooks/lib/config-hash.sh"
+if [ -e "$CONFIG_HASH_SRC" ]; then
+    config_hash_dest="$HOME/.config/playbook/hooks/lib/config-hash.sh"
+    if [ -e "$config_hash_dest" ]; then
+        mkdir -p "$BACKUP/hooks/lib"
+        cp -R "$config_hash_dest" "$BACKUP/hooks/lib/config-hash.sh"
+        rm -rf "$config_hash_dest"
+        backed_up=1
+    fi
+    mkdir -p "$(dirname "$config_hash_dest")"
+    cp "$CONFIG_HASH_SRC" "$config_hash_dest"
+fi
 
 # Wire the always-on guards, seed/merge settings.json, and install the shell
 # launcher and statusline, via `playbook init`. IMPORTANT: this runs

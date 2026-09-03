@@ -9,7 +9,7 @@
 //! two definitions of "did the config change", plus a sha256 dependency.
 //!
 //! The two callers pass different roots: hooks resolve it under
-//! `CLAUDE_PLUGIN_ROOT`, the launcher under `~/.claude`.
+//! `CLAUDE_PLUGIN_ROOT`, the launcher under `~/.config/playbook`.
 
 use crate::common::run_with_timeout;
 use std::path::Path;

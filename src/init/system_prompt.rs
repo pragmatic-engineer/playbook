@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Places `prompts/SYSTEM_PROMPT.md` under `~/.claude/prompts/`, porting
-//! `shell/setup-local.sh:278-295`, the only thing that has ever installed it.
+//! Places `prompts/SYSTEM_PROMPT.md` under `$HOME/.config/playbook/prompts/`,
+//! porting `shell/setup-local.sh:278-295`, the only prior installer of it.
 //!
 //! WU-14 deletes that script. Without this module the `--system-prompt` flag
 //! and `/playbook:doctor`'s Layer 4 would both outlive the code that makes
@@ -47,15 +47,17 @@ pub enum Placement {
     NotOptedIn,
 }
 
-/// Copy the shipped `prompts/SYSTEM_PROMPT.md` into `claude_home/prompts/`
-/// under the opt-in rules in this module's doc comment.
+/// Copy the shipped `prompts/SYSTEM_PROMPT.md` into
+/// `$HOME/.config/playbook/prompts/`, under the opt-in rules above.
 pub fn place_system_prompt(
     self_root: &Path,
-    claude_home: &Path,
+    home: &Path,
     opt_in: bool,
 ) -> Result<Placement, io::Error> {
     let source = self_root.join("prompts").join("SYSTEM_PROMPT.md");
-    let dest = claude_home.join("prompts").join("SYSTEM_PROMPT.md");
+    let dest = crate::common::paths::playbook_root_from(home)
+        .join("prompts")
+        .join("SYSTEM_PROMPT.md");
 
     if !opt_in && !dest.exists() {
         return Ok(Placement::NotOptedIn);

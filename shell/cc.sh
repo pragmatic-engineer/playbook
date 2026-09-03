@@ -10,4 +10,4 @@
 # New installs source shell/bash/cc.sh directly (setup-local.sh writes that
 # path). Re-run /playbook:setup or shell/setup-local.sh --aliases to update an existing
 # rc file to the new path; this shim can then be removed by uninstall.sh.
-[[ -f "$HOME/.claude/shell/bash/cc.sh" ]] && source "$HOME/.claude/shell/bash/cc.sh"
+[[ -f "$HOME/.config/playbook/shell/bash/cc.sh" ]] && source "$HOME/.config/playbook/shell/bash/cc.sh"

@@ -3,25 +3,6 @@
 
 //! Orchestrates `playbook init`: composes `merge`, `wire`, `shim` and
 //! `statusline` into one idempotent repair, backing `Command::Init`.
-//!
-//! Steps run independently and best-effort: a failure in one (a malformed
-//! `settings.json`, say) does not stop the others from making whatever
-//! progress they can, since each targets a different file on disk and a
-//! user running `init` to repair a broken machine is better served by
-//! partial progress plus a clear failure line than by an all-or-nothing
-//! abort. `InitOutcome::ok` still reports overall failure if any step
-//! failed, so a caller chaining on the exit code sees it.
-//!
-//! Ordering is not just cosmetic: `settings` seeds or three-way-merges
-//! `settings.json` from the shipped template BEFORE `hooks` upserts into it.
-//! `merge` only reconciles whole top-level keys (see `init::merge`'s doc
-//! comment: a key the user customised is kept or dropped as a whole), while
-//! `wire` reconciles individual hook entries inside `.hooks`. Running `wire`
-//! first would leave it nothing to upsert into on a fresh machine; running
-//! the merge after `wire` would risk the merge's coarser per-key policy
-//! discarding an entry `wire` just added. `statusline` runs after both
-//! because it depends on `settings.json` already naming a destination.
-//! `memory-migrate` touches neither file, so it has no ordering dependency on the other five.
 
 use crate::init::memory_migrate;
 use crate::init::merge;
@@ -142,58 +123,67 @@ impl InitOutcome {
     }
 }
 
-/// Run every `init` step against `paths`. See the module doc comment for
-/// step order and why one step's failure does not stop the others.
+/// Run every `init` step against `paths`. Copy steps run first; `settings`
+/// and `shim` only rewrite their file once their copy step is confirmed.
 pub fn run(paths: &InitPaths) -> InitOutcome {
     let settings_path = paths.claude_home.join("settings.json");
     let self_root = paths.self_root.as_deref();
 
-    // Bound to locals rather than built inline in the vec so execution order
-    // is the order written here.
-    let settings_step = seed_or_merge_settings(self_root, &paths.claude_home, &settings_path);
+    let shell_runtime_step = install_shell_runtime_step(self_root, &paths.home, paths.aliases);
+    let statusline_step = place_statusline_step(self_root, &paths.home);
+    let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
+
+    let statusline_confirmed = step_confirmed(&statusline_step);
+    let settings_step = if statusline_confirmed {
+        seed_or_merge_settings(self_root, &paths.claude_home, &settings_path)
+    } else {
+        StepReport::skipped("settings", "statusline copy not confirmed complete")
+    };
     let hooks_step = wire_hooks(&settings_path);
-    let shim_step = install_shim_step(
-        self_root,
-        &paths.claude_home,
+
+    let shell_runtime_confirmed = step_confirmed(&shell_runtime_step);
+    let shim_step = rewire_rc_file_step(
         &paths.home,
         paths.shell_kind,
         paths.aliases,
+        shell_runtime_confirmed,
     );
-    let statusline_step = place_statusline_step(self_root, &settings_path, &paths.home);
-    let system_prompt_step =
-        place_system_prompt_step(self_root, &paths.claude_home, paths.system_prompt);
+
     let memory_migrate_step = memory_migrate::migrate_memory_store(&paths.claude_home);
     let memory_root_migrate_step =
         memory_migrate::migrate_memory_root(&paths.home, &paths.claude_home);
 
     InitOutcome {
         steps: vec![
+            shell_runtime_step,
+            statusline_step,
+            system_prompt_step,
             settings_step,
             hooks_step,
             shim_step,
-            statusline_step,
-            system_prompt_step,
             memory_migrate_step,
             memory_root_migrate_step,
         ],
     }
 }
 
+/// Whether a copy step actually landed: `Skipped` does not count, since it
+/// means the destination's state is unconfirmed, not verified complete.
+fn step_confirmed(step: &StepReport) -> bool {
+    matches!(step.status, StepStatus::Wired | StepStatus::AlreadyCorrect)
+}
+
 /// Step 6: place `prompts/SYSTEM_PROMPT.md`, which is opt-in. See
 /// `init::system_prompt` for why `init` refreshes an existing copy but never
 /// installs one the user did not ask for.
-fn place_system_prompt_step(
-    self_root: Option<&Path>,
-    claude_home: &Path,
-    opt_in: bool,
-) -> StepReport {
+fn place_system_prompt_step(self_root: Option<&Path>, home: &Path, opt_in: bool) -> StepReport {
     let Some(self_root) = self_root else {
         return StepReport::skipped(
             "system-prompt",
             "CLAUDE_PLUGIN_ROOT is not set, no prompt to place",
         );
     };
-    match system_prompt::place_system_prompt(self_root, claude_home, opt_in) {
+    match system_prompt::place_system_prompt(self_root, home, opt_in) {
         Ok(system_prompt::Placement::Placed(dest)) => {
             StepReport::wired("system-prompt", format!("placed at {}", dest.display()))
         }
@@ -433,36 +423,49 @@ fn wire_hooks(settings_path: &Path) -> StepReport {
     }
 }
 
-/// Step 3: install the launcher runtime and wire the rc file, skipped
-/// cleanly when `aliases` is false or either other input is missing rather
-/// than guessed.
-fn install_shim_step(
-    self_root: Option<&Path>,
-    claude_home: &Path,
+/// Copy the launcher runtime, skipped when `aliases` is false or
+/// `CLAUDE_PLUGIN_ROOT` is unset.
+fn install_shell_runtime_step(self_root: Option<&Path>, home: &Path, aliases: bool) -> StepReport {
+    if !aliases {
+        return StepReport::skipped("shell-runtime", "not installed; pass --aliases to opt in");
+    }
+    let Some(self_root) = self_root else {
+        return StepReport::skipped(
+            "shell-runtime",
+            "CLAUDE_PLUGIN_ROOT is not set, no launcher runtime to install",
+        );
+    };
+    match shim::copy_launcher_runtime(self_root, home) {
+        Ok(true) => StepReport::wired("shell-runtime", "copied the launcher runtime"),
+        Ok(false) => StepReport::already_correct("shell-runtime", "already up to date"),
+        Err(err) => StepReport::failed("shell-runtime", err.to_string()),
+    }
+}
+
+/// Patch the rc file. Gated on `aliases`, `$SHELL`, then the copy step.
+fn rewire_rc_file_step(
     home: &Path,
     shell_kind: Option<ShellKind>,
     aliases: bool,
+    shell_runtime_confirmed: bool,
 ) -> StepReport {
     if !aliases {
         return StepReport::skipped("shim", "not installed; pass --aliases to opt in");
     }
-    let Some(self_root) = self_root else {
-        return StepReport::skipped(
-            "shim",
-            "CLAUDE_PLUGIN_ROOT is not set, no launcher runtime to install",
-        );
-    };
     let Some(shell_kind) = shell_kind else {
         return StepReport::skipped(
             "shim",
             "$SHELL is neither bash nor zsh; source shell/bash/cc.sh or shell/zsh/cc.zsh manually",
         );
     };
-    match shim::install_shim(self_root, claude_home, home, shell_kind) {
+    if !shell_runtime_confirmed {
+        return StepReport::skipped("shim", "launcher runtime copy not confirmed complete");
+    }
+    match shim::rewire_rc_file(home, shell_kind) {
         Ok(outcome) if outcome.appended => StepReport::wired(
             "shim",
             format!(
-                "added the launcher source line to {}",
+                "updated the launcher source line in {}",
                 outcome.rc_file.display()
             ),
         ),
@@ -474,18 +477,8 @@ fn install_shim_step(
     }
 }
 
-/// Step 4: place `statusline.sh` at the path `settings.json` names.
-///
-/// `statusline::place_statusline` always copies unconditionally, so whether
-/// this is a real change has to be decided BEFORE calling it, by comparing
-/// the shipped script against whatever is already at the resolved
-/// destination; deciding afterwards would find them equal on every run,
-/// wired or not, since the copy already landed.
-fn place_statusline_step(
-    self_root: Option<&Path>,
-    settings_path: &Path,
-    home: &Path,
-) -> StepReport {
+/// Place `statusline.sh` at its fixed destination under `home`.
+fn place_statusline_step(self_root: Option<&Path>, home: &Path) -> StepReport {
     let Some(self_root) = self_root else {
         return StepReport::skipped(
             "statusline",
@@ -493,16 +486,13 @@ fn place_statusline_step(
         );
     };
     let source = self_root.join("statusline.sh");
-    let already_current = statusline::resolve_statusline_path(settings_path, home)
+    let dest = statusline::playbook_statusline_path(home);
+    let already_current = fs::read(&source)
         .ok()
-        .and_then(|dest| {
-            let shipped = fs::read(&source).ok()?;
-            let placed = fs::read(&dest).ok()?;
-            Some(shipped == placed)
-        })
-        .unwrap_or(false);
+        .zip(fs::read(&dest).ok())
+        .is_some_and(|(shipped, placed)| shipped == placed);
 
-    match statusline::place_statusline(self_root, settings_path, home) {
+    match statusline::place_statusline(self_root, home) {
         Ok(dest) if already_current => StepReport::already_correct(
             "statusline",
             format!("already up to date at {}", dest.display()),

@@ -138,13 +138,13 @@ _claude() {
 # them by sourcing, and there is one implementation to keep honest.
 cc() {
     local -a _cc_sys=()
-    [ -f "$HOME/.claude/prompts/SYSTEM_PROMPT.md" ] \
-        && _cc_sys=(--system-prompt-file "$HOME/.claude/prompts/SYSTEM_PROMPT.md")
+    [ -f "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md" ] \
+        && _cc_sys=(--system-prompt-file "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md")
     _claude "${_cc_sys[@]}" "$@"; local rc=$?; _cc_prune; return $rc
 }
 ccd() {
     local -a _cc_sys=()
-    [ -f "$HOME/.claude/prompts/SYSTEM_PROMPT.md" ] \
-        && _cc_sys=(--system-prompt-file "$HOME/.claude/prompts/SYSTEM_PROMPT.md")
+    [ -f "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md" ] \
+        && _cc_sys=(--system-prompt-file "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md")
     _claude --dangerously-skip-permissions "${_cc_sys[@]}" "$@"; local rc=$?; _cc_prune; return $rc
 }

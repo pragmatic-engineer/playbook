@@ -367,6 +367,47 @@ fn hooks_reduced_to_safety_guards_only_functional_hooks_dropped() {
     );
 }
 
+/// A hook command naming the ADR 0012 `$HOME/.config/playbook/...` path,
+/// alongside the pre-ADR-0012 `~/.claude/...` form.
+const SRC_HOOKS_NEW_AND_OLD_PATHS: &str = r#"{
+  "env": {},
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [
+        { "type": "command", "command": "playbook hook rm-workspace-guard" },
+        { "type": "command", "command": "~/.claude/hooks/no-dash-guard.sh" },
+        { "type": "command", "command": "bash $HOME/.config/playbook/hooks/lib/config-hash.sh" }
+      ] }
+    ]
+  }
+}"#;
+
+// A widened destination must never widen what counts as a safe command.
+#[test]
+fn new_and_old_config_paths_are_both_filtered_out_identically() {
+    // Arrange
+    let dir = scratch_dir("hooks-filter-new-and-old-paths");
+    let src_path = dir.join("src.json");
+    let perms_path = dir.join("perms.json");
+    write_file(&src_path, SRC_HOOKS_NEW_AND_OLD_PATHS);
+    write_file(&perms_path, CANNED_PERMS);
+
+    // Act
+    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+
+    // Assert: only the bare form survives; neither path form is safe.
+    let result: Value = serde_json::from_str(&rust_output).unwrap();
+    let groups = result["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "the one surviving group should remain");
+    let commands: Vec<&str> = groups[0]["hooks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["command"].as_str().unwrap())
+        .collect();
+    assert_eq!(commands, vec!["playbook hook rm-workspace-guard"]);
+}
+
 // Mandatory non-ASCII fixture: python's json.dumps escapes to \uXXXX
 // (ensure_ascii=True is the default); serde_json writes raw UTF-8. Asserts
 // the divergence in a named direction rather than leaving it to a comment.

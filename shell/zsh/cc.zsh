@@ -21,12 +21,12 @@
 #   ccd <any>         Same, with --dangerously-skip-permissions.
 #
 # Install: source this file from ~/.zshrc.
-#   source ~/.claude/shell/zsh/cc.zsh
+#   source ~/.config/playbook/shell/zsh/cc.zsh
 
-source "$HOME/.claude/shell/shared/bust-cache.sh"
-source "$HOME/.claude/shell/shared/worktree.sh"
-source "$HOME/.claude/shell/shared/config-drift.sh"
-source "$HOME/.claude/shell/shared/retention.sh"
-source "$HOME/.claude/shell/shared/sessions.sh"
-source "$HOME/.claude/shell/shared/clean-resume.sh"
-source "$HOME/.claude/shell/shared/dispatch.sh"
+source "$HOME/.config/playbook/shell/shared/bust-cache.sh"
+source "$HOME/.config/playbook/shell/shared/worktree.sh"
+source "$HOME/.config/playbook/shell/shared/config-drift.sh"
+source "$HOME/.config/playbook/shell/shared/retention.sh"
+source "$HOME/.config/playbook/shell/shared/sessions.sh"
+source "$HOME/.config/playbook/shell/shared/clean-resume.sh"
+source "$HOME/.config/playbook/shell/shared/dispatch.sh"
