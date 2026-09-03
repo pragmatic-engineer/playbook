@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/memory-capture.py: a Stop hook that, when statusline.sh has
-//! dropped a `capture-due` marker in the session dir, pauses the turn with
-//! `{"decision":"block","reason":<text>}` asking the model to write down
-//! durable facts before continuing. It fires once per threshold crossing:
-//! the marker is consumed (deleted) as soon as it is seen, before the
-//! reason text is even built, so a run that fails partway through still
-//! leaves the marker gone rather than stuck blocking every future turn.
+//! Ports hooks/memory-capture.py: a Stop hook that pauses the turn once
+//! statusline.sh's `capture-due` marker fires.
+
+//! `{"decision":"block","reason":<text>}` asks the model to write down
+//! durable facts before continuing.
+
+//! The marker releases silently once a fact write is detected, otherwise
+//! it retains for a bounded re-block; see `REBLOCK_CAP`.
 //!
 //! Two divergences from the python source, both driven by the "never panic"
 //! rule in SEGMENT-B-RULES.md rather than a behaviour choice:
@@ -33,14 +34,21 @@
 //!    that a corrupted `edits.jsonl` only happens if something other than
 //!    this toolkit's own trusted writer touches the file.
 
-use crate::common::payload::Payload;
-use crate::common::{emit_block, session_dir};
+use crate::cc::{logical_cwd, project_slug};
+use crate::common::session::memory_dir;
+use crate::common::{emit_block, home_dir, session_dir, Payload};
+use crate::hooks::memory_signals;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
+use std::io;
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MAX_PATHS: usize = 5;
+/// How many times a no-write invocation retains the marker and re-blocks
+/// before it releases unconditionally.
+const REBLOCK_CAP: i64 = 2;
 
 const INTRO: &str = "Context usage in this session just crossed the capture threshold. This \
 is a good moment to pause, not a problem: write down anything from this \
@@ -52,30 +60,104 @@ const HANDOFF_NUDGE: &str = "\n\nAlso worth doing now: if this feels like a natu
 point, run /playbook:session-handoff so the next session can pick up without re-reading \
 this one.";
 
-const OUTRO: &str = "\n\nThis prompt fires once per threshold crossing, so it will not \
-interrupt the next turn unless usage climbs past the threshold again.";
+/// `capture-crossings` value at or above which a re-block escalates with
+/// `STRONG_HANDOFF_NUDGE`, once no handoff has been written this session.
+const CROSSING_ESCALATION_THRESHOLD: i64 = 3;
 
-/// Stop entry point. Never panics: a missing session id, a missing marker,
-/// or a missing/malformed edit log all resolve to either silence or a
-/// best-effort reason text.
+const STRONG_HANDOFF_NUDGE: &str = "\n\nThis session has crossed the capture threshold several \
+times with no handoff saved yet; run /playbook:session-handoff now, before continuing, so the \
+next session does not have to re-read this one.";
+
+/// `memory.graph.json` node count at or above which a re-block also scans
+/// for consolidation candidates.
+const CONSOLIDATION_NODE_THRESHOLD: usize = 10;
+
+/// A fact file's size in bytes above which it counts as oversized.
+const OVERSIZED_FACT_BYTES: u64 = 2000;
+
+/// Stop entry point. A detected write releases the marker silently;
+/// otherwise it re-blocks up to `REBLOCK_CAP` times, then fails open.
 pub fn run(payload: &Payload) {
     let dir = session_dir(payload);
     if dir.is_empty() {
         return;
     }
     let dir_path = Path::new(&dir);
-
     let marker = dir_path.join("capture-due");
-    if !marker.is_file() {
-        return;
+    let attempts_path = dir_path.join("capture-attempts");
+
+    let marker_mtime = match fs::metadata(&marker) {
+        Ok(meta) => match meta.modified() {
+            Ok(t) => t,
+            Err(_) => return release(&marker, &attempts_path),
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return,
+        Err(_) => return release(&marker, &attempts_path),
+    };
+
+    let mem_dir = memory_dir();
+    let graph_path = mem_dir.join("memory.graph.json");
+    let write_detected = match fs::metadata(&graph_path) {
+        Ok(meta) => match meta.modified() {
+            Ok(graph_mtime) => graph_mtime > marker_mtime,
+            Err(_) => return release(&marker, &attempts_path),
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => false,
+        Err(_) => return release(&marker, &attempts_path),
+    };
+    if write_detected {
+        return release(&marker, &attempts_path);
     }
-    // Consume the marker before building the reason text: a marker that
-    // survives a later failure would block every turn after this one.
-    let _ = fs::remove_file(&marker);
+
+    let attempts = match read_attempts(&attempts_path) {
+        Some(n) => n,
+        None => return release(&marker, &attempts_path),
+    };
+    if attempts >= REBLOCK_CAP {
+        eprintln!("memory-capture: capture skipped, re-block cap reached");
+        return release(&marker, &attempts_path);
+    }
+
+    let next_attempt = attempts + 1;
+    let _ = fs::write(&attempts_path, next_attempt.to_string());
 
     let edits_path = dir_path.join("edits.jsonl");
     let unique = unique_paths_recent_first(&edits_path);
+    let escalate_handoff = should_escalate_handoff(dir_path);
+    let consolidation = consolidation_mention(&mem_dir);
+    emit_block(&build_block_body(
+        &unique,
+        next_attempt,
+        escalate_handoff,
+        consolidation.as_deref(),
+    ));
+}
 
+/// Best-effort remove both state files, releasing without blocking. Used by
+/// every release path: a detected write, a fail-open error, and the cap.
+fn release(marker: &Path, attempts_path: &Path) {
+    let _ = fs::remove_file(marker);
+    let _ = fs::remove_file(attempts_path);
+}
+
+/// Parse `capture-attempts`'s integer contents. Absent means no attempt yet
+/// (`Some(0)`); unparseable or unreadable is `None`, the fail-open signal.
+fn read_attempts(path: &Path) -> Option<i64> {
+    match fs::read_to_string(path) {
+        Ok(contents) => contents.trim().parse::<i64>().ok(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Some(0),
+        Err(_) => None,
+    }
+}
+
+/// Build a no-write re-block reason: `INTRO`, the edited-path listing,
+/// `HANDOFF_NUDGE`, the attempt count, then `escalate_handoff`/`consolidation` if present.
+fn build_block_body(
+    unique: &[String],
+    attempt: i64,
+    escalate_handoff: bool,
+    consolidation: Option<&str>,
+) -> String {
     let mut body = String::from(INTRO);
     if !unique.is_empty() {
         let total = unique.len();
@@ -93,9 +175,165 @@ for capture worthy facts:\n",
         }
     }
     body.push_str(HANDOFF_NUDGE);
-    body.push_str(OUTRO);
+    body.push_str(&format!(
+        "\n\nThis is re-block {attempt} of {REBLOCK_CAP} since context usage crossed the \
+threshold; still no new memory fact detected."
+    ));
+    if escalate_handoff {
+        body.push_str(STRONG_HANDOFF_NUDGE);
+    }
+    if let Some(text) = consolidation {
+        body.push_str(text);
+    }
+    body
+}
 
-    emit_block(&body);
+/// Whether a re-block reason should escalate with `STRONG_HANDOFF_NUDGE`:
+/// crossings at or above the threshold, and no fresher handoff file.
+fn should_escalate_handoff(session_dir: &Path) -> bool {
+    let crossings = read_crossings(&session_dir.join("capture-crossings"));
+    if crossings < CROSSING_ESCALATION_THRESHOLD {
+        return false;
+    }
+    let start = read_start_ts(session_dir);
+    match freshest_handoff_mtime() {
+        Some(mtime) => mtime <= start,
+        None => true,
+    }
+}
+
+/// Parse `capture-crossings`'s integer contents; a missing or unparseable
+/// file starts from 0, matching `counter.rs::incr_counter`'s own fallback.
+fn read_crossings(path: &Path) -> i64 {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| contents.trim().parse::<i64>().ok())
+        .unwrap_or(0)
+}
+
+/// The session's recorded `start-ts`, or `SystemTime::now()` when missing or
+/// unparseable, so a broken start-ts can never swallow a nudge that should show.
+fn read_start_ts(session_dir: &Path) -> SystemTime {
+    fs::read_to_string(session_dir.join("start-ts"))
+        .ok()
+        .and_then(|contents| contents.trim().parse::<u64>().ok())
+        .map(|secs| UNIX_EPOCH + Duration::from_secs(secs))
+        .unwrap_or_else(SystemTime::now)
+}
+
+/// Freshest mtime among this worktree's handoff files (`<slug>-*.md` under
+/// `~/.claude/runtime/handoff`), directory-scoped like `session_init.rs`'s read side, so a sibling session's handoff can suppress this nudge, accepted deliberately.
+fn freshest_handoff_mtime() -> Option<SystemTime> {
+    let slug = project_slug(&logical_cwd());
+    if slug.is_empty() {
+        return None;
+    }
+    let dir = home_dir().join(".claude").join("runtime").join("handoff");
+    let prefix = format!("{slug}-");
+    let entries = fs::read_dir(&dir).ok()?;
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            if !name.starts_with(&prefix) || !name.ends_with(".md") {
+                return None;
+            }
+            entry.metadata().ok()?.modified().ok()
+        })
+        .max()
+}
+
+/// Scans facts touched since `memory.signals.json`'s cursor for
+/// consolidation candidates, once the store is at or above `CONSOLIDATION_NODE_THRESHOLD`.
+fn consolidation_mention(mem_dir: &Path) -> Option<String> {
+    let content = fs::read_to_string(mem_dir.join("memory.graph.json")).ok()?;
+    let graph: Value = serde_json::from_str(&content).ok()?;
+    let nodes = graph.get("nodes").and_then(Value::as_array)?;
+    if nodes.len() < CONSOLIDATION_NODE_THRESHOLD {
+        return None;
+    }
+
+    let cursor_since = memory_signals::read_cursor(mem_dir);
+    let touched: HashSet<String> = nodes
+        .iter()
+        .filter_map(|n| touched_node_id(mem_dir, n, cursor_since))
+        .collect();
+
+    let superseded_count = graph
+        .get("edges")
+        .and_then(Value::as_array)
+        .map(|edges| count_touched_superseded(edges, &touched))
+        .unwrap_or(0);
+    let oversized_count = nodes
+        .iter()
+        .filter(|n| is_touched_oversized(mem_dir, n, &touched))
+        .count();
+
+    memory_signals::advance_cursor(mem_dir);
+
+    if superseded_count == 0 && oversized_count == 0 {
+        return None;
+    }
+    Some(build_consolidation_text(superseded_count, oversized_count))
+}
+
+/// `node`'s id, if its fact file's mtime is newer than `cursor_since`
+/// (or `cursor_since` is `None`, meaning no pass has ever run).
+fn touched_node_id(mem_dir: &Path, node: &Value, cursor_since: Option<u64>) -> Option<String> {
+    let id = node.get("id").and_then(Value::as_str)?;
+    let file = node.get("file").and_then(Value::as_str)?;
+    let mtime = fs::metadata(mem_dir.join(file)).ok()?.modified().ok()?;
+    let touched = match cursor_since {
+        Some(since) => mtime.duration_since(UNIX_EPOCH).ok()?.as_secs() > since,
+        None => true,
+    };
+    touched.then(|| id.to_string())
+}
+
+/// Count of `supersedes` edges whose superseded (`to`) node is in `touched`.
+fn count_touched_superseded(edges: &[Value], touched: &HashSet<String>) -> usize {
+    edges
+        .iter()
+        .filter(|e| e.get("relation").and_then(Value::as_str) == Some("supersedes"))
+        .filter_map(|e| e.get("to").and_then(Value::as_str))
+        .filter(|to| touched.contains(*to))
+        .count()
+}
+
+/// Whether `node` is touched and its fact file exceeds `OVERSIZED_FACT_BYTES`.
+fn is_touched_oversized(mem_dir: &Path, node: &Value, touched: &HashSet<String>) -> bool {
+    let Some(id) = node.get("id").and_then(Value::as_str) else {
+        return false;
+    };
+    if !touched.contains(id) {
+        return false;
+    }
+    node.get("file")
+        .and_then(Value::as_str)
+        .and_then(|file| fs::metadata(mem_dir.join(file)).ok())
+        .is_some_and(|meta| meta.len() > OVERSIZED_FACT_BYTES)
+}
+
+/// The consolidation-mention sentence naming whichever candidate kinds were found.
+fn build_consolidation_text(superseded_count: usize, oversized_count: usize) -> String {
+    let mut parts = Vec::new();
+    if superseded_count > 0 {
+        parts.push(format!(
+            "{superseded_count} superseded fact{} still in the store",
+            if superseded_count == 1 { "" } else { "s" }
+        ));
+    }
+    if oversized_count > 0 {
+        parts.push(format!(
+            "{oversized_count} fact{} grown large enough to split",
+            if oversized_count == 1 { "" } else { "s" }
+        ));
+    }
+    format!(
+        "\n\nThe memory store has also grown large enough to flag a consolidation candidate \
+from recent activity: {}. Worth a pass before it grows further.",
+        parts.join(" and ")
+    )
 }
 
 /// Unique edited paths from `edits.jsonl`, most recently edited first.

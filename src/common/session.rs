@@ -37,6 +37,12 @@ fn runtime_root() -> PathBuf {
     home_dir().join(".claude").join("runtime")
 }
 
+/// `$HOME/.claude/memory`, the root for saved memory facts and the rebuilt
+/// `memory.graph.json`. Shared here so no hook module needs its own copy.
+pub(crate) fn memory_dir() -> PathBuf {
+    home_dir().join(".claude").join("memory")
+}
+
 /// Core of `session_dir`, taking the runtime root explicitly so tests can
 /// point it at a scratch directory instead of mutating the real `$HOME`.
 fn session_dir_in(root: &Path, payload: &Payload) -> String {

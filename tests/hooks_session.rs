@@ -781,11 +781,11 @@ fn session_init_caps_injected_handoffs_but_still_deletes_every_match() {
 }
 
 // ---------------------------------------------------------------------
-// session-init: the five zeroed counters plus start-ts
+// session-init: the six zeroed counters plus start-ts
 // ---------------------------------------------------------------------
 
 #[test]
-fn session_init_zeroes_exactly_the_five_counter_files() {
+fn session_init_zeroes_exactly_the_six_counter_files() {
     // Arrange: a session directory pre-seeded with non-empty content in
     // every file the hook is expected to zero, plus one unrelated file that
     // must survive untouched.
@@ -799,6 +799,7 @@ fn session_init_zeroes_exactly_the_five_counter_files() {
         "edit-count",
         "edits.jsonl",
         "seen-reads",
+        "capture-crossings",
     ] {
         fs::write(session_dir.join(name), "stale-content").unwrap();
     }
@@ -823,6 +824,7 @@ fn session_init_zeroes_exactly_the_five_counter_files() {
         "edit-count",
         "edits.jsonl",
         "seen-reads",
+        "capture-crossings",
     ] {
         let contents = fs::read_to_string(session_dir.join(name)).unwrap();
         assert_eq!(contents, "", "{name} should be zeroed, got '{contents}'");

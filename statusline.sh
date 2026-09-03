@@ -370,6 +370,12 @@ if [[ -n "${session_id:-}" ]]; then
             if [[ ! -f "$telemetry_dir/capture-fired" ]]; then
                 : > "$telemetry_dir/capture-due" 2>/dev/null || true
                 : > "$telemetry_dir/capture-fired" 2>/dev/null || true
+
+                # Same guarded, once-per-crossing point, so this tally never
+                # over-counts a render that merely stays above the line.
+                crossings=$(cat "$telemetry_dir/capture-crossings" 2>/dev/null)
+                [[ "$crossings" =~ ^[0-9]+$ ]] || crossings=0
+                printf '%s' "$((crossings + 1))" > "$telemetry_dir/capture-crossings" 2>/dev/null || true
             fi
         else
             rm -f "$telemetry_dir/capture-fired" 2>/dev/null || true

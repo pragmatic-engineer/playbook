@@ -46,15 +46,15 @@ const HANDOFF_MAX_AGE_DAYS: u64 = 14;
 /// enough to catch "I cleared twice in a row" without that risk.
 const HANDOFF_MAX_INJECTED: usize = 3;
 
-/// The five per-session counter/state files zeroed at the start of every
-/// session. Matches hooks/session-init.py:88 exactly; anything else in the
-/// session directory (config-hash, start-ts, clean-exit, ...) is untouched.
-const SESSION_COUNTER_FILES: [&str; 5] = [
+/// The per-session counter/state files zeroed at the start of every session.
+/// `capture-crossings` has no python counterpart, so this no longer matches hooks/session-init.py:88 one-for-one.
+const SESSION_COUNTER_FILES: [&str; 6] = [
     "search-count",
     "tool-count",
     "edit-count",
     "edits.jsonl",
     "seen-reads",
+    "capture-crossings",
 ];
 
 const DEFAULT_AUTO_LEARN_MAX_AGE_DAYS: i64 = 14;
@@ -123,7 +123,7 @@ fn migrate_legacy_graph_file(home: &str) {
     let _ = fs::rename(&old_path, &new_path);
 }
 
-/// Zeroes the five per-session counter files and stamps `start-ts`, matching hooks/session-init.py:86-98. A no-op when there is no session directory (no session id in the payload).
+/// Zeroes the per-session counter files and stamps `start-ts`. A no-op when there is no session directory (no session id in the payload).
 fn zero_session_state(dir: &str) {
     if dir.is_empty() {
         return;

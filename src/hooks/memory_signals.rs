@@ -36,9 +36,8 @@ pub struct SignalsStore {
     nodes: HashMap<String, NodeSignals>,
 }
 
-/// Where the consolidation pass last left off. A placeholder shape: only a
-/// single optional timestamp exists today because nothing in this module
-/// reads or writes it yet, a later consolidation pass defines what it means.
+/// Where the consolidation pass last left off, read and advanced by
+/// `read_cursor`/`advance_cursor` below.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Cursor {
     #[serde(default)]
@@ -133,6 +132,24 @@ pub fn set_staleness(mem_dir: &Path, node_id: &str, stale: bool, verified_hash: 
         if let Some(hash) = verified_hash {
             entry.verified_hash = Some(hash);
         }
+    });
+}
+
+/// The consolidation cursor's last recorded pass time, in epoch seconds.
+/// `None` before the first pass ever ran, or on a missing/unparsable file.
+pub fn read_cursor(mem_dir: &Path) -> Option<u64> {
+    read_store(mem_dir)?
+        .cursor
+        .last_run_at
+        .and_then(|s| s.parse::<u64>().ok())
+}
+
+/// Stamps the consolidation cursor with the current time, so the next pass
+/// only considers facts touched since.
+pub fn advance_cursor(mem_dir: &Path) {
+    let now = current_epoch_secs().to_string();
+    modify_locked(mem_dir, |store| {
+        store.cursor.last_run_at = Some(now.clone());
     });
 }
 

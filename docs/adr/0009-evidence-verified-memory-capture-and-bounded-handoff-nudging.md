@@ -1,8 +1,8 @@
 # ADR-0009: Evidence-verified memory capture and bounded handoff nudging
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date created:** 2026-08-25
-- **Date modified:** 2026-08-25
+- **Date modified:** 2026-09-02
 
 ## Context
 
@@ -18,7 +18,7 @@ Fetched directly from the official Claude Code hooks docs (`code.claude.com/docs
 - `SessionEnd`'s block column reads "No... Shows stderr to user only." It is fire-and-forget: nothing it returns can pause or redirect the model.
 - `Stop`'s decision-control fields are `decision` and `reason` only. `additionalContext` is not available there, matching what `memory_capture.rs` already does (only ever calling `emit_block`, never trying to inject context).
 
-Two mechanisms already exist that make evidence-based verification cheap. `src/hooks/rebuild_memory_graph.rs` rebuilds `~/.claude/memory/graph.json` atomically on every save under `~/.claude/memory/` (a `PostToolUse` hook), so the file's mtime is a free, already-current signal for "a memory fact was written." `session_init.rs`'s handoff read (ADR 0008) reads and deletes `~/.claude/runtime/handoff/<project-slug>.md` at `SessionStart`, so that file's mtime is the equivalent signal for "a handoff was written."
+Two mechanisms already exist that make evidence-based verification cheap. `src/hooks/rebuild_memory_graph.rs` rebuilds `~/.claude/memory/memory.graph.json` atomically on every save under `~/.claude/memory/` (a `PostToolUse` hook, file renamed from `graph.json` by ADR 0011 WU-0, `#303`), so the file's mtime is a free, already-current signal for "a memory fact was written." `session_init.rs`'s handoff read (ADR 0008, updated by `#241` to avoid cross-session collisions) glob-matches `~/.claude/runtime/handoff/<project-slug>-<epoch>-<pid>.md` at `SessionStart` and reads/deletes the freshest few (`session_init.rs:379-444`), so the freshest match's mtime is the equivalent signal for "a handoff was written."
 
 `prompts/SYSTEM_PROMPT.md:51-63`'s `## Memory` section narrates, in prose, both the save-time decisions that genuinely need model judgment (what counts as durable, which scope) and the three retrieval paths that `session_init.rs` and `memory_anchors.rs` already run mechanically. `docs/concepts/02-memory-system.md` carried a near-identical duplication before ADR 0008, and it had drifted stale and self-contradictory by the time it was caught.
 
@@ -39,14 +39,14 @@ Two mechanisms already exist that make evidence-based verification cheap. `src/h
 
 ### B. Hard block until any write happens, no cap (effort: S)
 
-- How it works: `memory_capture.rs` never deletes the marker until `graph.json`'s mtime advances past the marker's own mtime, blocking every `Stop` attempt until then.
+- How it works: `memory_capture.rs` never deletes the marker until `memory.graph.json`'s mtime advances past the marker's own mtime, blocking every `Stop` attempt until then.
 - Trade-offs: Simple to build. But the docs confirm `Stop` has no built-in loop-prevention, so a model that has genuinely nothing to capture, or that fails to act on the nudge for any reason, can re-block indefinitely. Turning a productivity aid into a stuck session is a worse failure than the one being fixed.
 
 ### C. Evidence-verified capture with a bounded re-block cap, plus mtime-checked handoff nudging, plus a trimmed system prompt (effort: M), chosen
 
 - How it works, three coordinated changes:
-  1. `memory_capture.rs` compares `graph.json`'s mtime against the marker's own arm time before consuming it. No write detected: retain the marker and re-block, up to a small fixed cap, then release with a distinct "capture skipped" note so the block can never wedge a session.
-  2. The same path also checks the handoff file's mtime once a session has crossed the capture threshold enough times to suggest it is running long (a proxy for "probably near a natural stop," since `Stop` cannot know it is the session's last turn and `SessionEnd` cannot block at all), nudging harder rather than blocking, since blocking here has no enforcement value `SessionEnd` could not already fire past.
+  1. `memory_capture.rs` compares `memory.graph.json`'s mtime against the marker's own arm time before consuming it. No write detected: retain the marker and re-block, up to a small fixed cap, then release with a distinct "capture skipped" note so the block can never wedge a session.
+  2. The same path also checks the handoff glob's freshest mtime once a session has crossed the capture threshold enough times to suggest it is running long (a proxy for "probably near a natural stop," since `Stop` cannot know it is the session's last turn and `SessionEnd` cannot block at all), nudging harder rather than blocking, since blocking here has no enforcement value `SessionEnd` could not already fire past.
   3. `SYSTEM_PROMPT.md`'s Memory section keeps only the save-time judgment calls, dropping the prose that just restates what `session_init.rs` and `memory_anchors.rs` already do mechanically.
 - Trade-offs: More real engineering than B: a re-block counter, two separate mtime comparisons, and careful wording for the skipped case. Bounded correctly: never wedges a session, and never claims an enforcement guarantee hooks cannot deliver.
 
@@ -65,6 +65,7 @@ Alternative C. It closes the real compliance gap in `memory_capture.rs` that alt
 - `SYSTEM_PROMPT.md` shrinks and stops duplicating hook behavior in prose, reducing the risk of the staleness ADR 0008 already found once in `docs/concepts/02-memory-system.md`.
 - `memory_capture.rs` gains state it does not have today: a re-block attempt counter, scoped per marker/session.
 - Handoff enforcement stays bounded by what hooks can actually do. `SessionEnd` cannot block, so this record closes the mid-session compliance gap, not the end-of-session one. A user who exits before complying with a nudge still loses the handoff, exactly as today; the blueprint must record this limit rather than imply it away.
+- A session that writes memory facts promptly on every crossing takes the silent-release branch every time and so never reaches the re-block branch the handoff-nudge escalation rides on. Such a session gets no handoff signal at all regardless of how long it runs, a distinct gap from "user exits before complying with a nudge they did receive" above, and not currently closed by any hook event.
 - Follow-up: the re-block cap and the threshold-crossing count that escalates handoff nudging are both concrete values the blueprint has to choose and justify, not implementation details left open here.
 
 ## Architecture Diagrams
@@ -93,8 +94,8 @@ sequenceDiagram
 sequenceDiagram
     participant SL as statusline.sh
     participant Stop as memory_capture.rs (Stop)
-    participant Graph as graph.json (mtime)
-    participant Handoff as handoff file (mtime)
+    participant Graph as memory.graph.json (mtime)
+    participant Handoff as handoff glob (freshest mtime)
     participant Model
     SL->>Stop: drops capture-due marker, records arm time
     Model->>Stop: turn ends, Stop fires
@@ -110,7 +111,7 @@ sequenceDiagram
         Stop-->>Model: no block, turn ends
     end
     opt session long enough (crossing count high)
-        Stop->>Handoff: mtime newer than session start?
+        Stop->>Handoff: freshest match's mtime newer than session start?
         Stop-->>Model: reason includes handoff nudge if stale
     end
     Note over Stop,Model: SessionEnd still cannot block; gap stays visible, not hidden
