@@ -26,9 +26,10 @@
 //! cache scenario in `hooks/memory-anchors.test.sh`; see that file's own
 //! comment for the full rationale.
 
+use crate::common::paths::memory_dir;
 use crate::common::payload::Payload;
 use crate::common::{
-    emit_pre_context, emit_prompt_context, home_dir, repo_slug, run_with_timeout, session_dir,
+    emit_pre_context, emit_prompt_context, repo_slug, run_with_timeout, session_dir,
 };
 use crate::hooks::memory_signals;
 use crate::hooks::staleness::{self, check_staleness};
@@ -104,7 +105,7 @@ pub fn run(payload: &Payload) {
 }
 
 fn mem_dir() -> PathBuf {
-    home_dir().join(".claude").join("memory")
+    memory_dir()
 }
 
 /// `UserPromptSubmit` branch: match prompt text and this-session touched
@@ -301,7 +302,7 @@ fn append_seen(path: &Path, ids: &[String]) {
 /// on any read failure (deleted, unreadable): the caller skips this one
 /// fact rather than treating it as fatal.
 fn read_fact_body(file: &str) -> Option<String> {
-    let path = home_dir().join(".claude").join("memory").join(file);
+    let path = memory_dir().join(file);
     let contents = fs::read_to_string(path).ok()?;
     Some(contents.chars().take(16000).collect())
 }
@@ -437,10 +438,7 @@ fn build_index(idx_path: &Path) {
 }
 
 fn memory_graph_path() -> PathBuf {
-    home_dir()
-        .join(".claude")
-        .join("memory")
-        .join("memory.graph.json")
+    memory_dir().join("memory.graph.json")
 }
 
 fn compute_index_rows(graph_path: &Path, repo: &str) -> Vec<String> {

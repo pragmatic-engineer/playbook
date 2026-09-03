@@ -26,21 +26,15 @@ pub fn home_dir() -> PathBuf {
 }
 
 /// Return the per-session state directory under `$HOME/.claude/runtime`,
-/// creating it on demand with mode 0700. Empty when no session id is
-/// present. Never panics; a directory that cannot be created is reported as
-/// its would-be path anyway, matching common.py swallowing the mkdir error.
+/// creating it on demand with mode 0700. Empty when no session id is present.
 pub fn session_dir(payload: &Payload) -> String {
     session_dir_in(&runtime_root(), payload)
 }
 
+/// Stays `.claude`-rooted, unlike `paths::runtime_root()`: other consumers
+/// of a session's runtime files still resolve this same old root today.
 fn runtime_root() -> PathBuf {
     home_dir().join(".claude").join("runtime")
-}
-
-/// `$HOME/.claude/memory`, the root for saved memory facts and the rebuilt
-/// `memory.graph.json`. Shared here so no hook module needs its own copy.
-pub(crate) fn memory_dir() -> PathBuf {
-    home_dir().join(".claude").join("memory")
 }
 
 /// Core of `session_dir`, taking the runtime root explicitly so tests can

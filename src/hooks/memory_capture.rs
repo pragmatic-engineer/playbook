@@ -35,7 +35,7 @@
 //!    this toolkit's own trusted writer touches the file.
 
 use crate::cc::{logical_cwd, project_slug};
-use crate::common::session::memory_dir;
+use crate::common::paths::memory_dir;
 use crate::common::{emit_block, home_dir, session_dir, Payload};
 use crate::hooks::memory_signals;
 use serde_json::Value;

@@ -12,8 +12,8 @@
 
 use crate::common::atomic::with_dir_lock;
 use crate::common::home_dir;
+use crate::common::paths::memory_dir;
 use crate::common::payload::Payload;
-use crate::common::session::memory_dir;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;

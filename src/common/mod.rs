@@ -9,6 +9,7 @@ pub mod atomic;
 pub mod config_hash;
 pub mod counter;
 pub mod emit;
+pub mod paths;
 pub mod payload;
 pub mod proc;
 pub mod repo;
@@ -19,6 +20,9 @@ pub use config_hash::config_hash;
 pub use counter::incr_counter;
 pub use emit::{
     emit_block, emit_pre_context, emit_pre_deny, emit_prompt_context, emit_system_message,
+};
+pub use paths::{
+    cc_state_dir, memory_dir, playbook_root, repo_scoped_dir, runtime_root, RepoScope,
 };
 pub use payload::Payload;
 pub use proc::run_with_timeout;

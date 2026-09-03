@@ -430,10 +430,10 @@ mod memory_capture {
         format!(r#"{{"session_id":"{SID}"}}"#)
     }
 
-    /// `$HOME/.claude/memory`, matching how the hooks derive the shared
+    /// `$HOME/.config/playbook/memory`, matching how the hooks derive the shared
     /// memory root.
     fn memory_dir_for(home: &Path) -> PathBuf {
-        home.join(".claude").join("memory")
+        home.join(".config").join("playbook").join("memory")
     }
 
     /// Write `older_path`, sleep briefly, write `newer_path`, then poll up
