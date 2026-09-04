@@ -136,12 +136,12 @@ if [[ "$LOCAL_HEAD" == "$HEAD_SHA" && -z "$DIRTY" ]]; then
   WT_CREATED=false
   echo "Mode: in-place (HEAD matches, tree clean)"
 else
-  if [[ ! -r "$HOME/.claude/shell/review-worktree.sh" ]]; then
-    echo "error: review-worktree.sh not found under \$HOME/.claude/shell/; install the repo's shell/ directory" >&2
+  if [[ ! -r "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" ]]; then
+    echo "error: review-worktree.sh not found under \$CLAUDE_PLUGIN_ROOT/shell/" >&2
     exit 1
   fi
   WT_ERR="$(mktemp)"
-  WT="$(bash "$HOME/.claude/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
+  WT="$(bash "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
   if [[ $? -ne 0 || -z "$WT" ]]; then
     echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
     rm -f "$WT_ERR"
@@ -350,7 +350,7 @@ Never fabricate URLs; use the `html_url` the API returns.
 Then, if `WT_CREATED` is true, always run:
 
 ```bash
-bash "$HOME/.claude/shell/review-worktree.sh" teardown "$WT"
+bash "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" teardown "$WT"
 ```
 
 Run this whether the review completed, failed, was skipped, or was aborted mid-swarm. It's a no-op if the worktree is already gone.
