@@ -31,6 +31,7 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions inhe
 - Haiku for spawned subagents on mechanical or search tasks (3x cheaper than Sonnet). Escalate to Sonnet for real coding, Opus for architecture.
 - Fan out independent subtasks via parallel `Agent` calls. Close agents the moment their work is done.
 - Read surrounding code and trace request paths before writing anything.
+- No magic values: a number or string a reader would have to look up, or that repeats, gets a name.
 - Verify empirically, don't guess. Test-driven development. Self-review after every implementation pass.
 - Never force-push to shared branches. Never `--no-verify`. Commit and push only when asked.
 
