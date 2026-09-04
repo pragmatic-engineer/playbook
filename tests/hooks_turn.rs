@@ -261,6 +261,203 @@ mod auto_model_detect {
         assert_eq!(code, 0);
         assert_eq!(stdout, "");
     }
+
+    #[test]
+    fn new_directive_pools_fire_and_name_the_right_command() {
+        // Arrange: table-driven, one short prompt per new floor-exempt pool, each well
+        // under the old 20-char floor, asserting the exact command substring named.
+        let cases = [
+            ("implement: ship it", "ship it", "/playbook:implement"),
+            ("implement: go ahead", "go ahead", "/playbook:implement"),
+            (
+                "scope: let's plan this",
+                "let's plan this",
+                "/playbook:scope",
+            ),
+            (
+                "adr: this is a big call",
+                "this is a big call",
+                "/playbook:adr",
+            ),
+            (
+                "brainstorm: explore this idea",
+                "explore this idea",
+                "/playbook:brainstorm",
+            ),
+        ];
+
+        for (label, prompt, expected_command) in cases {
+            let home = scratch_home("amd-directive");
+            let payload = serde_json::json!({ "prompt": prompt }).to_string();
+
+            // Act
+            let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+            // Assert
+            assert_eq!(code, 0, "{label}: exit code");
+            let value: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|e| panic!("{label}: not valid JSON: {e}"));
+            let context = value["hookSpecificOutput"]["additionalContext"]
+                .as_str()
+                .unwrap_or_default();
+            assert!(
+                context.contains(expected_command),
+                "{label}: expected context to contain {expected_command:?}, got {context:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn old_floor_boundary_still_enforced_on_fallthrough_path() {
+        // Arrange: exactly 19 chars (one under the old 20-char floor), contains "schema" with
+        // correct word boundaries but no new-pool phrase; confirms the old floor is still gated.
+        let home = scratch_home("amd-old-floor-boundary");
+        let payload = r#"{"prompt":"Explain this schema"}"#;
+        assert_eq!("Explain this schema".chars().count(), 19);
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+    }
+
+    #[test]
+    fn curly_quote_apostrophe_does_not_match_new_phrase() {
+        // Arrange: "let's plan this" with a curly apostrophe (U+2019) instead of the ASCII one
+        // SCOPE_DIRECTIVE_PHRASES uses; pins the accepted literal-match limitation.
+        let home = scratch_home("amd-curly-quote");
+        let payload = serde_json::json!({
+            "prompt": "let\u{2019}s plan this"
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+    }
+
+    #[test]
+    fn brainstorm_wins_tie_break_over_scope_in_sequential_sentence() {
+        // Arrange: contains "explore this idea" (brainstorm) followed by "let's plan this"
+        // (scope) in a naturally sequential sentence; brainstorm should win.
+        let home = scratch_home("amd-tie-break-brainstorm-scope");
+        let payload = serde_json::json!({
+            "prompt": "Let's explore this idea first, then let's plan this out properly."
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("nudge output should be valid JSON");
+        let context = value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(context.contains("/playbook:brainstorm"), "got: {context:?}");
+        assert!(!context.contains("/playbook:scope"), "got: {context:?}");
+    }
+
+    #[test]
+    fn adr_wins_over_scope_when_reversibility_language_present_case_a() {
+        // Arrange: contains "this is a big call" and "expensive to undo" (adr) plus
+        // "let's plan this" (scope); adr must win so this isn't misread as scope.
+        let home = scratch_home("amd-adr-vs-scope-a");
+        let payload = serde_json::json!({
+            "prompt": "This is a big call and expensive to undo, so let's plan this out carefully rather than rush a decision."
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("nudge output should be valid JSON");
+        let context = value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(context.contains("/playbook:adr"), "got: {context:?}");
+        assert!(!context.contains("/playbook:scope"), "got: {context:?}");
+    }
+
+    #[test]
+    fn adr_wins_over_scope_when_reversibility_language_present_case_b() {
+        // Arrange: contains "hard to reverse" (adr pool) plus "break this down" (scope
+        // pool). Same regression class as case_a, different phrase pair.
+        let home = scratch_home("amd-adr-vs-scope-b");
+        let payload = serde_json::json!({
+            "prompt": "This decision is hard to reverse, so let's break this down and think about which option is safest."
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("nudge output should be valid JSON");
+        let context = value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(context.contains("/playbook:adr"), "got: {context:?}");
+        assert!(!context.contains("/playbook:scope"), "got: {context:?}");
+    }
+
+    #[test]
+    fn brainstorm_wins_tie_break_over_adr_in_sequential_sentence() {
+        // Arrange: brainstorm phrase plus an adr phrase; brainstorm is checked first.
+        let home = scratch_home("amd-tie-break-brainstorm-adr");
+        let payload = serde_json::json!({
+            "prompt": "Let's brainstorm this before we commit, since this is a big call and expensive to undo."
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("nudge output should be valid JSON");
+        let context = value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(context.contains("/playbook:brainstorm"), "got: {context:?}");
+        assert!(!context.contains("/playbook:adr"), "got: {context:?}");
+    }
+
+    #[test]
+    fn scope_wins_tie_break_over_implement_in_sequential_sentence() {
+        // Arrange: scope phrase plus an implement phrase; scope is checked before implement.
+        let home = scratch_home("amd-tie-break-scope-implement");
+        let payload = serde_json::json!({
+            "prompt": "Let's plan this out properly before we just go ahead and ship it."
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("nudge output should be valid JSON");
+        let context = value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(context.contains("/playbook:scope"), "got: {context:?}");
+        assert!(!context.contains("/playbook:implement"), "got: {context:?}");
+    }
 }
 
 // ---------------------------------------------------------------------

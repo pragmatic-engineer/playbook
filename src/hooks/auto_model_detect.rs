@@ -83,26 +83,101 @@ const PHRASES: &[&str] = &[
     "pros and cons",
 ];
 
+/// Phrases naming the pipeline's ideation stage: raw idea, no plan yet.
+const BRAINSTORM_DIRECTIVE_PHRASES: &[&str] = &[
+    "let's brainstorm this",
+    "brainstorm this",
+    "explore this idea",
+    "not sure how to approach",
+    "what are our options",
+    "what are the options",
+];
+
+const BRAINSTORM_MSG: &str = r#"This prompt looks like ideation, exploring a raw idea with no plan yet. Consider running /playbook:brainstorm to work through the options before committing to a direction."#;
+
+/// Phrases naming the pipeline's planning stage: a direction exists, ready
+/// to become a concrete plan.
+const SCOPE_DIRECTIVE_PHRASES: &[&str] = &[
+    "let's plan this",
+    "let's scope this",
+    "break this down",
+    "let's turn that into a plan",
+    "how would we build",
+    "what would it take to build",
+];
+
+const SCOPE_MSG: &str = r#"This prompt looks ready to turn a direction into a concrete plan. Consider running /playbook:scope to produce a verified implementation plan before writing code."#;
+
+/// Phrases naming the pipeline's decision-record stage: a consequential,
+/// hard-to-reverse call worth documenting.
+const ADR_DIRECTIVE_PHRASES: &[&str] = &[
+    "this is a big call",
+    "let's not rush this",
+    "we need to decide this properly",
+    "document why we picked",
+    "expensive to undo",
+    "hard to reverse",
+    "hard-to-reverse",
+];
+
+const ADR_MSG: &str = r#"This prompt looks like a consequential, hard-to-reverse decision. Consider running /playbook:adr to record it properly, with the reasoning captured for later."#;
+
+/// Phrases naming the pipeline's execution stage: an approved plan or
+/// decision already exists.
+const IMPLEMENT_DIRECTIVE_PHRASES: &[&str] = &[
+    "let's implement this",
+    "let's build this",
+    "go ahead",
+    "ship it",
+    "make it happen",
+    "start building",
+    "let's pick this back up",
+    "start on it",
+];
+
+const IMPLEMENT_MSG: &str = r#"This prompt looks like it's ready to build: an approved plan or decision already exists. Consider running /playbook:implement to execute it, rather than writing code inline from a standing start."#;
+
 /// UserPromptSubmit entry point. Never panics: a missing prompt, a slash
 /// command, a short prompt, or plain prose all fall through silently.
 pub fn run(payload: &Payload) {
     let prompt = payload.field(".prompt");
-    if prompt.is_empty() || prompt.starts_with('/') || prompt.chars().count() < 20 {
+    if prompt.is_empty() || prompt.starts_with('/') {
         return;
     }
-    if !has_design_intent(&prompt) {
+    let lower: Vec<char> = prompt.to_lowercase().chars().collect();
+
+    // Checked brainstorm, adr, scope, implement so an adr-shaped prompt isn't misread as scope.
+    for (phrases, msg) in [
+        (BRAINSTORM_DIRECTIVE_PHRASES, BRAINSTORM_MSG),
+        (ADR_DIRECTIVE_PHRASES, ADR_MSG),
+        (SCOPE_DIRECTIVE_PHRASES, SCOPE_MSG),
+        (IMPLEMENT_DIRECTIVE_PHRASES, IMPLEMENT_MSG),
+    ] {
+        let hit = phrases.iter().any(|phrase| {
+            let needle: Vec<char> = phrase.chars().collect();
+            word_boundary_contains(&lower, &needle)
+        });
+        if hit {
+            emit_prompt_context(msg);
+            return;
+        }
+    }
+
+    if prompt.chars().count() < 20 {
+        return;
+    }
+    if !has_design_intent(&lower) {
         return;
     }
     emit_prompt_context(MSG);
 }
 
-fn has_design_intent(prompt: &str) -> bool {
-    let lower: Vec<char> = prompt.to_lowercase().chars().collect();
+fn has_design_intent(lower: &[char]) -> bool {
     let phrase_hit = PHRASES.iter().any(|phrase| {
         let needle: Vec<char> = phrase.chars().collect();
-        word_boundary_contains(&lower, &needle)
+        word_boundary_contains(lower, &needle)
     });
-    phrase_hit || matches_whats_the_best(&lower)
+    phrase_hit || matches_whats_the_best(lower)
 }
 
 /// Matches python's `\w` under `re.IGNORECASE` with no `re.ASCII` flag: any
