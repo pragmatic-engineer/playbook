@@ -27,7 +27,7 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions inhe
 
 **Code rules.** This section covers the full development workflow:
 
-- Plan mode first for design work. `settings.json` routes plan mode to Opus and execution to Sonnet.
+- Design work uses this repo's own `/playbook:brainstorm`, `/playbook:scope`, and `/playbook:adr` commands, not the built-in plan mode; those already run on Opus by their own frontmatter.
 - Casual phrasing maps to the planning pipeline: an undirected request defaults to `/playbook:brainstorm`, a settled one goes straight to `/playbook:scope`, and `/playbook:implement` only runs when an approved plan or blueprint already exists.
 - Haiku for spawned subagents on mechanical or search tasks (3x cheaper than Sonnet). Escalate to Sonnet for real coding, Opus for architecture.
 - Fan out independent subtasks via parallel `Agent` calls. Close agents the moment their work is done.
