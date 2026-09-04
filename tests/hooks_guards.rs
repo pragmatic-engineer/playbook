@@ -1058,14 +1058,14 @@ mod no_slop_guard {
     }
 
     #[test]
-    fn three_line_comment_run_in_an_edit_blocks() {
-        let new_string = "//! line one\n//! line two\n//! line three\nfn f() {}\n";
-        assert!(is_denied(&run_edit("src/lib.rs", new_string)));
+    fn an_unwrapped_wide_comment_line_in_an_edit_blocks() {
+        let new_string = format!("//! {}\nfn f() {{}}\n", "x".repeat(150));
+        assert!(is_denied(&run_edit("src/lib.rs", &new_string)));
     }
 
     #[test]
-    fn two_line_comment_run_in_an_edit_is_allowed() {
-        let new_string = "// line one\n// line two\nfn f() {}\n";
+    fn a_long_run_of_short_wrapped_lines_in_an_edit_is_allowed() {
+        let new_string = "// line one\n// line two\n// line three\n// line four\nfn f() {}\n";
         assert!(!is_denied(&run_edit("src/lib.rs", new_string)));
     }
 
@@ -1085,9 +1085,12 @@ mod no_slop_guard {
     }
 
     #[test]
-    fn a_new_file_written_with_a_long_module_doc_comment_blocks() {
-        let content = "// SPDX-FileCopyrightText: 2026 Igor Santos\n// SPDX-License-Identifier: MIT\n\n//! line one\n//! line two\n//! line three\n\nfn f() {}\n";
-        assert!(is_denied(&run_write("src/hooks/example.rs", content)));
+    fn a_new_file_written_with_an_unwrapped_wide_module_doc_comment_blocks() {
+        let content = format!(
+            "// SPDX-FileCopyrightText: 2026 Igor Santos\n// SPDX-License-Identifier: MIT\n\n//! {}\n\nfn f() {{}}\n",
+            "x".repeat(150)
+        );
+        assert!(is_denied(&run_write("src/hooks/example.rs", &content)));
     }
 
     #[test]
@@ -1099,14 +1102,9 @@ mod no_slop_guard {
 
     #[test]
     fn shell_and_python_files_use_hash_comments() {
-        assert!(is_denied(&run_edit(
-            "shell/example.sh",
-            "# line one\n# line two\n# line three\n"
-        )));
-        assert!(is_denied(&run_edit(
-            "shell/example.py",
-            "# line one\n# line two\n# line three\n"
-        )));
+        let wide = format!("# {}\n", "x".repeat(150));
+        assert!(is_denied(&run_edit("shell/example.sh", &wide)));
+        assert!(is_denied(&run_edit("shell/example.py", &wide)));
     }
 
     #[test]
@@ -1126,7 +1124,7 @@ mod no_slop_guard {
         let payload = serde_json::json!({
             "tool_input": {
                 "file_path": "src/lib.rs",
-                "new_string": "//! a\n//! b\n//! c\n"
+                "new_string": format!("//! {}\n", "x".repeat(150))
             }
         })
         .to_string();
@@ -1166,7 +1164,7 @@ mod no_slop_guard {
         let payload = serde_json::json!({
             "tool_input": {
                 "file_path": "src/lib.rs",
-                "new_string": "//! a\n//! b\n//! c\n"
+                "new_string": format!("//! {}\n", "x".repeat(150))
             }
         })
         .to_string();

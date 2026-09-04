@@ -149,23 +149,48 @@ fn check_comment_slop(payload: &Payload) {
     }
     if let Some(reason) = comment_violation(&text, marker) {
         emit_pre_deny(&format!(
-            "Blocked: {reason} in {file_path}. Comments are one line by \
-             default, a second only for a genuinely non-obvious mechanism, \
-             never a third. Never name a plan, brief, dispatch id, or \
-             completion criterion in a comment; a future reader never saw \
-             the dispatch. Rewrite the comment, then run the edit again."
+            "Blocked: {reason} in {file_path}. Comments should stay content-brief \
+             (one sentence by default, a second only for a genuinely non-obvious \
+             mechanism) and never name a plan, brief, dispatch id, or completion \
+             criterion; a future reader never saw the dispatch. Rewrite the comment, \
+             then run the edit again."
         ));
     }
 }
 
 /// Edit sends replacement text in `new_string`; Write sends the whole file
-/// in `content`. Exactly one is ever non-empty, so trying both covers either.
+/// in `content`. For Edit, only the changed part is scanned, so anchor context carried through untouched doesn't false-positive.
 fn new_text(payload: &Payload) -> String {
     let new_string = payload.field(".tool_input.new_string");
     if !new_string.is_empty() {
-        return new_string;
+        let old_string = payload.field(".tool_input.old_string");
+        return changed_lines(&old_string, &new_string);
     }
     payload.field(".tool_input.content")
+}
+
+/// `new`'s lines outside the common prefix/suffix with `old`, plus one line of context each side so a boundary-straddling violation is still caught.
+fn changed_lines(old: &str, new: &str) -> String {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+
+    let max_prefix = old_lines.len().min(new_lines.len());
+    let mut prefix = 0;
+    while prefix < max_prefix && old_lines[prefix] == new_lines[prefix] {
+        prefix += 1;
+    }
+
+    let max_suffix = old_lines.len().min(new_lines.len()) - prefix;
+    let mut suffix = 0;
+    while suffix < max_suffix
+        && old_lines[old_lines.len() - 1 - suffix] == new_lines[new_lines.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+
+    let start = prefix.saturating_sub(1);
+    let end = (new_lines.len() - suffix + 1).min(new_lines.len());
+    new_lines[start..end].join("\n")
 }
 
 fn marker_for(file_path: &str) -> Option<&'static str> {
@@ -175,14 +200,14 @@ fn marker_for(file_path: &str) -> Option<&'static str> {
         .map(|(_, marker)| *marker)
 }
 
-/// First violation found: a 3+ line comment run, or a comment line naming
-/// an orchestration term. A non-comment line resets the run.
+/// rustfmt's own default `max_width` (no `rustfmt.toml` overrides it here); a comment line past this wasn't wrapped, not just long.
+const MAX_COMMENT_LINE_WIDTH: usize = 100;
+
+/// First violation found: an orchestration term, a dispatch id, or a comment line wider than `MAX_COMMENT_LINE_WIDTH`. Line count itself is not a violation, wrapped comments can run as long as they need to.
 fn comment_violation(text: &str, marker: &str) -> Option<String> {
-    let mut run = 0u32;
     for line in text.lines() {
         let trimmed = line.trim_start();
         if !trimmed.starts_with(marker) {
-            run = 0;
             continue;
         }
         if let Some(term) = ORCHESTRATION_TERMS.iter().find(|t| trimmed.contains(**t)) {
@@ -193,9 +218,10 @@ fn comment_violation(text: &str, marker: &str) -> Option<String> {
         if has_ticket_id(trimmed) {
             return Some("a comment names a dispatch id".to_string());
         }
-        run += 1;
-        if run >= 3 {
-            return Some("a comment block runs 3 or more lines".to_string());
+        if trimmed.chars().count() > MAX_COMMENT_LINE_WIDTH {
+            return Some(format!(
+                "a comment line exceeds {MAX_COMMENT_LINE_WIDTH} columns, wrap it instead of writing one long line"
+            ));
         }
     }
     None
@@ -215,24 +241,87 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_line_rust_comment_run_is_a_violation() {
-        // Arrange
-        let text = "//! line one\n//! line two\n//! line three\n";
+    fn changed_lines_trims_a_pre_existing_banner_carried_through_as_suffix_context() {
+        // Arrange: old ends right before a banner; new inserts a line, keeps the same banner untouched.
+        let old = "fn a() {}\n\n// ---\n// Run all\n// ---\n";
+        let new = "fn a() {}\n\nlet x = 1;\n\n// ---\n// Run all\n// ---\n";
+
+        // Act
+        let got = changed_lines(old, new);
+
+        // Assert
+        assert!(got.contains("let x = 1;"));
+        assert!(
+            !got.contains("Run all"),
+            "the untouched middle banner line should be trimmed away: {got:?}"
+        );
+    }
+
+    #[test]
+    fn changed_lines_still_catches_a_wide_new_line_right_next_to_old_content() {
+        // Arrange: a new, over-width line inserted right after an untouched comment line.
+        let old = "// existing line\nfn a() {}\n";
+        let wide = "x".repeat(MAX_COMMENT_LINE_WIDTH + 1);
+        let new = format!("// existing line\n// {wide}\nfn a() {{}}\n");
+
+        // Act
+        let got = changed_lines(old, &new);
+
+        // Assert
+        assert!(
+            comment_violation(&got, "//").is_some(),
+            "a new over-width line next to untouched content should still be detected: {got:?}"
+        );
+    }
+
+    #[test]
+    fn changed_lines_still_catches_a_genuinely_new_wide_comment() {
+        // Arrange: no shared context at all, everything is new.
+        let old = "fn a() {}\n";
+        let wide = "x".repeat(MAX_COMMENT_LINE_WIDTH + 1);
+        let new = format!("// {wide}\nfn a() {{}}\n");
+
+        // Act
+        let got = changed_lines(old, &new);
+
+        // Assert
+        assert!(comment_violation(&got, "//").is_some());
+    }
+
+    #[test]
+    fn a_long_run_of_short_wrapped_comment_lines_is_not_a_violation() {
+        // Arrange: five short lines, well under the width cap on each.
+        let text = "//! line one\n//! line two\n//! line three\n//! line four\n//! line five\n";
 
         // Act
         let got = comment_violation(text, "//");
+
+        // Assert
+        assert!(
+            got.is_none(),
+            "line count alone is not a violation: {got:?}"
+        );
+    }
+
+    #[test]
+    fn a_comment_line_past_the_width_cap_is_a_violation() {
+        // Arrange: one line, unwrapped, past MAX_COMMENT_LINE_WIDTH.
+        let text = format!("// {}\n", "x".repeat(MAX_COMMENT_LINE_WIDTH + 1));
+
+        // Act
+        let got = comment_violation(&text, "//");
 
         // Assert
         assert!(got.is_some());
     }
 
     #[test]
-    fn two_line_rust_comment_run_is_not_a_violation() {
-        // Arrange
-        let text = "// line one\n// line two\nfn f() {}\n";
+    fn a_comment_line_at_the_width_cap_is_not_a_violation() {
+        // Arrange: exactly MAX_COMMENT_LINE_WIDTH characters, marker included.
+        let text = format!("//{}\n", "x".repeat(MAX_COMMENT_LINE_WIDTH - 2));
 
         // Act
-        let got = comment_violation(text, "//");
+        let got = comment_violation(&text, "//");
 
         // Assert
         assert!(got.is_none());
@@ -261,12 +350,15 @@ mod tests {
     }
 
     #[test]
-    fn non_comment_line_resets_the_run() {
-        // Arrange
-        let text = "// line one\n// line two\nlet x = 1;\n// line three\n// line four\n";
+    fn a_wide_non_comment_line_is_never_checked() {
+        // Arrange: the wide line is code, not a comment, so it must not be scanned for width.
+        let text = format!(
+            "// short\nlet x = \"{}\";\n// short again\n",
+            "y".repeat(200)
+        );
 
         // Act
-        let got = comment_violation(text, "//");
+        let got = comment_violation(&text, "//");
 
         // Assert
         assert!(got.is_none());
