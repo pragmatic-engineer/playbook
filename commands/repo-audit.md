@@ -54,6 +54,8 @@ Architecture & design:
 - layering violations
 - scalability bottlenecks
 
+Cross-reference structural findings against version-control churn: complex code that also changes often is where a fix pays off, complex code nobody touches usually isn't worth the risk of touching now.
+
 Code quality:
 
 - duplication
@@ -127,6 +129,7 @@ Synthesize the audit into a strategy:
 - For each theme, propose a target state and the principle behind it.
 - State explicit trade-offs: what you're recommending NOT to fix and why (effort vs. payoff, risk, project maturity).
 - Define what "done" looks like: measurable signals, for example "CI fails on lint errors," "core module test coverage ≥ 80%," or "zero Critical findings".
+- For a theme that implies a structural change to code already in production, name which incremental migration pattern applies and why, instead of defaulting to an unstated rewrite: strangler fig (route traffic from old to new behind a facade, for a system-level swap), branch by abstraction (introduce an interface, build the replacement behind it, migrate callers, delete the old implementation, for an in-place subsystem swap), or expand-contract (add the new form alongside the old, migrate consumers, remove the old form, for an interface or schema change). Treat the current architecture as expected to be replaced eventually, not preserved at all costs.
 
 Phase 4 / Detailed Task Plan
 
@@ -145,7 +148,7 @@ Each task must include:
 
 Order tasks into milestones:
 
-Milestone 0 Safety net: anything needed before refactoring safely (tests around critical paths, CI gates, backups).
+Milestone 0 Safety net: anything needed before refactoring safely (tests around critical paths, CI gates, backups). For code with no tests, that means a characterization test first, pinning what the code actually does today rather than what it should do, via a seam (an object boundary where behavior can be substituted without editing the code at that point), before any structural change. For a task whose true dependencies aren't clear upfront, don't try to plan the full sequence in advance: attempt the change, and when it breaks, record the failure as a new prerequisite task and revert, repeating until the leaf-level prerequisites are found. This keeps the codebase releasable at nearly every step instead of broken on a long-lived branch.
 
 Milestone 1 Critical fixes: security and correctness issues.
 
