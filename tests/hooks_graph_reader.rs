@@ -50,6 +50,24 @@ fn repo_dir(home: &Path) -> PathBuf {
     fs::canonicalize(home.join("repo")).expect("scratch repo should resolve")
 }
 
+/// Points the scratch repo's `origin` remote at `url`, so `repo_slug()`
+/// resolves to a real `<owner>/<repo>` instead of the empty string a bare `git init` leaves it at.
+fn set_origin(home: &Path, url: &str) {
+    let ok = Command::new("git")
+        .args([
+            "-C",
+            repo_dir(home).to_str().unwrap(),
+            "remote",
+            "add",
+            "origin",
+            url,
+        ])
+        .status()
+        .expect("git should be available")
+        .success();
+    assert!(ok, "scratch repo should accept an origin remote");
+}
+
 fn graph_path(home: &Path) -> PathBuf {
     home.join(".config")
         .join("playbook")
@@ -337,6 +355,80 @@ fn additional_context_output_is_valid_json_with_pretooluse_event_name() {
     );
 
     let _ = fs::remove_dir_all(&home);
+}
+
+/// `in_scope`'s `Some("org")` arm: a fact scoped to an org matches any repo
+/// under the same owner, and is excluded for a repo under a different owner.
+#[test]
+fn org_scoped_fact_anchors_only_within_its_own_owner() {
+    const GRAPH: &str = r#"{
+      "nodes": [
+        {"id": "acme/org-fact", "file": "org-fact.md", "scope": "org", "type": "reference", "name": "org-fact", "description": "Shared across every acme repo.", "project": "acme"},
+        {"id": "code:src/a.py", "file": "src/a.py", "scope": "code", "type": "code"}
+      ],
+      "edges": [
+        {"from": "acme/org-fact", "to": "code:src/a.py", "relation": "anchors"}
+      ]
+    }"#;
+
+    let home_a = scratch_home("org-scope-same-owner");
+    set_origin(&home_a, "git@github.com:acme/widget.git");
+    write_graph(&home_a, GRAPH);
+    let out_a = run_anchors_hook(&home_a, &edit_path(&home_a, "src/a.py"), "s-org-a");
+    assert!(
+        stdout_of(&out_a).contains("org-fact"),
+        "an org-scoped fact should anchor for any repo under its owner: {}",
+        stdout_of(&out_a)
+    );
+    let _ = fs::remove_dir_all(&home_a);
+
+    let home_b = scratch_home("org-scope-different-owner");
+    set_origin(&home_b, "git@github.com:other-org/widget.git");
+    write_graph(&home_b, GRAPH);
+    let out_b = run_anchors_hook(&home_b, &edit_path(&home_b, "src/a.py"), "s-org-b");
+    assert_eq!(
+        stdout_of(&out_b),
+        "",
+        "an org-scoped fact must not leak to a repo under a different owner"
+    );
+    let _ = fs::remove_dir_all(&home_b);
+}
+
+/// `in_scope`'s `Some("project")` arm: a fact scoped to one repo does not
+/// anchor in a sibling repo, even under the same owner.
+#[test]
+fn project_scoped_fact_anchors_only_for_its_exact_repo() {
+    const GRAPH: &str = r#"{
+      "nodes": [
+        {"id": "acme/widget/proj-fact", "file": "proj-fact.md", "scope": "project", "type": "reference", "name": "proj-fact", "description": "Specific to acme/widget.", "project": "acme/widget"},
+        {"id": "code:src/a.py", "file": "src/a.py", "scope": "code", "type": "code"}
+      ],
+      "edges": [
+        {"from": "acme/widget/proj-fact", "to": "code:src/a.py", "relation": "anchors"}
+      ]
+    }"#;
+
+    let home_a = scratch_home("project-scope-match");
+    set_origin(&home_a, "git@github.com:acme/widget.git");
+    write_graph(&home_a, GRAPH);
+    let out_a = run_anchors_hook(&home_a, &edit_path(&home_a, "src/a.py"), "s-proj-a");
+    assert!(
+        stdout_of(&out_a).contains("proj-fact"),
+        "a project-scoped fact should anchor in its own repo: {}",
+        stdout_of(&out_a)
+    );
+    let _ = fs::remove_dir_all(&home_a);
+
+    let home_b = scratch_home("project-scope-sibling");
+    set_origin(&home_b, "git@github.com:acme/other.git");
+    write_graph(&home_b, GRAPH);
+    let out_b = run_anchors_hook(&home_b, &edit_path(&home_b, "src/a.py"), "s-proj-b");
+    assert_eq!(
+        stdout_of(&out_b),
+        "",
+        "a project-scoped fact must not leak to a sibling repo under the same owner"
+    );
+    let _ = fs::remove_dir_all(&home_b);
 }
 
 // --- memory-anchors: UserPromptSubmit prompt-time recall ------------------

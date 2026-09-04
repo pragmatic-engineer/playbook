@@ -147,16 +147,24 @@ pub fn run(payload: &Payload) {
     let lower: Vec<char> = prompt.to_lowercase().chars().collect();
 
     // Checked brainstorm, adr, scope, implement so an adr-shaped prompt isn't misread as scope.
-    for (phrases, msg) in [
-        (BRAINSTORM_DIRECTIVE_PHRASES, BRAINSTORM_MSG),
-        (ADR_DIRECTIVE_PHRASES, ADR_MSG),
-        (SCOPE_DIRECTIVE_PHRASES, SCOPE_MSG),
-        (IMPLEMENT_DIRECTIVE_PHRASES, IMPLEMENT_MSG),
+    for (phrases, wildcard, msg) in [
+        (
+            BRAINSTORM_DIRECTIVE_PHRASES,
+            None::<fn(&[char]) -> bool>,
+            BRAINSTORM_MSG,
+        ),
+        (
+            ADR_DIRECTIVE_PHRASES,
+            Some(matches_named_alternatives as fn(&[char]) -> bool),
+            ADR_MSG,
+        ),
+        (SCOPE_DIRECTIVE_PHRASES, None, SCOPE_MSG),
+        (IMPLEMENT_DIRECTIVE_PHRASES, None, IMPLEMENT_MSG),
     ] {
         let hit = phrases.iter().any(|phrase| {
             let needle: Vec<char> = phrase.chars().collect();
             word_boundary_contains(&lower, &needle)
-        });
+        }) || wildcard.is_some_and(|matches| matches(&lower));
         if hit {
             emit_prompt_context(msg);
             return;
@@ -194,21 +202,40 @@ fn is_word_char(c: char) -> bool {
 /// `\bneedle\b`. Internal characters of `needle` (including spaces for
 /// multi-word phrases) are matched literally.
 fn word_boundary_contains(haystack: &[char], needle: &[char]) -> bool {
+    word_boundary_index(haystack, needle).is_some()
+}
+
+/// Like `word_boundary_contains`, but returns the match's start index, so a caller can search past it.
+fn word_boundary_index(haystack: &[char], needle: &[char]) -> Option<usize> {
     if needle.is_empty() || needle.len() > haystack.len() {
-        return false;
+        return None;
     }
     haystack
         .windows(needle.len())
         .enumerate()
-        .any(|(start, window)| {
+        .find_map(|(start, window)| {
             if window != needle {
-                return false;
+                return None;
             }
             let before_ok = start == 0 || !is_word_char(haystack[start - 1]);
             let end = start + needle.len();
             let after_ok = end == haystack.len() || !is_word_char(haystack[end]);
-            before_ok && after_ok
+            (before_ok && after_ok).then_some(start)
         })
+}
+
+/// True for "X vs Y" or "should we use X or Y", the canonical ADR-trigger examples named in SYSTEM_PROMPT.md.
+fn matches_named_alternatives(haystack: &[char]) -> bool {
+    let vs: Vec<char> = "vs".chars().collect();
+    if word_boundary_contains(haystack, &vs) {
+        return true;
+    }
+    let should_we_use: Vec<char> = "should we use".chars().collect();
+    let Some(start) = word_boundary_index(haystack, &should_we_use) else {
+        return false;
+    };
+    let or_word: Vec<char> = "or".chars().collect();
+    word_boundary_contains(&haystack[start + should_we_use.len()..], &or_word)
 }
 
 /// True for a word-bounded occurrence of "what.?s the best", where `.?`

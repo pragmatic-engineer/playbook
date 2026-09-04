@@ -218,7 +218,7 @@ fn comment_violation(text: &str, marker: &str) -> Option<String> {
         if has_ticket_id(trimmed) {
             return Some("a comment names a dispatch id".to_string());
         }
-        if trimmed.chars().count() > MAX_COMMENT_LINE_WIDTH {
+        if line.chars().count() > MAX_COMMENT_LINE_WIDTH {
             return Some(format!(
                 "a comment line exceeds {MAX_COMMENT_LINE_WIDTH} columns, wrap it instead of writing one long line"
             ));
@@ -325,6 +325,23 @@ mod tests {
 
         // Assert
         assert!(got.is_none());
+    }
+
+    #[test]
+    fn indentation_counts_toward_the_width_cap() {
+        // Arrange: content alone is under the cap, but indentation pushes the real column past it.
+        let indent = " ".repeat(20);
+        let content = "x".repeat(MAX_COMMENT_LINE_WIDTH - 10);
+        let text = format!("{indent}// {content}\n");
+
+        // Act
+        let got = comment_violation(&text, "//");
+
+        // Assert
+        assert!(
+            got.is_some(),
+            "an indented comment past the real column width should still be flagged"
+        );
     }
 
     #[test]
