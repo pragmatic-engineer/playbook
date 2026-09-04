@@ -6,17 +6,19 @@ Each new Claude Code session starts cold: no memory of the project, your convent
 
 Without persistent memory, every session rediscovers what it needs: your coding style, the team's architectural decisions, the quirks in a particular codebase. That works for one-off tasks. For ongoing work across many sessions, the cost compounds: corrections given once need to be given again, decisions get relitigated, patterns re-explained.
 
-Memory breaks that loop. Facts get written once and loaded on demand. The system knows which facts belong to one repo and which apply everywhere.
+Memory breaks that loop. Facts get written once and loaded on demand. The system knows which facts belong to one repo, which apply across every repo under one owner, and which apply everywhere.
 
-## Two Scopes
+## Three Scopes
 
-Both scopes use the same file format and the same index structure. The only differences are scope and when the index is loaded.
+All three scopes use the same file format and the same index structure. The only differences are scope and when the index is loaded.
 
 **Global** at `~/.config/playbook/memory/`: cross-project facts. Your preferences, corrections, and pointers to external resources. These apply in every repo. The index is read on demand, not at session start.
 
+**Org** under `~/.config/playbook/memory/<owner>/`: facts shared across every repo under one owner (e.g. every `acme/*` repo), but not universal. Namespaced by the first segment of the repo's git remote. Each owner subfolder has its own `MEMORY.md` index, sibling to that owner's project subfolders.
+
 **Project** under `~/.config/playbook/memory/<owner>/<repo>/`: facts true only inside one repo, namespaced by the repo's git remote (`<owner>/<repo>` from `git remote get-url origin`). Each project subfolder has its own `MEMORY.md` index. The whole `~/.config/playbook/memory/` store lives outside any repo checkout, so these files stay on your machine and never get committed.
 
-The split exists because the two categories are genuinely different. A preference for a coding style applies everywhere. The auth layer's token flow is meaningless outside one service. Namespacing project facts by repo also keeps them from polluting the global root, so the global index stays small enough to load efficiently.
+The split exists because the three categories are genuinely different. A preference for a coding style applies everywhere. A team convention applies across every repo your org owns but says nothing about a different org's codebase. The auth layer's token flow is meaningless outside one service. Namespacing org and project facts by owner (and repo) also keeps them from polluting the global root, so the global index stays small enough to load efficiently.
 
 ## File Format and Index
 
@@ -58,7 +60,7 @@ Facts link to each other via `links:` in frontmatter. Values are bare basenames 
 
 Edges are typed because each type carries a different action. `supersedes` says "ignore the old one." `depends_on` says "load this first." `relates_to` says "pull in the neighbor." `contradicts` says "surface the conflict." An untyped link would be ambiguous: should the system load the neighbor, replace it, or warn about it? The type resolves the ambiguity.
 
-Each edge is stored once on the authoring fact. Reverse links are inferred at load by scanning frontmatter, not stored explicitly. Traversal depth is 1 for all types except `supersedes`, which the system follows fully to the chain head. Resolution checks the source's own scope first, then falls back to global, so a project fact can link to a global one and still resolve; a project fact shadows a global fact of the same basename. In contradictions between levels, the project fact wins for its repo. A basename missing from both scopes is dangling: it surfaces rather than fails silently.
+Each edge is stored once on the authoring fact. Reverse links are inferred at load by scanning frontmatter, not stored explicitly. Traversal depth is 1 for all types except `supersedes`, which the system follows fully to the chain head. Resolution checks the source's own scope first, then falls back to global: this applies independently to org and project sources, so a project fact does not resolve through its org tier, only through its own project scope or global. A project or org fact can still link to a global target and resolve; a fact shadows a same-basename fact in a less specific scope reachable this way. A basename missing from both scopes tried is dangling: it surfaces rather than fails silently.
 
 ## How Facts Are Created
 

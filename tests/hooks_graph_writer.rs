@@ -646,6 +646,88 @@ fn project_scoped_and_global_facts_get_distinct_ids() {
     let _ = fs::remove_dir_all(&home);
 }
 
+#[test]
+fn org_scoped_facts_get_a_distinct_scope_and_id() {
+    // Arrange: a two-segment path (owner/fact.md), alongside the existing one- and three-segment shapes.
+    let home = scratch_home("org-scope-ids");
+    write_fact(
+        &home,
+        "acme/org-fact.md",
+        "---\nname: org-fact\ntype: reference\n---\n\nBody text.\n",
+    );
+    write_fact(
+        &home,
+        "acme/widget/proj-fact.md",
+        "---\nname: proj-fact\ntype: reference\n---\n\nBody text.\n",
+    );
+    write_fact(
+        &home,
+        "global-fact.md",
+        "---\nname: global-fact\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "acme/org-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    let org_node = nodes(&graph)
+        .iter()
+        .find(|n| n["id"] == "acme/org-fact")
+        .expect("org-scoped node should exist");
+    assert_eq!(org_node["scope"], "org");
+    assert_eq!(org_node["project"], "acme");
+    assert!(nodes(&graph)
+        .iter()
+        .any(|n| n["id"] == "acme/widget/proj-fact" && n["scope"] == "project"));
+    assert!(nodes(&graph)
+        .iter()
+        .any(|n| n["id"] == "global/global-fact" && n["scope"] == "global"));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn org_source_resolves_a_link_in_its_own_scope_before_global() {
+    // Arrange: an org-scoped source links to a same-named target in both its own org scope and globally.
+    let home = scratch_home("org-link-own-scope");
+    write_fact(
+        &home,
+        "acme/org-source.md",
+        "---\nname: org-source\ntype: reference\nlinks:\n  relates_to: [dup]\n---\n\nBody text.\n",
+    );
+    write_fact(
+        &home,
+        "acme/dup.md",
+        "---\nname: dup\ntype: reference\n---\n\nBody text.\n",
+    );
+    write_fact(
+        &home,
+        "dup.md",
+        "---\nname: dup\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "acme/org-source.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert!(has_edge(
+        &graph,
+        "acme/org-source",
+        "acme/dup",
+        "relates_to"
+    ));
+    assert!(!has_edge(
+        &graph,
+        "acme/org-source",
+        "global/dup",
+        "relates_to"
+    ));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// hooks/rebuild-memory-graph.test.sh scenario 10 and the brief's "non-memory
 /// file edits are a no-op" done-when criterion: writing a file outside the
 /// memory dir leaves memory.graph.json completely untouched, even when a second

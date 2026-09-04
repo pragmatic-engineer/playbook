@@ -299,14 +299,14 @@ fn append_promoted_facts(extra_context: &mut String, repo_root: &str) {
     push_context(extra_context, &ctx);
 }
 
-/// Whether `node` is in scope for this repo: global facts always are,
-/// project facts only when they belong to `repo`. Matches
-/// `memory_anchors.rs`'s private `in_scope`, reimplemented locally rather
-/// than made `pub` for this one caller, per this codebase's established
-/// per-module-duplication convention.
+/// Whether `node` is in scope: global always, org when its owner matches, project when it belongs to `repo`.
+/// Matches `memory_anchors.rs`'s private `in_scope`, reimplemented locally per this codebase's per-module-duplication convention.
 fn in_promotion_scope(node: &serde_json::Value, repo: &str) -> bool {
     match node.get("scope").and_then(serde_json::Value::as_str) {
         Some("global") => true,
+        Some("org") => {
+            node.get("project").and_then(serde_json::Value::as_str) == repo.split('/').next()
+        }
         Some("project") => node.get("project").and_then(serde_json::Value::as_str) == Some(repo),
         _ => false,
     }

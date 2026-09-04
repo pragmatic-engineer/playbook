@@ -409,6 +409,7 @@ fn parse_inline_list(val: &str) -> Vec<String> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Scope {
     Global,
+    Org,
     Project,
 }
 
@@ -416,18 +417,21 @@ impl Scope {
     fn as_str(self) -> &'static str {
         match self {
             Scope::Global => "global",
+            Scope::Org => "org",
             Scope::Project => "project",
         }
     }
 }
 
-/// A repo-root-relative path (`owner/repo/tail...`) is project-scoped; a
-/// one- or two-segment path is global.
+/// A repo-root-relative path (`owner/repo/tail...`) is project-scoped, a
+/// two-segment path (`owner/tail...`) is org-scoped, a one-segment path is global.
 fn scope_and_project(rel: &str) -> (Scope, Option<String>) {
     let normalized = rel.replace('\\', "/");
     let parts: Vec<&str> = normalized.split('/').collect();
     if parts.len() >= 3 {
         (Scope::Project, Some(format!("{}/{}", parts[0], parts[1])))
+    } else if parts.len() == 2 {
+        (Scope::Org, Some(parts[0].to_string()))
     } else {
         (Scope::Global, None)
     }
@@ -438,6 +442,11 @@ fn node_id(rel: &str, scope: Scope, project: Option<&str>) -> String {
     let base = normalized.strip_suffix(".md").unwrap_or(&normalized);
     match scope {
         Scope::Global => format!("global/{base}"),
+        Scope::Org => {
+            let parts: Vec<&str> = base.split('/').collect();
+            let tail = parts.get(1..).unwrap_or(&[]).join("/");
+            format!("{}/{tail}", project.unwrap_or(""))
+        }
         Scope::Project => {
             let parts: Vec<&str> = base.split('/').collect();
             let tail = parts.get(2..).unwrap_or(&[]).join("/");
@@ -713,7 +722,7 @@ fn rebuild_locked(mem_dir: &Path) {
     for (from_id, relation, raw_target, src_scope, src_project) in pending_links {
         let target_id = match src_scope {
             Scope::Global => format!("global/{raw_target}"),
-            Scope::Project => {
+            Scope::Org | Scope::Project => {
                 let project = src_project.unwrap_or_default();
                 let same_scope_id = format!("{project}/{raw_target}");
                 let global_id = format!("global/{raw_target}");

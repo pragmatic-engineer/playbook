@@ -4,8 +4,7 @@
 #
 # memory-context.sh: render a compact, repo-scoped markdown slice of the
 # graph-first memory store (~/.config/playbook/memory/memory.graph.json) for injection into
-# a session's context. Three parts: the facts in scope (every global fact
-# plus every fact whose project matches the repo), the typed edges among
+# a session's context. Three parts: the facts in scope (every global, org, or project fact matching the repo/owner), the typed edges among
 # those facts (supersedes, depends_on, relates_to, contradicts; anchors
 # edges are excluded here, they belong to the anchor index), and the anchor
 # index mapping each anchored path to the facts that describe it.
@@ -64,7 +63,9 @@ command -v jq >/dev/null 2>&1 || exit 0
 # project (or both global), so filtering edges on the in-scope fact ids
 # keeps both endpoints in scope with no separate code-node scoping pass.
 JQ_FILTER='
-  def in_scope: .scope == "global" or (.scope == "project" and .project == $repo);
+  def in_scope: .scope == "global"
+    or (.scope == "project" and .project == $repo)
+    or (.scope == "org" and .project == ($repo | split("/")[0]));
 
   (.nodes | map(select(in_scope))) as $facts
   | ($facts | map(.id)) as $ids
