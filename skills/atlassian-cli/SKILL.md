@@ -84,6 +84,14 @@ description,homepage,permissions`.
 Unlike Confluence, Jira **does** have `workitem search`, so start there rather
 than walking anything.
 
+### Posting a comment or description
+
+`workitem comment`, and any `edit`/`create` that writes a description, posts
+under the identity `acli` is authenticated as, typically the user's own
+account. Load `playbook:writing-style` and write in first person as that
+account holder: "I need clarification on X", never "the user needs
+clarification on X" or the user's name in third person.
+
 ## Read-only versus write
 
 `/playbook:learn-project` and any research flow are read-only on the remote. Safe:
