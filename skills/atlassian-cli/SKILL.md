@@ -1,6 +1,6 @@
 ---
 name: atlassian-cli
-description: Use when reading or writing Jira work items or Confluence pages from the command line with acli, especially during /playbook:learn-project when no Atlassian MCP server is connected. Covers the Confluence page-discovery workaround, since acli has no page search.
+description: Use when reading or writing Jira work items or Confluence pages from the command line with acli, especially during /playbook:learn-project when no Atlassian MCP server is connected.
 ---
 
 # Atlassian CLI (acli)
