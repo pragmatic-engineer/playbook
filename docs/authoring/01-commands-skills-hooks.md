@@ -10,7 +10,7 @@ Frontmatter fields that appear in the existing commands:
 
 | Field | Purpose |
 |---|---|
-| `description` | Short summary shown in the command picker. |
+| `description` | Both the picker summary and the trigger. Claude Code lists commands in the same available-skills listing it uses for `skills/`, matching this field against what the user asked for, so a command can load from a plain-English request with no slash typed. Write it as a "use when..." sentence, the same as a skill's. |
 | `allowed-tools` | Comma-separated tools the command is permitted to use. |
 | `effort` | Effort level: `low`, `medium`, `high`, `xhigh`. |
 | `model` | Optional. Pin to a model (e.g., `opus`). Omit to inherit the session default. |
@@ -39,6 +39,10 @@ Instruction for Claude.
 ```
 
 `scope.md` adds `model: opus` because the planning interview needs that capability. `commit-and-push.md` omits `model` and inherits the session default. Only set `model` when the command always needs a specific model.
+
+A command's `description` does double duty. It is the one line a human reads in the picker, and it is the text Claude matches a plain-English request against when deciding whether to reach for the command. `adr.md` shows the shape: "Use when recording a significant, hard-to-reverse architectural decision." Name the situation, not the mechanics. The mechanics belong in the body, which only loads once the command actually runs. A description that is a feature list ("Executes X, delegating to Y, then Z") reads fine in the picker and matches nothing.
+
+Weigh the cost of a wrong match before sharpening a trigger. A skill loads text and nothing else, so a false positive costs a few tokens. A command runs a procedure, sometimes a long interview or a write-and-commit pass, so a false positive costs the user's turn. For a heavyweight command, describe the precondition ("Use when an approved plan already exists") rather than the casual phrase that might have prompted it, and let `prompts/SYSTEM_PROMPT.md` decide whether a match launches or offers. A description names its own trigger; the system prompt sets the policy for what happens on a match.
 
 ## Skills
 
