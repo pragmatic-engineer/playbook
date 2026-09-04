@@ -89,6 +89,15 @@ cmd_setup() {
   git fetch "$fetch_url" "refs/pull/${pr}/head" \
     || _die "failed to fetch refs/pull/${pr}/head"
 
+  # Warn (not abort) when origin has moved past the requested head_sha since
+  # it was resolved, so a caller re-running the review notices before it burns tokens on stale state.
+  local origin_sha
+  origin_sha="$(git rev-parse FETCH_HEAD)" || _die "failed to resolve FETCH_HEAD after fetch"
+  if [[ "$origin_sha" != "$head_sha" ]]; then
+    printf 'warning: PR %s has moved since head_sha was resolved (requested %s, origin now at %s); re-run to review the latest commits\n' \
+      "$pr" "$short_sha" "${origin_sha:0:7}" >&2
+  fi
+
   # Assert SHA exists after fetch
   git cat-file -e "${head_sha}^{commit}" \
     || _die "head ${head_sha} not found after fetch (force-push?); re-run"

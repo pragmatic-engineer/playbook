@@ -5,7 +5,7 @@
 # review-worktree.test.sh: self-contained smoke tests for shell/review-worktree.sh
 #
 # Run:  bash shell/review-worktree.test.sh
-# Exit: 0 if all 9 scenarios pass, non-zero otherwise.
+# Exit: 0 if all 10 scenarios pass, non-zero otherwise.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -283,6 +283,35 @@ scenario_i() {
   fi
 }
 
+# Scenario J: origin moved past the requested head_sha, warns but still succeeds
+scenario_j() {
+  setup_repo
+  local repo="$REPO_DIR" bare="$BARE_DIR" sha="$HEAD_SHA"
+  # shellcheck disable=SC2064
+  trap "rm -rf \"$repo\" \"$bare\"" EXIT INT TERM
+
+  echo "v2" >> "$repo/README"
+  git -C "$repo" add README
+  git -C "$repo" commit -q -m "v2"
+  local new_sha
+  new_sha="$(git -C "$repo" rev-parse HEAD)"
+  git -C "$repo" push -q "$bare" "HEAD:refs/heads/pr7-moved" 2>/dev/null || true
+  git -C "$bare" update-ref refs/pull/7/head "$new_sha"
+
+  local err_file wt_path stderr_out
+  err_file="$(mktemp)"
+  wt_path="$(cd "$repo" && bash "$HELPER" setup 7 "$sha" 2>"$err_file")"
+  stderr_out="$(cat "$err_file")"
+  rm -f "$err_file"
+
+  echo "$stderr_out" | grep -qi "has moved" \
+    || { echo "  stderr did not warn about the moved origin: $stderr_out"; return 1; }
+  [[ -d "$wt_path" ]] || { echo "  setup did not still succeed: $wt_path"; return 1; }
+  local head
+  head="$(git -C "$wt_path" rev-parse HEAD 2>/dev/null)"
+  [[ "$head" == "$sha" ]] || { echo "  checked out $head, expected the originally requested $sha"; return 1; }
+}
+
 # ---------------------------------------------------------------------------
 # Run all scenarios
 # ---------------------------------------------------------------------------
@@ -295,6 +324,7 @@ run_scenario "F: teardown is idempotent (twice)"                     scenario_f
 run_scenario "G: teardown on never-existed path → success"           scenario_g
 run_scenario "H: fresh live-locked worktree NOT swept for diff PR"   scenario_h
 run_scenario "I: setup from different CWD prints absolute path"      scenario_i
+run_scenario "J: origin moved past head_sha, warns but still succeeds" scenario_j
 
 TOTAL=$(( PASS + FAIL ))
 echo ""
