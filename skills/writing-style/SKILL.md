@@ -11,17 +11,17 @@ These rules are MUST-level unless marked SHOULD.
 
 > **IRON RULE:** MUST NEVER use em dashes or en dashes in any output, and MUST write in simple, plain English (common words, short sentences). This applies to every file, comment, commit message, and generated text. Use commas, colons, or periods instead of dashes. Both dash types are strong AI tells; fancy vocabulary and long sentences are too. Use straight quotes (`"`, `'`), never curly/smart quotes (`"`, `"`, `'`, `'`); same ASCII-only reasoning as the dash rule.
 
-> **IRON RULE:** MUST NEVER write a code or doc comment unless the why isn't obvious from the code; MUST NEVER restate what the code already shows. One line by default; a second line only for a genuinely non-obvious mechanism, never a third or a paragraph. Write for the code's future reader, not this session: never name a plan, brief, Work Unit, done-when criterion, or ticket number in a comment. An already-committed, durable reference (an ADR, a documented convention) is fine. `no-slop-guard` blocks a violation of this rule at the Edit/Write tool call itself.
+> **IRON RULE:** MUST NEVER write a code or doc comment unless it is one of: a doc block at a module, library, or public-helper-function boundary; a warning that the operation is expensive; a warning that the operation is destructive or dangerous; an explanation of why the code does something that looks odd; a deprecation notice; context for a return type or value the signature doesn't make clear; or, at a class/type level only, context for a service class (which service this is) or a DTO (what the shape means). MUST NEVER restate what the code already shows. Say it in one sentence by default, a second only for a genuinely non-obvious mechanism; wrap a long line instead of writing one unwrapped line, don't pad a short comment into extra lines. Write for the code's future reader, not this session: never name a plan, brief, Work Unit, done-when criterion, or ticket number in a comment. An already-committed, durable reference (an ADR, a documented convention) is fine. `no-slop-guard` blocks an orchestration-artifact mention, a dispatch id, or an unwrapped comment line past the project's line-length standard, at the Edit/Write tool call itself; use your own judgment for the rest of this rule.
 
-## Reviewer usability (adapted from "Don't Make Me Think")
+## Reviewer usability (MUST, adapted from "Don't Make Me Think")
 
-Adopt these principles to what you write for review: the reviewer is the user, the text is the interface, a question in their head is the cost. Reviewers scan, they don't read.
+MUST apply these principles to anything written for review: the reviewer is the user, the text is the interface, a question in their head is the cost. Reviewers scan, they don't read.
 
-- Commit messages: conventional imperative subject under ~50 chars, one change. Add a body only when the why isn't obvious; a sentence or two, or tight bullets.
-- PR descriptions: one line of what and why is the target, not the floor. Add a short bulleted "what changed" only when the diff needs it to be reviewable; link to detail instead of inlining it. Aim for the gist in under 30 seconds, most PRs need fewer words than feel natural to write.
-- Review findings: default to one sentence, two at most (the problem, then what breaks). A paragraph is the rare exception for a genuinely non-obvious mechanism, not the normal case.
+- Commit messages MUST use a conventional imperative subject under ~50 chars, one change per commit. Add a body only when the why isn't obvious; a sentence or two, or tight bullets.
+- PR descriptions MUST lead with one line of what and why; treat that as the target, not the floor. Add a short bulleted "what changed" only when the diff needs it to be reviewable; link to detail instead of inlining it. Aim for the gist in under 30 seconds, most PRs need fewer words than feel natural to write.
+- Review findings MUST default to one sentence, two at most (the problem, then what breaks). A paragraph is the rare exception for a genuinely non-obvious mechanism, not the normal case.
 - Block and doc comments: see the IRON RULE above.
-- When clarity and consistency conflict, choose clarity.
+- When clarity and consistency conflict, MUST choose clarity.
 
 ## Voice
 
