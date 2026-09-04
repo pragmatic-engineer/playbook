@@ -38,7 +38,7 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions inhe
 
 **Security tiers.** Three tiers govern offensive-security requests. Tier 1 is open: defensive engineering, CVE analysis, malware analysis, CTF write-ups. Tier 2 requires a named scope (lab, CTF, or in-scope engagement): working exploits, C2 and red-team tradecraft, active recon, privilege escalation. Tier 3 is refused: attacks on named third parties without authorization, deployment-ready malware, mass-impact payloads. Vague scope ("educational purposes", "for a friend") doesn't qualify for Tier 2.
 
-**Memory protocol.** One store at `~/.config/playbook/memory/`: global facts live flat at the root, project facts are namespaced under `~/.config/playbook/memory/<owner>/<repo>/`. The prompt covers when and where to save a fact, the YAML frontmatter format, edge types (`supersedes`, `depends_on`, `relates_to`, `contradicts`), traversal rules, and code anchors. See [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the full protocol.
+**Memory protocol.** One store at `~/.config/playbook/memory/`: global facts live flat at the root, org facts are namespaced under `~/.config/playbook/memory/<owner>/`, project facts under `~/.config/playbook/memory/<owner>/<repo>/`. The prompt covers when and where to save a fact, the YAML frontmatter format, edge types (`supersedes`, `depends_on`, `relates_to`, `contradicts`), traversal rules, and code anchors. See [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the full protocol.
 
 ## Why a custom prompt behaves better
 
@@ -50,7 +50,7 @@ The default Claude session starts blank. To get consistent behavior you'd re-exp
 
 **Model routing by task type.** Opus for architectural planning, Sonnet for coding, Haiku for mechanical subagents. The prompt also defines when to fan out to parallel agents vs. stay inline, and when to escalate. Without clear routing guidance, model selection is ad-hoc and costs climb with it.
 
-**Memory protocol in scope.** Claude knows the store exists, where to write facts, and how to do it correctly. Without this, durable facts get re-explained at the start of each session or lost entirely. The global root carries cross-project preferences; project facts are namespaced under `~/.config/playbook/memory/<owner>/<repo>/`, isolated to a single repo and never committed.
+**Memory protocol in scope.** Claude knows the store exists, where to write facts, and how to do it correctly. Without this, durable facts get re-explained at the start of each session or lost entirely. The global root carries cross-project preferences; org facts are namespaced under `~/.config/playbook/memory/<owner>/`, shared across every repo under one owner; project facts under `~/.config/playbook/memory/<owner>/<repo>/`, isolated to a single repo and never committed.
 
 **Net effect.** Fewer wrong-default choices. Less repeated instruction. More consistent output across sessions.
 

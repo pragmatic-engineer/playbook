@@ -10,7 +10,7 @@ The practical split: `/playbook:adr` produces a decision record plus an optional
 
 ### The flow
 
-1. **Investigate.** Before drafting, the command explores the codebase, reads the memory store (global and project facts), and summarises findings. It waits for your acknowledgement before moving on.
+1. **Investigate.** Before drafting, the command explores the codebase, reads the memory store (global, org, and project facts), and summarises findings. It waits for your acknowledgement before moving on.
 2. **Draft.** Writes the record and (unless you pass `--record-only`) the execution blueprint. Both go under revision until you explicitly approve.
 3. **Quality gate.** Three sequential agent phases: fact-check (paths, signatures, dependency graph), adversarial review (simpler alternatives, scope creep, blast radius), and test review (blueprint test plan against engineering standards). A FAIL blocks finalisation.
 4. **Finalise.** Status flips from Proposed to Accepted, the quality report saves alongside the record, and the command reports all file paths.
@@ -53,15 +53,17 @@ The result: one fact file per topic in `~/.config/playbook/memory/<owner>/<repo>
 
 ## The Memory Model
 
-One store, two scopes.
+One store, three scopes.
 
 **Global**: flat files directly in `~/.config/playbook/memory/`, indexed by `~/.config/playbook/memory/MEMORY.md`. Facts that apply across all repos, like preferences, cross-project conventions, and external pointers.
+
+**Org**: files under `~/.config/playbook/memory/<owner>/`, namespaced by the first segment of the repo's git remote. Facts shared across every repo under one owner (e.g. every `acme/*` repo), but not universal.
 
 **Project**: files under `~/.config/playbook/memory/<owner>/<repo>/`, where `<owner>/<repo>` is derived from `git remote get-url origin`. Facts true only inside that repo. The project index gets injected at session start, making those facts available without manual loading.
 
 The whole `~/.config/playbook/memory/` tree lives outside any repo checkout, so no facts are ever committed.
 
-Both scopes use the same format: one fact per file, kebab-case filename, with frontmatter and a structured body.
+All three scopes use the same format: one fact per file, kebab-case filename, with frontmatter and a structured body.
 
 ```markdown
 ---
@@ -93,11 +95,11 @@ Edges live in the `links:` frontmatter block. Values are bare basenames (no path
 | `relates_to` | Symmetric neighbor. Pull it in when the topic is related. |
 | `contradicts` | Symmetric conflict. Surface the conflict when both facts are live; don't silently pick one. |
 
-Project facts win over global for that repo. Contradictions between the two scopes surface rather than resolve silently.
+Project facts win over org, which wins over global, for that repo. Contradictions between scopes surface rather than resolve silently.
 
 ### Where facts live
 
-Ask: "Is this fact only useful inside this repo?" Yes goes to the project store. No goes to global. In the project store, don't name the repo in the fact text. It's implicit.
+Ask: "Is this fact only useful inside this repo?" Yes goes to the project store. If no, ask whether it applies to every repo under your org but isn't universal: if so, it goes to org. Otherwise it goes to global. In the project or org store, don't name the repo or owner in the fact text. It's implicit.
 
 ## Worked Example: A Trimmed ADR
 

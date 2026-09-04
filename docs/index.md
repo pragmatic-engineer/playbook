@@ -9,7 +9,7 @@ Read them in order, or jump to what you need.
 Why the foundations work the way they do.
 
 - [The system prompt](concepts/01-system-prompt.md): what the custom prompt defines, and why a custom prompt behaves better than the default.
-- [The memory system](concepts/02-memory-system.md): the global and project fact store, typed edges, and how it feeds the commands.
+- [The memory system](concepts/02-memory-system.md): the global, org, and project fact store, typed edges, and how it feeds the commands.
 
 ## Guides
 

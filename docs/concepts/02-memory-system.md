@@ -1,6 +1,6 @@
 # The Memory System
 
-Each new Claude Code session starts cold: no memory of the project, your conventions, or past decisions. The memory system carries durable facts forward so you don't re-teach the same things session after session. It's a typed graph stored in plain markdown files in one local store on your machine, split into global and project scopes.
+Each new Claude Code session starts cold: no memory of the project, your conventions, or past decisions. The memory system carries durable facts forward so you don't re-teach the same things session after session. It's a typed graph stored in plain markdown files in one local store on your machine, split into global, org, and project scopes.
 
 ## The Problem It Solves
 
@@ -84,13 +84,13 @@ Facts reach context three ways, described in full in [ADR 0004](../adr/0004-grap
 
 The anchor index above builds once per session and is not rebuilt within it, so a fact written mid-session will not surface via anchor or prompt matching until the next session starts.
 
-The planning and execution commands (`/playbook:scope`, `/playbook:adr`, `/playbook:implement`) read both scopes before planning or executing. Project facts override global for that repo. Conflicts between the two scopes surface rather than resolve silently. The commit and review commands (`/playbook:commit-and-push`, `/playbook:quick-review`, `/playbook:address-pr-comments`) don't touch memory.
+The planning and execution commands (`/playbook:scope`, `/playbook:adr`, `/playbook:implement`) read all three scopes before planning or executing. Project facts override org, which overrides global, for that repo. Conflicts between scopes surface rather than resolve silently. The commit and review commands (`/playbook:commit-and-push`, `/playbook:quick-review`, `/playbook:address-pr-comments`) don't touch memory.
 
 **Across a session boundary**, `/playbook:session-handoff` persists a handoff document to disk; `session-init` reloads and deletes it automatically at the next `SessionStart`, including after `/clear`, so `/clear` no longer discards what the session had figured out. The `memory-capture` hook also fires once per context-usage threshold crossing during a session (a `Stop` hook, not a `SessionEnd` one), prompting you to write down durable facts and, since ADR 0008, to run a handoff too, in case the session runs long enough to approach compaction.
 
 ## memory.graph.json
 
-A single `memory.graph.json` lives at `~/.config/playbook/memory/memory.graph.json` and covers every fact, global and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global` or `project`) and, for project facts, the `project` (`owner/repo`). It is the primary retrieval path, not just a navigation aid: every mechanism in "How Facts Are Loaded" above, the SessionStart slice, the edit-time anchor lookup, and prompt-time recall, reads this file. See [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision, and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) for what was added on top of it.
+A single `memory.graph.json` lives at `~/.config/playbook/memory/memory.graph.json` and covers every fact, global, org, and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global`, `org`, or `project`) and, for org facts, the `project` (`owner`), or for project facts, the `project` (`owner/repo`). It is the primary retrieval path, not just a navigation aid: every mechanism in "How Facts Are Loaded" above, the SessionStart slice, the edit-time anchor lookup, and prompt-time recall, reads this file. See [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision, and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) for what was added on top of it.
 
 The graph rebuilds automatically. The `rebuild-memory-graph` hook fires whenever a file under `~/.config/playbook/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
 
@@ -108,7 +108,7 @@ A few principles shaped the system.
 
 **Durable over re-learned.** The cost of rediscovery is real. Write once, load on demand.
 
-**Two scopes.** Global preferences and project facts are different things. They live in different parts of the store for good reason.
+**Three scopes.** Global preferences, org conventions, and project facts are different things. They live in different parts of the store for good reason.
 
 **Typed edges.** Each relationship between facts carries a specific action. The type tells the system what to do. A bare, untyped link says nothing about the action to take.
 
