@@ -182,7 +182,7 @@ Skills live in `skills/` and load on demand. See [docs/authoring/01-commands-ski
 |---|---|
 | `grounding-review` | Review discipline; severity levels, Conventional Comments, proof ladder, verification summary. |
 | `grounding-research` | Investigation discipline; citation rules (every claim sourced to `file:line`), structured findings, scope boundaries. |
-| `engineering-standards` | PR readiness, test types, mocking rules, incremental delivery, deployment flow. |
+| `engineering-standards` | Code design rules, PR readiness, test types, mocking rules, incremental delivery, deployment flow. |
 | `engineering-standards-javascript` | JS/TS companion to `engineering-standards`; covers Zod validation and Jest/Vitest mocking. |
 | `writing-style` | Voice rules for human-facing prose; spartan, active voice, contractions, no dashes. |
 | `session-handoff` | Decision-first handoff so the next session picks up cold without rereading the thread. |

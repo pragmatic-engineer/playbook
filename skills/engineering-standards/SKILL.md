@@ -1,11 +1,44 @@
 ---
 name: engineering-standards
-description: Use when working on pull requests, planning a testing approach, or thinking about deployment under the team engineering standards.
+description: Use when designing or writing code, working on pull requests, planning a testing approach, or thinking about deployment under the team engineering standards.
 ---
 
 # Engineering Standards
 
-Team engineering standards for pull requests, testing, design, and deployment. RFC 2119 keywords (MUST, SHOULD, etc.) carry their standard meanings.
+Team engineering standards for code design, commits, pull requests, testing, and deployment. RFC 2119 keywords (MUST, SHOULD, etc.) carry their standard meanings.
+
+## Code Design
+
+### Principles
+
+- Every change applies SOLID, DRY, KISS, and YAGNI. One responsibility per function, class, or module.
+- Build only what the change requires now. No speculative hooks, flags, config, or generality.
+- Factor out duplication once it genuinely recurs. Never couple unrelated code that only looks alike.
+- Prefer composition over inheritance. Inherit only for a real is-a relationship, kept shallow.
+- Depend on an existing service interface rather than a concretion where one already covers the capability.
+- Names state what a thing is or does, not how or when. Match the conventions of the surrounding code over a personal preference.
+
+### Boundaries and interfaces
+
+- A module's dependencies MUST point one way. No import cycles between modules.
+- Untrusted or untyped input MUST be validated at the boundary where it enters, before any use. Boundaries include HTTP requests, environment variables and config, external API responses, queue and event payloads, and anything parsed off disk. For JS/TS, `playbook:engineering-standards-javascript` names the schema-validator pattern.
+- A change to a published interface (an API response, a database schema, an event payload, an exported function) MUST be additive first: add the new shape, migrate the readers, remove the old shape in a later change. Never break a consumer and its producer in the same deploy.
+- Model a multi-step process as a named sequence of steps, not implicit control flow spread across helpers.
+
+### Constants and configuration
+
+- No magic values. A number or string a reader would have to look up, or that appears in more than one place, MUST be named: a constant near its use, or configuration when it varies by environment or gets tuned. This covers thresholds, limits, timeouts, retry counts, sizes, status codes, feature keys, and repeated identifiers.
+- The name MUST state what the value means, not repeat the value: `MAX_RETRIES`, not `THREE`.
+- Exempt: 0, 1, and -1 as identity or sentinel values; loop and index arithmetic; a literal at its single definition site (a log message, a route, a SQL fragment, one map key); expected values and fixture data in tests.
+- This applies to code you write or change. Extracting constants from untouched neighbouring code is a separate change, not a drive-by.
+- Secrets MUST NOT be hardcoded, committed, or logged. They come from configuration or a secret store.
+
+### Errors and observability
+
+- An error MUST NOT be silently swallowed. Handle it, log it with context, or let it propagate to a layer that does.
+- Error messages state exactly what failed and why, in plain language. They MUST NOT carry PII or PHI; reference a record by a non-sensitive identifier instead.
+- Service and API operations SHOULD be idempotent and safely retryable wherever the operation allows. Retries SHOULD use backoff.
+- Log at boundaries and at each failure point of a multi-step process, so a failure's location is visible from the logs alone. Logs MUST NOT contain secrets, PII, or PHI.
 
 ## Commits
 

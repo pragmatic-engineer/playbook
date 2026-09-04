@@ -84,3 +84,4 @@ test('charges the customer once', async () => {
 - Rebuilding a typed object by hand with a `jest.fn()` per method. It drifts from the real type and rots silently. Use `mockDeep<T>()`.
 - Forgetting `mockReset` in `beforeEach`: call counts and return values leak between tests.
 - Reaching for `jest.mock()` when the dependency could be injected. It's global, harder to read, and hides the seam.
+- Repeating a bare string literal for a status, mode, or key. Define the values once in an `as const` object and derive the union type from it (`type Status = typeof Status[keyof typeof Status]`). Prefer that over a TS `enum`, which emits a runtime object and behaves differently under `const enum` and `isolatedModules`.
