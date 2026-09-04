@@ -1,5 +1,5 @@
 ---
-description: Divergent discovery session that explores a raw idea, weighs approaches, and produces an approved PRD plus a design doc that hands off to /playbook:scope.
+description: Use when an idea is still raw and the direction is not settled, or when the user says let's brainstorm this, explore this idea, or asks what the options are. Divergent discovery that challenges the premise, weighs 2-3 approaches, and produces an approved PRD and design doc that hand off to /playbook:scope.
 allowed-tools: Agent, Read, Bash, Grep, Glob, Skill, Write, Edit, WebFetch
 argument-hint: "[idea | PROJ-123 | ./prompt.md] [--ticket <id>] [--depth 0-2] [--adr] [--no-chain] [--help]"
 model: opus

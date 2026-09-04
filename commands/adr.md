@@ -1,5 +1,5 @@
 ---
-description: Use when recording a significant, hard-to-reverse architectural decision. Creates a fact-checked ADR with an optional execution blueprint and saves it to docs/adr/.
+description: Use when recording a significant, hard-to-reverse architectural decision, or when the user is choosing between named options and the choice is expensive to undo. Creates a fact-checked ADR with an optional execution blueprint and saves it to docs/adr/.
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
 argument-hint: "<topic> [--record-only] [--list] [--help]"
 model: opus

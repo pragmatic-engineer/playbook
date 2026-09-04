@@ -1,5 +1,5 @@
 ---
-description: Interview-driven planning session with deep requirements gathering that produces a verified implementation plan, its Work Units grouped into suggested PR-sized Segments.
+description: Use when the direction is settled and the work needs a plan, or when the user says let's plan this, let's scope this, or break this down. Interview-driven planning with deep requirements gathering that produces a verified implementation plan, its Work Units grouped into suggested PR-sized Segments for /playbook:implement.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
 argument-hint: "[topic | ./prompt.md | <design-doc-path>] [--auto] [--help]"
 model: opus
