@@ -37,8 +37,8 @@ OPTIONS:
   --help   Show this help
 
 Asks one question at a time with a recommended answer. Explores the codebase
-and the memory store (`~/.config/playbook/memory/` for global facts, `~/.config/playbook/memory/<owner>/<repo>/` for project facts, `<owner>/<repo>` derived from the git remote) when it exists to answer
-questions itself before asking you. Memory is optional: when neither store is present, it relies on the codebase alone. Walks decision trees, runs a 3-phase
+and the memory store (`~/.config/playbook/memory/` for global facts, `~/.config/playbook/memory/<owner>/` for org facts, `~/.config/playbook/memory/<owner>/<repo>/` for project facts, `<owner>/<repo>` derived from the git remote) when it exists to answer
+questions itself before asking you. Memory is optional: when no store is present, it relies on the codebase alone. Walks decision trees, runs a 3-phase
 quality gate, and produces a verified, self-contained plan broken into small
 Work Units (some flagged parallel-safe), grouped into ordered PR-sized Segments
 (one concern each, one PR each) that you can run with /playbook:implement.

@@ -137,7 +137,7 @@ done
 
 ## Phase 4.5: Rebuild the navigation graph
 
-`~/.config/playbook/memory/memory.graph.json` is a single graph covering every fact, global and project. It rebuilds automatically: the `rebuild-memory-graph.py` PostToolUse hook fires whenever a fact file under `~/.config/playbook/memory/` is saved, so once Phase 4 has written the facts the graph is already current. Normally you skip this phase.
+`~/.config/playbook/memory/memory.graph.json` is a single graph covering every fact, global, org, and project. It rebuilds automatically: the `rebuild-memory-graph.py` PostToolUse hook fires whenever a fact file under `~/.config/playbook/memory/` is saved, so once Phase 4 has written the facts the graph is already current. Normally you skip this phase.
 
 `--graph-only` forces a rebuild without re-collecting, for use after hand-editing fact files:
 

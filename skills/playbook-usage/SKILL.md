@@ -22,7 +22,7 @@ for a yes before doing anything (see Trigger phrases, below).
 | `/playbook:brainstorm` | Divergent discovery on a raw idea: challenges the premise, weighs 2-3 approaches, produces an approved PRD and design doc. | The direction is not settled yet: an idea seed, open-ended exploration, or genuine uncertainty about approach. |
 | `/playbook:scope` | Interview-driven planning that turns a settled direction into a verified implementation plan, its Work Units grouped into PR-sized Segments. | The direction is settled and the work needs a concrete plan to hand to `/playbook:implement`. |
 | `/playbook:adr` | Records a hard-to-reverse architectural decision as a fact-checked ADR, with an optional execution blueprint, saved to `docs/adr/`. | Choosing between named alternatives, a decision that is expensive to undo, or a request to document the reasoning behind a choice. |
-| `/playbook:implement` | Executes an approved plan or ADR blueprint: delegates Work Units to subagents, commits each as a savepoint, delivers PR-sized Segments, ends with a refinement pass and adversarial review. | An approved plan or blueprint already exists and it's time to build it. Execute-only, never designs new scope. |
+| `/playbook:implement` | Executes an approved plan or ADR blueprint: delegates Work Units to subagents, commits each as a savepoint, delivers PR-sized Segments, ends with a refinement pass and adversarial review. `--boundary=land` opts in to merging each Segment autonomously before starting the next. | An approved plan or blueprint already exists and it's time to build it. Execute-only, never designs new scope. |
 
 ### Review
 

@@ -125,9 +125,9 @@ For requirements, pinning a version, and uninstall, see
 
 ## Layers
 
-Playbook has six layers, numbered to match what `/playbook:doctor` reports.
-Layers 1, 2 and 6 are what a working install needs; 3, 4 and 5 are optional or
-cosmetic.
+Playbook has seven layers, numbered to match what `/playbook:doctor` reports.
+Layers 1, 2 and 6 are what a working install needs; 3, 4, 5 and 7 are optional
+or cosmetic.
 
 | Layer | When | What it does |
 |---|---|---|
@@ -137,6 +137,7 @@ cosmetic.
 | 4. Custom system prompt | Opt-in (recommended) | Copies `prompts/SYSTEM_PROMPT.md` to `~/.claude/prompts/`; `cc` passes it via `--system-prompt-file`. Plugin content works without it. |
 | 5. Status line | After `install.sh` | Installs `~/.claude/statusline.sh`. `/playbook:setup` does **not** install it; `/playbook:doctor` checks it. |
 | 6. The `playbook` binary | `install.sh` or `/playbook:setup` | Installs the release binary to `~/.local/bin`, checksum-verified. **Every ported hook is a bare `playbook hook <name>` command, so without this all 16 are dead.** `claude plugin install` alone does not provide it. |
+| 7. No dangling hook commands | Always | Flags any `settings.json` hook command pointing at a file that no longer exists, such as a leftover pre-migration Python hook a settings merge never removed. Fails open (silent no-op) if unchecked. |
 
 ## Usage
 
@@ -165,7 +166,7 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 | Command | What it does |
 |---|---|
 | `/playbook:setup` | Wires the guards, seeds `settings.json`, and installs what you choose. Safe to run repeatedly. |
-| `/playbook:doctor` | Checks the six layers and prints a pass/info table with a remediation hint for each miss. |
+| `/playbook:doctor` | Checks the seven layers and prints a pass/info table with a remediation hint for each miss. |
 | `/playbook:brainstorm` | Divergent discovery session; explores a raw idea and produces an approved design doc for `/playbook:scope`. |
 | `/playbook:scope` | Interview-driven planning; saves a verified, parallel-safe plan to `.claude/plans/` for `/playbook:implement`. |
 | `/playbook:implement` | Executes a `/playbook:scope` plan or `/playbook:adr` blueprint with subagents and TDD, committing each work unit. `--auto` opens a PR. |

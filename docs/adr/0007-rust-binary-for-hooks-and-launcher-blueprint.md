@@ -543,10 +543,12 @@ The adversarial and test-plan reviews recorded as INCONCLUSIVE on 2026-08-16 **d
   - `README.md` | edit | document all three channels and the `playbook init` step
   - `docs/guides/00-install.md` | edit | same, plus the macOS `xattr -d com.apple.quarantine` note for the download channel
 - Verification: `brew install --build-from-source pragmatic-engineer/tap/playbook && playbook --version`
-- Tests: Gherkin. Given a clean machine, when the user runs the brew install and then `playbook init`, then hooks are wired and `/playbook:doctor` passes all six layers.
+- Tests: Gherkin. Given a clean machine, when the user runs the brew install and then `playbook init`, then hooks are wired and `/playbook:doctor` passes all seven layers.
 - Done When:
-  - [ ] Formula installs and `playbook --version` resolves
+  - [x] Formula installs and `playbook --version` resolves
   - [ ] The Gatekeeper workaround is documented for channel 3 on macOS
+
+**Shipped 2026-09-04, diverged from plan.** The tap repo is `pragmatic-engineer/homebrew-playbook`, not `homebrew-tap`, so the real install command is `brew install pragmatic-engineer/playbook/playbook`. Naming the tap after the project avoids a generic `homebrew-tap` name colliding if a second formula ships from this org later. `README.md` documents the brew route; `docs/guides/00-install.md` and the channel-3 Gatekeeper workaround are still open, out of this unit's actual scope since the brew route never touches a quarantined raw download.
 
 ### WU-16: `playbook cc` core (release 2)
 - Requires: WU-1
