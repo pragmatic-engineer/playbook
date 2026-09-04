@@ -55,21 +55,55 @@ fn worktree_id_at(dir: &Path) -> String {
     slugify(&git_toplevel(dir))
 }
 
+/// A spawn failure or timeout gets this many attempts total before giving
+/// up; a real git failure (not a repo) is never retried, see `git_toplevel_with`.
+const GIT_TOPLEVEL_ATTEMPTS: u32 = 3;
+const GIT_TOPLEVEL_RETRY_DELAY: Duration = Duration::from_millis(50);
+
 /// `git -C <dir> rev-parse --show-toplevel`, trimmed. Empty on any failure,
 /// including a timeout. Never panics.
 fn git_toplevel(dir: &Path) -> String {
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(dir)
-        .args(["--no-optional-locks", "rev-parse", "--show-toplevel"]);
-    let Some(output) = crate::common::proc::run_with_timeout(&mut command, GIT_TIMEOUT) else {
-        return String::new();
-    };
-    if !output.status.success() {
-        return String::new();
+    git_toplevel_with(
+        dir,
+        GIT_TOPLEVEL_ATTEMPTS,
+        GIT_TOPLEVEL_RETRY_DELAY,
+        |dir| {
+            let mut command = Command::new("git");
+            command.arg("-C").arg(dir).args([
+                "--no-optional-locks",
+                "rev-parse",
+                "--show-toplevel",
+            ]);
+            crate::common::proc::run_with_timeout(&mut command, GIT_TIMEOUT)
+        },
+    )
+}
+
+/// Core of `git_toplevel`, with the attempt itself injected so a test can
+/// simulate a transient failure without spawning real processes. A `None`
+/// attempt (spawn failure or timeout, both transient) is retried up to
+/// `attempts` times; a `Some` with a non-success status is a real result
+/// (e.g. `dir` genuinely isn't a git repo) and returns immediately, since
+/// retrying it would never change the answer.
+fn git_toplevel_with(
+    dir: &Path,
+    attempts: u32,
+    delay: Duration,
+    mut attempt: impl FnMut(&Path) -> Option<std::process::Output>,
+) -> String {
+    for i in 0..attempts {
+        if i > 0 {
+            std::thread::sleep(delay);
+        }
+        let Some(output) = attempt(dir) else {
+            continue;
+        };
+        if !output.status.success() {
+            return String::new();
+        }
+        return String::from_utf8_lossy(&output.stdout).trim().to_string();
     }
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
+    String::new()
 }
 
 /// Every non-alphanumeric character becomes `-`. Duplicates
@@ -193,6 +227,73 @@ mod tests {
             ],
         );
         dest.canonicalize().expect("worktree should resolve")
+    }
+
+    #[test]
+    fn a_transient_none_attempt_is_retried_until_it_succeeds() {
+        // Arrange: the repo used for the real, successful attempt.
+        let repo = seeded_repo("git-toplevel-retry-success");
+        let calls = std::cell::Cell::new(0u32);
+
+        // Act: first two attempts simulate a spawn failure or timeout
+        // (`None`); the third runs a real `git` invocation.
+        let got = git_toplevel_with(&repo, 3, Duration::from_millis(1), |dir| {
+            let n = calls.get();
+            calls.set(n + 1);
+            if n < 2 {
+                None
+            } else {
+                Some(git(dir, &["rev-parse", "--show-toplevel"]))
+            }
+        });
+
+        // Assert
+        assert_eq!(got, repo.to_str().unwrap());
+        assert_eq!(
+            calls.get(),
+            3,
+            "should have retried twice before succeeding"
+        );
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn exhausting_every_retry_on_persistent_none_returns_empty() {
+        // Arrange
+        let calls = std::cell::Cell::new(0u32);
+
+        // Act: every attempt is a simulated transient failure.
+        let got = git_toplevel_with(Path::new("/unused"), 3, Duration::from_millis(1), |_| {
+            calls.set(calls.get() + 1);
+            None
+        });
+
+        // Assert: gave up empty, and spent the whole budget, not less or more.
+        assert_eq!(got, "");
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn a_real_git_failure_is_returned_immediately_not_retried() {
+        // Arrange: a directory that is genuinely not a git repo, so `git`
+        // exits non-zero on the very first attempt.
+        let not_a_repo = scratch_dir("git-toplevel-not-a-repo");
+        fs::create_dir_all(&not_a_repo).expect("scratch dir");
+        let calls = std::cell::Cell::new(0u32);
+
+        // Act
+        let got = git_toplevel_with(&not_a_repo, 3, Duration::from_millis(1), |dir| {
+            calls.set(calls.get() + 1);
+            Some(git(dir, &["rev-parse", "--show-toplevel"]))
+        });
+
+        // Assert: a real failure is not a transient one, so it must not
+        // burn the retry budget.
+        assert_eq!(got, "");
+        assert_eq!(calls.get(), 1, "a real git failure must not be retried");
+
+        let _ = fs::remove_dir_all(&not_a_repo);
     }
 
     #[test]
