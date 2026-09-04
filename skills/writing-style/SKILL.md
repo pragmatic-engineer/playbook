@@ -61,7 +61,10 @@ MUST apply these principles to anything written for review: the reviewer is the 
 - MUST NOT output warnings or notes preambles. Output the content, nothing else.
 - MUST NOT use unnecessary adjectives or adverbs.
 - MUST NOT include git commit hashes or SHAs in any output.
-- MUST NOT use copula avoidance. Say "is" and "are" instead of "serves as", "stands as", "functions as", "represents", "marks". Simple copulas sound human. Elaborate substitutes sound AI.
+- MUST NOT use copula avoidance. Say "is" and "are" instead of "serves as", "stands as", "functions as", "represents", "marks", "boasts", "features". Simple copulas sound human. Elaborate substitutes sound AI.
+- MUST NOT use vague "from X to Y" range framing (e.g. "from minor bugs to major security issues"). List the specific things directly.
+- MUST NOT end with a chatbot sign-off: "I hope this helps!", "Let me know if you have any questions!", "Of course!", "Certainly!". Stop after the last real sentence.
+- SHOULD NOT convert prose into a list of "**Label:** detail" bullets in a PR description, ADR, or design doc. Write flowing prose instead, the same way inline comments use plain-text labels instead of bold ones.
 - MUST NOT tack superficial -ing phrases onto sentences for fake depth: "highlighting", "underscoring", "emphasizing", "reflecting", "symbolizing", "contributing to", "showcasing", "fostering", "ensuring". Cut the -ing clause or make it a real sentence.
 - MUST NOT signpost. "Let's look at", "here's what you need to know", "let's break this down", "without further ado." Do the thing instead of announcing it.
 - MUST NOT use persuasive authority tropes: "The real question is", "at its core", "what really matters", "fundamentally", "the deeper issue." These pretend to cut through noise but restate an ordinary point with ceremony.
@@ -75,7 +78,7 @@ MUST apply these principles to anything written for review: the reviewer is the 
 
 These words are LLM vocabulary tells. MUST NOT appear in generated content:
 
-can, may, just, that, very, really, literally, actually, certainly, probably, basically, could, maybe, delve, embark, enlightening, esteemed, shed light, craft, crafting, imagine, realm, game-changer, unlock, discover, skyrocket, abyss, not alone, in a world where, revolutionize, disruptive, utilize, utilizing, leverage, dive deep, tapestry, illuminate, unveil, pivotal, intricate, elucidate, hence, furthermore, realm, however, harness, exciting, groundbreaking, cutting-edge, remarkable, it remains to be seen, glimpse into, navigating, landscape, stark, testament, in summary, in conclusion, moreover, boost, skyrocketing, opened up, powerful, inquiries, ever-evolving, serves as, stands as, functions as, nestled, vibrant, profound, enhancing, showcasing, underscoring, highlighting, fostering, garner, enduring, interplay, valuable, crucial.
+can, may, just, that, very, really, literally, actually, certainly, probably, basically, could, maybe, delve, embark, enlightening, esteemed, shed light, craft, crafting, imagine, realm, game-changer, unlock, discover, skyrocket, abyss, not alone, in a world where, revolutionize, disruptive, utilize, utilizing, leverage, facilitate, numerous, dive deep, tapestry, illuminate, unveil, pivotal, intricate, elucidate, hence, furthermore, additionally, realm, however, harness, exciting, groundbreaking, cutting-edge, breathtaking, remarkable, it remains to be seen, glimpse into, navigating, landscape, stark, testament, in summary, in conclusion, moreover, boost, skyrocketing, opened up, powerful, inquiries, ever-evolving, serves as, stands as, functions as, boasts, nestled, vibrant, profound, enhance, enhancing, showcase, showcasing, underscore, underscoring, highlighting, fostering, garner, enduring, interplay, valuable, crucial.
 
 A second, distinct category: phrases that perform depth or authority instead of stating a fact ("smart-ass" tone, not flowery vocabulary). Never appear in generated content: "load-bearing", "worth stating plainly", "here's the honest truth", "the real tension", "carry the argument", "at its core", "what really matters", "the deeper issue". State the fact; don't announce that you're about to state it.
 
@@ -85,8 +88,11 @@ A second, distinct category: phrases that perform depth or authority instead of 
 |---|---|
 | utilize | use |
 | leverage | use |
+| facilitate | help |
 | in order to | to |
 | due to the fact that | because |
+| in the event that | if |
+| numerous | many |
 | however | but (or start a new sentence) |
 | furthermore | and (or start a new sentence) |
 | moreover | and |
