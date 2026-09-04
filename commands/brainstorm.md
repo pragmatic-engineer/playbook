@@ -49,7 +49,7 @@ docs and skips what they already settled).
 ## Core Rules (MUST)
 
 1. **Do NOT write code or an implementation plan.** The output is a design doc. Detailed file lists, Work Units, and test strategy belong to `/playbook:scope`. The one narrow exception is Step 5.5's optional validation spike: throwaway code to check a single uncertain premise, never part of the design doc's content, never the start of the real implementation.
-2. **Ask ONE question at a time.** One question, a recommended answer, wait, then the next. The only exception is the first message, where you present context and the first question together.
+2. **Ask one question at a time by default.** A question, a recommended answer, wait, then the next. Batch at most 2 into one numbered round only when neither could plausibly depend on exploration or terminology the other's answer might surface, true independence, not just topical proximity (see Step 3). The first message is always a single question, never a round: there's no established frontier yet to batch from.
 3. **Explore before asking.** If the codebase settles a question, resolve it yourself and report what you found. Only ask about intent, constraints, and preferences the code can't answer.
 4. **Challenge the premise.** Don't accept the framing at face value. Ask whether this is the right problem, whether a simpler direction meets the goal, and what "done" actually looks like.
 5. **Present a design and get approval before writing the doc.** Hard gate, every time, even for a small idea. The design can be a few sentences, but you MUST present it and get a yes.
@@ -120,14 +120,26 @@ Consolidate into a short cited digest (a few bullets, each with `file:line`). Th
 
 ### Step 3: Interactive discovery
 
-Ask questions one at a time, each with a recommended answer and reasoning, each following from the last. Cover:
+Ask questions one at a time by default, each with a recommended answer and reasoning, each following from the last. Cover:
 
 - **Purpose:** why this, why now? What breaks or stays broken without it?
 - **Success criteria:** what does "done" look like, observably?
 - **Constraints:** technical, product, or time limits that rule options in or out.
 - **Non-goals:** what this explicitly won't do.
 
-Between questions, explore further if an answer opens a new area, and report what you found before the next question.
+**Rounds (narrow exception to one-at-a-time).** Think of the open questions as a frontier: the ones you could ask right now without guessing at an answer you haven't heard yet. The frontier here is almost always one question deep, since these four categories inform each other adaptively (Purpose shapes what Success criteria means, and so on), not as an upfront-resolvable tree. Batch two into one numbered round only on the rare case where they're genuinely independent. Never batch more than 2: a small idea's whole question budget (below) is 2-4, and a bigger round reintroduces the wall-of-text problem the recommended-answer mechanic exists to avoid. Format a round like this:
+
+```
+1. **<question title>**: <question body>
+   Recommended: <your recommended answer>
+
+2. **<question title>**: <question body>
+   Recommended: <your recommended answer>
+```
+
+A single question uses the same numbered, recommended-answer shape without the second entry.
+
+Between questions or rounds, explore further if an answer opens a new area, and report what you found before the next question or round. After a round, re-run this check and the domain glossary check (below) against every answer just received, not only the most recent one, before drafting the next round. If either check would change a question the user hasn't answered yet (asked in the same round as an answer that reshapes it), withdraw it: don't let the user answer it against context that's already stale, re-derive it in the next round instead.
 
 Scale the depth: 2-4 questions for a small idea, more for a broad one. Don't over-interview a simple thing.
 
