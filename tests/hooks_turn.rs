@@ -412,6 +412,52 @@ mod auto_model_detect {
         assert!(context.contains("/playbook:adr"), "got: {context:?}");
         assert!(!context.contains("/playbook:scope"), "got: {context:?}");
     }
+
+    #[test]
+    fn brainstorm_wins_tie_break_over_adr_in_sequential_sentence() {
+        // Arrange: brainstorm phrase plus an adr phrase; brainstorm is checked first.
+        let home = scratch_home("amd-tie-break-brainstorm-adr");
+        let payload = serde_json::json!({
+            "prompt": "Let's brainstorm this before we commit, since this is a big call and expensive to undo."
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("nudge output should be valid JSON");
+        let context = value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(context.contains("/playbook:brainstorm"), "got: {context:?}");
+        assert!(!context.contains("/playbook:adr"), "got: {context:?}");
+    }
+
+    #[test]
+    fn scope_wins_tie_break_over_implement_in_sequential_sentence() {
+        // Arrange: scope phrase plus an implement phrase; scope is checked before implement.
+        let home = scratch_home("amd-tie-break-scope-implement");
+        let payload = serde_json::json!({
+            "prompt": "Let's plan this out properly before we just go ahead and ship it."
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("nudge output should be valid JSON");
+        let context = value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(context.contains("/playbook:scope"), "got: {context:?}");
+        assert!(!context.contains("/playbook:implement"), "got: {context:?}");
+    }
 }
 
 // ---------------------------------------------------------------------
