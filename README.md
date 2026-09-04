@@ -99,6 +99,10 @@ you have not read.
 
    Add `~/.local/bin` to `PATH` in your shell rc if it is not already there.
 
+   On macOS or Linux, `brew install pragmatic-engineer/playbook/playbook`
+   does steps 2-4 for you: it fetches the same checksummed release binary
+   and puts it on `PATH`. No separate build, no separate release pipeline.
+
 5. Wire the local configuration. **`CLAUDE_PLUGIN_ROOT` is required**: without
    it `init` has no template to copy from and skips almost every step, reporting
    `skipped - CLAUDE_PLUGIN_ROOT is not set`.
