@@ -166,19 +166,18 @@ pub fn run(payload: &Payload) {
     if prompt.chars().count() < 20 {
         return;
     }
-    if !has_design_intent(&prompt) {
+    if !has_design_intent(&lower) {
         return;
     }
     emit_prompt_context(MSG);
 }
 
-fn has_design_intent(prompt: &str) -> bool {
-    let lower: Vec<char> = prompt.to_lowercase().chars().collect();
+fn has_design_intent(lower: &[char]) -> bool {
     let phrase_hit = PHRASES.iter().any(|phrase| {
         let needle: Vec<char> = phrase.chars().collect();
-        word_boundary_contains(&lower, &needle)
+        word_boundary_contains(lower, &needle)
     });
-    phrase_hit || matches_whats_the_best(&lower)
+    phrase_hit || matches_whats_the_best(lower)
 }
 
 /// Matches python's `\w` under `re.IGNORECASE` with no `re.ASCII` flag: any
