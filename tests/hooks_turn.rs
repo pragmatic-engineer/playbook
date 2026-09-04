@@ -414,6 +414,50 @@ mod auto_model_detect {
     }
 
     #[test]
+    fn named_alternatives_with_vs_triggers_adr() {
+        // Arrange: "X vs Y" comparison, one of the two canonical ADR-trigger examples in SYSTEM_PROMPT.md.
+        let home = scratch_home("amd-named-alternatives-vs");
+        let payload = serde_json::json!({
+            "prompt": "Postgres vs DynamoDB for the new event store, which one should we pick?"
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("nudge output should be valid JSON");
+        let context = value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(context.contains("/playbook:adr"), "got: {context:?}");
+    }
+
+    #[test]
+    fn named_alternatives_with_should_we_use_or_triggers_adr() {
+        // Arrange: "should we use X or Y", the other canonical ADR-trigger example.
+        let home = scratch_home("amd-named-alternatives-should-we-use");
+        let payload = serde_json::json!({
+            "prompt": "Should we use Redis or Memcached for the session cache here?"
+        })
+        .to_string();
+
+        // Act
+        let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("nudge output should be valid JSON");
+        let context = value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(context.contains("/playbook:adr"), "got: {context:?}");
+    }
+
+    #[test]
     fn brainstorm_wins_tie_break_over_adr_in_sequential_sentence() {
         // Arrange: brainstorm phrase plus an adr phrase; brainstorm is checked first.
         let home = scratch_home("amd-tie-break-brainstorm-adr");
