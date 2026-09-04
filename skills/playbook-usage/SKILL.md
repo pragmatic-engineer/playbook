@@ -28,7 +28,7 @@ for a yes before doing anything (see Trigger phrases, below).
 
 | Command | One-line purpose | When to reach for it |
 |---|---|---|
-| `/playbook:quick-review` | Single-pass PR review using grounding-review discipline and Conventional Comments; posts a pending GitHub review, or reports only for a self-review. | A routine PR review, including a quick self-review of your own branch. |
+| `/playbook:quick-review` | Single-pass PR review using grounding-review discipline and Conventional Comments; posts a pending GitHub review, or reports only when nothing was named to post to, `--self` was passed, or the resolved PR is yours. | A routine PR review, including a quick self-review of your own branch. |
 | `/playbook:deep-review` | Parallel swarm of specialist reviewer subagents (logic, test, security, data, types, perf, plus conditional lenses), consolidated and fact-checked into one pending review. | A substantial, risky, or cross-cutting PR that needs more scrutiny than `/playbook:quick-review`. |
 | `/playbook:address-pr-comments` | Walks unresolved PR review comments one at a time, applies fixes or drafts replies, commits and pushes, then posts replies with the new SHA. | Working through open review feedback on an existing PR. |
 
@@ -75,9 +75,9 @@ approved plan or blueprint, it says so and offers `/playbook:scope` (or
 ## Delivery pattern
 
 Some commands run in an isolated forked context with no bleed from the
-current conversation: `/playbook:commit-and-push` and
-`/playbook:create-pull-request` both carry `context: fork` in their
-frontmatter. `/playbook:implement` goes further, delegating each plan Work
+current conversation: `/playbook:commit-and-push`,
+`/playbook:create-pull-request`, and `/playbook:repo-audit` all carry
+`context: fork` in their frontmatter. `/playbook:implement` goes further, delegating each plan Work
 Unit to `implementer` subagents, some running in isolated git worktrees so
 independent Work Units execute in parallel. A subagent's return value alone
 is not a reliable signal of what it did. See `playbook:delegating-subagents`
@@ -86,10 +86,12 @@ file-based handoff discipline that governs every dispatch.
 
 ## Memory
 
-The plugin keeps a durable fact store at `~/.config/playbook/memory/`:
-global facts sit flat alongside its `MEMORY.md` index, and project-scoped
-facts live under `~/.config/playbook/memory/<owner>/<repo>/`. `/playbook:adr`
-and `/playbook:learn-project` both read from and write to this store. See
+The plugin keeps a durable fact store at `~/.config/playbook/memory/`, in
+three scopes: global facts sit flat alongside its `MEMORY.md` index,
+org-scoped facts live under `~/.config/playbook/memory/<owner>/`, and
+project-scoped facts live under `~/.config/playbook/memory/<owner>/<repo>/`.
+`/playbook:adr` and `/playbook:learn-project` both read from and write to
+this store. See
 `docs/guides/03-decisions-and-memory.md` for the full frontmatter schema, the
 typed-edges table (`supersedes`, `depends_on`, `relates_to`, `contradicts`),
 and the rule for where a given fact belongs.
