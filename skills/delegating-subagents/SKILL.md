@@ -1,6 +1,6 @@
 ---
 name: delegating-subagents
-description: Use before dispatching any subagent, and again the moment one finishes or goes quiet. Agents that can write deliver by file and the orchestrator MUST read it; read-only agents have no reliable channel, so run their pass inline and never treat silence as a clean result.
+description: Use before dispatching any subagent, and again the moment one finishes or goes quiet.
 ---
 
 # Delegating to Subagents

@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Use when encountering any bug, test failure, or unexpected behaviour, before proposing a fix. Find the root cause first; a patch that only hides the symptom does not count.
+description: Use when encountering any bug, test failure, or unexpected behaviour, before proposing a fix.
 ---
 
 # Systematic Debugging
