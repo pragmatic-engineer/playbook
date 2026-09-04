@@ -1,7 +1,7 @@
 ---
 description: Use when an approved plan or ADR blueprint already exists and the user says let's implement this, let's build this, or start on it. Execute-only, it does not design new scope. Runs the plan on Sonnet, delegating edits to subagents, committing each Work Unit as a savepoint, and delivering PR-sized Segments as one small pull request each (independent off the default branch when disjoint, stacked when they truly depend on each other), asking the delivery strategy up front. Ends with a refinement pass and an adversarial review.
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
-argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--no-tdd] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause>] [--all-lenses] [--help]"
+argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--no-tdd] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause|land>] [--all-lenses] [--help]"
 model: sonnet
 effort: high
 ---
@@ -43,9 +43,13 @@ OPTIONS:
   --force    In --auto mode, override quality-gate FAILs (logged)
   --pr-strategy=<stacked|independent|single>
              Preset the PR topology and skip that question (default: ask)
-  --boundary=<savepoint|pause>
+  --boundary=<savepoint|pause|land>
              Preset the Segment-boundary behaviour and skip that question
-             (default: ask; recommended: savepoint)
+             (default: ask; recommended: savepoint). The three are an
+             ascending ladder of autonomy. `land` merges each Segment before
+             starting the next and is OPT-IN ONLY: --auto never self-selects
+             it, because it is the only boundary that puts code on the
+             default branch with no human in the loop.
   --all-lenses
              Skip the Step 9 triage dispatch entirely: run all 5 lenses
              (correctness, behaviour drift, principles, scope, tests) at
@@ -54,7 +58,7 @@ OPTIONS:
 DELIVERY: /playbook:implement splits the plan into PR-sized Segments and, before
 executing, asks three things (unless preset by flag or running --auto):
   - PR topology: independent (default, disjoint Segments) | stacked (dependency chain) | single
-  - Boundary:    savepoint (default) | pause
+  - Boundary:    savepoint (default) | pause | land (opt-in, merges each Segment)
 It honors the plan's Segments but re-splits any whose real diff exceeds the
 1500-line hard limit (Segments target under 500). Each Segment becomes one small
 pull request.
@@ -177,6 +181,12 @@ Either way, confirm the Segment ordering respects the WU `Requires` graph (no fo
 - **Segment-boundary behaviour** (always recommend **Savepoints**):
   - **Savepoint commits, PRs at end** (default recommendation, and the norm under `--auto`): implement every Segment as savepoint commits on their (unpushed) branches, run Steps 7-9 once over the full diff, then open the PR set at the end. Because nothing is pushed until then, Step 8's stack rebase stays local and each PR-open push is a first push, not a force-push.
   - **Pause after each PR:** finish a Segment, run Steps 7-9 scoped to just that Segment, open its PR, then stop for the user before the next Segment. No cross-Segment rebase happens (earlier PRs are already open), so a fix implicating an already-delivered Segment becomes a follow-up, not a rebased commit.
+  - **Land each Segment before the next** (opt-in only; never recommended by default, and `--auto` never self-selects it): finish a Segment, run Steps 7-9 scoped to it, open its PR, promote it to ready, wait for its required checks, fix what CI finds, then merge it and confirm `state: MERGED` before Segment N+1's branch is even created (Step 10). Recommend this ONLY when the user states this repo has no human review gate they want honoured, typically a solo repo. **This is the only boundary that puts code on the default branch with no human in the loop**, so it also fires whatever merging to that branch triggers (deploys, releases, tag automation), once per Segment. Where a review gate turns out to be real, the Segment parks and the run stops rather than bypassing it.
+
+**`land` overrides stacked topology (MUST, and record it).** Under `land`, Segment N is merged into the default branch before Segment N+1's branch exists, so Segment N+1 branches off the freshly-fetched `origin/<default-branch>`, exactly as under **independent**. If the user chose **stacked**, honor the dependency but not the branch chain: the declared `Requires` is still satisfied, through merged history rather than through an open sibling's branch. Say so in the run's assumptions. This is also why the caveat at the **Stacked** option above (GitHub's async merge API has no bypass parameter, so an agent cannot merge a stacked chain) never applies under `land`: no two PRs in the chain are ever open at the same time, so no PR's base is ever another open PR's branch.
+
+**`land` is never auto-selected (MUST).** `--auto` with no `--boundary` still self-selects **savepoint**. `land` requires an explicit `--boundary=land` or an explicit answer to this question. `--auto --boundary=land` is legal and means the user opted in deliberately. Before Step 10's first merge attempt, print the resolved `<owner>/<repo>` and default branch once, so a wrong-repo invocation is visible without costing a prompt.
+
 - **TDD approach** (always recommend **red/green/refactor**):
   - **Red/green/refactor** (default recommendation): each test scenario gets its own failing-test, minimal-implementation, and refactor dispatch, per Step 5's TDD flow below. Recommend whenever the plan's Work Units carry Gherkin scenarios (the common case).
   - **Tests alongside implementation:** one dispatch per logical file group writes code and tests together (still encoding the plan's scenarios), skipping the three-dispatch cycle. Recommend for a plan that is mostly deletions/mechanical edits with little new logic (TDD adds dispatch overhead without adding rigor there).
@@ -213,6 +223,7 @@ When SOLID's abstraction pulls against KISS/YAGNI, favour the simplest thing tha
 - **Stacked:** `git switch -c <type>/<plan-slug>-s<N>-<seg-slug>` off the previous Segment's branch (Segment 1 off the default branch); `<segment-base>` is that starting ref. The base for Segment N's PR is Segment N-1's branch.
 - **Independent:** each Segment branch off the default branch; `<segment-base>` is the default branch.
 - **Single:** one shared branch for the whole plan (the pre-existing behaviour); `<segment-base>` is the branch tip captured at this Segment's first commit.
+- **`land` boundary (overrides the topology's base, all three topologies):** `git fetch origin <default-branch>` first, then branch off `origin/<default-branch>`; `<segment-base>` is `origin/<default-branch>` at that fetched SHA. Never branch off the previous Segment's branch: under `land` that branch is already merged, and with `delete_branch_on_merge: true` it may no longer exist on origin. Never branch off the *local* default branch, which is stale the moment Segment N-1 merged.
 
 On a **ledger-driven resume** (Step 5 ledger, e.g. after `/clear`, a crash, or a fresh checkout), the previous Segment's branch may not exist locally: `git fetch origin <prev-Segment-branch>` (or confirm the ref exists) before branching off it. Record `Segment id -> branch -> <segment-base> -> WU commit range` in the ledger as you go.
 
@@ -222,6 +233,8 @@ On a **ledger-driven resume** (Step 5 ledger, e.g. after `/clear`, a crash, or a
 2. `git branch <type>/<plan-slug>-s<N>b-<seg-slug> HEAD` to save the excess commits, then `git reset --hard <split-sha>` on the current Segment branch to drop them from it.
 3. The new `s<N>b` Segment branches off the trimmed current Segment (its `<segment-base>` is `<split-sha>`; under **independent** it still branches off the default branch); its PR targets the current Segment's branch under stacked, the default branch under independent, or the current Segment's (shared) branch under single. The `b` suffix avoids colliding with a planned `s<N+1>`. **Under single topology this means the re-split adds one follow-up PR** stacked on the shared branch: single still ships one PR normally, but the 1500 hard limit is never breached, so an overflowing single plan yields the shared-branch PR plus one follow-up.
 4. **Deliver `s<N>b` as the very next Segment**, before any pre-planned `s<N+1>`, then continue the outer loop. Note the re-split (new Segment id, split point) in the ledger and the final report.
+
+**Under `land`, a re-split defers `s<N>b` (MUST).** The re-split creates `s<N>b` before the current Segment has merged, which is the one place this command creates a later Segment's branch ahead of time. Do NOT open its PR yet. Land the current Segment first, then `git fetch origin <default-branch>`, `git rebase --onto origin/<default-branch> <split-sha> <type>/<plan-slug>-s<N>b-<seg-slug>`, and deliver `s<N>b` as the next Segment with the default branch as its base. Its PR must never target the current Segment's branch, which is merged and likely deleted.
 
 The plan's Segments are the starting point; reality wins at the budget.
 
@@ -260,7 +273,9 @@ This is not optional when the commit looks fine. The report is the only place a 
 
 **Verify-by-diff (MUST).** Never take the subagent's word. After a WU returns, confirm the work from git (`git show --stat <sha>`, review the diff against the brief) and the scoped verify. A `DONE` the diff doesn't support is a failure: re-dispatch or stop per Error handling. Git tells you whether the work landed; only the report tells you what the agent observed, so do both.
 
-**Progress ledger.** Record progress in `$(playbook path implement)/<plan-slug>.progress.md`. This directory lives outside the repo checkout (`$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/implement/`), so there is nothing to gitignore. At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary) from Step 4.5. Per Segment, record its id, branch, whether it was re-split, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch. First use in a repo, create the dir:
+**Progress ledger.** Record progress in `$(playbook path implement)/<plan-slug>.progress.md`. This directory lives outside the repo checkout (`$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/implement/`), so there is nothing to gitignore. At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary) from Step 4.5. Per Segment, record its id, branch, whether it was re-split, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch.
+
+**Under the `land` boundary, each Segment additionally records** (nothing else in this schema changes, and a Segment under **savepoint** or **pause** omits these fields entirely rather than writing them empty): `land:` one of `NOT_STARTED | READY | CI_RUNNING | CI_FIXING | CONFLICT | MERGE_ATTEMPTED | MERGED (<merge-sha>) | PARKED | CI_UNSTABLE`; `review:` which review satisfied the ready-promotion gate, e.g. `implement-step9 (5 lenses, 3 findings fixed)`, plus a line per fix re-review, e.g. `fix-review tier-1 (correctness, 0 findings)`; `ci_fix_attempts: <n>/3` and `ci_rerun_attempts: <n>/2` as two separate counters, since a rerun is not a fix; `merge_attempts:` each attempt with its verbatim outcome, e.g. `--auto -> armed`, `--admin -> refused: <message>`; and, when parked, `parked_reason:` (the verbatim blocking field and refusal message) with `parked_at:` (ISO-8601). A resumed run reads `land:` before doing anything else with that Segment: `MERGED` skips it, `PARKED` routes to Step 10's parked-resume procedure, and anything else re-enters Step 10 at the stage that state names, never at Step 5. First use in a repo, create the dir:
 
 ```bash
 if ! IMPLEMENT_DIR=$(playbook path implement 2>&1); then
@@ -362,6 +377,7 @@ Once the implementation is green, run ONE refinement pass over the code you just
 
 - **Savepoint boundary (default):** no Segment's PR is open yet and the branches are unpushed, so this is safe. Run a single refinement pass over the full implemented diff, commit each fix onto **the Segment branch that owns the touched file** (the earliest Segment that introduced it), then, under stacked topology, rebase the later Segment branches onto their updated bases in order (`git rebase --onto`), purely local. Re-run the Step 7 checks on the affected branches. Step 9 opening the PRs is then the first push of each branch, not a force-push. (Single and independent topologies need no rebase.)
 - **Pause boundary:** earlier Segments' PRs are already open, so you cannot rebase them. Run the refinement scoped to the **current** Segment only, before its PR opens (this is why the pause flow runs Steps 7-9 per Segment). A fix that implicates an already-delivered Segment is recorded as a follow-up, not a rebased commit.
+- **`land` boundary:** earlier Segments are not merely open, they are merged into the default branch, so nothing about them is rewritable. Run the refinement scoped to the **current** Segment only, before its PR opens, exactly as under **pause**. A fix implicating an already-landed Segment is a follow-up PR, never a rebase. This is stricter than pause, not looser: under pause an earlier Segment's PR could at least still be amended by a human; under `land` it is history.
 
 1. **Self quick-review (local).** Apply the `playbook:grounding-review` discipline to the branch diff: severity-classified findings, each with `file:line` evidence. Keep it local; don't post anything. Fix only the findings you hold with HIGH confidence (clear bug, dead code, obvious simplification). Leave low-confidence or speculative findings for the adversarial review (Step 9); don't guess.
 2. **Simplify & refactor analysis.** Read the changed files through the Design principles (SOLID, DRY, KISS, YAGNI). List concrete, behaviour-preserving changes: collapse needless indirection, delete dead or speculative code, dedupe real repetition, flatten tangled control flow, tighten names. Skip anything that changes behaviour or adds abstraction with no second caller.
@@ -429,9 +445,164 @@ Each lens gives severity-classified findings with `file:line` evidence and a fix
 - **Independent:** `/playbook:create-pull-request` per Segment branch with the default branch as base.
 - **Single:** in `--auto`, one `/playbook:create-pull-request` for the whole branch; interactively, leave PR creation to the user (the pre-existing behaviour). If a hard-limit re-split fired (Step 5), the plan now has a shared branch plus one `s<N>b` follow-up branch: open both (follow-up `--base` the shared branch), or in interactive mode point the user at both.
 
-**Boundary behaviour.** With **savepoint** (the default, and `--auto`), open the whole PR set here at the end. With **pause after each PR**, Step 9 has already run per Segment (its scoped review before the PR), so this step opens that one Segment's PR and stops for the user before the next Segment.
+**Boundary behaviour.** With **savepoint** (the default, and `--auto`), open the whole PR set here at the end. With **pause after each PR**, Step 9 has already run per Segment (its scoped review before the PR), so this step opens that one Segment's PR and stops for the user before the next Segment. With **land**, this step opens that one Segment's PR as a draft and then continues straight into Step 10, which promotes, gates on CI, merges, and only then returns to Step 5 for the next Segment.
 
-**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings, the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:deep-review`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Starting the next feature: run `/clear` before the next `/playbook:brainstorm` or `/playbook:scope`, so this run's plan, dispatch history, and fixes don't carry into it.
+**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings, the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:deep-review`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Under **land**, this step hands off to Step 10 instead of finishing here; the true finish is Step 10's own report once the Segment reads `MERGED` (or `PARKED`). Starting the next feature: run `/clear` before the next `/playbook:brainstorm` or `/playbook:scope`, so this run's plan, dispatch history, and fixes don't carry into it.
+
+## Step 10: Land the Segment (`--boundary=land` only)
+
+Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MUST complete with the PR reading `MERGED` before Step 5 creates Segment N+1's branch. Skip this step entirely under **savepoint** and **pause**.
+
+**The governing rule: attempt, then re-read state. Never conclude from an exit code.** `gh pr merge --auto` returns 0 when it merely *arms* auto-merge, and returns non-zero while still enqueueing successfully (this repo prints `! The merge strategy for main is set by the merge queue` to stderr and enqueues anyway). Both directions of the exit code lie. The exit code and stderr route the next probe; only a fresh `gh pr view` adjudicates. Equally, do NOT pre-compute whether a human review is required from `gh api repos/{owner}/{repo}` (`allow_auto_merge`, `permissions.admin`) or from branch-protection/ruleset introspection: those are two different APIs a repo may use either of, and neither tells you whether *this* PR is already satisfied. `reviewDecision` on the PR does, because GitHub computes it across whichever system is active, including approvals already present.
+
+**Never pass `--delete-branch`.** It is redundant where the repo sets `delete_branch_on_merge`, and it deletes the LOCAL branch even when the merge itself fails (seen during a 503), which is the one state this loop must not land in.
+
+**1. Promote to ready.** `/playbook:create-pull-request` always opens a draft, and a draft cannot enqueue (`Pull request is a draft`). Promote it directly:
+
+```bash
+gh pr ready "$BRANCH"
+```
+
+**Do NOT run `/playbook:create-pull-request`'s own Step 9 (`/clear`, then `/playbook:deep-review --self`), and do NOT pass it `--ready`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Its `/clear` is context isolation by hand for a session that wrote the code itself; subagent dispatch is context isolation by construction. And `/clear` cannot be issued programmatically at all, so instructing it inside an autonomous loop would mean stopping to ask the user to type it, once per Segment, which is exactly what `land` exists to remove. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
+
+**2. Gate on required checks.** Poll with a deadline; never `--watch` unbounded.
+
+```bash
+DEADLINE=$(( $(date +%s) + 1200 ))
+while :; do
+  OUT=$(gh pr checks "$PR" --required --json name,bucket,link 2>/dev/null || echo '[]')
+  PEND=$(printf '%s' "$OUT" | jq '[.[]|select(.bucket=="pending")]|length')
+  FAIL=$(printf '%s' "$OUT" | jq '[.[]|select(.bucket=="fail")]|length')
+  CANC=$(printf '%s' "$OUT" | jq '[.[]|select(.bucket=="cancel")]|length')
+  TOT=$(printf '%s' "$OUT" | jq 'length')
+  echo "checks total=$TOT pending=$PEND fail=$FAIL cancel=$CANC"
+  [ "$TOT" -eq 0 ]    && { echo "CI_VERDICT=NONE"; break; }
+  [ "$FAIL" -gt 0 ]   && { echo "CI_VERDICT=FAIL"; break; }
+  [ "$PEND" -eq 0 ] && [ "$CANC" -gt 0 ] && { echo "CI_VERDICT=CANCELLED"; break; }
+  [ "$PEND" -eq 0 ]   && { echo "CI_VERDICT=PASS"; break; }
+  [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "CI_VERDICT=TIMEOUT"; break; }
+  sleep 20
+done
+```
+
+`--required` is deliberate: the merge gate is what the repo enforces, not every check that exists. A failing NON-required check does not block the merge, but MUST be reported as a follow-up rather than silently dropped. `CI_VERDICT=NONE` (the repo requires no checks) is a legitimate pass; record it as `NONE`, never as `PASS`, so the ledger does not claim a gate that never ran. `CI_VERDICT=TIMEOUT` parks the Segment; do not merge a PR whose checks never finished.
+
+**3. CI-fix loop (two budgets, counted separately).** **3 fix attempts** per Segment, matching the existing `--auto: WU fails after 3 retries -> stop` rule, plus **2 reruns** per Segment. A rerun is not a fix and MUST NOT consume the fix budget.
+
+**Transient, not a code failure** (rerun, don't fix) when either holds:
+- `CI_VERDICT=CANCELLED`: `concurrency: cancel-in-progress` cancelled the run behind a newer push. `CANCELLED` is not `FAILURE`.
+- The failed *step* is `Set up job`, which runs before any repo code, so the failure cannot be yours (typically a rate-limited action download taking the whole matrix red at once):
+
+```bash
+gh api "repos/{owner}/{repo}/actions/runs/<id>/jobs" \
+  --jq '.jobs[] | select(.conclusion=="failure")
+        | "\(.name) -> \(.steps[] | select(.conclusion=="failure") | .name)"'
+```
+
+Either case: `gh run rerun <id> --failed`, then return to step 2. Max 2 reruns; a third consecutive transient parks the Segment as `CI_UNSTABLE` rather than burning turns.
+
+**Genuine failure:** apply `playbook:systematic-debugging` to find the root cause before touching code, dispatch an `implementer` scoped to the failing check's diagnosis on the Segment branch, then `/playbook:commit-and-push`, then return to step 2. **A formatter failure MUST be fixed by running the project's own formatter** (`cargo fmt`, `prettier --write`, `ruff format`, per the Step 3 stack detection), never by hand-editing lines to satisfy it: a hand-edit burns a fix attempt and usually trips the next wrapping rule. Capture `<pre-fix-sha>` before the fix; step 4 needs it.
+
+**4. Re-review the fix, tiered by what the fix actually is.** Re-running the full 5-lens swarm for a one-line format fix is waste; skipping review for a logic change is not. Classify the fix diff mechanically, do not judge:
+
+- **Tier 0, no re-review.** The fix diff is empty (rerun only), or the fix is confined to CI workflow config that touches no shipped code, or the fix is provably tool-generated. Prove the last case, don't assert it: from the pre-fix tree, re-run the formatter/codegen and confirm it reproduces the fix exactly (`git diff --quiet` against the fix's tree). If the tool reproduces it, there is no human-authored change to review.
+- **Tier 1, one scoped lens.** Touches production or test code, under 50 changed lines, and no file outside the Segment's `Files`. Dispatch ONE `reviewer` (`subagent_type: playbook:reviewer`) with focus `correctness` (plus `tests` when the fix touched test files), scoped to `git diff <pre-fix-sha>..HEAD`, the fix diff only, never the whole Segment diff.
+- **Tier 2, full Step 9 swarm scoped to this Segment.** Any one of: a file outside the Segment's `Files`; over 50 changed lines; a changed public signature, or a deleted or weakened assertion; the failing check was a security check (secret scanning, dependency/vulnerability scanning) rather than build/lint/test; **or this is the 2nd or 3rd fix attempt**. Repeated failure means the first root-cause diagnosis was wrong, which is exactly when a narrow re-look is worthless.
+
+Record the tier and its finding count in the ledger. Fix Tier 1/2 findings per Step 9's rules, then return to step 2.
+
+**5. Read the PR's real state before attempting anything.**
+
+```bash
+gh pr view "$PR" --json state,mergedAt,isDraft,mergeable,mergeStateStatus,reviewDecision,autoMergeRequest,baseRefName \
+  -q '{state,mergedAt,isDraft,mergeable,mergeStateStatus,reviewDecision,autoMerge:(.autoMergeRequest!=null),base:.baseRefName}'
+```
+
+Route in this order, first match wins:
+
+1. `state == "MERGED"` -> go to step 8.
+2. `state == "CLOSED"` and `mergedAt == null` -> the PR was closed out from under this run. `mergeable`/`mergeStateStatus` will sit at `UNKNOWN` forever and look like GitHub computation lag; it is not. Under `land` no sibling PR is ever open, so this should be impossible: report it as an invariant violation and STOP. Do not auto-reopen.
+3. `isDraft == true` -> step 1 did not take; re-run `gh pr ready` once, then re-read.
+4. `mergeable == "CONFLICTING"` or `mergeStateStatus == "DIRTY"` -> **conflict, a different problem entirely.** This is not a permissions question and `--admin` cannot bypass it. `git fetch origin <default-branch>` and `git rebase origin/<default-branch>`, resolve, `git push` (chained with `&&`, never as a separate statement), return to step 2. If a conflict hunk falls in a file outside the Segment's `Files`, STOP and report: resolving it would silently rewrite work this Segment does not own. Max 2 conflict-resolution attempts, then park as `CONFLICT`.
+5. `mergeable == "UNKNOWN"` -> GitHub is still computing. Re-read after 10s, up to 6 times. Route 2 already ruled out the closed-PR case that makes `UNKNOWN` permanent.
+6. `mergeStateStatus == "BEHIND"` -> the base moved while CI ran. Rebase onto `origin/<default-branch>` and push; do not merge and do not park. Return to step 2.
+7. `reviewDecision == "CHANGES_REQUESTED"` -> **park unconditionally** (step 7). A human looked and objected; that is categorically different from nobody having looked yet, and it MUST NOT be bypassed even where `--admin` would succeed.
+8. Otherwise -> step 6.
+
+**6. Attempt the merge, then re-read.**
+
+```bash
+set +e
+MERGE_OUT=$(gh pr merge "$PR" --auto 2>&1); MERGE_RC=$?
+set -e
+printf 'merge_rc=%s\n%s\n' "$MERGE_RC" "$MERGE_OUT"
+```
+
+No strategy flag: where a merge queue is required it sets the strategy, and passing one only adds a stderr warning. If `MERGE_OUT` says auto-merge is not allowed for this repository, fall back to a synchronous `gh pr merge "$PR" --squash` (checks are already green by step 2); that is a repo-settings difference, not a permissions block, and it is discovered by attempting, not by reading `.allow_auto_merge` first.
+
+Then poll to a terminal state, re-reading rather than believing `$MERGE_RC`:
+
+```bash
+DEADLINE=$(( $(date +%s) + 1800 ))
+while :; do
+  S=$(gh pr view "$PR" --json state,mergeStateStatus,reviewDecision,autoMergeRequest \
+        -q '[.state,.mergeStateStatus,(.reviewDecision//"-"),(if .autoMergeRequest then "armed" else "-" end)]|@tsv')
+  echo "$S"
+  case "$S" in
+    MERGED*)             echo "LAND_VERDICT=MERGED"; break;;
+    *REVIEW_REQUIRED*)   echo "LAND_VERDICT=REVIEW_GATE"; break;;
+    *CHANGES_REQUESTED*) echo "LAND_VERDICT=CHANGES_REQUESTED"; break;;
+    *DIRTY*|*BEHIND*)    echo "LAND_VERDICT=RESTATE"; break;;
+  esac
+  [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "LAND_VERDICT=TIMEOUT"; break; }
+  sleep 20
+done
+```
+
+`RESTATE` returns to step 5. `TIMEOUT` with everything green falls through to the admin escalation below; a merge queue can hold a PR for its full batching window, so a deadline shorter than that window would escalate needlessly.
+
+**Admin escalation (MUST be gated on green checks).** Only when `LAND_VERDICT` is `REVIEW_GATE` or `TIMEOUT`, `mergeable == "MERGEABLE"`, AND step 2 returned `CI_VERDICT=PASS` or `NONE`:
+
+```bash
+set +e
+ADMIN_OUT=$(gh pr merge "$PR" --admin --squash 2>&1); ADMIN_RC=$?
+set -e
+printf 'admin_rc=%s\n%s\n' "$ADMIN_RC" "$ADMIN_OUT"
+```
+
+**`--admin` bypasses required status checks, not only reviews.** Never reach it from a failing or unfinished CI state: the 3-attempt fix cap has no admin escape hatch, and "give up on CI, merge it anyway" is never a valid outcome of this loop. Re-read state afterwards, as always. If `ADMIN_OUT` says the PR must be merged using the asynchronous merge REST API, the PR's base is another open PR's branch, which `land` guarantees cannot happen: report the topology invariant as violated and STOP rather than retrying. Any permission refusal goes to step 7 with the message recorded verbatim.
+
+**7. Park (a stop, not a wait).** A human approving and merging cannot happen inside one turn, so parking ends the run, the way **pause** does, but only because genuinely blocked. Record in the ledger:
+
+```
+land: PARKED
+parked_reason: reviewDecision=REVIEW_REQUIRED; `gh pr merge --admin` refused: <verbatim message>
+parked_at: <ISO-8601>
+```
+
+Then report and STOP: the PR URL and number; the verbatim blocking field and refusal message; what is already green (required checks passed, Step 9 self-review done, N findings fixed, ledger-confirmed); the remaining Segments by name; and the literal resume command. Do not open the remaining Segments' PRs, do not start their branches, and do not fall back to another boundary without asking.
+
+**Resuming a parked Segment (MUST, and it differs from a normal ledger resume).** A normal resume continues *work*; a parked resume first checks whether the block cleared. Before any dispatch, any branch operation, or any re-review:
+
+```bash
+gh pr view "$PR" --json state,mergedAt,reviewDecision,mergeStateStatus \
+  -q '[.state,(.mergedAt//"-"),(.reviewDecision//"-"),.mergeStateStatus]|@tsv'
+```
+
+- `MERGED` -> go to step 8 and continue to Segment N+1. Do not re-run Steps 7-9 for this Segment.
+- `OPEN` with `reviewDecision == "APPROVED"` -> a human approved but did not merge. Re-enter at **step 5 only**. Do not re-review, do not re-push, do not re-run CI unless step 5 routes you there.
+- `OPEN` with the block unchanged -> still parked. Report and stop again immediately, having run nothing. A resumed run MUST NOT redo work on a parked PR.
+- `CLOSED` with `mergedAt == null` -> ask the user before anything else.
+
+**8. Confirm the content actually landed, then advance (MUST).** A merge command's success message is not evidence, the same way a subagent's `DONE` is not (Verify-by-diff, Step 5):
+
+```bash
+git fetch origin "$DEFAULT_BRANCH"
+git log --oneline -1 "origin/$DEFAULT_BRANCH"
+git diff "origin/$DEFAULT_BRANCH" "$SEGMENT_BRANCH" -- <the Segment's Files>
+```
+
+That last diff MUST be empty. A squash-merge collapses the branch's internal shape, so the trees match even though the commits do not. A non-empty diff means either concurrent merges by someone else (re-check scoped to the Segment's own `Files`, which is why the pathspec is there) or content genuinely lost; investigate before continuing, never assume. Record `land: MERGED (<merge-sha>)` in the ledger, then return to Step 5 for Segment N+1, whose branch MUST be created off the `origin/<default-branch>` just fetched.
 
 ## Decision Rules
 
@@ -458,6 +629,29 @@ Each lens gives severity-classified findings with `file:line` evidence and a fix
 | Refinement (Step 8) implies new feature scope | Record as a follow-up; don't build it (YAGNI) |
 | Adversarial review (Step 9) finds a blocking issue | Fix it, re-validate, then finish; report non-blocking findings as follow-ups |
 | Refinement or adversarial fix would change behaviour | Don't fold it into the refactor; treat it as a separate fix and re-validate |
+| `--auto` with no `--boundary` | Self-select `savepoint`; NEVER self-select `land`, which is opt-in only (Step 4.5) |
+| `land` boundary chosen | Run Steps 7-9 scoped per Segment, then Step 10: promote, gate on CI, merge, confirm `MERGED`, only then start Segment N+1 |
+| `land` + stacked topology | Reinterpret as independent: Segment N is merged before N+1's branch exists, so branch off the fetched `origin/<default>`. Record the override as an assumption (Step 4.5) |
+| `land`: Segment's PR just opened | `gh pr ready <branch>` directly; do NOT run create-pull-request.md's Step 9 (`/clear` + `deep-review --self`) and do NOT pass `--ready`: Steps 8-9 already reviewed this diff, and `/clear` cannot be issued programmatically (Step 10) |
+| `land`: required checks green (or none required) | Attempt `gh pr merge <n> --auto`; re-read `state`/`autoMergeRequest` before believing the exit code, in either direction (Step 10) |
+| `land`: `mergeable: CONFLICTING` / `mergeStateStatus: DIRTY` | Conflict, not permissions: rebase on the fetched default branch, push `&&`-chained, re-run CI. Never `--admin`; it cannot bypass a conflict (Step 10) |
+| `land`: `mergeStateStatus: BEHIND` | Rebase onto `origin/<default>` and push; don't merge, don't park (Step 10) |
+| `land`: a conflict hunk falls outside the Segment's `Files` | STOP and report; resolving it would rewrite work this Segment doesn't own (Step 10) |
+| `land`: a required check fails | Root-cause per `playbook:systematic-debugging`, fix, push, re-review per the fix tier; max 3 fix attempts per Segment (Step 10) |
+| `land`: check `bucket: cancel`, or the failed step is `Set up job` | Transient, not a code failure: `gh run rerun <id> --failed`, max 2, and it does NOT consume the 3-attempt fix budget (Step 10) |
+| `land`: a non-required check fails | Doesn't block the merge; report it as a follow-up, never drop it silently (Step 10) |
+| `land`: the CI fix is a formatter failure | Run the project's formatter; never hand-edit lines to satisfy it (Step 10) |
+| `land`: the fix diff is reproducible by re-running the formatter/codegen | Tier 0, no re-review; prove it with `git diff --quiet`, don't assert it (Step 10) |
+| `land`: fix under 50 lines, inside the Segment's `Files` | Tier 1: one `reviewer` on the fix diff only, focus `correctness` (Step 10) |
+| `land`: fix touches logic, a public signature, a security check, or is attempt 2 or 3 | Tier 2: full Step 9 swarm scoped to the Segment before re-attempting the merge (Step 10) |
+| `land`: `reviewDecision: REVIEW_REQUIRED` and `--admin` refused | PARK: record `land: PARKED` + verbatim reason, report the PR and what's already green, STOP (Step 10) |
+| `land`: `reviewDecision: CHANGES_REQUESTED` | PARK unconditionally; never `--admin` past a human's stated objection, even holding admin rights (Step 10) |
+| `land`: required checks not green | Never `--admin`; it bypasses required checks too. Fix or park. The 3-attempt cap has no admin escape hatch (Step 10) |
+| `land`: `gh pr merge` fails with "asynchronous merge REST API" | The PR's base is another open PR's branch, which `land` forbids: report the topology invariant as violated and STOP (Step 10) |
+| `land`: resume lands on a Segment recorded `PARKED` | Re-check `gh pr view <n> --json state,mergedAt,reviewDecision` FIRST. `MERGED` -> continue; `APPROVED` -> re-enter at the merge attempt only; still blocked -> report and stop, redoing nothing (Step 10) |
+| `land`: Segment reads `MERGED` | `git fetch origin <default>`; `git diff origin/<default> <segment-branch> -- <Segment Files>` MUST be empty before Segment N+1's branch is created (Step 10) |
+| `land`: a re-split fired (`s<N>b`) | Don't open `s<N>b`'s PR yet: land the current Segment, then `git rebase --onto origin/<default> <split-sha>` and deliver it against the default branch (Step 5) |
+| `land`: any `gh pr merge` invocation | Never pass `--delete-branch`; it deletes the local branch even when the merge fails (Step 10) |
 
 ## Teardown (MUST run, even on failure or abort)
 
