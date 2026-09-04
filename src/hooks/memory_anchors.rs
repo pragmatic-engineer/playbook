@@ -513,6 +513,7 @@ fn append_unanchored_fact_rows(nodes: &[Value], inscope: &HashSet<&str>, rows: &
 fn in_scope(node: &Value, repo: &str) -> bool {
     match node.get("scope").and_then(Value::as_str) {
         Some("global") => true,
+        Some("org") => node.get("project").and_then(Value::as_str) == repo.split('/').next(),
         Some("project") => node.get("project").and_then(Value::as_str) == Some(repo),
         _ => false,
     }

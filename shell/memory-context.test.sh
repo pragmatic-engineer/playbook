@@ -173,6 +173,34 @@ assert_contains "$EDGES" "fact-one depends_on fact-two" "anchors split: typed ed
 assert_not_contains "$EDGES" "anchors" "anchors split: anchors relation absent from typed-edges section"
 assert_contains "$OUT" "src/thing.py: fact-one" "anchors split: anchor still renders in the anchor index"
 
+# 7: org scope matches by owner, not by full repo.
+# Arrange: an org fact for ownerA, a project fact for ownerA/repoA, a project fact for ownerB/repoB.
+GRAPH7="${WORK}/org-scope.json"
+cat > "$GRAPH7" <<'EOF'
+{
+  "nodes": [
+    {"id": "ownerA/org-fact", "file": "ownerA/org-fact.md", "scope": "org", "type": "user", "name": "org-wide-fact", "description": "Shared across every ownerA repo.", "project": "ownerA"},
+    {"id": "ownerA/repoA/a1", "file": "ownerA/repoA/a1.md", "scope": "project", "type": "project", "name": "repo-a-fact", "description": "Belongs only to repo A.", "project": "ownerA/repoA"},
+    {"id": "ownerB/repoB/b1", "file": "ownerB/repoB/b1.md", "scope": "project", "type": "project", "name": "repo-b-fact", "description": "Belongs only to repo B.", "project": "ownerB/repoB"}
+  ],
+  "edges": []
+}
+EOF
+# Act (repo A)
+run_ctx --repo ownerA/repoA --graph "$GRAPH7"
+# Assert
+assert_contains "$OUT" "org-wide-fact" "org scope: visible from ownerA/repoA"
+assert_contains "$OUT" "repo-a-fact" "org scope: repo A's own fact still visible"
+assert_not_contains "$OUT" "repo-b-fact" "org scope: repo B's fact absent"
+# Act (a sibling repo under the same owner)
+run_ctx --repo ownerA/repoB --graph "$GRAPH7"
+# Assert
+assert_contains "$OUT" "org-wide-fact" "org scope: visible from a sibling repo under the same owner"
+# Act (a different owner)
+run_ctx --repo ownerB/repoB --graph "$GRAPH7"
+# Assert
+assert_not_contains "$OUT" "org-wide-fact" "org scope: absent for a different owner"
+
 TOTAL=$(( PASS + FAIL ))
 echo ""
 echo "${PASS}/${TOTAL} scenarios passed"

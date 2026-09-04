@@ -556,6 +556,74 @@ fn a_global_promoted_fact_injects_regardless_of_repo() {
     );
 }
 
+#[test]
+fn an_org_scoped_promoted_fact_injects_for_a_sibling_repo_under_the_same_owner() {
+    // Arrange: an org fact owned by "acme", session runs in a sibling repo that did not save it.
+    let work = scratch_dir("promoted-fact-org");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-promoted-org");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        r#"{"nodes":[{"id":"acme/org-promoted-fact","file":"acme/org-promoted-fact.md","scope":"org","type":"reference","name":"org-promoted-fact-name","description":"Shared across every acme repo.","project":"acme"}],"edges":[]}"#,
+    )
+    .unwrap();
+    fs::write(
+        memory_dir.join("memory.signals.json"),
+        r#"{"nodes":{"acme/org-promoted-fact":{"hits":3,"promoted":true}}}"#,
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("org-promoted-fact-name"),
+        "an org-scoped promoted fact should inject for any repo under its owner: {context}"
+    );
+}
+
+#[test]
+fn an_org_scoped_promoted_fact_does_not_leak_to_a_different_owner() {
+    // Arrange: the org fact belongs to "acme", session runs in a repo owned by "other-org".
+    let work = scratch_dir("promoted-fact-org-other-owner");
+    let repo_slug = "other-org/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-promoted-org-other-owner");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        r#"{"nodes":[{"id":"acme/org-promoted-fact","file":"acme/org-promoted-fact.md","scope":"org","type":"reference","name":"org-promoted-fact-name","description":"Shared across every acme repo.","project":"acme"}],"edges":[]}"#,
+    )
+    .unwrap();
+    fs::write(
+        memory_dir.join("memory.signals.json"),
+        r#"{"nodes":{"acme/org-promoted-fact":{"hits":3,"promoted":true}}}"#,
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        !context.contains("org-promoted-fact-name"),
+        "an org-scoped fact must not leak into a session under a different owner: {context}"
+    );
+}
+
 // ---------------------------------------------------------------------
 // session-init: ADR 0008 WU-3, reload a persisted handoff at SessionStart
 // ---------------------------------------------------------------------
