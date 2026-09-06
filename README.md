@@ -215,6 +215,8 @@ The shipped install seed (`settings.shared.json`) carries a conservative permiss
 
 It is not a sandbox. Some commands still run without a prompt: `git`, `gh`, `find -exec`, the `sed` e-command, and anything under `Bash(**/.claude/**)`. The split lowers the default prompt surface, nothing more. Autoupdates ship disabled through `DISABLE_AUTOUPDATER` in the env block; remove it or set it to `0` to turn them back on.
 
+The seed also ships `autoMemoryEnabled: false`, turning off Claude Code's own automatic memory capture. Playbook's [memory system](docs/concepts/02-memory-system.md) already covers that job with reviewed, typed facts; running both would mean a second, uncurated store with no cross-referencing to the first. Set it back to `true` in your own `settings.json` if you want both.
+
 To report a vulnerability, see [SECURITY.md](SECURITY.md); that page covers disclosure, not this permissions default.
 
 ## License

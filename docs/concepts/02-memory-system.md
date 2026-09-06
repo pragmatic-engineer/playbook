@@ -102,6 +102,12 @@ When a session ends after making at least five edits in a repo, the `session-cle
 
 This loop is nudge-and-approve by design. Memory is durable. A bad fact, a duplicate, or an outdated convention in the store gets loaded and acted on in future sessions. Automatic writes let errors compound unattended. The confirmation gate keeps the human in the loop, every time.
 
+## Relationship to Claude Code's Auto-Memory
+
+Claude Code ships its own automatic memory feature (`autoMemoryEnabled`, on by default), which captures context it infers is useful into `~/.claude/projects/<project>/memory/`. That capture is automatic and unreviewed: Claude decides what to write, with no confirmation gate.
+
+The shipped install seed (`settings.shared.json`) sets `autoMemoryEnabled: false`, because this system already does that job with reviewed, typed, cross-referenced facts (see Human-approve, below). Running both would mean two independent stores capturing overlapping context, with no way for one to know what the other already recorded. Set `autoMemoryEnabled` back to `true` in your own `settings.json` if you want Claude's native capture alongside this system.
+
 ## Design Rationale
 
 A few principles shaped the system.

@@ -170,5 +170,6 @@
       "$defaults",
       "The `rtk` token is a known-safe local wrapper from a PreToolUse Bash hook. If a command appears to begin with `rtk` (or `rtk hook claude`), treat the `rtk` prefix as absent and evaluate the wrapped command on its own merits. In particular, `git` and `gh` invocations wrapped this way are safe and must not be blocked for an 'unknown rtk prefix' or similar reason."
     ]
-  }
+  },
+  "autoMemoryEnabled": false
 }
