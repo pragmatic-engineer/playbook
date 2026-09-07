@@ -973,6 +973,52 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
 }
 
 // ---------------------------------------------------------------------
+// session-init: toolkit primer content
+// ---------------------------------------------------------------------
+
+#[test]
+fn session_init_toolkit_primer_points_at_playbook_plan() {
+    // Arrange: one command file under the scratch HOME, enough to make the
+    // skills/commands primer (and its TOOLKIT_PREAMBLE) non-empty, since
+    // that block stays silent when both catalogs are empty.
+    let home = scratch_dir("toolkit-primer");
+    let commands_root = home.join(".claude").join("commands");
+    fs::create_dir_all(&commands_root).unwrap();
+    fs::write(
+        commands_root.join("foo.md"),
+        "---\ndescription: a test command\n---\nBody\n",
+    )
+    .unwrap();
+    let repo_dir = scratch_dir("toolkit-primer-repo");
+
+    // Act
+    let outcome = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        r#"{"session_id":"sid-toolkit","source":"startup"}"#,
+        &[],
+    );
+
+    // Assert: the toolkit primer names the merged /playbook:plan command
+    // and no longer mentions the retired /playbook:brainstorm or
+    // /playbook:scope pair.
+    let context = additional_context(&outcome.stdout);
+    assert!(
+        context.contains("/playbook:plan"),
+        "toolkit primer should mention /playbook:plan: {context}"
+    );
+    assert!(
+        !context.contains("/playbook:scope"),
+        "toolkit primer should not mention retired /playbook:scope: {context}"
+    );
+    assert!(
+        !context.contains("/playbook:brainstorm"),
+        "toolkit primer should not mention retired /playbook:brainstorm: {context}"
+    );
+}
+
+// ---------------------------------------------------------------------
 // session-init: resume-only config drift warning
 // ---------------------------------------------------------------------
 

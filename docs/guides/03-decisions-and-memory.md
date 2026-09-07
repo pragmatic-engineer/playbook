@@ -4,9 +4,9 @@ Two commands handle durable knowledge. `/playbook:adr` records architectural dec
 
 ## /playbook:adr: Recording a Decision
 
-Use `/playbook:adr` when you're making a real architectural choice and want a durable record: what you chose, why, and why the alternatives lost. Use `/playbook:scope` when a decision's already made and you need an implementation plan only.
+Use `/playbook:adr` when you're making a real architectural choice and want a durable record: what you chose, why, and why the alternatives lost. Use `/playbook:plan` when a decision's already made and you need an implementation plan only.
 
-The practical split: `/playbook:adr` produces a decision record plus an optional execution blueprint. `/playbook:scope` produces a plan with no decision record attached.
+The practical split: `/playbook:adr` produces a decision record plus an optional execution blueprint. `/playbook:plan` produces a plan with no decision record attached.
 
 ### The flow
 
@@ -35,7 +35,7 @@ The blueprint is self-contained. Run `/playbook:implement docs/adr/0001-...-blue
 
 ### What /playbook:adr writes to memory
 
-During investigation, any durable conventions or gotchas discovered get written as project memory facts. After the gate passes, the decision itself and each rejected alternative (with reasoning) land in memory so future `/playbook:scope` and `/playbook:adr` runs don't re-propose them.
+During investigation, any durable conventions or gotchas discovered get written as project memory facts. After the gate passes, the decision itself and each rejected alternative (with reasoning) land in memory so future `/playbook:plan` and `/playbook:adr` runs don't re-propose them.
 
 ## /playbook:learn-project: Building Project Knowledge
 
