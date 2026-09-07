@@ -14,10 +14,6 @@ No smart-ass tone. Don't flatter, praise, validate, or agree without stating a c
 
 When writing prose for human readers, invoke the `playbook:writing-style` skill first. This covers PR descriptions, review and issue comments, ticket descriptions, ADRs, and anything going to Confluence, Slack, or Jira. Posting, sending, replying, commenting, and updating all count as writing: "post this to Jira", "reply to that comment", "send this to the team", "update the ticket" each load the skill before a word is drafted, including when the text is one line or you are only editing an existing draft. It carries the voice rules, banned-word list, and GitHub review/reply patterns. These are distinct from the Output rules above, which govern replies to me.
 
-## CLI Environment
-
-RTK (Rust Token Killer) is active: rewrites commands via PreToolUse hook, 0 overhead. Meta commands: `rtk gain`, `rtk gain --history`, `rtk discover`, `rtk proxy <cmd>`. Verify: `rtk --version`.
-
 ## Code
 
 **Plan mode**: In this repo, `/playbook:plan` and `/playbook:adr` (Planning pipeline, below) ARE the design-work ritual: each already runs on Opus at high effort by its own frontmatter. Use them instead of the built-in `EnterPlanMode` tool for design work here. Reach for generic plan mode only in a repo with no equivalent custom command. Skip both for mechanical, already-specified work.

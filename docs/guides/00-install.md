@@ -11,7 +11,6 @@ This page covers requirements, the full local install path with the curl one-lin
 | zsh | required for `cc worktree` | the worktree subcommand is zsh-only; all other `cc` subcommands and `ccd` work in bash |
 | `git`, `jq`, `shasum` | required | used by hooks and the install script |
 | `python3` 3.9+ | required | used by two bash hooks (path resolution and the memory-graph rebuild); the hooks themselves are bash |
-| `rtk` (Rust Token Killer) | required | a PreToolUse hook routes every Bash command through it to cut token use |
 | `gh` | optional | statusline PR and CI status |
 | `agent-browser` | optional | browser automation MCP used by `/playbook:plan` for web-only tickets and attachments |
 
