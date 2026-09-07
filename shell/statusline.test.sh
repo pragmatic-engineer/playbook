@@ -321,6 +321,85 @@ assert_eq "line 3 carries the 5h quota" \
     "$( [[ "$t10_line3" == *"5h"* ]] && echo yes || echo no )" "yes"
 rm -rf "$t10_home"
 
+# 11. is_workspace_project / STATUSLINE_CI_ROOTS + STATUSLINE_JIRA_BASE_URL (S3).
+#
+# Builds a throwaway git repo with a GitHub origin remote and a pre-populated
+# PR cache file so render_pr_right's CI/Jira paths run without touching the
+# network or invoking gh. Echoes the repo dir, which the caller uses as cwd.
+_ci_repo_setup() {
+    local home="$1" branch="$2" status_rollup="$3"
+    local repo_dir cache_dir pr_file
+    repo_dir="$home/proj/nested-repo"
+    mkdir -p "$repo_dir"
+    git -C "$repo_dir" init -q -b "$branch" >/dev/null 2>&1
+    git -C "$repo_dir" remote add origin "https://github.com/testowner/testrepo.git" >/dev/null 2>&1
+    cache_dir="$home/.cache/statusline"
+    mkdir -p "$cache_dir"
+    pr_file="$cache_dir/pr-$(cache_slug "${repo_dir}::${branch}").json"
+    printf '{"number":42,"author":{"login":"alice"},"reviewDecision":"APPROVED","state":"OPEN","mergedAt":null,"closedAt":null,"body":"","latestReviews":[],"reviewRequests":[],"statusCheckRollup":%s}' \
+        "$status_rollup" > "$pr_file"
+    printf '%s' "$repo_dir"
+}
+
+# 11a. REGRESSION: today's hardcoded $HOME/Workspace/ check hides the CI badge
+# for every repo outside that one tree. With STATUSLINE_CI_ROOTS unset, the CI
+# badge must appear for any git repo.
+c1_home=$(mktemp -d)
+c1_repo=$(_ci_repo_setup "$c1_home" "chore/no-ticket" '[{"status":"completed","conclusion":"failure"}]')
+c1_out=$(env -u STATUSLINE_CI_ROOTS HOME="$c1_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$c1_repo\"}" 2>&1)
+assert_eq "CI segment appears outside \$HOME/Workspace/ when STATUSLINE_CI_ROOTS is unset" \
+    "$( [[ "$c1_out" == *"CI"*"1/1"* ]] && echo yes || echo no )" "yes"
+rm -rf "$c1_home"
+
+# 11b. STATUSLINE_CI_ROOTS set to a root that does NOT contain cwd hides the badge.
+c2_home=$(mktemp -d)
+c2_repo=$(_ci_repo_setup "$c2_home" "chore/no-ticket" '[{"status":"completed","conclusion":"failure"}]')
+c2_root=$(mktemp -d)
+c2_out=$(STATUSLINE_CI_ROOTS="$c2_root" HOME="$c2_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$c2_repo\"}" 2>&1)
+assert_eq "CI segment absent when STATUSLINE_CI_ROOTS excludes cwd" \
+    "$( [[ "$c2_out" == *"CI ✗"* ]] && echo yes || echo no )" "no"
+rm -rf "$c2_home" "$c2_root"
+
+# 11c. STATUSLINE_CI_ROOTS set to a root that DOES contain cwd shows the badge.
+c3_home=$(mktemp -d)
+c3_repo=$(_ci_repo_setup "$c3_home" "chore/no-ticket" '[{"status":"completed","conclusion":"failure"}]')
+c3_out=$(STATUSLINE_CI_ROOTS="$c3_home" HOME="$c3_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$c3_repo\"}" 2>&1)
+assert_eq "CI segment appears when STATUSLINE_CI_ROOTS includes cwd" \
+    "$( [[ "$c3_out" == *"CI ✗"* ]] && echo yes || echo no )" "yes"
+rm -rf "$c3_home"
+
+# 11d. STATUSLINE_JIRA_BASE_URL unset: ticket renders as plain text, no
+# org-specific "atlassian" string leaks into the output.
+j1_home=$(mktemp -d)
+j1_repo=$(_ci_repo_setup "$j1_home" "feature/PROJ-123-thing" '[]')
+j1_out=$(env -u STATUSLINE_JIRA_BASE_URL HOME="$j1_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$j1_repo\"}" 2>&1)
+assert_eq "Jira ticket renders as plain text when STATUSLINE_JIRA_BASE_URL is unset" \
+    "$( [[ "$j1_out" == *"PROJ-123"* ]] && echo yes || echo no )" "yes"
+assert_eq "no atlassian string leaks when STATUSLINE_JIRA_BASE_URL is unset" \
+    "$( [[ "$j1_out" == *"atlassian"* ]] && echo yes || echo no )" "no"
+rm -rf "$j1_home"
+
+# 11e. STATUSLINE_JIRA_BASE_URL set: ticket hyperlinks to "<base>/browse/<ticket>".
+# STATUSLINE_OSC8=true forces the hyperlink escape so the URL is observable in
+# captured output regardless of the test terminal's actual capability.
+j2_home=$(mktemp -d)
+j2_repo=$(_ci_repo_setup "$j2_home" "feature/PROJ-123-thing" '[]')
+j2_out=$(STATUSLINE_JIRA_BASE_URL="https://example.atlassian.net" STATUSLINE_OSC8=true \
+    HOME="$j2_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$j2_repo\"}" 2>&1)
+assert_eq "Jira ticket links to the configured base URL" \
+    "$( [[ "$j2_out" == *"https://example.atlassian.net/browse/PROJ-123"* ]] && echo yes || echo no )" "yes"
+rm -rf "$j2_home"
+
+# 11f. A trailing slash on STATUSLINE_JIRA_BASE_URL must not produce a double
+# slash in front of "browse".
+j3_home=$(mktemp -d)
+j3_repo=$(_ci_repo_setup "$j3_home" "feature/PROJ-123-thing" '[]')
+j3_out=$(STATUSLINE_JIRA_BASE_URL="https://example.atlassian.net/" STATUSLINE_OSC8=true \
+    HOME="$j3_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$j3_repo\"}" 2>&1)
+assert_eq "trailing slash on STATUSLINE_JIRA_BASE_URL does not double up" \
+    "$( [[ "$j3_out" == *"https://example.atlassian.net/browse/PROJ-123"* && "$j3_out" != *"//browse"* ]] && echo yes || echo no )" "yes"
+rm -rf "$j3_home"
+
 TOTAL=$(( PASS + FAIL ))
 echo ""
 echo "${PASS}/${TOTAL} scenarios passed"
