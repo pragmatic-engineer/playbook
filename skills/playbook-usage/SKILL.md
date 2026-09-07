@@ -5,10 +5,11 @@ description: Use when a session doesn't have prompts/SYSTEM_PROMPT.md installed 
 
 # Playbook Usage
 
-`pragmatic-engineer/playbook` is a Claude Code plugin: 13 slash commands under
-`/playbook:*` plus supporting skills and hooks. Its primary flow is a four-stage
-planning pipeline, `/playbook:brainstorm` then `/playbook:scope` or
-`/playbook:adr` then `/playbook:implement`, that takes a raw idea through a
+`pragmatic-engineer/playbook` is a Claude Code plugin: 12 slash commands under
+`/playbook:*` plus supporting skills and hooks. Its primary flow is a planning
+pipeline, `/playbook:plan` (its own divergent phase settles the direction,
+then converges on a verified plan) or `/playbook:adr` for a hard-to-reverse
+decision, then `/playbook:implement`, that takes a raw idea through a
 verified plan to delivered code. Some pipeline commands run the moment the
 intent matches, no confirmation asked; others only offer in one line and wait
 for a yes before doing anything (see Trigger phrases, below).
@@ -19,8 +20,7 @@ for a yes before doing anything (see Trigger phrases, below).
 
 | Command | One-line purpose | When to reach for it |
 |---|---|---|
-| `/playbook:brainstorm` | Divergent discovery on a raw idea: challenges the premise, weighs 2-3 approaches, produces an approved PRD and design doc. | The direction is not settled yet: an idea seed, open-ended exploration, or genuine uncertainty about approach. |
-| `/playbook:scope` | Interview-driven planning that turns a settled direction into a verified implementation plan, its Work Units grouped into PR-sized Segments. | The direction is settled and the work needs a concrete plan to hand to `/playbook:implement`. |
+| `/playbook:plan` | One continuous, interview-driven session from a raw idea to a verified implementation plan: opens divergent (challenges the premise, weighs 2-3 approaches) then converges into an interview for Work Units and Segments, its Work Units grouped into PR-sized Segments. | Any planning need, whether the direction is still open (an idea seed, open-ended exploration, genuine uncertainty about approach) or already settled (a defined feature ready for a plan): the session settles it either way before producing the plan to hand to `/playbook:implement`. |
 | `/playbook:adr` | Records a hard-to-reverse architectural decision as a fact-checked ADR, with an optional execution blueprint, saved to `docs/adr/`. | Choosing between named alternatives, a decision that is expensive to undo, or a request to document the reasoning behind a choice. |
 | `/playbook:implement` | Executes an approved plan or ADR blueprint: delegates Work Units to subagents, commits each as a savepoint, delivers PR-sized Segments, ends with a refinement pass and adversarial review. `--boundary=land` opts in to merging each Segment autonomously before starting the next. | An approved plan or blueprint already exists and it's time to build it. Execute-only, never designs new scope. |
 
@@ -50,15 +50,14 @@ for a yes before doing anything (see Trigger phrases, below).
 
 ## Trigger phrases for the planning pipeline
 
-`/playbook:brainstorm` runs silently, no confirmation asked, when the
-direction isn't settled: an idea seed ("I have an idea about X", "what if we
-did X"), open-ended exploration ("let's brainstorm this", "what are our
-options"), or genuine uncertainty ("not sure how to approach X").
-
-`/playbook:scope` also runs silently, once the direction is settled: a
-defined feature ready for a plan ("let's plan this out", "let's scope this",
-"break this down"), or a continuation of an already-settled idea ("let's turn
-that into a plan").
+`/playbook:plan` runs silently, no confirmation asked, whether the direction
+is settled or not: an idea seed ("I have an idea about X", "what if we did
+X"), open-ended exploration ("let's brainstorm this", "what are our
+options"), genuine uncertainty ("not sure how to approach X"), a defined
+feature ready for a plan ("let's plan this out", "let's scope this", "break
+this down"), or a continuation of an already-settled idea ("let's turn that
+into a plan"). The session's own divergent phase settles the direction first
+when it isn't already, so there's no separate command to pick between.
 
 `/playbook:adr` never runs silently: it offers in one line and waits for a
 yes, on a choice between named alternatives ("should we use X or Y", "X vs
@@ -69,8 +68,7 @@ a request to record the reasoning ("let's document why we picked X").
 when an approved plan or ADR blueprint already exists: a green light ("let's
 do this", "go ahead", "ship it"), a direct build request ("implement this",
 "start building it"), or a resume ("let's pick this back up"). Without an
-approved plan or blueprint, it says so and offers `/playbook:scope` (or
-`/playbook:brainstorm` first, if the direction isn't settled either) instead.
+approved plan or blueprint, it says so and offers `/playbook:plan` instead.
 
 ## Delivery pattern
 

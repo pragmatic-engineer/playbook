@@ -152,7 +152,7 @@ Requirements:
 - The Decision section gives the reasoning for rejecting each alternative.
 - **Diagrams:** keep them readable, label nodes meaningfully, pick the right type (flowchart for components, sequence for interactions, state for lifecycles, ER for schemas). Always include current-state and proposed-state.
 
-**Knowledge capture:** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record the decision and each rejected alternative as memory facts (so future planning, including `/playbook:scope`, doesn't re-propose them), with the same locked `MEMORY.md` append shown in Stage 1. If no project store is present, skip this step silently.
+**Knowledge capture:** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record the decision and each rejected alternative as memory facts (so future planning, including `/playbook:plan`, doesn't re-propose them), with the same locked `MEMORY.md` append shown in Stage 1. If no project store is present, skip this step silently.
 
 Present the draft. Revise in place on feedback. Repeat until the user explicitly approves.
 
@@ -196,10 +196,10 @@ After the record is approved, write `{DIR}/{base}-blueprint.md` (`{base}` = file
 
 - Confidence: HIGH | MEDIUM | LOW, <one line on what makes it that>
 - Open items (verify downstream): each one MUST be stated precisely enough that whoever picks it up next knows exactly what to check or decide. If it can't be phrased that precisely yet, say so plainly instead of listing a vague placeholder that only looks actionable.
-  - <blind spot or LOW-confidence premise>, <who verifies: /playbook:scope interview, /playbook:implement watch>
+  - <blind spot or LOW-confidence premise>, <who verifies: /playbook:plan interview, /playbook:implement watch>
 ```
 
-Requirements: each work unit independently verifiable and committable as one small unit; file plans reference real existing paths; verification commands are literal (no placeholders); the Ordering table shows each WU's `Requires` and `Parallel group`; the test plan follows `playbook:engineering-standards`. Mark a shared `Parallel group` only when its members have no dependency on each other, touch disjoint files, and share no mutable state or ordering-sensitive step; otherwise leave them sequential. `/playbook:implement` consumes this blueprint exactly like a `/playbook:scope` plan: one small commit per WU, parallel-safe WUs dispatched to concurrent agents.
+Requirements: each work unit independently verifiable and committable as one small unit; file plans reference real existing paths; verification commands are literal (no placeholders); the Ordering table shows each WU's `Requires` and `Parallel group`; the test plan follows `playbook:engineering-standards`. Mark a shared `Parallel group` only when its members have no dependency on each other, touch disjoint files, and share no mutable state or ordering-sensitive step; otherwise leave them sequential. `/playbook:implement` consumes this blueprint exactly like a `/playbook:plan` plan: one small commit per WU, parallel-safe WUs dispatched to concurrent agents.
 
 Present the blueprint. Revise in place until the user explicitly approves.
 

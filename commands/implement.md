@@ -8,7 +8,7 @@ effort: high
 
 # Implement: Execute a Verified Plan
 
-Execute an approved implementation plan or ADR blueprint. **This command is execute-only: it does NOT design or plan new scope.** Produce the plan with `/playbook:scope` (or `/playbook:adr` for an architectural decision) first, then implement it here. The one exception is the Step 8 refinement pass, which re-plans and applies behaviour-preserving cleanups to the code it just wrote (never new features).
+Execute an approved implementation plan or ADR blueprint. **This command is execute-only: it does NOT design or plan new scope.** Produce the plan with `/playbook:plan` (or `/playbook:adr` for an architectural decision) first, then implement it here. The one exception is the Step 8 refinement pass, which re-plans and applies behaviour-preserving cleanups to the code it just wrote (never new features).
 
 **Incremental delivery.** `/playbook:implement` delivers the plan as PR-sized **Segments**, not one big change: it executes Segment by Segment, commits each Work Unit as a savepoint, and opens one small pull request per Segment (independent off the default branch when Segments are disjoint, stacked only when they truly depend on each other). Before executing, it asks how to deliver (PR topology and Segment-boundary behaviour) and recommends an option based on the plan's scope; under `--auto` it self-selects the recommended options and records them as assumptions. This follows `playbook:engineering-standards`: PRs under 500 lines, one concern each, "ship a sequence of small PRs".
 
@@ -64,7 +64,7 @@ It honors the plan's Segments but re-splits any whose real diff exceeds the
 pull request.
 
 PLANNING: /playbook:implement never designs. If the reference isn't a ready plan, it
-stops and tells you to run /playbook:scope or /playbook:adr first.
+stops and tells you to run /playbook:plan or /playbook:adr first.
 
 REFINEMENT: after implementing, /playbook:implement runs one pass (self quick-review +
 SOLID/DRY/KISS/YAGNI simplify, executed autonomously) then an adversarial
@@ -94,7 +94,7 @@ fi
 found=0
 for f in "$PLANS_DIR"/*.md "$ROOT"/docs/adr/*-blueprint.md; do
   [ -f "$f" ] || continue
-  case "$f" in *-quality.md) continue;; esac
+  case "$f" in *-quality.md|*.checkpoint.md) continue;; esac
   found=1
   title=$(grep -m1 '^#\{1,\} ' "$f" | sed 's/^#\{1,\} *//')
   st=$(grep -m1 -iE 'status' "$f" | grep -ioE 'proposed|accepted|implemented' | head -1)
@@ -103,7 +103,7 @@ done
 [ "$found" = 0 ] && echo "NO_PLANS"
 ```
 
-Present the rows as a numbered menu (index, status, title, path), listing unexecuted entries (`Proposed`/`Accepted`) first and `Implemented` last. Ask the user to pick a number, or to preview one first (Read it, show the summary, then re-ask). If the output is `NO_PLANS`, stop and tell the user to run `/playbook:scope` or `/playbook:adr` to create one. If the output starts with `PLAN_PATH_ERROR:`, stop and show the user that error verbatim (most likely no git `origin` remote); do NOT suggest running `/playbook:scope`, since the problem isn't an absence of plans. Use the chosen file as the task reference, then continue below. Any flags passed (e.g. `--auto`) still apply to the chosen plan.
+Present the rows as a numbered menu (index, status, title, path), listing unexecuted entries (`Proposed`/`Accepted`) first and `Implemented` last. Ask the user to pick a number, or to preview one first (Read it, show the summary, then re-ask). If the output is `NO_PLANS`, stop and tell the user to run `/playbook:plan` or `/playbook:adr` to create one. If the output starts with `PLAN_PATH_ERROR:`, stop and show the user that error verbatim (most likely no git `origin` remote); do NOT suggest running `/playbook:plan`, since the problem isn't an absence of plans. Use the chosen file as the task reference, then continue below. Any flags passed (e.g. `--auto`) still apply to the chosen plan.
 
 Otherwise, resolve `$ARGUMENTS` (minus flags) by format:
 
@@ -119,9 +119,9 @@ If a fetch fails, ask the user to paste the task content.
 
 Decide whether the resolved reference is a **ready, executable plan**: it names concrete files to change, an ordered set of steps or Work Units, acceptance criteria, and a test plan (Gherkin scenarios or TDD cycles).
 
-- A `/playbook:scope` plan or `/playbook:adr` blueprint → ready. Proceed.
+- A `/playbook:plan` plan or `/playbook:adr` blueprint → ready. Proceed.
 - A spec/issue/ticket detailed enough (explicit files, steps, acceptance criteria, tests) → ready. Proceed.
-- **Anything else** (raw text, a thin issue/ticket, a vague request) → **STOP.** Tell the user: "This isn't a ready plan. Run `/playbook:scope` (or `/playbook:adr` for an architectural decision) to produce one, then `/playbook:implement` it." Do NOT generate a plan inline; planning is `/playbook:scope` and `/playbook:adr`'s job. (The Step 8 refinement pass is the sole exception, and only to re-plan refactors of code already written, never new scope.)
+- **Anything else** (raw text, a thin issue/ticket, a vague request) → **STOP.** Tell the user: "This isn't a ready plan. Run `/playbook:plan` (or `/playbook:adr` for an architectural decision) to produce one, then `/playbook:implement` it." Do NOT generate a plan inline; planning is `/playbook:plan` and `/playbook:adr`'s job. (The Step 8 refinement pass is the sole exception, and only to re-plan refactors of code already written, never new scope.)
 
 If the plan or ADR blueprint ends with a "Confidence + open items" trailer, read it and carry the open items as a watch list through execution and the refinement/adversarial review: treat them as the spots most likely to be wrong, and confirm or resolve each before claiming the work done.
 
@@ -151,7 +151,7 @@ printf '%s\n' "- [<kebab-title>](<file>.md): <one-line hook>" >> "$MEMORY_MD"
 
 ## Step 4: Quality Gate (conditional)
 
-If the plan came from `/playbook:scope` or `/playbook:adr` it already has a companion `*-quality.md` report; trust it and skip to Step 5. Otherwise (a file/issue/ticket spec), run the inlined 3-phase gate before executing:
+If the plan came from `/playbook:plan` or `/playbook:adr` it already has a companion `*-quality.md` report; trust it and skip to Step 5. Otherwise (a file/issue/ticket spec), run the inlined 3-phase gate before executing:
 
 1. **Fact-Check** (`fact-checker` agent): every referenced path exists, signatures/imports match, downstream consumers identified, test infra present. After it returns, write its full raw return text to a file, e.g. `/tmp/<repo>/implement-<plan-slug>-fact-check.txt`, then run `playbook gate record <plan-slug> implement fact-check <that-file>`.
 2. **Adversarial Review** (`critic` agent, focus `pre-exec`, + the fact-check report): simpler alternatives, scope creep, missing error paths, blast radius. After it returns, write its full raw return text to a file, e.g. `/tmp/<repo>/implement-<plan-slug>-adversarial.txt`, then run `playbook gate record <plan-slug> implement adversarial <that-file>`.
@@ -167,7 +167,7 @@ Before proceeding past this gate, run `playbook gate check <plan-slug> implement
 
 **1. Resolve Segments.**
 
-- If the plan has a **Segments** table (a `/playbook:scope` plan does), use it: each Segment is an ordered group of Work Units, and the WU table's `Segment` column assigns every WU.
+- If the plan has a **Segments** table (a `/playbook:plan` plan does), use it: each Segment is an ordered group of Work Units, and the WU table's `Segment` column assigns every WU.
 - If it does NOT (an older plan, an issue, or a spec), **derive** Segments here: pack the Work Units into groups targeting under 500 changed lines (never over the 1500 hard limit), in dependency order, one concern per group where the WU titles make the boundary obvious. A tiny plan may be a single Segment.
 
 Either way, confirm the Segment ordering respects the WU `Requires` graph (no forward cross-Segment dependency) before continuing; reorder if needed.
@@ -199,7 +199,7 @@ Record the resolved Segments and the chosen strategy in the progress ledger (Ste
 
 ## Step 5: Execute (delegated subagents, reviewed)
 
-**Delegation (MUST):** this command runs on Sonnet. The orchestrating session reads the plan and delegates each implementation chunk to a subagent via the Agent tool, then reviews the result. Delegation keeps each chunk in a fresh, isolated context (no bleed between cycles); the orchestrator spends its turn reviewing, not editing. Independent Work Units run in parallel by default, each isolated in its own git worktree, with the model tier set per role (see the scheduler below). The deep design reasoning already happened in `/playbook:scope` or `/playbook:adr`, so execution doesn't need Opus.
+**Delegation (MUST):** this command runs on Sonnet. The orchestrating session reads the plan and delegates each implementation chunk to a subagent via the Agent tool, then reviews the result. Delegation keeps each chunk in a fresh, isolated context (no bleed between cycles); the orchestrator spends its turn reviewing, not editing. Independent Work Units run in parallel by default, each isolated in its own git worktree, with the model tier set per role (see the scheduler below). The deep design reasoning already happened in `/playbook:plan` or `/playbook:adr`, so execution doesn't need Opus.
 
 Every Agent prompt MUST include: a pointer to its Work Unit's brief file (Step 5's File-based handoff), which carries the plan content that dispatch needs, the specific cycle/step, the test-structure rules below, the design principles below, and grounding rules ("read files before modifying, match existing style, verify imports resolve, don't guess types, apply SOLID/DRY/KISS/YAGNI"). Point at the brief; don't paste the whole multi-WU plan into every prompt.
 
@@ -218,7 +218,7 @@ When SOLID's abstraction pulls against KISS/YAGNI, favour the simplest thing tha
 
 **Execution unit (MUST): the plan's Work Units, grouped by Segment.** Execute **one Segment at a time** in dependency order (Step 4.5). Within a Segment, execute its Work Units with the wave scheduler below; each WU becomes one small savepoint commit. The scheduler, worktree isolation, TDD flow, and verify-by-diff are unchanged; they just run scoped to the current Segment's WUs. **A wave never mixes WUs from two Segments:** the outer Segment loop is strictly sequential relative to the inner wave loop, so the ready set is always drawn from the current Segment only.
 
-**Per-Segment setup (MUST): branch per topology.** Before a Segment's first commit, put HEAD on the right branch (always branch-first; never commit to the default branch). `<seg-slug>` is the Segment's Title kebab-cased and truncated, the same way `<plan-slug>` derives from the topic (Step 7 of `/playbook:scope`). Capture the branch's starting ref as `<segment-base>` (used by the re-split guard):
+**Per-Segment setup (MUST): branch per topology.** Before a Segment's first commit, put HEAD on the right branch (always branch-first; never commit to the default branch). `<seg-slug>` is the Segment's Title kebab-cased and truncated, the same way `<plan-slug>` derives from the topic (Step 7 of `/playbook:plan`). Capture the branch's starting ref as `<segment-base>` (used by the re-split guard):
 
 - **Stacked:** `git switch -c <type>/<plan-slug>-s<N>-<seg-slug>` off the previous Segment's branch (Segment 1 off the default branch); `<segment-base>` is that starting ref. The base for Segment N's PR is Segment N-1's branch.
 - **Independent:** each Segment branch off the default branch; `<segment-base>` is the default branch.
@@ -381,7 +381,7 @@ Once the implementation is green, run ONE refinement pass over the code you just
 
 1. **Self quick-review (local).** Apply the `playbook:grounding-review` discipline to the branch diff: severity-classified findings, each with `file:line` evidence. Keep it local; don't post anything. Fix only the findings you hold with HIGH confidence (clear bug, dead code, obvious simplification). Leave low-confidence or speculative findings for the adversarial review (Step 9); don't guess.
 2. **Simplify & refactor analysis.** Read the changed files through the Design principles (SOLID, DRY, KISS, YAGNI). List concrete, behaviour-preserving changes: collapse needless indirection, delete dead or speculative code, dedupe real repetition, flatten tangled control flow, tighten names. Skip anything that changes behaviour or adds abstraction with no second caller.
-3. **Re-plan.** Fold the high-confidence fixes and accepted simplifications into a small set of refinement Work Units (same shape as a `/playbook:scope` plan: `Files`, `Requires`, `Done When`). Scope is limited to code already written. If a finding implies new feature work, record it as a follow-up; don't build it.
+3. **Re-plan.** Fold the high-confidence fixes and accepted simplifications into a small set of refinement Work Units (same shape as a `/playbook:plan` plan: `Files`, `Requires`, `Done When`). Scope is limited to code already written. If a finding implies new feature work, record it as a follow-up; don't build it.
 4. **Execute autonomously.** Run the refinement Work Units like `--auto`: TDD where it applies, behaviour-preserving refactors keep tests green, commit each WU with `/playbook:commit-and-push`. Then re-run the validation checks from Step 7 (type-check/lint/test only, not the status flip or the continue-to-Step-8 handoff); they MUST stay green.
 
 Run this pass once. Don't loop: Step 9 is the backstop for whatever remains.
@@ -447,7 +447,7 @@ Each lens gives severity-classified findings with `file:line` evidence and a fix
 
 **Boundary behaviour.** With **savepoint** (the default, and `--auto`), open the whole PR set here at the end. With **pause after each PR**, Step 9 has already run per Segment (its scoped review before the PR), so this step opens that one Segment's PR and stops for the user before the next Segment. With **land**, this step opens that one Segment's PR as a draft and then continues straight into Step 10, which promotes, gates on CI, merges, and only then returns to Step 5 for the next Segment.
 
-**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings, the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:deep-review`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Under **land**, this step hands off to Step 10 instead of finishing here; the true finish is Step 10's own report once the Segment reads `MERGED` (or `PARKED`). Starting the next feature: run `/clear` before the next `/playbook:brainstorm` or `/playbook:scope`, so this run's plan, dispatch history, and fixes don't carry into it.
+**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings, the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:deep-review`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Under **land**, this step hands off to Step 10 instead of finishing here; the true finish is Step 10's own report once the Segment reads `MERGED` (or `PARKED`). Starting the next feature: run `/clear` before the next `/playbook:plan`, so this run's plan, dispatch history, and fixes don't carry into it.
 
 ## Step 10: Land the Segment (`--boundary=land` only)
 
@@ -608,7 +608,7 @@ That last diff MUST be empty. A squash-merge collapses the branch's internal sha
 
 | Scenario | Action |
 | --- | --- |
-| Reference isn't a ready plan | STOP; tell the user to run `/playbook:scope` or `/playbook:adr` first (Step 2) |
+| Reference isn't a ready plan | STOP; tell the user to run `/playbook:plan` or `/playbook:adr` first (Step 2) |
 | Task is ambiguous | Ask the user before executing |
 | Plan needs new dependencies | List them and ask for approval (vet maintenance/license/CVEs) |
 | Touches auth/security code | Flag for extra review; be conservative |

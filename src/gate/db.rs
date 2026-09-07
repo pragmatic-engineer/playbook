@@ -55,7 +55,7 @@ pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
     // the write lock (the schema creation below, and future callers
     // opening the same fresh file concurrently): a connection's default
     // busy timeout is 0, so an SQLITE_BUSY hit before this is set fails
-    // immediately instead of retrying. `commands/scope.md` fires two
+    // immediately instead of retrying. `commands/plan.md` fires two
     // `gate record` processes in parallel (Phase 2 and Phase 3), so this
     // ordering is load-bearing, not cosmetic.
     conn.busy_timeout(Duration::from_millis(5000))
@@ -118,7 +118,9 @@ const MIGRATION_SENTINEL: &str = ".migration-complete";
 /// The legacy items a pre-ADR-0012 checkout held under its own `.claude/`.
 const LEGACY_ITEMS: &[&str] = &["state.db", "plans", "designs", "implement", "worktrees"];
 
-/// Moves legacy `.claude/{state.db,plans,designs,implement,worktrees}` items under `repo_root` to `dest_base`, once, locked against scope.md's two parallel `gate record` calls.
+/// Moves legacy `.claude/{state.db,plans,designs,implement,worktrees}` items
+/// under `repo_root` to `dest_base`, once, locked against plan.md's two
+/// parallel `gate record` calls.
 pub fn migrate_legacy_repo_local(repo_root: &Path, dest_base: &Path) -> Result<(), String> {
     let legacy_root = repo_root.join(".claude");
     let sentinel = dest_base.join(MIGRATION_SENTINEL);
