@@ -25,7 +25,7 @@ const MSG: &str = r#"This prompt looks like design / architecture work. Your mai
 
 Recommended for design-heavy prompts:
   - Plan (Agent tool, `model: "opus"`), implementation planning and architecture with codebase grounding
-  - /playbook:brainstorm, ideation / requirements before any code
+  - /playbook:plan, ideation and requirements through a verified implementation plan
 
 If the prompt is actually small-scope (e.g. quick choice between two named options), staying on Sonnet inline is fine. Use judgment.
 
@@ -83,21 +83,15 @@ const PHRASES: &[&str] = &[
     "pros and cons",
 ];
 
-/// Phrases naming the pipeline's ideation stage: raw idea, no plan yet.
-const BRAINSTORM_DIRECTIVE_PHRASES: &[&str] = &[
+/// Phrases naming the pipeline's planning stage: from a raw idea with no
+/// direction yet, through to a direction ready to become a concrete plan.
+const PLAN_DIRECTIVE_PHRASES: &[&str] = &[
     "let's brainstorm this",
     "brainstorm this",
     "explore this idea",
     "not sure how to approach",
     "what are our options",
     "what are the options",
-];
-
-const BRAINSTORM_MSG: &str = r#"This prompt looks like ideation, exploring a raw idea with no plan yet. Consider running /playbook:brainstorm to work through the options before committing to a direction."#;
-
-/// Phrases naming the pipeline's planning stage: a direction exists, ready
-/// to become a concrete plan.
-const SCOPE_DIRECTIVE_PHRASES: &[&str] = &[
     "let's plan this",
     "let's scope this",
     "break this down",
@@ -106,7 +100,7 @@ const SCOPE_DIRECTIVE_PHRASES: &[&str] = &[
     "what would it take to build",
 ];
 
-const SCOPE_MSG: &str = r#"This prompt looks ready to turn a direction into a concrete plan. Consider running /playbook:scope to produce a verified implementation plan before writing code."#;
+const PLAN_MSG: &str = r#"This prompt looks like it's moving from a raw idea toward a concrete plan. Consider running /playbook:plan to work through the options and produce a verified implementation plan before writing code."#;
 
 /// Phrases naming the pipeline's decision-record stage: a consequential,
 /// hard-to-reverse call worth documenting.
@@ -146,19 +140,19 @@ pub fn run(payload: &Payload) {
     }
     let lower: Vec<char> = prompt.to_lowercase().chars().collect();
 
-    // Checked brainstorm, adr, scope, implement so an adr-shaped prompt isn't misread as scope.
+    // Checked adr, plan, implement: adr wins over a plan-shaped prompt that also
+    // carries reversibility language, by construction, not by a tie-break.
     for (phrases, wildcard, msg) in [
-        (
-            BRAINSTORM_DIRECTIVE_PHRASES,
-            None::<fn(&[char]) -> bool>,
-            BRAINSTORM_MSG,
-        ),
         (
             ADR_DIRECTIVE_PHRASES,
             Some(matches_named_alternatives as fn(&[char]) -> bool),
             ADR_MSG,
         ),
-        (SCOPE_DIRECTIVE_PHRASES, None, SCOPE_MSG),
+        (
+            PLAN_DIRECTIVE_PHRASES,
+            None::<fn(&[char]) -> bool>,
+            PLAN_MSG,
+        ),
         (IMPLEMENT_DIRECTIVE_PHRASES, None, IMPLEMENT_MSG),
     ] {
         let hit = phrases.iter().any(|phrase| {
