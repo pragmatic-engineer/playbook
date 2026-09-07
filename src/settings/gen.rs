@@ -2,17 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 //! Settings seed generator, ported from `shell/gen-shared-settings.py`. That
-//! file's header comment is the specification: replace `.permissions` with a
-//! canned permissions object, force `skipAutoPermissionPrompt: false`, strip
-//! any pinned `.model`, drop the owner's personal keys, and filter `.hooks`
-//! down to entries whose command matches the safety pattern. Everything else
-//! passes through unchanged. Output is `json.dumps(result, indent=2)`
-//! followed by the newline `print` adds.
+//! file's header comment was the original specification: replace
+//! `.permissions` with a canned permissions object, force
+//! `skipAutoPermissionPrompt: false`, and filter `.hooks` down to entries
+//! whose command matches the safety pattern. Output is
+//! `json.dumps(result, indent=2)` followed by the newline `print` adds.
 //!
-//! `PERSONAL_KEYS` below is a DENYLIST of five keys, so any personal key not
-//! on the list still leaks into the generated seed. That is a known defect
-//! of the python original, tracked and owned elsewhere; this port keeps the
-//! same denylist unchanged rather than fixing it here.
+//! Top-level and `env` keys are now filtered through `settings::keys`'s
+//! `SHIPPABLE_KEYS`/`SHIPPABLE_ENV` ALLOWLIST, inverted from the python
+//! original's `PERSONAL_KEYS` denylist: any key not explicitly shippable is
+//! dropped, rather than any key not explicitly personal leaking through.
 //!
 //! Three divergences from the python original, all deliberate:
 //!
@@ -34,22 +33,12 @@
 //!   scenario exercises the omitted-PERMS default, and the Makefile
 //!   invocation this serves already passes both paths explicitly.
 
+use crate::settings::keys::{SHIPPABLE_ENV, SHIPPABLE_KEYS};
+use crate::HookName;
+use clap::ValueEnum;
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::Path;
-
-/// Denylist of top-level keys treated as personal, not product, config: an
-/// owner's model pin, UI preferences and notification routing. Ported
-/// unchanged from `shell/gen-shared-settings.py`'s `PERSONAL_KEYS`; any key
-/// NOT on this list still leaks into the generated seed, a known, separately
-/// owned defect not fixed here.
-const PERSONAL_KEYS: [&str; 5] = [
-    "model",
-    "effortLevel",
-    "theme",
-    "preferredNotifChannel",
-    "prefersReducedMotion",
-];
 
 /// Everything that can stop generation before it produces output, one
 /// variant per `die()` call site in `shell/gen-shared-settings.py`. Every
@@ -91,15 +80,16 @@ fn is_safe_hook_command(command: &str) -> bool {
         .is_some_and(is_valid_hook_name)
 }
 
-/// `[a-z][a-z0-9-]*`: at least one character, the first an ASCII lowercase
-/// letter, the rest ASCII lowercase letters, digits or hyphens.
+/// `[a-z][a-z0-9-]*` shape, AND a real `HookName`: a shape-valid but
+/// nonexistent hook name (a typo, a dangling reference) is filtered out too.
 fn is_valid_hook_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return false;
     };
-    first.is_ascii_lowercase()
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    let shape_ok = first.is_ascii_lowercase()
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    shape_ok && HookName::from_str(name, true).is_ok()
 }
 
 /// Ports `filter_hooks` from `shell/gen-shared-settings.py`: within each
@@ -154,25 +144,47 @@ fn filter_hooks(hooks: &Map<String, Value>) -> Map<String, Value> {
     result
 }
 
+/// Removes every key not in `allowed`, returning the dropped keys' names in
+/// their original order. `shift_remove`, not `remove`: with `preserve_order`
+/// enabled, plain `Map::remove` is `swap_remove` underneath (moves the last
+/// key into the removed slot, perturbing every other key's position), so
+/// this uses `shift_remove` to leave the surviving keys' order untouched,
+/// matching python's `dict.pop(key, None)`.
+fn keep_only(map: &mut Map<String, Value>, allowed: &[&str]) -> Vec<String> {
+    let dropped: Vec<String> = map
+        .keys()
+        .filter(|k| !allowed.contains(&k.as_str()))
+        .cloned()
+        .collect();
+    for key in &dropped {
+        map.shift_remove(key);
+    }
+    dropped
+}
+
 /// The transform itself, ported from `shell/gen-shared-settings.py`'s
 /// `main`: replace `.permissions`, force `skipAutoPermissionPrompt: false`,
-/// drop the personal keys, and filter `.hooks` if present. `serde_json`'s
-/// `Map::insert` updates a key already present in place, leaving its
-/// position unchanged, and appends a genuinely new key at the end; the same
-/// behaviour python's `dict[key] = value` has, so key order in `src` decides
-/// key order in the result exactly as it does in the python original.
-///
-/// `shift_remove`, not `remove`, drops the personal keys: with
-/// `preserve_order` enabled, plain `Map::remove` is `swap_remove` underneath
-/// (moves the last key into the removed slot, an O(1) removal that perturbs
-/// every other key's position), while python's `dict.pop(key, None)` leaves
-/// every other key exactly where it was. `shift_remove` matches that.
+/// keep only shippable top-level and `env` keys, and filter `.hooks` if
+/// present. `serde_json`'s `Map::insert` updates a key already present in
+/// place and appends a genuinely new key at the end, so key order in `src`
+/// decides key order in the result exactly as it does in the python
+/// original.
 fn build(mut src: Map<String, Value>, perms: Value) -> Map<String, Value> {
     src.insert("permissions".to_string(), perms);
     src.insert("skipAutoPermissionPrompt".to_string(), Value::Bool(false));
-    for key in PERSONAL_KEYS {
-        src.shift_remove(key);
+
+    let mut dropped = keep_only(&mut src, SHIPPABLE_KEYS);
+    if let Some(Value::Object(env)) = src.get_mut("env") {
+        dropped.extend(
+            keep_only(env, SHIPPABLE_ENV)
+                .into_iter()
+                .map(|k| format!("env.{k}")),
+        );
     }
+    if !dropped.is_empty() {
+        eprintln!("gen-shared-settings: dropped {}", dropped.join(", "));
+    }
+
     if let Some(hooks_value) = src.get("hooks").cloned() {
         let filtered = match hooks_value {
             Value::Object(hooks_map) => filter_hooks(&hooks_map),

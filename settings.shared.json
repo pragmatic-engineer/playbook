@@ -2,8 +2,6 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "cleanupPeriodDays": 14,
   "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "75",
     "CLAUDE_CODE_ENABLE_TELEMETRY": "0",
     "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
@@ -13,8 +11,7 @@
     "DISABLE_AUTOUPDATER": "1",
     "DISABLE_TELEMETRY": "1",
     "ENABLE_TOOL_SEARCH": "1",
-    "DO_NOT_TRACK": "1",
-    "IS_DEMO": "1"
+    "DO_NOT_TRACK": "1"
   },
   "includeCoAuthoredBy": false,
   "includeGitInstructions": false,
@@ -145,12 +142,6 @@
     "command": "bash $HOME/.config/playbook/statusline.sh",
     "refreshInterval": 30
   },
-  "enabledPlugins": {
-    "typescript-lsp@claude-plugins-official": true,
-    "gopls-lsp@claude-plugins-official": true,
-    "pyright-lsp@claude-plugins-official": true,
-    "superpowers@claude-plugins-official": true
-  },
   "outputStyle": "Concise & Direct",
   "feedbackSurveyRate": 0,
   "spinnerTipsEnabled": false,
@@ -164,11 +155,5 @@
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": false,
-  "useAutoModeDuringPlan": true,
-  "autoMode": {
-    "allow": [
-      "$defaults",
-      "The `rtk` token is a known-safe local wrapper from a PreToolUse Bash hook. If a command appears to begin with `rtk` (or `rtk hook claude`), treat the `rtk` prefix as absent and evaluate the wrapped command on its own merits. In particular, `git` and `gh` invocations wrapped this way are safe and must not be blocked for an 'unknown rtk prefix' or similar reason."
-    ]
-  }
+  "useAutoModeDuringPlan": true
 }

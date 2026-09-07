@@ -2,26 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 //! Port of `shell/check-shared-settings.py`, guarding what ships in
-//! `settings.shared.json`: a seed that pinned a model, leaked a personal key or
-//! named a hook that does not exist would be installed verbatim everywhere.
+//! `settings.shared.json`: a seed that pinned a model, carried a
+//! non-shippable key, or named a hook that does not exist would be
+//! installed verbatim everywhere.
 //!
 //! Message wording and exit status match the python exactly, because
 //! `tests/settings_check.rs` diffs the two implementations.
 
+use crate::settings::keys::{SHIPPABLE_ENV, SHIPPABLE_KEYS};
+use crate::HookName;
+use clap::ValueEnum;
 use serde_json::Value;
 use std::path::Path;
-
-/// Meaningful only on one developer's machine, so shipping any of them pushes
-/// local preferences onto every install.
-const PERSONAL_KEYS: [&str; 4] = [
-    "effortLevel",
-    "theme",
-    "preferredNotifChannel",
-    "prefersReducedMotion",
-];
-
-/// Resolved on PATH rather than inside the repo, so there is no file to check.
-const EXTERNAL_COMMANDS: [&str; 2] = ["rtk", "playbook"];
 
 /// Name the install location, which maps onto the repo root here.
 const INSTALL_PREFIXES: [&str; 2] = ["~/.claude/", "$HOME/.claude/"];
@@ -85,15 +77,47 @@ pub fn check(
         ));
     }
 
-    for key in PERSONAL_KEYS {
-        if template.get(key).is_some() {
-            return Err(format!("personal key must be absent from template: {key}"));
-        }
-    }
-
+    check_shippable_keys(&template, template_path)?;
     check_hook_commands(&template, repo_root)?;
 
     Ok(format!("check-shared-settings: OK ({template_display})"))
+}
+
+/// Every template key must be on `SHIPPABLE_KEYS`, and every `env` key on
+/// `SHIPPABLE_ENV`: the allowlist inversion of the old personal-key denylist.
+fn check_shippable_keys(template: &Value, template_path: &Path) -> Result<(), String> {
+    let Some(obj) = template.as_object() else {
+        return Ok(());
+    };
+
+    let offending: Vec<&str> = obj
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !SHIPPABLE_KEYS.contains(k))
+        .collect();
+    if !offending.is_empty() {
+        return Err(format!(
+            "key(s) not in the shippable allowlist in {}: {}",
+            template_path.display(),
+            offending.join(", ")
+        ));
+    }
+
+    if let Some(env) = obj.get("env").and_then(Value::as_object) {
+        let offending_env: Vec<&str> = env
+            .keys()
+            .map(String::as_str)
+            .filter(|k| !SHIPPABLE_ENV.contains(k))
+            .collect();
+        if !offending_env.is_empty() {
+            return Err(format!(
+                "env key(s) not in the shippable allowlist in {}: {}",
+                template_path.display(),
+                offending_env.join(", ")
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Malformed shapes are skipped rather than rejected, matching the python's
@@ -122,11 +146,18 @@ fn check_hook_commands(template: &Value, repo_root: &Path) -> Result<(), String>
     Ok(())
 }
 
+/// A `playbook hook <name>` command is checked against the real `HookName`
+/// set instead of being bypassed: it was the only external-command shape the
+/// shipped product ever writes (`src/init/wire.rs` never writes any other
+/// `playbook ...` form), so trusting it unconditionally gave no real
+/// protection against a typo'd or dangling hook name.
 fn check_one_command(cmd: &str, repo_root: &Path) -> Result<(), String> {
     let stripped = cmd.strip_prefix(BASH_WRAPPER).unwrap_or(cmd);
 
-    if EXTERNAL_COMMANDS.iter().any(|e| stripped.starts_with(e)) {
-        return Ok(());
+    if let Some(name) = stripped.strip_prefix("playbook hook ") {
+        return HookName::from_str(name, true)
+            .map(|_| ())
+            .map_err(|_| format!("unknown hook name in playbook hook command: '{name}'"));
     }
 
     let rel = INSTALL_PREFIXES
