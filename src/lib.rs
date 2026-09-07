@@ -94,7 +94,6 @@ pub enum Command {
 #[derive(ValueEnum, Debug, Clone, Copy)]
 pub enum PathKind {
     Plans,
-    Designs,
     Implement,
     Worktrees,
 }
@@ -104,7 +103,6 @@ impl PathKind {
     pub fn dir_name(&self) -> &'static str {
         match self {
             PathKind::Plans => "plans",
-            PathKind::Designs => "designs",
             PathKind::Implement => "implement",
             PathKind::Worktrees => "worktrees",
         }
@@ -313,9 +311,9 @@ mod tests {
     }
 
     #[test]
-    fn path_help_lists_all_four_kinds() {
+    fn path_help_lists_all_three_kinds() {
         // Arrange
-        let kinds = ["plans", "designs", "implement", "worktrees"];
+        let kinds = ["plans", "implement", "worktrees"];
 
         // Act
         let result = Cli::command().try_get_matches_from(["playbook", "path", "--help"]);
@@ -332,7 +330,6 @@ mod tests {
     fn path_kind_dir_name_matches_each_variant() {
         // Arrange, Act, Assert
         assert_eq!(PathKind::Plans.dir_name(), "plans");
-        assert_eq!(PathKind::Designs.dir_name(), "designs");
         assert_eq!(PathKind::Implement.dir_name(), "implement");
         assert_eq!(PathKind::Worktrees.dir_name(), "worktrees");
     }
