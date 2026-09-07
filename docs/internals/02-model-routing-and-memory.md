@@ -16,11 +16,11 @@ The policy lives in `prompts/SYSTEM_PROMPT.md`. Three tiers:
 
 The system prompt directs: enter plan mode first for design work (new features, non-trivial refactors, architecture decisions). `settings.json` sets `"useAutoModeDuringPlan": true`, which puts auto mode in effect during plan mode. The system prompt states this combination routes plan mode to Opus and execution to Sonnet.
 
-### auto-model-detect.py
+### auto-model-detect
 
-`hooks/auto-model-detect.py` runs on every `UserPromptSubmit` event, wired in `settings.json` under the `UserPromptSubmit` hook list. It can't flip the session model mid-stream (Claude Code doesn't support that). Instead it detects design intent and injects a context message nudging Claude toward an Opus subagent.
+The `auto-model-detect` hook (invoked as `playbook hook auto-model-detect`, `src/hooks/auto_model_detect.rs`) runs on every `UserPromptSubmit` event, wired in `settings.json` under the `UserPromptSubmit` hook list. It can't flip the session model mid-stream (Claude Code doesn't support that). Instead it detects design intent and injects a context message nudging Claude toward an Opus subagent.
 
-The script skips slash commands and prompts under 20 characters. For natural-prose prompts it applies an extended-regex pattern (case-insensitive) that matches:
+The hook skips slash commands and prompts under 20 characters. For natural-prose prompts it matches a hand-expanded set of phrases (case-insensitive, word-boundary matched, ported from the original regex) covering:
 
 - Design nouns: `design`, `architecture`, `ADR`, `schema`, `tradeoffs`, `migration`, `data model`, `interface design`, and related terms.
 - Decision verbs: `evaluate`, `compare`, `brainstorm`, `propose`, `critique`, `review the approach`.
