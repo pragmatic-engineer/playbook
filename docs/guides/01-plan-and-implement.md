@@ -58,9 +58,9 @@ A crash or interruption mid-session doesn't lose the work: `/playbook:plan` chec
 
 When all branches are resolved, it runs a three-phase quality gate:
 
-1. **Fact-check.** An Explore subagent verifies every file path, function signature, and import in the plan. It also checks the Work Unit dependency graph for cycles and confirms parallel-safe flags are accurate.
-2. **Adversarial review.** A general-purpose subagent challenges the design: simpler alternatives, missing error paths, blast radius.
-3. **Test review.** An Explore subagent checks the test plan against engineering standards: boundary coverage, flakiness risks, mock quality, assertion strength.
+1. **Fact-check.** A `fact-checker` agent verifies every file path, function signature, and import in the plan. It also checks the Work Unit dependency graph for cycles and confirms parallel-safe flags are accurate.
+2. **Adversarial review.** A `critic` agent (focus `plan`) challenges the design: simpler alternatives, missing error paths, blast radius.
+3. **Test review.** A `test-reviewer` agent checks the test plan against engineering standards: boundary coverage, flakiness risks, mock quality, assertion strength.
 
 Each phase retries up to three times on FAIL before blocking. WARNs are surfaced but don't block.
 
