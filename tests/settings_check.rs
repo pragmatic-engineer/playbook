@@ -65,6 +65,8 @@ impl Fixture {
 }
 
 /// A template that satisfies every rule, as a base for the defect variants.
+/// The PreToolUse command is a real `playbook hook <name>` invocation, the
+/// only external-command shape the shipped product ever writes.
 fn good_template() -> String {
     format!(
         r#"{{
@@ -75,7 +77,7 @@ fn good_template() -> String {
       {{ "hooks": [ {{ "type": "command", "command": "~/.claude/hooks/session-init.sh" }} ] }}
     ],
     "PreToolUse": [
-      {{ "matcher": "Bash", "hooks": [ {{ "type": "command", "command": "rtk hook claude" }} ] }}
+      {{ "matcher": "Bash", "hooks": [ {{ "type": "command", "command": "playbook hook rm-workspace-guard" }} ] }}
     ]
   }}
 }}"#
@@ -169,17 +171,21 @@ fn missing_hook_path_is_rejected() {
     );
 }
 
-/// Each personal key gets its own assertion: a loop that stopped after the
-/// first would leave the other three unproven.
+/// Each novel key gets its own assertion: a loop that stopped after the
+/// first would leave the rest unproven. Covers the old 4-key denylist names
+/// plus several keys that were never on any denylist, since the allowlist
+/// must reject anything not explicitly shippable, not just a known list.
 #[test]
-fn every_personal_key_is_rejected() {
+fn novel_keys_not_in_allowlist_are_rejected() {
     for key in [
         "effortLevel",
         "theme",
         "preferredNotifChannel",
         "prefersReducedMotion",
+        "totallyNovelKey",
+        "someFutureFlag",
     ] {
-        let f = Fixture::new(&format!("personal-{key}"));
+        let f = Fixture::new(&format!("novel-{key}"));
         let bad = good_template().replace(
             r#"{
   "skipAutoPermissionPrompt": false,"#,
@@ -189,7 +195,7 @@ fn every_personal_key_is_rejected() {
   "skipAutoPermissionPrompt": false,"#
             ),
         );
-        let t = f.template("personal", &bad);
+        let t = f.template("novel", &bad);
         let out = f.run(&t);
         assert_eq!(out.status.code(), Some(1), "key {key} should be rejected");
         assert!(
@@ -201,22 +207,76 @@ fn every_personal_key_is_rejected() {
 }
 
 #[test]
-fn rtk_command_is_skipped_not_failed() {
-    let f = Fixture::new("rtk");
-    let only_rtk = good_template().replace(
-        r#""SessionStart": [
-      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/session-init.sh" } ] }
-    ],
-    "#,
-        "",
+fn env_key_not_in_allowlist_is_rejected() {
+    let f = Fixture::new("bad-env");
+    let bad = good_template().replace(
+        r#""hooks": {"#,
+        r#""env": { "NOT_SHIPPABLE_ENV_KEY": "1" },
+  "hooks": {"#,
     );
-    let t = f.template("rtk", &only_rtk);
+    let t = f.template("bad-env", &bad);
     let out = f.run(&t);
+    assert_eq!(out.status.code(), Some(1));
     assert!(
-        out.status.success(),
-        "an external command has no repo file to resolve: {}",
+        stderr_of(&out).contains("NOT_SHIPPABLE_ENV_KEY"),
+        "got: {}",
         stderr_of(&out)
     );
+}
+
+// An external command that is neither `playbook hook <name>` nor a path
+// under the repo root now gets rejected instead of silently skipped: the
+// old EXTERNAL_COMMANDS bypass gave zero real protection since every real
+// hook command the product ships is `playbook hook <name>`.
+#[test]
+fn external_non_playbook_non_repo_command_is_rejected() {
+    let f = Fixture::new("external");
+    let bad = good_template().replace(
+        r#""command": "playbook hook rm-workspace-guard""#,
+        r#""command": "rtk hook claude""#,
+    );
+    let t = f.template("external", &bad);
+    let out = f.run(&t);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr_of(&out).contains("hook command path not found"),
+        "got: {}",
+        stderr_of(&out)
+    );
+}
+
+#[test]
+fn playbook_hook_command_naming_a_nonexistent_hook_is_rejected() {
+    let f = Fixture::new("bad-hook-name");
+    let bad = good_template().replace(
+        r#""command": "playbook hook rm-workspace-guard""#,
+        r#""command": "playbook hook not-a-real-hook""#,
+    );
+    let t = f.template("bad-hook-name", &bad);
+    let out = f.run(&t);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr_of(&out).contains("not-a-real-hook"),
+        "the message must name the bad hook: {}",
+        stderr_of(&out)
+    );
+}
+
+// The real, tracked settings.shared.json must validate once this change
+// regenerates it, exercised the same way the justfile's own recipe does.
+#[test]
+fn real_settings_shared_json_validates() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let template = repo_root.join("settings.shared.json");
+    let perms = repo_root.join("permissions.shared.json");
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["settings", "check"])
+        .arg(&template)
+        .arg(&perms)
+        .arg(repo_root)
+        .output()
+        .expect("playbook binary should spawn");
+    assert!(out.status.success(), "expected exit 0: {}", stderr_of(&out));
 }
 
 #[test]

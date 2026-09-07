@@ -18,7 +18,7 @@
 //!
 //! Coverage map, so every scenario named in the Work Unit brief is
 //! traceable to one place below:
-//! - A (happy path): `happy_path_canned_perms_model_stripped_personal_keys_dropped_passthrough`
+//! - A (happy path): `happy_path_canned_perms_model_stripped_only_shippable_keys_survive`
 //! - B (model absent stays absent): `model_absent_in_source_stays_absent`
 //! - C (model present is stripped): `model_in_source_is_stripped`
 //! - D (malformed source JSON), E (missing source file), F (missing
@@ -30,10 +30,14 @@
 //!   `hooks_reduced_to_safety_guards_only_functional_hooks_dropped`
 //! - Mandatory non-ASCII fixture, divergence asserted in a named direction:
 //!   `non_ascii_value_diverges_from_python_named_direction`
-//! - Falsifiable regression pin (byte match against the python oracle, plus
-//!   a mutated input proving the check can fail):
-//!   `regression_pin_rust_matches_python_oracle_and_mutation_diverges`
+//! - Falsifiable regression pin (a mutated input proving the check can
+//!   fail): `regression_pin_mutating_a_shippable_key_changes_the_output`
 //! - `playbook settings gen` works from the CLI: `settings_gen_works_from_the_cli`
+//! - Allowlist coverage added for the shippable-key inversion:
+//!   `novel_top_level_key_is_dropped_and_named_on_stderr`,
+//!   `novel_env_key_is_dropped_shippable_env_key_survives`,
+//!   `auto_mode_and_enabled_plugins_are_dropped`,
+//!   `shape_valid_but_nonexistent_hook_name_is_dropped`
 
 #![allow(dead_code)]
 
@@ -122,9 +126,9 @@ const SRC_HOOKS: &str = r#"{
 }"#;
 
 // A: happy path -> canned perms, no model, forced skipAutoPermissionPrompt,
-//    personal keys gone, product + unknown keys pass through.
+//    only allowlisted top-level and env keys survive.
 #[test]
-fn happy_path_canned_perms_model_stripped_personal_keys_dropped_passthrough() {
+fn happy_path_canned_perms_model_stripped_only_shippable_keys_survive() {
     // Arrange
     let dir = scratch_dir("happy-path");
     let src_path = dir.join("src.json");
@@ -135,16 +139,12 @@ fn happy_path_canned_perms_model_stripped_personal_keys_dropped_passthrough() {
     // Act
     let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
 
-    // Assert against the frozen python oracle rather than a live python run.
-    // See tests/fixtures/golden/README.md: the python original is deleted by
-    // ADR 0007 WU-14, so its output is committed instead. SRC_FULL and
-    // CANNED_PERMS are the same inputs the regression pin below uses, so this
-    // reuses that fixture rather than freezing a duplicate.
-    let golden_py_stdout = include_str!("fixtures/golden/gen-shared-settings.src-full.json");
-    assert_eq!(
-        rust_output, golden_py_stdout,
-        "rust output should byte-match the frozen python oracle's output, trailing newline included"
-    );
+    // Assert
+    //
+    // No byte-for-byte oracle comparison here: the frozen python golden
+    // (tests/fixtures/golden/gen-shared-settings.src-full.json) predates the
+    // allowlist and keeps `customUnknownKey` and `env.IS_DEMO`, which this
+    // change deliberately now drops. See src/settings/keys.rs for why.
     let result: Value = serde_json::from_str(&rust_output).unwrap();
     let canned_perms: Value = serde_json::from_str(CANNED_PERMS).unwrap();
     assert_eq!(
@@ -161,17 +161,23 @@ fn happy_path_canned_perms_model_stripped_personal_keys_dropped_passthrough() {
     ] {
         assert!(
             result.get(key).is_none(),
-            "{key} should be dropped as a personal key"
+            "{key} should be dropped as a non-shippable key"
         );
     }
-    assert_eq!(result["env"]["IS_DEMO"], "1");
+    assert!(
+        result["env"].get("IS_DEMO").is_none(),
+        "IS_DEMO is demo-only and must not ship"
+    );
     assert_eq!(result["env"]["DISABLE_AUTOUPDATER"], "1");
     assert!(result.get("hooks").is_some(), "hooks should pass through");
     assert!(
         result.get("statusLine").is_some(),
         "statusLine should pass through"
     );
-    assert_eq!(result["customUnknownKey"]["keep"], "me");
+    assert!(
+        result.get("customUnknownKey").is_none(),
+        "a key not in SHIPPABLE_KEYS must be dropped, not passed through"
+    );
 }
 
 // B: model absent in source -> stays absent.
@@ -187,16 +193,16 @@ fn model_absent_in_source_stays_absent() {
     // Act
     let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
 
-    // Assert against the frozen python oracle rather than a live python run.
-    // See tests/fixtures/golden/README.md: the python original is deleted by
-    // ADR 0007 WU-14, so its output is committed instead.
-    let golden_py_stdout = include_str!("fixtures/golden/gen-shared-settings.model-absent.json");
-    assert_eq!(
-        rust_output, golden_py_stdout,
-        "rust output should byte-match the frozen python oracle's output, trailing newline included"
-    );
+    // Assert
+    //
+    // No byte-for-byte oracle comparison: the frozen golden's env.IS_DEMO
+    // survived the old denylist and no longer survives the allowlist.
     let result: Value = serde_json::from_str(&rust_output).unwrap();
     assert!(result.get("model").is_none());
+    assert!(
+        result["env"].get("IS_DEMO").is_none(),
+        "IS_DEMO is demo-only and must not ship"
+    );
 }
 
 // C: model set in source -> stripped from the template.
@@ -413,12 +419,14 @@ fn new_and_old_config_paths_are_both_filtered_out_identically() {
 // the divergence in a named direction rather than leaving it to a comment.
 #[test]
 fn non_ascii_value_diverges_from_python_named_direction() {
-    // Arrange: a value with non-ASCII characters, a shape no real settings
-    // file or permissions.shared.json contains today.
+    // Arrange: a value with non-ASCII characters, carried in a SHIPPABLE_ENV
+    // key so it survives the allowlist (the golden fixture below still used
+    // customUnknownKey, which the allowlist now drops before this divergence
+    // could even be observed).
     let dir = scratch_dir("non-ascii");
     let src_path = dir.join("src.json");
     let perms_path = dir.join("perms.json");
-    write_file(&src_path, r#"{"customUnknownKey":"café ☃"}"#);
+    write_file(&src_path, r#"{"env":{"DISABLE_TELEMETRY":"café ☃"}}"#);
     write_file(&perms_path, CANNED_PERMS);
 
     // Act
@@ -455,8 +463,10 @@ fn non_ascii_value_diverges_from_python_named_direction() {
     );
 }
 
-/// A second, mutated copy of `SRC_FULL`: one product key (`env.IS_DEMO`)
-/// changed, so the generated output must differ from `SRC_FULL`'s.
+/// A second, mutated copy of `SRC_FULL`: the one shippable env key
+/// (`DISABLE_AUTOUPDATER`) changed, so the generated output must differ.
+/// `env.IS_DEMO` is not used for the mutation any more: the allowlist now
+/// drops it regardless of its value, which would make the mutation a no-op.
 const SRC_MUTATED: &str = r#"{
   "model": "sonnet",
   "skipAutoPermissionPrompt": true,
@@ -465,19 +475,19 @@ const SRC_MUTATED: &str = r#"{
   "preferredNotifChannel": "ghostty",
   "prefersReducedMotion": true,
   "permissions": { "allow": ["Bash"], "deny": [], "ask": [], "defaultMode": "auto" },
-  "env": { "IS_DEMO": "0", "DISABLE_AUTOUPDATER": "1" },
+  "env": { "IS_DEMO": "1", "DISABLE_AUTOUPDATER": "0" },
   "hooks": { "SessionStart": [{ "hooks": [] }] },
   "statusLine": { "type": "command", "command": "bash x" },
   "customUnknownKey": { "keep": "me" }
 }"#;
 
-// Falsifiable regression pin: the Rust generator's output byte-matches the
-// PYTHON generator's output from the same SRC, never "no diff against the
-// committed settings.shared.json" (which passes trivially once that file
-// was itself produced by the code under test). A mutated input must also
-// produce a genuinely different output, proving the pin can fail.
+// Falsifiable regression pin: a mutated input produces genuinely different
+// output from SRC_FULL's, proving the two calls are not accidentally
+// comparing something trivially equal (a stub, or "no diff against the
+// committed settings.shared.json", which passes for the wrong reason once
+// that file was itself produced by the code under test).
 #[test]
-fn regression_pin_rust_matches_python_oracle_and_mutation_diverges() {
+fn regression_pin_mutating_a_shippable_key_changes_the_output() {
     // Arrange: synthetic fixtures, not the committed settings.shared.json.
     let dir = scratch_dir("regression-pin");
     let src_path = dir.join("src.json");
@@ -485,19 +495,8 @@ fn regression_pin_rust_matches_python_oracle_and_mutation_diverges() {
     write_file(&src_path, SRC_FULL);
     write_file(&perms_path, CANNED_PERMS);
 
-    // Act: the pin itself, Rust against the frozen python oracle on matching
-    // input. See tests/fixtures/golden/README.md: the python original is
-    // deleted by ADR 0007 WU-14, so its output is committed instead.
+    // Act
     let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
-
-    // Assert: the pin holds.
-    let golden_py_stdout = include_str!("fixtures/golden/gen-shared-settings.src-full.json");
-    assert_eq!(
-        rust_output, golden_py_stdout,
-        "rust output should byte-match the frozen python oracle's output, trailing newline included"
-    );
-
-    // Act: mutate the input.
     let mutated_src_path = dir.join("src-mutated.json");
     write_file(&mutated_src_path, SRC_MUTATED);
     let mutated_output =
@@ -507,7 +506,7 @@ fn regression_pin_rust_matches_python_oracle_and_mutation_diverges() {
     // output, proving this pin can fail rather than passing vacuously.
     assert_ne!(
         rust_output, mutated_output,
-        "a mutated input should change the generated output"
+        "a mutated shippable env value should change the generated output"
     );
 }
 
@@ -596,4 +595,126 @@ fn malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout() {
              with one wiring no hooks"
         );
     }
+}
+
+// A novel top-level key, not on SHIPPABLE_KEYS, must be dropped and named on
+// stderr. Run via the CLI, not the library call, since the drop message goes
+// straight to stderr rather than being returned.
+#[test]
+fn novel_top_level_key_is_dropped_and_named_on_stderr() {
+    // Arrange
+    let dir = scratch_dir("novel-key");
+    let src_path = dir.join("src.json");
+    let perms_path = dir.join("perms.json");
+    write_file(&src_path, r#"{"totallyNovelKey": "x"}"#);
+    write_file(&perms_path, CANNED_PERMS);
+
+    // Act
+    let output = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["settings", "gen"])
+        .arg(&src_path)
+        .arg(&perms_path)
+        .output()
+        .expect("playbook binary should run");
+
+    // Assert
+    assert!(
+        output.status.success(),
+        "a novel key should be dropped, not fail generation: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(stdout.get("totallyNovelKey").is_none());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("totallyNovelKey"),
+        "stderr should name the dropped key: {stderr}"
+    );
+}
+
+// A novel env key, not on SHIPPABLE_ENV, is dropped; a shippable env key in
+// the same object survives.
+#[test]
+fn novel_env_key_is_dropped_shippable_env_key_survives() {
+    // Arrange
+    let dir = scratch_dir("novel-env-key");
+    let src_path = dir.join("src.json");
+    let perms_path = dir.join("perms.json");
+    write_file(
+        &src_path,
+        r#"{"env":{"TOTALLY_NOVEL_ENV_KEY":"x","DISABLE_TELEMETRY":"1"}}"#,
+    );
+    write_file(&perms_path, CANNED_PERMS);
+
+    // Act
+    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+
+    // Assert
+    let result: Value = serde_json::from_str(&rust_output).unwrap();
+    assert!(result["env"].get("TOTALLY_NOVEL_ENV_KEY").is_none());
+    assert_eq!(result["env"]["DISABLE_TELEMETRY"], "1");
+}
+
+// autoMode and enabledPlugins are machine/plugin state, never shippable.
+#[test]
+fn auto_mode_and_enabled_plugins_are_dropped() {
+    // Arrange
+    let dir = scratch_dir("automode-plugins");
+    let src_path = dir.join("src.json");
+    let perms_path = dir.join("perms.json");
+    write_file(
+        &src_path,
+        r#"{"autoMode": {"allow": ["$defaults"]}, "enabledPlugins": {"a@b": true}}"#,
+    );
+    write_file(&perms_path, CANNED_PERMS);
+
+    // Act
+    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+
+    // Assert
+    let result: Value = serde_json::from_str(&rust_output).unwrap();
+    assert!(result.get("autoMode").is_none());
+    assert!(result.get("enabledPlugins").is_none());
+}
+
+const SRC_HOOKS_FAKE_NAME: &str = r#"{
+  "env": {},
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [
+        { "type": "command", "command": "playbook hook rm-workspace-guard" },
+        { "type": "command", "command": "playbook hook not-a-real-hook" }
+      ] }
+    ]
+  }
+}"#;
+
+// A hook command shaped like `playbook hook <name>` but naming a hook that
+// does not exist in HookName must be dropped, not just shape-checked.
+#[test]
+fn shape_valid_but_nonexistent_hook_name_is_dropped() {
+    // Arrange
+    let dir = scratch_dir("hooks-fake-name");
+    let src_path = dir.join("src.json");
+    let perms_path = dir.join("perms.json");
+    write_file(&src_path, SRC_HOOKS_FAKE_NAME);
+    write_file(&perms_path, CANNED_PERMS);
+
+    // Act
+    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+
+    // Assert
+    let result: Value = serde_json::from_str(&rust_output).unwrap();
+    let groups = result["hooks"]["PreToolUse"].as_array().unwrap();
+    let commands: Vec<&str> = groups[0]["hooks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["command"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        commands,
+        vec!["playbook hook rm-workspace-guard"],
+        "a shape-valid but nonexistent hook name must be dropped"
+    );
 }
