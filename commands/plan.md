@@ -101,11 +101,11 @@ CHECKPOINT="$PLANS_DIR/<topic-slug>.checkpoint.md"
 ```
 
 - **Found:** read it. Show its `Goal:` line and its last-modified date (not a bare yes/no), then ask once: **"Found an in-progress plan for `<topic>` last touched `<date>`, goal: `<goal-line>`. Resume it? I'd recommend yes because picking up mid-session avoids redoing settled decisions."**
-  - **Yes:** load its Decisions Made, Out of Scope, Open Risks, chosen Approach, and the Work Units/Segments table as far as they got. Resume from the first step whose output the checkpoint doesn't yet have (a checkpoint with only a Goal and no Decisions Made resumes at Step 1; one with a confirmed Approach but no Work Units resumes at Step 7).
+  - **Yes:** load its Decisions Made, Out of Scope, Open Risks, chosen Approach, `Design approved` marker, and the Work Units/Segments table as far as they got. Resume from the first step whose output the checkpoint doesn't yet have: only a Goal and no Decisions Made resumes at Step 1; an Approach with no `Design approved` marker resumes at Step 5 (the route check still needs an answer); a `Design approved` marker with no Work Units resumes at Step 7. Never resume at Step 7 on an Approach alone: Step 6's approval is a hard gate (Core Rules), and a checkpoint that hasn't recorded it hasn't cleared that gate yet, no matter how settled the approach looks.
   - **No:** start fresh. The stale checkpoint is not deleted here: it gets overwritten in place as new decisions are appended through Step 3 onward (see the write shape below), and only Step 12 deletes it, once a completed plan actually replaces it. Silently deleting a stale checkpoint the moment someone declines to resume would destroy a session's progress on a whim, on the chance they meant to resume a different topic under the same seed.
 - **Not found:** proceed to Step 1 with nothing to resume.
 
-**Checkpoint content and write shape.** The checkpoint is a single Markdown file: a `Goal:` line, `Decisions Made`, `Out of Scope`, `Open Risks`, `Approach`, and the `Work Units / Segments` table as far as they've been settled, the same structured shape the final plan's condensed sections use. After each resolved decision from Step 3 onward, rewrite it under the same locked-write discipline `MEMORY.md`/`GLOSSARY.md` use elsewhere in this repo (a mkdir-based advisory lock, matching the Rust hooks' `with_dir_lock` in `src/common/atomic.rs`), adapted here to a full rewrite rather than a one-line append, since the checkpoint's content is a structured document, not an append-only log:
+**Checkpoint content and write shape.** The checkpoint is a single Markdown file: a `Goal:` line, `Decisions Made`, `Out of Scope`, `Open Risks`, `Approach`, a `Design approved` marker (set only once Step 6's gate clears), and the `Work Units / Segments` table as far as they've been settled, the same structured shape the final plan's condensed sections use. Rewrite it after each resolved decision, not only in Step 3 and Step 7: Step 4 (approach chosen), Step 5 (route-check answer), and Step 6 (the `Design approved` marker) each trigger a rewrite too, under the same locked-write discipline `MEMORY.md`/`GLOSSARY.md` use elsewhere in this repo (a mkdir-based advisory lock, matching the Rust hooks' `with_dir_lock` in `src/common/atomic.rs`), adapted here to a full rewrite rather than a one-line append, since the checkpoint's content is a structured document, not an append-only log:
 
 ```bash
 LOCK="$CHECKPOINT.lock"
@@ -140,7 +140,7 @@ Run this only when Argument Resolution found a ticket. Skip it entirely for a pl
 **Connect (layered).** Find a way to reach the tracker, in order:
 
 1. **MCP:** search for a connected ticket tool (`ToolSearch` for Jira, Linear, Atlassian, or issue tools). If one is connected, use it.
-2. **Provider command:** else look for a configured fetch command. Read `.claude/brainstorm.config` (or the repo's existing tracker config) for a per-tracker command with an `{id}` placeholder, for example `jira issue view {id} --raw` or `linear issue {id} --json`, and run it with Bash. A public tracker URL with no auth can be read with `WebFetch`. A page that needs auth or JavaScript rendering that `WebFetch` can't handle can be opened with the `agent-browser` MCP, if it's connected: `open` the url, then `snapshot` for the accessibility tree and `screenshot` for visual content.
+2. **Provider command:** else look for a configured fetch command. Read `.claude/plan.config` (or the repo's existing tracker config) for a per-tracker command with an `{id}` placeholder, for example `jira issue view {id} --raw` or `linear issue {id} --json`, and run it with Bash. A public tracker URL with no auth can be read with `WebFetch`. A page that needs auth or JavaScript rendering that `WebFetch` can't handle can be opened with the `agent-browser` MCP, if it's connected: `open` the url, then `snapshot` for the accessibility tree and `screenshot` for visual content.
 3. **Neither:** stop and tell the user how to connect one (an MCP server or a provider command), then offer to continue with the ticket id as a plain-text seed. Do NOT fabricate ticket contents.
 
 **Crawl (bounded, never infinite).** Gather, then stop:
@@ -225,11 +225,15 @@ Synthesize the running document's problem section from the Step 3 answers: Purpo
 
 Present 2-3 distinct approaches with their trade-offs. Lead with your recommendation and say why. Keep each approach to what matters: what it does, its main cost, and what it rules out. Let the user pick or push back.
 
+**Checkpoint the chosen approach (MUST).** The moment the user picks one, write it to the checkpoint's `Approach` field and rewrite the file using Step 0's locked write shape.
+
 ### Step 5: Route check
 
 Look at the chosen direction against a three-part test, all required: the decision is hard to reverse once made, it would be non-obvious to a future reader why it was made this way, and it's the product of a genuine trade-off, not a forced or obvious choice. When all three hold (a data model, a public contract, a cross-cutting dependency are common shapes), flag it and offer `/playbook:adr` for the deep record: **"This carries an architectural call worth a formal record. Route to /playbook:adr for that decision? I'd recommend yes because it's hard to reverse."** `--adr` forces this recommendation without running the three-part test.
 
 **This fires unconditionally regardless of `--auto`.** Even in autonomous mode, the divergent phase, including this route check, always stops for a human: `--auto` only reaches its self-answering behavior from Step 7 onward (see Autonomous Mode below). Record the answer (recommend `/playbook:adr` or not) either way; Step 12 surfaces it. Answering this question does not end the session: whether or not the user wants an ADR, the flow continues into Step 5.5 and onward to a saved implementation plan. An ADR and an implementation plan are not alternatives, they're two different artifacts this decision may need.
+
+**Checkpoint the route-check answer (MUST).** Write the recommendation and the user's answer to the checkpoint's `Decisions Made` list and rewrite the file using Step 0's locked write shape.
 
 ### Step 5.5: Offer a validation spike
 
@@ -247,6 +251,8 @@ The spike is disposable and scoped to one premise. It never becomes part of the 
 ### Step 6: Present the design
 
 Present the design in sections scaled to complexity: a few sentences where it's straightforward, more where it's nuanced. The problem and requirements are already confirmed (Step 3.5); cover the chosen approach, the key components and their boundaries, and the main risks. Ask after each section whether it looks right. Revise until the user approves. Do NOT continue into Step 7 before approval, even under `--auto`.
+
+**Checkpoint the approval (MUST).** The moment the user approves, set the checkpoint's `Design approved` marker and rewrite the file using Step 0's locked write shape. This is the field Step 0's resume logic checks before it will resume at Step 7: an `Approach` alone never implies approval.
 
 Keep applying the domain glossary discipline from Step 3 here too: a term that turns out ambiguous while presenting the design gets the same treatment, resolved and written to `GLOSSARY.md` immediately, with the same locked append.
 
