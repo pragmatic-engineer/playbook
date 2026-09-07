@@ -4,10 +4,10 @@
 #
 # shared-settings-keys.test.sh: pins the top-level key SET of
 # settings.shared.json, the public install seed. The seed is generated from
-# the maintainer's personal settings.json by denylisting a handful of keys,
-# so any new key the harness adds passes straight through to every
-# installer. This snapshot makes such an addition fail CI until a human
-# accepts it deliberately, by name.
+# the maintainer's personal settings.json by keeping only an explicit
+# shippable-key allowlist (src/settings/keys.rs), so a new key the harness
+# adds is dropped by default. This snapshot makes a deliberate allowlist
+# change fail CI until a human accepts it, by name.
 #
 # Run:  bash shell/shared-settings-keys.test.sh
 # Exit: 0 if all scenarios pass, non-zero otherwise.
@@ -35,12 +35,10 @@ EXPECTED="${WORK}/expected-keys.txt"
 cat > "$EXPECTED" <<'KEYS'
 $schema
 agentPushNotifEnabled
-autoMode
 autoUpdatesChannel
 awaySummaryEnabled
 cleanupPeriodDays
 editorMode
-enabledPlugins
 env
 feedbackSurveyRate
 hooks
@@ -91,9 +89,9 @@ fi
 
 # C: a fixture copy with a key REMOVED fails, naming the missing key.
 FIXTURE_MISSING="${WORK}/seed-missing.json"
-jq 'del(.autoMode)' "$SEED" > "$FIXTURE_MISSING"
+jq 'del(.editorMode)' "$SEED" > "$FIXTURE_MISSING"
 missing_output="$(assert_key_set "fixture with removed key" "$FIXTURE_MISSING" 2>&1)"
-if [[ "$missing_output" == FAIL:* && "$missing_output" == *"autoMode"* ]]; then
+if [[ "$missing_output" == FAIL:* && "$missing_output" == *"editorMode"* ]]; then
   pass "removed-key drift fails and names the missing key"
 else
   fail "removed-key drift fails and names the missing key" "$missing_output"

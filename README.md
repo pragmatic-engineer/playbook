@@ -212,7 +212,9 @@ One markdown store at `~/.claude/memory/`, global and per-project, local-only an
 
 The shipped install seed (`settings.shared.json`) carries a conservative permissions default. It drops bare `Bash` and the keychain `security` commands from auto-allow, and moves twelve interpreters (`node`, `python3`, `npx`, `npm`, `make`, `awk`, `go`, `source`, `xargs`, `sqlite3`, `psql`, `docker`) from allow to ask, so the installer gets prompted. This closes the obvious `node -e` and `python3 -c` one-liners.
 
-It is not a sandbox. Some commands still run without a prompt: `git`, `gh`, `find -exec`, the `sed` e-command, and anything under `Bash(**/.claude/**)`. The split lowers the default prompt surface, nothing more. Autoupdates ship disabled through `DISABLE_AUTOUPDATER` in the env block; remove it or set it to `0` to turn them back on.
+It is not a sandbox. Some commands still run without a prompt: `git`, `gh`, `find -exec`, the `sed` e-command, and anything under `Bash($HOME/.claude/**)`. The split lowers the default prompt surface, nothing more. Autoupdates ship disabled through `DISABLE_AUTOUPDATER` in the env block; remove it or set it to `0` to turn them back on.
+
+The `deny` block's `Read(**/.env)` and `Read(**/.env.*)` rules apply to the `Read` tool only. They do not stop an agent from reading a `.env` file's content through the auto-allowed shell readers: `cat`, `grep`, `head`, `tail`, and `sed` are all bare-allowed `Bash(...)` entries, so `cat .env` runs without a prompt even though `Read(.env)` would be denied. Treat the deny rule as a guard against the `Read` tool specifically, not as protection for `.env` content in general.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md); that page covers disclosure, not this permissions default.
 
