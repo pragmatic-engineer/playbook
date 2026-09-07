@@ -1,29 +1,26 @@
 # Plan and Implement
 
-`/playbook:scope` and `/playbook:implement` split feature work into two phases: a verified design session that produces a plan, then a delegated execution that builds it. Neither command does both jobs.
+`/playbook:plan` and `/playbook:implement` split feature work into two phases: a verified design session that produces a plan, then a delegated execution that builds it. `/playbook:plan` itself runs two internal phases, divergent then convergent, but it is one command, one session, one artifact.
 
 ## Overview
 
-The full chain starts before `/playbook:scope`, with `/playbook:brainstorm` finding the direction, and can branch to `/playbook:adr` when the decision is architectural. Both `/playbook:scope` and `/playbook:adr` hand `/playbook:implement` the same shape of work: Work Units grouped into Segments, where each Segment becomes one pull request and each Work Unit inside it becomes one commit.
+`/playbook:plan` opens divergent: it challenges the premise, explores the codebase and memory, and proposes 2-3 approaches before you approve a design. It can route to `/playbook:adr` mid-session when the decision is hard to reverse, without ending the session. It then continues, in the same conversation with no `/clear` in between, into the convergent interview for Work Units and Segments. `/playbook:plan` and `/playbook:adr` hand `/playbook:implement` the same shape of work: Work Units grouped into Segments, where each Segment becomes one pull request and each Work Unit inside it becomes one commit.
 
 ```mermaid
 flowchart TD
-  IDEA["idea, ticket, or file"] --> BS["/playbook:brainstorm<br/>divergent discovery"]
-  BS --> G1["Gate: PRD confirmed?"]
-  G1 -->|revise| BS
-  G1 -->|confirmed| G2["Gate: design doc approved?"]
-  G2 -->|revise| BS
+  IDEA["idea, ticket, or file"] --> PLAN["/playbook:plan<br/>divergent + convergent, one session"]
+  PLAN --> G1["Gate: problem confirmed<br/>(Step 3.5)"]
+  G1 -->|revise| PLAN
+  G1 -->|confirmed| G2["Gate: design approved<br/>(Step 6)"]
+  G2 -->|revise| PLAN
   G2 -->|"hard to reverse,<br/>genuine trade-off"| ADR["/playbook:adr<br/>decision record + blueprint"]
-  G2 -->|default| SCOPE["/playbook:scope<br/>interview-driven plan"]
-  IDEA -.->|skip brainstorm| SCOPE
-  IDEA -.->|skip brainstorm| ADR
+  G2 -->|default| G3["Gate: convergent summary confirmed,<br/>quality gate passed, you approve"]
 
-  SCOPE --> G3["Gate: quality gate passed,<br/>you approve"]
-  G3 -->|revise| SCOPE
-  G3 -->|approved| PLAN[("plan.md<br/>Work Units grouped into Segments")]
+  G3 -->|revise| PLAN
+  G3 -->|approved| PLANFILE[("plan.md<br/>Work Units grouped into Segments")]
   ADR --> BLUEPRINT[("blueprint.md<br/>Work Units")]
 
-  PLAN --> IMPL["/playbook:implement"]
+  PLANFILE --> IMPL["/playbook:implement"]
   BLUEPRINT --> IMPL
 
   IMPL --> G4["Gate: Step 4.5, delivery strategy<br/>PR topology + Segment boundary"]
@@ -42,28 +39,32 @@ flowchart TD
   REFINE --> PRS[("pull requests open<br/>stacked, one per Segment")]
 ```
 
-## Planning with /playbook:scope
+## Planning with /playbook:plan
 
-Run `/playbook:scope` with an optional topic seed or file path:
+Run `/playbook:plan` with an optional topic seed, ticket id, or file path:
 
 ```bash
-/playbook:scope "add --json flag to export command"
-/playbook:scope ./tasks/feature-brief.md
+/playbook:plan "add --json flag to export command"
+/playbook:plan ./tasks/feature-brief.md
 ```
 
-`/playbook:scope` runs on Opus. It interviews you one question at a time, each with a recommended answer and a reason. Before asking anything, it reads the codebase, the global memory store at `~/.config/playbook/memory/`, and the project store at `~/.config/playbook/memory/<owner>/<repo>/` (if present). Anything it finds there, it answers itself instead of asking you.
+`/playbook:plan` runs on Opus, effort high. Before asking anything, it reads the codebase, the global memory store at `~/.config/playbook/memory/`, and the project store at `~/.config/playbook/memory/<owner>/<repo>/` (if present). Anything it finds there, it answers itself instead of asking you.
 
-Each answer opens new branches. `/playbook:scope` walks them in dependency order and won't jump topics while a branch has unresolved decisions.
+It opens divergent: it challenges the premise, explores 2-3 approaches, and presents a design for your approval. Once you approve the design, it continues, in the same session with no `/clear` in between, into the convergent interview: one question at a time, each with a recommended answer and a reason, for Work Units and Segments.
+
+Each answer opens new branches. `/playbook:plan` walks them in dependency order and won't jump topics while a branch has unresolved decisions.
+
+A crash or interruption mid-session doesn't lose the work: `/playbook:plan` checkpoints after every resolved decision, in both the divergent and convergent phases. Re-running `/playbook:plan <same topic>` finds the checkpoint and offers to resume from wherever the session left off, instead of redoing settled decisions.
 
 When all branches are resolved, it runs a three-phase quality gate:
 
-1. **Fact-check.** An Explore subagent verifies every file path, function signature, and import in the plan. It also checks the Work Unit dependency graph for cycles and confirms parallel-safe flags are accurate.
-2. **Adversarial review.** A general-purpose subagent challenges the design: simpler alternatives, missing error paths, blast radius.
-3. **Test review.** An Explore subagent checks the test plan against engineering standards: boundary coverage, flakiness risks, mock quality, assertion strength.
+1. **Fact-check.** A `fact-checker` agent verifies every file path, function signature, and import in the plan. It also checks the Work Unit dependency graph for cycles and confirms parallel-safe flags are accurate.
+2. **Adversarial review.** A `critic` agent (focus `plan`) challenges the design: simpler alternatives, missing error paths, blast radius.
+3. **Test review.** A `test-reviewer` agent checks the test plan against engineering standards: boundary coverage, flakiness risks, mock quality, assertion strength.
 
 Each phase retries up to three times on FAIL before blocking. WARNs are surfaced but don't block.
 
-After the gate passes and you approve, `/playbook:scope` saves the plan to `<plans-dir>/<slug>.md` and the quality report to `<plans-dir>/<slug>-quality.md`, where `<plans-dir>` is `playbook path plans`'s resolved path. It also persists the key decisions as project memory facts.
+After the gate passes and you approve, `/playbook:plan` saves the plan to `<plans-dir>/<slug>.md` and the quality report to `<plans-dir>/<slug>-quality.md`, where `<plans-dir>` is `playbook path plans`'s resolved path. It also persists the key decisions from both phases as project memory facts.
 
 ### Plan structure
 
@@ -73,11 +74,11 @@ The saved plan is self-contained. Its core is a Work Units table: smallest indep
 | WU | Title | Files | Requires | Segment | Parallel group | Done When |
 ```
 
-`/playbook:scope` only marks a Work Unit as parallel-safe when its file set is disjoint from every sibling in the group and it has no dependency on them. When unsure, it leaves the unit sequential. `/playbook:implement` re-verifies the flags before dispatching concurrent agents.
+`/playbook:plan` only marks a Work Unit as parallel-safe when its file set is disjoint from every sibling in the group and it has no dependency on them. When unsure, it leaves the unit sequential. `/playbook:implement` re-verifies the flags before dispatching concurrent agents.
 
 ### Segments and incremental PRs
 
-Above the Work Units, `/playbook:scope` groups them into ordered **Segments**: PR-sized increments, one concern each, that each become one pull request.
+Above the Work Units, `/playbook:plan` groups them into ordered **Segments**: PR-sized increments, one concern each, that each become one pull request.
 
 ```
 | Seg | Title | Work Units | Requires | Concern | Est. lines |
@@ -88,10 +89,12 @@ A Segment targets under 500 changed lines (a Segment over 1000 needs justificati
 ### Autonomous mode (--auto)
 
 ```bash
-/playbook:scope "add --json flag to export command" --auto
+/playbook:plan "add --json flag to export command" --auto
 ```
 
-`--auto` skips the interview. For every decision, `/playbook:scope` takes the answer it would have recommended, records it in an Assumptions list, runs the quality gate, and saves the plan without pausing. A gate FAIL stops the run; it reports the failing checks and the assumptions made. On success, it lists all assumptions so you audit the autonomous choices before running `/playbook:implement`.
+`--auto` is narrower than the old two-command flow's autonomous mode: it only automates the convergent phase, Work Units and Segments. The divergent phase, approach selection, the `/playbook:adr` route check, and design approval, always stops for a human, regardless of `--auto`. This is an intentional breaking change: the old flow's `--auto`, on a raw topic-only invocation with no prior design doc, used to auto-answer approach selection too.
+
+Once the design is approved, `--auto` takes the answer it would have recommended for every convergent decision, records it in an Assumptions list, runs the quality gate, and saves the plan without pausing. A gate FAIL stops the run; it reports the failing checks and the assumptions made. On success, it lists all assumptions so you audit the autonomous choices before running `/playbook:implement`.
 
 ## Implementing with /playbook:implement
 
@@ -103,7 +106,7 @@ A Segment targets under 500 changed lines (a Segment over 1000 needs justificati
 /playbook:implement PROJ-123
 ```
 
-With no arguments, it lists saved plans to pick from. If the reference isn't a ready plan with named files, ordered steps, acceptance criteria, and a test plan, it stops and tells you to run `/playbook:scope` or `/playbook:adr` first.
+With no arguments, it lists saved plans to pick from. If the reference isn't a ready plan with named files, ordered steps, acceptance criteria, and a test plan, it stops and tells you to run `/playbook:plan` or `/playbook:adr` first.
 
 ### Execution
 
@@ -140,7 +143,7 @@ Pass `--no-tdd` to write tests and implementation together instead.
 
 ## Worked example
 
-Feature: add a `--json` flag to a CLI export command. After `/playbook:scope`, the plan has four Work Units grouped into two Segments:
+Feature: add a `--json` flag to a CLI export command. After `/playbook:plan`, the plan has four Work Units grouped into two Segments:
 
 | WU | Title | Requires | Segment | Parallel group | Done When |
 |----|-------|----------|---------|----------------|-----------|
@@ -164,6 +167,6 @@ Feature: add a `--json` flag to a CLI export command. After `/playbook:scope`, t
 
 ## See also
 
-- [Decisions and Memory](03-decisions-and-memory.md): when to use `/playbook:adr` instead of `/playbook:scope`, and how both memory stores feed planning.
+- [Decisions and Memory](03-decisions-and-memory.md): when to route mid-session to `/playbook:adr` instead of continuing straight to a plan with `/playbook:plan`, and how both memory stores feed planning.
 - [Review and PR flow](02-review-and-pr-flow.md): reviewing the branch after `/playbook:implement` finishes.
 - [Docs index](../index.md)

@@ -66,7 +66,7 @@ Each edge is stored once on the authoring fact. Reverse links are inferred at lo
 
 Facts get written two ways.
 
-**Ad-hoc during work.** When `/playbook:scope`, `/playbook:adr`, or `/playbook:implement` encounters a durable convention, a decision, a rejected alternative, or an error fix, it writes a fact immediately. `/playbook:deep-review` writes findings from a review pass. These are narrow, targeted writes tied to the work at hand.
+**Ad-hoc during work.** When `/playbook:plan`, `/playbook:adr`, or `/playbook:implement` encounters a durable convention, a decision, a rejected alternative, or an error fix, it writes a fact immediately. `/playbook:deep-review` writes findings from a review pass. These are narrow, targeted writes tied to the work at hand.
 
 **Bulk analysis via `/playbook:learn-project`.** This command reads the repo broadly (git history, code structure, PRs, and JIRA/Confluence when reachable), clusters what it finds into topics, and writes one fact file per topic. Before writing anything, it shows you a candidate table and asks once. It won't write without your confirmation.
 
@@ -84,7 +84,7 @@ Facts reach context three ways, described in full in [ADR 0004](../adr/0004-grap
 
 The anchor index above builds once per session and is not rebuilt within it, so a fact written mid-session will not surface via anchor or prompt matching until the next session starts.
 
-The planning and execution commands (`/playbook:scope`, `/playbook:adr`, `/playbook:implement`) read all three scopes before planning or executing. Project facts override org, which overrides global, for that repo. Conflicts between scopes surface rather than resolve silently. The commit and review commands (`/playbook:commit-and-push`, `/playbook:quick-review`, `/playbook:address-pr-comments`) don't touch memory.
+The planning and execution commands (`/playbook:plan`, `/playbook:adr`, `/playbook:implement`) read all three scopes before planning or executing. Project facts override org, which overrides global, for that repo. Conflicts between scopes surface rather than resolve silently. The commit and review commands (`/playbook:commit-and-push`, `/playbook:quick-review`, `/playbook:address-pr-comments`) don't touch memory.
 
 **Across a session boundary**, `/playbook:session-handoff` persists a handoff document to disk; `session-init` reloads and deletes it automatically at the next `SessionStart`, including after `/clear`, so `/clear` no longer discards what the session had figured out. The `memory-capture` hook also fires once per context-usage threshold crossing during a session (a `Stop` hook, not a `SessionEnd` one), prompting you to write down durable facts and, since ADR 0008, to run a handoff too, in case the session runs long enough to approach compaction.
 

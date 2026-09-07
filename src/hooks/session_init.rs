@@ -70,7 +70,7 @@ const DRIFT_EXTRA_CONTEXT: &str = "The user resumed this session, but the config
     a new `claude` invocation.";
 
 const TOOLKIT_PREAMBLE: &str = "Your toolkit. Before substantive work, check whether one of \
-    these fits and use it instead of ad-hoc steps: plan a feature with /playbook:scope, execute a ready \
+    these fits and use it instead of ad-hoc steps: plan a feature with /playbook:plan, execute a ready \
     plan with /playbook:implement, record a decision with /playbook:adr, commit and push with /playbook:commit-and-push, \
     open a PR with /playbook:create-pull-request, review a PR with /playbook:quick-review or /playbook:deep-review, debug \
     a failure with the systematic-debugging skill. Invoke skills via the Skill tool, commands \

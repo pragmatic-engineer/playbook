@@ -167,9 +167,8 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 |---|---|
 | `/playbook:setup` | Wires the guards, seeds `settings.json`, and installs what you choose. Safe to run repeatedly. |
 | `/playbook:doctor` | Checks the seven layers and prints a pass/info table with a remediation hint for each miss. |
-| `/playbook:brainstorm` | Divergent discovery session; explores a raw idea and produces an approved design doc for `/playbook:scope`. |
-| `/playbook:scope` | Interview-driven planning; saves a verified, parallel-safe plan to `.claude/plans/` for `/playbook:implement`. |
-| `/playbook:implement` | Executes a `/playbook:scope` plan or `/playbook:adr` blueprint with subagents and TDD, committing each work unit. `--auto` opens a PR. |
+| `/playbook:plan` | One continuous session from a raw idea or a settled direction to a verified, parallel-safe plan saved for `/playbook:implement`. |
+| `/playbook:implement` | Executes a `/playbook:plan` plan or `/playbook:adr` blueprint with subagents and TDD, committing each work unit. `--auto` opens a PR. |
 | `/playbook:adr` | Creates an Architecture Decision Record through investigate, draft, quality-gate, finalise. Saves to `.claude/adr/`. |
 | `/playbook:commit-and-push` | Writes a commit message from the staged diff, commits signed, optionally rebases, then pushes. |
 | `/playbook:create-pull-request` | Opens a PR with pre-flight checks, a conventional-commit title, and the team PR template. |
