@@ -6,6 +6,7 @@
 #   - ShellCheck static analysis on all tracked .sh files (Linux only, lint once)
 #   - Bash syntax (bash -n) on all tracked .sh files
 #   - Zsh syntax (zsh -n) on all tracked .zsh files
+#   - No personal identifier or maintainer-specific string in tracked files
 #   - Every behavioral suite discovered via `git ls-files '*.test.sh'`
 
 name: shell-ci
@@ -68,6 +69,40 @@ jobs:
       - name: Zsh syntax check
         run: |
           for f in $(git ls-files '*.zsh'); do zsh -n "$f"; done
+
+      - name: Personal-identifier grep
+        # Regression guard for everything S2-S4 of the product-hardening
+        # wrap-up removed from the shipped surface (settings.shared.json,
+        # permissions.shared.json, README.md, docs, Brewfile): a maintainer
+        # home-directory convention, a Jira host, the `rtk` local CLI wrapper,
+        # and the maintainer's own username. Excludes docs/adr/**: ADRs are
+        # a historical record (ADR 0001/0002/0006 alone carry 10+ legitimate
+        # references to `rtk` and `Workspace/` documenting real past
+        # decisions), and rewriting history after the fact is wrong. A
+        # further handful of test fixtures and doc-comments legitimately
+        # reuse these strings to exercise or document real, intentional
+        # product behaviour rather than leaking an identifier; each is
+        # excluded by exact path below. This step's own file is also
+        # excluded: its comments and its regex literal necessarily spell out
+        # the very strings it searches for.
+        run: |
+          if git ls-files -- \
+              ':!.github/workflows/shell-ci.yml' \
+              ':!docs/adr/**' \
+              ':!shell/ensure-deps.test.sh' \
+              ':!shell/statusline.test.sh' \
+              ':!src/hooks/rm_workspace_guard.rs' \
+              ':!src/init/wire.rs' \
+              ':!tests/fixtures/golden/setup-local.clean-install.json' \
+              ':!tests/fixtures/golden/setup-local.skip-triggering.json' \
+              ':!tests/hooks_guards.rs' \
+              ':!tests/init_wire.rs' \
+              ':!tests/settings_check.rs' \
+              ':!tests/settings_gen.rs' \
+              | xargs grep -nE 'Workspace/|atlassian\.net|\brtk\b|isantos'; then
+            echo "::error::personal identifier or maintainer-specific string found in tracked files (see above)"
+            exit 1
+          fi
 
       - name: Run behavioral test suites
         # Discover every suite so a new *.test.sh is picked up automatically.
