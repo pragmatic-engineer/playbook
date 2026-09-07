@@ -26,7 +26,7 @@ set +e   # Never let an error silently kill the status line
 
 SHOW_GIT="${STATUSLINE_SHOW_GIT:-true}"             # Git branch + dirty indicator
 SHOW_PR="${STATUSLINE_SHOW_PR:-true}"                # GitHub PR number, author, review status
-SHOW_CI="${STATUSLINE_SHOW_CI:-true}"                # CI status rollup (workspace projects only)
+SHOW_CI="${STATUSLINE_SHOW_CI:-true}"                # CI status rollup (see STATUSLINE_CI_ROOTS)
 SHOW_MODEL="${STATUSLINE_SHOW_MODEL:-true}"          # Model name + effort
 SHOW_CONTEXT="${STATUSLINE_SHOW_CONTEXT:-true}"      # Context window % (with compaction proximity arrow)
 SHOW_SESSION_AGE="${STATUSLINE_SHOW_SESSION_AGE:-true}"   # "Up 18m" since session start (needs hooks)
@@ -270,11 +270,19 @@ osc8_link() {
     printf '%s' '\033]8;;'"$url"'\033\\'"$text"'\033]8;;\033\\'
 }
 
-# True when the path is under ~/Workspace/ (work projects). The trailing slash is
-# load-bearing: without it ~/Workspace-personal/ would also match, but that tree
-# is explicitly excluded from CI status display.
+# True when the path is under one of STATUSLINE_CI_ROOTS (colon-separated). Unset
+# or empty means every git repo gets the CI badge. Each root is matched with a
+# trailing slash so e.g. "Workspace" doesn't also match "Workspace-personal".
 is_workspace_project() {
-    [[ "$1" == "$HOME/Workspace/"* ]]
+    local roots="${STATUSLINE_CI_ROOTS:-}"
+    [[ -z "$roots" ]] && return 0
+    local root IFS=':'
+    for root in $roots; do
+        [[ -z "$root" ]] && continue
+        root="${root%/}/"
+        [[ "$1" == "$root"* ]] && return 0
+    done
+    return 1
 }
 
 # Ensure cache dir exists with restrictive perms. chmod runs only on first creation
@@ -487,8 +495,9 @@ _pr_fire_refresh() {
 }
 
 # Render the PR section of line 1's right side.
-# Sets global `right`, and for workspace projects sets ci_state/ci_failed/
-# ci_running/ci_total so the standalone CI block below can skip its own fetch.
+# Sets global `right`, and when is_workspace_project allows it, sets
+# ci_state/ci_failed/ci_running/ci_total so the standalone CI block below can
+# skip its own fetch.
 render_pr_right() {
     [[ "$SHOW_PR" == true ]] || return 0
     [[ "$git_in_repo" == true ]] || return 0
@@ -549,8 +558,8 @@ render_pr_right() {
                else "d" end) + ":" + .author.login + ":" + (.submittedAt // "")] | join("\n"))"
     ' 2>/dev/null) && eval "$_pr_out" 2>/dev/null || true
 
-    # Populate CI globals (workspace projects only). The standalone CI block below
-    # skips its own fetch when ci_state is already set.
+    # Populate CI globals (gated by is_workspace_project / STATUSLINE_CI_ROOTS).
+    # The standalone CI block below skips its own fetch when ci_state is already set.
     ci_state=""; ci_failed=0; ci_running=0; ci_total=0
     if [[ "$SHOW_CI" == true ]] && is_workspace_project "$cwd"; then
         read -r ci_state ci_failed ci_running ci_total <<< "$ci_summary"
@@ -580,9 +589,12 @@ render_pr_right() {
     esac
 
     if [[ -n "$jira_ticket" ]]; then
-        local jira_label
+        local jira_label jira_base="${STATUSLINE_JIRA_BASE_URL:-}"
         jira_label="${TEAL}${jira_ticket}${RESET}"
-        jira_label=$(osc8_link "https://clipboard.atlassian.net/browse/${jira_ticket}" "$jira_label")
+        # No base URL configured: plain text, no link built (nothing to point at).
+        if [[ -n "$jira_base" ]]; then
+            jira_label=$(osc8_link "${jira_base%/}/browse/${jira_ticket}" "$jira_label")
+        fi
         right="${right} ${jira_label}"
     fi
 
@@ -671,7 +683,7 @@ ci_state=""; ci_failed=0; ci_running=0; ci_total=0
 render_pr_right
 
 # ╔══════════════════════════════════════════════════════════════════════════════╗
-# ║  Standalone CI fetch (workspace projects without an open PR)                 ║
+# ║  Standalone CI fetch (branches without an open PR)                           ║
 # ║                                                                              ║
 # ║  When the branch has a PR, statusCheckRollup is already on the cached PR     ║
 # ║  JSON (no extra round trip). For branches without a PR (e.g., master), we    ║
