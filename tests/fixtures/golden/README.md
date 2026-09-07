@@ -81,7 +81,7 @@ made two intentional behaviour changes upstream: the settings generator
 inverted a personal-key denylist to a shippable-key allowlist (dropping
 `autoMode`, `enabledPlugins`, and non-shippable `env` keys the old fixtures
 still carried), and the shared permissions template dropped the
-maintainer-personal `Write(~/Workspace/**)` grant and narrowed
+maintainer-personal home-directory write grant and narrowed
 `Bash(**/.claude/**)` to `Bash($HOME/.claude/**)`. Both changes are
 documented in their own PRs; this is the recorded reason for the divergence
 the paragraph above asks for.

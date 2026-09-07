@@ -210,9 +210,15 @@ strip_ansi() {
 # bytes 0x80-0xBF). Locale-independent; handles multibyte glyphs like █ ░ ✗ ● ϓ.
 visible_len() { strip_ansi "$1" | LC_ALL=C awk '{ t=length($0); c=gsub(/[\200-\277]/,"",$0); print t-c }'; }
 
-# File mtime in epoch seconds. macOS uses stat -f %m, GNU stat uses -c %Y.
+# File mtime in epoch seconds. GNU stat uses -c %Y, macOS/BSD stat uses -f %m.
+# GNU tried first: GNU stat accepts -f too (it means "filesystem status", a
+# different report) and exits 0 while ignoring the %m directive, so a
+# BSD-first order never falls through to -c on Linux and corrupts every
+# caller's arithmetic with that multi-line report instead of an epoch number.
+# BSD stat rejects -c outright (exit nonzero), so trying -c first still falls
+# back to -f %m correctly on macOS.
 file_mtime() {
-    stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0
+    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
 }
 
 # Parse an ISO 8601 UTC timestamp (e.g. "2024-01-15T10:30:00Z") to epoch seconds.
