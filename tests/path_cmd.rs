@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Binary-spawn tests for `playbook path <kind>`, resolving the absolute
-//! path to a worktree-scoped storage directory (`plans`/`designs`/`implement`/`worktrees`).
+//! path to a worktree-scoped storage directory (`plans`/`implement`/`worktrees`).
 
 use std::fs;
 use std::path::PathBuf;
@@ -107,7 +107,6 @@ fn stderr_of(out: &std::process::Output) -> String {
 fn every_kind_prints_its_worktree_scoped_subdirectory() {
     for (kind, dir_name) in [
         ("plans", "plans"),
-        ("designs", "designs"),
         ("implement", "implement"),
         ("worktrees", "worktrees"),
     ] {
@@ -161,6 +160,23 @@ fn errors_when_worktree_scoping_cannot_resolve() {
     assert!(
         stderr_of(&out).contains("playbook path:"),
         "got: {}",
+        stderr_of(&out)
+    );
+}
+
+#[test]
+fn rejects_designs_as_an_unknown_kind() {
+    // Arrange
+    let f = Fixture::new("designs-removed");
+
+    // Act
+    let out = f.run("designs");
+
+    // Assert
+    assert_ne!(
+        out.status.code(),
+        Some(0),
+        "designs should no longer be a valid path kind: {}",
         stderr_of(&out)
     );
 }
