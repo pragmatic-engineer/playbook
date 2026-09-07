@@ -346,7 +346,7 @@ _ci_repo_setup() {
 # badge must appear for any git repo.
 c1_home=$(mktemp -d)
 c1_repo=$(_ci_repo_setup "$c1_home" "chore/no-ticket" '[{"status":"completed","conclusion":"failure"}]')
-c1_out=$(env -u STATUSLINE_CI_ROOTS HOME="$c1_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$c1_repo\"}" 2>&1)
+c1_out=$(env -u STATUSLINE_CI_ROOTS -u XDG_CACHE_HOME STATUSLINE_CACHE_DIR="$c1_home/.cache/statusline" HOME="$c1_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$c1_repo\"}" 2>&1)
 assert_eq "CI segment appears outside \$HOME/Workspace/ when STATUSLINE_CI_ROOTS is unset" \
     "$( [[ "$c1_out" == *"CI"*"1/1"* ]] && echo yes || echo no )" "yes"
 rm -rf "$c1_home"
@@ -355,7 +355,7 @@ rm -rf "$c1_home"
 c2_home=$(mktemp -d)
 c2_repo=$(_ci_repo_setup "$c2_home" "chore/no-ticket" '[{"status":"completed","conclusion":"failure"}]')
 c2_root=$(mktemp -d)
-c2_out=$(STATUSLINE_CI_ROOTS="$c2_root" HOME="$c2_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$c2_repo\"}" 2>&1)
+c2_out=$(env -u XDG_CACHE_HOME STATUSLINE_CACHE_DIR="$c2_home/.cache/statusline" STATUSLINE_CI_ROOTS="$c2_root" HOME="$c2_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$c2_repo\"}" 2>&1)
 assert_eq "CI segment absent when STATUSLINE_CI_ROOTS excludes cwd" \
     "$( [[ "$c2_out" == *"CI ✗"* ]] && echo yes || echo no )" "no"
 rm -rf "$c2_home" "$c2_root"
@@ -363,7 +363,7 @@ rm -rf "$c2_home" "$c2_root"
 # 11c. STATUSLINE_CI_ROOTS set to a root that DOES contain cwd shows the badge.
 c3_home=$(mktemp -d)
 c3_repo=$(_ci_repo_setup "$c3_home" "chore/no-ticket" '[{"status":"completed","conclusion":"failure"}]')
-c3_out=$(STATUSLINE_CI_ROOTS="$c3_home" HOME="$c3_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$c3_repo\"}" 2>&1)
+c3_out=$(env -u XDG_CACHE_HOME STATUSLINE_CACHE_DIR="$c3_home/.cache/statusline" STATUSLINE_CI_ROOTS="$c3_home" HOME="$c3_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$c3_repo\"}" 2>&1)
 assert_eq "CI segment appears when STATUSLINE_CI_ROOTS includes cwd" \
     "$( [[ "$c3_out" == *"CI ✗"* ]] && echo yes || echo no )" "yes"
 rm -rf "$c3_home"
@@ -372,7 +372,7 @@ rm -rf "$c3_home"
 # org-specific "atlassian" string leaks into the output.
 j1_home=$(mktemp -d)
 j1_repo=$(_ci_repo_setup "$j1_home" "feature/PROJ-123-thing" '[]')
-j1_out=$(env -u STATUSLINE_JIRA_BASE_URL HOME="$j1_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$j1_repo\"}" 2>&1)
+j1_out=$(env -u STATUSLINE_JIRA_BASE_URL -u XDG_CACHE_HOME STATUSLINE_CACHE_DIR="$j1_home/.cache/statusline" HOME="$j1_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$j1_repo\"}" 2>&1)
 assert_eq "Jira ticket renders as plain text when STATUSLINE_JIRA_BASE_URL is unset" \
     "$( [[ "$j1_out" == *"PROJ-123"* ]] && echo yes || echo no )" "yes"
 assert_eq "no atlassian string leaks when STATUSLINE_JIRA_BASE_URL is unset" \
@@ -384,7 +384,7 @@ rm -rf "$j1_home"
 # captured output regardless of the test terminal's actual capability.
 j2_home=$(mktemp -d)
 j2_repo=$(_ci_repo_setup "$j2_home" "feature/PROJ-123-thing" '[]')
-j2_out=$(STATUSLINE_JIRA_BASE_URL="https://example.atlassian.net" STATUSLINE_OSC8=true \
+j2_out=$(env -u XDG_CACHE_HOME STATUSLINE_CACHE_DIR="$j2_home/.cache/statusline" STATUSLINE_JIRA_BASE_URL="https://example.atlassian.net" STATUSLINE_OSC8=true \
     HOME="$j2_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$j2_repo\"}" 2>&1)
 assert_eq "Jira ticket links to the configured base URL" \
     "$( [[ "$j2_out" == *"https://example.atlassian.net/browse/PROJ-123"* ]] && echo yes || echo no )" "yes"
@@ -394,7 +394,7 @@ rm -rf "$j2_home"
 # slash in front of "browse".
 j3_home=$(mktemp -d)
 j3_repo=$(_ci_repo_setup "$j3_home" "feature/PROJ-123-thing" '[]')
-j3_out=$(STATUSLINE_JIRA_BASE_URL="https://example.atlassian.net/" STATUSLINE_OSC8=true \
+j3_out=$(env -u XDG_CACHE_HOME STATUSLINE_CACHE_DIR="$j3_home/.cache/statusline" STATUSLINE_JIRA_BASE_URL="https://example.atlassian.net/" STATUSLINE_OSC8=true \
     HOME="$j3_home" bash "$SCRIPT_DIR/../statusline.sh" <<< "{\"cwd\":\"$j3_repo\"}" 2>&1)
 assert_eq "trailing slash on STATUSLINE_JIRA_BASE_URL does not double up" \
     "$( [[ "$j3_out" == *"https://example.atlassian.net/browse/PROJ-123"* && "$j3_out" != *"//browse"* ]] && echo yes || echo no )" "yes"
