@@ -27,7 +27,7 @@ Open a new terminal (or source your rc file) afterwards so the binary resolves o
 Pass `--yes` to accept every default without prompting. Pin a version:
 
 ```bash
-PLAYBOOK_REF=v0.14.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+PLAYBOOK_REF=v0.15.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
 
 Install files only (no plugin, no local wiring):
