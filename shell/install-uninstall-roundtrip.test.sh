@@ -371,6 +371,73 @@ else
         "exit $strict_rc, settings.json present: $([ -f "$strict_home/.claude/settings.json" ] && echo yes || echo no); output: $strict_out"
 fi
 
+# --- install.sh must forward --aliases to `playbook init`, same as
+# --system-prompt already does -------------------------------------------
+# Regression test: OPT_ALIASES was tracked from the --aliases flag and from
+# the interactive prompt, but never appended to $_INIT_ARGS, so `playbook
+# init` never received --aliases and its own shim step silently ran
+# unconfigured (always "skipped"), no matter what the user asked for. Only
+# --system-prompt was ever forwarded. This stub records the exact argv
+# `init` receives so the fix is pinned by an assertion, not just a comment.
+RECORDING_STUB_DIR="$WORK/recording-init-bin"
+mkdir -p "$RECORDING_STUB_DIR"
+cat > "$RECORDING_STUB_DIR/playbook" <<STUB
+#!/usr/bin/env bash
+case "\${1:-}" in
+  --version) printf 'playbook 0.0.0-stub\n' ;;
+  init)
+    shift
+    printf '%s\n' "\$@" > "$WORK/init-argv.txt"
+    if [ "\${1:-}" = "--help" ]; then
+      printf -- '--aliases\n--system-prompt\n'
+      exit 0
+    fi
+    home="\${CLAUDE_HOME:-\$HOME/.claude}"
+    [ -f "\$home/settings.json" ] || printf '{}\n' > "\$home/settings.json"
+    [ -f "\$home/.settings.base.json" ] || printf '{}\n' > "\$home/.settings.base.json"
+    printf 'settings: wired - seeded from template\n'
+    printf 'guards: ok - already in place\n'
+    printf 'hooks: ok - all hooks already wired\n'
+    printf 'shim: ok - installed\n'
+    printf 'statusline: ok - already up to date\n'
+    printf 'system-prompt: ok - installed\n'
+    ;;
+esac
+exit 0
+STUB
+chmod +x "$RECORDING_STUB_DIR/playbook"
+
+aliases_home="$(mktemp -d "$WORK/aliases-home.XXXXXX")"
+PLAYBOOK_SRC="$SRC" CLAUDE_HOME="$aliases_home/.claude" HOME="$aliases_home" \
+    PLAYBOOK_BIN_DIR="$RECORDING_STUB_DIR" SHELL=/bin/bash \
+    bash "$REPO_ROOT/install.sh" --yes --aliases --system-prompt --skip-plugin >/dev/null 2>&1
+aliases_argv="$(cat "$WORK/init-argv.txt" 2>/dev/null || true)"
+
+if printf '%s' "$aliases_argv" | grep -q -- '--aliases'; then
+    pass "install.sh --aliases forwards --aliases to playbook init"
+else
+    fail "install.sh --aliases forwards --aliases to playbook init" \
+        "playbook init received: '$aliases_argv'"
+fi
+
+if printf '%s' "$aliases_argv" | grep -q -- '--system-prompt'; then
+    pass "install.sh --system-prompt forwards --system-prompt to playbook init"
+else
+    fail "install.sh --system-prompt forwards --system-prompt to playbook init" \
+        "playbook init received: '$aliases_argv'"
+fi
+
+# Note: there is no non-interactive way to get OPT_ALIASES=0 to test the
+# absence case here. ask()'s own short-circuit (install.sh:56) takes the
+# prompt's default (Y for aliases) whenever --yes is set OR /dev/tty does not
+# exist, which is every automated test run; there is no --no-aliases flag to
+# force a decline. --no-setup does NOT suppress this (install.sh:97 documents
+# it as skipping only the plugin: "guards, settings, and shell wiring still
+# run"), so it is not a substitute. The unsupported-binary path (aliases
+# requested but the installed release predates the flag) is already covered
+# by the "predates an optional init flag" scenario above, which runs with
+# --yes against a stub that rejects --aliases as well as --system-prompt.
+
 TOTAL=$(( PASS + FAIL ))
 echo ""
 echo "${PASS}/${TOTAL} scenarios passed"

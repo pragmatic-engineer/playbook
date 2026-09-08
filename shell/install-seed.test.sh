@@ -47,16 +47,27 @@ cp "$BIN_SRC" "$BIN_DIR/playbook"
 chmod 0755 "$BIN_DIR/playbook"
 
 # seed_shipped_extras <src>: the stub statusline.sh every scenario needs so
-# `playbook init` completes. Guards are `playbook hook <name>` commands built into the binary, nothing to stage under hooks/.
+# `playbook init` completes, plus a minimal shell/ tree. Guards are
+# `playbook hook <name>` commands built into the binary, nothing to stage
+# under hooks/. The shell/ stub exists because `--yes` defaults the aliases
+# prompt to yes with no controlling tty (this harness's normal case), which
+# `install.sh` now correctly forwards as `--aliases`: the shell-runtime copy
+# step then runs regardless of $SHELL (only the separate rc-file shim step
+# is gated on it), so a synthetic source tree with no shell/ at all fails
+# that copy with a bare file-not-found instead of completing.
 seed_shipped_extras() {
   local src="$1"
   printf '#!/bin/sh\necho ok\n' > "$src/statusline.sh"
+  mkdir -p "$src/shell/bash" "$src/shell/zsh" "$src/shell/shared"
+  printf '#!/bin/sh\n' > "$src/shell/bash/cc.sh"
+  printf '#!/bin/sh\n' > "$src/shell/zsh/cc.zsh"
 }
 
 # run_install <src> <home> <log>: runs the real installer against a local
 # source, fully hermetic (the PLAYBOOK_SRC seam skips the network path, and
-# --no-setup skips the plugin). $SHELL is unset so the shim step skips
-# cleanly instead of failing on a launcher runtime this suite does not ship.
+# --no-setup skips the plugin). $SHELL is unset so the rc-file shim step
+# skips cleanly; the shell-runtime copy step still runs (see
+# seed_shipped_extras) since it does not check $SHELL.
 run_install() {
   local src="$1" home="$2" log="$3"
   env -u SHELL PLAYBOOK_SRC="$src" PLAYBOOK_BIN_DIR="$BIN_DIR" \
