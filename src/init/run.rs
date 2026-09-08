@@ -149,9 +149,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         shell_runtime_confirmed,
     );
 
-    let memory_migrate_step = memory_migrate::migrate_memory_store(&paths.claude_home);
-    let memory_root_migrate_step =
-        memory_migrate::migrate_memory_root(&paths.home, &paths.claude_home);
+    let memory_step = memory_migrate::migrate_memory(&paths.home, &paths.claude_home);
 
     InitOutcome {
         steps: vec![
@@ -161,8 +159,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
             settings_step,
             hooks_step,
             shim_step,
-            memory_migrate_step,
-            memory_root_migrate_step,
+            memory_step,
         ],
     }
 }

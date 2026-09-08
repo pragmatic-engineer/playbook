@@ -221,9 +221,9 @@ fn fresh_config_gets_fully_wired() {
             );
             continue;
         }
-        // `memory-migrate` and `memory-root-migrate` have nothing to
-        // migrate on a fresh machine with no legacy `~/.claude/memory`.
-        if step.name == "memory-migrate" || step.name == "memory-root-migrate" {
+        // `memory` has nothing to migrate on a fresh machine with no
+        // legacy `~/.claude/memory`.
+        if step.name == "memory" {
             assert_eq!(
                 step.status,
                 StepStatus::Skipped,
@@ -580,12 +580,9 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     // Assert: nothing is reported as a change the second time.
     assert!(second.ok());
     for step in &second.steps {
-        // `system-prompt`, `memory-migrate` and `memory-root-migrate` stay
-        // `Skipped` on both runs: none has anything to act on in this fixture.
-        let expected = if step.name == "system-prompt"
-            || step.name == "memory-migrate"
-            || step.name == "memory-root-migrate"
-        {
+        // `system-prompt` and `memory` stay `Skipped` on both runs: neither
+        // has anything to act on in this fixture.
+        let expected = if step.name == "system-prompt" || step.name == "memory" {
             StepStatus::Skipped
         } else {
             StepStatus::AlreadyCorrect
@@ -852,7 +849,7 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
     );
 }
 
-/// The `memory-migrate` step must appear in `run()`'s reported steps.
+/// The `memory` step must appear in `run()`'s reported steps.
 #[test]
 fn memory_migrate_step_appears_in_reported_steps() {
     // Arrange
@@ -863,7 +860,50 @@ fn memory_migrate_step_appears_in_reported_steps() {
     let outcome = run(&paths);
 
     // Assert
-    find_step(&outcome, "memory-migrate");
+    find_step(&outcome, "memory");
+}
+
+/// `run()` calls `memory_migrate::migrate_memory(&paths.home, &paths.claude_home)`;
+/// every other test in this file only exercises the no-op path (no legacy
+/// `~/.claude/memory` present), which would stay green even if `home` and
+/// `claude_home` were swapped at that call site. Seeding real content and
+/// checking it actually lands at `home/.config/playbook/memory` closes that
+/// gap.
+#[test]
+fn memory_step_actually_migrates_real_content_to_the_new_root() {
+    // Arrange: a legacy graph.json under the pre-migration location.
+    let home = scratch_home("memory-migrates-real-content");
+    let claude_home = claude_home_of(&home);
+    let mem_dir = claude_home.join("memory");
+    std::fs::create_dir_all(&mem_dir).unwrap();
+    std::fs::write(mem_dir.join("graph.json"), r#"{"nodes":[]}"#).unwrap();
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    let memory_step = find_step(&outcome, "memory");
+    assert_eq!(
+        memory_step.status,
+        StepStatus::Wired,
+        "{}",
+        memory_step.detail
+    );
+    let new_graph = home
+        .join(".config")
+        .join("playbook")
+        .join("memory")
+        .join("memory.graph.json");
+    assert_eq!(
+        std::fs::read_to_string(&new_graph)
+            .unwrap_or_else(|e| panic!("expected content at {}: {e}", new_graph.display())),
+        r#"{"nodes":[]}"#
+    );
+    assert!(
+        !mem_dir.exists(),
+        "the pre-migration tree should be gone once the move completes"
+    );
 }
 
 /// A full pre-ADR-0012 install migrates in one `run()` call.
