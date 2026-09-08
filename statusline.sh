@@ -210,21 +210,38 @@ strip_ansi() {
 # bytes 0x80-0xBF). Locale-independent; handles multibyte glyphs like █ ░ ✗ ● ϓ.
 visible_len() { strip_ansi "$1" | LC_ALL=C awk '{ t=length($0); c=gsub(/[\200-\277]/,"",$0); print t-c }'; }
 
+# Detected once at startup rather than probed per call: this script re-runs on
+# every prompt render, so a try-BSD-then-try-GNU fallback pays for a spawned,
+# guaranteed-fail process on every single render. Worse, for stat specifically
+# a fallback can't tell "wrong dialect" from "real failure": GNU stat accepts
+# -f too (it means "filesystem status", a different report) and exits 0 while
+# ignoring the %m directive, so a BSD-first probe never falls through to -c on
+# Linux and silently corrupts the caller's arithmetic instead of erroring.
+# Deciding the dialect once from uname sidesteps both problems.
+case "$(uname -s 2>/dev/null)" in
+    Darwin) IS_MACOS=true ;;
+    *)      IS_MACOS=false ;;
+esac
+
 # File mtime in epoch seconds. GNU stat uses -c %Y, macOS/BSD stat uses -f %m.
-# GNU tried first: GNU stat accepts -f too (it means "filesystem status", a
-# different report) and exits 0 while ignoring the %m directive, so a
-# BSD-first order never falls through to -c on Linux and corrupts every
-# caller's arithmetic with that multi-line report instead of an epoch number.
-# BSD stat rejects -c outright (exit nonzero), so trying -c first still falls
-# back to -f %m correctly on macOS.
 file_mtime() {
-    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
+    if [[ "$IS_MACOS" == true ]]; then
+        stat -f %m "$1" 2>/dev/null || echo 0
+    else
+        stat -c %Y "$1" 2>/dev/null || echo 0
+    fi
 }
 
 # Parse an ISO 8601 UTC timestamp (e.g. "2024-01-15T10:30:00Z") to epoch seconds.
 # macOS/BSD: date -j -f; Linux/GNU: date -d. TZ=UTC ensures correct epoch on both.
-# Returns empty string on parse failure (both branches fail).
-iso_to_epoch() { TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || TZ=UTC date -d "$1" +%s 2>/dev/null; }
+# Returns empty string on parse failure.
+iso_to_epoch() {
+    if [[ "$IS_MACOS" == true ]]; then
+        TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null
+    else
+        TZ=UTC date -d "$1" +%s 2>/dev/null
+    fi
+}
 
 # Filesystem-safe slug from arbitrary string (for cache file names).
 cache_slug() {
