@@ -416,6 +416,13 @@ _init_supports() {
 }
 
 _INIT_ARGS=""
+if [ "$OPT_ALIASES" -eq 1 ]; then
+    if _init_supports --aliases; then
+        _INIT_ARGS="$_INIT_ARGS --aliases"
+    else
+        warn "the installed playbook $( "$PLAYBOOK_BIN_DIR/playbook" --version 2>/dev/null | awk '{print $NF}' ) does not support --aliases; skipping it. Re-run this installer once a release includes it."
+    fi
+fi
 if [ "$OPT_SYSTEM_PROMPT" -eq 1 ]; then
     if _init_supports --system-prompt; then
         _INIT_ARGS="$_INIT_ARGS --system-prompt"
