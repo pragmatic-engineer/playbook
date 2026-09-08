@@ -96,7 +96,7 @@ pub fn run(payload: &Payload) {
     };
 
     let home = home_dir();
-    let _ = crate::init::memory_migrate::migrate_memory_root(&home, &home.join(".claude"));
+    let _ = crate::init::memory_migrate::migrate_memory(&home, &home.join(".claude"));
 
     let mem_dir = memory_dir();
     let _ = fs::create_dir_all(&mem_dir);

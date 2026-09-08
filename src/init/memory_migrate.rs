@@ -1,23 +1,90 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Migrates `~/.claude/memory/graph.json` to `memory.graph.json`, and
-//! migrates the whole `~/.claude/memory` tree to `$HOME/.config/playbook/memory`.
+//! Migrates the whole memory store as a single reported step named `memory`:
+//! renames `~/.claude/memory/graph.json` to `memory.graph.json` if the old
+//! filename is still present, then moves the whole `~/.claude/memory` tree to
+//! `$HOME/.config/playbook/memory`. The rename is an internal precondition
+//! the move needs (it copies whatever filenames are present, so a move
+//! before the rename would strand the old filename at the new location),
+//! not a separate migration a caller should reason about.
 
-use crate::init::run::StepReport;
+use crate::init::run::{StepReport, StepStatus};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-const STEP_NAME: &str = "memory-migrate";
+const STEP_NAME: &str = "memory";
 const OLD_FILE_NAME: &str = "graph.json";
 const NEW_FILE_NAME: &str = "memory.graph.json";
 const OLD_LOCK_NAME: &str = "graph.json.lock";
 const NEW_LOCK_NAME: &str = "memory.graph.json.lock";
+/// Its presence is the only "migration complete" signal: a destination
+/// left partially populated by an interrupted prior run has no sentinel.
+const SENTINEL_NAME: &str = ".migration-complete";
+
+/// Migrates the whole memory store in one step: renames the legacy filename
+/// first (a fast no-op once already renamed), then moves the tree to its
+/// final location (a fast no-op once the sentinel is present). Safe to call
+/// repeatedly and from any entry point (`playbook init`, or a session-start
+/// fallback): every call after the first is a cheap check, not a re-copy.
+///
+/// A failed rename does not abort the move: the move copies whatever
+/// filename is present either way, so a legacy `graph.json` that could not
+/// be renamed (a read-only source, say) still reaches the new location,
+/// just under its old name. `session_init.rs`'s own new-root fallback
+/// self-heals a stray old name found there later. Aborting here would
+/// instead leave every reader looking at a store the move never even
+/// attempted to bring over.
+pub fn migrate_memory(home: &Path, claude_home: &Path) -> StepReport {
+    let rename = rename_legacy_graph_file(claude_home);
+
+    let moved = move_memory_root(home, claude_home);
+    if moved.status == StepStatus::Failed {
+        return StepReport::failed(STEP_NAME, moved.detail);
+    }
+
+    let detail = match rename.status {
+        StepStatus::Wired => format!(
+            "renamed legacy graph.json to memory.graph.json; {}",
+            moved.detail
+        ),
+        StepStatus::Failed => format!(
+            "could not rename legacy graph.json ({}); {}",
+            rename.detail, moved.detail
+        ),
+        _ => moved.detail,
+    };
+    match combined_status(rename.status, moved.status) {
+        StepStatus::Wired => StepReport::wired(STEP_NAME, detail),
+        StepStatus::AlreadyCorrect => StepReport::already_correct(STEP_NAME, detail),
+        StepStatus::Skipped => StepReport::skipped(STEP_NAME, detail),
+        StepStatus::Failed => {
+            unreachable!("moved.status == Failed already returned above")
+        }
+    }
+}
+
+/// The overall status once `moved.status` is known not to be `Failed`
+/// (`migrate_memory` returns early on that case). `Wired` beats
+/// `AlreadyCorrect` beats `Skipped`: if either sub-step actually did
+/// something, the step as a whole did something. A failed rename alone
+/// never wins here (see `migrate_memory`'s doc comment), it only ever
+/// changes the detail string.
+fn combined_status(rename: StepStatus, moved: StepStatus) -> StepStatus {
+    match (rename, moved) {
+        (StepStatus::Wired, _) | (_, StepStatus::Wired) => StepStatus::Wired,
+        (StepStatus::AlreadyCorrect, _) | (_, StepStatus::AlreadyCorrect) => {
+            StepStatus::AlreadyCorrect
+        }
+        _ => StepStatus::Skipped,
+    }
+}
 
 /// Renames the pre-rename `graph.json` (and its mkdir-based `.lock`
-/// sibling, if present) to `memory.graph.json`. An old file left alongside an already-migrated store is never touched or deleted.
-pub fn migrate_memory_store(claude_home: &Path) -> StepReport {
+/// sibling, if present) to `memory.graph.json`. An old file left alongside
+/// an already-migrated store is never touched or deleted.
+fn rename_legacy_graph_file(claude_home: &Path) -> StepReport {
     let mem_dir = claude_home.join("memory");
     let old_path = mem_dir.join(OLD_FILE_NAME);
     let new_path = mem_dir.join(NEW_FILE_NAME);
@@ -55,21 +122,17 @@ pub fn migrate_memory_store(claude_home: &Path) -> StepReport {
     )
 }
 
-const ROOT_STEP_NAME: &str = "memory-root-migrate";
-/// Its presence is the only "migration complete" signal: a destination
-/// left partially populated by an interrupted prior run has no sentinel.
-const SENTINEL_NAME: &str = ".migration-complete";
-
-/// Moves the whole `<claude_home>/memory` tree to `<home>/.config/playbook/memory`,
-/// verifying a fallback copy before the sentinel is written and the source deleted.
-pub fn migrate_memory_root(home: &Path, claude_home: &Path) -> StepReport {
+/// Moves the whole `<claude_home>/memory` tree to
+/// `<home>/.config/playbook/memory`, verifying a fallback copy before the
+/// sentinel is written and the source deleted.
+fn move_memory_root(home: &Path, claude_home: &Path) -> StepReport {
     let old_root = claude_home.join("memory");
     let new_root = home.join(".config").join("playbook").join("memory");
     let sentinel = new_root.join(SENTINEL_NAME);
 
     if sentinel.is_file() {
         return StepReport::already_correct(
-            ROOT_STEP_NAME,
+            STEP_NAME,
             format!("already migrated to {}", new_root.display()),
         );
     }
@@ -91,18 +154,18 @@ pub fn migrate_memory_root(home: &Path, claude_home: &Path) -> StepReport {
 /// one with no sentinel is a prior rename that finished but never marked.
 fn finish_when_source_absent(new_root: &Path, sentinel: &Path) -> StepReport {
     if !new_root.exists() {
-        return StepReport::skipped(ROOT_STEP_NAME, "no legacy ~/.claude/memory to migrate");
+        return StepReport::skipped(STEP_NAME, "no legacy ~/.claude/memory to migrate");
     }
     match write_sentinel(sentinel) {
         Ok(()) => StepReport::wired(
-            ROOT_STEP_NAME,
+            STEP_NAME,
             format!(
                 "{} already complete from a prior run; marked so",
                 new_root.display()
             ),
         ),
         Err(err) => StepReport::failed(
-            ROOT_STEP_NAME,
+            STEP_NAME,
             format!(
                 "could not write completion marker {}: {err}",
                 sentinel.display()
@@ -117,7 +180,7 @@ fn try_rename(old_root: &Path, new_root: &Path, sentinel: &Path) -> Option<StepR
     if let Some(parent) = new_root.parent() {
         if let Err(err) = fs::create_dir_all(parent) {
             return Some(StepReport::failed(
-                ROOT_STEP_NAME,
+                STEP_NAME,
                 format!("could not create {}: {err}", parent.display()),
             ));
         }
@@ -125,11 +188,11 @@ fn try_rename(old_root: &Path, new_root: &Path, sentinel: &Path) -> Option<StepR
     match fs::rename(old_root, new_root) {
         Ok(()) => Some(match write_sentinel(sentinel) {
             Ok(()) => StepReport::wired(
-                ROOT_STEP_NAME,
+                STEP_NAME,
                 format!("renamed {} to {}", old_root.display(), new_root.display()),
             ),
             Err(err) => StepReport::failed(
-                ROOT_STEP_NAME,
+                STEP_NAME,
                 format!(
                     "moved to {} but could not write completion marker: {err}",
                     new_root.display()
@@ -138,7 +201,7 @@ fn try_rename(old_root: &Path, new_root: &Path, sentinel: &Path) -> Option<StepR
         }),
         Err(err) if err.kind() == io::ErrorKind::CrossesDevices => None,
         Err(err) => Some(StepReport::failed(
-            ROOT_STEP_NAME,
+            STEP_NAME,
             format!(
                 "could not rename {} to {}: {err}",
                 old_root.display(),
@@ -153,7 +216,7 @@ fn try_rename(old_root: &Path, new_root: &Path, sentinel: &Path) -> Option<StepR
 fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> StepReport {
     if let Err(err) = fs::create_dir_all(new_root) {
         return StepReport::failed(
-            ROOT_STEP_NAME,
+            STEP_NAME,
             format!("could not create {}: {err}", new_root.display()),
         );
     }
@@ -162,7 +225,7 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
 
     if let Err(err) = copy_all(old_root, new_root, &files) {
         return StepReport::failed(
-            ROOT_STEP_NAME,
+            STEP_NAME,
             format!(
                 "copy to {} failed, the original is untouched: {err}",
                 new_root.display()
@@ -172,7 +235,7 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
 
     if !all_copied_and_verified(old_root, new_root, &files) {
         return StepReport::failed(
-            ROOT_STEP_NAME,
+            STEP_NAME,
             format!(
                 "verification failed after copying to {}, the original is untouched",
                 new_root.display()
@@ -182,7 +245,7 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
 
     if let Err(err) = write_sentinel(sentinel) {
         return StepReport::failed(
-            ROOT_STEP_NAME,
+            STEP_NAME,
             format!("copy verified but could not write completion marker: {err}"),
         );
     }
@@ -192,7 +255,7 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
     let _ = fs::remove_dir_all(old_root);
 
     StepReport::wired(
-        ROOT_STEP_NAME,
+        STEP_NAME,
         format!(
             "copied {} file(s) to {} and removed the original",
             files.len(),
@@ -290,7 +353,7 @@ mod tests {
         write_file(&old_root.join("memory.graph.json"), r#"{"nodes":[]}"#);
 
         // Act
-        let report = migrate_memory_root(&home, &claude_home);
+        let report = migrate_memory(&home, &claude_home);
 
         // Assert
         assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
@@ -335,7 +398,7 @@ mod tests {
         write_file(&new_root.join(SENTINEL_NAME), "migrated\n");
 
         // Act
-        let report = migrate_memory_root(&home, &claude_home);
+        let report = migrate_memory(&home, &claude_home);
 
         // Assert
         assert_eq!(
@@ -386,7 +449,7 @@ mod tests {
         fs::set_permissions(&new_root, fs::Permissions::from_mode(0o555)).unwrap();
 
         // Act
-        let report = migrate_memory_root(&home, &claude_home);
+        let report = migrate_memory(&home, &claude_home);
 
         // Assert
         fs::set_permissions(&new_root, fs::Permissions::from_mode(0o755)).unwrap();
@@ -409,7 +472,7 @@ mod tests {
         let claude_home = home.join(".claude");
 
         // Act
-        let report = migrate_memory_root(&home, &claude_home);
+        let report = migrate_memory(&home, &claude_home);
 
         // Assert
         assert_eq!(report.status, StepStatus::Skipped, "{}", report.detail);
@@ -437,7 +500,7 @@ mod tests {
         write_file(&new_root.join("global-fact.md"), "global fact content");
 
         // Act
-        let report = migrate_memory_root(&home, &claude_home);
+        let report = migrate_memory(&home, &claude_home);
 
         // Assert
         assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
@@ -493,7 +556,7 @@ mod tests {
         fs::set_permissions(&new_root, fs::Permissions::from_mode(0o555)).unwrap();
 
         // Act
-        let report = migrate_memory_root(&home, &claude_home);
+        let report = migrate_memory(&home, &claude_home);
 
         // Assert
         fs::set_permissions(&new_root, fs::Permissions::from_mode(0o755)).unwrap();
