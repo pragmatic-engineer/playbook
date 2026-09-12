@@ -1161,6 +1161,114 @@ fn permission_checks_are_enforced(dir: &Path) -> bool {
     blocked
 }
 
+/// Done-when: `playbook memory rebuild` (the CLI subcommand) fails loud when
+/// a memory subdirectory cannot be read, instead of silently walking past it
+/// and printing the hardcoded success line. The error must also name the
+/// specific subdirectory that failed, not just the top-level memory root.
+#[test]
+fn memory_rebuild_subcommand_fails_loud_when_a_subdirectory_cannot_be_read() {
+    // Arrange
+    let home = scratch_home("unreadable-subdir-cli");
+    let mem_dir = home.join(".config").join("playbook").join("memory");
+    write_fact(
+        &home,
+        "seed.md",
+        "---\nname: seed\ntype: reference\n---\n\nBody.\n",
+    );
+    let bad_subdir = mem_dir.join("no-access-subdir");
+    fs::create_dir_all(&bad_subdir).unwrap();
+
+    if !permission_checks_are_enforced(&mem_dir) {
+        eprintln!(
+            "skipping memory_rebuild_subcommand_fails_loud_when_a_subdirectory_cannot_be_read: \
+             this filesystem/user does not enforce permission bits (likely running as root)"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+
+    set_mode(&bad_subdir, 0o000);
+
+    // Act
+    let out = run_playbook(&home, &["memory", "rebuild"], "");
+
+    // Assert
+    set_mode(&bad_subdir, 0o755); // restore before cleanup can remove the dir
+    assert!(
+        !out.status.success(),
+        "memory rebuild should exit non-zero when a subdirectory cannot be read"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty when the rebuild fails"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("read memory directory"),
+        "stderr should contain the RebuildError wrapper text: {stderr}"
+    );
+    assert!(
+        stderr.contains("no-access-subdir"),
+        "stderr should name the specific failing subdirectory: {stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Done-when: the same unreadable-subdirectory failure, exercised via the
+/// PostToolUse hook path instead of the CLI subcommand, keeps the hook's
+/// documented exit-0/stdout-silent contract, but the failure is now
+/// observable on stderr instead of vanishing.
+#[test]
+fn hook_rebuild_path_stays_silent_on_stdout_but_reports_unreadable_subdirectory_on_stderr() {
+    // Arrange
+    let home = scratch_home("unreadable-subdir-hook");
+    let mem_dir = home.join(".config").join("playbook").join("memory");
+    write_fact(
+        &home,
+        "seed.md",
+        "---\nname: seed\ntype: reference\n---\n\nBody.\n",
+    );
+    let bad_subdir = mem_dir.join("no-access-subdir");
+    fs::create_dir_all(&bad_subdir).unwrap();
+
+    if !permission_checks_are_enforced(&mem_dir) {
+        eprintln!(
+            "skipping hook_rebuild_path_stays_silent_on_stdout_but_reports_unreadable_subdirectory_on_stderr: \
+             this filesystem/user does not enforce permission bits (likely running as root)"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+
+    set_mode(&bad_subdir, 0o000);
+
+    // Act
+    let out = run_rebuild_for(&home, "seed.md");
+
+    // Assert
+    set_mode(&bad_subdir, 0o755); // restore before cleanup can remove the dir
+    assert!(
+        out.status.success(),
+        "the hook path must still exit 0 when a subdirectory cannot be read"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "the hook path must stay silent on stdout"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("read memory directory"),
+        "stderr should contain the RebuildError wrapper text: {stderr}"
+    );
+    assert!(
+        stderr.contains("no-access-subdir"),
+        "stderr should name the specific failing subdirectory: {stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// A regression guard for the `.md` extension match: an upper-case
 /// `.MD` suffix must still be picked up by the walk, not silently skipped.
 #[test]
