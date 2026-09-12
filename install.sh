@@ -472,17 +472,28 @@ CLAUDE_PLUGIN_ROOT="$SRC" "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \
 if [ "$SKIP_PLUGIN" -eq 0 ]; then
     if command -v claude >/dev/null 2>&1; then
         # claude --version prints e.g. "2.1.269 (Claude Code)"; the first
-        # field is the dotted version. A version claude doesn't understand
-        # (a dev build, a wrapper script) parses as all-zero fields via awk's
-        # numeric coercion, which fails the minimum check below rather than
-        # crashing on it; that degrades to the same fallback as too-old.
-        # The `|| CLAUDE_VERSION=""` matters under set -euo pipefail: without
-        # it, a claude --version that exits non-zero (a broken shim, one that
-        # needs auth to answer --version) kills the whole installer right
-        # here, silently, since pipefail propagates that failure through the
-        # awk into the assignment itself.
-        CLAUDE_VERSION="$(claude --version 2>/dev/null | awk '{print $1}')" || CLAUDE_VERSION=""
-        if [ -n "$CLAUDE_VERSION" ] && ! version_ge "$CLAUDE_VERSION" "$CLAUDE_MIN_VERSION"; then
+        # field of the FIRST line is the dotted version (NR==1 guards against
+        # a CLI that writes more than one line to stdout). A version claude
+        # doesn't understand (a dev build, a wrapper script) still parses to
+        # a non-empty string, which then fails the minimum check below via
+        # awk's numeric coercion (all-zero fields), the same skip path as
+        # too-old. A CLI that exits non-zero on --version (a broken shim, one
+        # that needs auth to answer it) leaves CLAUDE_VERSION genuinely empty
+        # instead, handled as its own case below rather than silently falling
+        # through to "proceed as if fine": not knowing the version at all is
+        # not evidence it meets the minimum. The `|| CLAUDE_VERSION=""` part
+        # matters under set -euo pipefail: without it, that same non-zero
+        # exit kills the whole installer right here, silently, since
+        # pipefail propagates the failure through the awk into the
+        # assignment itself, before any of this fallback logic ever runs.
+        CLAUDE_VERSION="$(claude --version 2>/dev/null | awk 'NR==1{print $1}')" || CLAUDE_VERSION=""
+        if [ -z "$CLAUDE_VERSION" ]; then
+            PLUGIN_SKIPPED_FOR_VERSION=1
+            warn "could not determine the installed claude CLI's version; skipping the plugin rather than assuming it meets the minimum ($CLAUDE_MIN_VERSION)."
+            warn "Upgrade or repair the claude CLI, then run: claude plugin marketplace add $MARKETPLACE && claude plugin install $PLUGIN"
+            warn "npm: npm install -g @anthropic-ai/claude-code@latest"
+            warn "Homebrew: the claude-code cask tracks a slower channel than npm; switch with: brew uninstall --cask claude-code && brew install --cask claude-code@latest"
+        elif ! version_ge "$CLAUDE_VERSION" "$CLAUDE_MIN_VERSION"; then
             PLUGIN_SKIPPED_FOR_VERSION=1
             warn "claude CLI $CLAUDE_VERSION is older than the minimum this plugin assumes ($CLAUDE_MIN_VERSION); skipping the plugin."
             warn "Upgrade, then run: claude plugin marketplace add $MARKETPLACE && claude plugin install $PLUGIN"

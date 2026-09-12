@@ -4,7 +4,8 @@
 #
 # install-claude-version-gate.test.sh: install.sh must skip the plugin step,
 # with a clear upgrade message, when the installed claude CLI is older than
-# CLAUDE_MIN_VERSION, and must proceed normally at or above it. Uses the same
+# CLAUDE_MIN_VERSION or its version can't be determined at all, and must
+# proceed normally at or above it. Uses the same
 # PLAYBOOK_SRC local-source seam and staged real `playbook` binary as
 # shell/install-seed.test.sh, but runs WITHOUT --no-setup (which would skip
 # the plugin section entirely, the one this file exercises) and stubs `claude`
@@ -85,17 +86,22 @@ run_scenario() {
   if "$fn"; then pass "$name"; else fail "$name"; fi
 }
 
-# stub_claude_version_fails <dir>: a `claude` whose --version exits 1 with no
-# stdout, standing in for a broken shim or one that needs auth to answer
-# --version. Pins the fix for a real regression: under set -euo pipefail, an
-# unguarded `VAR="$(claude --version | awk ...)"` assignment dies right there
-# when the probe fails, silently, before the fallback logic ever runs.
+# stub_claude_version_fails <dir> <call-log>: a `claude` whose --version
+# exits 1 with no stdout, standing in for a broken shim or one that needs
+# auth to answer --version. Pins the fix for a real regression: under
+# set -euo pipefail, an unguarded `VAR="$(claude --version | awk ...)"`
+# assignment dies right there when the probe fails, silently, before the
+# fallback logic ever runs. Also logs a `plugin` invocation to call-log,
+# same as stub_claude above: without this, an assertion that no plugin
+# subcommand ran can never fail, since there'd be nothing recording whether
+# one actually did.
 stub_claude_version_fails() {
-  local dir="$1"
-  cat > "$dir/claude" <<'EOF'
+  local dir="$1" call_log="$2"
+  cat > "$dir/claude" <<EOF
 #!/usr/bin/env bash
-case "${1:-}" in
+case "\${1:-}" in
   --version) exit 1 ;;
+  plugin) printf '%s\n' "\$*" >> "$call_log" ;;
 esac
 exit 0
 EOF
@@ -187,10 +193,14 @@ scenario_above_minimum() {
 }
 
 # (E) claude --version itself exits non-zero (a broken shim, or one that
-# needs network/auth to answer --version). Before the fix this killed the
-# whole installer silently at the version-probe assignment, under
-# set -euo pipefail. The rest of the install (binary, hooks, guards,
-# settings) must still complete; only the plugin step degrades.
+# needs network/auth to answer --version), leaving CLAUDE_VERSION genuinely
+# empty. Before the fix this killed the whole installer silently at the
+# version-probe assignment, under set -euo pipefail. The rest of the install
+# (binary, hooks, guards, settings) must still complete, and the plugin step
+# must skip rather than proceed: an empty version is not evidence the
+# installed CLI meets the minimum, so this takes the same skip path as
+# too-old, with its own message naming the actual failure (not a version
+# number, since there isn't one).
 scenario_version_probe_fails() {
   local d src home log claude_dir call_log
   d="$(mktemp -d "$WORK/probefails.XXXXXX")"
@@ -200,12 +210,13 @@ scenario_version_probe_fails() {
   log="$d/install.log"
   call_log="$d/claude-calls.log"
   : > "$call_log"
-  stub_claude_version_fails "$claude_dir"
+  stub_claude_version_fails "$claude_dir" "$call_log"
 
   run_install "$src" "$home" "$log" "$claude_dir"
   local rc=$?
   [ "$rc" -eq 0 ] || { echo "  install rc=$rc (should have completed, degrading only the plugin step): $(cat "$log")"; return 1; }
   [ -f "$home/.claude/settings.json" ] || { echo "  settings.json missing: the installer died before finishing, not just before the plugin step: $(cat "$log")"; return 1; }
+  grep -q "could not determine the installed claude CLI's version" "$log" || { echo "  the could-not-determine-version message is missing: $(cat "$log")"; return 1; }
   [ ! -s "$call_log" ] || { echo "  plugin subcommands were invoked despite a failed version probe: $(cat "$call_log")"; return 1; }
 }
 
