@@ -8,6 +8,7 @@
 pub mod agents;
 pub mod cc;
 pub mod common;
+pub mod doctor;
 pub mod gate;
 pub mod hooks;
 pub mod init;
@@ -86,6 +87,11 @@ pub enum Command {
     Path {
         /// Which worktree-scoped directory to resolve.
         kind: PathKind,
+    },
+    /// Single-field JSON reads backing `/playbook:doctor`, `src/doctor/`.
+    Doctor {
+        #[command(subcommand)]
+        sub: DoctorCommand,
     },
 }
 
@@ -205,6 +211,24 @@ pub enum GateCommand {
         /// and exit code 1, since clap's own missing-argument usage error
         /// exits with a different code (2) than the plan requires here.
         phases: Vec<String>,
+    },
+}
+
+/// `playbook doctor` subcommands, backing `src/doctor/`.
+#[derive(Subcommand, Debug)]
+pub enum DoctorCommand {
+    /// Print `.version` from a `plugin.json`-shaped file, or an empty line
+    /// if it is missing, unreadable, or not a string. Backs Layer 6.
+    PluginVersion {
+        /// Path to the plugin manifest to read.
+        path: PathBuf,
+    },
+    /// Print `.statusLine.command` from a `settings.json`-shaped file, or an
+    /// empty line if it is missing, unreadable, or not a string. Backs
+    /// Layer 5.
+    StatuslineCommand {
+        /// Path to the settings.json to read.
+        path: PathBuf,
     },
 }
 
