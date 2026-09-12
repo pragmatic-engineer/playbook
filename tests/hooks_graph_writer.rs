@@ -1161,6 +1161,61 @@ fn permission_checks_are_enforced(dir: &Path) -> bool {
     blocked
 }
 
+/// A regression guard for the `.md` extension match: an upper-case
+/// `.MD` suffix must still be picked up by the walk, not silently skipped.
+#[test]
+fn uppercase_md_extension_is_matched() {
+    // Arrange
+    let home = scratch_home("case-insensitive-md");
+    write_fact(
+        &home,
+        "upper-fact.MD",
+        "---\nname: upper-fact\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "upper-fact.MD");
+
+    // Assert: node id derivation only strips a lowercase ".md" suffix, so a
+    // ".MD" file's id keeps the literal suffix; matching on the
+    // frontmatter-derived `name` field instead checks what matters here,
+    // that the walk visits the file at all.
+    let graph = read_graph(&home);
+    assert!(
+        nodes(&graph).iter().any(|n| n["name"] == "upper-fact"),
+        "a .MD-suffixed fact should still get a node in the graph"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// `MEMORY.md`, exact case, stays excluded from the walk even once the
+/// `.md` extension match itself becomes case-insensitive.
+#[test]
+fn exact_case_memory_md_is_still_excluded() {
+    // Arrange
+    let home = scratch_home("case-insensitive-md-exclusion");
+    write_fact(&home, "MEMORY.md", "This file must never become a node.\n");
+    write_fact(
+        &home,
+        "normal-fact.md",
+        "---\nname: normal-fact\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "normal-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert!(
+        !has_node(&graph, "global/MEMORY"),
+        "MEMORY.md must still be excluded from the graph"
+    );
+    assert!(has_node(&graph, "global/normal-fact"));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 // --- Cross-implementation check --------------------------------------------
 
 /// Populate an identical fixture memory tree, covering all six mandatory

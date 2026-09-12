@@ -804,7 +804,7 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) {
             if !name.starts_with('.') {
                 walk_markdown_files_into(&path, out);
             }
-        } else if name.ends_with(".md") && name != "MEMORY.md" {
+        } else if name.to_ascii_lowercase().ends_with(".md") && name != "MEMORY.md" {
             out.push(path);
         }
     }
