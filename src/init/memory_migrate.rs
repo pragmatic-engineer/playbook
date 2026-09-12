@@ -4,11 +4,17 @@
 //! Migrates the whole memory store as a single reported step named `memory`:
 //! renames `~/.claude/memory/graph.json` to `memory.graph.json` if the old
 //! filename is still present, then moves the whole `~/.claude/memory` tree to
-//! `$HOME/.config/playbook/memory`. The rename is an internal precondition
-//! the move needs (it copies whatever filenames are present, so a move
-//! before the rename would strand the old filename at the new location),
-//! not a separate migration a caller should reason about.
+//! `$HOME/.config/playbook/memory`, then self-heals a stray `graph.json` left
+//! behind at that new location. The rename is an internal precondition the
+//! move needs (it copies whatever filenames are present, so a move before
+//! the rename would strand the old filename at the new location), not a
+//! separate migration a caller should reason about. The new-root self-heal
+//! is likewise folded in here rather than left to each caller: this is the
+//! one place every entry point (`playbook init`, SessionStart, Stop) gets
+//! the full set of legacy-filename fixes, not just the ones a particular
+//! caller happened to add.
 
+use crate::common::paths::playbook_root_from;
 use crate::init::run::{StepReport, StepStatus};
 use std::fs;
 use std::io;
@@ -25,21 +31,25 @@ const SENTINEL_NAME: &str = ".migration-complete";
 
 /// Migrates the whole memory store in one step: renames the legacy filename
 /// first (a fast no-op once already renamed), then moves the tree to its
-/// final location (a fast no-op once the sentinel is present). Safe to call
-/// repeatedly and from any entry point (`playbook init`, or a session-start
-/// fallback): every call after the first is a cheap check, not a re-copy.
+/// final location (a fast no-op once the sentinel is present), then
+/// self-heals a stray legacy filename left at the new root. Safe to call
+/// repeatedly and from any entry point (`playbook init`, SessionStart, or
+/// Stop): every call after the first is a cheap check, not a re-copy.
 ///
 /// A failed rename does not abort the move: the move copies whatever
 /// filename is present either way, so a legacy `graph.json` that could not
 /// be renamed (a read-only source, say) still reaches the new location,
-/// just under its old name. `session_init.rs`'s own new-root fallback
-/// self-heals a stray old name found there later. Aborting here would
-/// instead leave every reader looking at a store the move never even
-/// attempted to bring over.
+/// just under its old name. The new-root self-heal runs regardless of the
+/// move's own outcome, including a failed one: it repairs whatever stray
+/// old name it finds at the new root, however it got there, independent of
+/// whether this particular call is the one that put it there. Aborting the
+/// whole step on a failed move would instead leave every reader looking at
+/// a store the move never even attempted to bring over.
 pub fn migrate_memory(home: &Path, claude_home: &Path) -> StepReport {
     let rename = rename_legacy_graph_file(claude_home);
-
     let moved = move_memory_root(home, claude_home);
+    rename_legacy_graph_file_at_new_root(home);
+
     if moved.status == StepStatus::Failed {
         return StepReport::failed(STEP_NAME, moved.detail);
     }
@@ -122,12 +132,45 @@ fn rename_legacy_graph_file(claude_home: &Path) -> StepReport {
     )
 }
 
+/// Best-effort self-heal for a stray `graph.json` found at the NEW root
+/// (`<home>/.config/playbook/memory`) after the move above, distinct from
+/// `rename_legacy_graph_file`'s own OLD-root check. A stray new-root file
+/// can arrive by paths the move itself never touches (an interrupted older
+/// build, a manual copy), so this is not redundant with the move's own
+/// copy step. It is silent and ignores every failure, since it is a
+/// defensive fixup, not a step whose outcome callers need to react to.
+///
+/// Deliberately does not rename a `graph.json.lock` sibling the way
+/// `rename_legacy_graph_file` does for the old root: nothing ever reads or
+/// takes that lock under its legacy name, only `memory.graph.json.lock`
+/// (`rebuild_memory_graph.rs`), so a stray old-named lock directory left
+/// behind here is inert, not a bug.
+///
+/// Not lock-protected against a concurrent `rebuild_memory_graph` write
+/// under `memory.graph.json.lock`: a rebuild landing in the narrow window
+/// between the `exists()` check and the rename below could be overwritten
+/// by this stale file. That race predates this function (the fallback it
+/// replaces had it too); it needs a stray legacy file to be present at all,
+/// and the graph rebuilds from the fact files regardless, so it's accepted
+/// here rather than added to for what is meant to stay a cheap check.
+fn rename_legacy_graph_file_at_new_root(home: &Path) {
+    let mem_dir = playbook_root_from(home).join("memory");
+    let old_path = mem_dir.join(OLD_FILE_NAME);
+    let new_path = mem_dir.join(NEW_FILE_NAME);
+
+    if new_path.exists() || !old_path.is_file() {
+        return;
+    }
+
+    let _ = fs::rename(&old_path, &new_path);
+}
+
 /// Moves the whole `<claude_home>/memory` tree to
 /// `<home>/.config/playbook/memory`, verifying a fallback copy before the
 /// sentinel is written and the source deleted.
 fn move_memory_root(home: &Path, claude_home: &Path) -> StepReport {
     let old_root = claude_home.join("memory");
-    let new_root = home.join(".config").join("playbook").join("memory");
+    let new_root = playbook_root_from(home).join("memory");
     let sentinel = new_root.join(SENTINEL_NAME);
 
     if sentinel.is_file() {

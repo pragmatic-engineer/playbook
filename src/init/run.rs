@@ -149,6 +149,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         shell_runtime_confirmed,
     );
 
+    // See migrate_memory's own doc comment for what this single call covers.
     let memory_step = memory_migrate::migrate_memory(&paths.home, &paths.claude_home);
 
     InitOutcome {

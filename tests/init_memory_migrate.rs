@@ -284,10 +284,274 @@ fn a_failed_rename_does_not_abort_the_tree_move() {
         "the rename failure must not be silently swallowed: {}",
         report.detail
     );
+    // The old-root rename failed, so the copy carried the file to the new
+    // root under its old name, exactly as before this test's follow-up
+    // fix. But the new-root self-heal folded into `migrate_memory` now
+    // catches this immediately: it fires right after the move, in the same
+    // call, so the stray old name never lingers at the new root even when
+    // the earlier old-root rename couldn't run.
+    let new_root = new_root_of(&home);
+    assert!(
+        !new_root.join("graph.json").exists(),
+        "the new-root self-heal folded into migrate_memory should catch \
+         the stray old name the failed rename left behind"
+    );
     assert_eq!(
-        fs::read_to_string(new_root_of(&home).join("graph.json")).unwrap(),
+        fs::read_to_string(new_root.join("memory.graph.json")).unwrap(),
         GRAPH_CONTENT,
-        "the old-named file must still reach the new root under its old name"
+        "the new-root self-heal must rename the file in place, preserving content"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn stray_file_at_new_root_is_renamed_with_content_preserved() {
+    // Arrange: the tree is already fully migrated (sentinel present), but a
+    // stray old-named `graph.json` also sits at the new root, e.g. left
+    // behind by an older build or a manual copy: a case `migrate_memory`'s
+    // own rename step never covers on its own, since that step only ever
+    // looks at the OLD root.
+    let home = scratch_home("new-root-stray-renamed");
+    let claude_home = claude_home_of(&home);
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("graph.json"), GRAPH_CONTENT).unwrap();
+    fs::write(new_root.join(".migration-complete"), "migrated\n").unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert: the stray file is renamed in place, content preserved, and
+    // the call reports its usual (already-migrated) status; the new-root
+    // self-heal is a silent, best-effort side effect, not a status change.
+    assert_eq!(
+        report.status,
+        StepStatus::AlreadyCorrect,
+        "{}",
+        report.detail
+    );
+    assert!(
+        !new_root.join("graph.json").exists(),
+        "the stray new-root file should be renamed away, not left behind"
+    );
+    assert_eq!(
+        fs::read_to_string(new_root.join("memory.graph.json")).unwrap(),
+        GRAPH_CONTENT,
+        "the rename must preserve the stray file's content exactly"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn new_root_file_already_correct_is_left_untouched_when_a_stray_file_is_also_present() {
+    // Arrange: the new root already has BOTH the correct filename and a
+    // stray old-named file sitting beside it. The correct file must win:
+    // it's never overwritten or deleted by the stray one.
+    let home = scratch_home("new-root-both-present");
+    let claude_home = claude_home_of(&home);
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("memory.graph.json"), "correct content").unwrap();
+    fs::write(
+        new_root.join("graph.json"),
+        "stray content, must not overwrite",
+    )
+    .unwrap();
+    fs::write(new_root.join(".migration-complete"), "migrated\n").unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert: neither file is touched.
+    assert_eq!(
+        report.status,
+        StepStatus::AlreadyCorrect,
+        "{}",
+        report.detail
+    );
+    assert_eq!(
+        fs::read_to_string(new_root.join("memory.graph.json")).unwrap(),
+        "correct content",
+        "an already-correct file must never be overwritten by a stray sibling"
+    );
+    assert_eq!(
+        fs::read_to_string(new_root.join("graph.json")).unwrap(),
+        "stray content, must not overwrite",
+        "a stray file next to an already-correct one is left alone, never deleted"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn new_root_self_heal_is_idempotent_on_a_second_call() {
+    // Arrange: a stray file at the new root, not yet renamed.
+    let home = scratch_home("new-root-idempotent");
+    let claude_home = claude_home_of(&home);
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("graph.json"), GRAPH_CONTENT).unwrap();
+    fs::write(new_root.join(".migration-complete"), "migrated\n").unwrap();
+
+    // Act: call once (the rename happens here), then again (must be a no-op).
+    let first = migrate_memory(&home, &claude_home);
+    let second = migrate_memory(&home, &claude_home);
+
+    // Assert: the first call performs the rename; the second is a genuine
+    // no-op, not a repeat rename or a crash on an already-absent source.
+    assert_eq!(first.status, StepStatus::AlreadyCorrect, "{}", first.detail);
+    assert_eq!(
+        second.status,
+        StepStatus::AlreadyCorrect,
+        "{}",
+        second.detail
+    );
+    assert!(
+        !new_root.join("graph.json").exists(),
+        "the stray file must be gone after the first call"
+    );
+    assert_eq!(
+        fs::read_to_string(new_root.join("memory.graph.json")).unwrap(),
+        GRAPH_CONTENT,
+        "content must survive both calls unchanged"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn new_root_self_heal_leaves_a_stray_lock_directory_under_its_legacy_name() {
+    // Arrange: a stray `graph.json` at the new root, with its own mkdir-based
+    // lock sibling under the OLD name too, unlike the old-root rename (which
+    // does carry `graph.json.lock` across), the new-root self-heal
+    // deliberately leaves the lock alone: nothing ever reads or takes a lock
+    // under the legacy name, only `memory.graph.json.lock`.
+    let home = scratch_home("new-root-lock-left-alone");
+    let claude_home = claude_home_of(&home);
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("graph.json"), GRAPH_CONTENT).unwrap();
+    fs::create_dir(new_root.join("graph.json.lock")).unwrap();
+    fs::write(new_root.join(".migration-complete"), "migrated\n").unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert: the graph file is renamed, but the lock directory is left
+    // exactly where it was, under its legacy name, not renamed or removed.
+    assert_eq!(
+        report.status,
+        StepStatus::AlreadyCorrect,
+        "{}",
+        report.detail
+    );
+    assert_eq!(
+        fs::read_to_string(new_root.join("memory.graph.json")).unwrap(),
+        GRAPH_CONTENT
+    );
+    assert!(
+        new_root.join("graph.json.lock").is_dir(),
+        "the new-root self-heal deliberately does not rename the lock sibling"
+    );
+    assert!(!new_root.join("memory.graph.json.lock").exists());
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn new_root_self_heal_never_renames_a_directory_named_graph_json() {
+    // Arrange: `graph.json` at the new root is a directory, not a file (an
+    // unlikely but possible on-disk state). The `is_file()` guard must
+    // refuse it, unlike a looser `exists()` check, which would rename a
+    // directory onto the path every reader expects to be the graph file.
+    let home = scratch_home("new-root-graph-json-is-a-directory");
+    let claude_home = claude_home_of(&home);
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(new_root.join("graph.json")).unwrap();
+    fs::write(new_root.join(".migration-complete"), "migrated\n").unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert: the directory is left exactly where it was; no rename attempted.
+    assert_eq!(
+        report.status,
+        StepStatus::AlreadyCorrect,
+        "{}",
+        report.detail
+    );
+    assert!(
+        new_root.join("graph.json").is_dir(),
+        "a directory named graph.json must never be renamed by the self-heal"
+    );
+    assert!(!new_root.join("memory.graph.json").exists());
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+#[test]
+fn new_root_self_heal_fires_even_when_the_old_root_rename_fails_and_a_distinct_stray_file_already_sits_at_the_new_root(
+) {
+    // Arrange: the exact composition this fold-in's design has to get right,
+    // per its own plan: an OLD-root rename failure (read-only source
+    // directory) happening at the same time as an INDEPENDENT, pre-existing
+    // stray `graph.json` already sitting at the new root, seeded with its
+    // own distinct content before the call, not arriving via this call's
+    // copy. Both self-heals must still do their job without interfering.
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = scratch_home("new-root-stray-plus-failed-old-rename");
+    let claude_home = claude_home_of(&home);
+    let mem_dir = mem_dir_of(&claude_home);
+    fs::create_dir_all(&mem_dir).unwrap();
+    fs::write(old_graph_path(&claude_home), GRAPH_CONTENT).unwrap();
+
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(
+        new_root.join("graph.json"),
+        "independent new-root stray, seeded before the call",
+    )
+    .unwrap();
+
+    fs::set_permissions(&mem_dir, fs::Permissions::from_mode(0o555)).unwrap();
+    let probe = mem_dir.join(".write-probe");
+    let permissions_are_enforced = fs::write(&probe, "x").is_err();
+    let _ = fs::set_permissions(&mem_dir, fs::Permissions::from_mode(0o755));
+    let _ = fs::remove_file(&probe);
+    if !permissions_are_enforced {
+        eprintln!(
+            "skipping new_root_self_heal_fires_even_when_the_old_root_rename_fails_and_a_distinct_stray_file_already_sits_at_the_new_root: \
+             running as a user that bypasses directory permissions"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+    fs::set_permissions(&mem_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert: the move still ran (the new root already existed, so it takes
+    // the copy path), and the self-heal still fires afterward. Per the
+    // plan's own scoping of this scenario, assert only existence/absence at
+    // the new root, not whose content survives: `copy_all` overwrites the
+    // new root's same-named `graph.json` with the old root's un-renamed
+    // copy before the self-heal ever runs, so the surviving content is
+    // whatever the old root held, not the independently-seeded value.
+    fs::set_permissions(&mem_dir, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        !new_root.join("graph.json").exists(),
+        "no stray graph.json must remain at the new root, regardless of which \
+         origin it came from"
+    );
+    assert!(
+        new_root.join("memory.graph.json").is_file(),
+        "the new-root self-heal must still fire: {}",
+        report.detail
     );
 
     let _ = fs::remove_dir_all(&home);

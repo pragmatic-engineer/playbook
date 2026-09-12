@@ -96,8 +96,7 @@ pub fn run(payload: &Payload) {
     let dir = session_dir(payload);
     let repo_root = git_toplevel();
 
-    migrate_memory_home_root();
-    migrate_legacy_graph_file();
+    prepare_memory_store();
     zero_session_state(&dir);
     clear_statusline_cache();
 
@@ -113,23 +112,14 @@ pub fn run(payload: &Payload) {
     emit(&system_message, &extra_context);
 }
 
-/// Defensive fallback for a session starting before `playbook init` is re-run after an upgrade: moves `~/.claude/memory` to `$HOME/.config/playbook/memory` if the old tree still exists. Cheap and idempotent (a sentinel short-circuits an already-migrated store), silently does nothing on failure.
-fn migrate_memory_home_root() {
+/// Defensive fallback for a session starting before `playbook init` is
+/// re-run after an upgrade, so the memory store is in its current location
+/// before the reads below need it.
+fn prepare_memory_store() {
     let home = home_dir();
     let claude_home = home.join(".claude");
     let _ = crate::init::memory_migrate::migrate_memory(&home, &claude_home);
     let _ = fs::create_dir_all(crate::common::paths::memory_dir());
-}
-
-/// Defensive fallback for a session starting before `playbook init` is re-run after an upgrade: renames a pre-rename `graph.json` to `memory.graph.json` if present. Silently does nothing on any failure.
-fn migrate_legacy_graph_file() {
-    let mem_dir = crate::common::paths::memory_dir();
-    let old_path = mem_dir.join("graph.json");
-    let new_path = mem_dir.join("memory.graph.json");
-    if new_path.exists() || !old_path.is_file() {
-        return;
-    }
-    let _ = fs::rename(&old_path, &new_path);
 }
 
 /// Zeroes the per-session counter files and stamps `start-ts`. A no-op when there is no session directory (no session id in the payload).
