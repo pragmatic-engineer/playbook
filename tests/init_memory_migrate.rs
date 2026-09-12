@@ -495,9 +495,9 @@ fn new_root_self_heal_never_renames_a_directory_named_graph_json() {
 #[test]
 fn new_root_self_heal_fires_even_when_the_old_root_rename_fails_and_a_distinct_stray_file_already_sits_at_the_new_root(
 ) {
-    // Arrange: the exact composition this fold-in's design has to get right,
-    // per its own plan: an OLD-root rename failure (read-only source
-    // directory) happening at the same time as an INDEPENDENT, pre-existing
+    // Arrange: the exact composition this fold-in's design has to get right:
+    // an OLD-root rename failure (read-only source directory) happening at
+    // the same time as an INDEPENDENT, pre-existing
     // stray `graph.json` already sitting at the new root, seeded with its
     // own distinct content before the call, not arriving via this call's
     // copy. Both self-heals must still do their job without interfering.
@@ -536,9 +536,9 @@ fn new_root_self_heal_fires_even_when_the_old_root_rename_fails_and_a_distinct_s
     let report = migrate_memory(&home, &claude_home);
 
     // Assert: the move still ran (the new root already existed, so it takes
-    // the copy path), and the self-heal still fires afterward. Per the
-    // plan's own scoping of this scenario, assert only existence/absence at
-    // the new root, not whose content survives: `copy_all` overwrites the
+    // the copy path), and the self-heal still fires afterward. This scenario
+    // only asserts existence/absence at the new root, not whose content
+    // survives: `copy_all` overwrites the
     // new root's same-named `graph.json` with the old root's un-renamed
     // copy before the self-heal ever runs, so the surviving content is
     // whatever the old root held, not the independently-seeded value.
@@ -551,6 +551,81 @@ fn new_root_self_heal_fires_even_when_the_old_root_rename_fails_and_a_distinct_s
     assert!(
         new_root.join("memory.graph.json").is_file(),
         "the new-root self-heal must still fire: {}",
+        report.detail
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+#[test]
+fn new_root_self_heal_fires_even_when_the_copy_step_itself_fails() {
+    // Arrange: unlike the scenario above (where the move actually succeeds
+    // via the copy path), this one forces `move_memory_root` to return
+    // `Failed` outright: one source file is made unreadable, so `copy_all`
+    // fails partway through and the whole step fails, while the new root
+    // itself stays fully writable so the self-heal's own rename isn't
+    // blocked by the same permission problem. An independent, pre-existing
+    // stray `graph.json` sits at the new root before the call, seeded with
+    // its own distinct content, exactly like the read-only-old-root scenario
+    // above. The self-heal must still run and repair it: `migrate_memory`
+    // calls `rename_legacy_graph_file_at_new_root` unconditionally, above
+    // the `if moved.status == StepStatus::Failed { return ... }` early
+    // return, not after it.
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = scratch_home("new-root-stray-plus-failed-copy");
+    let claude_home = claude_home_of(&home);
+    let mem_dir = mem_dir_of(&claude_home);
+    fs::create_dir_all(&mem_dir).unwrap();
+    fs::write(old_graph_path(&claude_home), GRAPH_CONTENT).unwrap();
+    // A second file the copy step must also carry over, made unreadable so
+    // `fs::copy` fails on the read side. `graph.json` above stays readable:
+    // if it were the only file, the copy step could still succeed and the
+    // move would not actually fail.
+    let unreadable = mem_dir.join("a-fact.md");
+    fs::write(&unreadable, "some fact content").unwrap();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+    let permissions_are_enforced = fs::read(&unreadable).is_err();
+    if !permissions_are_enforced {
+        eprintln!(
+            "skipping new_root_self_heal_fires_even_when_the_copy_step_itself_fails: \
+             running as a user that bypasses file permissions"
+        );
+        let _ = fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o644));
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(
+        new_root.join("graph.json"),
+        "independent new-root stray, seeded before the call",
+    )
+    .unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert: the move itself genuinely failed.
+    let _ = fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o644));
+    assert_eq!(
+        report.status,
+        StepStatus::Failed,
+        "expected the copy step to fail on the unreadable source file: {}",
+        report.detail
+    );
+    // ...but the self-heal still fires afterward and repairs the
+    // independently-seeded stray, proving it runs unconditionally rather
+    // than only on a non-failed move.
+    assert!(
+        !new_root.join("graph.json").exists(),
+        "no stray graph.json must remain at the new root even after a failed move"
+    );
+    assert!(
+        new_root.join("memory.graph.json").is_file(),
+        "the new-root self-heal must still fire after a failed move: {}",
         report.detail
     );
 
