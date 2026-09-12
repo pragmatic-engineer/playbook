@@ -68,7 +68,18 @@ Run after the gate above had already passed and the PR was opened, as this repo'
 6. NITPICK: the blueprint cited the no-active-cleanup decision at `:204-205`, which had drifted to a blank line and a section heading after earlier edits shifted the file. Corrected to the real location of that text.
 7. NITPICK: `commands/doctor.md` was listed among files grep found `MEMORY.md` references in, but it has zero; it's in the WU set only for WU-8's new jq layer. Fixed: the sweep instruction now makes this explicit.
 
-All seven fixed directly on the PR branch before merge; no further review round was run afterward, since these were all textual/planning-document corrections with no code behavior to re-verify.
+All seven fixed directly on the PR branch. A confirmation round was then run (below), which found a genuinely new blocking gap the first self-review pass missed.
+
+## Second post-gate PR self-review (`/playbook:reviewer` confirmation pass on PR #375)
+
+Run to confirm the seven fixes above actually landed correctly. Six of seven confirmed fixed as described. One citation regressed (the no-active-cleanup pointer had drifted again after the intervening edits) and three new findings surfaced:
+
+1. BLOCKING: `tests/hooks_session.rs`'s `session_init_migrates_legacy_home_memory_root_before_recall` (an existing, currently-green test, untouched by any WU) seeds only a legacy `MEMORY.md` file and asserts a fact surfaces post-migration via the (retired) `MEMORY.md` fallback path. Once WU-0 lands, this assertion goes red: the native fallback looks for `memory.graph.json`, which this fixture never provides. This is the one place in the whole blueprint where an existing green test would silently break, not just a new scenario needing to be added. Fixed: WU-0's scope now includes updating this fixture to seed a legacy `memory.graph.json` instead, and its post-migration assertion to check for `memory.graph.json` at the new location instead of `MEMORY.md`.
+2. ISSUE: the final sweep grep's path list omitted `tests/`, which carries a stale doc-comment reference (`tests/hooks_session.rs:401-405`) even after all 10 WUs land. Fixed: `tests/` added to the sweep's path list, and the stale comment folded into WU-0's scope (it's directly about the concept WU-0 changes).
+3. ISSUE: the "Breadth" consequence bullet in the ADR record still said "two Rust files," undercounting the `memory_anchors.rs` doc-comment fix already added to WU-0 in the prior round. Fixed: corrected to three, and the blueprint's own P0 description (which had the identical undercount) fixed too.
+4. NITPICK (citation regression): the no-active-cleanup citation, fixed once already in the first self-review round, had drifted again after the WU-9 insertion shifted line numbers a second time. Corrected to the current real location (`:189-194`, restated at `:218-220`).
+
+All four fixed. No further round run: these are the last mechanical/planning-document corrections identified across two full confirmation passes, and the pattern of findings has narrowed to citation drift and one legitimate scope gap, not new categories of issue.
 
 ## Structural Checks
 

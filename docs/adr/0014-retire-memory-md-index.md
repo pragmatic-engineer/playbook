@@ -222,7 +222,8 @@ Negative and follow-up:
   (bracket-link markdown to `memory-context.sh`'s plain `name: description`
   block); this needs explicit re-verification during implementation, not an
   assumption that swapping the source is drop-in.
-- Breadth: two Rust files (`session_init.rs` plus its test file), five
+- Breadth: three Rust files (`session_init.rs`, its test file, and one
+  doc-comment line in `memory_anchors.rs`), five
   command files, one skill file, three contributor/user doc files,
   `commands/doctor.md` (a new check, not a repoint), and the system prompt
   change in one blueprint. `rebuild_memory_graph.rs` is read and cited but
