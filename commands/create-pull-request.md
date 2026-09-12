@@ -44,32 +44,47 @@ There is no confirmation flag or gate: the command always runs end to end, auto-
 
 ## Step 0: Load the skill rules (MUST run before drafting title or body)
 
-This step needs exactly two things: `playbook:writing-style`'s voice/banned-words/dash rules plus its "When creating PRs" guidance, and `playbook:engineering-standards`' PR readiness criteria and size limits (used in Step 2). Reading each full skill file to get a subset that small is most of Step 0's own cost, so extract only those sections with `sed` instead of invoking the Skill tool. A guard checks each extracted block for a marker string and fails loudly if the extraction came back empty, wrong, or truncated, rather than silently drafting with missing rules:
+This step needs four things: `playbook:writing-style`'s voice/banned-words/dash rules, its "When creating PRs" guidance, its "Prohibited GitHub Content" rules (the PR title and body are posted to GitHub, so these apply), and `playbook:engineering-standards`' PR readiness criteria and size limits (used in Step 2). Reading each full skill file to get a subset that small is most of Step 0's own cost, so extract only those sections with `sed` instead of invoking the Skill tool. A guard checks each extracted block for a marker string, and for the one range whose end-marker is exact heading text rather than a heading *level* (engineering-standards' Readiness+Size slice), also checks that a later section's heading is ABSENT, so a rename of the end-marker heading fails loudly instead of silently pulling everything through end of file:
 
 ```bash
-REPO_ROOT=$(git rev-parse --show-toplevel)
-WS="$REPO_ROOT/skills/writing-style/SKILL.md"
-ES="$REPO_ROOT/skills/engineering-standards/SKILL.md"
+WS="${CLAUDE_PLUGIN_ROOT}/skills/writing-style/SKILL.md"
+ES="${CLAUDE_PLUGIN_ROOT}/skills/engineering-standards/SKILL.md"
+[ -r "$WS" ] || { echo "ERROR: $WS not found under \$CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead." >&2; exit 1; }
+[ -r "$ES" ] || { echo "ERROR: $ES not found under \$CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead." >&2; exit 1; }
 
-sed -n '1,/^# GitHub-Specific Rules/p' "$WS" | sed '$d' > /tmp/pr-writing-style-core.md
-sed -n '/^### When creating PRs/,/^## /p' "$WS" | sed '$d' > /tmp/pr-writing-style-prs.md
-sed -n '/^### Readiness/,/^### Review Comments/p' "$ES" | sed '$d' > /tmp/pr-eng-standards.md
+# Process-scoped names: two runs (even against different repos) never share
+# a fixed /tmp path and overwrite each other's extracts. $PR_TMP isn't set
+# yet at this point (Step 1 derives it from the branch name), so this can't
+# reuse it.
+EXTRACT_DIR="/tmp/create-pr-step0-$$"
+mkdir -p "$EXTRACT_DIR"
+CORE="$EXTRACT_DIR/writing-style-core.md"
+PRS="$EXTRACT_DIR/writing-style-prs.md"
+GH="$EXTRACT_DIR/writing-style-github.md"
+ENG="$EXTRACT_DIR/eng-standards.md"
 
-for f in /tmp/pr-writing-style-core.md /tmp/pr-writing-style-prs.md /tmp/pr-eng-standards.md; do
+sed -n '1,/^# GitHub-Specific Rules/p' "$WS" | sed '$d' > "$CORE"
+sed -n '/^### When creating PRs/,/^## /p' "$WS" | sed '$d' > "$PRS"
+sed -n '/^## Prohibited GitHub Content/,/^## Examples/p' "$WS" | sed '$d' > "$GH"
+sed -n '/^### Readiness/,/^### Review Comments/p' "$ES" | sed '$d' > "$ENG"
+
+for f in "$CORE" "$PRS" "$GH" "$ENG"; do
   if [ ! -s "$f" ]; then
     echo "ERROR: $f extracted empty; the source skill's heading text likely changed. Read the full skill via the Skill tool instead before continuing." >&2
     exit 1
   fi
 done
-grep -q "IRON RULE" /tmp/pr-writing-style-core.md && grep -q "Banned Words" /tmp/pr-writing-style-core.md \
+grep -q "IRON RULE" "$CORE" && grep -q "Banned Words" "$CORE" \
   || { echo "ERROR: writing-style core extraction is missing an expected rule; read the full skill via the Skill tool instead." >&2; exit 1; }
-grep -q "Readiness" /tmp/pr-eng-standards.md && grep -q "Size" /tmp/pr-eng-standards.md \
+grep -q "Readiness" "$ENG" && grep -q "Size" "$ENG" \
   || { echo "ERROR: engineering-standards extraction is missing Readiness or Size; read the full skill via the Skill tool instead." >&2; exit 1; }
+grep -q "Automated Testing" "$ENG" \
+  && { echo "ERROR: engineering-standards extraction ran past Review Comments into Automated Testing; the end-marker heading likely changed. Read the full skill via the Skill tool instead." >&2; exit 1; }
 
-echo "Skill sections extracted and verified."
+echo "Skill sections extracted and verified under $EXTRACT_DIR."
 ```
 
-Read all three files with the Read tool now. Together they carry the same rules Step 0 has always needed: voice, banned words, the dash rule, "When creating PRs" guidance, and the PR readiness/size limits enforced in Step 2. If any guard above fails, fall back to invoking the full skill via the Skill tool for that one file rather than proceeding without its rules.
+Read all four files with the Read tool now (paths printed by the block above). Together they carry the same rules Step 0 has always needed: voice, banned words, the dash rule, "When creating PRs" guidance, the Prohibited GitHub Content rules, and the PR readiness/size limits enforced in Step 2. If any guard above fails, fall back to invoking the full skill via the Skill tool for that one file rather than proceeding without its rules.
 
 The PR title and body are read by another engineer, so they use the humane `playbook:writing-style` register (warm, contractions, active voice), NOT the terse operator voice. Where they conflict, `playbook:writing-style` wins for anything posted to GitHub.
 
