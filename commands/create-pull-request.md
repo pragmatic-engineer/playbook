@@ -24,7 +24,7 @@ This command is built to run in an isolated subagent (`context: fork`) so the di
 
 Parse these from `$ARGUMENTS` **once**, in Step 1, and persist them to `$PR_TMP/args.env`. Every later step `source`s that file instead of re-deriving flag values from `$ARGUMENTS` by hand.
 
-> **Why persisted to a file, not re-parsed per step:** each bash block runs in its own shell, so nothing set inline in one block reliably survives to the next (the Bash tool keeps the working directory but not shell state). An earlier version of this command told each step to "set FOO_ARG at the top of that block" from memory of `$ARGUMENTS`; in practice `--base` was silently dropped that way, three times in a row, and every PR opened against the repo default instead of the stacked branch it was pointed at. A file on disk survives regardless of how the executing agent batches its tool calls; re-deriving a value from a natural-language instruction each step does not.
+> **Why a file, not re-parsed per step:** each bash block runs in its own shell; nothing set inline in one block survives to the next. Persist to disk, don't re-derive `$ARGUMENTS` from memory each step.
 
 - `--ready` → promote the PR to ready once Step 9's self-review passes, instead of leaving it a draft. Parsed into `READY_FLAG` in Step 1. Does NOT skip the draft stage: every PR opens as a draft regardless of this flag.
 - `--base <branch>` → override the base branch. Parsed into `BASE_ARG` in Step 1.
@@ -42,12 +42,53 @@ There is no confirmation flag or gate: the command always runs end to end, auto-
 5. Derive the title and body from the actual diff and commit log, never from the branch name alone or from memory.
 6. Pass the PR body via `--body-file`, never `--body "..."`, to preserve formatting.
 
-## Step 0: Load the skills (MUST run before drafting title or body)
+## Step 0: Load the skill rules (MUST run before drafting title or body)
 
-Invoke both via the Skill tool before writing any prose:
+This step needs four things: `playbook:writing-style`'s voice/banned-words/dash rules, its "When creating PRs" guidance, its "Prohibited GitHub Content" rules (the PR title and body are posted to GitHub, so these apply), and `playbook:engineering-standards`' PR readiness criteria and size limits (used in Step 2). Reading each full skill file to get a subset that small is most of Step 0's own cost, so extract only those sections with `sed` instead of invoking the Skill tool. A guard checks each extracted block for a marker string, and for the one range whose end-marker is exact heading text rather than a heading *level* (engineering-standards' Readiness+Size slice), also checks that a later section's heading is ABSENT, so a rename of the end-marker heading fails loudly instead of silently pulling everything through end of file:
 
-- `playbook:writing-style`: voice, banned words, the "PR descriptions" guidance, and the golden rule (no em or en dashes). Every line of the title and body MUST follow it.
-- `playbook:engineering-standards`: PR readiness criteria and size limits, enforced in Step 2.
+```bash
+WS="${CLAUDE_PLUGIN_ROOT}/skills/writing-style/SKILL.md"
+ES="${CLAUDE_PLUGIN_ROOT}/skills/engineering-standards/SKILL.md"
+[ -r "$WS" ] || { echo "ERROR: $WS not found under \$CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead." >&2; exit 1; }
+[ -r "$ES" ] || { echo "ERROR: $ES not found under \$CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead." >&2; exit 1; }
+
+# Process-scoped names: two runs (even against different repos) never share
+# a fixed /tmp path and overwrite each other's extracts. $PR_TMP isn't set
+# yet at this point (Step 1 derives it from the branch name), so this can't
+# reuse it.
+EXTRACT_DIR="/tmp/create-pr-step0-$$"
+mkdir -p "$EXTRACT_DIR"
+CORE="$EXTRACT_DIR/writing-style-core.md"
+PRS="$EXTRACT_DIR/writing-style-prs.md"
+GH="$EXTRACT_DIR/writing-style-github.md"
+ENG="$EXTRACT_DIR/eng-standards.md"
+
+sed -n '1,/^# GitHub-Specific Rules/p' "$WS" | sed '$d' > "$CORE"
+sed -n '/^### When creating PRs/,/^## /p' "$WS" | sed '$d' > "$PRS"
+sed -n '/^## Prohibited GitHub Content/,/^## Examples/p' "$WS" | sed '$d' > "$GH"
+sed -n '/^### Readiness/,/^### Review Comments/p' "$ES" | sed '$d' > "$ENG"
+
+for f in "$CORE" "$PRS" "$GH" "$ENG"; do
+  if [ ! -s "$f" ]; then
+    echo "ERROR: $f extracted empty; the source skill's heading text likely changed. Read the full skill via the Skill tool instead before continuing." >&2
+    exit 1
+  fi
+done
+grep -q "IRON RULE" "$CORE" && grep -q "Banned Words" "$CORE" \
+  || { echo "ERROR: writing-style core extraction is missing an expected rule; read the full skill via the Skill tool instead." >&2; exit 1; }
+grep -q "Readiness" "$ENG" && grep -q "Size" "$ENG" \
+  || { echo "ERROR: engineering-standards extraction is missing Readiness or Size; read the full skill via the Skill tool instead." >&2; exit 1; }
+grep -q "Automated Testing" "$ENG" \
+  && { echo "ERROR: engineering-standards extraction ran past Review Comments into Automated Testing; the end-marker heading likely changed. Read the full skill via the Skill tool instead." >&2; exit 1; }
+
+echo "Skill sections extracted and verified:"
+echo "  $CORE"
+echo "  $PRS"
+echo "  $GH"
+echo "  $ENG"
+```
+
+Read all four printed paths with the Read tool now. Together they carry the same rules Step 0 has always needed: voice, banned words, the dash rule, "When creating PRs" guidance, the Prohibited GitHub Content rules, and the PR readiness/size limits enforced in Step 2. "Natural Imperfections" (the other subsection under writing-style's GitHub-Specific Rules) is deliberately not extracted: it governs injecting casual typos/imperfections into posted *review* comments, not PR titles/bodies, so it doesn't apply here. If any guard above fails, fall back to invoking the full skill via the Skill tool for that one file rather than proceeding without its rules.
 
 The PR title and body are read by another engineer, so they use the humane `playbook:writing-style` register (warm, contractions, active voice), NOT the terse operator voice. Where they conflict, `playbook:writing-style` wins for anything posted to GitHub.
 
@@ -116,17 +157,12 @@ git fetch origin "$BASE_BRANCH" --quiet 2>/dev/null || true
 echo "Resolved base: $BASE_BRANCH (source: $BASE_SOURCE)"
 ```
 
-**Hard check, not a sanity note (MUST run before continuing to Step 2).** A prior
-version of this step relied on the authoring agent noticing a mismatch and fixing
-it by hand; that still let `--base` silently drop on roughly a third of runs, per
-`feedback-create-pr-base-flag-drops`, because the check was prose the agent could
-skim past under momentum, not something that could fail the run. Run this as its
-own bash block. Write the raw `$ARGUMENTS` text into a heredoc with a QUOTED
-delimiter (`<<'RAWARGS_EOF'`, not `<<RAWARGS_EOF`), not a single-quoted literal:
-a heredoc needs no escaping regardless of content, while an apostrophe or
-backtick in `$ARGUMENTS` breaks a single-quoted string open, which an earlier
-draft of this fix did not handle. Re-read the actual invocation text now if
-there is any doubt about transcribing it exactly:
+**Hard check, not a sanity note (MUST run before continuing to Step 2), as its
+own bash block.** Write the raw `$ARGUMENTS` text into a heredoc with a QUOTED
+delimiter (`<<'RAWARGS_EOF'`, not `<<RAWARGS_EOF`): a quoted heredoc needs no
+escaping regardless of content, while a single-quoted string breaks open on an
+apostrophe or backtick in `$ARGUMENTS`. Re-read the actual invocation text now
+if there is any doubt about transcribing it exactly:
 
 ```bash
 RAW_ARGUMENTS=$(cat <<'RAWARGS_EOF'
@@ -142,20 +178,14 @@ echo "Hard check passed: --base presence in \$ARGUMENTS matches BASE_ARG."
 ```
 
 **This check is only as reliable as the `RAW_ARGUMENTS` transcription above
-it.** It closes the "prose skimmed past" failure mode, not a "the agent never
-actually looked at `$ARGUMENTS`" one: an authoring agent that mistranscribes or
-omits the flag there defeats the check the same way it dropped `BASE_ARG`
-before. A bare substring match on `--base` can also false-positive on argument
-text that merely mentions the string in prose (e.g. a `--ticket` description
-that quotes it); that fails safe (an overly-cautious hard-abort with a fixable
-error), not unsafe, so it's left as a known, accepted limitation rather than a
-more fragile boundary-matching regex.
+it.** Transcribe `$ARGUMENTS` exactly. A bare substring match on `--base` can
+false-positive on argument text that merely mentions the string in prose; that
+fails safe (a fixable hard-abort), so it's an accepted limitation.
 
 If this exits non-zero, fix `$PR_TMP/args.env` with the Edit tool and re-run the
 base-resolution block above; do not proceed to Step 2 on a non-zero exit here.
-This is the exact failure mode the file-persistence design in this step exists to
-catch: silently opening a PR against the wrong base is a correctness bug, not a
-style nit, especially for stacked PRs where the base is load-bearing.
+Opening a PR against the wrong base is a correctness bug, not a style nit,
+especially for stacked PRs.
 
 ## Step 2: Pre-flight checks (engineering-standards)
 
@@ -195,14 +225,8 @@ if [ "${CHANGED:-0}" -gt 1500 ]; then
   echo "ABORT: ${CHANGED} changed lines is over the 1500-line hard size limit; split the work into smaller PRs"; exit 1
 fi
 
-# The thresholds are applied HERE, not narrated downstream.
-#
-# This block used to print the four raw numbers and leave the caller to apply
-# the limits and describe the result in prose. Three separate runs then reported
-# `test_files_touched=0` for diffs that really did touch tests, and twice
-# invented the same false cause (a "missing regex anchor" that is present two
-# lines above and demonstrably works). A value the script can compute must never
-# be restated from memory: the script decides, the caller copies.
+# Thresholds are applied HERE, not narrated downstream: the script decides,
+# the caller copies the VERDICT lines verbatim, never restating them from memory.
 verdict() { printf 'VERDICT %s\n' "$1"; }
 
 if [ "$DIRTY" -gt 0 ]; then
@@ -226,12 +250,9 @@ else
 fi
 ```
 
-**Copy every `VERDICT` line verbatim into the readiness block.** Do not recompute
-them, re-derive them from the diff, or paraphrase them: the script has already
-applied every threshold in `playbook:engineering-standards`. If a `VERDICT`
-contradicts your own reading of the diff, the `VERDICT` is right and your reading
-is wrong; report the `VERDICT` and, if it seems worth investigating, say so as a
-separate remark rather than replacing the line.
+**Copy every `VERDICT` line verbatim into the readiness block.** Do not
+recompute, re-derive, or paraphrase them. If a `VERDICT` contradicts your own
+reading of the diff, the `VERDICT` is right; report it as-is.
 
 The two hard stops (`AHEAD` = 0, `CHANGED` > 1500) have already exited above.
 Every `VERDICT` is non-blocking: print them and move on without pausing.
