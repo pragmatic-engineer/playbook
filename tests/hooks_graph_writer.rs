@@ -1367,7 +1367,9 @@ fn memory_rebuild_subcommand_fails_loud_on_a_rename_failure() {
 }
 
 /// A regression guard for the `.md` extension match: an upper-case
-/// `.MD` suffix must still be picked up by the walk, not silently skipped.
+/// `.MD` suffix must still be picked up by the walk, not silently skipped,
+/// and must not leak a literal `.MD`/`.md` tail into the derived node id or
+/// default name.
 #[test]
 fn uppercase_md_extension_is_matched() {
     // Arrange
@@ -1381,26 +1383,57 @@ fn uppercase_md_extension_is_matched() {
     // Act
     run_rebuild_for(&home, "upper-fact.MD");
 
-    // Assert: node id derivation only strips a lowercase ".md" suffix, so a
-    // ".MD" file's id keeps the literal suffix; matching on the
-    // frontmatter-derived `name` field instead checks what matters here,
-    // that the walk visits the file at all.
+    // Assert: node id derivation strips a `.MD` suffix the same as a
+    // lowercase one, so a `.MD` fact gets a clean id, not one with the
+    // literal suffix still attached.
     let graph = read_graph(&home);
     assert!(
-        nodes(&graph).iter().any(|n| n["name"] == "upper-fact"),
-        "a .MD-suffixed fact should still get a node in the graph"
+        has_node(&graph, "global/upper-fact"),
+        "a .MD-suffixed fact should get a clean node id, not one with .MD baked in"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A fact whose filename mixes case in its `.md` suffix (`.Md`) and carries
+/// no `name` frontmatter field falls back to the filename minus the
+/// suffix; that fallback must also strip the suffix case-insensitively.
+#[test]
+fn mixed_case_md_extension_strips_cleanly_into_the_default_name() {
+    // Arrange
+    let home = scratch_home("case-insensitive-md-default-name");
+    write_fact(
+        &home,
+        "no-name-field.Md",
+        "---\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "no-name-field.Md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert!(
+        nodes(&graph).iter().any(|n| n["name"] == "no-name-field"),
+        "the default-name fallback must strip a .Md suffix case-insensitively too"
     );
 
     let _ = fs::remove_dir_all(&home);
 }
 
 /// `MEMORY.md`, exact case, stays excluded from the walk even once the
-/// `.md` extension match itself becomes case-insensitive.
+/// `.md` extension match itself becomes case-insensitive; so does a
+/// differently-cased `MEMORY.MD`, since the exclusion is case-insensitive too.
 #[test]
 fn exact_case_memory_md_is_still_excluded() {
     // Arrange
     let home = scratch_home("case-insensitive-md-exclusion");
     write_fact(&home, "MEMORY.md", "This file must never become a node.\n");
+    write_fact(
+        &home,
+        "MEMORY.MD",
+        "This file must never become a node either.\n",
+    );
     write_fact(
         &home,
         "normal-fact.md",
@@ -1415,6 +1448,11 @@ fn exact_case_memory_md_is_still_excluded() {
     assert!(
         !has_node(&graph, "global/MEMORY"),
         "MEMORY.md must still be excluded from the graph"
+    );
+    assert_eq!(
+        nodes(&graph).len(),
+        1,
+        "MEMORY.MD must be excluded too, leaving only normal-fact.md's node: {graph:?}"
     );
     assert!(has_node(&graph, "global/normal-fact"));
 

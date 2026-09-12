@@ -452,9 +452,20 @@ fn scope_and_project(rel: &str) -> (Scope, Option<String>) {
     }
 }
 
+/// Strips a trailing `.md` regardless of case (`.MD`, `.Md`, ...), so a fact
+/// walked in case-insensitively doesn't end up with a literal `.md`/`.MD`
+/// tail baked into its node id or default display name.
+fn strip_md_suffix_ci(s: &str) -> &str {
+    if s.len() >= 3 && s[s.len() - 3..].eq_ignore_ascii_case(".md") {
+        &s[..s.len() - 3]
+    } else {
+        s
+    }
+}
+
 fn node_id(rel: &str, scope: Scope, project: Option<&str>) -> String {
     let normalized = rel.replace('\\', "/");
-    let base = normalized.strip_suffix(".md").unwrap_or(&normalized);
+    let base = strip_md_suffix_ci(&normalized);
     match scope {
         Scope::Global => format!("global/{base}"),
         Scope::Org => {
@@ -641,10 +652,7 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let default_name = file_name
-            .strip_suffix(".md")
-            .unwrap_or(&file_name)
-            .to_string();
+        let default_name = strip_md_suffix_ci(&file_name).to_string();
 
         let node_type = fm
             .scalar("type")
@@ -802,10 +810,12 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
 }
 
 /// Recursively collect every `.md` file under `dir` except `MEMORY.md`,
-/// pruning dot-directories. Mirrors the `os.walk` filter in
-/// `hooks/rebuild-memory-graph.py:rebuild`. A directory that cannot be read
-/// (missing, permissions) aborts the walk with an error naming that
-/// directory, rather than silently contributing zero files.
+/// pruning dot-directories. Loosely mirrors the `os.walk` filter in
+/// `hooks/rebuild-memory-graph.py:rebuild`, but diverges on case: the match
+/// here is case-insensitive (`.MD`, `MEMORY.MD`, ...), where python's
+/// `endswith` was not. A directory that cannot be read (missing, permissions)
+/// aborts the walk with an error naming that directory, rather than silently
+/// contributing zero files.
 fn walk_markdown_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     walk_markdown_files_into(dir, &mut out)?;
@@ -826,7 +836,9 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()
             if !name.starts_with('.') {
                 walk_markdown_files_into(&path, out)?;
             }
-        } else if name.to_ascii_lowercase().ends_with(".md") && name != "MEMORY.md" {
+        } else if name.to_ascii_lowercase().ends_with(".md")
+            && !name.eq_ignore_ascii_case("MEMORY.md")
+        {
             out.push(path);
         }
     }
