@@ -41,6 +41,11 @@ claude plugin install playbook@pragmatic-engineer
 Expect `/playbook:doctor` to report the binary, the guards and the status line
 as missing. That is correct for this path, not a broken install.
 
+This route (and `/playbook:setup`) has no equivalent of `install.sh`'s
+minimum-claude-CLI-version check: Claude Code's plugin system has no hook for
+it. See [docs/guides/00-install.md](docs/guides/00-install.md#requirements)
+for the version this toolkit assumes going forward.
+
 ### Install without `curl | bash`
 
 Piping a script into a shell is a reasonable thing to refuse. Two routes avoid

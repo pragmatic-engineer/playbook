@@ -26,6 +26,14 @@ set -euo pipefail
 PLUGIN_REPO="pragmatic-engineer/playbook"
 MARKETPLACE="pragmatic-engineer/marketplace"
 PLUGIN="playbook@pragmatic-engineer"
+# Lowest claude CLI version this toolkit targets going forward: v2.1.121
+# shipped PostToolUse's updatedToolOutput, which planned token-budget work
+# (tool-output compression) will build on. Nothing shipped today actually
+# requires it yet; this floor is set ahead of that work landing so a user
+# who upgrades the plugin doesn't also need to separately discover a CLI
+# upgrade at that point. Bump this only alongside a feature that genuinely
+# needs the newer floor, never speculatively.
+CLAUDE_MIN_VERSION="2.1.121"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
 REF="${PLAYBOOK_REF:-}"
@@ -33,6 +41,7 @@ SKIP_PLUGIN=0
 OPT_ALIASES=0
 OPT_SYSTEM_PROMPT=0
 ASSUME_YES=0
+PLUGIN_SKIPPED_FOR_VERSION=0
 
 # Component dirs the plugin owns: never copied into ~/.claude directly, so the
 # plugin stays the single source and skills/commands/agents don't load twice.
@@ -46,6 +55,25 @@ fi
 log()  { printf '%s==>%s %s\n' "$C_B" "$C_0" "$*"; }
 warn() { printf '%swarning:%s %s\n' "$C_Y" "$C_0" "$*" >&2; }
 die()  { printf '%serror:%s %s\n' "$C_R" "$C_0" "$*" >&2; exit 1; }
+
+# version_ge A B -> true (0) if dotted version A >= B, comparing major.minor.patch
+# numerically. Implemented in awk rather than `sort -V`: macOS's shipped BSD
+# sort does not support -V, and this avoids a GNU-only dependency.
+version_ge() {
+    awk -v a="$1" -v b="$2" '
+        BEGIN {
+            split(a, av, ".")
+            split(b, bv, ".")
+            for (i = 1; i <= 3; i++) {
+                ai = av[i] + 0
+                bi = bv[i] + 0
+                if (ai > bi) { exit 0 }
+                if (ai < bi) { exit 1 }
+            }
+            exit 0
+        }
+    '
+}
 
 # ask PROMPT [default]  ->  0 = yes, 1 = no. Default is yes unless the second
 # argument is "n". With --yes, or when there is no controlling terminal (a
@@ -443,7 +471,35 @@ CLAUDE_PLUGIN_ROOT="$SRC" "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \
 # so they do not depend on the plugin.
 if [ "$SKIP_PLUGIN" -eq 0 ]; then
     if command -v claude >/dev/null 2>&1; then
-        if ask "Add the playbook marketplace and install the plugin?" Y; then
+        # claude --version prints e.g. "2.1.269 (Claude Code)"; the first
+        # field of the FIRST line is the dotted version (NR==1 guards against
+        # a CLI that writes more than one line to stdout). A version claude
+        # doesn't understand (a dev build, a wrapper script) still parses to
+        # a non-empty string, which then fails the minimum check below via
+        # awk's numeric coercion (all-zero fields), the same skip path as
+        # too-old. A CLI that exits non-zero on --version (a broken shim, one
+        # that needs auth to answer it) leaves CLAUDE_VERSION genuinely empty
+        # instead, handled as its own case below rather than silently falling
+        # through to "proceed as if fine": not knowing the version at all is
+        # not evidence it meets the minimum. The `|| CLAUDE_VERSION=""` part
+        # matters under set -euo pipefail: without it, that same non-zero
+        # exit kills the whole installer right here, silently, since
+        # pipefail propagates the failure through the awk into the
+        # assignment itself, before any of this fallback logic ever runs.
+        CLAUDE_VERSION="$(claude --version 2>/dev/null | awk 'NR==1{print $1}')" || CLAUDE_VERSION=""
+        if [ -z "$CLAUDE_VERSION" ]; then
+            PLUGIN_SKIPPED_FOR_VERSION=1
+            warn "could not determine the installed claude CLI's version; skipping the plugin rather than assuming it meets the minimum ($CLAUDE_MIN_VERSION)."
+            warn "Upgrade or repair the claude CLI, then run: claude plugin marketplace add $MARKETPLACE && claude plugin install $PLUGIN"
+            warn "npm: npm install -g @anthropic-ai/claude-code@latest"
+            warn "Homebrew: the claude-code cask tracks a slower channel than npm; switch with: brew uninstall --cask claude-code && brew install --cask claude-code@latest"
+        elif ! version_ge "$CLAUDE_VERSION" "$CLAUDE_MIN_VERSION"; then
+            PLUGIN_SKIPPED_FOR_VERSION=1
+            warn "claude CLI $CLAUDE_VERSION is older than the minimum this plugin assumes ($CLAUDE_MIN_VERSION); skipping the plugin."
+            warn "Upgrade, then run: claude plugin marketplace add $MARKETPLACE && claude plugin install $PLUGIN"
+            warn "npm: npm install -g @anthropic-ai/claude-code@latest"
+            warn "Homebrew: the claude-code cask tracks a slower channel than npm; switch with: brew uninstall --cask claude-code && brew install --cask claude-code@latest"
+        elif ask "Add the playbook marketplace and install the plugin?" Y; then
             log "Adding marketplace and installing the plugin"
             # </dev/null keeps claude off the script's stdin under `curl | bash`.
             claude plugin marketplace add "$MARKETPLACE" </dev/null \
@@ -487,6 +543,8 @@ printf '\nNext steps:\n'
 if ! command -v claude >/dev/null 2>&1; then
     printf '  - Install the claude CLI: npm i -g @anthropic-ai/claude-code (or the native installer)\n'
     printf '  - Then: claude plugin marketplace add %s && claude plugin install %s\n' "$MARKETPLACE" "$PLUGIN"
+elif [ "$PLUGIN_SKIPPED_FOR_VERSION" -eq 1 ]; then
+    printf '  - Plugin not installed: the claude CLI is older than this toolkit assumes. Upgrade, then: claude plugin marketplace add %s && claude plugin install %s\n' "$MARKETPLACE" "$PLUGIN"
 else
     printf '  - The toolkit is a plugin: manage it with `claude plugin list` / `enable` / `disable`.\n'
 fi
