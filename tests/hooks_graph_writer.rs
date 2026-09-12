@@ -1269,6 +1269,103 @@ fn hook_rebuild_path_stays_silent_on_stdout_but_reports_unreadable_subdirectory_
     let _ = fs::remove_dir_all(&home);
 }
 
+/// Done-when: a write failure (the memory dir is read-only, so the temp file
+/// this hook writes before any rename cannot even be created) makes
+/// `playbook memory rebuild` exit non-zero and report the real failure on
+/// stderr, instead of the hardcoded success line, and leaves the previously
+/// written `memory.graph.json` byte-for-byte intact.
+#[test]
+fn memory_rebuild_subcommand_fails_loud_on_a_write_failure() {
+    // Arrange
+    let home = scratch_home("write-failure-cli");
+    let mem_dir = home.join(".config").join("playbook").join("memory");
+    write_fact(
+        &home,
+        "seed.md",
+        "---\nname: seed\ntype: reference\n---\n\nBody.\n",
+    );
+    run_rebuild_for(&home, "seed.md"); // establishes a real memory.graph.json while the dir is still writable
+
+    if !permission_checks_are_enforced(&mem_dir) {
+        eprintln!(
+            "skipping memory_rebuild_subcommand_fails_loud_on_a_write_failure: \
+             this filesystem/user does not enforce permission bits (likely running as root)"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+
+    let before = fs::read_to_string(graph_path(&home)).unwrap();
+    set_mode(&mem_dir, 0o555); // read + execute only: no new file can be created in it
+
+    // Act
+    let out = run_playbook(&home, &["memory", "rebuild"], "");
+
+    // Assert
+    set_mode(&mem_dir, 0o755); // restore before cleanup can remove the dir
+    assert!(
+        !out.status.success(),
+        "memory rebuild should exit non-zero when the graph write fails"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty when the rebuild fails"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("write temp graph file"),
+        "stderr should contain the RebuildError wrapper text: {stderr}"
+    );
+    let after = fs::read_to_string(graph_path(&home)).unwrap();
+    assert_eq!(
+        after, before,
+        "the previous memory.graph.json must stay byte-for-byte intact after a failed write"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Done-when: a rename failure (the target path already occupied by a
+/// directory instead of the graph file) makes `playbook memory rebuild`
+/// exit non-zero and report the real failure on stderr. Forced
+/// deterministically by replacing the graph file with a directory of the
+/// same name, not by permission bits, so this needs no root-skip.
+#[test]
+fn memory_rebuild_subcommand_fails_loud_on_a_rename_failure() {
+    // Arrange
+    let home = scratch_home("rename-failure-cli");
+    let mem_dir = home.join(".config").join("playbook").join("memory");
+    write_fact(
+        &home,
+        "seed.md",
+        "---\nname: seed\ntype: reference\n---\n\nBody.\n",
+    );
+    run_rebuild_for(&home, "seed.md"); // establishes a real memory.graph.json
+
+    fs::remove_file(graph_path(&home)).unwrap();
+    fs::create_dir(mem_dir.join("memory.graph.json")).unwrap();
+
+    // Act
+    let out = run_playbook(&home, &["memory", "rebuild"], "");
+
+    // Assert
+    assert!(
+        !out.status.success(),
+        "memory rebuild should exit non-zero when the graph rename fails"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty when the rebuild fails"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("rename temp graph file into place"),
+        "stderr should contain the RebuildError wrapper text: {stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// A regression guard for the `.md` extension match: an upper-case
 /// `.MD` suffix must still be picked up by the walk, not silently skipped.
 #[test]

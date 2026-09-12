@@ -798,8 +798,7 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
             edges,
             version: 1,
         },
-    );
-    Ok(())
+    )
 }
 
 /// Recursively collect every `.md` file under `dir` except `MEMORY.md`,
@@ -839,20 +838,26 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()
 /// observes a partially written file, and a failed write leaves the
 /// previous `memory.graph.json` untouched. Mirrors
 /// `tempfile.mkstemp(dir=MEMORY_DIR, ...)` plus `os.replace`.
-fn write_graph_atomically(mem_dir: &Path, graph: &Graph) {
-    let Ok(rendered) = serde_json::to_string_pretty(graph) else {
-        return;
-    };
+fn write_graph_atomically(mem_dir: &Path, graph: &Graph) -> Result<(), RebuildError> {
+    let rendered = serde_json::to_string_pretty(graph)
+        .map_err(|e| RebuildError(format!("serialize graph: {e}")))?;
     let tmp_path = mem_dir.join(format!(
         ".graph-{}-{:?}.json.tmp",
         std::process::id(),
         std::thread::current().id()
     ));
-    if fs::write(&tmp_path, rendered).is_err() {
+    if let Err(e) = fs::write(&tmp_path, rendered) {
         let _ = fs::remove_file(&tmp_path);
-        return;
+        return Err(RebuildError(format!(
+            "write temp graph file {}: {e}",
+            tmp_path.display()
+        )));
     }
-    if fs::rename(&tmp_path, mem_dir.join("memory.graph.json")).is_err() {
+    if let Err(e) = fs::rename(&tmp_path, mem_dir.join("memory.graph.json")) {
         let _ = fs::remove_file(&tmp_path);
+        return Err(RebuildError(format!(
+            "rename temp graph file into place: {e}"
+        )));
     }
+    Ok(())
 }
