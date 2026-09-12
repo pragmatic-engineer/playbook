@@ -1161,6 +1161,304 @@ fn permission_checks_are_enforced(dir: &Path) -> bool {
     blocked
 }
 
+/// Done-when: `playbook memory rebuild` (the CLI subcommand) fails loud when
+/// a memory subdirectory cannot be read, instead of silently walking past it
+/// and printing the hardcoded success line. The error must also name the
+/// specific subdirectory that failed, not just the top-level memory root.
+#[test]
+fn memory_rebuild_subcommand_fails_loud_when_a_subdirectory_cannot_be_read() {
+    // Arrange
+    let home = scratch_home("unreadable-subdir-cli");
+    let mem_dir = home.join(".config").join("playbook").join("memory");
+    write_fact(
+        &home,
+        "seed.md",
+        "---\nname: seed\ntype: reference\n---\n\nBody.\n",
+    );
+    let bad_subdir = mem_dir.join("no-access-subdir");
+    fs::create_dir_all(&bad_subdir).unwrap();
+
+    if !permission_checks_are_enforced(&mem_dir) {
+        eprintln!(
+            "skipping memory_rebuild_subcommand_fails_loud_when_a_subdirectory_cannot_be_read: \
+             this filesystem/user does not enforce permission bits (likely running as root)"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+
+    set_mode(&bad_subdir, 0o000);
+
+    // Act
+    let out = run_playbook(&home, &["memory", "rebuild"], "");
+
+    // Assert
+    set_mode(&bad_subdir, 0o755); // restore before cleanup can remove the dir
+    assert!(
+        !out.status.success(),
+        "memory rebuild should exit non-zero when a subdirectory cannot be read"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty when the rebuild fails"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("read memory directory"),
+        "stderr should contain the RebuildError wrapper text: {stderr}"
+    );
+    assert!(
+        stderr.contains("no-access-subdir"),
+        "stderr should name the specific failing subdirectory: {stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Done-when: the same unreadable-subdirectory failure, exercised via the
+/// PostToolUse hook path instead of the CLI subcommand, keeps the hook's
+/// documented exit-0/stdout-silent contract, but the failure is now
+/// observable on stderr instead of vanishing.
+#[test]
+fn hook_rebuild_path_stays_silent_on_stdout_but_reports_unreadable_subdirectory_on_stderr() {
+    // Arrange
+    let home = scratch_home("unreadable-subdir-hook");
+    let mem_dir = home.join(".config").join("playbook").join("memory");
+    write_fact(
+        &home,
+        "seed.md",
+        "---\nname: seed\ntype: reference\n---\n\nBody.\n",
+    );
+    let bad_subdir = mem_dir.join("no-access-subdir");
+    fs::create_dir_all(&bad_subdir).unwrap();
+
+    if !permission_checks_are_enforced(&mem_dir) {
+        eprintln!(
+            "skipping hook_rebuild_path_stays_silent_on_stdout_but_reports_unreadable_subdirectory_on_stderr: \
+             this filesystem/user does not enforce permission bits (likely running as root)"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+
+    set_mode(&bad_subdir, 0o000);
+
+    // Act
+    let out = run_rebuild_for(&home, "seed.md");
+
+    // Assert
+    set_mode(&bad_subdir, 0o755); // restore before cleanup can remove the dir
+    assert!(
+        out.status.success(),
+        "the hook path must still exit 0 when a subdirectory cannot be read"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "the hook path must stay silent on stdout"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("read memory directory"),
+        "stderr should contain the RebuildError wrapper text: {stderr}"
+    );
+    assert!(
+        stderr.contains("no-access-subdir"),
+        "stderr should name the specific failing subdirectory: {stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Done-when: a write failure (the memory dir is read-only, so the temp file
+/// this hook writes before any rename cannot even be created) makes
+/// `playbook memory rebuild` exit non-zero and report the real failure on
+/// stderr, instead of the hardcoded success line, and leaves the previously
+/// written `memory.graph.json` byte-for-byte intact.
+#[test]
+fn memory_rebuild_subcommand_fails_loud_on_a_write_failure() {
+    // Arrange
+    let home = scratch_home("write-failure-cli");
+    let mem_dir = home.join(".config").join("playbook").join("memory");
+    write_fact(
+        &home,
+        "seed.md",
+        "---\nname: seed\ntype: reference\n---\n\nBody.\n",
+    );
+    run_rebuild_for(&home, "seed.md"); // establishes a real memory.graph.json while the dir is still writable
+
+    if !permission_checks_are_enforced(&mem_dir) {
+        eprintln!(
+            "skipping memory_rebuild_subcommand_fails_loud_on_a_write_failure: \
+             this filesystem/user does not enforce permission bits (likely running as root)"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+
+    let before = fs::read_to_string(graph_path(&home)).unwrap();
+    set_mode(&mem_dir, 0o555); // read + execute only: no new file can be created in it
+
+    // Act
+    let out = run_playbook(&home, &["memory", "rebuild"], "");
+
+    // Assert
+    set_mode(&mem_dir, 0o755); // restore before cleanup can remove the dir
+    assert!(
+        !out.status.success(),
+        "memory rebuild should exit non-zero when the graph write fails"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty when the rebuild fails"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("write temp graph file"),
+        "stderr should contain the RebuildError wrapper text: {stderr}"
+    );
+    let after = fs::read_to_string(graph_path(&home)).unwrap();
+    assert_eq!(
+        after, before,
+        "the previous memory.graph.json must stay byte-for-byte intact after a failed write"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Done-when: a rename failure (the target path already occupied by a
+/// directory instead of the graph file) makes `playbook memory rebuild`
+/// exit non-zero and report the real failure on stderr. Forced
+/// deterministically by replacing the graph file with a directory of the
+/// same name, not by permission bits, so this needs no root-skip.
+#[test]
+fn memory_rebuild_subcommand_fails_loud_on_a_rename_failure() {
+    // Arrange
+    let home = scratch_home("rename-failure-cli");
+    let mem_dir = home.join(".config").join("playbook").join("memory");
+    write_fact(
+        &home,
+        "seed.md",
+        "---\nname: seed\ntype: reference\n---\n\nBody.\n",
+    );
+    run_rebuild_for(&home, "seed.md"); // establishes a real memory.graph.json
+
+    fs::remove_file(graph_path(&home)).unwrap();
+    fs::create_dir(mem_dir.join("memory.graph.json")).unwrap();
+
+    // Act
+    let out = run_playbook(&home, &["memory", "rebuild"], "");
+
+    // Assert
+    assert!(
+        !out.status.success(),
+        "memory rebuild should exit non-zero when the graph rename fails"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty when the rebuild fails"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("rename temp graph file into place"),
+        "stderr should contain the RebuildError wrapper text: {stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A regression guard for the `.md` extension match: an upper-case
+/// `.MD` suffix must still be picked up by the walk, not silently skipped,
+/// and must not leak a literal `.MD`/`.md` tail into the derived node id or
+/// default name.
+#[test]
+fn uppercase_md_extension_is_matched() {
+    // Arrange
+    let home = scratch_home("case-insensitive-md");
+    write_fact(
+        &home,
+        "upper-fact.MD",
+        "---\nname: upper-fact\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "upper-fact.MD");
+
+    // Assert: node id derivation strips a `.MD` suffix the same as a
+    // lowercase one, so a `.MD` fact gets a clean id, not one with the
+    // literal suffix still attached.
+    let graph = read_graph(&home);
+    assert!(
+        has_node(&graph, "global/upper-fact"),
+        "a .MD-suffixed fact should get a clean node id, not one with .MD baked in"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A fact whose filename mixes case in its `.md` suffix (`.Md`) and carries
+/// no `name` frontmatter field falls back to the filename minus the
+/// suffix; that fallback must also strip the suffix case-insensitively.
+#[test]
+fn mixed_case_md_extension_strips_cleanly_into_the_default_name() {
+    // Arrange
+    let home = scratch_home("case-insensitive-md-default-name");
+    write_fact(
+        &home,
+        "no-name-field.Md",
+        "---\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "no-name-field.Md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert!(
+        nodes(&graph).iter().any(|n| n["name"] == "no-name-field"),
+        "the default-name fallback must strip a .Md suffix case-insensitively too"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// `MEMORY.md`, exact case, stays excluded from the walk even once the
+/// `.md` extension match itself becomes case-insensitive; so does a
+/// differently-cased `MEMORY.MD`, since the exclusion is case-insensitive too.
+#[test]
+fn exact_case_memory_md_is_still_excluded() {
+    // Arrange
+    let home = scratch_home("case-insensitive-md-exclusion");
+    write_fact(&home, "MEMORY.md", "This file must never become a node.\n");
+    write_fact(
+        &home,
+        "MEMORY.MD",
+        "This file must never become a node either.\n",
+    );
+    write_fact(
+        &home,
+        "normal-fact.md",
+        "---\nname: normal-fact\ntype: reference\n---\n\nBody text.\n",
+    );
+
+    // Act
+    run_rebuild_for(&home, "normal-fact.md");
+
+    // Assert
+    let graph = read_graph(&home);
+    assert!(
+        !has_node(&graph, "global/MEMORY"),
+        "MEMORY.md must still be excluded from the graph"
+    );
+    assert_eq!(
+        nodes(&graph).len(),
+        1,
+        "MEMORY.MD must be excluded too, leaving only normal-fact.md's node: {graph:?}"
+    );
+    assert!(has_node(&graph, "global/normal-fact"));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 // --- Cross-implementation check --------------------------------------------
 
 /// Populate an identical fixture memory tree, covering all six mandatory

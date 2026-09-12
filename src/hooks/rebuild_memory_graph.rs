@@ -17,14 +17,29 @@ use crate::common::payload::Payload;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// Everything that can stop a rebuild before it produces a new
+/// `memory.graph.json`, one variant's worth of detail flattened into a single
+/// string. Mirrors `settings::gen::GenError`'s struct-plus-`Display` shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RebuildError(pub String);
+
+impl std::fmt::Display for RebuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 pub fn run(payload: &Payload) {
     if should_skip(payload) {
         return;
     }
-    rebuild();
+    if let Err(err) = rebuild() {
+        eprintln!("rebuild-memory-graph: {err}");
+    }
 }
 
 /// Mirror the bash/python guard: skip the rebuild unless the edited file's
@@ -437,9 +452,20 @@ fn scope_and_project(rel: &str) -> (Scope, Option<String>) {
     }
 }
 
+/// Strips a trailing `.md` regardless of case (`.MD`, `.Md`, ...), so a fact
+/// walked in case-insensitively doesn't end up with a literal `.md`/`.MD`
+/// tail baked into its node id or default display name.
+fn strip_md_suffix_ci(s: &str) -> &str {
+    if s.len() >= 3 && s[s.len() - 3..].eq_ignore_ascii_case(".md") {
+        &s[..s.len() - 3]
+    } else {
+        s
+    }
+}
+
 fn node_id(rel: &str, scope: Scope, project: Option<&str>) -> String {
     let normalized = rel.replace('\\', "/");
-    let base = normalized.strip_suffix(".md").unwrap_or(&normalized);
+    let base = strip_md_suffix_ci(&normalized);
     match scope {
         Scope::Global => format!("global/{base}"),
         Scope::Org => {
@@ -570,8 +596,8 @@ fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
 /// "rebuild everything", and this port dropped that branch (see `should_skip`)
 /// on the grounds it was unexercised by the test suite. It was exercised, just
 /// by a slash command rather than a test.
-pub fn rebuild_now() {
-    rebuild();
+pub fn rebuild_now() -> Result<(), RebuildError> {
+    rebuild()
 }
 
 /// Serializes concurrent rebuilds (two sessions saving facts near the same
@@ -584,18 +610,19 @@ pub fn rebuild_now() {
 /// completes second always reads the tree as the first one left it. Fails
 /// open after the retry budget, same as every other lock in this codebase:
 /// a hook must never hang waiting on contention.
-fn rebuild() {
+fn rebuild() -> Result<(), RebuildError> {
     let mem_dir = memory_dir();
     let lock_path = mem_dir.join("memory.graph.json.lock");
-    let (acquired, ()) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
-        rebuild_locked(&mem_dir);
+    let (acquired, result) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
+        rebuild_locked(&mem_dir)
     });
     if acquired {
         let _ = fs::remove_dir(&lock_path);
     }
+    result
 }
 
-fn rebuild_locked(mem_dir: &Path) {
+fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
     let mut nodes: Vec<Node> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
     let mut seen_code: HashSet<String> = HashSet::new();
@@ -606,7 +633,9 @@ fn rebuild_locked(mem_dir: &Path) {
     // pairwise similarity check in pass 3, once every fact has been walked.
     let mut infos: Vec<SimilarityInfo> = Vec::new();
 
-    for fpath in walk_markdown_files(mem_dir) {
+    let files = walk_markdown_files(mem_dir)
+        .map_err(|e| RebuildError(format!("read memory directory tree: {e}")))?;
+    for fpath in files {
         let Ok(rel_path) = fpath.strip_prefix(mem_dir) else {
             continue;
         };
@@ -623,10 +652,7 @@ fn rebuild_locked(mem_dir: &Path) {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let default_name = file_name
-            .strip_suffix(".md")
-            .unwrap_or(&file_name)
-            .to_string();
+        let default_name = strip_md_suffix_ci(&file_name).to_string();
 
         let node_type = fm
             .scalar("type")
@@ -780,34 +806,43 @@ fn rebuild_locked(mem_dir: &Path) {
             edges,
             version: 1,
         },
-    );
+    )
 }
 
 /// Recursively collect every `.md` file under `dir` except `MEMORY.md`,
-/// pruning dot-directories. Mirrors the `os.walk` filter in
-/// `hooks/rebuild-memory-graph.py:rebuild`. A directory that cannot be read
-/// (missing, permissions) contributes no files rather than aborting the walk.
-fn walk_markdown_files(dir: &Path) -> Vec<PathBuf> {
+/// pruning dot-directories. Loosely mirrors the `os.walk` filter in
+/// `hooks/rebuild-memory-graph.py:rebuild`, but diverges on case: the match
+/// here is case-insensitive (`.MD`, `MEMORY.MD`, ...), where python's
+/// `endswith` was not. A directory that cannot be read (missing, permissions)
+/// aborts the walk with an error naming that directory, rather than silently
+/// contributing zero files.
+fn walk_markdown_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut out = Vec::new();
-    walk_markdown_files_into(dir, &mut out);
-    out
+    walk_markdown_files_into(dir, &mut out)?;
+    Ok(out)
 }
 
-fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
+fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
+    // Wrapped here, at the actual failing directory, rather than only once
+    // where the walk is first invoked: a bare `io::Error` carries no path, so
+    // without this every failure would read as "top-level memory dir
+    // unreadable" regardless of which nested subdirectory actually failed.
+    let entries = fs::read_dir(dir)
+        .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
         if path.is_dir() {
             if !name.starts_with('.') {
-                walk_markdown_files_into(&path, out);
+                walk_markdown_files_into(&path, out)?;
             }
-        } else if name.ends_with(".md") && name != "MEMORY.md" {
+        } else if name.to_ascii_lowercase().ends_with(".md")
+            && !name.eq_ignore_ascii_case("MEMORY.md")
+        {
             out.push(path);
         }
     }
+    Ok(())
 }
 
 /// Write `graph` to `memory.graph.json` inside `mem_dir` via a temp file in
@@ -815,20 +850,26 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) {
 /// observes a partially written file, and a failed write leaves the
 /// previous `memory.graph.json` untouched. Mirrors
 /// `tempfile.mkstemp(dir=MEMORY_DIR, ...)` plus `os.replace`.
-fn write_graph_atomically(mem_dir: &Path, graph: &Graph) {
-    let Ok(rendered) = serde_json::to_string_pretty(graph) else {
-        return;
-    };
+fn write_graph_atomically(mem_dir: &Path, graph: &Graph) -> Result<(), RebuildError> {
+    let rendered = serde_json::to_string_pretty(graph)
+        .map_err(|e| RebuildError(format!("serialize graph: {e}")))?;
     let tmp_path = mem_dir.join(format!(
         ".graph-{}-{:?}.json.tmp",
         std::process::id(),
         std::thread::current().id()
     ));
-    if fs::write(&tmp_path, rendered).is_err() {
+    if let Err(e) = fs::write(&tmp_path, rendered) {
         let _ = fs::remove_file(&tmp_path);
-        return;
+        return Err(RebuildError(format!(
+            "write temp graph file {}: {e}",
+            tmp_path.display()
+        )));
     }
-    if fs::rename(&tmp_path, mem_dir.join("memory.graph.json")).is_err() {
+    if let Err(e) = fs::rename(&tmp_path, mem_dir.join("memory.graph.json")) {
         let _ = fs::remove_file(&tmp_path);
+        return Err(RebuildError(format!(
+            "rename temp graph file into place: {e}"
+        )));
     }
+    Ok(())
 }

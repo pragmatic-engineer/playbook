@@ -105,10 +105,13 @@ fn main() {
             },
         },
         Command::Memory { sub } => match sub {
-            MemoryCommand::Rebuild => {
-                hooks::rebuild_memory_graph::rebuild_now();
-                println!("memory: memory.graph.json rebuilt");
-            }
+            MemoryCommand::Rebuild => match hooks::rebuild_memory_graph::rebuild_now() {
+                Ok(()) => println!("memory: memory.graph.json rebuilt"),
+                Err(err) => {
+                    eprintln!("memory rebuild: {err}");
+                    std::process::exit(1);
+                }
+            },
         },
         Command::Manifest { sub } => match sub {
             // Exit 1, not 2: the shell original used it and both CI lanes key
