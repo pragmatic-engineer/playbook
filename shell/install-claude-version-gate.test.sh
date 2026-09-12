@@ -17,6 +17,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}/.."
 INSTALL="${REPO_ROOT}/install.sh"
 
+# Read the real minimum straight out of install.sh rather than hardcoding it
+# a second time here: a bump to CLAUDE_MIN_VERSION would otherwise silently
+# turn the at-minimum scenario below into a second below-minimum case.
+MIN_VERSION="$(sed -n 's/^CLAUDE_MIN_VERSION="\(.*\)"$/\1/p' "$INSTALL")"
+[ -n "$MIN_VERSION" ] || { echo "could not read CLAUDE_MIN_VERSION from install.sh" >&2; exit 2; }
+
 PASS=0
 FAIL=0
 pass() { echo "PASS: $1"; (( PASS++ )) || true; }
@@ -79,9 +85,26 @@ run_scenario() {
   if "$fn"; then pass "$name"; else fail "$name"; fi
 }
 
-# (A) claude below CLAUDE_MIN_VERSION (2.1.121): the plugin step must be
-# skipped with a warning naming both the installed and minimum versions, and
-# neither marketplace-add nor install may be invoked.
+# stub_claude_version_fails <dir>: a `claude` whose --version exits 1 with no
+# stdout, standing in for a broken shim or one that needs auth to answer
+# --version. Pins the fix for a real regression: under set -euo pipefail, an
+# unguarded `VAR="$(claude --version | awk ...)"` assignment dies right there
+# when the probe fails, silently, before the fallback logic ever runs.
+stub_claude_version_fails() {
+  local dir="$1"
+  cat > "$dir/claude" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --version) exit 1 ;;
+esac
+exit 0
+EOF
+  chmod +x "$dir/claude"
+}
+
+# (A) claude below CLAUDE_MIN_VERSION: the plugin step must be skipped with a
+# warning naming both the installed and minimum versions, and neither
+# marketplace-add nor install may be invoked.
 scenario_below_minimum() {
   local d src home log claude_dir call_log
   d="$(mktemp -d "$WORK/below.XXXXXX")"
@@ -97,7 +120,7 @@ scenario_below_minimum() {
   local rc=$?
   [ "$rc" -eq 0 ] || { echo "  install rc=$rc: $(cat "$log")"; return 1; }
   grep -q "2.0.0" "$log" || { echo "  installed version not named: $(cat "$log")"; return 1; }
-  grep -q "2.1.121" "$log" || { echo "  minimum version not named: $(cat "$log")"; return 1; }
+  grep -q "$MIN_VERSION" "$log" || { echo "  minimum version not named: $(cat "$log")"; return 1; }
   [ ! -s "$call_log" ] || { echo "  plugin subcommands were invoked despite the old version: $(cat "$call_log")"; return 1; }
 }
 
@@ -112,13 +135,36 @@ scenario_at_minimum() {
   log="$d/install.log"
   call_log="$d/claude-calls.log"
   : > "$call_log"
-  stub_claude "$claude_dir" "2.1.121" "$call_log"
+  stub_claude "$claude_dir" "$MIN_VERSION" "$call_log"
 
   run_install "$src" "$home" "$log" "$claude_dir"
   local rc=$?
   [ "$rc" -eq 0 ] || { echo "  install rc=$rc: $(cat "$log")"; return 1; }
   grep -q "marketplace add" "$call_log" || { echo "  marketplace add not invoked at the exact minimum: $(cat "$call_log")"; return 1; }
   grep -q "install" "$call_log" || { echo "  plugin install not invoked at the exact minimum: $(cat "$call_log")"; return 1; }
+}
+
+# (D) claude --version prints something install.sh's awk can't parse into a
+# dotted version (e.g. a dev build with no numeric fields): the comment in
+# install.sh promises this degrades to the same skip as too-old, since awk's
+# numeric coercion turns "dev-build" into all-zero fields. Confirms that
+# promise rather than assuming it.
+scenario_unparseable_version() {
+  local d src home log claude_dir call_log
+  d="$(mktemp -d "$WORK/unparseable.XXXXXX")"
+  src="$d/src"; home="$d/home"; claude_dir="$d/claude-bin"
+  mkdir -p "$src" "$home" "$claude_dir"
+  seed_shipped_extras "$src"
+  log="$d/install.log"
+  call_log="$d/claude-calls.log"
+  : > "$call_log"
+  stub_claude "$claude_dir" "dev-build" "$call_log"
+
+  run_install "$src" "$home" "$log" "$claude_dir"
+  local rc=$?
+  [ "$rc" -eq 0 ] || { echo "  install rc=$rc: $(cat "$log")"; return 1; }
+  grep -q "dev-build" "$log" || { echo "  the unparseable version string was not named: $(cat "$log")"; return 1; }
+  [ ! -s "$call_log" ] || { echo "  plugin subcommands were invoked despite an unparseable version: $(cat "$call_log")"; return 1; }
 }
 
 # (C) claude above CLAUDE_MIN_VERSION: proceeds normally, same as (B) but
@@ -140,9 +186,34 @@ scenario_above_minimum() {
   grep -q "marketplace add" "$call_log" || { echo "  marketplace add not invoked above the minimum: $(cat "$call_log")"; return 1; }
 }
 
+# (E) claude --version itself exits non-zero (a broken shim, or one that
+# needs network/auth to answer --version). Before the fix this killed the
+# whole installer silently at the version-probe assignment, under
+# set -euo pipefail. The rest of the install (binary, hooks, guards,
+# settings) must still complete; only the plugin step degrades.
+scenario_version_probe_fails() {
+  local d src home log claude_dir call_log
+  d="$(mktemp -d "$WORK/probefails.XXXXXX")"
+  src="$d/src"; home="$d/home"; claude_dir="$d/claude-bin"
+  mkdir -p "$src" "$home" "$claude_dir"
+  seed_shipped_extras "$src"
+  log="$d/install.log"
+  call_log="$d/claude-calls.log"
+  : > "$call_log"
+  stub_claude_version_fails "$claude_dir"
+
+  run_install "$src" "$home" "$log" "$claude_dir"
+  local rc=$?
+  [ "$rc" -eq 0 ] || { echo "  install rc=$rc (should have completed, degrading only the plugin step): $(cat "$log")"; return 1; }
+  [ -f "$home/.claude/settings.json" ] || { echo "  settings.json missing: the installer died before finishing, not just before the plugin step: $(cat "$log")"; return 1; }
+  [ ! -s "$call_log" ] || { echo "  plugin subcommands were invoked despite a failed version probe: $(cat "$call_log")"; return 1; }
+}
+
 run_scenario "A: claude below the minimum version skips the plugin with a clear warning" scenario_below_minimum
 run_scenario "B: claude at exactly the minimum version proceeds (inclusive boundary)" scenario_at_minimum
 run_scenario "C: claude above the minimum version proceeds normally" scenario_above_minimum
+run_scenario "D: an unparseable claude version degrades to the same skip as too-old" scenario_unparseable_version
+run_scenario "E: a claude --version that exits non-zero does not abort the installer" scenario_version_probe_fails
 
 TOTAL=$(( PASS + FAIL ))
 echo ""

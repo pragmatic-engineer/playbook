@@ -26,9 +26,13 @@ set -euo pipefail
 PLUGIN_REPO="pragmatic-engineer/playbook"
 MARKETPLACE="pragmatic-engineer/marketplace"
 PLUGIN="playbook@pragmatic-engineer"
-# Lowest claude CLI version the plugin's hooks assume: v2.1.121 shipped
-# PostToolUse's updatedToolOutput, which token-budget work builds on. Bump
-# this only alongside a feature that genuinely needs the newer floor.
+# Lowest claude CLI version this toolkit targets going forward: v2.1.121
+# shipped PostToolUse's updatedToolOutput, which planned token-budget work
+# (tool-output compression) will build on. Nothing shipped today actually
+# requires it yet; this floor is set ahead of that work landing so a user
+# who upgrades the plugin doesn't also need to separately discover a CLI
+# upgrade at that point. Bump this only alongside a feature that genuinely
+# needs the newer floor, never speculatively.
 CLAUDE_MIN_VERSION="2.1.121"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
@@ -37,6 +41,7 @@ SKIP_PLUGIN=0
 OPT_ALIASES=0
 OPT_SYSTEM_PROMPT=0
 ASSUME_YES=0
+PLUGIN_SKIPPED_FOR_VERSION=0
 
 # Component dirs the plugin owns: never copied into ~/.claude directly, so the
 # plugin stays the single source and skills/commands/agents don't load twice.
@@ -471,8 +476,14 @@ if [ "$SKIP_PLUGIN" -eq 0 ]; then
         # (a dev build, a wrapper script) parses as all-zero fields via awk's
         # numeric coercion, which fails the minimum check below rather than
         # crashing on it; that degrades to the same fallback as too-old.
-        CLAUDE_VERSION="$(claude --version 2>/dev/null | awk '{print $1}')"
+        # The `|| CLAUDE_VERSION=""` matters under set -euo pipefail: without
+        # it, a claude --version that exits non-zero (a broken shim, one that
+        # needs auth to answer --version) kills the whole installer right
+        # here, silently, since pipefail propagates that failure through the
+        # awk into the assignment itself.
+        CLAUDE_VERSION="$(claude --version 2>/dev/null | awk '{print $1}')" || CLAUDE_VERSION=""
         if [ -n "$CLAUDE_VERSION" ] && ! version_ge "$CLAUDE_VERSION" "$CLAUDE_MIN_VERSION"; then
+            PLUGIN_SKIPPED_FOR_VERSION=1
             warn "claude CLI $CLAUDE_VERSION is older than the minimum this plugin assumes ($CLAUDE_MIN_VERSION); skipping the plugin."
             warn "Upgrade, then run: claude plugin marketplace add $MARKETPLACE && claude plugin install $PLUGIN"
             warn "npm: npm install -g @anthropic-ai/claude-code@latest"
@@ -521,6 +532,8 @@ printf '\nNext steps:\n'
 if ! command -v claude >/dev/null 2>&1; then
     printf '  - Install the claude CLI: npm i -g @anthropic-ai/claude-code (or the native installer)\n'
     printf '  - Then: claude plugin marketplace add %s && claude plugin install %s\n' "$MARKETPLACE" "$PLUGIN"
+elif [ "$PLUGIN_SKIPPED_FOR_VERSION" -eq 1 ]; then
+    printf '  - Plugin not installed: the claude CLI is older than this toolkit assumes. Upgrade, then: claude plugin marketplace add %s && claude plugin install %s\n' "$MARKETPLACE" "$PLUGIN"
 else
     printf '  - The toolkit is a plugin: manage it with `claude plugin list` / `enable` / `disable`.\n'
 fi
