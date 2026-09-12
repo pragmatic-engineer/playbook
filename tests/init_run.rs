@@ -906,6 +906,46 @@ fn memory_step_actually_migrates_real_content_to_the_new_root() {
     );
 }
 
+/// Before this fix, only the SessionStart hook's own private fallback
+/// repaired a stray `graph.json` left at the NEW root; `playbook init` had
+/// no equivalent, so this scenario would have left the stray file in place.
+/// `migrate_memory` now folds that self-heal in for every caller, `run()`
+/// included, closing that gap.
+#[test]
+fn memory_step_repairs_a_stray_graph_file_at_the_new_root() {
+    // Arrange: a fully migrated store, except a stray old-named file also
+    // sits at the new root (e.g. left behind by an older build).
+    let home = scratch_home("memory-new-root-stray");
+    let new_root = home.join(".config").join("playbook").join("memory");
+    std::fs::create_dir_all(&new_root).unwrap();
+    std::fs::write(new_root.join("graph.json"), r#"{"nodes":[]}"#).unwrap();
+    std::fs::write(new_root.join(".migration-complete"), "migrated\n").unwrap();
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert: the stray file is renamed away, content preserved. The store
+    // is already fully migrated (sentinel present), so the step's own
+    // status is AlreadyCorrect; the self-heal is a silent side effect of
+    // that same call, not a status change.
+    let memory_step = find_step(&outcome, "memory");
+    assert_eq!(
+        memory_step.status,
+        StepStatus::AlreadyCorrect,
+        "{}",
+        memory_step.detail
+    );
+    assert!(
+        !new_root.join("graph.json").exists(),
+        "playbook init should now repair a stray new-root graph.json, not just SessionStart"
+    );
+    assert_eq!(
+        std::fs::read_to_string(new_root.join("memory.graph.json")).unwrap(),
+        r#"{"nodes":[]}"#
+    );
+}
+
 /// A full pre-ADR-0012 install migrates in one `run()` call.
 #[test]
 fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift() {

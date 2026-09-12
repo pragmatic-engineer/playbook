@@ -811,6 +811,50 @@ mod memory_capture {
         );
     }
 
+    /// Before this fix, only the SessionStart hook's own private fallback
+    /// repaired a stray `graph.json` left at the NEW root; the Stop hook had
+    /// no equivalent. `migrate_memory` now folds that self-heal in for
+    /// every caller, this hook included, closing that gap.
+    #[test]
+    fn stop_hook_repairs_a_stray_graph_file_at_the_new_root() {
+        // Arrange: the marker must be present, or `run()` returns before ever
+        // reaching its `migrate_memory` call. Its mtime is made older than
+        // the stray graph file's, so the write-detected release path fires
+        // deterministically (a plain simultaneous write would leave the
+        // outcome up to filesystem mtime resolution, asserting on neither
+        // branch); `fs::rename` preserves mtime, so the ordering survives
+        // the self-heal's rename into `memory.graph.json`.
+        let home = scratch_home("mc-new-root-stray");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("capture-due");
+        let mem_dir = memory_dir_for(&home);
+        fs::create_dir_all(&mem_dir).unwrap();
+        let stray_graph = mem_dir.join("graph.json");
+        write_with_older_then_newer_mtime(&marker, &stray_graph);
+        fs::write(mem_dir.join(".migration-complete"), "migrated\n").unwrap();
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert: the stray file is renamed away, content preserved, and the
+        // write-detected release path ran (marker cleared, nothing emitted).
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "");
+        assert!(
+            !marker.exists(),
+            "the write-detected release path should have cleared the marker"
+        );
+        assert!(
+            !mem_dir.join("graph.json").exists(),
+            "the Stop hook should now repair a stray new-root graph.json, not just SessionStart"
+        );
+        assert_eq!(
+            fs::read_to_string(mem_dir.join("memory.graph.json")).unwrap(),
+            "{}"
+        );
+    }
+
     #[test]
     fn second_call_with_marker_already_consumed_is_silent() {
         // Arrange: same write-detected precondition, so the first call
