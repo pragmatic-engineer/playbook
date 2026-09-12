@@ -49,25 +49,29 @@ scenario_extracts_cleanly() {
   return 0
 }
 
-# (B) Content sanity: the four extracted files (named by the block's own
-# $EXTRACT_DIR, parsed from its stdout) carry the specific rules Step 0
+# (B) Content sanity: the four extracted files (their paths printed by the
+# block itself, one per line, indented) carry the specific rules Step 0
 # claims to need, so a partial-but-nonempty extraction still gets caught.
 scenario_extracted_content_is_correct() {
-  local out extract_dir
+  local out core prs github eng
   out="$(run_step0)"
-  extract_dir="$(echo "$out" | sed -n 's/^Skill sections extracted and verified under \(.*\)\.$/\1/p')"
-  [ -n "$extract_dir" ] && [ -d "$extract_dir" ] || { echo "  could not locate the extraction dir from: $out"; return 1; }
+  core="$(echo "$out" | grep 'writing-style-core.md$' | sed 's/^[[:space:]]*//')"
+  prs="$(echo "$out" | grep 'writing-style-prs.md$' | sed 's/^[[:space:]]*//')"
+  github="$(echo "$out" | grep 'writing-style-github.md$' | sed 's/^[[:space:]]*//')"
+  eng="$(echo "$out" | grep 'eng-standards.md$' | sed 's/^[[:space:]]*//')"
+  [ -f "$core" ] && [ -f "$prs" ] && [ -f "$github" ] && [ -f "$eng" ] \
+    || { echo "  could not locate all four extracted files from: $out"; return 1; }
 
-  grep -q "IRON RULE" "$extract_dir/writing-style-core.md" || { echo "  core: missing IRON RULE"; return 1; }
-  grep -q "Banned Words" "$extract_dir/writing-style-core.md" || { echo "  core: missing Banned Words"; return 1; }
-  grep -q "When creating PRs" "$extract_dir/writing-style-prs.md" || { echo "  prs: missing its own heading"; return 1; }
-  grep -q "Prohibited GitHub Content" "$extract_dir/writing-style-github.md" || { echo "  github: missing its own heading"; return 1; }
-  grep -q "commit hashes" "$extract_dir/writing-style-github.md" || { echo "  github: missing a real rule from the section"; return 1; }
-  grep -q "Readiness" "$extract_dir/eng-standards.md" || { echo "  eng: missing Readiness"; return 1; }
-  grep -q "Size" "$extract_dir/eng-standards.md" || { echo "  eng: missing Size"; return 1; }
-  grep -qi "Automated Testing" "$extract_dir/eng-standards.md" && { echo "  eng: ran past its intended range into Automated Testing"; return 1; }
-  grep -qi "Review Comments" "$extract_dir/eng-standards.md" && { echo "  eng: end-marker heading itself leaked into the extract"; return 1; }
-  rm -rf "$extract_dir"
+  grep -q "IRON RULE" "$core" || { echo "  core: missing IRON RULE"; return 1; }
+  grep -q "Banned Words" "$core" || { echo "  core: missing Banned Words"; return 1; }
+  grep -q "When creating PRs" "$prs" || { echo "  prs: missing its own heading"; return 1; }
+  grep -q "Prohibited GitHub Content" "$github" || { echo "  github: missing its own heading"; return 1; }
+  grep -q "commit hashes" "$github" || { echo "  github: missing a real rule from the section"; return 1; }
+  grep -q "Readiness" "$eng" || { echo "  eng: missing Readiness"; return 1; }
+  grep -q "Size" "$eng" || { echo "  eng: missing Size"; return 1; }
+  grep -qi "Automated Testing" "$eng" && { echo "  eng: ran past its intended range into Automated Testing"; return 1; }
+  grep -qi "Review Comments" "$eng" && { echo "  eng: end-marker heading itself leaked into the extract"; return 1; }
+  rm -rf "$(dirname "$core")"
   return 0
 }
 

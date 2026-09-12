@@ -81,10 +81,14 @@ grep -q "Readiness" "$ENG" && grep -q "Size" "$ENG" \
 grep -q "Automated Testing" "$ENG" \
   && { echo "ERROR: engineering-standards extraction ran past Review Comments into Automated Testing; the end-marker heading likely changed. Read the full skill via the Skill tool instead." >&2; exit 1; }
 
-echo "Skill sections extracted and verified under $EXTRACT_DIR."
+echo "Skill sections extracted and verified:"
+echo "  $CORE"
+echo "  $PRS"
+echo "  $GH"
+echo "  $ENG"
 ```
 
-Read all four files with the Read tool now (paths printed by the block above). Together they carry the same rules Step 0 has always needed: voice, banned words, the dash rule, "When creating PRs" guidance, the Prohibited GitHub Content rules, and the PR readiness/size limits enforced in Step 2. If any guard above fails, fall back to invoking the full skill via the Skill tool for that one file rather than proceeding without its rules.
+Read all four printed paths with the Read tool now. Together they carry the same rules Step 0 has always needed: voice, banned words, the dash rule, "When creating PRs" guidance, the Prohibited GitHub Content rules, and the PR readiness/size limits enforced in Step 2. "Natural Imperfections" (the other subsection under writing-style's GitHub-Specific Rules) is deliberately not extracted: it governs injecting casual typos/imperfections into posted *review* comments, not PR titles/bodies, so it doesn't apply here. If any guard above fails, fall back to invoking the full skill via the Skill tool for that one file rather than proceeding without its rules.
 
 The PR title and body are read by another engineer, so they use the humane `playbook:writing-style` register (warm, contractions, active voice), NOT the terse operator voice. Where they conflict, `playbook:writing-style` wins for anything posted to GitHub.
 
