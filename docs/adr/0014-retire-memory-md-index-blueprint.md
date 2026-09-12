@@ -20,6 +20,7 @@
 - Four command files with a `MEMORY.md` write step to delete: `commands/plan.md:281-291,510`, `commands/adr.md:85-92,155`, `commands/implement.md:138-145`, `commands/learn-project.md:120-130,161,168,178`.
 - `commands/implement.md:267` — a WU-brief drafting instruction that references "any fact whose `MEMORY.md` one-line hook mentions the WU's title keywords", needs rewording to `description` since the data now comes from the graph read, not a MEMORY.md scan.
 - `skills/playbook-usage/SKILL.md:88` and three doc files (`docs/concepts/02-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/02-model-routing-and-memory.md`) describe the mechanism for contributors/users.
+- `prompts/SYSTEM_PROMPT.md:53,61,63` — the system prompt loaded into every session's persistent instructions, independently instructing the same `MEMORY.md` write convention. Distinct from the five commands above: this isn't read by one specific `/playbook:*` invocation, it's the standing instruction set every session already has, regardless of which command (if any) is running.
 
 ## Work Units
 
@@ -27,12 +28,13 @@
 
 - Requires: nothing
 - Goal: `session_init.rs`'s SessionStart fallback stops reading `MEMORY.md` and instead parses `memory.graph.json` directly (no jq, no bash), producing the same `name: description` shape.
-- Files: `src/hooks/session_init.rs` (production), `tests/hooks_session.rs` (test)
+- Files: `src/hooks/session_init.rs` (production), `tests/hooks_session.rs` (test), `src/hooks/memory_anchors.rs` (one doc-comment line, see Changes)
 - Changes:
   - Add `fn read_graph_slice_fallback(repo: &str) -> String`, mirroring `append_promoted_facts`'s read-and-filter shape (`session_init.rs:236-299`): read `memory_dir().join("memory.graph.json")`, parse as `serde_json::Value`, iterate `nodes`, keep only nodes where `in_promotion_scope(node, repo)` is true AND `node.get("name")` is present (a code-anchor node has no `name`, so this alone excludes it, no separate `scope != "code"` check needed), extract `name`/`description` (`description` defaults to `""` if absent), sort by name, join as `"{name}: {description}"` lines, and return `cap_memory_body(body)`. Any read or parse failure returns an empty string (never panics), matching every other fallback in this file.
-  - In `append_memory_slice` (`:318-367`), replace the else-branch's `MEMORY.md` read (`:348-360`, `crate::common::paths::memory_dir().join(&mem_slug).join("MEMORY.md")` + `read_legacy_memory`) with a call to `read_graph_slice_fallback(&mem_slug)`.
+  - In `append_memory_slice` (`:318-367`), replace the else-branch's `MEMORY.md` read (`:348-360`, `crate::common::paths::memory_dir().join(&mem_slug).join("MEMORY.md")` + `read_legacy_memory`) with a call to `read_graph_slice_fallback(&mem_slug)`. That else-branch's preamble text (`:355-358`, `"Project memory for this repo ({mem_slug})... These facts apply only in this repo..."`) also needs rewording as part of this change: `in_promotion_scope` (reused by the new function) includes global and org facts, not just project-scoped ones, so "these facts apply only in this repo" is no longer accurate once this branch calls it. Reword to something like "facts in scope for this repo (global, org, and project)".
   - Remove `read_legacy_memory` (`:461-469`) entirely; confirmed via grep it has no other caller.
   - Update the doc comments at `:315-317` and the removed function's former doc comment references to describe the fallback as "a native, dependency-free parse of `memory.graph.json`" instead of "the legacy `MEMORY.md` index".
+  - `src/hooks/memory_anchors.rs:300`'s doc comment ("Capped at 16000 chars, matching the legacy `MEMORY.md` fallback cap...") also references the fallback this WU retires; reword it to reference the new native fallback (or just `MEMORY_BODY_CAP_CHARS`, the shared constant) instead of naming `MEMORY.md`. Included here rather than as a separate WU since it is one line, directly about the same concept this WU changes, and `memory_anchors.rs` needs no other edit.
 - Test scenarios:
   - Given `memory.graph.json` exists with an in-scope project fact and `CLAUDE_PLUGIN_ROOT` is unset (forcing `plugin_root` empty, `mem_script` to `None`, and the fallback branch to run), `additionalContext` contains that fact's name and description. Replaces `session_init_falls_back_to_the_legacy_memory_index` (`tests/hooks_session.rs:242-278`); same repo/home scaffolding, same assertion shape, different fixture (a `memory.graph.json` node instead of a `MEMORY.md` line).
   - Given the same no-`CLAUDE_PLUGIN_ROOT` condition and a graph with ~120 in-scope facts whose rendered `name: description` lines exceed 16000 chars (same fixture shape as `session_init_caps_the_graph_backed_slice_like_the_legacy_fallback`, `tests/hooks_session.rs:191-239`), an early fact survives and a fact placed past the cap boundary does not. Confirms `cap_memory_body` is genuinely reused on this path, not just assumed. Note for whoever implements this: the native path's body has no `"Facts:\n"` preamble the jq path's rendering has (`shell/memory-context.sh:74,91`), so don't just copy the existing test's character-count assumptions; compute the actual rendered length for this path's own format and confirm `fact-001` lands before, and `fact-120` lands after, the 16000-char boundary for real, not by inference from the jq-path test's numbers.
@@ -42,6 +44,8 @@
 - Done When:
   - [ ] `read_legacy_memory` no longer exists anywhere in the file.
   - [ ] The fallback branch of `append_memory_slice` calls `read_graph_slice_fallback`, not any `MEMORY.md` path.
+  - [ ] The fallback branch's preamble text no longer claims the facts it lists are repo-only, matching the fact that `in_promotion_scope` also includes global and org facts.
+  - [ ] `memory_anchors.rs:300`'s doc comment no longer references "the legacy `MEMORY.md` fallback cap".
   - [ ] `cargo test --test hooks_session session_init_falls_back_to_a_native_graph_read` passes.
   - [ ] `cargo test --test hooks_session session_init_caps_the_native_graph_fallback` passes.
   - [ ] A malformed-`memory.graph.json` test and a code-anchor-only-graph test both pass.
@@ -53,7 +57,7 @@
 - Goal: `/playbook:plan` reads memory via `shell/memory-context.sh` instead of `MEMORY.md`, and writes exactly one file per captured fact.
 - Files: `commands/plan.md`
 - Changes:
-  - Step 2's "Check memory and prior plans" (`:171`): replace the `~/.config/playbook/memory/MEMORY.md` / `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` read instruction with: resolve `$CLAUDE_PLUGIN_ROOT/shell/memory-context.sh` (same resolve-then-check-`-f` convention `commands/doctor.md:123` uses for `statusline.sh`), run it with `--repo <owner>/<repo>`, and load the fact files it names on demand. **If the script produces no output** (empty store, or `jq`/`bash` unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope): the same dependency-free shape WU-0 gives `session_init.rs`, since this command is an LLM session and can parse JSON without shelling to `jq`. Note in the digest which path actually produced the result (script output vs. direct graph read vs. nothing found), so an operator can tell "nothing relevant" apart from "the script couldn't run."
+  - Step 2's "Check memory and prior plans" (`:171`): replace the `~/.config/playbook/memory/MEMORY.md` / `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` read instruction with: resolve `$CLAUDE_PLUGIN_ROOT/shell/memory-context.sh` (same resolve-then-check-`-f` convention `commands/doctor.md:108-113` uses for `statusline.sh`), run it with `--repo <owner>/<repo>`, and load the fact files it names on demand. **If the script produces no output** (empty store, or `jq`/`bash` unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope): the same dependency-free shape WU-0 gives `session_init.rs`, since this command is an LLM session and can parse JSON without shelling to `jq`. Note in the digest which path actually produced the result (script output vs. direct graph read vs. nothing found), so an operator can tell "nothing relevant" apart from "the script couldn't run."
   - "Knowledge capture (memory)" (`:281`): drop "plus its `MEMORY.md` index line".
   - Delete the "Locked index append" paragraph and its bash block (`:284-291`) entirely; a fact capture is now one `Write` call, no lock needed for a single file only one process is writing at that moment (unlike the shared-index-file case this lock existed for).
   - Step 12, item 3 (`:510`): drop "and update `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` with the same locked append shown earlier".
@@ -166,6 +170,20 @@
   - [ ] The frontmatter description and intro line both say "eight", not "seven".
   - [ ] The remediation-line logic has a Layer 8 branch, not just Layers 1-7.
 
+### WU-9: prompts/SYSTEM_PROMPT.md — stop instructing the MEMORY.md write
+
+- Requires: nothing
+- Goal: the system prompt every session loads no longer instructs writing or reading `MEMORY.md`; it describes `memory.graph.json` as the sole index instead. This is not a command file a specific `/playbook:*` invocation reads; it is the standing instruction set every session already has loaded, so it is a distinct write path from the five commands in WU-1 through WU-5, not covered by any of them.
+- Files: `prompts/SYSTEM_PROMPT.md`
+- Changes:
+  - `:53` ("Global facts live flat alongside `MEMORY.md`... Each project subfolder has its own `MEMORY.md` as its local index. Both use: index `MEMORY.md` (format: `- [Title](file.md): one-line hook`)..."): remove the `MEMORY.md`-as-index description entirely; the sentence still needs to describe where facts live (global flat, project under `<owner>/<repo>/`) and the frontmatter/body shape, just without naming an index file.
+  - `:61` ("First save in a repo or org: create the subfolder, write the fact + its `MEMORY.md`."): drop the `+ its MEMORY.md` clause; a first save is just the fact file.
+  - `:63` ("write the fact file... and add its `MEMORY.md` index line in the right store"): drop the `MEMORY.md` index-line clause; a fact capture is one file write.
+- Test scenarios: none automated (this is the system prompt text, not a command file; no test harness covers either).
+- Done When:
+  - [ ] `grep -c "MEMORY.md" prompts/SYSTEM_PROMPT.md` is 0.
+  - [ ] The Memory section still accurately describes where facts live and what their frontmatter/body shape is, just without naming `MEMORY.md`.
+
 ## Ordering
 
 | WU | Requires | Parallel group |
@@ -179,10 +197,11 @@
 | WU-6 | none | P0 |
 | WU-7 | none | P0 |
 | WU-8 | none | P0 |
+| WU-9 | none | P0 |
 
 ## Parallel Groups
 
-- **P0** (all 9 WUs): every WU touches a disjoint set of files (one Rust production file + its own test file for WU-0; one distinct command file each for WU-1 through WU-5; one skill file for WU-6; three distinct doc files for WU-7; `commands/doctor.md` for WU-8, touched by no other WU), and none depends on another's output: the command-file WUs call `shell/memory-context.sh`, which is unchanged by this blueprint, not WU-0's Rust changes; WU-8 adds a new, appended Layer 8, never renumbering the existing seven, with no dependency on anything else in this blueprint. Safe to dispatch as one wave.
+- **P0** (all 10 WUs): every WU touches a disjoint set of files (one Rust production file + its own test file for WU-0; one distinct command file each for WU-1 through WU-5; one skill file for WU-6; three distinct doc files for WU-7; `commands/doctor.md` for WU-8, touched by no other WU; `prompts/SYSTEM_PROMPT.md` for WU-9, touched by no other WU), and none depends on another's output: the command-file WUs call `shell/memory-context.sh`, which is unchanged by this blueprint, not WU-0's Rust changes; WU-8 adds a new, appended Layer 8, never renumbering the existing seven, with no dependency on anything else in this blueprint; WU-9 is a standalone prose edit to the system prompt, independent of every other WU. Safe to dispatch as one wave.
 - Sequential: none.
 
 ## Dependency Graph
@@ -198,6 +217,7 @@ flowchart LR
   WU6["WU-6: playbook-usage SKILL.md"]
   WU7["WU-7: docs (3 files)"]
   WU8["WU-8: doctor.md Layer 8"]
+  WU9["WU-9: SYSTEM_PROMPT.md"]
 
   START(("start")) --> WU0
   START --> WU1
@@ -208,12 +228,13 @@ flowchart LR
   START --> WU6
   START --> WU7
   START --> WU8
+  START --> WU9
 ```
 
 ## Confidence + open items
 
-- Confidence: HIGH. WU-0's design mirrors an existing, working function in the same file (`append_promoted_facts`, `session_init.rs:236-299`) rather than inventing a new pattern; the node schema it depends on (`name: None` for code nodes) was confirmed by reading `rebuild_memory_graph.rs:699` directly, not assumed; the test harness's `CLAUDE_PLUGIN_ROOT` isolation was confirmed by reading `run_hook` itself (`tests/hooks_session.rs:88`). Every command-file change is a mechanical repoint (read `MEMORY.md` becomes run `memory-context.sh`, with a native graph-read fallback when it produces nothing; delete a locked-append block) grounded in real line numbers read directly from each file in Stage 1. The Phase 2 adversarial pass caught a real gap in the first draft (the five commands losing their only jq-free path once `MEMORY.md` was gone, with nothing to replace it) and Phase 3's test review caught two real WU-0 boundary gaps (a malformed-graph scenario, a code-anchor-only-graph scenario); both are now fixed in this revision, not just noted.
+- Confidence: HIGH. WU-0's design mirrors an existing, working function in the same file (`append_promoted_facts`, `session_init.rs:236-299`) rather than inventing a new pattern; the node schema it depends on (`name: None` for code nodes) was confirmed by reading `rebuild_memory_graph.rs:699` directly, not assumed; the test harness's `CLAUDE_PLUGIN_ROOT` isolation was confirmed by reading `run_hook` itself (`tests/hooks_session.rs:88`). Every command-file change is a mechanical repoint (read `MEMORY.md` becomes run `memory-context.sh`, with a native graph-read fallback when it produces nothing; delete a locked-append block) grounded in real line numbers read directly from each file in Stage 1. The Phase 2 adversarial pass caught a real gap in the first draft (the five commands losing their only jq-free path once `MEMORY.md` was gone, with nothing to replace it) and Phase 3's test review caught two real WU-0 boundary gaps (a malformed-graph scenario, a code-anchor-only-graph scenario); both are now fixed in this revision, not just noted. A later post-gate PR self-review caught a more fundamental gap the formal gate missed: `prompts/SYSTEM_PROMPT.md`, loaded into every session regardless of which command runs, independently instructed the same `MEMORY.md` write convention, uncovered by any of the original 9 WUs. Fixed with a new WU-9; see `docs/adr/0014-retire-memory-md-index-quality.md`'s "Post-gate PR self-review" section for the full finding list from that pass.
 - Open items (verify downstream):
   - `commands/learn-project.md`'s Phase 1/3 priming and dedupe steps change their data shape (from `MEMORY.md`'s `- [Title](file.md): hook` bracket-link lines to `memory-context.sh`'s plain `name: description` lines). The prose instructions in WU-5 describe this correctly, but since this is a markdown command with no automated test, the actual behavior needs manual verification the first time `/playbook:learn-project --refresh` runs after this ships: confirm collectors still get a usable priming signal and dedupe still correctly skips existing facts. This is now a Done-When completion condition for WU-5 itself, not just a note here. Who verifies: manual run during or right after WU-5, by whoever runs `/playbook:implement` on this blueprint.
   - The same class of risk applies more lightly to WU-1 through WU-4 (`plan.md`, `adr.md`, `implement.md`, `deep-review.md`): their read-instruction swap is lower-stakes than `learn-project.md`'s dedupe (a missed read just means less context, not a duplicated fact), but a grep-based Done-When check (per each WU's own Done When list) cannot confirm the replacement instruction actually resolves and surfaces content when followed by a live session. Who verifies: run each of `/playbook:plan`, `/playbook:adr`, `/playbook:implement`, and `/playbook:deep-review` at least once after implementation and confirm the memory-check step visibly loads something in a repo with existing facts. Whoever runs `/playbook:implement` on this blueprint owns this; not a hard gate the way WU-5's is, since the failure mode here is silent degradation to less context, not data corruption.
-  - Whether any other command or skill file references `MEMORY.md` beyond the ones grep found during Stage 1 (`commands/plan.md`, `commands/adr.md`, `commands/implement.md`, `commands/deep-review.md`, `commands/learn-project.md`, `commands/doctor.md`, `skills/playbook-usage/SKILL.md`, and the three docs files) was checked via a repo-wide grep restricted to `commands/`, `skills/`, `src/`, `shell/`, and `docs/`; a final repo-wide `grep -rln "MEMORY.md" commands/ skills/ src/ shell/ docs/concepts/ docs/guides/ docs/internals/` (deliberately excluding `docs/adr/`, which is a historical record and must keep referencing `MEMORY.md` in ADR 0004/0008/0013's own text) should return empty once all 9 WUs land. Who verifies: the orchestrator, right before Stage 3's quality gate.
+  - Whether any other command, skill, or prompt file references `MEMORY.md` beyond the ones grep found during Stage 1 (`commands/plan.md`, `commands/adr.md`, `commands/implement.md`, `commands/deep-review.md`, `commands/learn-project.md`, `skills/playbook-usage/SKILL.md`, `prompts/SYSTEM_PROMPT.md`, and the three docs files; `commands/doctor.md` is in the WU set only for WU-8's new jq layer, it has no `MEMORY.md` mentions of its own) was checked via a repo-wide grep restricted to `commands/`, `skills/`, `src/`, `shell/`, `prompts/`, and `docs/`. A final repo-wide `grep -rln "MEMORY.md" commands/ skills/ src/ shell/ prompts/ docs/concepts/ docs/guides/ docs/internals/` will NOT come back empty even once all 10 WUs land, and that is expected, not a failure: three references are deliberately kept. `src/hooks/rebuild_memory_graph.rs:786,807` keeps its `MEMORY.md` exclusion by this ADR's own Decision (defensive, not load-bearing). `shell/fixtures/review-triage-eval-set.json:85` is a frozen eval fixture recording what a past PR's real diff contained; it describes history, not current behavior, and must not be edited to match a design decision made after the fact it records. `docs/adr/` (0004, 0008, 0013) is historical record, excluded from the grep path list above entirely rather than expected in its output. The sweep's actual pass condition is: every match is one of these three, nothing else. Who verifies: the orchestrator, right before Stage 3's quality gate.

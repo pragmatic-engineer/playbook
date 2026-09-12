@@ -15,7 +15,7 @@ Ran mechanically against the record and blueprint before drafting the final revi
 
 - Every file path cited (`src/hooks/session_init.rs`, `src/hooks/rebuild_memory_graph.rs`, `shell/memory-context.sh`, `tests/hooks_session.rs`, `commands/plan.md`, `commands/adr.md`, `commands/implement.md`, `commands/deep-review.md`, `commands/learn-project.md`, `skills/playbook-usage/SKILL.md`, three docs files, `commands/doctor.md`) exists.
 - Every line-number citation verified exact against real file content at time of check.
-- All 9 work units confirmed file-disjoint (one parallel group, no dependency edges).
+- All 10 work units confirmed file-disjoint (one parallel group, no dependency edges).
 - Dependency graph trivially acyclic (no `Requires` edges among WUs).
 
 ## Phase 2: Adversarial Review (`critic`, focus `decision`)
@@ -55,10 +55,25 @@ All fixed: two new WU-0 test scenarios added (malformed JSON, code-anchor-only g
 
 Both fixed: the code-anchor scenario's assertion now pinned to the same shape as `session_init_no_memory_store_emits_no_memory_block`; each of WU-1 through WU-5 got an added Done-When bullet requiring the source-attribution instruction to survive.
 
+## Post-gate PR self-review (`/playbook:quick-review --self` on PR #375)
+
+Run after the gate above had already passed and the PR was opened, as this repo's standing self-review step before promoting a PR out of draft. This is a single-pass reviewer, not the Phase 2/3 gate agents, so it's recorded separately rather than folded into either phase's iteration count.
+
+**Findings, one BLOCKING:**
+1. BLOCKING: `prompts/SYSTEM_PROMPT.md` (loaded into every session's persistent instructions, not a command file any single `/playbook:*` invocation reads) independently instructs the same MEMORY.md write convention three times (`:53`, `:61`, `:63`), and no work unit touched it. Fixed: new WU-9 added, retiring these three references; the ADR record's Context and Consequences sections updated to name this as a sixth, distinct write path.
+2. ISSUE: the final repo-wide sweep grep in Confidence + open items could never return empty, since `rebuild_memory_graph.rs`'s exclusion, `memory_anchors.rs`'s doc comment, and a frozen eval fixture all deliberately keep referencing `MEMORY.md`. Fixed: the sweep instruction now names all three as expected, explaining why each is legitimate, with the real pass condition being "every match is one of these three."
+3. ISSUE: the record's Consequences "Breadth" bullet didn't match the blueprint's actual file plan (omitted `doctor.md` and the system prompt, incorrectly implied `rebuild_memory_graph.rs` was modified). Fixed: reworded to list the true file set and explicitly note `rebuild_memory_graph.rs` is read and cited but not modified.
+4. ISSUE: the native fallback (WU-0) pulls global and org facts via `in_promotion_scope`, but the `session_init.rs` preamble text it falls into still says "these facts apply only in this repo." Fixed: WU-0 now includes rewording that preamble, plus a matching Done-When bullet.
+5. NITPICK: the `doctor.md` citation for the resolve-then-check-`-f` pattern pointed at `:123` (the MISSING report bullet), not the actual pattern at `:108-113`. Fixed.
+6. NITPICK: the blueprint cited the no-active-cleanup decision at `:204-205`, which had drifted to a blank line and a section heading after earlier edits shifted the file. Corrected to the real location of that text.
+7. NITPICK: `commands/doctor.md` was listed among files grep found `MEMORY.md` references in, but it has zero; it's in the WU set only for WU-8's new jq layer. Fixed: the sweep instruction now makes this explicit.
+
+All seven fixed directly on the PR branch before merge; no further review round was run afterward, since these were all textual/planning-document corrections with no code behavior to re-verify.
+
 ## Structural Checks
 
 - [x] Every Considered Alternatives entry (A, B, C, D) has an effort estimate and real trade-off detail.
 - [x] The Decision section explains why each rejected alternative was rejected.
-- [x] All 9 work units have file plans with real paths.
+- [x] All 10 work units have file plans with real paths.
 - [x] All verification commands are literal (`cargo test --test hooks_session <name>`, `grep -c "MEMORY.md" <file>`, `cargo build && cargo clippy --all-targets -- -D warnings`).
 - [x] No unresolved questions remain unaddressed; the two remaining open items (WU-1 through WU-4's manual verification, and the repo-wide final grep sweep) are explicitly named with an owner and a verification step, not vague placeholders.

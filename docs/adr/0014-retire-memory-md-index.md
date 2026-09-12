@@ -43,6 +43,17 @@ when `shell/memory-context.sh` is missing, fails, or `memory.graph.json`
 itself is absent or unreadable (`:333-360`). In the healthy case, the one
 this repo runs in daily, `MEMORY.md` is read by nothing at `SessionStart`.
 
+`prompts/SYSTEM_PROMPT.md`, loaded into every session's persistent
+instructions, independently instructs the same two-write convention three
+times over (`:53`, `:61`, `:63`): it describes `MEMORY.md` as each scope's
+index alongside the fact files, and its "When to save" rule tells every
+session to "write the fact file... and add its `MEMORY.md` index line in
+the right store." This is not a command file a specific `/playbook:*`
+invocation reads; it is the standing instruction set every session already
+has loaded, independent of which command (if any) is running, so it is a
+sixth, distinct write path this ADR must also retire, not an incidental
+detail of the five commands above.
+
 ## Decision Drivers
 
 - **MEMORY.md is structurally redundant.** Its only content (`name` +
@@ -211,11 +222,16 @@ Negative and follow-up:
   (bracket-link markdown to `memory-context.sh`'s plain `name: description`
   block); this needs explicit re-verification during implementation, not an
   assumption that swapping the source is drop-in.
-- Breadth: three Rust files, five command files, one skill file, and three
-  doc files change in one blueprint. Each change is small, but the count is
-  real and worth sequencing carefully (Rust first, since the command files'
-  correctness depends on `memory-context.sh`'s existing behavior, which
-  doesn't change; doc files last, since they only describe the result).
+- Breadth: two Rust files (`session_init.rs` plus its test file), five
+  command files, one skill file, three contributor/user doc files,
+  `commands/doctor.md` (a new check, not a repoint), and the system prompt
+  change in one blueprint. `rebuild_memory_graph.rs` is read and cited but
+  not modified: its existing `MEMORY.md` exclusion stays as-is, per the
+  Decision above. Each change is small, but the count is real and worth
+  sequencing carefully (Rust first, since the command files' correctness
+  depends on `memory-context.sh`'s existing behavior, which doesn't change;
+  doc files and the system prompt last, since they only describe the
+  result).
 - This is a narrower fix within the current memory architecture, not the
   broader rethink the user flagged mid-session
   (`backlog-rethink-memory-architecture`). That remains open and separate.
