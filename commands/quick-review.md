@@ -177,7 +177,7 @@ The subagent prompt MUST include:
 - The output contract in Step 3: it MUST return exactly that report, one `Post:` block per finding.
 - Read every cited file at `HEAD_SHA` before drafting; quote exact evidence; tag anything unconfirmed `[unverified]`.
 
-Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`); the moment it returns its report, `TaskStop` it. There is no gh-api fallback; if the worktree setup in Step 1 failed, execution has already stopped.
+Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`); the moment it returns its report, `TaskStop` it. `TaskStop` can itself report failure, e.g. `no task found with ID: qr-<PR_NUMBER>`, when the agent already finished and was cleaned up before this call ran. That failure means the goal (nothing left running) is already satisfied: treat it as a benign no-op, not a command error, and continue to Step 3 with the report already in hand. There is no gh-api fallback; if the worktree setup in Step 1 failed, execution has already stopped.
 
 ## Step 3: Review report contract
 
