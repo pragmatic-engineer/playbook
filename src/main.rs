@@ -6,8 +6,8 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, gate, hooks, init, manifest, settings, AgentsCommand, CcCommand, Cli,
-    Command, GateCommand, ManifestCommand, MemoryCommand, SettingsCommand,
+    agents, cc, common, doctor, gate, hooks, init, manifest, settings, AgentsCommand, CcCommand,
+    Cli, Command, DoctorCommand, GateCommand, ManifestCommand, MemoryCommand, SettingsCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -200,6 +200,14 @@ fn main() {
                      toplevel, refusing to fall back to a repo-local path"
                 );
                 std::process::exit(1);
+            }
+        },
+        Command::Doctor { sub } => match sub {
+            DoctorCommand::PluginVersion { path } => {
+                println!("{}", doctor::field::plugin_version(&path));
+            }
+            DoctorCommand::StatuslineCommand { path } => {
+                println!("{}", doctor::field::statusline_command(&path));
             }
         },
     }

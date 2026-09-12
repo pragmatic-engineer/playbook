@@ -99,7 +99,7 @@ means the installed copy can sit silently out of step with the shipped one for
 as long as nobody looks.
 
 ```bash
-sl_cmd=$(jq -r '.statusLine.command // ""' ~/.claude/settings.json 2>/dev/null)
+sl_cmd=$(playbook doctor statusline-command ~/.claude/settings.json 2>/dev/null)
 if [ -z "$sl_cmd" ]; then
   echo "NOT_CONFIGURED"
 else
@@ -161,7 +161,7 @@ else
   if [ ! -f "$manifest" ]; then
     manifest=$(ls -d "$HOME"/.claude/plugins/cache/*/playbook/*/.claude-plugin/plugin.json 2>/dev/null | sort -V | tail -1)
   fi
-  man_ver=$(jq -r '.version // ""' "$manifest" 2>/dev/null)
+  man_ver=$(playbook doctor plugin-version "$manifest" 2>/dev/null)
   if [ -z "$bin_ver" ]; then echo "NO_VERSION"
   elif [ -z "$man_ver" ]; then echo "PRESENT_NO_BASELINE $bin_ver"
   elif [ "$bin_ver" = "$man_ver" ]; then echo "MATCH $bin_ver"
