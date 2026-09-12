@@ -100,7 +100,10 @@ as long as nobody looks.
 
 ```bash
 sl_cmd=$(playbook doctor statusline-command ~/.claude/settings.json 2>/dev/null)
-if [ -z "$sl_cmd" ]; then
+sl_status=$?
+if [ $sl_status -ne 0 ]; then
+  echo "UNKNOWN, playbook too old or missing, see Layer 6"
+elif [ -z "$sl_cmd" ]; then
   echo "NOT_CONFIGURED"
 else
   sl_path=$(printf '%s\n' "$sl_cmd" | awk '{print $NF}')
@@ -131,6 +134,10 @@ Report:
 - `NOT_CONFIGURED` → INFO, opt-in, no status line is configured.
 - `PRESENT_NO_BASELINE` → INFO, the file is there but no plugin copy was found
   to compare against, so drift cannot be judged.
+- `UNKNOWN` → INFO, not the same thing as `NOT_CONFIGURED`. `playbook` failed
+  to answer, either it is missing entirely or it predates the `doctor`
+  subcommand, so this layer genuinely does not know whether a status line is
+  configured. Layer 6 names which.
 
 **Do not label a difference "stale" without checking direction.** Verified on
 2026-08-18: a locally fixed `statusline.sh` reported as differing from the 0.9.1
@@ -161,8 +168,18 @@ else
   if [ ! -f "$manifest" ]; then
     manifest=$(ls -d "$HOME"/.claude/plugins/cache/*/playbook/*/.claude-plugin/plugin.json 2>/dev/null | sort -V | tail -1)
   fi
-  man_ver=$(playbook doctor plugin-version "$manifest" 2>/dev/null)
+  # Guarded: an empty $manifest means no candidate path was ever found, not a
+  # subcommand failure, and clap reads a genuinely empty argument as a
+  # missing one, so calling through with "" would misreport TOO_OLD.
+  if [ -n "$manifest" ]; then
+    man_ver=$(playbook doctor plugin-version "$manifest" 2>/dev/null)
+    man_status=$?
+  else
+    man_ver=""
+    man_status=0
+  fi
   if [ -z "$bin_ver" ]; then echo "NO_VERSION"
+  elif [ $man_status -ne 0 ]; then echo "TOO_OLD $bin_ver"
   elif [ -z "$man_ver" ]; then echo "PRESENT_NO_BASELINE $bin_ver"
   elif [ "$bin_ver" = "$man_ver" ]; then echo "MATCH $bin_ver"
   else echo "SKEW binary=$bin_ver plugin=$man_ver"
@@ -190,6 +207,11 @@ Report:
   line, and for the same reason.
 - `PRESENT_NO_BASELINE` → INFO, the binary is there but no plugin manifest was
   found to compare against, so skew cannot be judged.
+- `TOO_OLD` → INFO, not FAIL. The binary resolved and reports a version, but it
+  predates the `doctor plugin-version` subcommand, so this layer cannot check
+  it against the plugin manifest. Not the same as `PRESENT_NO_BASELINE`: here a
+  manifest may well exist, the binary is just too old to read it this way.
+  Remediation: update `playbook`.
 
 **Layer numbering: do not renumber.** ADR 0007's WU-12 specified this as "Layer
 5" and a statusline-existence check as "Layer 6", written before PR #143 shipped

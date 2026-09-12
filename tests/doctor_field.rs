@@ -100,3 +100,40 @@ fn statusline_command_prints_an_empty_line_when_not_configured() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(stdout_of(&out), "\n");
 }
+
+/// Differential against the real `jq` pipeline these subcommands replaced.
+/// Skipped when `jq` is absent, since CI for this binary does not install it.
+#[test]
+fn matches_the_jq_pipeline_both_fields_used_to_run() {
+    if Command::new("jq").arg("--version").output().is_err() {
+        eprintln!("SKIP: jq not installed");
+        return;
+    }
+
+    let plugin = Fixture::new("jq-diff-plugin", r#"{"version": "0.15.0"}"#);
+    let settings = Fixture::new(
+        "jq-diff-settings",
+        r#"{"statusLine": {"command": "bash $HOME/.claude/statusline.sh"}}"#,
+    );
+
+    let jq_version = Command::new("jq")
+        .args(["-r", ".version // \"\""])
+        .arg(&plugin.path)
+        .output()
+        .expect("jq should run");
+    let jq_statusline = Command::new("jq")
+        .args(["-r", ".statusLine.command // \"\""])
+        .arg(&settings.path)
+        .output()
+        .expect("jq should run");
+
+    let rust_version = run(&["doctor", "plugin-version", plugin.path.to_str().unwrap()]);
+    let rust_statusline = run(&[
+        "doctor",
+        "statusline-command",
+        settings.path.to_str().unwrap(),
+    ]);
+
+    assert_eq!(stdout_of(&rust_version), stdout_of(&jq_version));
+    assert_eq!(stdout_of(&rust_statusline), stdout_of(&jq_statusline));
+}

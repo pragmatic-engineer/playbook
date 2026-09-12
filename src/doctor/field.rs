@@ -18,14 +18,17 @@ use serde_json::Value;
 use std::path::Path;
 
 /// Reads `.version` from a `plugin.json`-shaped file. Empty on any failure:
-/// unreadable file, invalid JSON, missing field, or a non-string value,
-/// matching `jq -r '.version // ""'`.
+/// unreadable file, invalid JSON, or a missing field, matching
+/// `jq -r '.version // ""'`'s null-or-missing fallback. Diverges from `jq`
+/// on one edge case both real call sites never hit: a non-string value (a
+/// number, say) reads as empty here, where `jq -r` would print it raw.
 pub fn plugin_version(path: &Path) -> String {
     string_field(path, &["version"])
 }
 
 /// Reads `.statusLine.command` from a `settings.json`-shaped file. Same
-/// empty-on-any-failure behavior as [`plugin_version`].
+/// empty-on-missing-or-null behavior as [`plugin_version`], including its
+/// non-string divergence from `jq -r`.
 pub fn statusline_command(path: &Path) -> String {
     string_field(path, &["statusLine", "command"])
 }
