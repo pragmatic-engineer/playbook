@@ -185,61 +185,131 @@ write_statusline_settings() {
   printf '{"statusLine":{"command":"%s"}}' "$cmd" > "$home/.claude/settings.json"
 }
 
+# A stub playbook on PATH, isolated to one scenario by prepending its bin dir
+# to a fixed, minimal PATH rather than reusing the caller's. Answers
+# `--version` from `version_line`, and the two `doctor` subcommands
+# `commands/doctor.md` now calls in place of `jq`, by reading the real field
+# straight out of whatever file it is pointed at, so a scenario's fixture
+# content (written by `write_manifest` / `write_statusline_settings`) is the
+# only thing that needs to vary, not the stub itself. Both `doctor` branches
+# force `exit 0` regardless of whether `sed` found a match or the path does
+# not exist, matching the real subcommands: they always exit 0, empty output
+# on any failure, never a nonzero exit for a merely-missing field or file.
+write_stub_binary() {
+  local bindir="$1" version_line="$2"
+  mkdir -p "$bindir"
+  cat > "$bindir/playbook" <<STUB
+#!/usr/bin/env bash
+if [ "\$1" = "--version" ]; then
+  printf '%s\n' "$version_line"
+elif [ "\$1" = "doctor" ] && [ "\$2" = "plugin-version" ]; then
+  sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "\$3" 2>/dev/null
+  exit 0
+elif [ "\$1" = "doctor" ] && [ "\$2" = "statusline-command" ]; then
+  sed -n 's/.*"statusLine"[[:space:]]*:[[:space:]]*{[^}]*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "\$3" 2>/dev/null
+  exit 0
+fi
+STUB
+  chmod +x "$bindir/playbook"
+}
+
+# A stub playbook that only understands `--version`, simulating a real
+# binary built before the `doctor` subcommand shipped: any other invocation
+# exits 2, matching clap's behavior for an unrecognized subcommand.
+write_stub_binary_without_doctor() {
+  local bindir="$1" version_line="$2"
+  mkdir -p "$bindir"
+  cat > "$bindir/playbook" <<STUB
+#!/usr/bin/env bash
+if [ "\$1" = "--version" ]; then
+  printf '%s\n' "$version_line"
+  exit 0
+fi
+exit 2
+STUB
+  chmod +x "$bindir/playbook"
+}
+
 run_layer5() {
-  local home="$1" plugin_root="${2:-}"
-  HOME="$home" CLAUDE_PLUGIN_ROOT="$plugin_root" bash -c "$LAYER5" 2>&1
+  local home="$1" path="$2" plugin_root="${3:-}"
+  HOME="$home" PATH="$path" CLAUDE_PLUGIN_ROOT="$plugin_root" bash -c "$LAYER5" 2>&1
 }
 
 # F: statusLine.command names a path that does not exist on disk.
 scenario_layer5_missing() {
-  local home="$WORK/l5-f" out
+  local home="$WORK/l5-f" bin="$WORK/l5-f-bin" out
   mkdir -p "$home/.claude"
   write_statusline_settings "$home" '$HOME/.claude/statusline.sh'
-  out="$(run_layer5 "$home")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer5 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == "MISSING $home/.claude/statusline.sh" ]] || { echo "  got: $out"; return 1; }
 }
 
 # G: the installed copy exists and is byte-identical to the shipped copy.
 scenario_layer5_match() {
-  local home="$WORK/l5-g" plugin="$WORK/l5-g-plugin" out
+  local home="$WORK/l5-g" plugin="$WORK/l5-g-plugin" bin="$WORK/l5-g-bin" out
   mkdir -p "$home/.claude" "$plugin"
   printf '#!/usr/bin/env bash\necho hi\n' > "$home/.claude/statusline.sh"
   cp "$home/.claude/statusline.sh" "$plugin/statusline.sh"
   write_statusline_settings "$home" '$HOME/.claude/statusline.sh'
-  out="$(run_layer5 "$home" "$plugin")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer5 "$home" "$bin:/usr/bin:/bin" "$plugin")"
   [[ "$out" == "MATCH" ]] || { echo "  got: $out"; return 1; }
 }
 
 # G2: the ADR 0012 destination, $HOME/.config/playbook/statusline.sh,
 # byte-identical to the shipped copy.
 scenario_layer5_match_config_playbook_path() {
-  local home="$WORK/l5-g2" plugin="$WORK/l5-g2-plugin" out
+  local home="$WORK/l5-g2" plugin="$WORK/l5-g2-plugin" bin="$WORK/l5-g2-bin" out
   mkdir -p "$home/.claude" "$home/.config/playbook" "$plugin"
   printf '#!/usr/bin/env bash\necho hi\n' > "$home/.config/playbook/statusline.sh"
   cp "$home/.config/playbook/statusline.sh" "$plugin/statusline.sh"
   write_statusline_settings "$home" '$HOME/.config/playbook/statusline.sh'
-  out="$(run_layer5 "$home" "$plugin")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer5 "$home" "$bin:/usr/bin:/bin" "$plugin")"
   [[ "$out" == "MATCH" ]] || { echo "  got: $out"; return 1; }
 }
 
 # H: the installed copy exists but its bytes differ from the shipped copy.
 scenario_layer5_differs() {
-  local home="$WORK/l5-h" plugin="$WORK/l5-h-plugin" out
+  local home="$WORK/l5-h" plugin="$WORK/l5-h-plugin" bin="$WORK/l5-h-bin" out
   mkdir -p "$home/.claude" "$plugin"
   printf '#!/usr/bin/env bash\necho old\n' > "$home/.claude/statusline.sh"
   printf '#!/usr/bin/env bash\necho new\n' > "$plugin/statusline.sh"
   write_statusline_settings "$home" '$HOME/.claude/statusline.sh'
-  out="$(run_layer5 "$home" "$plugin")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer5 "$home" "$bin:/usr/bin:/bin" "$plugin")"
   [[ "$out" == "DIFFERS $home/.claude/statusline.sh vs $plugin/statusline.sh" ]] || { echo "  got: $out"; return 1; }
 }
 
 # I: no statusLine.command at all.
 scenario_layer5_not_configured() {
-  local home="$WORK/l5-i" out
+  local home="$WORK/l5-i" bin="$WORK/l5-i-bin" out
   mkdir -p "$home/.claude"
   printf '{}' > "$home/.claude/settings.json"
-  out="$(run_layer5 "$home")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer5 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == "NOT_CONFIGURED" ]] || { echo "  got: $out"; return 1; }
+}
+
+# U: playbook absent from PATH entirely -> UNKNOWN, not silently NOT_CONFIGURED.
+scenario_layer5_playbook_missing() {
+  local home="$WORK/l5-u" out
+  write_statusline_settings "$home" '$HOME/.claude/statusline.sh'
+  out="$(run_layer5 "$home" "/usr/bin:/bin")"
+  [[ "$out" == "UNKNOWN, playbook too old or missing, see Layer 6" ]] || { echo "  got: $out"; return 1; }
+}
+
+# V: playbook resolves but predates the `doctor` subcommand -> the same
+# UNKNOWN, not silently NOT_CONFIGURED. A different root cause than U, same
+# observable outcome, both worth pinning since they exercise different code
+# paths (command not found vs. unrecognized subcommand).
+scenario_layer5_playbook_too_old() {
+  local home="$WORK/l5-v" bin="$WORK/l5-v-bin" out
+  write_statusline_settings "$home" '$HOME/.claude/statusline.sh'
+  write_stub_binary_without_doctor "$bin" "playbook 0.12.0"
+  out="$(run_layer5 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "UNKNOWN, playbook too old or missing, see Layer 6" ]] || { echo "  got: $out"; return 1; }
 }
 
 run_scenario "F: statusLine.command path does not exist -> MISSING <path>" scenario_layer5_missing
@@ -247,20 +317,13 @@ run_scenario "G: installed copy byte-identical to shipped -> MATCH"        scena
 run_scenario "G2: .config/playbook destination, byte-identical -> MATCH"   scenario_layer5_match_config_playbook_path
 run_scenario "H: installed copy differs from shipped -> DIFFERS"           scenario_layer5_differs
 run_scenario "I: no statusLine.command at all -> NOT_CONFIGURED"           scenario_layer5_not_configured
+run_scenario "U: playbook absent from PATH -> UNKNOWN"                     scenario_layer5_playbook_missing
+run_scenario "V: playbook too old for doctor subcommand -> UNKNOWN"        scenario_layer5_playbook_too_old
 
 # ── Layer 6: binary resolves ────────────────────────────────────────────────
-
-# A stub playbook on PATH, isolated to one scenario by prepending its bin dir
-# to a fixed, minimal PATH rather than reusing the caller's.
-write_stub_binary() {
-  local bindir="$1" version_line="$2"
-  mkdir -p "$bindir"
-  cat > "$bindir/playbook" <<STUB
-#!/usr/bin/env bash
-[ "\$1" = "--version" ] && printf '%s\n' "$version_line"
-STUB
-  chmod +x "$bindir/playbook"
-}
+#
+# `write_stub_binary` and `write_stub_binary_without_doctor` are defined above,
+# in the Layer 5 section: both layers need the same stubbed `playbook`.
 
 write_manifest() {
   local plugin_root="$1" version="$2"
@@ -320,11 +383,24 @@ scenario_layer6_present_no_baseline() {
   [[ "$out" == "PRESENT_NO_BASELINE 0.10.0" ]] || { echo "  got: $out"; return 1; }
 }
 
+# W: the binary resolves and reports a version, but predates the `doctor`
+# subcommand, so it cannot be asked for the manifest's version -> TOO_OLD, not
+# silently PRESENT_NO_BASELINE (a manifest may well exist here, unlike N).
+scenario_layer6_too_old() {
+  local home="$WORK/l6-w" bin="$WORK/l6-w-bin" plugin="$WORK/l6-w-plugin" out
+  mkdir -p "$home"
+  write_stub_binary_without_doctor "$bin" "playbook 0.12.0"
+  write_manifest "$plugin" "0.12.0"
+  out="$(run_layer6 "$home" "$bin:/usr/bin:/bin" "$plugin")"
+  [[ "$out" == "TOO_OLD 0.12.0" ]] || { echo "  got: $out"; return 1; }
+}
+
 run_scenario "J: playbook absent from PATH -> MISSING"                         scenario_layer6_missing
 run_scenario "K: binary and manifest agree -> MATCH <ver>"                     scenario_layer6_match
 run_scenario "L: binary and manifest disagree -> SKEW binary=.. plugin=.."     scenario_layer6_skew
 run_scenario "M: --version prints nothing -> NO_VERSION"                       scenario_layer6_no_version
 run_scenario "N: binary present, no manifest found -> PRESENT_NO_BASELINE"     scenario_layer6_present_no_baseline
+run_scenario "W: binary predates doctor subcommand -> TOO_OLD <ver>"           scenario_layer6_too_old
 
 # ── Layer 7: no hook command points at a missing file ───────────────────────
 
