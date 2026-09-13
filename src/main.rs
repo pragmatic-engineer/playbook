@@ -212,6 +212,11 @@ fn main() {
             DoctorCommand::StatuslineCommand { path } => {
                 println!("{}", doctor::field::statusline_command(&path));
             }
+            DoctorCommand::HookCommands { path } => {
+                for command in doctor::field::hook_commands(&path) {
+                    println!("{command}");
+                }
+            }
         },
     }
 }
