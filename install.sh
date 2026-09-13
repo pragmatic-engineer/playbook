@@ -111,29 +111,39 @@ ask() {
 # that folder, especially under the documented curl-pipe install path where
 # $PWD may be unrelated to any project.
 #
-# Best-effort and silent-safe: skipped (with a warning, not a failure) when
-# ~/.claude.json does not exist yet -- nothing to merge into, and this script
-# should not originate Claude Code's own state file -- or when neither jq nor
-# python3 is available to edit JSON safely. Never edits any OTHER project's
+# Best-effort and silent-safe: a plain, silent no-op when ~/.claude.json does
+# not exist yet (nothing to merge into, and this script should not originate
+# Claude Code's own state file), and a WARNING (never a failure) when the
+# file exists but neither JSON tool is usable, or both attempts fail. A
+# failing mktemp (full disk, unwritable $HOME) is guarded the same way:
+# under `set -euo pipefail` an unguarded assignment failure here would end
+# the whole install at its last step, which is exactly the kind of failure
+# this best-effort step must never cause. Never edits any OTHER project's
 # trust entry; only ever adds or updates the one keyed to
-# $PLAYBOOK_CONFIG_DIR.
+# $PLAYBOOK_CONFIG_DIR. Writes through the destination's existing inode
+# (`cat > `, not `mv` over it) so a symlinked ~/.claude.json (as a dotfile
+# manager might set up) still points at the same real file afterward, and
+# whatever mode or ACL that real file had survives; only a freshly created
+# ~/.claude.json (impossible here, since the function already returned above
+# when the file is absent) would ever pick up mktemp's own 600.
 trust_playbook_config_dir() {
     local claude_json="$HOME/.claude.json" tmp
     [ -f "$claude_json" ] || return 0
 
-    tmp="$(mktemp "${claude_json}.XXXXXX")"
+    tmp="$(mktemp "${claude_json}.XXXXXX")" || {
+        warn "could not create a temp file to update $claude_json; skipping the $PLAYBOOK_CONFIG_DIR trust entry."
+        return 0
+    }
     chmod 600 "$tmp" 2>/dev/null || true
 
+    local updated=1
     if command -v jq >/dev/null 2>&1; then
-        if jq --arg p "$PLAYBOOK_CONFIG_DIR" \
+        jq --arg p "$PLAYBOOK_CONFIG_DIR" \
             '.projects[$p] = ((.projects[$p] // {}) + {hasTrustDialogAccepted: true})' \
-            "$claude_json" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
-            mv "$tmp" "$claude_json"
-            log "Marked $PLAYBOOK_CONFIG_DIR as a trusted workspace"
-            return 0
-        fi
-    elif command -v python3 >/dev/null 2>&1; then
-        if python3 - "$claude_json" "$PLAYBOOK_CONFIG_DIR" "$tmp" <<'PYEOF' 2>/dev/null
+            "$claude_json" > "$tmp" 2>/dev/null && [ -s "$tmp" ] && updated=0
+    fi
+    if [ "$updated" -ne 0 ] && command -v python3 >/dev/null 2>&1; then
+        python3 - "$claude_json" "$PLAYBOOK_CONFIG_DIR" "$tmp" <<'PYEOF' 2>/dev/null
 import json, sys
 claude_json, path, tmp = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(claude_json) as f:
@@ -144,15 +154,17 @@ entry["hasTrustDialogAccepted"] = True
 with open(tmp, "w") as f:
     json.dump(data, f, indent=2)
 PYEOF
-        then
-            mv "$tmp" "$claude_json"
-            log "Marked $PLAYBOOK_CONFIG_DIR as a trusted workspace"
-            return 0
-        fi
+        [ -s "$tmp" ] && updated=0
     fi
 
-    rm -f "$tmp"
-    warn "could not update $claude_json to trust $PLAYBOOK_CONFIG_DIR (neither jq nor python3 usable, or the edit failed); if you ever run claude directly in that folder, accept its trust dialog manually."
+    if [ "$updated" -eq 0 ]; then
+        cat "$tmp" > "$claude_json"
+        rm -f "$tmp"
+        log "Marked $PLAYBOOK_CONFIG_DIR as a trusted workspace"
+    else
+        rm -f "$tmp"
+        warn "could not update $claude_json to trust $PLAYBOOK_CONFIG_DIR (neither jq nor python3 usable, or both attempts failed); if you ever run claude directly in that folder, accept its trust dialog manually."
+    fi
     return 0
 }
 
