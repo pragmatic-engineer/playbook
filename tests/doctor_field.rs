@@ -210,3 +210,56 @@ fn matches_the_jq_pipeline_all_three_fields_used_to_run() {
     assert_eq!(stdout_of(&rust_statusline), stdout_of(&jq_statusline));
     assert_eq!(stdout_of(&rust_hooks), stdout_of(&jq_hooks));
 }
+
+/// Differential against real `jq` for the shape-mismatch cases the `?`
+/// operators in the original filter were specifically there to tolerate:
+/// `.hooks` missing or not an object, an event value that isn't an array,
+/// and a matcher group with no `.hooks` array. `matches_the_jq_pipeline_...`
+/// above only ever feeds well-formed input, so it can't tell a genuine
+/// parity bug in one of these branches apart from a coincidence; each case
+/// here is checked against real jq, not just against this port's own
+/// expectations. Skipped when `jq` is absent, same as the test above.
+#[test]
+fn matches_the_jq_pipeline_on_malformed_hooks_shapes() {
+    if Command::new("jq").arg("--version").output().is_err() {
+        eprintln!("SKIP: jq not installed");
+        return;
+    }
+
+    let cases: &[(&str, &str)] = &[
+        ("hooks-key-missing", r#"{"other": true}"#),
+        ("hooks-not-an-object", r#"{"hooks": "not an object"}"#),
+        (
+            "event-value-not-an-array",
+            r#"{"hooks": {"PreToolUse": "not an array"}}"#,
+        ),
+        (
+            "group-with-no-hooks-array",
+            r#"{"hooks": {"PreToolUse": [{"matcher": "Write"}]}}"#,
+        ),
+        (
+            "hook-with-no-command-field",
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"matcher": "Write"}]}]}}"#,
+        ),
+    ];
+
+    for (tag, contents) in cases {
+        let f = Fixture::new(&format!("jq-diff-malformed-{tag}"), contents);
+
+        let jq_out = Command::new("jq")
+            .args([
+                "-r",
+                "[.hooks | to_entries[]? | .value[]? | .hooks[]?.command // empty] | .[]",
+            ])
+            .arg(&f.path)
+            .output()
+            .expect("jq should run");
+        let rust_out = run(&["doctor", "hook-commands", f.path.to_str().unwrap()]);
+
+        assert_eq!(
+            stdout_of(&rust_out),
+            stdout_of(&jq_out),
+            "mismatch for case {tag}"
+        );
+    }
+}

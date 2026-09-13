@@ -503,15 +503,33 @@ scenario_layer7_playbook_missing() {
   [[ "$out" == "status=UNKNOWN checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
 }
 
-# Y: playbook resolves but predates the `hook-commands` subcommand ->
+# Y: playbook resolves but predates the `doctor` subcommand entirely (the
+# same stub Layer 5/6's own "too old" scenarios, U and W, already share) ->
 # status=UNKNOWN, same observable outcome as X, different root cause
-# (command not found vs. unrecognized subcommand), mirroring Layer 5/6's U/V.
+# (command not found vs. unrecognized subcommand). Does not separately pin
+# the narrower in-between case (a build with `plugin-version`/
+# `statusline-command` but not yet `hook-commands`): no existing Layer 5/6
+# scenario does either, and the stub would need its own variant to tell
+# `doctor hook-commands` apart from `doctor plugin-version`.
 scenario_layer7_playbook_too_old() {
   local home="$WORK/l7-y" bin="$WORK/l7-y-bin" out
   mkdir -p "$home/.claude"
   printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"~/.claude/hooks/gone.sh"}]}]}}' \
     > "$home/.claude/settings.json"
   write_stub_binary_without_doctor "$bin" "playbook 0.12.0"
+  out="$(run_layer7 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "status=UNKNOWN checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
+}
+
+# Z: ~/.claude/settings.json itself does not exist -> status=UNKNOWN, not a
+# silent PASS with checked=0. `hook-commands` on a missing file returns an
+# empty list the same way it would for a legitimately empty `.hooks`, so
+# without this guard the layer could not tell "nothing to check" apart from
+# "couldn't even find the file to check."
+scenario_layer7_settings_json_missing() {
+  local home="$WORK/l7-z" bin="$WORK/l7-z-bin" out
+  mkdir -p "$home/.claude" "$bin"
+  write_stub_binary "$bin" ""
   out="$(run_layer7 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == "status=UNKNOWN checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
 }
@@ -524,6 +542,7 @@ run_scenario "S: same dangling command on two events -> reported once"        sc
 run_scenario "T: unresolved \$VAR in path -> skipped, not flagged"            scenario_layer7_unresolved_var_skipped
 run_scenario "X: playbook absent from PATH -> status=UNKNOWN, not a silent PASS" scenario_layer7_playbook_missing
 run_scenario "Y: playbook too old for hook-commands subcommand -> status=UNKNOWN" scenario_layer7_playbook_too_old
+run_scenario "Z: ~/.claude/settings.json missing -> status=UNKNOWN, not a silent PASS" scenario_layer7_settings_json_missing
 
 TOTAL=$(( PASS + FAIL ))
 echo ""

@@ -239,7 +239,10 @@ left exactly as it was). This layer checks every hook command in
 dangling=""
 checked=0
 hooks_status="OK"
-if command -v playbook >/dev/null 2>&1; then
+if [ ! -f ~/.claude/settings.json ]; then
+  hook_cmds=""
+  hooks_status="UNKNOWN"
+elif command -v playbook >/dev/null 2>&1; then
   hook_cmds=$(playbook doctor hook-commands ~/.claude/settings.json 2>/dev/null) || hooks_status="UNKNOWN"
 else
   hook_cmds=""
@@ -281,16 +284,23 @@ layer only ever reports a path it actually resolved and actually checked.
 The command list itself comes from `playbook doctor hook-commands`, not
 `jq`: it walks the exact same shape (`.hooks | to_entries[]? | .value[]? |
 .hooks[]?.command`) directly against the compiled binary, so a host with no
-`jq` installed no longer reads as "zero commands, all healthy." If
-`playbook` itself is missing, or resolves to a build old enough to lack the
-`hook-commands` subcommand, `hooks_status` is set to `UNKNOWN` rather than
-letting an empty command list masquerade as PASS.
+`jq` installed no longer reads as "zero commands, all healthy." `hooks_status`
+is set to `UNKNOWN`, rather than letting an empty command list masquerade as
+PASS, in every case this layer cannot actually answer the question: no
+`~/.claude/settings.json` to read at all, `playbook` itself missing, or a
+`playbook` build old enough to lack the `hook-commands` subcommand. A
+`settings.json` that exists but fails to parse as JSON is not separately
+distinguished (the subcommand reads that the same way as a legitimately
+empty `.hooks`, matching Layer 5 and 6's existing string-field reads), so it
+still reports `status=OK checked=0`; a corrupt `settings.json` is caught by
+other means (the file would not have parsed for any other tool either).
 
 Report:
 
-- `hooks_status=UNKNOWN` → INFO, not FAIL: the binary is missing or too old
-  to run this check, both already reported by Layer 6, so this layer only
-  needs to say it could not check rather than repeat that diagnosis.
+- `hooks_status=UNKNOWN` → INFO, not FAIL: either `~/.claude/settings.json`
+  itself is missing, or `playbook` is missing or too old to run this check
+  (the latter two already reported by Layer 6), so this layer only needs to
+  say it could not check rather than repeat that diagnosis.
 - `dangling` empty (and `hooks_status=OK`) → PASS. Say how many commands
   were checked (`checked`); `checked=0` on a fully-ported install is
   expected and healthy, not a gap.

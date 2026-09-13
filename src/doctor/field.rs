@@ -45,12 +45,16 @@ pub fn statusline_command(path: &Path) -> String {
 /// feature this crate already depends on), the same order `jq` walks a
 /// `to_entries` result in.
 ///
-/// Diverges from `jq -r` on one edge case: a `.command` value that exists
-/// but is not a string (a number or bool) is skipped here, where `jq -r`
-/// would print its raw text form. Real `settings.json` hook commands are
-/// always strings, so this never fires on a real install, the same
-/// documented tradeoff [`plugin_version`] and [`statusline_command`] already
-/// accept.
+/// Diverges from `jq -r` on two edge cases, neither reachable from a real
+/// `settings.json`: a `.command` value that exists but is not a string (a
+/// number or bool) is skipped here, where `jq -r` would print its raw text
+/// form, the same documented tradeoff [`plugin_version`] and
+/// [`statusline_command`] already accept; and a `.hooks` that is a JSON
+/// array rather than an object is treated as absent here (`and_then`'s
+/// `as_object` returns `None`), where jq's `to_entries` is defined over
+/// array indices too and would still walk it. Real `settings.json` always
+/// shapes `.hooks` as an object keyed by event name, so this never fires on
+/// a real install either.
 pub fn hook_commands(path: &Path) -> Vec<String> {
     let Ok(raw) = std::fs::read_to_string(path) else {
         return Vec::new();
