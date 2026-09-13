@@ -35,6 +35,12 @@ PLUGIN="playbook@pragmatic-engineer"
 # needs the newer floor, never speculatively.
 CLAUDE_MIN_VERSION="2.1.121"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+# Root for every directory playbook itself writes (memory, runtime state,
+# the statusline script, config-hash.sh); mirrors playbook_root_from() in
+# src/common/paths.rs. Not currently overridable by env var, unlike
+# CLAUDE_HOME: nothing downstream of this script reads a PLAYBOOK_CONFIG_DIR
+# override yet, so introducing one here would be a knob with no effect.
+PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
 REF="${PLAYBOOK_REF:-}"
 SKIP_PLUGIN=0
@@ -92,6 +98,74 @@ ask() {
         [Yy]|[Yy][Ee][Ss]) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+# Marks $PLAYBOOK_CONFIG_DIR as a trusted workspace in ~/.claude.json, so a
+# `claude` session started directly inside it (e.g. to inspect or hand-edit
+# statusline.sh) does not hit the trust dialog and silently skip statusLine
+# execution: Claude Code's own troubleshooting docs name this exact failure
+# as "Status line command skipped: workspace trust not accepted", logged via
+# `claude --debug`. This does NOT trust the project the user actually works
+# in day to day; that is a separate per-cwd entry Claude Code writes itself
+# the first time it opens there, and this script has no reliable way to know
+# that folder, especially under the documented curl-pipe install path where
+# $PWD may be unrelated to any project.
+#
+# Best-effort and silent-safe: a plain, silent no-op when ~/.claude.json does
+# not exist yet (nothing to merge into, and this script should not originate
+# Claude Code's own state file), and a WARNING (never a failure) when the
+# file exists but neither JSON tool is usable, or both attempts fail. A
+# failing mktemp (full disk, unwritable $HOME) is guarded the same way:
+# under `set -euo pipefail` an unguarded assignment failure here would end
+# the whole install at its last step, which is exactly the kind of failure
+# this best-effort step must never cause. Never edits any OTHER project's
+# trust entry; only ever adds or updates the one keyed to
+# $PLAYBOOK_CONFIG_DIR. Writes through the destination's existing inode
+# (`cat > `, not `mv` over it) so a symlinked ~/.claude.json (as a dotfile
+# manager might set up) still points at the same real file afterward, and
+# whatever mode or ACL that real file had survives; only a freshly created
+# ~/.claude.json (impossible here, since the function already returned above
+# when the file is absent) would ever pick up mktemp's own 600.
+trust_playbook_config_dir() {
+    local claude_json="$HOME/.claude.json" tmp
+    [ -f "$claude_json" ] || return 0
+
+    tmp="$(mktemp "${claude_json}.XXXXXX")" || {
+        warn "could not create a temp file to update $claude_json; skipping the $PLAYBOOK_CONFIG_DIR trust entry."
+        return 0
+    }
+    chmod 600 "$tmp" 2>/dev/null || true
+
+    local updated=1
+    if command -v jq >/dev/null 2>&1; then
+        jq --arg p "$PLAYBOOK_CONFIG_DIR" \
+            '.projects[$p] = ((.projects[$p] // {}) + {hasTrustDialogAccepted: true})' \
+            "$claude_json" > "$tmp" 2>/dev/null && [ -s "$tmp" ] && updated=0
+    fi
+    if [ "$updated" -ne 0 ] && command -v python3 >/dev/null 2>&1; then
+        python3 - "$claude_json" "$PLAYBOOK_CONFIG_DIR" "$tmp" <<'PYEOF' 2>/dev/null
+import json, sys
+claude_json, path, tmp = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(claude_json) as f:
+    data = json.load(f)
+projects = data.setdefault("projects", {})
+entry = projects.setdefault(path, {})
+entry["hasTrustDialogAccepted"] = True
+with open(tmp, "w") as f:
+    json.dump(data, f, indent=2)
+PYEOF
+        [ -s "$tmp" ] && updated=0
+    fi
+
+    if [ "$updated" -eq 0 ]; then
+        cat "$tmp" > "$claude_json"
+        rm -f "$tmp"
+        log "Marked $PLAYBOOK_CONFIG_DIR as a trusted workspace"
+    else
+        rm -f "$tmp"
+        warn "could not update $claude_json to trust $PLAYBOOK_CONFIG_DIR (neither jq nor python3 usable, or both attempts failed); if you ever run claude directly in that folder, accept its trust dialog manually."
+    fi
+    return 0
 }
 
 print_help() {
@@ -393,7 +467,7 @@ done
 # lives under $HOME/.config/playbook, not $CLAUDE_HOME.
 CONFIG_HASH_SRC="$SRC/hooks/lib/config-hash.sh"
 if [ -e "$CONFIG_HASH_SRC" ]; then
-    config_hash_dest="$HOME/.config/playbook/hooks/lib/config-hash.sh"
+    config_hash_dest="$PLAYBOOK_CONFIG_DIR/hooks/lib/config-hash.sh"
     if [ -e "$config_hash_dest" ]; then
         mkdir -p "$BACKUP/hooks/lib"
         cp -R "$config_hash_dest" "$BACKUP/hooks/lib/config-hash.sh"
@@ -462,6 +536,8 @@ log "Running playbook init"
 # shellcheck disable=SC2086
 CLAUDE_PLUGIN_ROOT="$SRC" "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \
     die "playbook init failed; see the step report above"
+
+trust_playbook_config_dir
 
 # --- setup -----------------------------------------------------------------
 

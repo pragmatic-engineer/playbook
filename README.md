@@ -140,7 +140,7 @@ or cosmetic.
 | 2. Safety guards and settings | After `install.sh`, or `/playbook:setup` | Wires the guards and seeds or merges `~/.claude/settings.json`. `install.sh` wires them as `playbook hook <name>`; `/playbook:setup` still copies the legacy `~/.claude/hooks/*.sh` scripts, which `/playbook:doctor` reports as not wired. |
 | 3. Shell launchers | Opt-in (recommended) | Adds `cc` and `ccd` to `~/.bashrc` or `~/.zshrc`. Both shells work; `cc clean` and `cc raw` are zsh-only (see Usage). |
 | 4. Custom system prompt | Opt-in (recommended) | Copies `prompts/SYSTEM_PROMPT.md` to `~/.claude/prompts/`; `cc` passes it via `--system-prompt-file`. Plugin content works without it. |
-| 5. Status line | After `install.sh` | Installs `~/.claude/statusline.sh`. `/playbook:setup` does **not** install it; `/playbook:doctor` checks it. |
+| 5. Status line | After `install.sh` | Installs `~/.config/playbook/statusline.sh`. `/playbook:setup` does **not** install it; `/playbook:doctor` checks it. `install.sh` also marks `~/.config/playbook` as a trusted workspace in `~/.claude.json`, so a `claude` session started directly in that folder doesn't hit the trust dialog and silently skip the status line; best-effort, needs `jq` or `python3`. |
 | 6. The `playbook` binary | `install.sh` or `/playbook:setup` | Installs the release binary to `~/.local/bin`, checksum-verified. **Every ported hook is a bare `playbook hook <name>` command, so without this all 16 are dead.** `claude plugin install` alone does not provide it. |
 | 7. No dangling hook commands | Always | Flags any `settings.json` hook command pointing at a file that no longer exists, such as a leftover pre-migration Python hook a settings merge never removed. Fails open (silent no-op) if unchecked. |
 
