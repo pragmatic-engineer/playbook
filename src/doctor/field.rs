@@ -1,17 +1,18 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Reads the two single string fields `commands/doctor.md`'s Layer 5 and
-//! Layer 6 checks need: `.claude-plugin/plugin.json`'s `.version` and
-//! `settings.json`'s `.statusLine.command`. Both used to shell out to
-//! `jq -r '<path> // ""' <file> 2>/dev/null`, so a missing `jq` produced the
-//! same empty string as the field itself being absent, silently misreporting
-//! a healthy install. `playbook` is already required for both layers to mean
+//! Reads the JSON shapes `commands/doctor.md`'s Layer 5, 6, and 7 checks
+//! need: `.claude-plugin/plugin.json`'s `.version`, `settings.json`'s
+//! `.statusLine.command`, and every hook `.command` string nested under
+//! `settings.json`'s `.hooks`. All three used to shell out to `jq`, so a
+//! missing `jq` produced the same empty result as the field itself being
+//! absent or the hooks list being empty, silently misreporting a healthy
+//! install. `playbook` is already required for all three layers to mean
 //! anything, so this trades an optional external dependency for one that was
 //! already assumed.
 //!
 //! Deliberately not a general JSON query command: each function names the one
-//! field it reads. A future call site needing a different field gets its own
+//! shape it reads. A future call site needing a different field gets its own
 //! function here, not a flag on a generic getter.
 
 use serde_json::Value;
@@ -31,6 +32,53 @@ pub fn plugin_version(path: &Path) -> String {
 /// non-string divergence from `jq -r`.
 pub fn statusline_command(path: &Path) -> String {
     string_field(path, &["statusLine", "command"])
+}
+
+/// Every hook `.command` string nested under `settings.json`'s `.hooks`,
+/// across every event and matcher group: `.hooks | to_entries[]? |
+/// .value[]? | .hooks[]?.command // empty`, the same traversal
+/// `commands/doctor.md`'s Layer 7 used to run through `jq -r`. Empty on any
+/// failure (unreadable file, invalid JSON, `.hooks` missing or not an
+/// object), matching `jq`'s own `?` operators, which swallow a shape
+/// mismatch at each step rather than erroring. Order matches file order:
+/// `serde_json::Value`'s object map preserves insertion order (the `preserve_order`
+/// feature this crate already depends on), the same order `jq` walks a
+/// `to_entries` result in.
+///
+/// Diverges from `jq -r` on one edge case: a `.command` value that exists
+/// but is not a string (a number or bool) is skipped here, where `jq -r`
+/// would print its raw text form. Real `settings.json` hook commands are
+/// always strings, so this never fires on a real install, the same
+/// documented tradeoff [`plugin_version`] and [`statusline_command`] already
+/// accept.
+pub fn hook_commands(path: &Path) -> Vec<String> {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return Vec::new();
+    };
+    let Some(hooks) = value.get("hooks").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for event_value in hooks.values() {
+        let Some(matcher_groups) = event_value.as_array() else {
+            continue;
+        };
+        for group in matcher_groups {
+            let Some(group_hooks) = group.get("hooks").and_then(Value::as_array) else {
+                continue;
+            };
+            for hook in group_hooks {
+                if let Some(command) = hook.get("command").and_then(Value::as_str) {
+                    out.push(command.to_string());
+                }
+            }
+        }
+    }
+    out
 }
 
 fn string_field(path: &Path, keys: &[&str]) -> String {
@@ -181,5 +229,136 @@ mod tests {
 
         // Assert
         assert_eq!(got, "");
+    }
+
+    #[test]
+    fn hook_commands_collects_across_multiple_events_and_matcher_groups() {
+        // Arrange
+        let f = Fixture::new(
+            "hook-commands-multi-event",
+            r#"{
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "Write", "hooks": [{"command": "playbook hook preread-edit-check"}]},
+                        {"matcher": "Bash", "hooks": [
+                            {"command": "/legacy/guard.py"},
+                            {"command": "playbook hook bash-guard"}
+                        ]}
+                    ],
+                    "Stop": [
+                        {"hooks": [{"command": "playbook hook session-init"}]}
+                    ]
+                }
+            }"#,
+        );
+
+        // Act
+        let got = hook_commands(&f.path);
+
+        // Assert
+        assert_eq!(
+            got,
+            vec![
+                "playbook hook preread-edit-check",
+                "/legacy/guard.py",
+                "playbook hook bash-guard",
+                "playbook hook session-init",
+            ]
+        );
+    }
+
+    #[test]
+    fn hook_commands_is_empty_when_hooks_key_is_absent() {
+        // Arrange
+        let f = Fixture::new("hook-commands-no-key", r#"{"other": true}"#);
+
+        // Act
+        let got = hook_commands(&f.path);
+
+        // Assert
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn hook_commands_is_empty_when_hooks_is_not_an_object() {
+        // Arrange
+        let f = Fixture::new("hook-commands-wrong-shape", r#"{"hooks": "not an object"}"#);
+
+        // Act
+        let got = hook_commands(&f.path);
+
+        // Assert
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn hook_commands_skips_an_event_whose_value_is_not_an_array() {
+        // Arrange: a malformed settings.json shouldn't crash the check, just
+        // contribute nothing for that one event.
+        let f = Fixture::new(
+            "hook-commands-event-not-array",
+            r#"{"hooks": {"PreToolUse": "not an array"}}"#,
+        );
+
+        // Act
+        let got = hook_commands(&f.path);
+
+        // Assert
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn hook_commands_skips_a_matcher_group_with_no_hooks_array() {
+        // Arrange
+        let f = Fixture::new(
+            "hook-commands-group-no-hooks",
+            r#"{"hooks": {"PreToolUse": [{"matcher": "Write"}]}}"#,
+        );
+
+        // Act
+        let got = hook_commands(&f.path);
+
+        // Assert
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn hook_commands_skips_a_non_string_command_value() {
+        // Arrange: divergence from `jq -r`, documented on the function; no
+        // real settings.json ever has a non-string command.
+        let f = Fixture::new(
+            "hook-commands-non-string",
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"command": 5}]}]}}"#,
+        );
+
+        // Act
+        let got = hook_commands(&f.path);
+
+        // Assert
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn hook_commands_is_empty_when_file_is_missing() {
+        // Arrange
+        let path = std::env::temp_dir().join("playbook-doctor-field-hooks-does-not-exist.json");
+
+        // Act
+        let got = hook_commands(&path);
+
+        // Assert
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn hook_commands_is_empty_on_invalid_json() {
+        // Arrange
+        let f = Fixture::new("hook-commands-invalid", "not json");
+
+        // Act
+        let got = hook_commands(&f.path);
+
+        // Assert
+        assert!(got.is_empty());
     }
 }

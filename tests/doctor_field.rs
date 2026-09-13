@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Binary-spawn tests for `playbook doctor plugin-version` and
-//! `playbook doctor statusline-command`, the subcommands
-//! `commands/doctor.md`'s Layer 6 and Layer 5 blocks call in place of `jq`.
+//! Binary-spawn tests for `playbook doctor plugin-version`,
+//! `playbook doctor statusline-command`, and `playbook doctor hook-commands`,
+//! the subcommands `commands/doctor.md`'s Layer 6, Layer 5, and Layer 7
+//! blocks call in place of `jq`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -101,10 +102,51 @@ fn statusline_command_prints_an_empty_line_when_not_configured() {
     assert_eq!(stdout_of(&out), "\n");
 }
 
+#[test]
+fn hook_commands_prints_one_command_per_line_across_events() {
+    // Arrange
+    let f = Fixture::new(
+        "hook-commands",
+        r#"{
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Write", "hooks": [{"command": "playbook hook preread-edit-check"}]}
+                ],
+                "Stop": [
+                    {"hooks": [{"command": "playbook hook session-init"}]}
+                ]
+            }
+        }"#,
+    );
+
+    // Act
+    let out = run(&["doctor", "hook-commands", f.path.to_str().unwrap()]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        stdout_of(&out),
+        "playbook hook preread-edit-check\nplaybook hook session-init\n"
+    );
+}
+
+#[test]
+fn hook_commands_prints_nothing_when_hooks_key_is_absent() {
+    // Arrange
+    let f = Fixture::new("hook-commands-absent", r#"{}"#);
+
+    // Act
+    let out = run(&["doctor", "hook-commands", f.path.to_str().unwrap()]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(stdout_of(&out), "");
+}
+
 /// Differential against the real `jq` pipeline these subcommands replaced.
 /// Skipped when `jq` is absent, since CI for this binary does not install it.
 #[test]
-fn matches_the_jq_pipeline_both_fields_used_to_run() {
+fn matches_the_jq_pipeline_all_three_fields_used_to_run() {
     if Command::new("jq").arg("--version").output().is_err() {
         eprintln!("SKIP: jq not installed");
         return;
@@ -114,6 +156,23 @@ fn matches_the_jq_pipeline_both_fields_used_to_run() {
     let settings = Fixture::new(
         "jq-diff-settings",
         r#"{"statusLine": {"command": "bash $HOME/.claude/statusline.sh"}}"#,
+    );
+    let hooks_settings = Fixture::new(
+        "jq-diff-hooks",
+        r#"{
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Write", "hooks": [{"command": "playbook hook preread-edit-check"}]},
+                    {"matcher": "Bash", "hooks": [
+                        {"command": "/legacy/guard.py"},
+                        {"command": "playbook hook bash-guard"}
+                    ]}
+                ],
+                "Stop": [
+                    {"hooks": [{"command": "playbook hook session-init"}]}
+                ]
+            }
+        }"#,
     );
 
     let jq_version = Command::new("jq")
@@ -126,6 +185,14 @@ fn matches_the_jq_pipeline_both_fields_used_to_run() {
         .arg(&settings.path)
         .output()
         .expect("jq should run");
+    let jq_hooks = Command::new("jq")
+        .args([
+            "-r",
+            "[.hooks | to_entries[]? | .value[]? | .hooks[]?.command // empty] | .[]",
+        ])
+        .arg(&hooks_settings.path)
+        .output()
+        .expect("jq should run");
 
     let rust_version = run(&["doctor", "plugin-version", plugin.path.to_str().unwrap()]);
     let rust_statusline = run(&[
@@ -133,7 +200,13 @@ fn matches_the_jq_pipeline_both_fields_used_to_run() {
         "statusline-command",
         settings.path.to_str().unwrap(),
     ]);
+    let rust_hooks = run(&[
+        "doctor",
+        "hook-commands",
+        hooks_settings.path.to_str().unwrap(),
+    ]);
 
     assert_eq!(stdout_of(&rust_version), stdout_of(&jq_version));
     assert_eq!(stdout_of(&rust_statusline), stdout_of(&jq_statusline));
+    assert_eq!(stdout_of(&rust_hooks), stdout_of(&jq_hooks));
 }

@@ -230,6 +230,13 @@ pub enum DoctorCommand {
         /// Path to the settings.json to read.
         path: PathBuf,
     },
+    /// Print every hook `.command` string nested under `settings.json`'s
+    /// `.hooks`, one per line, or nothing if the file is unreadable, invalid,
+    /// or has no `.hooks` object. Backs Layer 7.
+    HookCommands {
+        /// Path to the settings.json to read.
+        path: PathBuf,
+    },
 }
 
 /// Every hook Claude Code can invoke, one per entry in hooks.json. Kebab-case

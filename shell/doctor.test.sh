@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # doctor.test.sh: hermetic tests for the bash snippets embedded in
-# commands/doctor.md (Layers 2, 5, 6).
+# commands/doctor.md (Layers 2, 5, 6, 7).
 #
 # commands/doctor.md is markdown, not a shell script: each layer's check lives
 # in a fenced ```bash block under a `## Layer N:` heading. This suite EXTRACTS
@@ -187,14 +187,18 @@ write_statusline_settings() {
 
 # A stub playbook on PATH, isolated to one scenario by prepending its bin dir
 # to a fixed, minimal PATH rather than reusing the caller's. Answers
-# `--version` from `version_line`, and the two `doctor` subcommands
-# `commands/doctor.md` now calls in place of `jq`, by reading the real field
+# `--version` from `version_line`, and the three `doctor` subcommands
+# `commands/doctor.md` now calls in place of `jq`, by reading the real field(s)
 # straight out of whatever file it is pointed at, so a scenario's fixture
-# content (written by `write_manifest` / `write_statusline_settings`) is the
-# only thing that needs to vary, not the stub itself. Both `doctor` branches
-# force `exit 0` regardless of whether `sed` found a match or the path does
-# not exist, matching the real subcommands: they always exit 0, empty output
-# on any failure, never a nonzero exit for a merely-missing field or file.
+# content (written by `write_manifest` / `write_statusline_settings` / the
+# Layer 7 settings.json fixtures) is the only thing that needs to vary, not
+# the stub itself. Every `doctor` branch forces `exit 0` regardless of
+# whether the match found anything or the path does not exist, matching the
+# real subcommands: they always exit 0, empty output on any failure, never a
+# nonzero exit for a merely-missing field, file, or hooks key. `hook-commands`
+# is a coarse `grep`, not real JSON parsing (it does not scope to the
+# `.hooks` key the way the real subcommand does), which is fine here since no
+# Layer 7 fixture in this suite has a `"command"` key outside `.hooks`.
 write_stub_binary() {
   local bindir="$1" version_line="$2"
   mkdir -p "$bindir"
@@ -207,6 +211,9 @@ elif [ "\$1" = "doctor" ] && [ "\$2" = "plugin-version" ]; then
   exit 0
 elif [ "\$1" = "doctor" ] && [ "\$2" = "statusline-command" ]; then
   sed -n 's/.*"statusLine"[[:space:]]*:[[:space:]]*{[^}]*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "\$3" 2>/dev/null
+  exit 0
+elif [ "\$1" = "doctor" ] && [ "\$2" = "hook-commands" ]; then
+  grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' "\$3" 2>/dev/null | sed 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/'
   exit 0
 fi
 STUB
@@ -405,53 +412,57 @@ run_scenario "W: binary predates doctor subcommand -> TOO_OLD <ver>"           s
 # ── Layer 7: no hook command points at a missing file ───────────────────────
 
 run_layer7() {
-  local home="$1"
-  HOME="$home" bash -c "$LAYER7" 2>&1
+  local home="$1" path="$2"
+  HOME="$home" PATH="$path" bash -c "$LAYER7" 2>&1
 }
 
 # O: every hook command is the bare `playbook hook <name>` form, across two
 # different events. None of them look like a path, so nothing is checked.
 scenario_layer7_all_bare_healthy() {
-  local home="$WORK/l7-o" out
+  local home="$WORK/l7-o" bin="$WORK/l7-o-bin" out
   mkdir -p "$home/.claude"
   printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"playbook hook rm-workspace-guard"}]}],"Stop":[{"hooks":[{"command":"playbook hook memory-capture"}]}]}}' \
     > "$home/.claude/settings.json"
-  out="$(run_layer7 "$home")"
-  [[ "$out" == "checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
+  write_stub_binary "$bin" ""
+  out="$(run_layer7 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "status=OK checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
 }
 
 # P: the exact shape the orphaned memory_context.py incident had, a leftover
 # Python hook command naming a file that is no longer on disk. Regression pin
 # for that incident.
 scenario_layer7_dangling_python_hook() {
-  local home="$WORK/l7-p" out
+  local home="$WORK/l7-p" bin="$WORK/l7-p-bin" out
   mkdir -p "$home/.claude"
   printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"python3 ~/.claude/hooks/memory_context.py"}]}]}}' \
     > "$home/.claude/settings.json"
-  out="$(run_layer7 "$home")"
-  [[ "$out" == "checked=1 dangling=python3 ~/.claude/hooks/memory_context.py" ]] || { echo "  got: $out"; return 1; }
+  write_stub_binary "$bin" ""
+  out="$(run_layer7 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "status=OK checked=1 dangling=python3 ~/.claude/hooks/memory_context.py" ]] || { echo "  got: $out"; return 1; }
 }
 
 # Q: a legacy `.sh` command left over from before a hook was ported, on a
 # machine where the script itself is gone. A second, independent path shape.
 scenario_layer7_dangling_legacy_guard() {
-  local home="$WORK/l7-q" out
+  local home="$WORK/l7-q" bin="$WORK/l7-q-bin" out
   mkdir -p "$home/.claude"
   printf '{"hooks":{"Stop":[{"hooks":[{"command":"~/.claude/hooks/retired-guard.sh"}]}]}}' \
     > "$home/.claude/settings.json"
-  out="$(run_layer7 "$home")"
-  [[ "$out" == "checked=1 dangling=~/.claude/hooks/retired-guard.sh" ]] || { echo "  got: $out"; return 1; }
+  write_stub_binary "$bin" ""
+  out="$(run_layer7 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "status=OK checked=1 dangling=~/.claude/hooks/retired-guard.sh" ]] || { echo "  got: $out"; return 1; }
 }
 
 # R: a path-shaped command whose file genuinely exists must not be flagged.
 scenario_layer7_existing_path_not_flagged() {
-  local home="$WORK/l7-r" out
+  local home="$WORK/l7-r" bin="$WORK/l7-r-bin" out
   mkdir -p "$home/.claude/hooks"
   touch "$home/.claude/hooks/real.sh"
   printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"%s/.claude/hooks/real.sh"}]}]}}' "$home" \
     > "$home/.claude/settings.json"
-  out="$(run_layer7 "$home")"
-  [[ "$out" == "checked=1 dangling=" ]] || { echo "  got: $out"; return 1; }
+  write_stub_binary "$bin" ""
+  out="$(run_layer7 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "status=OK checked=1 dangling=" ]] || { echo "  got: $out"; return 1; }
 }
 
 # S: the same dangling command wired under two different events, the real
@@ -459,23 +470,50 @@ scenario_layer7_existing_path_not_flagged() {
 # and SessionEnd), must be reported once, not twice, even though both count
 # toward `checked`.
 scenario_layer7_duplicate_across_events_deduped() {
-  local home="$WORK/l7-s" out
+  local home="$WORK/l7-s" bin="$WORK/l7-s-bin" out
   mkdir -p "$home/.claude"
   printf '{"hooks":{"Stop":[{"hooks":[{"command":"~/.claude/hooks/gone.sh"}]}],"SessionEnd":[{"hooks":[{"command":"~/.claude/hooks/gone.sh"}]}]}}' \
     > "$home/.claude/settings.json"
-  out="$(run_layer7 "$home")"
-  [[ "$out" == "checked=2 dangling=~/.claude/hooks/gone.sh" ]] || { echo "  got: $out"; return 1; }
+  write_stub_binary "$bin" ""
+  out="$(run_layer7 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "status=OK checked=2 dangling=~/.claude/hooks/gone.sh" ]] || { echo "  got: $out"; return 1; }
 }
 
 # T: a command whose path still contains an unresolved environment variable
 # after ~/$HOME substitution must be skipped, not falsely flagged as missing.
 scenario_layer7_unresolved_var_skipped() {
-  local home="$WORK/l7-t" out
+  local home="$WORK/l7-t" bin="$WORK/l7-t-bin" out
   mkdir -p "$home/.claude"
   printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"bash $CLAUDE_PLUGIN_ROOT/hooks/foo.sh"}]}]}}' \
     > "$home/.claude/settings.json"
-  out="$(run_layer7 "$home")"
-  [[ "$out" == "checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
+  write_stub_binary "$bin" ""
+  out="$(run_layer7 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "status=OK checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
+}
+
+# X: playbook absent from PATH entirely -> status=UNKNOWN, not a silent PASS
+# with checked=0 (the exact fail-open shape issue #381 reported: no jq used
+# to read the same as zero commands, all healthy).
+scenario_layer7_playbook_missing() {
+  local home="$WORK/l7-x" out
+  mkdir -p "$home/.claude"
+  printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"~/.claude/hooks/gone.sh"}]}]}}' \
+    > "$home/.claude/settings.json"
+  out="$(run_layer7 "$home" "/usr/bin:/bin")"
+  [[ "$out" == "status=UNKNOWN checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
+}
+
+# Y: playbook resolves but predates the `hook-commands` subcommand ->
+# status=UNKNOWN, same observable outcome as X, different root cause
+# (command not found vs. unrecognized subcommand), mirroring Layer 5/6's U/V.
+scenario_layer7_playbook_too_old() {
+  local home="$WORK/l7-y" bin="$WORK/l7-y-bin" out
+  mkdir -p "$home/.claude"
+  printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"~/.claude/hooks/gone.sh"}]}]}}' \
+    > "$home/.claude/settings.json"
+  write_stub_binary_without_doctor "$bin" "playbook 0.12.0"
+  out="$(run_layer7 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "status=UNKNOWN checked=0 dangling=" ]] || { echo "  got: $out"; return 1; }
 }
 
 run_scenario "O: every command is the bare form -> nothing checked, nothing dangling" scenario_layer7_all_bare_healthy
@@ -484,6 +522,8 @@ run_scenario "Q: leftover legacy .sh guard command, file gone -> dangling"     s
 run_scenario "R: path-shaped command whose file exists -> not flagged"        scenario_layer7_existing_path_not_flagged
 run_scenario "S: same dangling command on two events -> reported once"        scenario_layer7_duplicate_across_events_deduped
 run_scenario "T: unresolved \$VAR in path -> skipped, not flagged"            scenario_layer7_unresolved_var_skipped
+run_scenario "X: playbook absent from PATH -> status=UNKNOWN, not a silent PASS" scenario_layer7_playbook_missing
+run_scenario "Y: playbook too old for hook-commands subcommand -> status=UNKNOWN" scenario_layer7_playbook_too_old
 
 TOTAL=$(( PASS + FAIL ))
 echo ""

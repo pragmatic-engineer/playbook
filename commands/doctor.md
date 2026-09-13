@@ -238,6 +238,13 @@ left exactly as it was). This layer checks every hook command in
 ```bash
 dangling=""
 checked=0
+hooks_status="OK"
+if command -v playbook >/dev/null 2>&1; then
+  hook_cmds=$(playbook doctor hook-commands ~/.claude/settings.json 2>/dev/null) || hooks_status="UNKNOWN"
+else
+  hook_cmds=""
+  hooks_status="UNKNOWN"
+fi
 while IFS= read -r cmd; do
   [ -n "$cmd" ] || continue
   case "$cmd" in
@@ -257,10 +264,10 @@ while IFS= read -r cmd; do
   if [ ! -e "$path" ]; then
     dangling="$dangling|$cmd"
   fi
-done < <(jq -r '[.hooks | to_entries[]? | .value[]? | .hooks[]?.command // empty] | .[]' ~/.claude/settings.json 2>/dev/null)
+done <<< "$hook_cmds"
 dangling=$(printf '%s' "${dangling#|}" | tr '|' '\n' | sort -u | tr '\n' '|')
 dangling=${dangling%|}
-echo "checked=$checked dangling=$dangling"
+echo "status=$hooks_status checked=$checked dangling=$dangling"
 ```
 
 A bare `playbook hook <name>` command never reaches the check: it names no
@@ -271,10 +278,22 @@ command whose last whitespace-separated token looks like a path (contains a
 after `~`/`$HOME` substitution is skipped rather than guessed at, so this
 layer only ever reports a path it actually resolved and actually checked.
 
+The command list itself comes from `playbook doctor hook-commands`, not
+`jq`: it walks the exact same shape (`.hooks | to_entries[]? | .value[]? |
+.hooks[]?.command`) directly against the compiled binary, so a host with no
+`jq` installed no longer reads as "zero commands, all healthy." If
+`playbook` itself is missing, or resolves to a build old enough to lack the
+`hook-commands` subcommand, `hooks_status` is set to `UNKNOWN` rather than
+letting an empty command list masquerade as PASS.
+
 Report:
 
-- `dangling` empty → PASS. Say how many commands were checked (`checked`);
-  `checked=0` on a fully-ported install is expected and healthy, not a gap.
+- `hooks_status=UNKNOWN` → INFO, not FAIL: the binary is missing or too old
+  to run this check, both already reported by Layer 6, so this layer only
+  needs to say it could not check rather than repeat that diagnosis.
+- `dangling` empty (and `hooks_status=OK`) → PASS. Say how many commands
+  were checked (`checked`); `checked=0` on a fully-ported install is
+  expected and healthy, not a gap.
 - `dangling` non-empty → **FAIL**, one line per entry. Remediation: the
   file is missing, so this hook does nothing every time it fires; `playbook
   init` will not remove a stray entry like this on its own, since it only
