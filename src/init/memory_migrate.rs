@@ -264,14 +264,25 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
         );
     }
 
-    let files = relative_files(old_root);
+    let (files, skipped_symlinks) = match relative_files(old_root) {
+        Ok(result) => result,
+        Err(err) => {
+            return StepReport::failed(
+                STEP_NAME,
+                format!("could not enumerate {}: {err}", old_root.display()),
+            );
+        }
+    };
 
     if let Err(err) = copy_all(old_root, new_root, &files) {
         return StepReport::failed(
             STEP_NAME,
-            format!(
-                "copy to {} failed, the original is untouched: {err}",
-                new_root.display()
+            with_skipped_symlinks(
+                format!(
+                    "copy to {} failed, the original is untouched: {err}",
+                    new_root.display()
+                ),
+                &skipped_symlinks,
             ),
         );
     }
@@ -279,9 +290,12 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
     if !all_copied_and_verified(old_root, new_root, &files) {
         return StepReport::failed(
             STEP_NAME,
-            format!(
-                "verification failed after copying to {}, the original is untouched",
-                new_root.display()
+            with_skipped_symlinks(
+                format!(
+                    "verification failed after copying to {}, the original is untouched",
+                    new_root.display()
+                ),
+                &skipped_symlinks,
             ),
         );
     }
@@ -289,7 +303,10 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
     if let Err(err) = write_sentinel(sentinel) {
         return StepReport::failed(
             STEP_NAME,
-            format!("copy verified but could not write completion marker: {err}"),
+            with_skipped_symlinks(
+                format!("copy verified but could not write completion marker: {err}"),
+                &skipped_symlinks,
+            ),
         );
     }
 
@@ -299,34 +316,71 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
 
     StepReport::wired(
         STEP_NAME,
-        format!(
-            "copied {} file(s) to {} and removed the original",
-            files.len(),
-            new_root.display()
+        with_skipped_symlinks(
+            format!(
+                "copied {} file(s) to {} and removed the original",
+                files.len(),
+                new_root.display()
+            ),
+            &skipped_symlinks,
         ),
     )
 }
 
-/// Every regular file under `root`, recursively, as paths relative to
-/// `root`; copies everything rather than filtering, unlike the markdown-only walk `rebuild_memory_graph` does.
-fn relative_files(root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    relative_files_into(root, root, &mut out);
-    out
+/// Folds a non-empty `skipped_symlinks` list into `detail`, so a symlink
+/// skipped during the walk stays visible in the returned `StepReport`
+/// regardless of which of `copy_verify_and_finish`'s return paths produced it.
+fn with_skipped_symlinks(detail: String, skipped_symlinks: &[PathBuf]) -> String {
+    if skipped_symlinks.is_empty() {
+        return detail;
+    }
+    let paths = skipped_symlinks
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{detail}; skipped {} symlink(s): {paths}",
+        skipped_symlinks.len()
+    )
 }
 
-fn relative_files_into(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
+/// Every regular file under `root`, recursively, as paths relative to
+/// `root`, plus the relative paths of any symlinks the walk skipped rather
+/// than followed. `Err` names the subdirectory that could not be read.
+fn relative_files(root: &Path) -> io::Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let mut out = Vec::new();
+    let mut skipped_symlinks = Vec::new();
+    relative_files_into(root, root, &mut out, &mut skipped_symlinks)?;
+    Ok((out, skipped_symlinks))
+}
+
+fn relative_files_into(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<PathBuf>,
+    skipped_symlinks: &mut Vec<PathBuf>,
+) -> io::Result<()> {
+    // A bare `io::Error` carries no path, so wrapping it here is what lets
+    // the caller name the specific failing subdirectory.
+    let entries = fs::read_dir(dir)
+        .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            relative_files_into(root, &path, out);
+        let file_type = entry.file_type()?;
+        // `file_type()` reports the entry itself, unlike `path.is_dir()`,
+        // which follows a symlink to check its target instead.
+        if file_type.is_symlink() {
+            if let Ok(rel) = path.strip_prefix(root) {
+                skipped_symlinks.push(rel.to_path_buf());
+            }
+        } else if file_type.is_dir() {
+            relative_files_into(root, &path, out, skipped_symlinks)?;
         } else if let Ok(rel) = path.strip_prefix(root) {
             out.push(rel.to_path_buf());
         }
     }
+    Ok(())
 }
 
 /// Copies each of `files` from `old_root` to `new_root`, creating

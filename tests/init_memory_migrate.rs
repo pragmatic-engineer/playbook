@@ -13,6 +13,8 @@ use playbook::init::memory_migrate::migrate_memory;
 use playbook::init::run::StepStatus;
 use std::env;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -456,6 +458,167 @@ fn new_root_self_heal_leaves_a_stray_lock_directory_under_its_legacy_name() {
         "the new-root self-heal deliberately does not rename the lock sibling"
     );
     assert!(!new_root.join("memory.graph.json.lock").exists());
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+/// Whether this filesystem/user enforces Unix permission bits at all, so a
+/// test run as root degrades to a skip instead of a false failure.
+#[cfg(unix)]
+fn permission_checks_are_enforced(dir: &Path) -> bool {
+    let probe = dir.join(".perm-probe");
+    set_mode(dir, 0o555);
+    let blocked = fs::write(&probe, "x").is_err();
+    set_mode(dir, 0o755);
+    let _ = fs::remove_file(&probe);
+    blocked
+}
+
+/// A subdirectory the walk cannot read must fail the migration, not be
+/// silently treated as empty and have the source deleted regardless.
+#[cfg(unix)]
+#[test]
+fn unreadable_subdirectory_fails_the_migration_instead_of_silently_dropping_it() {
+    // Arrange: an unreadable subdirectory, plus a pre-created empty new root
+    // so the move takes the per-file copy path that enumerates the tree.
+    let home = scratch_home("unreadable-subdir");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("global-fact.md"), "global fact content").unwrap();
+    let locked_dir = old_root.join("no-access");
+    fs::create_dir_all(&locked_dir).unwrap();
+    fs::write(locked_dir.join("secret.md"), "secret content").unwrap();
+    fs::create_dir_all(new_root_of(&home)).unwrap();
+
+    if !permission_checks_are_enforced(&locked_dir) {
+        eprintln!(
+            "skipping unreadable_subdirectory_fails_the_migration_instead_of_silently_dropping_it: \
+             this filesystem/user does not enforce permission bits (likely running as root)"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+    set_mode(&locked_dir, 0o000);
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    set_mode(&locked_dir, 0o755); // restore before cleanup can remove the dir
+    assert_eq!(report.status, StepStatus::Failed, "{}", report.detail);
+    assert!(
+        report.detail.contains("no-access"),
+        "detail should name the unreadable subdirectory: {}",
+        report.detail
+    );
+    assert!(
+        old_root.exists(),
+        "the source must survive untouched when enumeration fails"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A symlink in the tree must be skipped, not followed and its target's
+/// content copied under the symlink's own name; a sibling real file in the
+/// same directory still gets copied, and the skip is recorded in the report.
+#[cfg(unix)]
+#[test]
+fn symlink_in_the_tree_is_skipped_sibling_file_still_copied_and_skip_is_recorded() {
+    // Arrange: an external file, a symlink to it inside the tree, a sibling
+    // real file, and a pre-created empty new root so the move takes the
+    // per-file copy path that walks the tree.
+    let home = scratch_home("symlink-skip");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    let external_target = home.join("external-secret.txt");
+    fs::write(
+        &external_target,
+        "external secret content, must not be copied",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&external_target, old_root.join("link-to-external")).unwrap();
+    fs::write(old_root.join("sibling.md"), "sibling content").unwrap();
+    fs::create_dir_all(new_root_of(&home)).unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
+    let new_root = new_root_of(&home);
+    assert!(
+        !new_root.join("link-to-external").exists(),
+        "the symlink's target content must not be copied to the destination"
+    );
+    assert_eq!(
+        fs::read_to_string(new_root.join("sibling.md")).unwrap(),
+        "sibling content",
+        "a sibling real file in the same directory must still be copied"
+    );
+    assert!(
+        report.detail.contains("link-to-external"),
+        "the report should record the skipped symlink's path: {}",
+        report.detail
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A symlink pointing at its own parent directory must not send the walk
+/// into unbounded recursion. Run as a real subprocess: an in-process stack
+/// overflow would abort the whole shared test binary, not just this test.
+#[cfg(unix)]
+#[test]
+fn self_referential_symlink_does_not_hang_the_migration() {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    // Arrange: a symlink to the tree's own root, plus a sibling real file.
+    let home = scratch_home("self-referential-symlink");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    std::os::unix::fs::symlink(&old_root, old_root.join("loop")).unwrap();
+    fs::write(old_root.join("sibling.md"), "sibling content").unwrap();
+    fs::create_dir_all(new_root_of(&home)).unwrap();
+
+    // Act: poll rather than block on `wait`, so a hang can be killed instead
+    // of leaving the test suite stuck.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .arg("init")
+        .env("HOME", &home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("playbook binary should spawn");
+    let budget = Duration::from_secs(5);
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("polling the child should not fail") {
+            break status;
+        }
+        if start.elapsed() > budget {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("migrate_memory did not exit within {budget:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+
+    // Assert
+    assert!(
+        status.success(),
+        "a self-referential symlink should be skipped, not fail the migration"
+    );
 
     let _ = fs::remove_dir_all(&home);
 }
