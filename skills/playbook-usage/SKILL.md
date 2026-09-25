@@ -85,7 +85,7 @@ file-based handoff discipline that governs every dispatch.
 ## Memory
 
 The plugin keeps a durable fact store at `~/.config/playbook/memory/`, in
-three scopes: global facts sit flat alongside its `MEMORY.md` index,
+three scopes: global facts sit flat in that directory,
 org-scoped facts live under `~/.config/playbook/memory/<owner>/`, and
 project-scoped facts live under `~/.config/playbook/memory/<owner>/<repo>/`.
 `/playbook:adr` and `/playbook:learn-project` both read from and write to
