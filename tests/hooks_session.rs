@@ -184,11 +184,11 @@ fn session_init_injects_the_graph_backed_slice() {
     );
 }
 
-/// ADR 0008 WU-1: the graph-backed slice has no cap today, unlike the legacy
-/// fallback (`read_legacy_memory`, capped at 16000 chars). A repo-slice with
-/// enough facts to exceed that cap must still be truncated: an early fact
-/// (guaranteed within the first 16000 chars) survives, a fact deliberately
-/// placed past that boundary does not.
+/// ADR 0008 WU-1: the graph-backed slice has no cap today, unlike the native
+/// fallback (`read_graph_slice_fallback`, capped at 16000 chars). A
+/// repo-slice with enough facts to exceed that cap must still be truncated:
+/// an early fact (guaranteed within the first 16000 chars) survives, a fact
+/// deliberately placed past that boundary does not.
 #[test]
 fn session_init_caps_the_graph_backed_slice_like_the_legacy_fallback() {
     // Arrange: ~120 facts, each with a ~150-char description, so the
@@ -241,41 +241,176 @@ fn session_init_caps_the_graph_backed_slice_like_the_legacy_fallback() {
 }
 
 #[test]
-fn session_init_falls_back_to_the_legacy_memory_index() {
-    // Arrange: a fake HOME with the legacy MEMORY.md index but no memory.graph.json.
-    let work = scratch_dir("legacy-index");
+fn session_init_falls_back_to_a_native_graph_read() {
+    // Arrange: a fake HOME with memory.graph.json but no CLAUDE_PLUGIN_ROOT,
+    // so the fallback branch parses the graph directly instead of shelling
+    // out to shell/memory-context.sh.
+    let work = scratch_dir("native-fallback");
     let repo_slug = "acme/widget";
     let repo_dir = work.join("repo");
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
-    let home = work.join("home-index");
-    let legacy_dir = home
-        .join(".config")
-        .join("playbook")
-        .join("memory")
-        .join(repo_slug);
-    fs::create_dir_all(&legacy_dir).unwrap();
+    let home = work.join("home-native");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
-        legacy_dir.join("MEMORY.md"),
-        "- legacy-fact-two: an old style index entry\n",
+        memory_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"native-fact-one","description":"parsed straight from the graph file, no jq involved","project":"{repo_slug}"}}],"edges":[]}}"#
+        ),
     )
     .unwrap();
 
-    // Act
-    let outcome = run_hook(
-        "session-init",
-        &repo_dir,
-        &home,
-        "{}",
-        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
-    );
+    // Act: no CLAUDE_PLUGIN_ROOT, so mem_script is None and the fallback runs.
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
     let context = additional_context(&outcome.stdout);
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("legacy-fact-two"),
-        "additionalContext should carry the index line: {context}"
+        context.contains("native-fact-one"),
+        "additionalContext should carry the fact name: {context}"
+    );
+    assert!(
+        context.contains("parsed straight from the graph file, no jq involved"),
+        "additionalContext should carry the fact description: {context}"
+    );
+}
+
+/// The native fallback shares `MEMORY_BODY_CAP_CHARS` with the graph-backed
+/// slice, so it truncates the same way: an early fact survives, a fact
+/// placed past the boundary does not. Its rendering has no "Facts:\n"
+/// preamble, unlike the jq-backed slice, so the boundary math is computed
+/// against its own "name: description" lines rather than the jq path's.
+#[test]
+fn session_init_caps_the_native_graph_fallback() {
+    // Arrange: 120 facts, each rendering as "fact-NNN: desc-NNN-<140 x's>"
+    // (159 chars) joined by newlines, ~19080 chars total: comfortably past
+    // the 16000-char cap well before the last node. Zero-padded names sort
+    // in the same ascending order the fallback renders them.
+    let work = scratch_dir("native-fallback-cap");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-native-cap");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    let padding = "x".repeat(140);
+    let nodes: Vec<String> = (1..=120)
+        .map(|n| {
+            format!(
+                r#"{{"id":"{repo_slug}/f{n:03}","file":"{repo_slug}/f{n:03}.md","scope":"project","type":"project","name":"fact-{n:03}","description":"desc-{n:03}-{padding}","project":"{repo_slug}"}}"#
+            )
+        })
+        .collect();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        format!(r#"{{"nodes":[{}],"edges":[]}}"#, nodes.join(",")),
+    )
+    .unwrap();
+
+    // Act: no CLAUDE_PLUGIN_ROOT, so the native fallback runs.
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("fact-001"),
+        "an early fact, well within the cap, should survive: {context}"
+    );
+    assert!(
+        !context.contains("fact-120"),
+        "a fact placed past the 16000-char cap should be truncated away: {context}"
+    );
+}
+
+#[test]
+fn session_init_native_fallback_absent_graph_emits_no_memory_block() {
+    // Arrange: no CLAUDE_PLUGIN_ROOT and no memory.graph.json at all.
+    let work = scratch_dir("native-fallback-absent");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+    let home = scratch_dir("native-fallback-absent-home");
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
+        "stdout should be valid JSON: {}",
+        outcome.stdout
+    );
+    assert!(
+        !context.contains("Project memory for this repo"),
+        "no memory block should be emitted when memory.graph.json is absent: {context}"
+    );
+}
+
+#[test]
+fn session_init_native_fallback_malformed_graph_emits_no_memory_block() {
+    // Arrange: a memory.graph.json that is not valid JSON.
+    let work = scratch_dir("native-fallback-malformed");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-malformed");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(memory_dir.join("memory.graph.json"), "{not valid json").unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
+        "stdout should be valid JSON: {}",
+        outcome.stdout
+    );
+    assert!(
+        !context.contains("Project memory for this repo"),
+        "no memory block should be emitted for a malformed graph file: {context}"
+    );
+}
+
+#[test]
+fn session_init_native_fallback_ignores_a_code_anchor_only_graph() {
+    // Arrange: the graph has one code-anchor node (no `name` field, matching
+    // how rebuild_memory_graph.rs serializes one) and zero fact nodes.
+    let work = scratch_dir("native-fallback-code-anchor");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-code-anchor");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"code:{repo_slug}/src/lib.rs","file":"src/lib.rs","scope":"code","type":"code","project":"{repo_slug}"}}],"edges":[]}}"#
+        ),
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        !context.contains("Project memory for this repo"),
+        "a code-anchor-only graph has no facts, so no memory block should be emitted: {context}"
     );
 }
 
@@ -289,22 +424,19 @@ fn session_init_migrates_legacy_home_memory_root_before_recall() {
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
     let home = work.join("home-legacy-root");
-    let legacy_dir = home.join(".claude").join("memory").join(repo_slug);
+    let legacy_dir = home.join(".claude").join("memory");
     fs::create_dir_all(&legacy_dir).unwrap();
     fs::write(
-        legacy_dir.join("MEMORY.md"),
-        "- legacy-root-fact: still under the old home tree\n",
+        legacy_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"{repo_slug}/legacy-root-fact","file":"{repo_slug}/legacy-root-fact.md","scope":"project","type":"project","name":"legacy-root-fact","description":"still under the old home tree","project":"{repo_slug}"}}],"edges":[]}}"#
+        ),
     )
     .unwrap();
 
-    // Act
-    let outcome = run_hook(
-        "session-init",
-        &repo_dir,
-        &home,
-        "{}",
-        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
-    );
+    // Act: no CLAUDE_PLUGIN_ROOT, so the fact surfaces via the native
+    // fallback reading the migrated graph file, not a shelled-out script.
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
     let context = additional_context(&outcome.stdout);
 
     // Assert
@@ -313,16 +445,15 @@ fn session_init_migrates_legacy_home_memory_root_before_recall() {
         context.contains("legacy-root-fact"),
         "the hook should migrate ~/.claude/memory before reading it, so the fact still surfaces: {context}"
     );
-    let new_index = home
+    let new_graph = home
         .join(".config")
         .join("playbook")
         .join("memory")
-        .join(repo_slug)
-        .join("MEMORY.md");
+        .join("memory.graph.json");
     assert!(
-        new_index.is_file(),
-        "the index should now live at the new location: {}",
-        new_index.display()
+        new_graph.is_file(),
+        "the graph file should now live at the new location: {}",
+        new_graph.display()
     );
     assert!(
         !home.join(".claude").join("memory").exists(),
@@ -470,10 +601,10 @@ fn session_init_surfaces_a_failed_migration_on_stderr_not_stdout() {
 // ---------------------------------------------------------------------
 
 /// A fact marked `pinned: true` in `memory.graph.json` must inject even
-/// though nothing anchors or prompt-matches it, and even with the general
-/// memory-slice machinery entirely inactive (no `CLAUDE_PLUGIN_ROOT`, no
-/// legacy `MEMORY.md`): the pinned/promoted block reads the graph directly
-/// and does not depend on that machinery at all.
+/// though nothing anchors or prompt-matches it, and even with no
+/// `CLAUDE_PLUGIN_ROOT` set: the pinned/promoted block reads the graph
+/// directly and does not depend on the general memory-slice machinery at
+/// all.
 #[test]
 fn session_init_injects_a_pinned_fact_independent_of_general_memory_slice() {
     // Arrange
