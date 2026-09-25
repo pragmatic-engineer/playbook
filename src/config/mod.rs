@@ -10,6 +10,7 @@
 //! defaults, not Claude Code's.
 
 pub mod keys;
+pub mod write;
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -25,9 +26,11 @@ pub enum Source {
     Default,
 }
 
-/// Everything that can stop `resolve` from producing a value. A missing
-/// tier file is not one of these cases, since it is a normal "no override
-/// here" outcome handled by falling through to the next tier.
+/// Everything that can stop `resolve` or `write::set` from producing or
+/// storing a value. A missing tier file is not one of these cases when
+/// reading, since it is a normal "no override here" outcome handled by
+/// falling through to the next tier; `write::set` treats it the same way,
+/// as "nothing to merge into yet".
 #[derive(Debug)]
 pub enum ConfigError {
     /// A tier file exists but is not readable as a JSON object: either it
@@ -36,6 +39,21 @@ pub enum ConfigError {
     /// `key` is not in `keys::KNOWN_KEYS`, so no tier and no default can
     /// ever supply it.
     UnknownKey(String),
+    /// `value`'s JSON type does not match what `keys::default_value(key)`
+    /// implies for `key`.
+    WrongType { key: String, expected: &'static str },
+    /// `value` is a string outside `keys::allowed_enum_values(key)`.
+    InvalidEnumValue {
+        key: String,
+        value: String,
+        allowed: &'static [&'static str],
+    },
+    /// A write targeted the org or repo tier but no `repo_slug` was
+    /// available to build that tier's path from.
+    MissingRepoContext,
+    /// A tier's directory could not be created or written into: its parent
+    /// path exists as a non-directory, or is not writable.
+    DirectoryUnwritable(PathBuf),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -46,7 +64,33 @@ impl std::fmt::Display for ConfigError {
                 "config file is not a valid JSON object: {}",
                 path.display()
             ),
-            ConfigError::UnknownKey(key) => write!(f, "unknown config key: {key}"),
+            ConfigError::UnknownKey(key) => write!(
+                f,
+                "unknown config key: {key}, valid keys are: {}",
+                keys::KNOWN_KEYS.join(", ")
+            ),
+            ConfigError::WrongType { key, expected } => {
+                write!(f, "config key {key} expects a {expected} value")
+            }
+            ConfigError::InvalidEnumValue {
+                key,
+                value,
+                allowed,
+            } => write!(
+                f,
+                "config key {key} does not accept '{value}', valid values are: {}",
+                allowed.join(", ")
+            ),
+            ConfigError::MissingRepoContext => write!(
+                f,
+                "could not resolve a repo-scoped config location; repo_slug is unresolved, \
+                 refusing to write an org or repo tier config value"
+            ),
+            ConfigError::DirectoryUnwritable(path) => write!(
+                f,
+                "config directory could not be created or written into: {}",
+                path.display()
+            ),
         }
     }
 }
