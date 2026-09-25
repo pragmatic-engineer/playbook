@@ -10,3 +10,116 @@
 //! defaults, not Claude Code's.
 
 pub mod keys;
+
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+
+/// Which tier of the repo/org/global/default chain actually supplied a
+/// resolved value, so a caller (or a future `playbook config get` command)
+/// can report where a setting came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    Repo,
+    Org,
+    Global,
+    Default,
+}
+
+/// Everything that can stop `resolve` from producing a value. A missing
+/// tier file is not one of these cases, since it is a normal "no override
+/// here" outcome handled by falling through to the next tier.
+#[derive(Debug)]
+pub enum ConfigError {
+    /// A tier file exists but is not readable as a JSON object: either it
+    /// fails to parse, or it parses to a non-object value.
+    Malformed(PathBuf),
+    /// `key` is not in `keys::KNOWN_KEYS`, so no tier and no default can
+    /// ever supply it.
+    UnknownKey(String),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::Malformed(path) => write!(
+                f,
+                "config file is not a valid JSON object: {}",
+                path.display()
+            ),
+            ConfigError::UnknownKey(key) => write!(f, "unknown config key: {key}"),
+        }
+    }
+}
+
+/// Resolve `key` through the repo, org, global, then built-in default tier,
+/// in that order, returning the value and which tier supplied it. `home`
+/// stands in for `$HOME` so callers (and tests) can point resolution at a
+/// scratch directory instead of the real one, matching
+/// `common::session::home_dir`'s injection convention. The repo and org
+/// tiers are skipped entirely when `repo_slug` is `None`, since there is no
+/// `<owner>/<repo>` to build their paths from.
+pub fn resolve(
+    key: &str,
+    home: &Path,
+    repo_slug: Option<&str>,
+) -> Result<(Value, Source), ConfigError> {
+    let root = crate::common::paths::playbook_root_from(home);
+
+    if let Some((owner, repo)) = repo_slug.and_then(|slug| slug.split_once('/')) {
+        let repo_path = root
+            .join("repos")
+            .join(owner)
+            .join(repo)
+            .join(".config")
+            .join("config.json");
+        if let Some(value) = lookup_tier(&repo_path, key)? {
+            return Ok((value, Source::Repo));
+        }
+
+        let org_path = root.join("orgs").join(owner).join("config.json");
+        if let Some(value) = lookup_tier(&org_path, key)? {
+            return Ok((value, Source::Org));
+        }
+    }
+
+    let global_path = root.join("config.json");
+    if let Some(value) = lookup_tier(&global_path, key)? {
+        return Ok((value, Source::Global));
+    }
+
+    keys::default_value(key)
+        .map(|value| (value, Source::Default))
+        .ok_or_else(|| ConfigError::UnknownKey(key.to_string()))
+}
+
+/// Read one tier file and look up `key` in it. `Ok(None)` means "no
+/// override here", covering both a missing file and a file that parses
+/// fine but does not contain `key`; both fall through to the next tier the
+/// same way. A file that fails to parse, or that parses to something other
+/// than a JSON object, is `Err` instead: a malformed file is never silently
+/// treated as absent.
+fn lookup_tier(path: &Path, key: &str) -> Result<Option<Value>, ConfigError> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(ConfigError::Malformed(path.to_path_buf())),
+    };
+    let parsed: Value =
+        serde_json::from_str(&raw).map_err(|_| ConfigError::Malformed(path.to_path_buf()))?;
+    if !parsed.is_object() {
+        return Err(ConfigError::Malformed(path.to_path_buf()));
+    }
+    Ok(dotted_lookup(&parsed, key).cloned())
+}
+
+/// Look up a dotted path (`"autoReview.enabled"`) inside a JSON object,
+/// descending one segment at a time. `None` means some segment along the
+/// path is absent, distinct from a `Some(Value::Null)` found at the full
+/// path, which is a present value.
+fn dotted_lookup<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    let mut current = value;
+    for segment in key.split('.') {
+        current = current.as_object()?.get(segment)?;
+    }
+    Some(current)
+}
