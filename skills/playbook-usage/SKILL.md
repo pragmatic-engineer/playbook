@@ -45,7 +45,7 @@ for a yes before doing anything (see Trigger phrases, below).
 |---|---|---|
 | `/playbook:repo-audit` | Read-only four-phase audit: discovery and mapping, evidence-based severity-rated findings, an improvement strategy, and a milestone task plan. Every claim cited to file:line. | Assessing the health of an unfamiliar or long-lived repo without changing anything. |
 | `/playbook:learn-project` | Reads git history, PRs, and JIRA/Confluence, distills what it finds into memory facts (project-scoped or global), and exports a navigable `memory.graph.json`. | Building durable project knowledge the session (and future sessions) can recall. |
-| `/playbook:doctor` | Checks the seven playbook layers and prints a status table with a remediation hint for each miss. | Confirming the plugin itself is wired correctly. |
+| `/playbook:doctor` | Checks the eight playbook layers and prints a status table with a remediation hint for each miss. | Confirming the plugin itself is wired correctly. |
 | `/playbook:setup` | Interactive setup: wires safety guards, seeds or merges `settings.json`, and asks whether to install the shell launchers and system prompt. | First-time install or reconfiguring the plugin's own settings. |
 
 ## Trigger phrases for the planning pipeline

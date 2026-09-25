@@ -39,7 +39,7 @@ anchors:
 
 `type` is one of `user`, `feedback`, `project`, or `reference`. `description` is a one-line trigger hint: "use when..." For `feedback` and `project` type facts, the body follows a fixed structure: the rule first, then a `**Why:**` section and a `**How to apply:**` section. The optional `anchors:` field lists repo-relative code locations the fact describes: a directory, a file, or a `file#symbol`. It maps a fact to concrete code so the graph knows where a fact lives.
 
-`memory.graph.json` is the sole index, built automatically from every fact file's frontmatter across all three scopes. Commands query it through `shell/memory-context.sh`, or through a native Rust fallback when jq or bash aren't reachable. See [memory.graph.json](#memorygraphjson) below for the node shape, and [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the format mechanics.
+`memory.graph.json` is the sole index, built automatically from every fact file's frontmatter across all three scopes. Commands query it through `shell/memory-context.sh`, or by reading the graph file directly with the `Read` tool when jq or bash aren't reachable; `session-init`'s own SessionStart injection has a separate native Rust fallback for the same case. See [memory.graph.json](#memorygraphjson) below for the node shape, and [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the format mechanics.
 
 An install that predates this design may still have a leftover `MEMORY.md` file on disk from before the graph became the index. It is no longer read by anything; it is safe to ignore or delete.
 
@@ -72,7 +72,7 @@ Both paths produce the same file format and land in the right scope of the store
 
 Facts reach context three ways, described in full in [ADR 0004](../adr/0004-graph-first-memory.md) and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md).
 
-**At session start**, the `session-init` hook injects a slice of `memory.graph.json`: every global fact plus every fact scoped to the current repo, as names and one-line descriptions, not full bodies. The slice is capped at 16000 characters, so it cannot grow without bound as the store grows. If the graph is unavailable, `session-init` falls back to a native, dependency-free read of `memory.graph.json` (capped the same way); if neither exists, it injects nothing.
+**At session start**, the `session-init` hook injects a slice of `memory.graph.json`: every global fact plus every fact scoped to the current repo, as names and one-line descriptions, not full bodies. The slice is capped at 16000 characters, so it cannot grow without bound as the store grows. If `shell/memory-context.sh` can't run or returns nothing (`jq` or `bash` missing, for instance), `session-init` falls back to a native, dependency-free read of `memory.graph.json` (capped the same way); with no graph file either, it injects nothing.
 
 **Editing or writing a file** surfaces the facts anchored to it: the `memory-anchors` hook matches the edited path against the graph's anchor index and injects the matching facts' names, descriptions, and `depends_on`/`contradicts` neighbours.
 

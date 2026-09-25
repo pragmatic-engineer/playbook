@@ -312,12 +312,16 @@ Report:
 
 ## Layer 8: jq installed
 
-Layers 2, 5, 6, and 7 all shell out to `jq` to read `settings.json` and plugin
-manifests, but until now nothing checked that `jq` itself is on PATH. A host
-missing it does not fail loudly there, each of those layers instead reads the
-command-not-found case as an empty result and reports whatever an empty
-result means for that layer, which quietly hides the real problem. This layer
-checks for `jq` directly so a missing dependency is reported as itself.
+Layer 2 shells out to `jq` to read `settings.json`, but until now nothing
+checked that `jq` itself is on PATH. A host missing it does not fail loudly
+there: Layer 2 instead reads the command-not-found case as an empty result
+and reports whatever an empty result means for that layer, which quietly
+hides the real problem. `shell/memory-context.sh` also depends on `jq`, and
+`/playbook:plan`, `/playbook:adr`, `/playbook:implement`,
+`/playbook:deep-review`, and `/playbook:learn-project` each fall back to a
+native, jq-free graph read when it produces nothing, so a missing `jq`
+degrades those commands silently too. This layer checks for `jq` directly
+so a missing dependency is reported as itself.
 
 ```bash
 if command -v jq >/dev/null 2>&1; then

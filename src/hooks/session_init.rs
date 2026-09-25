@@ -343,9 +343,9 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, repo_root:
     } else {
         mem_body = read_graph_slice_fallback(&mem_slug);
         format!(
-            "Project memory for this repo ({mem_slug}), stored in the central memory store at \
-            ~/.config/playbook/memory/{mem_slug}/. Facts in scope for this repo (global, org, \
-            and project); read the referenced fact files on demand. Index:"
+            "Project memory for this repo ({mem_slug}), read from the central memory store at \
+            ~/.config/playbook/memory/. Facts in scope for this repo (global, org, and \
+            project), names and descriptions only. Index:"
         )
     };
 
