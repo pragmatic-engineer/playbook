@@ -17,9 +17,18 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// `PLAYBOOK_TEST_COPY_DELAY_MS` is process-wide, and cargo runs the tests in
+/// this binary on parallel threads. One shared lock, so a test mutating it
+/// never leaks its value into an unrelated test running concurrently.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// A fresh scratch directory standing in for `$HOME`, unique per call.
 fn scratch_home(tag: &str) -> PathBuf {
@@ -812,6 +821,128 @@ fn failed_conflict_still_reports_a_symlink_skipped_earlier_in_the_run() {
         "a Failed conflict result must still report the symlink skipped \
          earlier in the same run: {}",
         report.detail
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn migration_completes_quickly_when_the_new_root_does_not_exist_yet() {
+    // Arrange: a fresh migration, new_root not yet created, so the move
+    // takes the fast rename path rather than the per-file copy path.
+    let home = scratch_home("fresh-new-root-absent");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "fact content").unwrap();
+
+    // Act
+    let start = Instant::now();
+    let report = migrate_memory(&home, &claude_home);
+    let elapsed = start.elapsed();
+
+    // Assert: completes well under the lock's 500ms retry budget (50
+    // retries * 10ms delay), not merely eventually via fail-open. Weak
+    // signal on its own (a fail-open lock would also eventually succeed);
+    // paired with the poll-based proof below.
+    assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
+    assert!(
+        elapsed < Duration::from_millis(400),
+        "migration took {elapsed:?}, which suggests the lock retry budget \
+         was burned instead of completing promptly"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn lock_directory_is_held_for_the_duration_of_an_in_flight_copy() {
+    let _guard = lock_env();
+    // Arrange: at least two files, and an empty pre-existing new root so the
+    // move takes the per-file copy path (the fast rename never takes a
+    // lock). PLAYBOOK_TEST_COPY_DELAY_MS makes the total copy time bounded
+    // and predictable: file count times delay.
+    let home = scratch_home("lock-held-during-copy");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact-a.md"), "fact a content").unwrap();
+    fs::write(old_root.join("fact-b.md"), "fact b content").unwrap();
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    let lock_path = new_root.join("memory.graph.json.lock");
+
+    let delay_ms: u64 = 50;
+    env::set_var("PLAYBOOK_TEST_COPY_DELAY_MS", delay_ms.to_string());
+
+    let observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let poller = {
+        let observed = observed.clone();
+        let lock_path = lock_path.clone();
+        // A retry loop, not a single check, so the poll window reliably
+        // overlaps the in-flight copy despite scheduling jitter: roughly
+        // 10x the expected total copy time (2 files * 50ms), 5ms apart.
+        std::thread::spawn(move || {
+            for _ in 0..200 {
+                if lock_path.is_dir() {
+                    observed.store(true, Ordering::Relaxed);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        })
+    };
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+    poller.join().unwrap();
+    env::remove_var("PLAYBOOK_TEST_COPY_DELAY_MS");
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
+    assert!(
+        observed.load(Ordering::Relaxed),
+        "the poller never observed the lock directory during the in-flight copy"
+    );
+    assert!(
+        !lock_path.is_dir(),
+        "the lock directory must be removed once migration completes"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Matches `rebuild_memory_graph.rs`'s own
+/// `rebuild_succeeds_when_the_lock_directory_is_already_held` test shape:
+/// supplementary coverage that the lock is advisory, not proof it is real
+/// (that's `lock_directory_is_held_for_the_duration_of_an_in_flight_copy`'s
+/// job).
+#[test]
+fn migration_completes_when_the_lock_directory_is_already_held() {
+    // Arrange: simulate a concurrent rebuild_memory_graph run already
+    // holding the lock at the new root.
+    let home = scratch_home("lock-already-held");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "fact content").unwrap();
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::create_dir(new_root.join("memory.graph.json.lock")).unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert: fails open after the retry budget, same as rebuild_memory_graph.
+    assert_eq!(
+        report.status,
+        StepStatus::Wired,
+        "migration must fail open, not hang or error, when the lock is already held: {}",
+        report.detail
+    );
+    assert_eq!(
+        fs::read_to_string(new_root.join("fact.md")).unwrap(),
+        "fact content"
     );
 
     let _ = fs::remove_dir_all(&home);

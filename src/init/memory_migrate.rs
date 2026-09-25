@@ -14,11 +14,13 @@
 //! the full set of legacy-filename fixes, not just the ones a particular
 //! caller happened to add.
 
+use crate::common::atomic::with_dir_lock;
 use crate::common::paths::playbook_root_from;
 use crate::init::run::{StepReport, StepStatus};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const STEP_NAME: &str = "memory";
 const OLD_FILE_NAME: &str = "graph.json";
@@ -190,7 +192,27 @@ fn move_memory_root(home: &Path, claude_home: &Path) -> StepReport {
         }
     }
 
-    copy_verify_and_finish(&old_root, &new_root, &sentinel)
+    // The lock lives under new_root, so new_root must exist before it is
+    // acquired: acquiring first would burn the whole retry budget on
+    // `NotFound` on a fresh cross-device migration, where new_root doesn't
+    // exist yet at this point.
+    if !new_root.exists() {
+        if let Err(err) = fs::create_dir_all(&new_root) {
+            return StepReport::failed(
+                STEP_NAME,
+                format!("could not create {}: {err}", new_root.display()),
+            );
+        }
+    }
+
+    let lock_path = new_root.join(NEW_LOCK_NAME);
+    let (acquired, report) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
+        copy_verify_and_finish(&old_root, &new_root, &sentinel)
+    });
+    if acquired {
+        let _ = fs::remove_dir(&lock_path);
+    }
+    report
 }
 
 /// A bare destination means a fresh install, nothing to do; a populated
@@ -391,6 +413,14 @@ fn relative_files_into(
 /// overwriting it, when that destination is already at least as new as the
 /// source.
 fn copy_all(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> io::Result<()> {
+    // Test seam: lets a test observe an in-flight copy (e.g. that the
+    // migration lock is held for its duration) without slowing production
+    // runs, which never set this variable.
+    let test_copy_delay = std::env::var("PLAYBOOK_TEST_COPY_DELAY_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis);
+
     for rel in files {
         let dest = new_root.join(rel);
         if let Some(parent) = dest.parent() {
@@ -406,6 +436,9 @@ fn copy_all(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> io::Result<(
             if dest_mtime >= source_mtime {
                 continue;
             }
+        }
+        if let Some(delay) = test_copy_delay {
+            std::thread::sleep(delay);
         }
         fs::copy(old_root.join(rel), &dest)?;
     }
