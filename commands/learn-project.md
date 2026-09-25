@@ -69,7 +69,7 @@ Then, before collecting:
 
 ## Phase 1: Collect (parallel subagents)
 
-On `--refresh` only, read `$STORE/MEMORY.md` (if it exists) before dispatching: its titles and one-line hooks, not the full fact bodies. Include that index in each collector's prompt so it can flag what's already documented instead of silently re-discovering it, and note anything that looks stale against what it finds. Skip this on a fresh (non-`--refresh`) run: there's rarely anything in the store yet, and this command's job is building it, not consuming it.
+On `--refresh` only, before dispatching, resolve `$CLAUDE_PLUGIN_ROOT/shell/memory-context.sh` (same resolve-then-check-`-f` convention `commands/doctor.md:108-113` uses for `statusline.sh`) and run it with `--repo $REPO`: its facts block (`name: description` lines), not the full fact bodies. If the script produces no output (empty store, or `jq`/`bash` unavailable), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches `$REPO` (or its owner, for `org` scope). Include whichever result you got in each collector's prompt so it can flag what's already documented instead of silently re-discovering it, and note anything that looks stale against what it finds. Note in the report which source produced it: script output, direct graph read, or nothing found. Skip this on a fresh (non-`--refresh`) run: there's rarely anything in the store yet, and this command's job is building it, not consuming it.
 
 Dispatch these collectors in parallel with `subagent_type: playbook:collector`. `collector` pins Haiku, the cost win this phase is built for. Each returns a compact structured summary (tight JSON or markdown) that cites paths/refs, NOT raw command output. Spawn each collector with a stable `name`; the moment it returns its result, call `TaskStop` on it. A spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished collector, so leaving it unstopped keeps it running in the background.
 
@@ -100,7 +100,7 @@ Keep facts atomic: one concept per fact. Drop low-signal or self-evident facts.
 ## Phase 3: Classify, dedupe, plan
 
 - **Scope routing:** default `repo`. Mark `global` only when the fact is org/account-wide and not tied to this repo (company tooling, the Atlassian instance, standards seen across repos). A repo fact that contradicts a global one wins for this repo; note it with a `contradicts` edge.
-- **Dedupe:** read the existing indexes (`$STORE/MEMORY.md` and `~/.config/playbook/memory/MEMORY.md`) and the relevant fact files. If a fact already exists: skip it, unless `--refresh`, in which case update the file or write a successor carrying a `supersedes` edge. Never blind-duplicate.
+- **Dedupe:** resolve `$CLAUDE_PLUGIN_ROOT/shell/memory-context.sh` the same way as Phase 1's priming and run it once with `--repo $REPO`: its facts block already covers both project-scoped and global-scoped facts for this repo (`in_scope` in the script unconditionally includes `.scope == "global"`), so one call replaces both index reads. Load the relevant fact files it names. If the script produces nothing, fall back to reading `~/.config/playbook/memory/memory.graph.json` directly the same way as Phase 1's priming; this fallback is not optional polish here, since a broken dedupe read risks writing a duplicate fact. Note which source produced the result. If a fact already exists: skip it, unless `--refresh`, in which case update the file or write a successor carrying a `supersedes` edge. Never blind-duplicate.
 - **Plan:** show the user a concise table of candidate facts (title · scope · type · new/update/supersede). Ask once: "Write these to memory?" Proceed only on yes; honor a subset selection.
 
 ## Phase 4: Write memory
@@ -117,23 +117,7 @@ Then write each approved fact:
 - Frontmatter: `name`, `description` (one-line when-to-use), `type`, `links:` with bare-basename edges (`supersedes`, `depends_on`, `relates_to`, `contradicts`), and `anchors:` listing the repo-relative code locations the fact describes (`src/auth/`, `src/auth/login.py`, or `src/auth/login.py#authenticate`).
 - Body: the fact, then **Why:** and **How to apply:**. Use absolute dates for anything time-bound (`date +%F`).
 - In the project store, do NOT name the repo in the fact text; it's implicit.
-- Add or refresh the `- [Title](file.md): one-line hook` line in the right `MEMORY.md` (`$STORE/MEMORY.md` for a project fact, `~/.config/playbook/memory/MEMORY.md` for a global one). Mark superseded index entries `(superseded)`.
 - Write a `project-overview` fact as the entry point, linked via `relates_to` to the main topic facts.
-
-**Locked index write (MUST).** Two `cc` sessions in the same repo, or two collector clusters in this same run, can touch the same `MEMORY.md` at once; a plain check-then-append or check-then-edit can silently drop or overwrite the other's line. Wrap the whole read-modify-write, append or in-place edit alike, in the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, make the edit regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
-
-```bash
-MEMORY_MD="<the MEMORY.md path resolved above>"
-LOCK="$MEMORY_MD.lock"
-ACQUIRED=0
-for _ in $(seq 1 20); do
-  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
-  sleep 0.05
-done
-# Inside the lock: append the new index line, or edit an existing one in
-# place (mark it (superseded), or refresh its one-line hook).
-[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
-```
 
 ## Phase 4.5: Rebuild the navigation graph
 
@@ -158,14 +142,14 @@ These split collection from the write decision, so a run can happen unattended (
 1. Run Phases 0-2 as normal to produce candidate facts.
 2. Skip Phase 3's confirmation and Phase 4's live writes. Create `$STORE/staging/`, then write each candidate to `$STORE/staging/<kebab>.md` in the normal fact format, plus two extra frontmatter fields: `status: pending` and `staged: <date +%F>`, a `scope:` (`repo` | `global`), and, when it would update an existing fact, a `supersedes:` note.
 3. Write or refresh `$STORE/staging/STAGED.md` with one `- [Title](file.md): one-line hook` line per candidate.
-4. Do NOT touch the live `MEMORY.md` or `memory.graph.json`.
+4. Do NOT touch the live `memory.graph.json`.
 5. Report the count staged, the staging path, and: "Review with `/playbook:learn-project --from-staged`."
 
 **`--from-staged`** (review and promote):
 
 1. Skip Phases 0-2. Read every candidate in `$STORE/staging/`.
 2. Run Phase 3 against them: show the candidate table, dedupe against the live stores, and ask once "Write these to memory?" (honor a subset).
-3. For approved candidates, run Phase 4 (write to the live store, dropping the `status`/`staged` staging fields; apply `supersedes`/updates; refresh `MEMORY.md`) and Phase 4.5 (rebuild `memory.graph.json`).
+3. For approved candidates, run Phase 4 (write to the live store, dropping the `status`/`staged` staging fields; apply `supersedes`/updates) and Phase 4.5 (rebuild `memory.graph.json`).
 4. Remove promoted candidates from staging. Leave any the user skipped; delete any the user rejects.
 5. Report as in Phase 5.
 
@@ -175,7 +159,6 @@ One tight summary:
 
 - Facts written / updated / superseded, per cluster and per store.
 - Sources used, and **sources skipped with the reason** (e.g. "Confluence: no MCP and acli absent").
-- The path to each store's `MEMORY.md`.
 - The `memory.graph.json` path, node and edge counts, and any dangling anchors or edges flagged during the build.
 
 ## Teardown (MUST run, even on failure or abort)
