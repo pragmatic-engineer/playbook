@@ -55,6 +55,34 @@ fn run_hook(name: &str, home: &Path, stdin: &str) -> (String, i32) {
     )
 }
 
+/// Like `run_hook`, but also captures stderr instead of discarding it.
+/// Used by tests asserting a failure is surfaced there, not swallowed.
+fn run_hook_capturing_stderr(name: &str, home: &Path, stdin: &str) -> (String, String, i32) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["hook", name])
+        .env("HOME", home)
+        .env_remove("HOOK_INPUT")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("playbook binary should spawn");
+    child
+        .stdin
+        .take()
+        .expect("child stdin should be piped")
+        .write_all(stdin.as_bytes())
+        .expect("writing hook input should succeed");
+    let output = child.wait_with_output().expect("child process should exit");
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf8");
+    (
+        stdout.trim_end_matches('\n').to_string(),
+        stderr,
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 /// `$HOME/.config/playbook/runtime/<session_id>`, matching how the hooks
 /// derive their per-session state directory.
 fn session_dir_for(home: &Path, session_id: &str) -> PathBuf {
@@ -852,6 +880,70 @@ mod memory_capture {
         assert_eq!(
             fs::read_to_string(mem_dir.join("memory.graph.json")).unwrap(),
             "{}"
+        );
+    }
+
+    /// Whether this filesystem/user enforces Unix permission bits at all, so
+    /// a test run as root (which bypasses them) degrades to a skip instead
+    /// of a false failure. Mirrors `init_memory_migrate.rs`'s own probe.
+    #[cfg(unix)]
+    fn permission_checks_are_enforced(dir: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        let probe = dir.join(".perm-probe");
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o555)).unwrap();
+        let blocked = fs::write(&probe, "x").is_err();
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = fs::remove_file(&probe);
+        blocked
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_hook_surfaces_a_failed_migration_on_stderr_not_stdout() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Arrange: the marker so `run()` reaches its `migrate_memory` call,
+        // plus a legacy memory tree with a subdirectory the migration cannot
+        // enumerate, and a pre-existing new root so the move takes the
+        // per-file copy path instead of a plain rename.
+        let home = scratch_home("mc-migrate-fails");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("capture-due"), "").unwrap();
+
+        let legacy_mem_dir = home.join(".claude").join("memory");
+        fs::create_dir_all(&legacy_mem_dir).unwrap();
+        fs::write(legacy_mem_dir.join("global-fact.md"), "global fact content").unwrap();
+        let locked_dir = legacy_mem_dir.join("no-access");
+        fs::create_dir_all(&locked_dir).unwrap();
+        fs::write(locked_dir.join("secret.md"), "secret content").unwrap();
+        fs::create_dir_all(memory_dir_for(&home)).unwrap();
+
+        if !permission_checks_are_enforced(&locked_dir) {
+            eprintln!(
+                "skipping stop_hook_surfaces_a_failed_migration_on_stderr_not_stdout: \
+                 this filesystem/user does not enforce permission bits (likely running as root)"
+            );
+            return;
+        }
+        fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o000)).unwrap();
+        let _guard = RestorePerms {
+            path: locked_dir.clone(),
+            mode: 0o755,
+        };
+
+        // Act
+        let (stdout, stderr, code) = run_hook_capturing_stderr("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        assert!(
+            stderr.contains("memory-migrate:"),
+            "stderr should surface the migration failure: {stderr}"
+        );
+        assert!(
+            !stdout.contains("memory-migrate:"),
+            "the failure detail must not leak onto stdout: {stdout}"
         );
     }
 

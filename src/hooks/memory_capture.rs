@@ -38,6 +38,7 @@ use crate::cc::{logical_cwd, project_slug};
 use crate::common::paths::memory_dir;
 use crate::common::{emit_block, home_dir, session_dir, Payload};
 use crate::hooks::memory_signals;
+use crate::init::run::StepStatus;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
@@ -98,7 +99,10 @@ pub fn run(payload: &Payload) {
     // Must run before the mtime comparison below: it's what puts
     // memory.graph.json at the location that comparison reads.
     let home = home_dir();
-    let _ = crate::init::memory_migrate::migrate_memory(&home, &home.join(".claude"));
+    let migration = crate::init::memory_migrate::migrate_memory(&home, &home.join(".claude"));
+    if migration.status == StepStatus::Failed {
+        eprintln!("memory-migrate: {}", migration.detail);
+    }
 
     let mem_dir = memory_dir();
     let _ = fs::create_dir_all(&mem_dir);
