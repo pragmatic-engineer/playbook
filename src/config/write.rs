@@ -50,7 +50,8 @@ pub fn set(
     let parent = path
         .parent()
         .expect("a tier path always has a parent directory");
-    fs::create_dir_all(parent).map_err(|_| ConfigError::DirectoryUnwritable(parent.to_path_buf()))?;
+    fs::create_dir_all(parent)
+        .map_err(|_| ConfigError::DirectoryUnwritable(parent.to_path_buf()))?;
 
     let lock_path = PathBuf::from(format!("{}.lock", path.display()));
     let (acquired, result) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
@@ -66,7 +67,8 @@ pub fn set(
 /// `keys::default_value(key)`, or an out-of-enum string, before any file is
 /// touched.
 fn validate_key_and_value(key: &str, value: &Value) -> Result<(), ConfigError> {
-    let default = keys::default_value(key).ok_or_else(|| ConfigError::UnknownKey(key.to_string()))?;
+    let default =
+        keys::default_value(key).ok_or_else(|| ConfigError::UnknownKey(key.to_string()))?;
     let expected = match default {
         Value::Bool(_) => "boolean",
         Value::String(_) => "string",
@@ -149,7 +151,8 @@ fn merge_and_write(path: &Path, key: &str, value: Value) -> Result<(), ConfigErr
 
     let serialized =
         serde_json::to_string_pretty(&root).expect("a merged config object always serializes");
-    write_atomically(path, &serialized).map_err(|_| ConfigError::DirectoryUnwritable(parent.to_path_buf()))
+    write_atomically(path, &serialized)
+        .map_err(|_| ConfigError::DirectoryUnwritable(parent.to_path_buf()))
 }
 
 /// Set `key`'s dotted path inside `root`, creating any missing intermediate

@@ -164,7 +164,10 @@ fn repo_tier_with_no_repo_slug_is_rejected_and_writes_nothing() {
     let result = set(Tier::Repo, "autoReview.enabled", json!(true), &home, None);
 
     // Assert
-    assert!(matches!(result.unwrap_err(), ConfigError::MissingRepoContext));
+    assert!(matches!(
+        result.unwrap_err(),
+        ConfigError::MissingRepoContext
+    ));
 
     let _ = fs::remove_dir_all(&home);
 }
