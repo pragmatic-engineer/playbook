@@ -103,23 +103,18 @@ fn validate_key_and_value(key: &str, value: &Value) -> Result<(), ConfigError> {
 fn tier_path(tier: Tier, home: &Path, repo_slug: Option<&str>) -> Result<PathBuf, ConfigError> {
     let root = crate::common::paths::playbook_root_from(home);
     match tier {
-        Tier::Global => Ok(root.join("config.json")),
+        Tier::Global => Ok(super::global_config_path(&root)),
         Tier::Org => {
             let (owner, _) = repo_slug
                 .and_then(|slug| slug.split_once('/'))
                 .ok_or(ConfigError::MissingRepoContext)?;
-            Ok(root.join("orgs").join(owner).join("config.json"))
+            Ok(super::org_config_path(&root, owner))
         }
         Tier::Repo => {
             let (owner, repo) = repo_slug
                 .and_then(|slug| slug.split_once('/'))
                 .ok_or(ConfigError::MissingRepoContext)?;
-            Ok(root
-                .join("repos")
-                .join(owner)
-                .join(repo)
-                .join(".config")
-                .join("config.json"))
+            Ok(super::repo_config_path(&root, owner, repo))
         }
     }
 }

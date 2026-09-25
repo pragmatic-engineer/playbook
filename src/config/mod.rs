@@ -110,30 +110,45 @@ pub fn resolve(
     let root = crate::common::paths::playbook_root_from(home);
 
     if let Some((owner, repo)) = repo_slug.and_then(|slug| slug.split_once('/')) {
-        let repo_path = root
-            .join("repos")
-            .join(owner)
-            .join(repo)
-            .join(".config")
-            .join("config.json");
-        if let Some(value) = lookup_tier(&repo_path, key)? {
+        if let Some(value) = lookup_tier(&repo_config_path(&root, owner, repo), key)? {
             return Ok((value, Source::Repo));
         }
 
-        let org_path = root.join("orgs").join(owner).join("config.json");
-        if let Some(value) = lookup_tier(&org_path, key)? {
+        if let Some(value) = lookup_tier(&org_config_path(&root, owner), key)? {
             return Ok((value, Source::Org));
         }
     }
 
-    let global_path = root.join("config.json");
-    if let Some(value) = lookup_tier(&global_path, key)? {
+    if let Some(value) = lookup_tier(&global_config_path(&root), key)? {
         return Ok((value, Source::Global));
     }
 
     keys::default_value(key)
         .map(|value| (value, Source::Default))
         .ok_or_else(|| ConfigError::UnknownKey(key.to_string()))
+}
+
+/// The global tier's config file, directly under `root`. Shared by `resolve`
+/// and `write::tier_path` so the two never drift on where this file lives.
+pub(crate) fn global_config_path(root: &Path) -> PathBuf {
+    root.join("config.json")
+}
+
+/// The org tier's config file for `owner`. Shared by `resolve` and
+/// `write::tier_path` so the two never drift on where this file lives.
+pub(crate) fn org_config_path(root: &Path, owner: &str) -> PathBuf {
+    root.join("orgs").join(owner).join("config.json")
+}
+
+/// The repo tier's config file for `owner`/`repo`, at the `RepoScope::Config`
+/// slot `src/common/paths.rs` reserves. Shared by `resolve` and
+/// `write::tier_path` so the two never drift on where this file lives.
+pub(crate) fn repo_config_path(root: &Path, owner: &str, repo: &str) -> PathBuf {
+    root.join("repos")
+        .join(owner)
+        .join(repo)
+        .join(".config")
+        .join("config.json")
 }
 
 /// Read one tier file and look up `key` in it. `Ok(None)` means "no
