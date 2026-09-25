@@ -196,7 +196,11 @@ fn main() {
             match sub {
                 ConfigCommand::Get { key } => match config::resolve(&key, &home, repo_slug) {
                     Ok((value, source)) => {
-                        println!("{key}: {value} (source: {})", source_label(source));
+                        println!(
+                            "{key}: {} (source: {})",
+                            format_config_value(&value),
+                            source_label(source)
+                        );
                     }
                     Err(err) => {
                         eprintln!("config get: {err}");
@@ -239,7 +243,11 @@ fn main() {
                     for &key in config::keys::KNOWN_KEYS {
                         match config::resolve(key, &home, repo_slug) {
                             Ok((value, source)) => {
-                                println!("{key}: {value} (source: {})", source_label(source));
+                                println!(
+                                    "{key}: {} (source: {})",
+                                    format_config_value(&value),
+                                    source_label(source)
+                                );
                             }
                             Err(err) => {
                                 eprintln!("config list: {err}");
@@ -295,6 +303,16 @@ fn source_label(source: config::Source) -> &'static str {
         config::Source::Org => "org",
         config::Source::Global => "global",
         config::Source::Default => "default",
+    }
+}
+
+/// Render a resolved config value the way a shell script or a human reading
+/// `playbook config get`/`list` output expects: a bare `deep`, not the
+/// JSON-quoted `"deep"` a raw `Value`'s `Display` impl would print.
+fn format_config_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }
 

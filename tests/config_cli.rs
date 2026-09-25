@@ -178,6 +178,27 @@ fn set_with_global_flag_writes_the_global_tier_file() {
 }
 
 #[test]
+fn get_prints_a_string_value_unquoted_not_as_raw_json() {
+    // Arrange: prose consumers (create-pull-request.md's Step 9, doctor.md's
+    // effective-config line) match this output as a bare `deep`/`quick`
+    // token, not a JSON-quoted `"deep"`.
+    let repo = seeded_repo("get-string-unquoted");
+    let home = scratch_dir("get-string-unquoted-home");
+
+    // Act
+    let out = run_playbook(&repo, &home, &["config", "get", "autoReview.type"]);
+
+    // Assert
+    let stdout = stdout_of(&out);
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+    assert!(
+        stdout.contains("autoReview.type: deep (source: default)"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("\"deep\""), "{stdout}");
+}
+
+#[test]
 fn set_with_both_org_and_global_flags_exits_non_zero_and_writes_nothing() {
     // Arrange
     let repo = seeded_repo("set-org-and-global");
