@@ -83,6 +83,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: GateCommand,
     },
+    /// Playbook's own tiered (repo < org < global < default) config
+    /// subcommands, backing `src/config/`.
+    Config {
+        #[command(subcommand)]
+        sub: ConfigCommand,
+    },
     /// Print the resolved absolute path to one of this repo's
     /// worktree-scoped storage directories.
     Path {
@@ -213,6 +219,31 @@ pub enum GateCommand {
         /// exits with a different code (2) than the plan requires here.
         phases: Vec<String>,
     },
+}
+
+/// `playbook config` subcommands, backing `src/config/`.
+#[derive(Subcommand, Debug)]
+pub enum ConfigCommand {
+    /// Print a key's effective value and which tier supplied it.
+    Get {
+        /// Dotted config key, e.g. `autoReview.enabled`.
+        key: String,
+    },
+    /// Write a key's value into one tier's config file.
+    Set {
+        /// Dotted config key, e.g. `autoReview.enabled`.
+        key: String,
+        /// Raw value to parse into the key's expected type before writing.
+        value: String,
+        /// Write into the org tier instead of the default repo tier.
+        #[arg(long)]
+        org: bool,
+        /// Write into the global tier instead of the default repo tier.
+        #[arg(long)]
+        global: bool,
+    },
+    /// Print every known key's effective value and source tier.
+    List,
 }
 
 /// `playbook doctor` subcommands, backing `src/doctor/`.
