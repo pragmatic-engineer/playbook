@@ -1,5 +1,5 @@
 ---
-description: Check the seven playbook layers and print a status table with a remediation hint for each miss.
+description: Check the eight playbook layers and print a status table with a remediation hint for each miss.
 allowed-tools: Bash, Read
 argument-hint: ""
 model: sonnet
@@ -8,7 +8,7 @@ effort: low
 
 # Doctor
 
-Run all seven checks below. Do not stop early if one fails. Then print a
+Run all eight checks below. Do not stop early if one fails. Then print a
 status table with one row per layer.
 
 ## Layer 1: Plugin enabled
@@ -310,6 +310,30 @@ Report:
   manages the entries it recognises, so delete the entry from
   `~/.claude/settings.json` by hand, or fix the path if the file moved.
 
+## Layer 8: jq installed
+
+Layers 2, 5, 6, and 7 all shell out to `jq` to read `settings.json` and plugin
+manifests, but until now nothing checked that `jq` itself is on PATH. A host
+missing it does not fail loudly there, each of those layers instead reads the
+command-not-found case as an empty result and reports whatever an empty
+result means for that layer, which quietly hides the real problem. This layer
+checks for `jq` directly so a missing dependency is reported as itself.
+
+```bash
+if command -v jq >/dev/null 2>&1; then
+  echo "PRESENT $(command -v jq)"
+else
+  echo "MISSING"
+fi
+```
+
+Report:
+
+- `PRESENT <path>` → PASS, say the resolved path.
+- `MISSING` → **FAIL.** Remediation: install `jq` with the OS's package
+  manager, for example `brew install jq` on macOS or `apt install jq` on
+  Debian/Ubuntu.
+
 ## Output format
 
 Print a table with one row per layer. Use a clear status marker and a brief
@@ -341,3 +365,7 @@ tool for what failed, rather than always pointing at `/playbook:setup`:
   not `playbook init`'s job: the entry is a stray one, not a managed one.
   Tell the user to remove or fix the named entry in `~/.claude/settings.json`
   directly.
+- Layer 8 → `/playbook:setup` cannot install `jq` either, for the same reason
+  it can't fix Layer 6 or Layer 7. Give the OS package-manager install
+  command directly, for example `brew install jq` on macOS or `apt install jq`
+  on Debian/Ubuntu.
