@@ -197,7 +197,7 @@ fn move_memory_root(home: &Path, claude_home: &Path) -> StepReport {
     // `NotFound` on a fresh cross-device migration, where new_root doesn't
     // exist yet at this point.
     if !new_root.exists() {
-        if let Err(err) = fs::create_dir_all(&new_root) {
+        if let Err(err) = create_dir_all_0700(&new_root) {
             return StepReport::failed(
                 STEP_NAME,
                 format!("could not create {}: {err}", new_root.display()),
@@ -239,11 +239,29 @@ fn finish_when_source_absent(new_root: &Path, sentinel: &Path) -> StepReport {
     }
 }
 
+/// Creates `path` and any missing ancestors with mode 0700 on Unix, since
+/// every directory this migration creates holds copied memory content and
+/// should not be readable by another account on the same machine (mirrors
+/// `session.rs`'s `session_dir_in`). The mode is unix-only, gated rather than
+/// dropped, since on Windows the directory inherits the parent ACL instead.
+/// Like `create_dir_all`, a no-op on a path that already exists as a
+/// directory, mode included.
+fn create_dir_all_0700(path: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)
+}
+
 /// `Some` is a final report (rename succeeded or failed outright); `None`
 /// means fall through to the verified copy after a cross-device error.
 fn try_rename(old_root: &Path, new_root: &Path, sentinel: &Path) -> Option<StepReport> {
     if let Some(parent) = new_root.parent() {
-        if let Err(err) = fs::create_dir_all(parent) {
+        if let Err(err) = create_dir_all_0700(parent) {
             return Some(StepReport::failed(
                 STEP_NAME,
                 format!("could not create {}: {err}", parent.display()),
@@ -279,7 +297,7 @@ fn try_rename(old_root: &Path, new_root: &Path, sentinel: &Path) -> Option<StepR
 /// The resume path for a destination a prior interrupted run already
 /// touched, and the cross-device fallback for a fresh migration.
 fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> StepReport {
-    if let Err(err) = fs::create_dir_all(new_root) {
+    if let Err(err) = create_dir_all_0700(new_root) {
         return StepReport::failed(
             STEP_NAME,
             format!("could not create {}: {err}", new_root.display()),
@@ -424,7 +442,7 @@ fn copy_all(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> io::Result<(
     for rel in files {
         let dest = new_root.join(rel);
         if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)?;
+            create_dir_all_0700(parent)?;
         }
         if dest.exists() {
             let source_mtime = fs::metadata(old_root.join(rel))?.modified()?;
@@ -467,7 +485,7 @@ fn all_copied_and_verified(
 
 fn write_sentinel(sentinel: &Path) -> io::Result<()> {
     if let Some(parent) = sentinel.parent() {
-        fs::create_dir_all(parent)?;
+        create_dir_all_0700(parent)?;
     }
     fs::write(sentinel, "migrated\n")
 }

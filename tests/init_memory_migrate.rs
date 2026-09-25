@@ -1022,3 +1022,111 @@ fn new_root_self_heal_fires_even_when_the_copy_step_itself_fails() {
 
     let _ = fs::remove_dir_all(&home);
 }
+
+// `mode_t` is 16-bit on Darwin and 32-bit on Linux/glibc, so the umask FFI
+// binding below is cfg-gated per target rather than hardcoded to one width.
+#[cfg(target_os = "macos")]
+type RawMode = u16;
+#[cfg(not(target_os = "macos"))]
+type RawMode = u32;
+#[cfg(unix)]
+extern "C" {
+    fn umask(mask: RawMode) -> RawMode;
+}
+
+/// Restores the process umask on drop, so a panicking assertion mid-test
+/// still leaves the umask as this process found it rather than bleeding a
+/// changed value into whichever test the shared binary schedules next.
+#[cfg(unix)]
+struct UmaskGuard(RawMode);
+
+#[cfg(unix)]
+impl Drop for UmaskGuard {
+    fn drop(&mut self) {
+        unsafe {
+            umask(self.0);
+        }
+    }
+}
+
+/// Pins the process umask to `new_mask`, returning a guard that restores the
+/// original value on drop. The umask is whole-process state, not
+/// thread-local, so every caller must also hold `lock_env()` for the guard's
+/// full lifetime.
+#[cfg(unix)]
+fn pin_umask(new_mask: RawMode) -> UmaskGuard {
+    let original = unsafe { umask(new_mask) };
+    UmaskGuard(original)
+}
+
+#[cfg(unix)]
+#[test]
+fn rename_fast_path_creates_new_root_parent_with_mode_0700_under_a_permissive_umask() {
+    // Arrange: `new_root`'s parent chain (`<home>/.config/playbook`) does not
+    // exist yet, so `try_rename`'s own `create_dir_all` call is the only
+    // directory creation in this path; `fs::rename` itself, confirmed
+    // empirically, never changes the mode of the directory it moves, so
+    // `new_root` ends up with whatever mode `old_root` already had rather
+    // than anything this migration's own directory-creation code controls.
+    // The freshly created parent chain is therefore the meaningful mode to
+    // assert on for this path, not `new_root` itself.
+    let _guard = lock_env();
+    let _umask_guard = pin_umask(0o022 as RawMode);
+    let home = scratch_home("rename-mode-0700");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "fact content").unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
+    let new_root_parent = new_root_of(&home);
+    let new_root_parent = new_root_parent.parent().unwrap();
+    let mode = fs::metadata(new_root_parent).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o700,
+        "the freshly created playbook root should be mode 0700, got {mode:o}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_fallback_path_creates_nested_directories_with_mode_0700_under_a_permissive_umask() {
+    // Arrange: a partially populated destination so `new_root` already
+    // exists, skipping `try_rename`'s `!new_root.exists()` guard and forcing
+    // `copy_verify_and_finish`. A nested subdirectory the source holds but
+    // the destination does not yet have forces `copy_all` to create it fresh.
+    let _guard = lock_env();
+    let _umask_guard = pin_umask(0o022 as RawMode);
+    let home = scratch_home("copy-mode-0700");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(old_root.join("owner-repo-one")).unwrap();
+    fs::write(
+        old_root.join("owner-repo-one").join("fact-a.md"),
+        "fact a content",
+    )
+    .unwrap();
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("placeholder.md"), "placeholder content").unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
+    let nested = new_root.join("owner-repo-one");
+    let mode = fs::metadata(&nested).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o700,
+        "the directory copy_all creates for a nested file should be mode 0700, got {mode:o}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
