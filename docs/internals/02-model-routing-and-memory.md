@@ -65,13 +65,20 @@ Edge values are bare basenames with no path and no extension. For `feedback` and
 
 ### Index
 
-Each store has a `MEMORY.md` at its root. One line per fact:
+`memory.graph.json` is the index. Each fact becomes one node:
 
-```
-- [Title](file.md): one-line hook
+```json
+{
+  "id": "acme/api/auth-flow",
+  "file": "acme/api/auth-flow.md",
+  "scope": "project",
+  "type": "project",
+  "name": "Auth Flow",
+  "description": "How tokens are issued and validated in this service"
+}
 ```
 
-The index is for navigation only. Don't duplicate edge declarations here.
+Nodes carry names and descriptions for navigation; edge declarations live only in each fact's frontmatter, not duplicated on the node.
 
 ### Edge types
 

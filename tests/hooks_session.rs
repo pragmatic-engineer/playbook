@@ -184,13 +184,13 @@ fn session_init_injects_the_graph_backed_slice() {
     );
 }
 
-/// ADR 0008 WU-1: the graph-backed slice has no cap today, unlike the legacy
-/// fallback (`read_legacy_memory`, capped at 16000 chars). A repo-slice with
-/// enough facts to exceed that cap must still be truncated: an early fact
-/// (guaranteed within the first 16000 chars) survives, a fact deliberately
-/// placed past that boundary does not.
+/// ADR 0008 WU-1: the graph-backed slice has no cap today, unlike the native
+/// fallback (`read_graph_slice_fallback`, capped at 16000 chars). A
+/// repo-slice with enough facts to exceed that cap must still be truncated:
+/// an early fact (guaranteed within the first 16000 chars) survives, a fact
+/// deliberately placed past that boundary does not.
 #[test]
-fn session_init_caps_the_graph_backed_slice_like_the_legacy_fallback() {
+fn session_init_caps_the_graph_backed_slice_like_the_native_fallback() {
     // Arrange: ~120 facts, each with a ~150-char description, so the
     // rendered "Facts:" section alone exceeds 16000 chars well before the
     // last node. Zero-padded names sort in the same order memory-context.sh
@@ -241,41 +241,268 @@ fn session_init_caps_the_graph_backed_slice_like_the_legacy_fallback() {
 }
 
 #[test]
-fn session_init_falls_back_to_the_legacy_memory_index() {
-    // Arrange: a fake HOME with the legacy MEMORY.md index but no memory.graph.json.
-    let work = scratch_dir("legacy-index");
+fn session_init_falls_back_to_a_native_graph_read() {
+    // Arrange: a fake HOME with memory.graph.json but no CLAUDE_PLUGIN_ROOT,
+    // so the fallback branch parses the graph directly instead of shelling
+    // out to shell/memory-context.sh.
+    let work = scratch_dir("native-fallback");
     let repo_slug = "acme/widget";
     let repo_dir = work.join("repo");
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
-    let home = work.join("home-index");
-    let legacy_dir = home
-        .join(".config")
-        .join("playbook")
-        .join("memory")
-        .join(repo_slug);
-    fs::create_dir_all(&legacy_dir).unwrap();
+    let home = work.join("home-native");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
     fs::write(
-        legacy_dir.join("MEMORY.md"),
-        "- legacy-fact-two: an old style index entry\n",
+        memory_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"native-fact-one","description":"parsed straight from the graph file, no jq involved","project":"{repo_slug}"}}],"edges":[]}}"#
+        ),
     )
     .unwrap();
 
-    // Act
+    // Act: no CLAUDE_PLUGIN_ROOT, so mem_script is None and the fallback runs.
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("native-fact-one"),
+        "additionalContext should carry the fact name: {context}"
+    );
+    assert!(
+        context.contains("parsed straight from the graph file, no jq involved"),
+        "additionalContext should carry the fact description: {context}"
+    );
+}
+
+/// The far more common production trigger for the fallback than an unset
+/// `CLAUDE_PLUGIN_ROOT`: the script is present and runs, but exits 0 with
+/// empty stdout because `jq` is not on PATH
+/// (`command -v jq >/dev/null 2>&1 || exit 0`, shell/memory-context.sh:53).
+/// That empty output must still fall through to the native fallback rather
+/// than short-circuiting on "the script ran, so trust it."
+#[test]
+fn session_init_falls_back_to_native_graph_read_when_script_produces_no_output() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Arrange: a scratch plugin root whose shell/memory-context.sh stands in
+    // for the real script's jq-missing exit.
+    let work = scratch_dir("script-empty-stdout");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let fake_plugin_root = work.join("fake-plugin-root");
+    let script_dir = fake_plugin_root.join("shell");
+    fs::create_dir_all(&script_dir).unwrap();
+    let script_path = script_dir.join("memory-context.sh");
+    fs::write(&script_path, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let home = work.join("home-script-empty-stdout");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"fallback-through-empty-script","description":"surfaced by the native fallback when the script has nothing to say","project":"{repo_slug}"}}],"edges":[]}}"#
+        ),
+    )
+    .unwrap();
+
+    // Act: the script exists and runs, but produces no stdout.
     let outcome = run_hook(
         "session-init",
         &repo_dir,
         &home,
         "{}",
-        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
+        &[("CLAUDE_PLUGIN_ROOT", fake_plugin_root.to_str().unwrap())],
     );
     let context = additional_context(&outcome.stdout);
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("legacy-fact-two"),
-        "additionalContext should carry the index line: {context}"
+        context.contains("fallback-through-empty-script"),
+        "an empty-stdout script run should still fall through to the native fallback: {context}"
+    );
+}
+
+/// The native fallback shares `MEMORY_BODY_CAP_CHARS` with the graph-backed
+/// slice, so it truncates the same way: an early fact survives, a fact
+/// placed past the boundary does not. Its rendering has no "Facts:\n"
+/// preamble, unlike the jq-backed slice, so the boundary math is computed
+/// against its own "name: description" lines rather than the jq path's.
+#[test]
+fn session_init_caps_the_native_graph_fallback() {
+    // Arrange: 120 facts, each rendering as "fact-NNN: desc-NNN-<140 x's>"
+    // (159 chars) joined by newlines, ~19080 chars total: comfortably past
+    // the 16000-char cap well before the last node. Zero-padded names sort
+    // in the same ascending order the fallback renders them.
+    let work = scratch_dir("native-fallback-cap");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-native-cap");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    let padding = "x".repeat(140);
+    let nodes: Vec<String> = (1..=120)
+        .map(|n| {
+            format!(
+                r#"{{"id":"{repo_slug}/f{n:03}","file":"{repo_slug}/f{n:03}.md","scope":"project","type":"project","name":"fact-{n:03}","description":"desc-{n:03}-{padding}","project":"{repo_slug}"}}"#
+            )
+        })
+        .collect();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        format!(r#"{{"nodes":[{}],"edges":[]}}"#, nodes.join(",")),
+    )
+    .unwrap();
+
+    // Act: no CLAUDE_PLUGIN_ROOT, so the native fallback runs.
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        context.contains("fact-001"),
+        "an early fact, well within the cap, should survive: {context}"
+    );
+    assert!(
+        !context.contains("fact-120"),
+        "a fact placed past the 16000-char cap should be truncated away: {context}"
+    );
+}
+
+#[test]
+fn session_init_native_fallback_absent_graph_emits_no_memory_block() {
+    // Arrange: no CLAUDE_PLUGIN_ROOT and no memory.graph.json at all.
+    let work = scratch_dir("native-fallback-absent");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+    let home = scratch_dir("native-fallback-absent-home");
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
+        "stdout should be valid JSON: {}",
+        outcome.stdout
+    );
+    assert!(
+        !context.contains("Project memory for this repo"),
+        "no memory block should be emitted when memory.graph.json is absent: {context}"
+    );
+}
+
+#[test]
+fn session_init_native_fallback_malformed_graph_emits_no_memory_block() {
+    // Arrange: a memory.graph.json that is not valid JSON.
+    let work = scratch_dir("native-fallback-malformed");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-malformed");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(memory_dir.join("memory.graph.json"), "{not valid json").unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
+        "stdout should be valid JSON: {}",
+        outcome.stdout
+    );
+    assert!(
+        !context.contains("Project memory for this repo"),
+        "no memory block should be emitted for a malformed graph file: {context}"
+    );
+}
+
+/// Distinct from the invalid-JSON scenario above: the file parses fine but
+/// has no `nodes` key at all, so the fallback's `.get("nodes")` lookup
+/// itself returns `None` rather than `serde_json::from_str` failing.
+#[test]
+fn session_init_native_fallback_no_nodes_array_emits_no_memory_block() {
+    // Arrange: valid JSON with no `nodes` key.
+    let work = scratch_dir("native-fallback-no-nodes");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-no-nodes");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(memory_dir.join("memory.graph.json"), r#"{"edges":[]}"#).unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
+        "stdout should be valid JSON: {}",
+        outcome.stdout
+    );
+    assert!(
+        !context.contains("Project memory for this repo"),
+        "no memory block should be emitted when the graph file has no nodes array: {context}"
+    );
+}
+
+#[test]
+fn session_init_native_fallback_ignores_a_code_anchor_only_graph() {
+    // Arrange: the graph has one code-anchor node (no `name` field, matching
+    // how rebuild_memory_graph.rs serializes one), rejected by the scope
+    // filter before the `name` check ever runs since its scope is "code",
+    // plus a second node that IS in scope (`scope: "project"`, matching this
+    // repo) but also has no `name`. That second node is the only one that
+    // actually isolates the `name`-presence filter: a graph with just the
+    // code-anchor node would stay green even if the `name` filter itself
+    // were broken, since the scope filter alone already excludes it.
+    let work = scratch_dir("native-fallback-code-anchor");
+    let repo_slug = "acme/widget";
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
+
+    let home = work.join("home-code-anchor");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(
+        memory_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"code:{repo_slug}/src/lib.rs","file":"src/lib.rs","scope":"code","type":"code","project":"{repo_slug}"}},{{"id":"{repo_slug}/no-name-fact","file":"{repo_slug}/no-name-fact.md","scope":"project","type":"project","project":"{repo_slug}"}}],"edges":[]}}"#
+        ),
+    )
+    .unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
+    assert!(
+        !context.contains("Project memory for this repo"),
+        "a code-anchor-only graph has no facts, so no memory block should be emitted: {context}"
     );
 }
 
@@ -289,22 +516,19 @@ fn session_init_migrates_legacy_home_memory_root_before_recall() {
     init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
 
     let home = work.join("home-legacy-root");
-    let legacy_dir = home.join(".claude").join("memory").join(repo_slug);
+    let legacy_dir = home.join(".claude").join("memory");
     fs::create_dir_all(&legacy_dir).unwrap();
     fs::write(
-        legacy_dir.join("MEMORY.md"),
-        "- legacy-root-fact: still under the old home tree\n",
+        legacy_dir.join("memory.graph.json"),
+        format!(
+            r#"{{"nodes":[{{"id":"{repo_slug}/legacy-root-fact","file":"{repo_slug}/legacy-root-fact.md","scope":"project","type":"project","name":"legacy-root-fact","description":"still under the old home tree","project":"{repo_slug}"}}],"edges":[]}}"#
+        ),
     )
     .unwrap();
 
-    // Act
-    let outcome = run_hook(
-        "session-init",
-        &repo_dir,
-        &home,
-        "{}",
-        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
-    );
+    // Act: no CLAUDE_PLUGIN_ROOT, so the fact surfaces via the native
+    // fallback reading the migrated graph file, not a shelled-out script.
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
     let context = additional_context(&outcome.stdout);
 
     // Assert
@@ -313,16 +537,15 @@ fn session_init_migrates_legacy_home_memory_root_before_recall() {
         context.contains("legacy-root-fact"),
         "the hook should migrate ~/.claude/memory before reading it, so the fact still surfaces: {context}"
     );
-    let new_index = home
+    let new_graph = home
         .join(".config")
         .join("playbook")
         .join("memory")
-        .join(repo_slug)
-        .join("MEMORY.md");
+        .join("memory.graph.json");
     assert!(
-        new_index.is_file(),
-        "the index should now live at the new location: {}",
-        new_index.display()
+        new_graph.is_file(),
+        "the graph file should now live at the new location: {}",
+        new_graph.display()
     );
     assert!(
         !home.join(".claude").join("memory").exists(),
@@ -470,10 +693,14 @@ fn session_init_surfaces_a_failed_migration_on_stderr_not_stdout() {
 // ---------------------------------------------------------------------
 
 /// A fact marked `pinned: true` in `memory.graph.json` must inject even
-/// though nothing anchors or prompt-matches it, and even with the general
-/// memory-slice machinery entirely inactive (no `CLAUDE_PLUGIN_ROOT`, no
-/// legacy `MEMORY.md`): the pinned/promoted block reads the graph directly
-/// and does not depend on that machinery at all.
+/// though nothing anchors or prompt-matches it, and even with no
+/// `CLAUDE_PLUGIN_ROOT` set: the pinned/promoted block reads the graph
+/// directly and does not depend on the general memory-slice machinery at
+/// all. Asserts on `append_promoted_facts`'s own header and bulleted
+/// rendering, not just the bare fact name: with no `CLAUDE_PLUGIN_ROOT`,
+/// `read_graph_slice_fallback` also renders this fixture's fact on this same
+/// branch, as a plain "name: description" line with no header or bullet, so
+/// the bare name alone would pass even if the promoted block were removed.
 #[test]
 fn session_init_injects_a_pinned_fact_independent_of_general_memory_slice() {
     // Arrange
@@ -493,26 +720,29 @@ fn session_init_injects_a_pinned_fact_independent_of_general_memory_slice() {
     )
     .unwrap();
 
-    // Act: no CLAUDE_PLUGIN_ROOT, so the general memory-slice machinery
-    // never fires and cannot be the reason this fact shows up.
+    // Act: no CLAUDE_PLUGIN_ROOT, so the general memory slice runs through
+    // its native fallback rather than the jq-backed script.
     let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
     let context = additional_context(&outcome.stdout);
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("pinned-fact-name"),
-        "a pinned fact should inject with no general memory slice active: {context}"
+        context.contains("Facts pinned or frequently used in this repo:"),
+        "additionalContext should carry the promoted-facts block header: {context}"
     );
     assert!(
-        context.contains("Pinned fact description text."),
-        "the pinned fact's description should be included: {context}"
+        context.contains("- pinned-fact-name: Pinned fact description text."),
+        "the promoted block's own bulleted line should carry the pinned fact; the native \
+        fallback's plain \"name: description\" rendering never produces this line: {context}"
     );
 }
 
 /// A fact marked `promoted: true` in `memory.signals.json` injects the same
-/// way a pinned fact does, with the general memory-slice machinery entirely
-/// inactive.
+/// way a pinned fact does. As above, the assertion checks the promoted
+/// block's own header and bulleted rendering rather than the bare fact name,
+/// since the native fallback renders the same fact on this branch too, just
+/// without that header or bullet.
 #[test]
 fn session_init_injects_a_promoted_fact_independent_of_general_memory_slice() {
     // Arrange
@@ -544,12 +774,13 @@ fn session_init_injects_a_promoted_fact_independent_of_general_memory_slice() {
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("promoted-fact-name"),
-        "a promoted fact should inject with no general memory slice active: {context}"
+        context.contains("Facts pinned or frequently used in this repo:"),
+        "additionalContext should carry the promoted-facts block header: {context}"
     );
     assert!(
-        context.contains("Promoted fact description text."),
-        "the promoted fact's description should be included: {context}"
+        context.contains("- promoted-fact-name: Promoted fact description text."),
+        "the promoted block's own bulleted line should carry the promoted fact; the native \
+        fallback's plain \"name: description\" rendering never produces this line: {context}"
     );
 }
 
@@ -619,11 +850,18 @@ fn a_global_promoted_fact_injects_regardless_of_repo() {
     let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
     let context = additional_context(&outcome.stdout);
 
-    // Assert
+    // Assert: the promoted block's own header and bulleted line, not just the
+    // bare name, since the native fallback also renders this fact on this
+    // no-CLAUDE_PLUGIN_ROOT branch, just without that header or bullet.
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("global-promoted-fact-name"),
-        "a global-scope promoted fact should inject regardless of repo: {context}"
+        context.contains("Facts pinned or frequently used in this repo:"),
+        "additionalContext should carry the promoted-facts block header: {context}"
+    );
+    assert!(
+        context.contains("- global-promoted-fact-name: Global fact, any repo."),
+        "a global-scope promoted fact should inject via the promoted block's own bulleted \
+        rendering, regardless of repo: {context}"
     );
 }
 
@@ -653,11 +891,18 @@ fn an_org_scoped_promoted_fact_injects_for_a_sibling_repo_under_the_same_owner()
     let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
     let context = additional_context(&outcome.stdout);
 
-    // Assert
+    // Assert: the promoted block's own header and bulleted line, not just the
+    // bare name, since the native fallback also renders this fact on this
+    // no-CLAUDE_PLUGIN_ROOT branch, just without that header or bullet.
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("org-promoted-fact-name"),
-        "an org-scoped promoted fact should inject for any repo under its owner: {context}"
+        context.contains("Facts pinned or frequently used in this repo:"),
+        "additionalContext should carry the promoted-facts block header: {context}"
+    );
+    assert!(
+        context.contains("- org-promoted-fact-name: Shared across every acme repo."),
+        "an org-scoped promoted fact should inject via the promoted block's own bulleted \
+        rendering, for any repo under its owner: {context}"
     );
 }
 

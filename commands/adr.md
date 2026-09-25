@@ -77,24 +77,10 @@ Build understanding before writing. Skipping this produces records that don't su
 
 1. **Read existing records** in `docs/adr/` (if it exists) for precedent and numbering.
 2. **Explore the codebase** with Read/Glob/Grep: modules and services affected by the topic, database schemas and migration history (if relevant), test patterns, configuration and deployment.
-3. **Read memory stores if present** (optional enhancement, not required): if `~/.config/playbook/memory/MEMORY.md` exists, read it for cross-project preferences, corrections, and conventions. If `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` exists (`<owner>/<repo>` derived from `git remote get-url origin`), read it for project-level decisions, conventions, gotchas, and patterns. Load the relevant fact files from each store that is present. Use what you find to inform Considered Alternatives (reference a named pattern where one applies) and to avoid re-proposing something already rejected. If both stores are present: a project fact that contradicts a global one wins for this repo; surface any conflict bearing on the decision rather than silently choosing. If no memory store is present, skip this step silently and proceed on the codebase alone.
+3. **Read memory stores if present** (optional enhancement, not required): resolve `$CLAUDE_PLUGIN_ROOT/shell/memory-context.sh` (same resolve-then-check-`-f` convention `commands/doctor.md:108-113` uses for `statusline.sh`) and, if found, run it with `--repo <owner>/<repo>` (`<owner>/<repo>` derived from `git remote get-url origin`), then load the fact files it names on demand. Use what you find to inform Considered Alternatives (reference a named pattern where one applies) and to avoid re-proposing something already rejected. Surface any `contradicts` edge among the returned facts that bears on the decision, rather than silently choosing one side. If the script produces no output (empty store, or jq/bash unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the Read tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope): a dependency-free shape, since this command is an LLM session and can parse JSON without shelling to jq. Note in the digest which path actually produced the result (script output, direct graph read, or nothing found), so an operator can tell "nothing relevant" apart from "the script couldn't run." If nothing is found by either path, skip this step silently and proceed on the codebase alone.
 4. **Summarise findings to the user:** what's relevant to the topic, which areas are affected, existing patterns/constraints, and applicable patterns from memory if a memory store was present (with brief rationale).
 
 **Knowledge capture:** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, write any durable convention or gotcha revealed by exploration as a project memory fact now. If no project store is present, skip this step silently.
-
-**Locked index append (MUST, every time this doc writes a `MEMORY.md` index line).** Two `cc` sessions in the same repo can each persist a fact around the same moment; a plain check-then-append can silently drop one of the two lines. Append with the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
-
-```bash
-MEMORY_MD=~/.config/playbook/memory/<owner>/<repo>/MEMORY.md
-LOCK="$MEMORY_MD.lock"
-ACQUIRED=0
-for _ in $(seq 1 20); do
-  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
-  sleep 0.05
-done
-printf '%s\n' "- [<kebab-title>](<file>.md): <one-line hook>" >> "$MEMORY_MD"
-[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
-```
 
 Wait for the user to acknowledge before Stage 2.
 
@@ -152,7 +138,7 @@ Requirements:
 - The Decision section gives the reasoning for rejecting each alternative.
 - **Diagrams:** keep them readable, label nodes meaningfully, pick the right type (flowchart for components, sequence for interactions, state for lifecycles, ER for schemas). Always include current-state and proposed-state.
 
-**Knowledge capture:** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record the decision and each rejected alternative as memory facts (so future planning, including `/playbook:plan`, doesn't re-propose them), with the same locked `MEMORY.md` append shown in Stage 1. If no project store is present, skip this step silently.
+**Knowledge capture:** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record the decision and each rejected alternative as memory facts (so future planning, including `/playbook:plan`, doesn't re-propose them). If no project store is present, skip this step silently.
 
 Present the draft. Revise in place on feedback. Repeat until the user explicitly approves.
 
