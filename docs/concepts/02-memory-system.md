@@ -14,9 +14,9 @@ All three scopes use the same file format and the same index structure. The only
 
 **Global** at `~/.config/playbook/memory/`: cross-project facts. Your preferences, corrections, and pointers to external resources. These apply in every repo. The index is read on demand, not at session start.
 
-**Org** under `~/.config/playbook/memory/<owner>/`: facts shared across every repo under one owner (e.g. every `acme/*` repo), but not universal. Namespaced by the first segment of the repo's git remote. Each owner subfolder has its own `MEMORY.md` index, sibling to that owner's project subfolders.
+**Org** under `~/.config/playbook/memory/<owner>/`: facts shared across every repo under one owner (e.g. every `acme/*` repo), but not universal. Namespaced by the first segment of the repo's git remote. These facts are indexed, like every other scope, in the shared `memory.graph.json`.
 
-**Project** under `~/.config/playbook/memory/<owner>/<repo>/`: facts true only inside one repo, namespaced by the repo's git remote (`<owner>/<repo>` from `git remote get-url origin`). Each project subfolder has its own `MEMORY.md` index. The whole `~/.config/playbook/memory/` store lives outside any repo checkout, so these files stay on your machine and never get committed.
+**Project** under `~/.config/playbook/memory/<owner>/<repo>/`: facts true only inside one repo, namespaced by the repo's git remote (`<owner>/<repo>` from `git remote get-url origin`). These facts are indexed the same way, in `memory.graph.json`. The whole `~/.config/playbook/memory/` store lives outside any repo checkout, so these files stay on your machine and never get committed.
 
 The split exists because the three categories are genuinely different. A preference for a coding style applies everywhere. A team convention applies across every repo your org owns but says nothing about a different org's codebase. The auth layer's token flow is meaningless outside one service. Namespacing org and project facts by owner (and repo) also keeps them from polluting the global root, so the global index stays small enough to load efficiently.
 
@@ -39,13 +39,9 @@ anchors:
 
 `type` is one of `user`, `feedback`, `project`, or `reference`. `description` is a one-line trigger hint: "use when..." For `feedback` and `project` type facts, the body follows a fixed structure: the rule first, then a `**Why:**` section and a `**How to apply:**` section. The optional `anchors:` field lists repo-relative code locations the fact describes: a directory, a file, or a `file#symbol`. It maps a fact to concrete code so the graph knows where a fact lives.
 
-The global root and each project subfolder have a `MEMORY.md` index. One line per fact:
+`memory.graph.json` is the sole index, built automatically from every fact file's frontmatter across all three scopes. Commands query it through `shell/memory-context.sh`, or through a native Rust fallback when jq or bash aren't reachable. See [memory.graph.json](#memorygraphjson) below for the node shape, and [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the format mechanics.
 
-```
-- [Title](file.md): one-line hook
-```
-
-The index is a navigation aid, not the source of truth for edges. See [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the full format mechanics.
+An install that predates this design may still have a leftover `MEMORY.md` file on disk from before the graph became the index. It is no longer read by anything; it is safe to ignore or delete.
 
 ## Typed Edges
 
@@ -76,7 +72,7 @@ Both paths produce the same file format and land in the right scope of the store
 
 Facts reach context three ways, described in full in [ADR 0004](../adr/0004-graph-first-memory.md) and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md).
 
-**At session start**, the `session-init` hook injects a slice of `memory.graph.json`: every global fact plus every fact scoped to the current repo, as names and one-line descriptions, not full bodies. The slice is capped at 16000 characters, so it cannot grow without bound as the store grows. If the graph is unavailable, `session-init` falls back to the legacy `MEMORY.md` index (capped the same way); if neither exists, it injects nothing.
+**At session start**, the `session-init` hook injects a slice of `memory.graph.json`: every global fact plus every fact scoped to the current repo, as names and one-line descriptions, not full bodies. The slice is capped at 16000 characters, so it cannot grow without bound as the store grows. If the graph is unavailable, `session-init` falls back to a native, dependency-free read of `memory.graph.json` (capped the same way); if neither exists, it injects nothing.
 
 **Editing or writing a file** surfaces the facts anchored to it: the `memory-anchors` hook matches the edited path against the graph's anchor index and injects the matching facts' names, descriptions, and `depends_on`/`contradicts` neighbours.
 
