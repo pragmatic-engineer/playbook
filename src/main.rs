@@ -188,7 +188,11 @@ fn main() {
         Command::Config { sub } => {
             let home = common::home_dir();
             let slug = common::repo_slug();
-            let repo_slug = if slug.is_empty() { None } else { Some(slug.as_str()) };
+            let repo_slug = if slug.is_empty() {
+                None
+            } else {
+                Some(slug.as_str())
+            };
             match sub {
                 ConfigCommand::Get { key } => match config::resolve(&key, &home, repo_slug) {
                     Ok((value, source)) => {

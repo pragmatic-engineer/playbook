@@ -164,7 +164,8 @@ fn set_with_global_flag_writes_the_global_tier_file() {
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
     let raw = fs::read_to_string(global_config_path(&home))
         .expect("global config file should have been written");
-    let parsed: Value = serde_json::from_str(&raw).expect("global config file should be valid json");
+    let parsed: Value =
+        serde_json::from_str(&raw).expect("global config file should be valid json");
     assert_eq!(parsed["autoReview"]["type"], Value::String("quick".into()));
     assert!(
         !org_config_path(&home).exists(),
@@ -249,7 +250,11 @@ fn set_with_an_out_of_enum_value_exits_non_zero_and_writes_nothing() {
     let home = scratch_dir("set-out-of-enum-home");
 
     // Act
-    let out = run_playbook(&repo, &home, &["config", "set", "autoReview.type", "medium"]);
+    let out = run_playbook(
+        &repo,
+        &home,
+        &["config", "set", "autoReview.type", "medium"],
+    );
 
     // Assert
     assert!(!out.status.success());
