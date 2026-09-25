@@ -105,7 +105,7 @@ CHECKPOINT="$PLANS_DIR/<topic-slug>.checkpoint.md"
   - **No:** start fresh. The stale checkpoint is not deleted here: it gets overwritten in place as new decisions are appended through Step 3 onward (see the write shape below), and only Step 12 deletes it, once a completed plan actually replaces it. Silently deleting a stale checkpoint the moment someone declines to resume would destroy a session's progress on a whim, on the chance they meant to resume a different topic under the same seed.
 - **Not found:** proceed to Step 1 with nothing to resume.
 
-**Checkpoint content and write shape.** The checkpoint is a single Markdown file: a `Goal:` line, `Decisions Made`, `Out of Scope`, `Open Risks`, `Approach`, a `Design approved` marker (set only once Step 6's gate clears), and the `Work Units / Segments` table as far as they've been settled, the same structured shape the final plan's condensed sections use. Rewrite it after each resolved decision, not only in Step 3 and Step 7: Step 4 (approach chosen), Step 5 (route-check answer), and Step 6 (the `Design approved` marker) each trigger a rewrite too, under the same locked-write discipline `MEMORY.md`/`GLOSSARY.md` use elsewhere in this repo (a mkdir-based advisory lock, matching the Rust hooks' `with_dir_lock` in `src/common/atomic.rs`), adapted here to a full rewrite rather than a one-line append, since the checkpoint's content is a structured document, not an append-only log:
+**Checkpoint content and write shape.** The checkpoint is a single Markdown file: a `Goal:` line, `Decisions Made`, `Out of Scope`, `Open Risks`, `Approach`, a `Design approved` marker (set only once Step 6's gate clears), and the `Work Units / Segments` table as far as they've been settled, the same structured shape the final plan's condensed sections use. Rewrite it after each resolved decision, not only in Step 3 and Step 7: Step 4 (approach chosen), Step 5 (route-check answer), and Step 6 (the `Design approved` marker) each trigger a rewrite too, under the same mkdir-based advisory lock pattern this repo uses elsewhere for concurrent small-file writes, like `GLOSSARY.md`'s append (`src/common/atomic.rs`'s `with_dir_lock`), adapted here to a full rewrite rather than a one-line append, since the checkpoint's content is a structured document, not an append-only log:
 
 ```bash
 LOCK="$CHECKPOINT.lock"
@@ -168,7 +168,22 @@ Alongside the `Explore` agents, dispatch one independent `critic` agent (`subage
 
 Built-in `Explore` agents have been reliable at returning results; the `critic` is structurally read-only and has only the return channel, so it may deliver nothing (`playbook:delegating-subagents`). An area whose agent returned nothing was NOT explored: it does not mean there is nothing there. Say which areas are unexplored rather than treating the digest as complete, and if the premise-challenge came back empty, challenge the premise yourself before moving to Step 3.
 
-**Check memory and prior plans.** Alongside the `Explore` agents, check whether a memory store exists: the global store at `~/.config/playbook/memory/MEMORY.md` and the project store at `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` (`<owner>/<repo>` from `git remote get-url origin`). Load the relevant fact files from whichever exist. Also scan `$(playbook path plans)/*.md` (excluding `*.checkpoint.md` and `*-quality.md`) for a prior saved plan whose title or topic overlaps this idea, a cheap keyword match, not semantic search. When neither has anything relevant, skip this silently. When either surfaces a plausible match, a decision already made or an idea already rejected, say so in the digest: what was decided, when, and why. Ask directly whether anything has changed before diverging into new approaches, rather than re-litigating a settled call from scratch.
+**Check memory and prior plans.** Alongside the `Explore` agents, resolve `shell/memory-context.sh` and run it for this repo's memory context:
+
+```bash
+MCTX="${CLAUDE_PLUGIN_ROOT:-}/shell/memory-context.sh"
+if [ ! -f "$MCTX" ]; then
+  MCTX=$(ls -d "$HOME"/.claude/plugins/cache/*/playbook/*/shell/memory-context.sh 2>/dev/null | sort -V | tail -1)
+fi
+MEMORY_SLICE=""
+[ -n "$MCTX" ] && [ -f "$MCTX" ] && MEMORY_SLICE="$(bash "$MCTX" --repo <owner>/<repo> 2>/dev/null)"
+```
+
+`<owner>/<repo>` comes from `git remote get-url origin`, the same slug the script derives itself when `--repo` is omitted. Load the fact files `$MEMORY_SLICE` names on demand rather than treating the compact digest alone as the full content.
+
+If `$MEMORY_SLICE` comes back empty (an empty store, or `jq`/`bash` unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope): a dependency-free shape, since this command is an LLM session and can parse JSON without shelling to `jq`.
+
+Also scan `$(playbook path plans)/*.md` (excluding `*.checkpoint.md` and `*-quality.md`) for a prior saved plan whose title or topic overlaps this idea, a cheap keyword match, not semantic search. When neither memory nor prior plans have anything relevant, skip this silently. When either surfaces a plausible match, a decision already made or an idea already rejected, say so in the digest: what was decided, when, and why. Either way, note in the digest which path actually produced the memory context, `memory-context.sh` output, a direct graph read, or nothing found, so an operator can tell "nothing relevant" apart from "the script couldn't run." Ask directly whether anything has changed before diverging into new approaches, rather than re-litigating a settled call from scratch.
 
 Consolidate into a short cited digest (a few bullets, each with `file:line`). This grounds the questions that follow so you ask about intent, not about facts the code already holds. In ticket mode, fold the Step 1.5 ticket findings into the same digest, citing the source id or url for those. Assign each `Explore` agent a stable `name` at spawn and `TaskStop` it as soon as it returns. A spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps a subagent running in the background.
 
@@ -201,7 +216,7 @@ Between questions or rounds, explore further if an answer opens a new area, and 
 
 **Domain glossary (when a term is genuinely ambiguous or new).** If the conversation turns on a term that's overloaded, vague, or new to this codebase, don't just use it and move on: propose a precise definition and check it with the user. This isn't for every noun in a small idea, only for a term the design actually hinges on. Write it to `GLOSSARY.md` at the target repo's root (create the file only on its first real entry; it's tracked in git, not ignored, since its value is shared vocabulary across future sessions, not scratch). Each entry states what the term IS in one or two sentences, not what it does, plus a short list of synonyms to avoid so the disambiguation is recorded, not just implied. Write it the moment it resolves, don't batch it for later. If `GLOSSARY.md` already has a conflicting entry for the term, surface the conflict to the user instead of overwriting it silently.
 
-Append with the same locked-write shape the checkpoint and `MEMORY.md`'s index use: a mkdir-based advisory lock, matching the Rust hooks' `with_dir_lock` (`src/common/atomic.rs`). Two concurrent sessions can each resolve a term at the same moment; a plain check-then-append can silently drop one of the two lines.
+Append with the same mkdir-based advisory lock pattern the checkpoint's rewrite uses, matching the Rust hooks' `with_dir_lock` (`src/common/atomic.rs`). Two concurrent sessions can each resolve a term at the same moment; a plain check-then-append can silently drop one of the two lines.
 
 ```bash
 GLOSSARY_MD="$ROOT/GLOSSARY.md"
@@ -278,21 +293,7 @@ Between questions, explore the codebase if the answer reveals new areas. Report 
 
 **Checkpoint after each resolved decision (MUST), same as Step 3:** append it to the checkpoint's Decisions Made list (or its Work Units/Segments table, once those start taking shape) and rewrite the checkpoint file using Step 0's locked write shape.
 
-**Knowledge capture (memory).** When exploration reveals a durable convention or gotcha about the codebase (true regardless of this plan), and a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist it as a project memory fact right then: a kebab-case file in `~/.config/playbook/memory/<owner>/<repo>/` with `name`/`description`/`type: project`/`links:`/`anchors:` (to the files), plus its `MEMORY.md` index line. When no project store is present, skip this step silently.
-
-**Locked index append (MUST, whenever the index line is written, here or at Step 12).** Two `cc` sessions in the same repo can each persist a fact around the same moment; a plain check-then-append can silently drop one of the two lines. Append with the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
-
-```bash
-MEMORY_MD=~/.config/playbook/memory/<owner>/<repo>/MEMORY.md
-LOCK="$MEMORY_MD.lock"
-ACQUIRED=0
-for _ in $(seq 1 20); do
-  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
-  sleep 0.05
-done
-printf '%s\n' "- [<kebab-title>](<file>.md): <one-line hook>" >> "$MEMORY_MD"
-[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
-```
+**Knowledge capture (memory).** When exploration reveals a durable convention or gotcha about the codebase (true regardless of this plan), and a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist it as a project memory fact right then: a kebab-case file in `~/.config/playbook/memory/<owner>/<repo>/` with `name`/`description`/`type: project`/`links:`/`anchors:` (to the files). When no project store is present, skip this step silently.
 
 **Work Unit sizing (MUST).** Each WU is one coherent commit: small enough to review on its own, following the `playbook:engineering-standards` size limits and incremental-delivery guidance. Prefer more, smaller WUs over a few large ones; `/playbook:implement` commits each separately. The `Files` column lists production and test files. The `Requires` column is the dependency edge `/playbook:implement` topologically orders and cycle-checks. The `Segment` column names the PR-sized group each WU belongs to (see below).
 
@@ -507,7 +508,7 @@ Only after the user approves. The plans directory lives outside this repo checko
 
 1. Save the plan to `$PLANS_DIR/<topic-slug>.md` and the gate reports to `$PLANS_DIR/<topic-slug>-quality.md`.
 2. Delete the checkpoint file now that the final plan replaces it: `rm -f "$PLANS_DIR/<topic-slug>.checkpoint.md"`. The checkpoint's only job was resuming an interrupted session; once the finished plan is saved, keeping it around would leave a stale, superseded draft next to the real answer.
-3. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist the plan's accepted key decisions (from both the divergent and convergent phases) as project memory facts (`type: project`, `anchors:` to the files they touch), and update `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` with the same locked append shown earlier. The graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip.
+3. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist the plan's accepted key decisions (from both the divergent and convergent phases) as project memory facts (`type: project`, `anchors:` to the files they touch). The graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip.
 4. Tell the user:
    - "Saved to `<plans-dir>/<topic-slug>.md`" (`<plans-dir>` is `playbook path plans`'s resolved path).
    - "Run `/clear`, then implement it with a clean context: `/playbook:implement <plans-dir>/<topic-slug>.md`." This session's back-and-forth is exactly what a fresh execution phase shouldn't carry forward; there's no way to clear it from inside this session, so say so instead of leaving it implicit.

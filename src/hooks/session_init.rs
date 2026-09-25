@@ -27,7 +27,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Matches hooks/session-init.py:29's `timeout=15`.
 const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Shared cap for the injected memory slice, graph-backed or legacy
+/// Shared cap for the injected memory slice, graph-backed or native
 /// fallback alike. See `cap_memory_body`'s doc comment for why this exists.
 const MEMORY_BODY_CAP_CHARS: usize = 16000;
 
@@ -307,8 +307,9 @@ fn in_promotion_scope(node: &serde_json::Value, repo: &str) -> bool {
 }
 
 /// Inject the project memory slice into `extra_context`: the graph-backed
-/// slice from `shell/memory-context.sh` when available, else the legacy
-/// `MEMORY.md` index, else nothing. Matches hooks/session-init.py:154-188.
+/// slice from `shell/memory-context.sh` when available, else a native,
+/// dependency-free parse of `memory.graph.json`, else nothing. Matches
+/// hooks/session-init.py:154-188.
 fn append_memory_slice(extra_context: &mut String, plugin_root: &str, repo_root: &str) {
     let mem_slug = repo_slug();
     if repo_root.is_empty() || mem_slug.is_empty() {
@@ -340,16 +341,11 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, repo_root:
             bodies are read on demand."
         )
     } else {
-        let legacy = crate::common::paths::memory_dir()
-            .join(&mem_slug)
-            .join("MEMORY.md");
-        if legacy.is_file() {
-            mem_body = read_legacy_memory(&legacy);
-        }
+        mem_body = read_graph_slice_fallback(&mem_slug);
         format!(
-            "Project memory for this repo ({mem_slug}), stored in the central memory store at \
-            ~/.config/playbook/memory/{mem_slug}/. These facts apply only in this repo; read \
-            the referenced fact files on demand. Index:"
+            "Project memory for this repo ({mem_slug}), read from the central memory store at \
+            ~/.config/playbook/memory/. Facts in scope for this repo (global, org, and \
+            project), names and descriptions only. Index:"
         )
     };
 
@@ -375,8 +371,8 @@ fn append_memory_slice(extra_context: &mut String, plugin_root: &str, repo_root:
 /// forever, the same invariant the old single-file version held, and a
 /// busy directory cannot accumulate handoffs past this one run. Never
 /// panics: a missing, unreadable, or permission-denied file degrades to
-/// "say nothing", the same invariant `read_legacy_memory` holds for its own
-/// file.
+/// "say nothing", the same invariant `read_graph_slice_fallback` holds for
+/// its own file.
 fn append_handoff_slice(extra_context: &mut String) {
     let slug = crate::cc::project_slug(&crate::cc::logical_cwd());
     if slug.is_empty() {
@@ -452,18 +448,52 @@ fn run_memory_context(script: &Path, mem_slug: &str) -> Option<String> {
     }
 }
 
-/// Read up to the first `MEMORY_BODY_CAP_CHARS` characters of the legacy
-/// `MEMORY.md` index. Empty on any read failure. Matches
-/// hooks/session-init.py:173-179.
-fn read_legacy_memory(path: &Path) -> String {
-    let Ok(contents) = fs::read_to_string(path) else {
+/// A native, dependency-free parse of `memory.graph.json` for the fallback
+/// path, used when `shell/memory-context.sh` is unavailable: no jq, no
+/// shelling out. Keeps every node in scope for `repo` (see
+/// `in_promotion_scope`) that has a `name` (a code-anchor node has none, so
+/// this alone excludes it), sorted by name, rendered as `"name:
+/// description"` lines. Empty on any read or parse failure, or if there are
+/// no matching nodes. Never panics.
+fn read_graph_slice_fallback(repo: &str) -> String {
+    let Ok(content) =
+        fs::read_to_string(crate::common::paths::memory_dir().join("memory.graph.json"))
+    else {
         return String::new();
     };
-    contents.chars().take(MEMORY_BODY_CAP_CHARS).collect()
+    let Ok(graph) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return String::new();
+    };
+    let empty_nodes = Vec::new();
+    let nodes = graph
+        .get("nodes")
+        .and_then(serde_json::Value::as_array)
+        .unwrap_or(&empty_nodes);
+
+    let mut facts: Vec<(&str, &str)> = nodes
+        .iter()
+        .filter(|node| in_promotion_scope(node, repo))
+        .filter_map(|node| {
+            let name = node.get("name").and_then(serde_json::Value::as_str)?;
+            let description = node
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            Some((name, description))
+        })
+        .collect();
+    facts.sort_by_key(|(name, _)| *name);
+
+    let body = facts
+        .iter()
+        .map(|(name, description)| format!("{name}: {description}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    cap_memory_body(body)
 }
 
-/// ADR 0008 WU-1: the graph-backed slice had no cap, unlike the legacy
-/// fallback above, so it grew without bound as the memory store grew (8.8 KB
+/// ADR 0008 WU-1: the graph-backed slice had no cap, unlike the fallback
+/// that preceded it, so it grew without bound as the memory store grew (8.8 KB
 /// when ADR 0004 measured it, 29.3 KB two weeks later). Same cap, same
 /// constant, so the two paths cannot drift apart again.
 fn cap_memory_body(body: String) -> String {

@@ -297,10 +297,10 @@ fn append_seen(path: &Path, ids: &[String]) {
 
 /// Reads a fact's markdown body from `~/.config/playbook/memory/<file>` (`file` is
 /// relative to that root, per `rebuild_memory_graph.rs`'s node construction).
-/// Capped at 16000 chars, matching the legacy `MEMORY.md` fallback cap
-/// (`session_init.rs:246`), so one huge fact cannot dominate a turn. `None`
-/// on any read failure (deleted, unreadable): the caller skips this one
-/// fact rather than treating it as fatal.
+/// Capped at 16000 chars, matching `session_init.rs`'s `MEMORY_BODY_CAP_CHARS`,
+/// so one huge fact cannot dominate a turn. `None` on any read failure
+/// (deleted, unreadable): the caller skips this one fact rather than
+/// treating it as fatal.
 fn read_fact_body(file: &str) -> Option<String> {
     let path = memory_dir().join(file);
     let contents = fs::read_to_string(path).ok()?;

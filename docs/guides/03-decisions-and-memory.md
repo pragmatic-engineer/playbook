@@ -55,7 +55,7 @@ The result: one fact file per topic in `~/.config/playbook/memory/<owner>/<repo>
 
 One store, three scopes.
 
-**Global**: flat files directly in `~/.config/playbook/memory/`, indexed by `~/.config/playbook/memory/MEMORY.md`. Facts that apply across all repos, like preferences, cross-project conventions, and external pointers.
+**Global**: flat files directly in `~/.config/playbook/memory/`. Facts that apply across all repos, like preferences, cross-project conventions, and external pointers.
 
 **Org**: files under `~/.config/playbook/memory/<owner>/`, namespaced by the first segment of the repo's git remote. Facts shared across every repo under one owner (e.g. every `acme/*` repo), but not universal.
 
@@ -114,7 +114,7 @@ A decision record for a small, realistic choice.
 
 **Context**
 
-Facts under `~/.config/playbook/memory/` are written by multiple commands and referenced by name from `MEMORY.md` index entries. Three naming styles appeared in early practice: `snake_case`, `camelCase`, and `kebab-case`.
+Facts under `~/.config/playbook/memory/` are written by multiple commands and referenced by name from the graph. Three naming styles appeared in early practice: `snake_case`, `camelCase`, and `kebab-case`.
 
 **Decision Drivers**
 
