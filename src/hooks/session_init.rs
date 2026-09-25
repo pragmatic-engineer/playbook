@@ -464,11 +464,11 @@ fn read_graph_slice_fallback(repo: &str) -> String {
     let Ok(graph) = serde_json::from_str::<serde_json::Value>(&content) else {
         return String::new();
     };
+    let empty_nodes = Vec::new();
     let nodes = graph
         .get("nodes")
         .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+        .unwrap_or(&empty_nodes);
 
     let mut facts: Vec<(&str, &str)> = nodes
         .iter()
