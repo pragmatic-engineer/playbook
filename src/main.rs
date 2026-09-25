@@ -6,8 +6,9 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, doctor, gate, hooks, init, manifest, settings, AgentsCommand, CcCommand,
-    Cli, Command, DoctorCommand, GateCommand, ManifestCommand, MemoryCommand, SettingsCommand,
+    agents, cc, common, config, doctor, gate, hooks, init, manifest, settings, AgentsCommand,
+    CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand, ManifestCommand,
+    MemoryCommand, SettingsCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -184,6 +185,67 @@ fn main() {
                 }
             },
         },
+        Command::Config { sub } => {
+            let home = common::home_dir();
+            let slug = common::repo_slug();
+            let repo_slug = if slug.is_empty() { None } else { Some(slug.as_str()) };
+            match sub {
+                ConfigCommand::Get { key } => match config::resolve(&key, &home, repo_slug) {
+                    Ok((value, source)) => {
+                        println!("{key}: {value} (source: {})", source_label(source));
+                    }
+                    Err(err) => {
+                        eprintln!("config get: {err}");
+                        std::process::exit(1);
+                    }
+                },
+                ConfigCommand::Set {
+                    key,
+                    value,
+                    org,
+                    global,
+                } => {
+                    if org && global {
+                        eprintln!("config set: --org and --global are mutually exclusive");
+                        std::process::exit(1);
+                    }
+                    let tier = if global {
+                        config::write::Tier::Global
+                    } else if org {
+                        config::write::Tier::Org
+                    } else {
+                        config::write::Tier::Repo
+                    };
+                    let value_json = match parse_config_value(&key, &value) {
+                        Ok(value_json) => value_json,
+                        Err(err) => {
+                            eprintln!("config set: {err}");
+                            std::process::exit(1);
+                        }
+                    };
+                    match config::write::set(tier, &key, value_json, &home, repo_slug) {
+                        Ok(()) => println!("config set: {key} updated"),
+                        Err(err) => {
+                            eprintln!("config set: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ConfigCommand::List => {
+                    for &key in config::keys::KNOWN_KEYS {
+                        match config::resolve(key, &home, repo_slug) {
+                            Ok((value, source)) => {
+                                println!("{key}: {value} (source: {})", source_label(source));
+                            }
+                            Err(err) => {
+                                eprintln!("config list: {err}");
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Command::Path { kind } => match common::repo_scoped_dir(common::RepoScope::Worktree) {
             Some(base) => {
                 if let Some(repo_root) = playbook::manifest::check::toplevel() {
@@ -218,6 +280,39 @@ fn main() {
                 }
             }
         },
+    }
+}
+
+/// Lowercase tier label for `config get`/`config list` output, e.g. "repo"
+/// rather than the raw `Source::Repo` debug casing.
+fn source_label(source: config::Source) -> &'static str {
+    match source {
+        config::Source::Repo => "repo",
+        config::Source::Org => "org",
+        config::Source::Global => "global",
+        config::Source::Default => "default",
+    }
+}
+
+/// Parse `config set`'s raw `value` string into the JSON type `key` expects,
+/// using `config::keys::default_value` to learn that type generically so an
+/// unknown key or a wrong-type value is rejected before `write::set` ever
+/// runs and touches a file. A boolean key accepts `true`/`false`
+/// case-insensitively; any other known key is passed through as a string,
+/// leaving an out-of-enum value for `write::set`'s own check to reject.
+fn parse_config_value(key: &str, value: &str) -> Result<serde_json::Value, config::ConfigError> {
+    let default = config::keys::default_value(key)
+        .ok_or_else(|| config::ConfigError::UnknownKey(key.to_string()))?;
+    match default {
+        serde_json::Value::Bool(_) => match value.to_ascii_lowercase().as_str() {
+            "true" => Ok(serde_json::Value::Bool(true)),
+            "false" => Ok(serde_json::Value::Bool(false)),
+            _ => Err(config::ConfigError::WrongType {
+                key: key.to_string(),
+                expected: "boolean",
+            }),
+        },
+        _ => Ok(serde_json::Value::String(value.to_string())),
     }
 }
 
