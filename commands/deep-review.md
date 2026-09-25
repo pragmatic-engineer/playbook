@@ -195,7 +195,7 @@ If install or run fails, log the error in `CHECK_OUTPUT` and continue: never blo
 
 ## Step 2c: Load memory (best-effort)
 
-Check whether a memory store exists: the global store at `~/.config/playbook/memory/MEMORY.md` and the project store at `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` (`<owner>/<repo>` from `git remote get-url origin`). Load the relevant fact files from whichever exist. When neither exists, skip this step silently; Step 3's reviewers get no memory section and that's expected, not an error.
+Resolve `$CLAUDE_PLUGIN_ROOT/shell/memory-context.sh` (same resolve-then-check-`-f` convention `commands/doctor.md:108-113` uses for `statusline.sh`), run it with `--repo <owner>/<repo>` (`<owner>/<repo>` from `git remote get-url origin`), and load the fact files it names on demand. If the script produces no output (empty store, or `jq`/`bash` unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope). When both the script and the direct graph read produce nothing, skip this step silently; Step 3's reviewers get no memory section and that's expected, not an error. Note in the report which source produced the result (script output, direct graph read, or nothing found), so an operator can tell "nothing relevant" apart from "the script couldn't run."
 
 ## Step 2d: Haiku triage
 
