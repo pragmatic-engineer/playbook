@@ -287,13 +287,15 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
         );
     }
 
-    if !all_copied_and_verified(old_root, new_root, &files) {
+    if let Err(relpath) = all_copied_and_verified(old_root, new_root, &files) {
         return StepReport::failed(
             STEP_NAME,
             with_skipped_symlinks(
                 format!(
-                    "verification failed after copying to {}, the original is untouched",
-                    new_root.display()
+                    "verification failed after copying to {}, the original is untouched; \
+                     {} differs and was not overwritten",
+                    new_root.display(),
+                    relpath.display()
                 ),
                 &skipped_symlinks,
             ),
@@ -384,26 +386,50 @@ fn relative_files_into(
 }
 
 /// Copies each of `files` from `old_root` to `new_root`, creating
-/// destination subdirectories as needed, stopping at the first failure.
+/// destination subdirectories as needed and stopping at the first I/O
+/// failure. Leaves an existing destination file untouched, rather than
+/// overwriting it, when that destination is already at least as new as the
+/// source.
 fn copy_all(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> io::Result<()> {
     for rel in files {
         let dest = new_root.join(rel);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
         }
+        if dest.exists() {
+            let source_mtime = fs::metadata(old_root.join(rel))?.modified()?;
+            let dest_mtime = fs::metadata(&dest)?.modified()?;
+            // A tie counts as "not older", not just a strictly newer mtime:
+            // on a filesystem with coarse (1-second) mtime resolution, a
+            // hook write and a migration retry can land in the same tick,
+            // and a strict `>` here would silently overwrite that write.
+            if dest_mtime >= source_mtime {
+                continue;
+            }
+        }
         fs::copy(old_root.join(rel), &dest)?;
     }
     Ok(())
 }
 
-/// The completion check the sentinel's presence promises: every source
-/// file exists at the destination with byte-identical content, not just a matching size.
-fn all_copied_and_verified(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> bool {
-    files.iter().all(|rel| {
+/// The completion check the sentinel's presence promises: every source file
+/// exists at the destination with byte-identical content, not just a
+/// matching size. `Err` names the first relative path that does not match,
+/// e.g. one a skipped-copy left holding an unrelated, newer write instead of
+/// the source's content.
+fn all_copied_and_verified(
+    old_root: &Path,
+    new_root: &Path,
+    files: &[PathBuf],
+) -> Result<(), PathBuf> {
+    for rel in files {
         let source = fs::read(old_root.join(rel));
         let dest = fs::read(new_root.join(rel));
-        matches!((source, dest), (Ok(s), Ok(d)) if s == d)
-    })
+        if !matches!((source, dest), (Ok(s), Ok(d)) if s == d) {
+            return Err(rel.clone());
+        }
+    }
+    Ok(())
 }
 
 fn write_sentinel(sentinel: &Path) -> io::Result<()> {
@@ -420,12 +446,20 @@ mod tests {
     use crate::init::run::StepStatus;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, SystemTime};
 
     fn write_file(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, content).unwrap();
+    }
+
+    /// Sets an explicit, deterministic mtime, never relying on ordering from
+    /// a `sleep` (some filesystems have 1-second mtime resolution).
+    fn set_mtime(path: &Path, time: SystemTime) {
+        let file = fs::File::open(path).unwrap();
+        file.set_modified(time).unwrap();
     }
 
     fn new_root_of(home: &Path) -> PathBuf {
@@ -673,6 +707,95 @@ mod tests {
         assert!(
             old_root.exists(),
             "the original must survive an interrupted resume"
+        );
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn copy_all_preserves_a_strictly_newer_destination_file() {
+        // Arrange: source and destination both hold the file, destination's
+        // mtime set strictly ahead of the source's, with distinguishable
+        // content on each side so a buggy overwrite is easy to spot.
+        let home = scratch_dir("copy-all-newer-dest-preserved");
+        let old_root = home.join("old");
+        let new_root = home.join("new");
+        write_file(&old_root.join("fact.md"), "source content");
+        write_file(
+            &new_root.join("fact.md"),
+            "destination content, must survive",
+        );
+        let base = SystemTime::now();
+        set_mtime(&old_root.join("fact.md"), base);
+        set_mtime(&new_root.join("fact.md"), base + Duration::from_secs(10));
+
+        // Act
+        let result = copy_all(&old_root, &new_root, &[PathBuf::from("fact.md")]);
+
+        // Assert
+        assert!(result.is_ok(), "{:?}", result);
+        assert_eq!(
+            fs::read_to_string(new_root.join("fact.md")).unwrap(),
+            "destination content, must survive",
+            "a strictly newer destination must not be overwritten"
+        );
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn copy_all_preserves_a_tied_mtime_destination_file() {
+        // Arrange: destination's mtime is EXACTLY equal to the source's,
+        // pinning the >= vs > boundary: a strict > check would overwrite
+        // this, since a tie is not "greater than".
+        let home = scratch_dir("copy-all-tied-mtime-dest-preserved");
+        let old_root = home.join("old");
+        let new_root = home.join("new");
+        write_file(&old_root.join("fact.md"), "source content");
+        write_file(
+            &new_root.join("fact.md"),
+            "destination content, must survive",
+        );
+        let tied = SystemTime::now();
+        set_mtime(&old_root.join("fact.md"), tied);
+        set_mtime(&new_root.join("fact.md"), tied);
+
+        // Act
+        let result = copy_all(&old_root, &new_root, &[PathBuf::from("fact.md")]);
+
+        // Assert
+        assert!(result.is_ok(), "{:?}", result);
+        assert_eq!(
+            fs::read_to_string(new_root.join("fact.md")).unwrap(),
+            "destination content, must survive",
+            "a tied mtime must not be overwritten"
+        );
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn copy_all_overwrites_an_older_destination_file() {
+        // Arrange: destination's mtime is strictly behind the source's, the
+        // common case a migration retry needs to catch up on.
+        let home = scratch_dir("copy-all-older-dest-overwritten");
+        let old_root = home.join("old");
+        let new_root = home.join("new");
+        write_file(&old_root.join("fact.md"), "source content, must win");
+        write_file(&new_root.join("fact.md"), "stale destination content");
+        let base = SystemTime::now();
+        set_mtime(&new_root.join("fact.md"), base);
+        set_mtime(&old_root.join("fact.md"), base + Duration::from_secs(10));
+
+        // Act
+        let result = copy_all(&old_root, &new_root, &[PathBuf::from("fact.md")]);
+
+        // Assert
+        assert!(result.is_ok(), "{:?}", result);
+        assert_eq!(
+            fs::read_to_string(new_root.join("fact.md")).unwrap(),
+            "source content, must win",
+            "an older destination must still be overwritten with the source's content"
         );
 
         let _ = fs::remove_dir_all(&home);

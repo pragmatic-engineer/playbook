@@ -17,6 +17,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime};
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -52,6 +53,13 @@ fn old_lock_path(claude_home: &Path) -> PathBuf {
 }
 
 const GRAPH_CONTENT: &str = r#"{"nodes":[],"edges":[]}"#;
+
+/// Sets an explicit, deterministic mtime, never relying on ordering from a
+/// `sleep` (some filesystems have 1-second mtime resolution).
+fn set_mtime(path: &Path, time: SystemTime) {
+    let file = fs::File::open(path).unwrap();
+    file.set_modified(time).unwrap();
+}
 
 #[test]
 fn only_old_file_present_wires_and_preserves_lock_sibling_at_the_new_root() {
@@ -714,6 +722,95 @@ fn new_root_self_heal_fires_even_when_the_old_root_rename_fails_and_a_distinct_s
     assert!(
         new_root.join("memory.graph.json").is_file(),
         "the new-root self-heal must still fire: {}",
+        report.detail
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A destination that is both newer than the source AND holds different
+/// content is a genuine conflict, not a resumable write: it must fail the
+/// migration outright, name the specific file, and reproduce identically on
+/// a retry, rather than silently picking a side.
+#[test]
+fn genuine_conflict_fails_permanently_and_names_the_file() {
+    // Arrange: an empty pre-existing new root holding a conflicting file, so
+    // the move takes the per-file copy path that compares mtimes.
+    let home = scratch_home("genuine-conflict-names-file");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "source content").unwrap();
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("fact.md"), "conflicting destination content").unwrap();
+    let base = SystemTime::now();
+    set_mtime(&old_root.join("fact.md"), base);
+    set_mtime(&new_root.join("fact.md"), base + Duration::from_secs(10));
+
+    // Act: run the migration twice; a genuine conflict must not resolve
+    // itself, or resolve differently, on a retry.
+    let first = migrate_memory(&home, &claude_home);
+    let second = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(first.status, StepStatus::Failed, "{}", first.detail);
+    assert!(
+        first.detail.contains("fact.md"),
+        "the detail should name the conflicting file: {}",
+        first.detail
+    );
+    assert_eq!(second.status, StepStatus::Failed, "{}", second.detail);
+    assert_eq!(
+        second.detail, first.detail,
+        "a retry of the same unresolved conflict must reproduce the identical result"
+    );
+    assert!(
+        old_root.exists(),
+        "the original must survive an unresolved conflict"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A regression pin on `with_skipped_symlinks` being folded into every
+/// return path of `copy_verify_and_finish`, not just the success path: a
+/// conflict elsewhere in the tree must not cause a symlink skipped earlier
+/// in the same walk to go unreported.
+#[cfg(unix)]
+#[test]
+fn failed_conflict_still_reports_a_symlink_skipped_earlier_in_the_run() {
+    // Arrange: the same genuine-conflict fixture as above, plus an unrelated
+    // symlink elsewhere in the tree that the walk must skip.
+    let home = scratch_home("genuine-conflict-plus-symlink-skip");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "source content").unwrap();
+    let external_target = home.join("external-secret.txt");
+    fs::write(&external_target, "external secret content").unwrap();
+    std::os::unix::fs::symlink(&external_target, old_root.join("link-to-external")).unwrap();
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("fact.md"), "conflicting destination content").unwrap();
+    let base = SystemTime::now();
+    set_mtime(&old_root.join("fact.md"), base);
+    set_mtime(&new_root.join("fact.md"), base + Duration::from_secs(10));
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Failed, "{}", report.detail);
+    assert!(
+        report.detail.contains("fact.md"),
+        "the detail should still name the conflicting file: {}",
+        report.detail
+    );
+    assert!(
+        report.detail.contains("link-to-external"),
+        "a Failed conflict result must still report the symlink skipped \
+         earlier in the same run: {}",
         report.detail
     );
 
