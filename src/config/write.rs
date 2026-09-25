@@ -194,5 +194,9 @@ fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
         let _ = fs::remove_file(&tmp_path);
         return result;
     }
-    fs::rename(&tmp_path, path)
+    let renamed = fs::rename(&tmp_path, path);
+    if renamed.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+    renamed
 }

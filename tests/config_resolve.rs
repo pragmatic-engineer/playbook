@@ -218,3 +218,20 @@ fn an_unknown_key_with_no_config_files_errors_instead_of_defaulting_to_null() {
 
     let _ = fs::remove_dir_all(&home);
 }
+
+#[test]
+fn an_unknown_key_present_in_a_tier_file_still_errors() {
+    // Arrange: a tier file happens to contain a dotted path that is not on
+    // KNOWN_KEYS (a stale or hand-edited key), which must not let it resolve
+    // successfully just because some file has it.
+    let home = scratch_home("unknown-key-present-in-file");
+    write_json(&global_config_path(&home), r#"{"bogus": {"key": 1}}"#);
+
+    // Act
+    let got = resolve("bogus.key", &home, None);
+
+    // Assert
+    assert!(matches!(got.unwrap_err(), ConfigError::UnknownKey(k) if k == "bogus.key"));
+
+    let _ = fs::remove_dir_all(&home);
+}

@@ -107,6 +107,13 @@ pub fn resolve(
     home: &Path,
     repo_slug: Option<&str>,
 ) -> Result<(Value, Source), ConfigError> {
+    // Checked up front, not just as the post-tiers fallback: a tier file can
+    // legitimately contain an arbitrary dotted path (a stale key from a
+    // retired setting, a typo, a future key written by a newer binary), and
+    // that must not let an unknown key resolve successfully just because
+    // some file happens to have it.
+    keys::default_value(key).ok_or_else(|| ConfigError::UnknownKey(key.to_string()))?;
+
     let root = crate::common::paths::playbook_root_from(home);
 
     if let Some((owner, repo)) = repo_slug.and_then(|slug| slug.split_once('/')) {
@@ -123,9 +130,12 @@ pub fn resolve(
         return Ok((value, Source::Global));
     }
 
-    keys::default_value(key)
-        .map(|value| (value, Source::Default))
-        .ok_or_else(|| ConfigError::UnknownKey(key.to_string()))
+    // Never `None` here: the top-of-function check already proved `key` is
+    // known, so a default value always exists.
+    Ok((
+        keys::default_value(key).expect("key was already validated as known"),
+        Source::Default,
+    ))
 }
 
 /// The global tier's config file, directly under `root`. Shared by `resolve`
