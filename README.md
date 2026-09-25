@@ -130,9 +130,9 @@ For requirements, pinning a version, and uninstall, see
 
 ## Layers
 
-Playbook has seven layers, numbered to match what `/playbook:doctor` reports.
-Layers 1, 2 and 6 are what a working install needs; 3, 4, 5 and 7 are optional
-or cosmetic.
+Playbook has eight layers, numbered to match what `/playbook:doctor` reports.
+Layers 1, 2 and 6 are what a working install needs; 3, 4, 5, 7 and 8 are
+optional or cosmetic.
 
 | Layer | When | What it does |
 |---|---|---|
@@ -143,6 +143,7 @@ or cosmetic.
 | 5. Status line | After `install.sh` | Installs `~/.config/playbook/statusline.sh`. `/playbook:setup` does **not** install it; `/playbook:doctor` checks it. `install.sh` also marks `~/.config/playbook` as a trusted workspace in `~/.claude.json`, so a `claude` session started directly in that folder doesn't hit the trust dialog and silently skip the status line; best-effort, needs `jq` or `python3`. |
 | 6. The `playbook` binary | `install.sh` or `/playbook:setup` | Installs the release binary to `~/.local/bin`, checksum-verified. **Every ported hook is a bare `playbook hook <name>` command, so without this all 16 are dead.** `claude plugin install` alone does not provide it. |
 | 7. No dangling hook commands | Always | Flags any `settings.json` hook command pointing at a file that no longer exists, such as a leftover pre-migration Python hook a settings merge never removed. Fails open (silent no-op) if unchecked. |
+| 8. `jq` installed | Always | Checks `jq` is on PATH. Layer 2 and `shell/memory-context.sh` depend on it; several commands degrade to a slower native fallback without it. |
 
 ## Usage
 
@@ -171,7 +172,7 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 | Command | What it does |
 |---|---|
 | `/playbook:setup` | Wires the guards, seeds `settings.json`, and installs what you choose. Safe to run repeatedly. |
-| `/playbook:doctor` | Checks the seven layers and prints a pass/info table with a remediation hint for each miss. |
+| `/playbook:doctor` | Checks the eight layers and prints a pass/info table with a remediation hint for each miss. |
 | `/playbook:plan` | One continuous session from a raw idea or a settled direction to a verified, parallel-safe plan saved for `/playbook:implement`. |
 | `/playbook:implement` | Executes a `/playbook:plan` plan or `/playbook:adr` blueprint with subagents and TDD, committing each work unit. `--auto` opens a PR. |
 | `/playbook:adr` | Creates an Architecture Decision Record through investigate, draft, quality-gate, finalise. Saves to `.claude/adr/`. |

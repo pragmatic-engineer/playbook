@@ -128,26 +128,12 @@ If the plan or ADR blueprint ends with a "Confidence + open items" trailer, read
 ## Step 3: Load Standards and Context
 
 - Invoke the `playbook:engineering-standards` skill (testing requirements, mocking, PR readiness, deployment), the `playbook:grounding-research` skill (verify before asserting), `playbook:delegating-subagents` (every dispatch names an output file and the orchestrator reads it; this command delegates every Work Unit, so it governs the whole run), and `playbook:writing-style` (for any prose, e.g. commit messages and the PR body).
-- If a memory store is present, load it: check whether `~/.config/playbook/memory/MEMORY.md` exists and, if so, read it (cross-project preferences, corrections, conventions); check whether `~/.config/playbook/memory/<owner>/<repo>/MEMORY.md` exists (`<owner>/<repo>` derived from `git remote get-url origin`) and, if so, read it, loading the relevant fact files for conventions, gotchas, and prior decisions. Honor the typed edges: a project fact that contradicts a global one wins for this repo, and surface any conflict bearing on the work rather than silently choosing. If neither store is present, skip this step silently and proceed on the codebase and the plan alone.
+- Load memory context: resolve `$CLAUDE_PLUGIN_ROOT/shell/memory-context.sh` (same resolve-then-check-`-f` convention `commands/doctor.md:108-113` uses for `statusline.sh`) and run it with `--repo <owner>/<repo>` (`<owner>/<repo>` derived from `git remote get-url origin`), then load the fact files it names on demand (cross-project preferences, corrections, conventions, gotchas, and prior decisions). If the script produces no output (empty store, or `jq`/`bash` unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope), since this command is an LLM session and can parse JSON without shelling to `jq`. Note which path actually produced the result (script output, direct graph read, or nothing found), so a gap or conflict can be traced to its source. Honor the typed edges: a project fact that contradicts a global one wins for this repo, and surface any conflict bearing on the work rather than silently choosing. If nothing is found by either path, skip this step silently and proceed on the codebase and the plan alone.
 - **Cost baseline:** find the most recently written `telemetry.jsonl` under `~/.config/playbook/runtime/` (one per session, populated by `statusline.sh` on each render), read its last line, and record the `cost_usd` field as this run's starting cost. No file yet (statusline hasn't rendered this session) means no baseline: Step 7 then reports the cost as unavailable rather than a delta.
 - Read every file the plan references before changing it (grounding).
 - **Detect the stack** to know the verify commands: check `tsconfig.json` / `package.json` (TS/JS), `pyproject.toml` / `setup.py` (Python), `go.mod` (Go), `Cargo.toml` (Rust). Derive the type-check / lint / test commands from what you find.
 
 **Knowledge capture:** when you discover a durable convention or gotcha, write it as a project memory fact only if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`; otherwise skip silently.
-
-**Locked index append (MUST, every time this doc writes a `MEMORY.md` index line).** Two `cc` sessions in the same repo can each persist a fact around the same moment; a plain check-then-append can silently drop one of the two lines. Append with the same mkdir-based advisory lock the Rust hooks use (`src/common/atomic.rs`'s `with_dir_lock`): briefly wait for the lock, append regardless of whether it was acquired (never block indefinitely on a stuck lock), remove the lock directory only if this run created it.
-
-```bash
-MEMORY_MD=~/.config/playbook/memory/<owner>/<repo>/MEMORY.md
-LOCK="$MEMORY_MD.lock"
-ACQUIRED=0
-for _ in $(seq 1 20); do
-  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
-  sleep 0.05
-done
-printf '%s\n' "- [<kebab-title>](<file>.md): <one-line hook>" >> "$MEMORY_MD"
-[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
-```
 
 ## Step 4: Quality Gate (conditional)
 
@@ -159,7 +145,7 @@ If the plan came from `/playbook:plan` or `/playbook:adr` it already has a compa
 
 Max 3 iterations per phase; revise on FAIL, recording again after every retry's return so a later PASS overwrites an earlier FAIL (`gate record` upserts on `(plan_slug, phase)`; only the last recorded value before the check below matters).
 
-Before proceeding past this gate, run `playbook gate check <plan-slug> implement fact-check adversarial test-review`. Only continue to Step 4.5 if it exits 0; on a non-zero exit, report exactly which phase(s) are missing or failed, per `gate check`'s own output (copy it verbatim rather than re-narrating it). A FAIL blocks execution unless the user explicitly overrides (or `--auto --force`): the override never changes or fakes `gate check`'s result, it is an explicit, recorded decision to proceed despite a real, honestly reported non-zero exit, not a claim that the gate actually passed. `--force` overrides the block; it must never write a fake PASS into the database. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record gotchas and rejected alternatives as memory facts, locked append as in Step 3; otherwise skip silently.
+Before proceeding past this gate, run `playbook gate check <plan-slug> implement fact-check adversarial test-review`. Only continue to Step 4.5 if it exits 0; on a non-zero exit, report exactly which phase(s) are missing or failed, per `gate check`'s own output (copy it verbatim rather than re-narrating it). A FAIL blocks execution unless the user explicitly overrides (or `--auto --force`): the override never changes or fakes `gate check`'s result, it is an explicit, recorded decision to proceed despite a real, honestly reported non-zero exit, not a claim that the gate actually passed. `--force` overrides the block; it must never write a fake PASS into the database. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record gotchas and rejected alternatives as memory facts (one file write per fact); otherwise skip silently.
 
 ## Step 4.5: Delivery Strategy Gate (MUST, before executing)
 
@@ -264,7 +250,7 @@ Scope each WU's verify command to its own test files (the full suite runs in Ste
 
 **File-based handoff.** Keep the orchestrator's context clean over long runs:
 
-- Each WU's brief (its `Files`, `Changes`, `Test scenarios`, `Done When`, the worktree path, and the scoped verify command) is written to `$(playbook path implement)/<plan-slug>/<wu-id>.brief.md` by the wave's haiku drafting call (the scheduler's step 3, above), which points the implementer subagent at that file instead of pasting the whole plan into every prompt. Before that call, select a memory slice per WU from what Step 3 already loaded: facts whose `anchors:` overlap the WU's `Files`, plus any fact whose `MEMORY.md` one-line hook mentions the WU's title keywords. Hand the drafting call each WU's slice to include as a "Relevant memory" section in its brief. A WU touching nothing anchored gets no section, not an empty placeholder.
+- Each WU's brief (its `Files`, `Changes`, `Test scenarios`, `Done When`, the worktree path, and the scoped verify command) is written to `$(playbook path implement)/<plan-slug>/<wu-id>.brief.md` by the wave's haiku drafting call (the scheduler's step 3, above), which points the implementer subagent at that file instead of pasting the whole plan into every prompt. Before that call, select a memory slice per WU from what Step 3 already loaded: facts whose `anchors:` overlap the WU's `Files`, plus any fact whose `description` mentions the WU's title keywords. Hand the drafting call each WU's slice to include as a "Relevant memory" section in its brief. A WU touching nothing anchored gets no section, not an empty placeholder.
 - A WU dispatches once per step (RED, GREEN, REFACTOR per scenario, or once per file group under `--no-tdd`), so its report path is scoped per dispatch: `<wu-id>.<step-slug>.report.md`, e.g. `wu-3.s2-red.report.md`. A shared `<wu-id>.report.md` would let GREEN's report clobber RED's before it's ever read. Each dispatch writes its full report there and returns ONLY: a status (`DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, or `NEEDS_CONTEXT`), its commit SHA, and a one-line test result.
 
 **Read the report file (MUST, per `playbook:delegating-subagents`).** The dispatch's report file is the deliverable; the returned status is a courtesy. The moment a dispatch finishes, goes idle, or is given up on, **read its report file before doing anything else with that WU**, including before deciding it produced nothing. Agent-tool spawns frequently complete their work and return no result at all, so a silent agent is not an empty one. If the file is missing, say so explicitly rather than inferring what it would have said.
