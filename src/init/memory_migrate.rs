@@ -333,7 +333,7 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
             with_skipped_symlinks(
                 format!(
                     "verification failed after copying to {}, the original is untouched; \
-                     {} differs and was not overwritten",
+                     {} does not match the source",
                     new_root.display(),
                     relpath.display()
                 ),
@@ -407,7 +407,9 @@ fn relative_files_into(
     // the caller name the specific failing subdirectory.
     let entries = fs::read_dir(dir)
         .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry =
+            entry.map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
         let path = entry.path();
         let file_type = entry.file_type()?;
         // `file_type()` reports the entry itself, unlike `path.is_dir()`,
@@ -433,10 +435,12 @@ fn relative_files_into(
 fn copy_all(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> io::Result<()> {
     // Test seam: lets a test observe an in-flight copy (e.g. that the
     // migration lock is held for its duration) without slowing production
-    // runs, which never set this variable.
+    // runs, which never set this variable. Clamped to 1s so a stray large
+    // value left in a shell's environment cannot stall a real migration.
     let test_copy_delay = std::env::var("PLAYBOOK_TEST_COPY_DELAY_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
+        .map(|ms| ms.min(1000))
         .map(Duration::from_millis);
 
     for rel in files {

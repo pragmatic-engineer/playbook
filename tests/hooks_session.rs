@@ -458,6 +458,11 @@ fn session_init_surfaces_a_failed_migration_on_stderr_not_stdout() {
         "the failure detail must not leak onto stdout: {}",
         outcome.stdout
     );
+    assert!(
+        outcome.stderr.contains("no-access"),
+        "the failure detail should name the unreadable subdirectory: {}",
+        outcome.stderr
+    );
 }
 
 // ---------------------------------------------------------------------

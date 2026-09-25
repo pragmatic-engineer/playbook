@@ -945,6 +945,10 @@ mod memory_capture {
             !stdout.contains("memory-migrate:"),
             "the failure detail must not leak onto stdout: {stdout}"
         );
+        assert!(
+            stderr.contains("no-access"),
+            "the failure detail should name the unreadable subdirectory: {stderr}"
+        );
     }
 
     #[test]
