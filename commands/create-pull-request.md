@@ -410,8 +410,14 @@ Show the PR URL and a one-line summary (title, base, draft state). Include the `
 
 This step is not executable from inside this command's own forked context: it runs as `context: fork, agent: git`, and the `git` agent's tools are `Bash, Read, Skill` only, no `Agent`. It cannot spawn `deep-review`'s reviewer swarm itself. This step is the instruction the orchestrating session (whoever invoked this skill) follows after it returns:
 
-1. Run `/clear`, then run `/playbook:deep-review --self` against the PR just created. A draft PR is a real PR, so this works; reviewing before any PR exists does not (`deep-review` needs `gh pr view`/`gh pr diff`).
-2. Fix any findings it surfaces. A push updates the draft automatically, no new PR needed.
+1. Decide whether a review runs, and which one, by reading the repo's auto-review config before touching the PR further:
+   - Run `playbook config get autoReview.enabled` and read its stdout. If the command exits non-zero, or the output does not parse as `true` or `false`, that is a config read error: **do not** treat it as `false`, go straight to the fallback bullet below instead.
+   - If it resolves to `false`: skip the review entirely. Say so explicitly in the final report ("auto-review is disabled for this repo, review skipped") so the user knows it was intentional, not forgotten.
+   - If it resolves to `true` (or the key is unset, which defaults to `true`): run `playbook config get autoReview.type` and read its stdout.
+     - `deep` (or unset, defaulting to `deep`): run `/clear`, then run `/playbook:deep-review --self` against the PR just created, exactly as before. A draft PR is a real PR, so this works; reviewing before any PR exists does not (`deep-review` needs `gh pr view`/`gh pr diff`).
+     - `quick`: run `/playbook:quick-review --self` instead. Run `/clear` first too: `quick-review --self` is report-only and asks no follow-up questions, so a fresh context is not strictly needed here, but clearing costs nothing and keeps the same safety margin as the `deep` path.
+   - Fallback, config read error: if either `playbook config get` call above itself errors (a non-zero exit, or output that does not parse as the expected value; this happens when a config file at some tier is malformed JSON or is not an object), **do not** block PR creation and **do not** silently skip the review. Fall back to today's default: run `/clear`, then run `/playbook:deep-review --self`. Name what `playbook config get` printed to stderr in the final report, so a broken config file degrades to the known-safe default instead of a silent skip or a hard failure.
+2. Fix any findings the review surfaces. A push updates the draft automatically, no new PR needed.
 3. If `READY_FLAG` was `--ready` (the caller wanted this published, not left as a draft): run `gh pr ready <branch>` now, after the review and fixes, not before. `--ready` means "ready once self-reviewed," not "skip the review."
 4. If `READY_FLAG` was empty: stop after the review. The caller asked for a draft; leave it one.
 
