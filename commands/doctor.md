@@ -338,6 +338,57 @@ Report:
   manager, for example `brew install jq` on macOS or `apt install jq` on
   Debian/Ubuntu.
 
+## Effective auto-review config
+
+This is informational, not one of the eight layers above: a non-default but
+validly-configured `autoReview.*` value is nothing to "fix", so it carries no
+remediation hint and never fails the check on its own.
+
+```bash
+if ! command -v playbook >/dev/null 2>&1; then
+  echo "UNKNOWN"
+else
+  enabled_status=0
+  enabled_out=$(playbook config get autoReview.enabled 2>&1) || enabled_status=$?
+  type_status=0
+  type_out=$(playbook config get autoReview.type 2>&1) || type_status=$?
+  if [ $enabled_status -ne 0 ] || [ $type_status -ne 0 ]; then
+    errors=$(printf '%s\n%s\n' "$enabled_out" "$type_out" \
+      | grep 'config file is not a valid JSON object' | sort -u)
+    if [ -n "$errors" ]; then
+      echo "MALFORMED"
+      printf '%s\n' "$errors"
+    else
+      echo "UNKNOWN"
+    fi
+  else
+    echo "OK"
+    printf '%s\n%s\n' "$enabled_out" "$type_out"
+  fi
+fi
+```
+
+`playbook config get <key>` prints `<key>: <value> (source: <tier>)` on
+success, where tier is `repo`, `org`, `global`, or `default`; `default` means
+no file at any tier set the key, so the value shown is the built-in default,
+not one read off disk. On a malformed tier file it instead prints an error
+naming the file to stderr and exits non-zero; the `||` after each assignment
+above exists so that failure is captured into `enabled_status`/`type_status`
+rather than aborting this block (and, if this file's shell blocks share a
+`set -e` context, the rest of the script), the same guard style Layer 7 uses
+around `playbook doctor hook-commands`.
+
+Report:
+
+- `OK` → INFO, one line per key, exactly as `playbook config get` printed it,
+  for example `INFO  autoReview.enabled: true (source: default)`.
+- `MALFORMED` → INFO, print the captured error line(s) plainly; they already
+  name the file that failed to parse.
+- `UNKNOWN` → INFO, "could not check: playbook config unavailable". Covers
+  both `playbook` missing entirely and a `playbook` too old to have the
+  `config` subcommand, the same underlying condition Layer 6 and Layer 7
+  already report as `MISSING`/`UNKNOWN` for their own checks.
+
 ## Output format
 
 Print a table with one row per layer. Use a clear status marker and a brief
@@ -353,6 +404,8 @@ INFO  system prompt not installed (opt-in, recommended) -- run /playbook:setup a
 INFO  status line differs from the shipped copy -- stale, or a local fix ahead of the release; a plugin install will overwrite it either way
 FAIL  playbook binary not on PATH -- every ported hook is dead; install the release asset or cargo build --release, then ensure its directory is on PATH
 FAIL  hook command points at a missing file: python3 ~/.claude/hooks/memory_context.py -- this hook does nothing every time it fires; playbook init will not remove it, delete the entry from ~/.claude/settings.json by hand
+INFO  autoReview.enabled: true (source: default)
+INFO  autoReview.type: deep (source: default)
 ```
 
 If all required layers pass and optional layers are installed, say so in one
