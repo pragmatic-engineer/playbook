@@ -14,11 +14,13 @@
 //! the full set of legacy-filename fixes, not just the ones a particular
 //! caller happened to add.
 
+use crate::common::atomic::with_dir_lock;
 use crate::common::paths::playbook_root_from;
 use crate::init::run::{StepReport, StepStatus};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const STEP_NAME: &str = "memory";
 const OLD_FILE_NAME: &str = "graph.json";
@@ -190,7 +192,27 @@ fn move_memory_root(home: &Path, claude_home: &Path) -> StepReport {
         }
     }
 
-    copy_verify_and_finish(&old_root, &new_root, &sentinel)
+    // The lock lives under new_root, so new_root must exist before it is
+    // acquired: acquiring first would burn the whole retry budget on
+    // `NotFound` on a fresh cross-device migration, where new_root doesn't
+    // exist yet at this point.
+    if !new_root.exists() {
+        if let Err(err) = create_dir_all_0700(&new_root) {
+            return StepReport::failed(
+                STEP_NAME,
+                format!("could not create {}: {err}", new_root.display()),
+            );
+        }
+    }
+
+    let lock_path = new_root.join(NEW_LOCK_NAME);
+    let (acquired, report) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
+        copy_verify_and_finish(&old_root, &new_root, &sentinel)
+    });
+    if acquired {
+        let _ = fs::remove_dir(&lock_path);
+    }
+    report
 }
 
 /// A bare destination means a fresh install, nothing to do; a populated
@@ -217,11 +239,29 @@ fn finish_when_source_absent(new_root: &Path, sentinel: &Path) -> StepReport {
     }
 }
 
+/// Creates `path` and any missing ancestors with mode 0700 on Unix, since
+/// every directory this migration creates holds copied memory content and
+/// should not be readable by another account on the same machine (mirrors
+/// `session.rs`'s `session_dir_in`). The mode is unix-only, gated rather than
+/// dropped, since on Windows the directory inherits the parent ACL instead.
+/// Like `create_dir_all`, a no-op on a path that already exists as a
+/// directory, mode included.
+fn create_dir_all_0700(path: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)
+}
+
 /// `Some` is a final report (rename succeeded or failed outright); `None`
 /// means fall through to the verified copy after a cross-device error.
 fn try_rename(old_root: &Path, new_root: &Path, sentinel: &Path) -> Option<StepReport> {
     if let Some(parent) = new_root.parent() {
-        if let Err(err) = fs::create_dir_all(parent) {
+        if let Err(err) = create_dir_all_0700(parent) {
             return Some(StepReport::failed(
                 STEP_NAME,
                 format!("could not create {}: {err}", parent.display()),
@@ -257,31 +297,47 @@ fn try_rename(old_root: &Path, new_root: &Path, sentinel: &Path) -> Option<StepR
 /// The resume path for a destination a prior interrupted run already
 /// touched, and the cross-device fallback for a fresh migration.
 fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> StepReport {
-    if let Err(err) = fs::create_dir_all(new_root) {
+    if let Err(err) = create_dir_all_0700(new_root) {
         return StepReport::failed(
             STEP_NAME,
             format!("could not create {}: {err}", new_root.display()),
         );
     }
 
-    let files = relative_files(old_root);
+    let (files, skipped_symlinks) = match relative_files(old_root) {
+        Ok(result) => result,
+        Err(err) => {
+            return StepReport::failed(
+                STEP_NAME,
+                format!("could not enumerate {}: {err}", old_root.display()),
+            );
+        }
+    };
 
     if let Err(err) = copy_all(old_root, new_root, &files) {
         return StepReport::failed(
             STEP_NAME,
-            format!(
-                "copy to {} failed, the original is untouched: {err}",
-                new_root.display()
+            with_skipped_symlinks(
+                format!(
+                    "copy to {} failed, the original is untouched: {err}",
+                    new_root.display()
+                ),
+                &skipped_symlinks,
             ),
         );
     }
 
-    if !all_copied_and_verified(old_root, new_root, &files) {
+    if let Err(relpath) = all_copied_and_verified(old_root, new_root, &files) {
         return StepReport::failed(
             STEP_NAME,
-            format!(
-                "verification failed after copying to {}, the original is untouched",
-                new_root.display()
+            with_skipped_symlinks(
+                format!(
+                    "verification failed after copying to {}, the original is untouched; \
+                     {} does not match the source",
+                    new_root.display(),
+                    relpath.display()
+                ),
+                &skipped_symlinks,
             ),
         );
     }
@@ -289,7 +345,10 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
     if let Err(err) = write_sentinel(sentinel) {
         return StepReport::failed(
             STEP_NAME,
-            format!("copy verified but could not write completion marker: {err}"),
+            with_skipped_symlinks(
+                format!("copy verified but could not write completion marker: {err}"),
+                &skipped_symlinks,
+            ),
         );
     }
 
@@ -299,62 +358,138 @@ fn copy_verify_and_finish(old_root: &Path, new_root: &Path, sentinel: &Path) -> 
 
     StepReport::wired(
         STEP_NAME,
-        format!(
-            "copied {} file(s) to {} and removed the original",
-            files.len(),
-            new_root.display()
+        with_skipped_symlinks(
+            format!(
+                "copied {} file(s) to {} and removed the original",
+                files.len(),
+                new_root.display()
+            ),
+            &skipped_symlinks,
         ),
     )
 }
 
-/// Every regular file under `root`, recursively, as paths relative to
-/// `root`; copies everything rather than filtering, unlike the markdown-only walk `rebuild_memory_graph` does.
-fn relative_files(root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    relative_files_into(root, root, &mut out);
-    out
+/// Folds a non-empty `skipped_symlinks` list into `detail`, so a symlink
+/// skipped during the walk stays visible in the returned `StepReport`
+/// regardless of which of `copy_verify_and_finish`'s return paths produced it.
+fn with_skipped_symlinks(detail: String, skipped_symlinks: &[PathBuf]) -> String {
+    if skipped_symlinks.is_empty() {
+        return detail;
+    }
+    let paths = skipped_symlinks
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{detail}; skipped {} symlink(s): {paths}",
+        skipped_symlinks.len()
+    )
 }
 
-fn relative_files_into(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
+/// Every regular file under `root`, recursively, as paths relative to
+/// `root`, plus the relative paths of any symlinks the walk skipped rather
+/// than followed. `Err` names the subdirectory that could not be read.
+fn relative_files(root: &Path) -> io::Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let mut out = Vec::new();
+    let mut skipped_symlinks = Vec::new();
+    relative_files_into(root, root, &mut out, &mut skipped_symlinks)?;
+    Ok((out, skipped_symlinks))
+}
+
+fn relative_files_into(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<PathBuf>,
+    skipped_symlinks: &mut Vec<PathBuf>,
+) -> io::Result<()> {
+    // A bare `io::Error` carries no path, so wrapping it here is what lets
+    // the caller name the specific failing subdirectory.
+    let entries = fs::read_dir(dir)
+        .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
         let path = entry.path();
-        if path.is_dir() {
-            relative_files_into(root, &path, out);
+        let file_type = entry.file_type()?;
+        // `file_type()` reports the entry itself, unlike `path.is_dir()`,
+        // which follows a symlink to check its target instead.
+        if file_type.is_symlink() {
+            if let Ok(rel) = path.strip_prefix(root) {
+                skipped_symlinks.push(rel.to_path_buf());
+            }
+        } else if file_type.is_dir() {
+            relative_files_into(root, &path, out, skipped_symlinks)?;
         } else if let Ok(rel) = path.strip_prefix(root) {
             out.push(rel.to_path_buf());
         }
     }
+    Ok(())
 }
 
 /// Copies each of `files` from `old_root` to `new_root`, creating
-/// destination subdirectories as needed, stopping at the first failure.
+/// destination subdirectories as needed and stopping at the first I/O
+/// failure. Leaves an existing destination file untouched, rather than
+/// overwriting it, when that destination is already at least as new as the
+/// source.
 fn copy_all(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> io::Result<()> {
+    // Test seam: lets a test observe an in-flight copy (e.g. that the
+    // migration lock is held for its duration) without slowing production
+    // runs, which never set this variable. Clamped to 1s so a stray large
+    // value left in a shell's environment cannot stall a real migration.
+    let test_copy_delay = std::env::var("PLAYBOOK_TEST_COPY_DELAY_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|ms| ms.min(1000))
+        .map(Duration::from_millis);
+
     for rel in files {
         let dest = new_root.join(rel);
         if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)?;
+            create_dir_all_0700(parent)?;
+        }
+        if dest.exists() {
+            let source_mtime = fs::metadata(old_root.join(rel))?.modified()?;
+            let dest_mtime = fs::metadata(&dest)?.modified()?;
+            // A tie counts as "not older", not just a strictly newer mtime:
+            // on a filesystem with coarse (1-second) mtime resolution, a
+            // hook write and a migration retry can land in the same tick,
+            // and a strict `>` here would silently overwrite that write.
+            if dest_mtime >= source_mtime {
+                continue;
+            }
+        }
+        if let Some(delay) = test_copy_delay {
+            std::thread::sleep(delay);
         }
         fs::copy(old_root.join(rel), &dest)?;
     }
     Ok(())
 }
 
-/// The completion check the sentinel's presence promises: every source
-/// file exists at the destination with byte-identical content, not just a matching size.
-fn all_copied_and_verified(old_root: &Path, new_root: &Path, files: &[PathBuf]) -> bool {
-    files.iter().all(|rel| {
+/// The completion check the sentinel's presence promises: every source file
+/// exists at the destination with byte-identical content, not just a
+/// matching size. `Err` names the first relative path that does not match,
+/// e.g. one a skipped-copy left holding an unrelated, newer write instead of
+/// the source's content.
+fn all_copied_and_verified(
+    old_root: &Path,
+    new_root: &Path,
+    files: &[PathBuf],
+) -> Result<(), PathBuf> {
+    for rel in files {
         let source = fs::read(old_root.join(rel));
         let dest = fs::read(new_root.join(rel));
-        matches!((source, dest), (Ok(s), Ok(d)) if s == d)
-    })
+        if !matches!((source, dest), (Ok(s), Ok(d)) if s == d) {
+            return Err(rel.clone());
+        }
+    }
+    Ok(())
 }
 
 fn write_sentinel(sentinel: &Path) -> io::Result<()> {
     if let Some(parent) = sentinel.parent() {
-        fs::create_dir_all(parent)?;
+        create_dir_all_0700(parent)?;
     }
     fs::write(sentinel, "migrated\n")
 }
@@ -366,12 +501,20 @@ mod tests {
     use crate::init::run::StepStatus;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, SystemTime};
 
     fn write_file(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, content).unwrap();
+    }
+
+    /// Sets an explicit, deterministic mtime, never relying on ordering from
+    /// a `sleep` (some filesystems have 1-second mtime resolution).
+    fn set_mtime(path: &Path, time: SystemTime) {
+        let file = fs::File::open(path).unwrap();
+        file.set_modified(time).unwrap();
     }
 
     fn new_root_of(home: &Path) -> PathBuf {
@@ -619,6 +762,95 @@ mod tests {
         assert!(
             old_root.exists(),
             "the original must survive an interrupted resume"
+        );
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn copy_all_preserves_a_strictly_newer_destination_file() {
+        // Arrange: source and destination both hold the file, destination's
+        // mtime set strictly ahead of the source's, with distinguishable
+        // content on each side so a buggy overwrite is easy to spot.
+        let home = scratch_dir("copy-all-newer-dest-preserved");
+        let old_root = home.join("old");
+        let new_root = home.join("new");
+        write_file(&old_root.join("fact.md"), "source content");
+        write_file(
+            &new_root.join("fact.md"),
+            "destination content, must survive",
+        );
+        let base = SystemTime::now();
+        set_mtime(&old_root.join("fact.md"), base);
+        set_mtime(&new_root.join("fact.md"), base + Duration::from_secs(10));
+
+        // Act
+        let result = copy_all(&old_root, &new_root, &[PathBuf::from("fact.md")]);
+
+        // Assert
+        assert!(result.is_ok(), "{:?}", result);
+        assert_eq!(
+            fs::read_to_string(new_root.join("fact.md")).unwrap(),
+            "destination content, must survive",
+            "a strictly newer destination must not be overwritten"
+        );
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn copy_all_preserves_a_tied_mtime_destination_file() {
+        // Arrange: destination's mtime is EXACTLY equal to the source's,
+        // pinning the >= vs > boundary: a strict > check would overwrite
+        // this, since a tie is not "greater than".
+        let home = scratch_dir("copy-all-tied-mtime-dest-preserved");
+        let old_root = home.join("old");
+        let new_root = home.join("new");
+        write_file(&old_root.join("fact.md"), "source content");
+        write_file(
+            &new_root.join("fact.md"),
+            "destination content, must survive",
+        );
+        let tied = SystemTime::now();
+        set_mtime(&old_root.join("fact.md"), tied);
+        set_mtime(&new_root.join("fact.md"), tied);
+
+        // Act
+        let result = copy_all(&old_root, &new_root, &[PathBuf::from("fact.md")]);
+
+        // Assert
+        assert!(result.is_ok(), "{:?}", result);
+        assert_eq!(
+            fs::read_to_string(new_root.join("fact.md")).unwrap(),
+            "destination content, must survive",
+            "a tied mtime must not be overwritten"
+        );
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn copy_all_overwrites_an_older_destination_file() {
+        // Arrange: destination's mtime is strictly behind the source's, the
+        // common case a migration retry needs to catch up on.
+        let home = scratch_dir("copy-all-older-dest-overwritten");
+        let old_root = home.join("old");
+        let new_root = home.join("new");
+        write_file(&old_root.join("fact.md"), "source content, must win");
+        write_file(&new_root.join("fact.md"), "stale destination content");
+        let base = SystemTime::now();
+        set_mtime(&new_root.join("fact.md"), base);
+        set_mtime(&old_root.join("fact.md"), base + Duration::from_secs(10));
+
+        // Act
+        let result = copy_all(&old_root, &new_root, &[PathBuf::from("fact.md")]);
+
+        // Assert
+        assert!(result.is_ok(), "{:?}", result);
+        assert_eq!(
+            fs::read_to_string(new_root.join("fact.md")).unwrap(),
+            "source content, must win",
+            "an older destination must still be overwritten with the source's content"
         );
 
         let _ = fs::remove_dir_all(&home);

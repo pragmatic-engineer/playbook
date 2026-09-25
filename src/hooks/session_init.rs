@@ -16,6 +16,7 @@
 
 use crate::common::{config_hash, home_dir, repo_slug, run_with_timeout, session_dir, Payload};
 use crate::hooks::memory_signals;
+use crate::init::run::StepStatus;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -118,7 +119,10 @@ pub fn run(payload: &Payload) {
 fn prepare_memory_store() {
     let home = home_dir();
     let claude_home = home.join(".claude");
-    let _ = crate::init::memory_migrate::migrate_memory(&home, &claude_home);
+    let migration = crate::init::memory_migrate::migrate_memory(&home, &claude_home);
+    if migration.status == StepStatus::Failed {
+        eprintln!("memory-migrate: {}", migration.detail);
+    }
     let _ = fs::create_dir_all(crate::common::paths::memory_dir());
 }
 

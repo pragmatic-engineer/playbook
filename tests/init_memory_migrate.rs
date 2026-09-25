@@ -13,10 +13,22 @@ use playbook::init::memory_migrate::migrate_memory;
 use playbook::init::run::StepStatus;
 use std::env;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime};
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// `PLAYBOOK_TEST_COPY_DELAY_MS` is process-wide, and cargo runs the tests in
+/// this binary on parallel threads. One shared lock, so a test mutating it
+/// never leaks its value into an unrelated test running concurrently.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// A fresh scratch directory standing in for `$HOME`, unique per call.
 fn scratch_home(tag: &str) -> PathBuf {
@@ -50,6 +62,13 @@ fn old_lock_path(claude_home: &Path) -> PathBuf {
 }
 
 const GRAPH_CONTENT: &str = r#"{"nodes":[],"edges":[]}"#;
+
+/// Sets an explicit, deterministic mtime, never relying on ordering from a
+/// `sleep` (some filesystems have 1-second mtime resolution).
+fn set_mtime(path: &Path, time: SystemTime) {
+    let file = fs::File::open(path).unwrap();
+    file.set_modified(time).unwrap();
+}
 
 #[test]
 fn only_old_file_present_wires_and_preserves_lock_sibling_at_the_new_root() {
@@ -460,6 +479,167 @@ fn new_root_self_heal_leaves_a_stray_lock_directory_under_its_legacy_name() {
     let _ = fs::remove_dir_all(&home);
 }
 
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+/// Whether this filesystem/user enforces Unix permission bits at all, so a
+/// test run as root degrades to a skip instead of a false failure.
+#[cfg(unix)]
+fn permission_checks_are_enforced(dir: &Path) -> bool {
+    let probe = dir.join(".perm-probe");
+    set_mode(dir, 0o555);
+    let blocked = fs::write(&probe, "x").is_err();
+    set_mode(dir, 0o755);
+    let _ = fs::remove_file(&probe);
+    blocked
+}
+
+/// A subdirectory the walk cannot read must fail the migration, not be
+/// silently treated as empty and have the source deleted regardless.
+#[cfg(unix)]
+#[test]
+fn unreadable_subdirectory_fails_the_migration_instead_of_silently_dropping_it() {
+    // Arrange: an unreadable subdirectory, plus a pre-created empty new root
+    // so the move takes the per-file copy path that enumerates the tree.
+    let home = scratch_home("unreadable-subdir");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("global-fact.md"), "global fact content").unwrap();
+    let locked_dir = old_root.join("no-access");
+    fs::create_dir_all(&locked_dir).unwrap();
+    fs::write(locked_dir.join("secret.md"), "secret content").unwrap();
+    fs::create_dir_all(new_root_of(&home)).unwrap();
+
+    if !permission_checks_are_enforced(&locked_dir) {
+        eprintln!(
+            "skipping unreadable_subdirectory_fails_the_migration_instead_of_silently_dropping_it: \
+             this filesystem/user does not enforce permission bits (likely running as root)"
+        );
+        let _ = fs::remove_dir_all(&home);
+        return;
+    }
+    set_mode(&locked_dir, 0o000);
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    set_mode(&locked_dir, 0o755); // restore before cleanup can remove the dir
+    assert_eq!(report.status, StepStatus::Failed, "{}", report.detail);
+    assert!(
+        report.detail.contains("no-access"),
+        "detail should name the unreadable subdirectory: {}",
+        report.detail
+    );
+    assert!(
+        old_root.exists(),
+        "the source must survive untouched when enumeration fails"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A symlink in the tree must be skipped, not followed and its target's
+/// content copied under the symlink's own name; a sibling real file in the
+/// same directory still gets copied, and the skip is recorded in the report.
+#[cfg(unix)]
+#[test]
+fn symlink_in_the_tree_is_skipped_sibling_file_still_copied_and_skip_is_recorded() {
+    // Arrange: an external file, a symlink to it inside the tree, a sibling
+    // real file, and a pre-created empty new root so the move takes the
+    // per-file copy path that walks the tree.
+    let home = scratch_home("symlink-skip");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    let external_target = home.join("external-secret.txt");
+    fs::write(
+        &external_target,
+        "external secret content, must not be copied",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&external_target, old_root.join("link-to-external")).unwrap();
+    fs::write(old_root.join("sibling.md"), "sibling content").unwrap();
+    fs::create_dir_all(new_root_of(&home)).unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
+    let new_root = new_root_of(&home);
+    assert!(
+        !new_root.join("link-to-external").exists(),
+        "the symlink's target content must not be copied to the destination"
+    );
+    assert_eq!(
+        fs::read_to_string(new_root.join("sibling.md")).unwrap(),
+        "sibling content",
+        "a sibling real file in the same directory must still be copied"
+    );
+    assert!(
+        report.detail.contains("link-to-external"),
+        "the report should record the skipped symlink's path: {}",
+        report.detail
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A symlink pointing at its own parent directory must not send the walk
+/// into unbounded recursion. Run as a real subprocess: an in-process stack
+/// overflow would abort the whole shared test binary, not just this test.
+#[cfg(unix)]
+#[test]
+fn self_referential_symlink_does_not_hang_the_migration() {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    // Arrange: a symlink to the tree's own root, plus a sibling real file.
+    let home = scratch_home("self-referential-symlink");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    std::os::unix::fs::symlink(&old_root, old_root.join("loop")).unwrap();
+    fs::write(old_root.join("sibling.md"), "sibling content").unwrap();
+    fs::create_dir_all(new_root_of(&home)).unwrap();
+
+    // Act: poll rather than block on `wait`, so a hang can be killed instead
+    // of leaving the test suite stuck.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .arg("init")
+        .env("HOME", &home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("playbook binary should spawn");
+    let budget = Duration::from_secs(5);
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("polling the child should not fail") {
+            break status;
+        }
+        if start.elapsed() > budget {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("migrate_memory did not exit within {budget:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+
+    // Assert
+    assert!(
+        status.success(),
+        "a self-referential symlink should be skipped, not fail the migration"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 #[test]
 fn new_root_self_heal_never_renames_a_directory_named_graph_json() {
     // Arrange: `graph.json` at the new root is a directory, not a file (an
@@ -557,6 +737,164 @@ fn new_root_self_heal_fires_even_when_the_old_root_rename_fails_and_a_distinct_s
     let _ = fs::remove_dir_all(&home);
 }
 
+/// A destination that is both newer than the source AND holds different
+/// content is a genuine conflict, not a resumable write: it must fail the
+/// migration outright, name the specific file, and reproduce identically on
+/// a retry, rather than silently picking a side.
+#[test]
+fn genuine_conflict_fails_permanently_and_names_the_file() {
+    // Arrange: an empty pre-existing new root holding a conflicting file, so
+    // the move takes the per-file copy path that compares mtimes.
+    let home = scratch_home("genuine-conflict-names-file");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "source content").unwrap();
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("fact.md"), "conflicting destination content").unwrap();
+    let base = SystemTime::now();
+    set_mtime(&old_root.join("fact.md"), base);
+    set_mtime(&new_root.join("fact.md"), base + Duration::from_secs(10));
+
+    // Act: run the migration twice; a genuine conflict must not resolve
+    // itself, or resolve differently, on a retry.
+    let first = migrate_memory(&home, &claude_home);
+    let second = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(first.status, StepStatus::Failed, "{}", first.detail);
+    assert!(
+        first.detail.contains("fact.md"),
+        "the detail should name the conflicting file: {}",
+        first.detail
+    );
+    assert_eq!(second.status, StepStatus::Failed, "{}", second.detail);
+    assert_eq!(
+        second.detail, first.detail,
+        "a retry of the same unresolved conflict must reproduce the identical result"
+    );
+    assert!(
+        old_root.exists(),
+        "the original must survive an unresolved conflict"
+    );
+    assert!(
+        !new_root.join("memory.graph.json.lock").exists(),
+        "a failed migration must not leave its lock behind"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A regression pin on `with_skipped_symlinks` being folded into every
+/// return path of `copy_verify_and_finish`, not just the success path: a
+/// conflict elsewhere in the tree must not cause a symlink skipped earlier
+/// in the same walk to go unreported.
+#[cfg(unix)]
+#[test]
+fn failed_conflict_still_reports_a_symlink_skipped_earlier_in_the_run() {
+    // Arrange: the same genuine-conflict fixture as above, plus an unrelated
+    // symlink elsewhere in the tree that the walk must skip.
+    let home = scratch_home("genuine-conflict-plus-symlink-skip");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "source content").unwrap();
+    let external_target = home.join("external-secret.txt");
+    fs::write(&external_target, "external secret content").unwrap();
+    std::os::unix::fs::symlink(&external_target, old_root.join("link-to-external")).unwrap();
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("fact.md"), "conflicting destination content").unwrap();
+    let base = SystemTime::now();
+    set_mtime(&old_root.join("fact.md"), base);
+    set_mtime(&new_root.join("fact.md"), base + Duration::from_secs(10));
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Failed, "{}", report.detail);
+    assert!(
+        report.detail.contains("fact.md"),
+        "the detail should still name the conflicting file: {}",
+        report.detail
+    );
+    assert!(
+        report.detail.contains("link-to-external"),
+        "a Failed conflict result must still report the symlink skipped \
+         earlier in the same run: {}",
+        report.detail
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A basic smoke test for a fresh migration via the rename fast path, not a
+/// lock-ordering regression pin: on a same-filesystem scratch dir,
+/// `try_rename` always succeeds, so `move_memory_root` returns before the
+/// lock code is ever reached. `lock_directory_is_held_for_the_duration_of_an_in_flight_copy`
+/// in `tests/init_memory_migrate_lock.rs` is what actually proves the lock
+/// is held for an in-flight copy.
+#[test]
+fn migration_via_the_rename_fast_path_succeeds_when_the_new_root_does_not_exist_yet() {
+    // Arrange: a fresh migration, new_root not yet created, so the move
+    // takes the fast rename path rather than the per-file copy path.
+    let home = scratch_home("fresh-new-root-absent");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "fact content").unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Matches `rebuild_memory_graph.rs`'s own
+/// `rebuild_succeeds_when_the_lock_directory_is_already_held` test shape:
+/// supplementary coverage that the lock is advisory, not proof it is real
+/// (that's `lock_directory_is_held_for_the_duration_of_an_in_flight_copy` in
+/// `tests/init_memory_migrate_lock.rs`'s job).
+#[test]
+fn migration_completes_when_the_lock_directory_is_already_held() {
+    // Arrange: simulate a concurrent rebuild_memory_graph run already
+    // holding the lock at the new root.
+    let home = scratch_home("lock-already-held");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "fact content").unwrap();
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::create_dir(new_root.join("memory.graph.json.lock")).unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert: fails open after the retry budget, same as rebuild_memory_graph.
+    assert_eq!(
+        report.status,
+        StepStatus::Wired,
+        "migration must fail open, not hang or error, when the lock is already held: {}",
+        report.detail
+    );
+    assert_eq!(
+        fs::read_to_string(new_root.join("fact.md")).unwrap(),
+        "fact content"
+    );
+    assert!(
+        new_root.join("memory.graph.json.lock").is_dir(),
+        "a lock this run never acquired must survive, it belongs to the other writer"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 #[cfg(unix)]
 #[test]
 fn new_root_self_heal_fires_even_when_the_copy_step_itself_fails() {
@@ -627,6 +965,114 @@ fn new_root_self_heal_fires_even_when_the_copy_step_itself_fails() {
         new_root.join("memory.graph.json").is_file(),
         "the new-root self-heal must still fire after a failed move: {}",
         report.detail
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+// `mode_t` is 16-bit on Darwin and 32-bit on Linux/glibc, so the umask FFI
+// binding below is cfg-gated per target rather than hardcoded to one width.
+#[cfg(target_os = "macos")]
+type RawMode = u16;
+#[cfg(not(target_os = "macos"))]
+type RawMode = u32;
+#[cfg(unix)]
+extern "C" {
+    fn umask(mask: RawMode) -> RawMode;
+}
+
+/// Restores the process umask on drop, so a panicking assertion mid-test
+/// still leaves the umask as this process found it rather than bleeding a
+/// changed value into whichever test the shared binary schedules next.
+#[cfg(unix)]
+struct UmaskGuard(RawMode);
+
+#[cfg(unix)]
+impl Drop for UmaskGuard {
+    fn drop(&mut self) {
+        unsafe {
+            umask(self.0);
+        }
+    }
+}
+
+/// Pins the process umask to `new_mask`, returning a guard that restores the
+/// original value on drop. The umask is whole-process state, not
+/// thread-local, so every caller must also hold `lock_env()` for the guard's
+/// full lifetime.
+#[cfg(unix)]
+fn pin_umask(new_mask: RawMode) -> UmaskGuard {
+    let original = unsafe { umask(new_mask) };
+    UmaskGuard(original)
+}
+
+#[cfg(unix)]
+#[test]
+fn rename_fast_path_creates_new_root_parent_with_mode_0700_under_a_permissive_umask() {
+    // Arrange: `new_root`'s parent chain (`<home>/.config/playbook`) does not
+    // exist yet, so `try_rename`'s own `create_dir_all` call is the only
+    // directory creation in this path; `fs::rename` itself, confirmed
+    // empirically, never changes the mode of the directory it moves, so
+    // `new_root` ends up with whatever mode `old_root` already had rather
+    // than anything this migration's own directory-creation code controls.
+    // The freshly created parent chain is therefore the meaningful mode to
+    // assert on for this path, not `new_root` itself.
+    let _guard = lock_env();
+    let _umask_guard = pin_umask(0o022 as RawMode);
+    let home = scratch_home("rename-mode-0700");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(&old_root).unwrap();
+    fs::write(old_root.join("fact.md"), "fact content").unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
+    let new_root_parent = new_root_of(&home);
+    let new_root_parent = new_root_parent.parent().unwrap();
+    let mode = fs::metadata(new_root_parent).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o700,
+        "the freshly created playbook root should be mode 0700, got {mode:o}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_fallback_path_creates_nested_directories_with_mode_0700_under_a_permissive_umask() {
+    // Arrange: a partially populated destination so `new_root` already
+    // exists, skipping `try_rename`'s `!new_root.exists()` guard and forcing
+    // `copy_verify_and_finish`. A nested subdirectory the source holds but
+    // the destination does not yet have forces `copy_all` to create it fresh.
+    let _guard = lock_env();
+    let _umask_guard = pin_umask(0o022 as RawMode);
+    let home = scratch_home("copy-mode-0700");
+    let claude_home = claude_home_of(&home);
+    let old_root = mem_dir_of(&claude_home);
+    fs::create_dir_all(old_root.join("owner-repo-one")).unwrap();
+    fs::write(
+        old_root.join("owner-repo-one").join("fact-a.md"),
+        "fact a content",
+    )
+    .unwrap();
+    let new_root = new_root_of(&home);
+    fs::create_dir_all(&new_root).unwrap();
+    fs::write(new_root.join("placeholder.md"), "placeholder content").unwrap();
+
+    // Act
+    let report = migrate_memory(&home, &claude_home);
+
+    // Assert
+    assert_eq!(report.status, StepStatus::Wired, "{}", report.detail);
+    let nested = new_root.join("owner-repo-one");
+    let mode = fs::metadata(&nested).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o700,
+        "the directory copy_all creates for a nested file should be mode 0700, got {mode:o}"
     );
 
     let _ = fs::remove_dir_all(&home);

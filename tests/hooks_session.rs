@@ -67,6 +67,7 @@ fn init_repo_with_origin(dir: &Path, origin_url: &str) {
 struct Outcome {
     exit_code: i32,
     stdout: String,
+    stderr: String,
 }
 
 /// Run `playbook hook <hook>` the way Claude Code would: cwd, HOME, stdin
@@ -88,7 +89,7 @@ fn run_hook(
         .env_remove("CLAUDE_PLUGIN_ROOT")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     for (key, value) in extra_env {
         command.env(key, value);
     }
@@ -105,6 +106,7 @@ fn run_hook(
     Outcome {
         exit_code: output.status.code().unwrap_or(-1),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     }
 }
 
@@ -391,6 +393,75 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
     assert!(
         !context.contains("widget-fact-one"),
         "the fact from the slice should be absent: {context}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// session-init: a failed migration is surfaced on stderr, not swallowed
+// ---------------------------------------------------------------------
+
+/// Whether this filesystem/user enforces Unix permission bits at all, so a
+/// test run as root (which bypasses them) degrades to a skip instead of a
+/// false failure. Mirrors `init_memory_migrate.rs`'s own probe.
+#[cfg(unix)]
+fn permission_checks_are_enforced(dir: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let probe = dir.join(".perm-probe");
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o555)).unwrap();
+    let blocked = fs::write(&probe, "x").is_err();
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = fs::remove_file(&probe);
+    blocked
+}
+
+#[cfg(unix)]
+#[test]
+fn session_init_surfaces_a_failed_migration_on_stderr_not_stdout() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Arrange: a legacy memory tree with a subdirectory the migration
+    // cannot enumerate, and a pre-existing new root so the move takes the
+    // per-file copy path instead of a plain rename.
+    let work = scratch_dir("migrate-fails");
+    let repo_dir = work.join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    let home = work.join("home");
+    let legacy_mem_dir = home.join(".claude").join("memory");
+    fs::create_dir_all(&legacy_mem_dir).unwrap();
+    fs::write(legacy_mem_dir.join("global-fact.md"), "global fact content").unwrap();
+    let locked_dir = legacy_mem_dir.join("no-access");
+    fs::create_dir_all(&locked_dir).unwrap();
+    fs::write(locked_dir.join("secret.md"), "secret content").unwrap();
+    fs::create_dir_all(home.join(".config").join("playbook").join("memory")).unwrap();
+
+    if !permission_checks_are_enforced(&locked_dir) {
+        eprintln!(
+            "skipping session_init_surfaces_a_failed_migration_on_stderr_not_stdout: \
+             this filesystem/user does not enforce permission bits (likely running as root)"
+        );
+        return;
+    }
+    fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o000)).unwrap();
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+
+    // Assert
+    fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        outcome.stderr.contains("memory-migrate:"),
+        "stderr should surface the migration failure: {}",
+        outcome.stderr
+    );
+    assert!(
+        !outcome.stdout.contains("memory-migrate:"),
+        "the failure detail must not leak onto stdout: {}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stderr.contains("no-access"),
+        "the failure detail should name the unreadable subdirectory: {}",
+        outcome.stderr
     );
 }
 
