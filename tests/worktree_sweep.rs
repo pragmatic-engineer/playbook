@@ -519,8 +519,13 @@ fn named_branch_landed_covers_pr_state_local_fallback_and_age_boundary() {
 fn review_worktree_landed_covers_lock_state_and_pid_liveness() {
     // Arrange: a live child process standing in for a lock still held by a
     // running review session, and a reaped child standing in for one whose
-    // owner already exited without releasing the lock.
+    // owner already exited without releasing the lock. A dead lock pid is
+    // never sufficient on its own here: `review-worktree.sh` locks with its
+    // own short-lived setup script's pid, so that pid is dead even for a
+    // review still actively running; the lock's age must also clear a real
+    // TTL (`REVIEW_LOCK_TTL_SECS`, 24 hours) before it reads as landed.
     const NEVER_LOCKED_GRACE_SECS: i64 = 30;
+    const REVIEW_LOCK_TTL_SECS: i64 = 86_400;
 
     let mut live_child = Command::new("sleep")
         .arg("5")
@@ -540,8 +545,12 @@ fn review_worktree_landed_covers_lock_state_and_pid_liveness() {
         (false, None, NEVER_LOCKED_GRACE_SECS - 1, false),
         (false, None, NEVER_LOCKED_GRACE_SECS, true),
         (true, None, 0, false),
+        (true, None, REVIEW_LOCK_TTL_SECS, true),
         (true, Some(live_pid), 0, false),
-        (true, Some(dead_pid), 0, true),
+        (true, Some(live_pid), REVIEW_LOCK_TTL_SECS, false),
+        (true, Some(dead_pid), 0, false),
+        (true, Some(dead_pid), REVIEW_LOCK_TTL_SECS - 1, false),
+        (true, Some(dead_pid), REVIEW_LOCK_TTL_SECS, true),
     ];
     let got: Vec<bool> = cases
         .iter()

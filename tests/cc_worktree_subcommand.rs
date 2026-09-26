@@ -40,11 +40,15 @@ fn git(dir: &Path, args: &[&str]) -> Output {
         .expect("git")
 }
 
-/// A real repo with one commit on `master`.
+/// A real repo with one commit on `master`, named explicitly rather than
+/// left to `git init`'s own default: this repo has no `origin`, so
+/// `base_branch`'s fallback resolves to `origin/master` regardless, and a
+/// fixture relying on that match should not depend on git's own default
+/// branch name choice, which git itself warns may change.
 fn repo(tag: &str) -> PathBuf {
     let dir = scratch(tag);
     for args in [
-        vec!["init", "-q"],
+        vec!["init", "-q", "-b", "master"],
         vec!["config", "user.email", "t@t"],
         vec!["config", "user.name", "T"],
     ] {
@@ -61,11 +65,18 @@ fn repo(tag: &str) -> PathBuf {
 /// the child only): unlike `std::env::set_current_dir`, this never touches
 /// this test process's own cwd, so parallel tests cannot corrupt each other.
 fn run_cli(cwd: &Path, args: &[&str]) -> Output {
+    // A scratch `HOME`, not the developer's real one: `run_housekeep`'s new
+    // sweep resolves `worktreeCleanup.*` from `HOME`, so without this a
+    // machine with that key set to false (or a malformed tier file) would
+    // fail these tests for a reason unrelated to what they're testing.
+    let home = cwd.join(".test-home");
+    fs::create_dir_all(&home).expect("create scratch home dir");
     Command::new(env!("CARGO_BIN_EXE_playbook"))
         .arg("cc")
         .arg("worktree")
         .args(args)
         .current_dir(cwd)
+        .env("HOME", &home)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env_remove("WORKTREE_BASE_DIR")
@@ -76,6 +87,10 @@ fn run_cli(cwd: &Path, args: &[&str]) -> Output {
 
 fn stdout_of(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+fn stderr_of(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).to_string()
 }
 
 /// The default worktree root `resolve_base` computes for `repo_root`:
@@ -190,5 +205,55 @@ fn stash_is_restored_when_the_run_fails_after_stashing() {
     assert_eq!(
         restored, "dirty-edit",
         "the stashed edit should be restored to the main worktree"
+    );
+}
+
+#[test]
+fn background_housekeeping_sweeps_a_stale_worktree_via_the_new_subcommand() {
+    // Arrange: a CcLauncher-convention worktree on a branch already merged
+    // into the default branch (no divergent commits), the same landed shape
+    // `playbook worktree sweep` reaps on its own, sitting alongside the
+    // worktree this run is about to create.
+    let repo = repo("housekeep-sweep");
+    git(&repo, &["branch", "already-merged"]);
+    git(&repo, &["branch", "develop"]);
+    let wt_root = wt_root_of(&repo);
+    fs::create_dir_all(&wt_root).expect("wt root");
+    let stale = wt_root.join("already-merged");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            &stale.to_string_lossy(),
+            "already-merged",
+        ],
+    );
+    assert!(stale.is_dir(), "stale fixture worktree should exist");
+
+    // Act: a fresh worktree on a different branch. `run_housekeep` runs its
+    // background block synchronously, so the sweep it now performs has
+    // already run by the time this returns.
+    let out = run_cli(&repo, &["develop"]);
+
+    // Assert: the stale worktree is gone, the new one is not.
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
+    let new_path = PathBuf::from(stdout_of(&out).trim());
+    assert!(
+        new_path.is_dir(),
+        "the worktree this run just created should still exist: {new_path:?}"
+    );
+    assert!(
+        fs::symlink_metadata(&stale).is_err(),
+        "the stale merged worktree should have been swept: {stale:?}"
+    );
+    // Attributes the removal to the new `sweep` specifically, not the old
+    // `cleanup_stale_with` reaper `run_housekeep` still calls (neutered via a
+    // freshly-touched marker): that old reaper also deletes the branch after
+    // removing the worktree, `sweep` never touches branches.
+    let branches = git(&repo, &["branch", "--list", "already-merged"]);
+    assert!(
+        !String::from_utf8_lossy(&branches.stdout).trim().is_empty(),
+        "the branch should survive: sweep removes worktrees, not branches"
     );
 }

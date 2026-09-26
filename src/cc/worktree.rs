@@ -343,6 +343,10 @@ const FETCH_CACHE_MARKER_PREFIX: &str = ".git-fetch-";
 /// directly, with a scratch marker and an injected PR list, so no test
 /// depends on `gh` being installed and authenticated or touches this
 /// machine's real markers.
+///
+/// RETIRED as the active cleanup path: [`crate::worktree::sweep`] is what
+/// production now calls. Nothing in this binary calls this function; kept
+/// only for the tests exercising [`cleanup_stale_with`] directly.
 pub fn cleanup_stale(repo_root: &Path, target: &Path, now_epoch: i64) -> usize {
     let Some(marker) = cleanup_marker_path(repo_root) else {
         return 0;
@@ -571,7 +575,7 @@ pub(crate) fn contains_line(haystack: &[String], needle: &str) -> bool {
 /// piped to a plain, non-anchored `grep -qF` (worktree.sh:220). Absent
 /// `lsof` reads as "not in use": the shell's own `command -v lsof` gate means
 /// a machine without it never treats any worktree as busy.
-fn is_in_use(path: &Path) -> bool {
+pub(crate) fn is_in_use(path: &Path) -> bool {
     if !command_exists("lsof") {
         return false;
     }
@@ -1664,6 +1668,11 @@ pub fn housekeep(
         target.no_push,
     );
     reuse_node_modules(target.worktree, target.repo_root);
+    // Every caller in this binary hands this a marker freshly touched this
+    // instant (`worktree_run.rs`'s `run_housekeep`), so this call always
+    // reads as not-yet-due and no-ops: it is not the active stale-worktree
+    // path any more, `crate::worktree::sweep` is, called separately by that
+    // same caller.
     cleanup_stale_with(
         target.repo_root,
         target.worktree,
