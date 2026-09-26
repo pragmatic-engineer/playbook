@@ -15,6 +15,7 @@ pub mod hooks;
 pub mod init;
 pub mod manifest;
 pub mod settings;
+pub mod worktree;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
