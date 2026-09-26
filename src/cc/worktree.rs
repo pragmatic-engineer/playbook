@@ -544,7 +544,7 @@ pub fn main_worktree(porcelain: &str) -> Option<String> {
 /// `sed 's/^[[:space:]*+]*//'` prefix-strip applied: `*` marks the branch
 /// checked out in the worktree this command ran from, `+` marks one checked
 /// out in another linked worktree, and either can mix with leading spaces.
-fn merged_branches(repo_root: &Path, base: &str) -> Vec<String> {
+pub(crate) fn merged_branches(repo_root: &Path, base: &str) -> Vec<String> {
     git_stdout(repo_root, &["branch", "--merged", base])
         .map(|out| {
             out.lines()
@@ -563,7 +563,7 @@ fn strip_branch_marker(line: &str) -> &str {
 /// worktree.sh:228 (merged branches). A substring match here would spare or
 /// reap the wrong branch, e.g. an open-PR entry of `feat-two` must not spare
 /// a branch named `feat`.
-fn contains_line(haystack: &[String], needle: &str) -> bool {
+pub(crate) fn contains_line(haystack: &[String], needle: &str) -> bool {
     !needle.is_empty() && haystack.iter().any(|line| line == needle)
 }
 
