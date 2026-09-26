@@ -100,6 +100,7 @@ pub fn run(payload: &Payload) {
     prepare_memory_store();
     zero_session_state(&dir);
     clear_statusline_cache();
+    maybe_sweep_worktrees(&home, &repo_root);
 
     let (system_message, mut extra_context) = check_config_drift(payload, &dir, &plugin_root);
 
@@ -765,6 +766,97 @@ fn slugify(s: &str) -> String {
             }
         })
         .collect()
+}
+
+/// How often the periodic sweep this hook triggers may run, matching
+/// `cc::worktree::cleanup_due`'s own daily interval.
+const WORKTREE_SWEEP_INTERVAL_SECS: i64 = 86_400;
+
+/// The rate-limit marker for the periodic worktree sweep, one per repo
+/// (matching the cc launcher's own per-repo `/tmp`-based marker): the sweep
+/// itself is scoped to one `repo_root` per call, so a single machine-wide
+/// marker would let whichever repo's `SessionStart` fires first after the
+/// window claims the slot for every other repo too, regardless of how long
+/// it has actually been since each one was last swept.
+pub fn worktree_sweep_marker_path(home: &Path, repo_root: &Path) -> PathBuf {
+    let slug = slugify(&repo_root.to_string_lossy());
+    crate::common::paths::playbook_root_from(home).join(format!("worktree-sweep-marker-{slug}"))
+}
+
+/// Whether the periodic sweep is due, given the marker's mtime. Mirrors
+/// [`crate::cc::worktree::cleanup_due`]'s own signature and rationale:
+/// `None` (no marker yet) counts as due, so a machine that has never swept
+/// sweeps on its very first `SessionStart`.
+pub fn worktree_sweep_due(marker_mtime_epoch: Option<i64>, now_epoch: i64) -> bool {
+    match marker_mtime_epoch {
+        None => true,
+        Some(stamped) => now_epoch - stamped >= WORKTREE_SWEEP_INTERVAL_SECS,
+    }
+}
+
+/// Runs `playbook worktree sweep` at most once every
+/// [`WORKTREE_SWEEP_INTERVAL_SECS`], skipping entirely, with no sweep
+/// attempt and no marker write, when `worktreeCleanup.enabled` resolves
+/// false: writing the marker in that case would make enabling the policy
+/// later wait out a stale marker before its first real sweep. Degrades
+/// silently on any failure (config error, no repo, sweep error), matching
+/// this hook's own "never break the session" contract.
+///
+/// This overlaps, deliberately, with the cc launcher's own eager sweep
+/// (`cc::worktree_run::run_housekeep`, unthrottled): a repo worked in
+/// through `cc worktree` gets swept on every invocation there and again
+/// here at most daily, while a repo only ever opened directly relies on
+/// this path alone. The redundancy is accepted as defense in depth, not an
+/// oversight.
+fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
+    if repo_root.is_empty() {
+        return;
+    }
+    let home = Path::new(home);
+    let slug = repo_slug();
+    let repo_slug_opt = (!slug.is_empty()).then_some(slug.as_str());
+
+    // Reuses `resolve_policy` rather than a separate hand-rolled resolve, so
+    // a wrong-typed config value (a hand-edited tier file, say) fails closed
+    // here the same way it would inside `sweep` itself, instead of reading
+    // as enabled, running a sweep that then errors internally, and still
+    // stamping the marker for the next `WORKTREE_SWEEP_INTERVAL_SECS`.
+    let enabled = match crate::worktree::resolve_policy(home, repo_slug_opt) {
+        Ok(policy) => policy.enabled,
+        Err(_) => false,
+    };
+    if !enabled {
+        return;
+    }
+
+    let now_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let marker = worktree_sweep_marker_path(home, Path::new(repo_root));
+    let marker_mtime_epoch = fs::metadata(&marker)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64);
+
+    if !worktree_sweep_due(marker_mtime_epoch, now_epoch) {
+        return;
+    }
+
+    // Stamped BEFORE the sweep runs, matching `cleanup_stale_with`'s own
+    // ordering and its stated reason (src/cc/worktree.rs): a sweep killed
+    // partway through still rate-limits the next run, rather than retrying
+    // the same destructive pass on every SessionStart until one finishes.
+    if let Some(parent) = marker.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&marker, now_epoch.to_string());
+    if let Err(err) =
+        crate::worktree::sweep(Path::new(repo_root), home, repo_slug_opt, false, now_epoch)
+    {
+        eprintln!("worktree-sweep: {err}");
+    }
 }
 
 /// `git rev-parse --show-toplevel`, trimmed. Empty outside a repo or on any
