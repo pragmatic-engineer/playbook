@@ -287,7 +287,7 @@ fn set_with_an_out_of_enum_value_exits_non_zero_and_writes_nothing() {
 }
 
 #[test]
-fn list_shows_both_known_keys_with_value_and_source_tier() {
+fn list_shows_known_keys_with_value_and_source_tier() {
     // Arrange
     let repo = seeded_repo("list-keys");
     let home = scratch_dir("list-keys-home");
@@ -301,6 +301,51 @@ fn list_shows_both_known_keys_with_value_and_source_tier() {
     assert!(stdout.contains("autoReview.enabled"), "{stdout}");
     assert!(stdout.contains("autoReview.type"), "{stdout}");
     assert!(stdout.contains("(source: default)"), "{stdout}");
+    assert!(stdout.contains("worktreeCleanup.enabled"), "{stdout}");
+    assert!(
+        stdout.contains("worktreeCleanup.staleAfterDays"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("worktreeCleanup.conflictGracePeriodDays"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("worktreeCleanup.enabled: true"), "{stdout}");
+    assert!(
+        stdout.contains("worktreeCleanup.staleAfterDays: 30"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("worktreeCleanup.conflictGracePeriodDays: 90"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn set_with_a_numeric_value_writes_it_and_get_reflects_it() {
+    // Arrange: regression pin for the CLI's string-to-Value parser rejecting
+    // a valid numeric string for a numeric key such as staleAfterDays.
+    let repo = seeded_repo("set-numeric");
+    let home = scratch_dir("set-numeric-home");
+    let seed = run_playbook(
+        &repo,
+        &home,
+        &["config", "set", "worktreeCleanup.staleAfterDays", "14"],
+    );
+    assert!(seed.status.success(), "stderr: {}", stderr_of(&seed));
+
+    // Act
+    let out = run_playbook(
+        &repo,
+        &home,
+        &["config", "get", "worktreeCleanup.staleAfterDays"],
+    );
+
+    // Assert
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("14"), "{stdout}");
+    assert!(stdout.contains("(source: repo)"), "{stdout}");
 }
 
 #[test]
