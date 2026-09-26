@@ -7,6 +7,7 @@
 //! a subprocess, exactly as Claude Code would, against a scratch `$HOME`
 //! and a scratch git repo, never the real `~/.claude`.
 
+use playbook::hooks::session_init::worktree_sweep_marker_path;
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -616,6 +617,24 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
     assert!(
         !context.contains("widget-fact-one"),
         "the fact from the slice should be absent: {context}"
+    );
+    // A SessionStart outside any repo must not consume the sweep window
+    // either: `git_toplevel()` reads empty there, so `maybe_sweep_worktrees`
+    // must have returned before ever reaching the marker.
+    let playbook_dir = home.join(".config").join("playbook");
+    let wrote_a_sweep_marker = fs::read_dir(&playbook_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("worktree-sweep-marker")
+        });
+    assert!(
+        !wrote_a_sweep_marker,
+        "a non-repo SessionStart must not write any sweep rate-limit marker"
     );
 }
 
@@ -1944,5 +1963,280 @@ fn session_clean_exit_auto_learn_nudge_disabled_skips_queue() {
     assert!(
         !to_learn_dir.is_dir() || fs::read_dir(&to_learn_dir).unwrap().next().is_none(),
         "AUTO_LEARN_NUDGE=0 should disable the queue even above threshold"
+    );
+}
+
+/// A landed, unlocked Wu-convention worktree under `home`, for a repo whose
+/// origin is `owner/repo`: `playbook worktree sweep`'s simplest removable
+/// fixture, matching `tests/worktree_cli.rs`'s own convention.
+fn build_sweepable_wu_worktree(repo_dir: &Path, home: &Path, owner: &str, repo: &str) -> PathBuf {
+    let head = String::from_utf8(
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo_dir)
+            .output()
+            .expect("git rev-parse should run")
+            .stdout,
+    )
+    .expect("git output should be utf8")
+    .trim()
+    .to_string();
+    run_git(repo_dir, &["update-ref", "refs/remotes/origin/main", &head]);
+
+    let wu_path = home
+        .join(".config")
+        .join("playbook")
+        .join("repos")
+        .join(owner)
+        .join(repo)
+        .join("wt-abc123")
+        .join("worktrees")
+        .join("plan-slug")
+        .join("wu-1");
+    fs::create_dir_all(wu_path.parent().expect("wu path has a parent")).unwrap();
+    run_git(
+        repo_dir,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            wu_path.to_str().expect("utf8 path"),
+            "HEAD",
+        ],
+    );
+    wu_path.canonicalize().expect("wu worktree should resolve")
+}
+
+#[test]
+fn session_init_sweeps_worktrees_when_no_marker_exists() {
+    // Arrange: no prior marker, a landed unlocked Wu-convention worktree.
+    let work = scratch_dir("sweep-no-marker");
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, "git@github.com:acme/sweep-a.git");
+    let home = work.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let repo_dir = repo_dir.canonicalize().expect("repo dir should resolve");
+    let home = home.canonicalize().expect("home should resolve");
+    let wu_path = build_sweepable_wu_worktree(&repo_dir, &home, "acme", "sweep-a");
+
+    // Act
+    let outcome = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        "{}",
+        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
+    );
+
+    // Assert
+    assert_eq!(
+        outcome.exit_code, 0,
+        "hook should exit 0: {}",
+        outcome.stderr
+    );
+    assert!(
+        fs::symlink_metadata(&wu_path).is_err(),
+        "the landed worktree should have been swept on the first-ever SessionStart"
+    );
+    assert!(
+        worktree_sweep_marker_path(&home, &repo_dir).is_file(),
+        "the rate-limit marker should be written after a sweep runs"
+    );
+}
+
+#[test]
+fn session_init_skips_sweep_when_marker_is_fresh() {
+    // Arrange: a marker just written (well within the rate-limit interval).
+    let work = scratch_dir("sweep-fresh-marker");
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, "git@github.com:acme/sweep-b.git");
+    let home = work.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let repo_dir = repo_dir.canonicalize().expect("repo dir should resolve");
+    let home = home.canonicalize().expect("home should resolve");
+    let wu_path = build_sweepable_wu_worktree(&repo_dir, &home, "acme", "sweep-b");
+    let marker = worktree_sweep_marker_path(&home, &repo_dir);
+    fs::create_dir_all(marker.parent().unwrap()).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock should read after the unix epoch")
+        .as_secs();
+    fs::write(&marker, now.to_string()).unwrap();
+    let before = marker
+        .metadata()
+        .expect("marker should exist")
+        .modified()
+        .expect("mtime should read");
+
+    // Act
+    let outcome = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        "{}",
+        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
+    );
+
+    // Assert: left alone, no real sleep needed since the marker was just written.
+    assert_eq!(
+        outcome.exit_code, 0,
+        "hook should exit 0: {}",
+        outcome.stderr
+    );
+    assert!(
+        fs::symlink_metadata(&wu_path).is_ok(),
+        "a fresh rate-limit marker should skip the sweep entirely"
+    );
+    // A skipped sweep must not touch the marker either: refreshing it here
+    // would slide the window forward on every SessionStart and the sweep
+    // would never actually run again after the first one.
+    let after = marker
+        .metadata()
+        .expect("marker should exist")
+        .modified()
+        .expect("mtime should read");
+    assert_eq!(
+        after, before,
+        "a skipped sweep must not refresh the rate-limit marker"
+    );
+}
+
+#[test]
+fn session_init_sweeps_again_when_marker_is_stale() {
+    // Arrange: a marker backdated past the rate-limit interval.
+    const WORKTREE_SWEEP_INTERVAL_SECS: i64 = 86_400;
+    let work = scratch_dir("sweep-stale-marker");
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, "git@github.com:acme/sweep-c.git");
+    let home = work.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let repo_dir = repo_dir.canonicalize().expect("repo dir should resolve");
+    let home = home.canonicalize().expect("home should resolve");
+    let wu_path = build_sweepable_wu_worktree(&repo_dir, &home, "acme", "sweep-c");
+    let marker = worktree_sweep_marker_path(&home, &repo_dir);
+    fs::create_dir_all(marker.parent().unwrap()).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock should read after the unix epoch")
+        .as_secs() as i64;
+    let stale_epoch = now - (WORKTREE_SWEEP_INTERVAL_SECS + 1);
+    fs::write(&marker, stale_epoch.to_string()).unwrap();
+    let stale = std::time::SystemTime::now()
+        - std::time::Duration::from_secs((WORKTREE_SWEEP_INTERVAL_SECS + 1) as u64);
+    fs::File::open(&marker)
+        .expect("open marker to backdate")
+        .set_modified(stale)
+        .expect("set marker mtime");
+
+    // Act
+    let outcome = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        "{}",
+        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
+    );
+
+    // Assert: swept again, marker refreshed.
+    assert_eq!(
+        outcome.exit_code, 0,
+        "hook should exit 0: {}",
+        outcome.stderr
+    );
+    assert!(
+        fs::symlink_metadata(&wu_path).is_err(),
+        "a stale rate-limit marker should let the sweep run again"
+    );
+    let refreshed_age = marker
+        .metadata()
+        .expect("marker should exist")
+        .modified()
+        .expect("mtime should read")
+        .elapsed()
+        .expect("elapsed should compute");
+    assert!(
+        refreshed_age.as_secs() < 60,
+        "the marker should have been refreshed to roughly now"
+    );
+}
+
+#[test]
+fn session_init_skips_sweep_entirely_when_policy_disabled() {
+    // Arrange: worktreeCleanup.enabled set false at the repo tier, no prior
+    // marker.
+    let work = scratch_dir("sweep-disabled");
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, "git@github.com:acme/sweep-d.git");
+    let home = work.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let repo_dir = repo_dir.canonicalize().expect("repo dir should resolve");
+    let home = home.canonicalize().expect("home should resolve");
+    let wu_path = build_sweepable_wu_worktree(&repo_dir, &home, "acme", "sweep-d");
+    let set_out = Command::new(playbook_bin())
+        .args(["config", "set", "worktreeCleanup.enabled", "false"])
+        .current_dir(&repo_dir)
+        .env("HOME", &home)
+        .output()
+        .expect("playbook config set should run");
+    assert!(
+        set_out.status.success(),
+        "config set should succeed: {}",
+        String::from_utf8_lossy(&set_out.stderr)
+    );
+
+    // Act
+    let outcome = run_hook(
+        "session-init",
+        &repo_dir,
+        &home,
+        "{}",
+        &[("CLAUDE_PLUGIN_ROOT", plugin_root())],
+    );
+
+    // Assert: no sweep attempt at all, and no marker written either, so
+    // re-enabling the policy later does not have to wait out a stale marker.
+    assert_eq!(
+        outcome.exit_code, 0,
+        "hook should exit 0: {}",
+        outcome.stderr
+    );
+    assert!(
+        fs::symlink_metadata(&wu_path).is_ok(),
+        "sweep should not run at all while the policy is disabled"
+    );
+    assert!(
+        !worktree_sweep_marker_path(&home, &repo_dir).is_file(),
+        "no marker should be written when the sweep is skipped for being disabled"
+    );
+}
+
+#[test]
+fn worktree_sweep_due_covers_absent_and_aged_markers() {
+    // A pure boundary check, matching `cc::worktree::cleanup_due`'s own
+    // signature and inclusive-boundary convention: the interval itself
+    // already counts as due.
+    const NOW: i64 = 1_700_000_000;
+    const INTERVAL: i64 = 86_400;
+
+    assert!(
+        playbook::hooks::session_init::worktree_sweep_due(None, NOW),
+        "no marker at all should always be due"
+    );
+    assert!(
+        !playbook::hooks::session_init::worktree_sweep_due(Some(NOW - 3600), NOW),
+        "an hour-old marker should not be due"
+    );
+    assert!(
+        !playbook::hooks::session_init::worktree_sweep_due(Some(NOW - (INTERVAL - 1)), NOW),
+        "just under the interval should not be due"
+    );
+    assert!(
+        playbook::hooks::session_init::worktree_sweep_due(Some(NOW - INTERVAL), NOW),
+        "exactly at the interval should be due"
+    );
+    assert!(
+        playbook::hooks::session_init::worktree_sweep_due(Some(NOW - INTERVAL - 1), NOW),
+        "past the interval should be due"
     );
 }
