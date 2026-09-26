@@ -11,7 +11,7 @@ use crate::common::repo_slug;
 use crate::common::run_with_timeout;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 /// Which convention created a worktree, matched purely by its path shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,8 +215,8 @@ pub fn pid_is_alive(pid: u32) -> bool {
     Command::new("kill")
         .arg("-0")
         .arg(pid.to_string())
-        .status()
-        .is_ok_and(|status| status.success())
+        .output()
+        .is_ok_and(|out| out.status.success())
 }
 
 /// Extracts a pid from a lock reason string, trying `review-worktree.sh`'s
@@ -250,4 +250,445 @@ fn git_stdout(args: &[&str]) -> Option<String> {
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// `git <args>` scoped to `dir` via `-C`, trimmed stdout on success. Unlike
+/// `git_stdout` above, the caller already knows which directory to run
+/// against instead of relying on the calling process's own cwd.
+fn git_stdout_at(dir: &Path, args: &[&str]) -> Option<String> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(dir).args(args);
+    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// One worktree from `git worktree list --porcelain`'s output: its path,
+/// checked-out `HEAD` commit, branch name (absent when detached), and lock
+/// reason (absent when unlocked).
+pub struct WorktreeEntry {
+    pub path: PathBuf,
+    pub head: Option<String>,
+    pub branch: Option<String>,
+    pub lock_reason: Option<String>,
+}
+
+/// Lists every worktree registered against `repo_root`. Aborts rather than
+/// treating a failed or unparseable command as "nothing to sweep": a broken
+/// `.git` state must stop the sweep, not proceed as if no worktrees existed.
+pub fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeEntry>, String> {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .args(["worktree", "list", "--porcelain"]);
+    let out = run_with_timeout(&mut command, GIT_TIMEOUT)
+        .ok_or_else(|| "git worktree list --porcelain timed out or failed to run".to_string())?;
+    if !out.status.success() {
+        return Err(format!(
+            "git worktree list --porcelain failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    parse_porcelain(&stdout)
+        .ok_or_else(|| "git worktree list --porcelain produced unparseable output".to_string())
+}
+
+/// Splits porcelain output into one [`WorktreeEntry`] per `worktree ` block.
+/// `None` when a line appears before any `worktree ` header, or no block was
+/// found at all: either shape means this is not the output this parser was
+/// built against, and a caller must abort rather than guess.
+fn parse_porcelain(porcelain: &str) -> Option<Vec<WorktreeEntry>> {
+    let mut entries = Vec::new();
+    let mut current: Option<WorktreeEntry> = None;
+    for line in porcelain.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            if let Some(entry) = current.take() {
+                entries.push(entry);
+            }
+            current = Some(WorktreeEntry {
+                path: PathBuf::from(path),
+                head: None,
+                branch: None,
+                lock_reason: None,
+            });
+            continue;
+        }
+        let Some(entry) = current.as_mut() else {
+            if line.trim().is_empty() {
+                continue;
+            }
+            return None;
+        };
+        if let Some(sha) = line.strip_prefix("HEAD ") {
+            entry.head = Some(sha.to_string());
+        } else if let Some(reference) = line.strip_prefix("branch ") {
+            entry.branch = Some(reference.trim_start_matches("refs/heads/").to_string());
+        } else if line == "locked" {
+            entry.lock_reason = Some(String::new());
+        } else if let Some(reason) = line.strip_prefix("locked ") {
+            entry.lock_reason = Some(reason.to_string());
+        }
+    }
+    if let Some(entry) = current.take() {
+        entries.push(entry);
+    }
+    (!entries.is_empty()).then_some(entries)
+}
+
+/// The three `worktreeCleanup.*` config keys, resolved once per `sweep`/
+/// `remove` invocation rather than per worktree inside the loop.
+pub struct SweepPolicy {
+    pub enabled: bool,
+    pub stale_after_days: i64,
+    pub conflict_grace_period_days: i64,
+}
+
+/// Resolves [`SweepPolicy`] via `config::resolve`, propagating a malformed
+/// tier file as an error rather than falling back to a default: a broken
+/// config file must stop the sweep, not silently run under default policy.
+pub fn resolve_policy(
+    home: &Path,
+    repo_slug: Option<&str>,
+) -> Result<SweepPolicy, crate::config::ConfigError> {
+    let (enabled, _) = crate::config::resolve("worktreeCleanup.enabled", home, repo_slug)?;
+    let (stale_after_days, _) =
+        crate::config::resolve("worktreeCleanup.staleAfterDays", home, repo_slug)?;
+    let (conflict_grace_period_days, _) =
+        crate::config::resolve("worktreeCleanup.conflictGracePeriodDays", home, repo_slug)?;
+    Ok(SweepPolicy {
+        enabled: require_bool("worktreeCleanup.enabled", &enabled)?,
+        stale_after_days: require_i64("worktreeCleanup.staleAfterDays", &stale_after_days)?,
+        conflict_grace_period_days: require_i64(
+            "worktreeCleanup.conflictGracePeriodDays",
+            &conflict_grace_period_days,
+        )?,
+    })
+}
+
+/// A hand-edited or externally-written tier file can carry a `Value` of the
+/// wrong type for a key `config::resolve` never itself type-checks: fail
+/// closed with [`ConfigError::WrongType`] rather than silently defaulting,
+/// since a wrong-typed `worktreeCleanup.enabled` defaulting to `true` would
+/// re-open the destructive gate the value was meant to close.
+fn require_bool(key: &str, value: &serde_json::Value) -> Result<bool, crate::config::ConfigError> {
+    value
+        .as_bool()
+        .ok_or_else(|| crate::config::ConfigError::WrongType {
+            key: key.to_string(),
+            expected: "bool",
+        })
+}
+
+fn require_i64(key: &str, value: &serde_json::Value) -> Result<i64, crate::config::ConfigError> {
+    value
+        .as_i64()
+        .ok_or_else(|| crate::config::ConfigError::WrongType {
+            key: key.to_string(),
+            expected: "integer",
+        })
+}
+
+/// The marker filename left inside a Wu-convention worktree when a merge
+/// conflict stopped its landed check and a human must resolve it.
+const CONFLICT_MARKER_FILE: &str = ".playbook-conflict-stop";
+
+/// A worktree just added but not yet locked needs a moment before `git
+/// worktree lock` runs, matching the gap between `review-worktree.sh`'s own
+/// `add` and `lock` calls.
+const NEVER_LOCKED_GRACE_SECS: i64 = 60;
+
+/// Unix seconds the conflict-STOP marker inside `worktree_path` was written
+/// at, or `None` when the marker is absent or its second line does not parse
+/// as an ISO-8601 UTC timestamp.
+fn read_conflict_marker_epoch(worktree_path: &Path) -> Option<i64> {
+    let raw = std::fs::read_to_string(worktree_path.join(CONFLICT_MARKER_FILE)).ok()?;
+    let timestamp = raw.lines().nth(1)?;
+    parse_iso8601_utc_epoch(timestamp.trim())
+}
+
+/// Parses a fixed `YYYY-MM-DDTHH:MM:SSZ` UTC timestamp into Unix seconds,
+/// with no external date crate: this is a shape playbook itself writes, not
+/// arbitrary user input, so the fixed format is a safe assumption here.
+fn parse_iso8601_utc_epoch(s: &str) -> Option<i64> {
+    let s = s.strip_suffix('Z')?;
+    let (date, time) = s.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year: i64 = date_parts.next()?.parse().ok()?;
+    let month: u32 = date_parts.next()?.parse().ok()?;
+    let day: u32 = date_parts.next()?.parse().ok()?;
+    let mut time_parts = time.split(':');
+    let hour: i64 = time_parts.next()?.parse().ok()?;
+    let minute: i64 = time_parts.next()?.parse().ok()?;
+    let second: i64 = time_parts.next()?.split('.').next()?.parse().ok()?;
+
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=59).contains(&second)
+    {
+        return None;
+    }
+
+    let days = days_from_civil(year, month, day);
+    Some(days * SECS_PER_DAY + hour * 3600 + minute * 60 + second)
+}
+
+/// Howard Hinnant's `days_from_civil`: days since the Unix epoch for a
+/// proleptic-Gregorian `(year, month, day)`.
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (i64::from(month) + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + i64::from(day) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// The bare name of the repo's actual default branch, reusing
+/// `cc::worktree::base_branch`'s `origin/HEAD`-then-common-names resolution
+/// rather than reading whatever branch the calling worktree happens to be
+/// on: the sweep can run from a feature branch (the normal state mid-Work
+/// Unit), and comparing against that branch instead of the real default
+/// would misjudge every named-branch and Wu-convention worktree.
+fn default_branch(repo_root: &Path) -> Option<String> {
+    crate::cc::worktree::base_branch(repo_root)
+        .strip_prefix("origin/")
+        .map(str::to_string)
+}
+
+/// Unix seconds `worktree_path`'s own linked-worktree `.git` file was
+/// written, a stand-in for when the worktree itself was created: `git
+/// worktree add` writes that file once and never touches it again, unlike
+/// the checked-out commit's own date, which reflects whoever authored it
+/// (often long before this worktree existed) and would make the never-locked
+/// grace window in [`review_worktree_landed`] never actually apply.
+fn worktree_created_epoch(worktree_path: &Path) -> Option<i64> {
+    let modified = std::fs::metadata(worktree_path.join(".git"))
+        .ok()?
+        .modified()
+        .ok()?;
+    modified
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
+}
+
+/// Whether a worktree was found locked, and by which pid, per `git worktree
+/// list --porcelain`'s own `locked` line for that entry.
+struct LockState {
+    is_locked: bool,
+    owner_pid: Option<u32>,
+}
+
+fn lock_state(entry: &WorktreeEntry) -> LockState {
+    match &entry.lock_reason {
+        Some(reason) => LockState {
+            is_locked: true,
+            owner_pid: parse_lock_pid(reason),
+        },
+        None => LockState {
+            is_locked: false,
+            owner_pid: None,
+        },
+    }
+}
+
+/// Applies whichever landed-signal function matches `convention`:
+/// `wu_worktree_landed` for `Wu` (overridden by a present conflict-STOP
+/// marker's grace period), `named_branch_landed` for `AgentTool`/
+/// `CcLauncher`, and `review_worktree_landed` for `Review`.
+fn is_landed(
+    entry: &WorktreeEntry,
+    convention: Convention,
+    lock: &LockState,
+    policy: &SweepPolicy,
+    repo_root: &Path,
+    now_epoch: i64,
+) -> bool {
+    match convention {
+        Convention::Wu => wu_landed(entry, policy, repo_root, now_epoch),
+        Convention::AgentTool | Convention::CcLauncher => match entry.branch.as_deref() {
+            Some(branch) => match default_branch(repo_root) {
+                Some(default) => named_branch_landed(
+                    branch,
+                    &default,
+                    policy.stale_after_days,
+                    repo_root,
+                    now_epoch,
+                    None,
+                ),
+                None => false,
+            },
+            None => false,
+        },
+        Convention::Review => {
+            let worktree_age_secs = worktree_created_epoch(&entry.path)
+                .map(|epoch| now_epoch - epoch)
+                .unwrap_or(0);
+            review_worktree_landed(
+                lock.is_locked,
+                lock.owner_pid,
+                worktree_age_secs,
+                NEVER_LOCKED_GRACE_SECS,
+            )
+        }
+        Convention::Unmanaged => false,
+    }
+}
+
+/// A present conflict-STOP marker overrides the normal commit-reachability
+/// check with a grace period measured from the marker's own timestamp, using
+/// this module's `staleAfterDays` inclusive-boundary convention: the
+/// boundary itself already counts as landed. A present-but-unparseable
+/// marker fails closed (not landed) rather than falling through to the
+/// reachability check: the marker's whole purpose is to stop that check
+/// from firing, so a malformed timestamp must never silently defeat it.
+fn wu_landed(
+    entry: &WorktreeEntry,
+    policy: &SweepPolicy,
+    repo_root: &Path,
+    now_epoch: i64,
+) -> bool {
+    let marker_path = entry.path.join(CONFLICT_MARKER_FILE);
+    if marker_path.exists() {
+        return match read_conflict_marker_epoch(&entry.path) {
+            Some(marker_epoch) => {
+                let age = now_epoch - marker_epoch;
+                age >= policy.conflict_grace_period_days * SECS_PER_DAY
+            }
+            None => false,
+        };
+    }
+    let (Some(head), Some(branch)) = (entry.head.as_deref(), default_branch(repo_root)) else {
+        return false;
+    };
+    wu_worktree_landed(head, &branch, repo_root)
+}
+
+/// Removes `path` via `git worktree remove`, doubling `--force` when the
+/// caller has already confirmed the lock is held by a dead process: a live
+/// lock is never overridden, only a stale one left behind by a process that
+/// no longer exists.
+fn remove_worktree(repo_root: &Path, path: &Path, force_twice: bool) -> Result<(), String> {
+    let path_str = path.to_string_lossy().into_owned();
+    let mut args: Vec<&str> = vec!["worktree", "remove", "--force"];
+    if force_twice {
+        args.push("--force");
+    }
+    args.push(&path_str);
+    let mut command = Command::new("git");
+    command.arg("-C").arg(repo_root).args(&args);
+    match run_with_timeout(&mut command, GIT_TIMEOUT) {
+        Some(out) if out.status.success() => Ok(()),
+        Some(out) => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+        None => Err("git worktree remove timed out or failed to run".to_string()),
+    }
+}
+
+/// Whether `worktree_path` has uncommitted changes: a plain `git status
+/// --porcelain` from inside it, non-empty meaning dirty. `remove_worktree`
+/// always passes `--force`, which overrides `git worktree remove`'s own
+/// refusal to touch a dirty tree, so this check stands in for that refusal
+/// before removal is even attempted: a landed commit-reachability check
+/// says nothing about uncommitted work sitting on top of it, and a
+/// just-created worktree mid-Work-Unit is landed (a commit is its own
+/// ancestor) with its actual work still uncommitted.
+fn worktree_is_dirty(worktree_path: &Path) -> bool {
+    match git_stdout_at(worktree_path, &["status", "--porcelain"]) {
+        // The conflict-STOP marker is written directly into the worktree and
+        // never committed, so its own status line must not count as dirty:
+        // that would block removal once its own grace period expires, the
+        // one thing the marker exists to allow.
+        Some(status) => status
+            .lines()
+            .any(|line| line.get(3..) != Some(CONFLICT_MARKER_FILE)),
+        // Can't confirm clean: treat as dirty rather than risk removing
+        // work `git status` itself couldn't be asked about.
+        None => true,
+    }
+}
+
+/// Decides one worktree's fate and, unless `dry_run`, acts on it, returning
+/// a report line: "not landed", "has uncommitted changes", "locked by a live
+/// process", "would remove", or the outcome of the actual removal.
+fn decide_and_report(
+    entry: &WorktreeEntry,
+    landed: bool,
+    lock: &LockState,
+    repo_root: &Path,
+    dry_run: bool,
+) -> String {
+    let path = entry.path.display();
+    if !landed {
+        return format!("worktree {path}: not landed, skipping");
+    }
+    if worktree_is_dirty(&entry.path) {
+        return format!("worktree {path}: has uncommitted changes, skipping");
+    }
+    if lock.is_locked && lock.owner_pid.is_none() {
+        return format!("worktree {path}: locked with no readable owner pid, skipping");
+    }
+    let (should_remove, force_twice) = match (lock.is_locked, lock.owner_pid) {
+        (false, _) => (true, false),
+        (true, Some(pid)) if !pid_is_alive(pid) => (true, true),
+        (true, _) => (false, false),
+    };
+    if !should_remove {
+        return format!("worktree {path}: locked by a live process, skipping");
+    }
+    if dry_run {
+        return format!("worktree {path}: would remove (dry run)");
+    }
+    match remove_worktree(repo_root, &entry.path, force_twice) {
+        Ok(()) => format!("worktree {path}: removed"),
+        Err(err) => format!("worktree {path}: failed to remove: {err}"),
+    }
+}
+
+/// Scans every worktree registered against `repo_root`, classifies each,
+/// applies the matching landed-signal check, and removes what has landed
+/// and is not locked by a live process, per the sequence: list, classify,
+/// check landed (conflict marker first for `Wu`), check lock, decide, act.
+pub fn sweep(
+    repo_root: &Path,
+    home: &Path,
+    repo_slug: Option<&str>,
+    dry_run: bool,
+    now_epoch: i64,
+) -> Result<Vec<String>, String> {
+    let policy = resolve_policy(home, repo_slug).map_err(|err| err.to_string())?;
+    if !policy.enabled {
+        return Ok(vec![
+            "worktree sweep: worktreeCleanup.enabled is false, nothing to do".to_string(),
+        ]);
+    }
+
+    let entries = list_worktrees(repo_root)?;
+    // `repo_root` is the caller's own cwd, which may itself be a linked
+    // worktree (the eager trigger this backs runs from inside the
+    // just-created worktree, not the main checkout), so skipping only
+    // position 0 (the main worktree, per `git worktree list`'s documented
+    // ordering) is not enough to protect it.
+    let caller_worktree = repo_root.canonicalize().ok();
+    let mut report = Vec::new();
+    // The first entry is always the main worktree; sweeping it would
+    // destroy the caller's own checkout.
+    for entry in entries.into_iter().skip(1) {
+        if caller_worktree.as_deref() == entry.path.canonicalize().ok().as_deref() {
+            continue;
+        }
+        let convention = classify(&entry.path, home);
+        if convention == Convention::Unmanaged {
+            continue;
+        }
+        let lock = lock_state(&entry);
+        let landed = is_landed(&entry, convention, &lock, &policy, repo_root, now_epoch);
+        report.push(decide_and_report(&entry, landed, &lock, repo_root, dry_run));
+    }
+    Ok(report)
 }

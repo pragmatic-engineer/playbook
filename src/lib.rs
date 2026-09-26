@@ -101,6 +101,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: DoctorCommand,
     },
+    /// Reap landed worktrees across every creation convention, backing
+    /// `src/worktree/`.
+    Worktree {
+        #[command(subcommand)]
+        sub: WorktreeCommand,
+    },
 }
 
 /// Which worktree-scoped storage directory `playbook path` resolves under
@@ -268,6 +274,23 @@ pub enum DoctorCommand {
     /// or has no `.hooks` object. Backs Layer 7.
     HookCommands {
         /// Path to the settings.json to read.
+        path: PathBuf,
+    },
+}
+
+/// `playbook worktree` subcommands, backing `src/worktree/`.
+#[derive(Subcommand, Debug)]
+pub enum WorktreeCommand {
+    /// Scan every registered worktree, classify it, and remove any that
+    /// have landed and are not locked (or are locked by a dead process).
+    Sweep {
+        /// Print what would be removed without touching any worktree.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Apply the same landed/lock checks to one worktree path.
+    Remove {
+        /// Worktree path to check, as printed by `git worktree list`.
         path: PathBuf,
     },
 }
