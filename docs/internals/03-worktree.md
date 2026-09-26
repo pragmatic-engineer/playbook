@@ -12,7 +12,7 @@ Once `_wt_main` prints `Ready:`, it starts a background subshell and calls `diso
 4. `git worktree prune` to remove stale worktree entries.
 5. `_wt_setup_upstream` to create the remote branch when it's missing.
 6. `_wt_node_modules` to clone `node_modules` with a copy-on-write copy.
-7. `_wt_cleanup_stale` to remove merged or 30-day-old worktrees.
+7. `playbook worktree sweep` to remove worktrees, of any creation convention, that have already landed and are not locked.
 
 The subshell runs with `</dev/null >/dev/null 2>&1` and is disowned, so all its output is silenced. Anything visible on-screen before `Ready:` comes from foreground code in `_wt_main` or `_wt_maybe_rebase`.
 

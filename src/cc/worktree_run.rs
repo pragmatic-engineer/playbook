@@ -274,18 +274,14 @@ fn gh_login() -> String {
 /// else) is an open design question this Work Unit defers rather than
 /// guesses at, matching [`worktree::housekeep`]'s own doc comment.
 ///
-/// The stale-worktree reaper nested inside `housekeep` needs a REAL,
-/// rate-limiting cleanup marker and a real open-PR list to run safely. This
-/// module only has a real path for the FETCH marker
-/// ([`worktree::fetch_cache_marker_path`], made public for exactly this);
-/// the cleanup marker's real path is computed by a function private to
-/// `cc::worktree`, reachable only through [`worktree::cleanup_stale`]'s own
-/// separate, self-contained call. Rather than guess at that private path, or
-/// hand `housekeep` an empty open-PR list (which could delete a worktree that
-/// still has real, open work), this always hands it a marker freshly touched
-/// this instant, which guarantees `housekeep`'s cleanup step reads as
-/// not-yet-due and no-ops. Wiring the real stale-worktree reap through here,
-/// on equal footing with the fetch marker, is left to a later slice.
+/// `housekeep`'s own nested stale-worktree reaper ([`worktree::cleanup_stale_with`])
+/// stays permanently neutered here via a marker freshly touched every call,
+/// the same way it always has: that reaper is the pre-`gh-366` port, kept
+/// only for the tests that still exercise it directly, and is not this
+/// binary's active stale-worktree path any more. The real cleanup now runs
+/// through [`crate::worktree::sweep`] instead, called separately below with
+/// its own classification-and-landed-signal logic and its own
+/// `worktreeCleanup.*` config gate, in-process rather than as a subprocess.
 fn run_housekeep(repo_root: &Path, worktree_path: &Path, branch: &str, no_push: bool) {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -305,6 +301,21 @@ fn run_housekeep(repo_root: &Path, worktree_path: &Path, branch: &str, no_push: 
         no_push,
     };
     worktree::housekeep(&ctx, &fetch_marker, &cleanup_marker, &[], now);
+
+    let home = crate::common::home_dir();
+    let slug = crate::common::repo_slug();
+    let repo_slug = if slug.is_empty() {
+        None
+    } else {
+        Some(slug.as_str())
+    };
+    // `worktree_path`, not `repo_root`: `sweep` protects whichever worktree
+    // it is invoked FROM, and this call runs from inside the worktree this
+    // very invocation just created, so passing the main checkout here would
+    // leave the new worktree unprotected and reapable the instant it looks
+    // merged (a fresh branch with no divergent commits is trivially
+    // "merged" into its own base).
+    let _ = crate::worktree::sweep(worktree_path, &home, repo_slug, false, now);
 }
 
 /// Matches the shell's `[[ -n "${VAR:-}" && "$VAR" != "0" ]]` truthiness test

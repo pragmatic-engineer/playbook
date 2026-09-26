@@ -126,7 +126,16 @@ cmd_setup() {
 cmd_teardown() {
   local path="$1"
   git worktree unlock "$path" 2>/dev/null || true
-  git worktree remove -f -f "$path" 2>/dev/null || true
+  # `playbook worktree remove` runs the same classification and landed-signal
+  # checks the periodic sweep applies, but teardown MUST remove the worktree
+  # even after an aborted review (commands/quick-review.md, commands/deep-review.md).
+  # Its exit code alone can't gate the fallback: a disabled `worktreeCleanup`
+  # policy exits 0 without touching anything, which would silently skip the
+  # fallback too. Check whether the path is actually gone instead.
+  playbook worktree remove "$path" 2>/dev/null || true
+  if [[ -e "$path" ]]; then
+    git worktree remove -f -f "$path" 2>/dev/null || true
+  fi
   git worktree prune
   return 0
 }

@@ -199,11 +199,27 @@ pub fn review_worktree_landed(
     if !is_locked {
         return lock_age_secs >= never_locked_grace_secs;
     }
+    // `review-worktree.sh`'s lock reason carries the SETUP script's own pid,
+    // and that script exits right after locking, so this pid is dead for
+    // every review, active ones included, not only finished ones: pid
+    // liveness alone is never a safe "still in use" signal here. Requiring
+    // the lock to also be older than a real TTL, not just the short
+    // never-locked grace window, keeps an active review (which can run for
+    // minutes, e.g. a full check-suite run) from being reaped the instant a
+    // sweep happens to run. `REVIEW_LOCK_TTL_SECS` matches
+    // `review-worktree.sh`'s own `REVIEW_WT_TTL_SECONDS` default.
+    let stale_enough = lock_age_secs >= REVIEW_LOCK_TTL_SECS;
     match lock_owner_pid {
-        Some(pid) => !pid_is_alive(pid),
-        None => false,
+        Some(pid) => !pid_is_alive(pid) && stale_enough,
+        None => stale_enough,
     }
 }
+
+/// Matches `review-worktree.sh`'s own `REVIEW_WT_TTL_SECONDS` default (24
+/// hours): the floor a locked review worktree's lock age must clear before
+/// [`review_worktree_landed`] treats it as safe to reap, since a dead lock
+/// pid is not itself a safe signal for this convention.
+const REVIEW_LOCK_TTL_SECS: i64 = 86_400;
 
 /// Whether `pid` still refers to a running process, checked via `kill -0`
 /// rather than a signal-handling crate dependency (none already in this
@@ -631,6 +647,9 @@ fn decide_and_report(
     let path = entry.path.display();
     if !landed {
         return format!("worktree {path}: not landed, skipping");
+    }
+    if crate::cc::worktree::is_in_use(&entry.path) {
+        return format!("worktree {path}: a process is using it, skipping");
     }
     if worktree_is_dirty(&entry.path) {
         return format!("worktree {path}: has uncommitted changes, skipping");

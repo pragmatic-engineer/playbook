@@ -13,8 +13,8 @@
 # Features: a grouped worktree base dir (WORKTREE_BASE_DIR, default .worktrees)
 # holding <repo>/<folder>, JIRA-key folder naming (PROJECT-1234-foo ->
 # PROJECT-1234/), .env copy, upstream tracking, node_modules hardlink reuse,
-# base-branch rebase, and a daily-rate-limited background cleanup of
-# merged/stale worktrees.
+# base-branch rebase, and a background sweep of landed, unlocked worktrees
+# (delegated to `playbook worktree sweep`).
 #
 # Flags: --ai-resolve (or WORKTREE_AI_RESOLVE=1) lets Claude resolve rebase
 # conflicts; otherwise a conflict just aborts the rebase.
@@ -198,6 +198,11 @@ _wt_node_modules() {
 
 # Remove worktrees whose branch is merged or whose last commit is >30 days old.
 # Daily-rate-limited; skips open-PR branches, in-use dirs, and the new TARGET.
+# RETIRED as the active cleanup path: `_wt_main`'s background subshell now
+# calls `playbook worktree sweep` instead. Kept only because its Rust port
+# (`cc::worktree::cleanup_stale_with`) documents this function as its spec
+# and its own tests exercise that same logic; this function itself is no
+# longer called from anywhere in this file.
 _wt_cleanup_stale() {
     local cache
     cache="/tmp/.git-wt-cleanup-$(_wt_hash "$REPO_ROOT")"
@@ -393,7 +398,7 @@ _wt_main() {
         git worktree prune 2>/dev/null || true
         _wt_setup_upstream
         _wt_node_modules
-        _wt_cleanup_stale
+        playbook worktree sweep >/dev/null 2>&1 || true
     ) </dev/null >/dev/null 2>&1 &
     disown 2>/dev/null || true
 }
