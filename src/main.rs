@@ -6,9 +6,9 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, config, doctor, gate, hooks, init, manifest, settings, AgentsCommand,
-    CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand, ManifestCommand,
-    MemoryCommand, SettingsCommand,
+    agents, cc, common, config, doctor, gate, hooks, init, manifest, settings, worktree,
+    AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand,
+    ManifestCommand, MemoryCommand, SettingsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -279,6 +279,41 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        Command::Worktree { sub } => {
+            let home = common::home_dir();
+            let slug = common::repo_slug();
+            let repo_slug = if slug.is_empty() {
+                None
+            } else {
+                Some(slug.as_str())
+            };
+            let repo_root = std::env::current_dir().unwrap_or_default();
+            match sub {
+                WorktreeCommand::Sweep { dry_run } => {
+                    let now_epoch = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    match worktree::sweep(&repo_root, &home, repo_slug, dry_run, now_epoch) {
+                        Ok(report) => {
+                            for line in report {
+                                println!("{line}");
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("worktree sweep: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                // `remove` lands in a later Segment; a bare success here
+                // would let a caller wire it up believing it already works.
+                WorktreeCommand::Remove { path: _ } => {
+                    eprintln!("worktree remove: not implemented yet");
+                    std::process::exit(1);
+                }
+            }
+        }
         Command::Doctor { sub } => match sub {
             DoctorCommand::PluginVersion { path } => {
                 println!("{}", doctor::field::plugin_version(&path));
