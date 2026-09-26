@@ -72,11 +72,14 @@ fn validate_key_and_value(key: &str, value: &Value) -> Result<(), ConfigError> {
     let expected = match default {
         Value::Bool(_) => "boolean",
         Value::String(_) => "string",
+        Value::Number(_) => "number",
         _ => "value",
     };
     let type_matches = matches!(
         (&default, value),
-        (Value::Bool(_), Value::Bool(_)) | (Value::String(_), Value::String(_))
+        (Value::Bool(_), Value::Bool(_))
+            | (Value::String(_), Value::String(_))
+            | (Value::Number(_), Value::Number(_))
     );
     if !type_matches {
         return Err(ConfigError::WrongType {
@@ -90,6 +93,18 @@ fn validate_key_and_value(key: &str, value: &Value) -> Result<(), ConfigError> {
                 key: key.to_string(),
                 value: s.clone(),
                 allowed,
+            });
+        }
+    }
+    if matches!(default, Value::Number(_)) {
+        // `as_i64` returns `None` for both an out-of-range integer and a
+        // fractional number (e.g. `3.5`), so it alone distinguishes every
+        // non-negative-integer case from a valid one. `value` is already
+        // confirmed to be `Value::Number` by the `type_matches` check above.
+        if !matches!(value.as_i64(), Some(n) if n >= 0) {
+            return Err(ConfigError::InvalidNumber {
+                key: key.to_string(),
+                value: value.to_string(),
             });
         }
     }

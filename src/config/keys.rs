@@ -8,7 +8,13 @@
 use serde_json::Value;
 
 /// Every config key playbook resolves, in v1.
-pub const KNOWN_KEYS: &[&str] = &["autoReview.enabled", "autoReview.type"];
+pub const KNOWN_KEYS: &[&str] = &[
+    "autoReview.enabled",
+    "autoReview.type",
+    "worktreeCleanup.enabled",
+    "worktreeCleanup.staleAfterDays",
+    "worktreeCleanup.conflictGracePeriodDays",
+];
 
 /// The default value for a known key, or `None` if `key` is not in
 /// `KNOWN_KEYS`.
@@ -16,6 +22,9 @@ pub fn default_value(key: &str) -> Option<Value> {
     match key {
         "autoReview.enabled" => Some(Value::Bool(true)),
         "autoReview.type" => Some(Value::String("deep".to_string())),
+        "worktreeCleanup.enabled" => Some(Value::Bool(true)),
+        "worktreeCleanup.staleAfterDays" => Some(Value::Number(30.into())),
+        "worktreeCleanup.conflictGracePeriodDays" => Some(Value::Number(90.into())),
         _ => None,
     }
 }

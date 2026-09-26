@@ -48,6 +48,9 @@ pub enum ConfigError {
         value: String,
         allowed: &'static [&'static str],
     },
+    /// `value` is a JSON number but not a non-negative integer (negative,
+    /// or fractional such as `3.5`).
+    InvalidNumber { key: String, value: String },
     /// A write targeted the org or repo tier but no `repo_slug` was
     /// available to build that tier's path from.
     MissingRepoContext,
@@ -80,6 +83,10 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "config key {key} does not accept '{value}', valid values are: {}",
                 allowed.join(", ")
+            ),
+            ConfigError::InvalidNumber { key, value } => write!(
+                f,
+                "config key {key} does not accept '{value}', must be a non-negative integer"
             ),
             ConfigError::MissingRepoContext => write!(
                 f,
@@ -191,4 +198,109 @@ fn dotted_lookup<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
         current = current.as_object()?.get(segment)?;
     }
     Some(current)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write::Tier;
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// A fresh scratch directory standing in for `$HOME`, unique per call so
+    /// parallel tests never collide.
+    fn scratch_home(tag: &str) -> PathBuf {
+        let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "playbook-config-mod-{}-{tag}-{n}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("scratch home should be creatable");
+        dir
+    }
+
+    #[test]
+    fn stale_after_days_defaults_to_thirty_with_no_override() {
+        // Arrange
+        let home = scratch_home("stale-after-days-default");
+
+        // Act
+        let result = resolve("worktreeCleanup.staleAfterDays", &home, None);
+
+        // Assert
+        assert_eq!(result.unwrap(), (Value::Number(30.into()), Source::Default));
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn stale_after_days_round_trips_through_write_and_resolve() {
+        // Arrange
+        let home = scratch_home("stale-after-days-round-trip");
+        write::set(
+            Tier::Repo,
+            "worktreeCleanup.staleAfterDays",
+            Value::Number(14.into()),
+            &home,
+            Some("owner/repo"),
+        )
+        .expect("write should succeed once staleAfterDays is a known key");
+
+        // Act
+        let result = resolve("worktreeCleanup.staleAfterDays", &home, Some("owner/repo"));
+
+        // Assert
+        assert_eq!(result.unwrap(), (Value::Number(14.into()), Source::Repo));
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn rejects_invalid_stale_after_days_values() {
+        // Each case pairs an invalid value with substrings its rejection
+        // error must contain.
+        let cases: Vec<(Value, Vec<&str>)> = vec![
+            (
+                Value::String("not-a-number".to_string()),
+                vec!["worktreeCleanup.staleAfterDays", "number"],
+            ),
+            (
+                Value::Number((-5).into()),
+                vec!["worktreeCleanup.staleAfterDays", "-5"],
+            ),
+            (
+                Value::Number(serde_json::Number::from_f64(3.5).unwrap()),
+                vec!["worktreeCleanup.staleAfterDays", "3.5"],
+            ),
+        ];
+
+        for (value, expected_substrings) in cases {
+            // Arrange
+            let home = scratch_home("stale-after-days-rejects");
+
+            // Act
+            let result = write::set(
+                Tier::Repo,
+                "worktreeCleanup.staleAfterDays",
+                value,
+                &home,
+                Some("owner/repo"),
+            );
+
+            // Assert
+            let message = result
+                .expect_err("invalid value should be rejected")
+                .to_string();
+            for expected in expected_substrings {
+                assert!(
+                    message.contains(expected),
+                    "expected error message {message:?} to contain {expected:?}"
+                );
+            }
+
+            let _ = fs::remove_dir_all(&home);
+        }
+    }
 }
