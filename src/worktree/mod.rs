@@ -23,7 +23,9 @@ pub enum Convention {
     Unmanaged,
 }
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
+// Wider than a plain 5s: this crate's fully parallel tests flake at 5s under
+// load, the same reason `src/common/paths.rs` widened its own git timeout.
+const GIT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Classifies `worktree_path` against each known creation convention's path
 /// shape, resolved relative to `home`.
@@ -142,11 +144,11 @@ const SECS_PER_DAY: i64 = 86_400;
 
 /// Whether a named-branch worktree's branch already landed: true for a
 /// merged PR, false for an open one, and otherwise a local fallback: merged
-/// into the currently checked-out `HEAD` (this function takes no explicit
-/// default-branch parameter, unlike [`wu_worktree_landed`]) or stale past
-/// `stale_after_days`, with the threshold itself counting as stale.
+/// into `default_branch` or stale past `stale_after_days`, with the
+/// threshold itself counting as stale.
 pub fn named_branch_landed(
     branch: &str,
+    default_branch: &str,
     stale_after_days: i64,
     repo_root: &Path,
     now_epoch: i64,
@@ -158,7 +160,7 @@ pub fn named_branch_landed(
         None => {}
     }
 
-    let merged = crate::cc::worktree::merged_branches(repo_root, "HEAD");
+    let merged = crate::cc::worktree::merged_branches(repo_root, default_branch);
     if crate::cc::worktree::contains_line(&merged, branch) {
         return true;
     }

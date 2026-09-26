@@ -166,6 +166,24 @@ fn classify_returns_expected_convention_for_each_of_the_four_path_conventions() 
             .join("42-abc1234"),
     );
 
+    // A hand-made directory under the same container, and a wu-shaped path
+    // with an extra nested segment: neither should ever classify as managed.
+    let plain_path = container.join("just-a-directory");
+    fs::create_dir_all(&plain_path).expect("create plain dir");
+
+    let extra_nested_wu_path = home
+        .join(".config")
+        .join("playbook")
+        .join("repos")
+        .join("acme")
+        .join("widgets")
+        .join("wt-abc123")
+        .join("worktrees")
+        .join("plan-slug")
+        .join("wu-1")
+        .join("too-deep");
+    fs::create_dir_all(&extra_nested_wu_path).expect("create extra nested dir");
+
     let previous_cwd = std::env::current_dir().expect("read current dir");
     std::env::set_current_dir(&repo_root).expect("cd into repo root");
 
@@ -175,6 +193,8 @@ fn classify_returns_expected_convention_for_each_of_the_four_path_conventions() 
         (agent_tool_path, Convention::AgentTool),
         (cc_launcher_path, Convention::CcLauncher),
         (review_path, Convention::Review),
+        (plain_path, Convention::Unmanaged),
+        (extra_nested_wu_path, Convention::Unmanaged),
     ];
     let got: Vec<Convention> = cases
         .iter()
@@ -225,6 +245,23 @@ fn classify_returns_wu_when_called_from_a_different_worktree_of_the_same_repo() 
             .join("wu-1"),
     );
 
+    // A second Wu-convention path with a DIFFERENT worktree-id segment
+    // ("wt-def456" vs "wt-abc123"): if the wildcard were ever narrowed to a
+    // literal match, only one of these two would still classify as Wu.
+    let other_wu_path = add_detached_worktree(
+        &repo_root,
+        &home
+            .join(".config")
+            .join("playbook")
+            .join("repos")
+            .join("acme")
+            .join("widgets")
+            .join("wt-def456")
+            .join("worktrees")
+            .join("plan-slug")
+            .join("wu-2"),
+    );
+
     let other_toplevel = add_worktree(
         &repo_root,
         &container.join("other-toplevel"),
@@ -236,6 +273,7 @@ fn classify_returns_wu_when_called_from_a_different_worktree_of_the_same_repo() 
 
     // Act
     let got = classify(&wu_path, &home);
+    let other_got = classify(&other_wu_path, &home);
 
     std::env::set_current_dir(&previous_cwd).expect("restore cwd");
 
@@ -244,6 +282,11 @@ fn classify_returns_wu_when_called_from_a_different_worktree_of_the_same_repo() 
         got,
         Convention::Wu,
         "expected Wu when classifying from a different toplevel of the same repo, got {got:?}"
+    );
+    assert_eq!(
+        other_got,
+        Convention::Wu,
+        "expected Wu for a different worktree-id segment too, got {other_got:?}"
     );
 
     let _ = fs::remove_dir_all(&container);
@@ -419,6 +462,11 @@ fn named_branch_landed_covers_pr_state_local_fallback_and_age_boundary() {
     commit_branch_at_epoch(&repo_root, "unmerged-fresh", NOW_EPOCH - SECS_PER_DAY);
     commit_branch_at_epoch(
         &repo_root,
+        "unmerged-just-under",
+        NOW_EPOCH - (STALE_AFTER_DAYS * SECS_PER_DAY - 1),
+    );
+    commit_branch_at_epoch(
+        &repo_root,
         "unmerged-at-boundary",
         NOW_EPOCH - STALE_AFTER_DAYS * SECS_PER_DAY,
     );
@@ -427,21 +475,32 @@ fn named_branch_landed_covers_pr_state_local_fallback_and_age_boundary() {
         "unmerged-stale",
         NOW_EPOCH - (STALE_AFTER_DAYS + 1) * SECS_PER_DAY,
     );
-    git_ok(&repo_root, &["checkout", "-q", "main"]);
+    // Checked out on a throwaway branch, not "main": pins that the landed
+    // check compares against the passed-in default branch, never whatever
+    // HEAD happens to be pointed at.
+    git_ok(&repo_root, &["checkout", "-q", "-b", "some-other-checkout"]);
 
     // Act
     let cases = [
-        ("pr-branch", Some(PrState::Merged), true),
+        ("unmerged-fresh", Some(PrState::Merged), true),
         ("pr-branch", Some(PrState::Open), false),
         ("merged-branch", None, true),
         ("unmerged-fresh", None, false),
+        ("unmerged-just-under", None, false),
         ("unmerged-stale", None, true),
         ("unmerged-at-boundary", None, true),
     ];
     let got: Vec<bool> = cases
         .iter()
         .map(|(branch, pr_state, _)| {
-            named_branch_landed(branch, STALE_AFTER_DAYS, &repo_root, NOW_EPOCH, *pr_state)
+            named_branch_landed(
+                branch,
+                "main",
+                STALE_AFTER_DAYS,
+                &repo_root,
+                NOW_EPOCH,
+                *pr_state,
+            )
         })
         .collect();
 
@@ -479,6 +538,8 @@ fn review_worktree_landed_covers_lock_state_and_pid_liveness() {
     let cases = [
         (false, None, NEVER_LOCKED_GRACE_SECS + 1, true),
         (false, None, NEVER_LOCKED_GRACE_SECS - 1, false),
+        (false, None, NEVER_LOCKED_GRACE_SECS, true),
+        (true, None, 0, false),
         (true, Some(live_pid), 0, false),
         (true, Some(dead_pid), 0, true),
     ];
