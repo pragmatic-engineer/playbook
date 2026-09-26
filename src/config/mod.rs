@@ -303,4 +303,24 @@ mod tests {
             let _ = fs::remove_dir_all(&home);
         }
     }
+
+    #[test]
+    fn accepts_zero_as_stale_after_days_value() {
+        // Arrange
+        let home = scratch_home("stale-after-days-accepts-zero");
+
+        // Act
+        let result = write::set(
+            Tier::Repo,
+            "worktreeCleanup.staleAfterDays",
+            Value::Number(0.into()),
+            &home,
+            Some("owner/repo"),
+        );
+
+        // Assert
+        assert!(result.is_ok(), "zero should be accepted as non-negative");
+
+        let _ = fs::remove_dir_all(&home);
+    }
 }

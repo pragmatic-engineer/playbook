@@ -320,8 +320,9 @@ fn format_config_value(value: &serde_json::Value) -> String {
 /// using `config::keys::default_value` to learn that type generically so an
 /// unknown key or a wrong-type value is rejected before `write::set` ever
 /// runs and touches a file. A boolean key accepts `true`/`false`
-/// case-insensitively; any other known key is passed through as a string,
-/// leaving an out-of-enum value for `write::set`'s own check to reject.
+/// case-insensitively; a numeric key accepts a non-negative integer; any
+/// other known key is passed through as a string, leaving an out-of-enum
+/// value for `write::set`'s own check to reject.
 fn parse_config_value(key: &str, value: &str) -> Result<serde_json::Value, config::ConfigError> {
     let default = config::keys::default_value(key)
         .ok_or_else(|| config::ConfigError::UnknownKey(key.to_string()))?;
@@ -332,6 +333,13 @@ fn parse_config_value(key: &str, value: &str) -> Result<serde_json::Value, confi
             _ => Err(config::ConfigError::WrongType {
                 key: key.to_string(),
                 expected: "boolean",
+            }),
+        },
+        serde_json::Value::Number(_) => match value.parse::<u64>() {
+            Ok(parsed) => Ok(serde_json::Value::Number(parsed.into())),
+            Err(_) => Err(config::ConfigError::InvalidNumber {
+                key: key.to_string(),
+                value: value.to_string(),
             }),
         },
         _ => Ok(serde_json::Value::String(value.to_string())),

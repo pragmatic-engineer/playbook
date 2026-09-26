@@ -97,10 +97,8 @@ fn validate_key_and_value(key: &str, value: &Value) -> Result<(), ConfigError> {
         }
     }
     if matches!(default, Value::Number(_)) {
-        // `as_i64` returns `None` for both an out-of-range integer and a
-        // fractional number (e.g. `3.5`), so it alone distinguishes every
-        // non-negative-integer case from a valid one. `value` is already
-        // confirmed to be `Value::Number` by the `type_matches` check above.
+        // `as_i64` screens out fractional and out-of-i64-range values
+        // (`None`); the `n >= 0` guard then screens out negatives.
         if !matches!(value.as_i64(), Some(n) if n >= 0) {
             return Err(ConfigError::InvalidNumber {
                 key: key.to_string(),
