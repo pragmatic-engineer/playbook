@@ -502,6 +502,10 @@ fn lock_state(entry: &WorktreeEntry) -> LockState {
 /// `wu_worktree_landed` for `Wu` (overridden by a present conflict-STOP
 /// marker's grace period), `named_branch_landed` for `AgentTool`/
 /// `CcLauncher`, and `review_worktree_landed` for `Review`.
+/// `never_locked_grace_secs` guards a background scan against the narrow
+/// add-then-lock race a review worktree can be caught in; it does not apply
+/// when the caller named this exact path (`remove`), so that path passes 0
+/// instead of [`NEVER_LOCKED_GRACE_SECS`].
 fn is_landed(
     entry: &WorktreeEntry,
     convention: Convention,
@@ -509,6 +513,7 @@ fn is_landed(
     policy: &SweepPolicy,
     repo_root: &Path,
     now_epoch: i64,
+    never_locked_grace_secs: i64,
 ) -> bool {
     match convention {
         Convention::Wu => wu_landed(entry, policy, repo_root, now_epoch),
@@ -534,7 +539,7 @@ fn is_landed(
                 lock.is_locked,
                 lock.owner_pid,
                 worktree_age_secs,
-                NEVER_LOCKED_GRACE_SECS,
+                never_locked_grace_secs,
             )
         }
         Convention::Unmanaged => false,
@@ -650,6 +655,63 @@ fn decide_and_report(
     }
 }
 
+/// Applies the same list -> classify -> check-landed -> check-lock -> decide
+/// -> act sequence as [`sweep`], scoped to exactly the worktree entry at
+/// `target_path` rather than every registered worktree, and with no
+/// never-locked grace window (see [`is_landed`]): the caller named this path
+/// directly, so the background-scan race that window guards against does not
+/// apply. Errs if `target_path` is not itself a registered worktree,
+/// comparing canonicalized paths (falling back to the raw path on either side
+/// if it no longer exists, so an already-deleted-but-still-registered
+/// worktree still matches) so a relative argument or a trailing slash cannot
+/// cause a false "not found". Also errs on anything other than a clean
+/// removal (not landed, dirty, locked, or a failed `git worktree remove`),
+/// since unlike `sweep`'s per-entry report list, `remove` is a single
+/// targeted command with no other channel to signal that nothing happened.
+pub fn remove(
+    repo_root: &Path,
+    home: &Path,
+    repo_slug: Option<&str>,
+    target_path: &Path,
+    now_epoch: i64,
+) -> Result<String, String> {
+    let policy = resolve_policy(home, repo_slug).map_err(|err| err.to_string())?;
+    if !policy.enabled {
+        return Ok("worktree remove: worktreeCleanup.enabled is false, nothing to do".to_string());
+    }
+
+    let entries = list_worktrees(repo_root)?;
+    let target = target_path
+        .canonicalize()
+        .unwrap_or_else(|_| target_path.to_path_buf());
+    let entry = entries
+        .into_iter()
+        .find(|entry| {
+            entry
+                .path
+                .canonicalize()
+                .unwrap_or_else(|_| entry.path.clone())
+                == target
+        })
+        .ok_or_else(|| format!("{} is not a registered git worktree", target_path.display()))?;
+
+    let convention = classify(&entry.path, home);
+    if convention == Convention::Unmanaged {
+        return Err(format!(
+            "{} is not a playbook-managed worktree",
+            target_path.display()
+        ));
+    }
+    let lock = lock_state(&entry);
+    let landed = is_landed(&entry, convention, &lock, &policy, repo_root, now_epoch, 0);
+    let report = decide_and_report(&entry, landed, &lock, repo_root, false);
+    if report.ends_with(": removed") {
+        Ok(report)
+    } else {
+        Err(report.trim_start_matches("worktree ").to_string())
+    }
+}
+
 /// Scans every worktree registered against `repo_root`, classifies each,
 /// applies the matching landed-signal check, and removes what has landed
 /// and is not locked by a live process, per the sequence: list, classify,
@@ -687,7 +749,15 @@ pub fn sweep(
             continue;
         }
         let lock = lock_state(&entry);
-        let landed = is_landed(&entry, convention, &lock, &policy, repo_root, now_epoch);
+        let landed = is_landed(
+            &entry,
+            convention,
+            &lock,
+            &policy,
+            repo_root,
+            now_epoch,
+            NEVER_LOCKED_GRACE_SECS,
+        );
         report.push(decide_and_report(&entry, landed, &lock, repo_root, dry_run));
     }
     Ok(report)

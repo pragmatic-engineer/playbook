@@ -611,22 +611,18 @@ fn format_epoch(epoch_secs: i64, format_spec: &str) -> String {
     panic!("date should format epoch {epoch_secs} on either BSD or GNU");
 }
 
+/// Same as [`format_epoch`], without `-u`: formats in the local timezone
+/// instead of UTC.
 /// Backdates `path`'s mtime to `epoch_secs`, standing in for a worktree
-/// created a while ago: `touch -t`'s `[[CC]YY]MMDDhhmm.SS` shape is accepted
-/// by both BSD and GNU `touch`, so no OS-specific fallback is needed here.
+/// created a while ago. Sets it directly via `File::set_modified` rather than
+/// round-tripping through `date`/`touch -t`'s local-wall-clock string
+/// representation, which is ambiguous during a DST fall-back hour and could
+/// shift the mtime by an hour; this matches the pattern already used in
+/// `tests/hooks_session.rs`.
 fn touch_at_epoch(path: &Path, epoch_secs: i64) {
-    let timestamp = format_epoch(epoch_secs, "+%Y%m%d%H%M.%S");
-    let out = Command::new("touch")
-        .arg("-t")
-        .arg(&timestamp)
-        .arg(path)
-        .output()
-        .expect("touch command should spawn");
-    assert!(
-        out.status.success(),
-        "touch -t {timestamp} {path:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let target = std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch_secs as u64);
+    let file = fs::File::open(path).expect("open file to backdate");
+    file.set_modified(target).expect("set mtime");
 }
 
 fn write_conflict_marker(worktree_path: &Path, epoch_secs: i64) {
@@ -799,6 +795,99 @@ fn sweep_removes_a_landed_unlocked_review_convention_worktree() {
     let _ = fs::remove_dir_all(&container);
 }
 
+/// Builds an unlocked Review-convention worktree fixture whose own creation
+/// time (its `.git` file's mtime, the signal `review_worktree_landed`'s
+/// unlocked path actually reads) is backdated by `worktree_age_secs`, so only
+/// that age varies between cases, not the lock state.
+fn build_review_fixture(tag: &str, worktree_age_secs: i64) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    let container = scratch(tag).canonicalize().expect("container resolves");
+    let repo_root = container.join("repo");
+    init_repo_at_epoch(
+        &repo_root,
+        "https://github.com/acme/widgets.git",
+        1_700_000_000,
+    );
+    let repo_root = repo_root.canonicalize().expect("repo root resolves");
+    let home = container.join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let home = home.canonicalize().expect("home resolves");
+
+    let common_dir = git_stdout(
+        &repo_root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    );
+    let review_path = add_detached_worktree(
+        &repo_root,
+        &Path::new(&common_dir)
+            .join("review-worktrees")
+            .join("42-abc1234"),
+    );
+    // The landed check reads the worktree's own creation time (its `.git`
+    // file's mtime), not its checked-out commit's date, so the fixture
+    // backdates that file directly to control the age the sweep sees.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock should read after the unix epoch")
+        .as_secs() as i64;
+    touch_at_epoch(&review_path.join(".git"), now - worktree_age_secs);
+
+    (container, repo_root, home, review_path)
+}
+
+enum ReviewGraceExpectation {
+    LeftAlone,
+    Removed,
+}
+
+#[test]
+fn sweep_applies_never_locked_grace_window_to_unlocked_review_convention_worktree() {
+    // Arrange: `build_review_fixture` backdates the worktree's own creation
+    // time, since the compiled binary reads its own `now_epoch` from the
+    // real clock with no injection point.
+    let cases = [
+        ("young", 10, ReviewGraceExpectation::LeftAlone),
+        ("old", 3600, ReviewGraceExpectation::Removed),
+    ];
+
+    for (tag, worktree_age_secs, expected) in cases {
+        let (container, repo_root, home, review_path) =
+            build_review_fixture(&format!("review-grace-{tag}"), worktree_age_secs);
+
+        // Act
+        let out = run_playbook(&repo_root, &home, &["worktree", "sweep"]);
+
+        // Assert
+        match expected {
+            ReviewGraceExpectation::LeftAlone => {
+                assert!(
+                    out.status.success(),
+                    "case {tag}, stderr: {}",
+                    stderr_of(&out)
+                );
+                assert!(
+                    fs::symlink_metadata(&review_path).is_ok(),
+                    "case {tag}: worktree younger than the never-locked grace window should still exist: {}",
+                    review_path.display()
+                );
+                assert!(
+                    still_registered(&repo_root, &review_path),
+                    "case {tag}: worktree younger than the never-locked grace window should still be registered"
+                );
+                let stdout = stdout_of(&out);
+                assert!(
+                    stdout.contains("not landed, skipping"),
+                    "case {tag}: sweep should report the young worktree as not landed, got: {stdout}"
+                );
+            }
+            ReviewGraceExpectation::Removed => {
+                assert_removed_and_reported(&repo_root, &review_path, &out);
+            }
+        }
+
+        let _ = fs::remove_dir_all(&container);
+    }
+}
+
 #[test]
 fn sweep_never_removes_the_worktree_it_is_invoked_from() {
     // Arrange: a landed, unlocked Wu-convention worktree, otherwise
@@ -857,6 +946,313 @@ fn sweep_never_removes_the_worktree_it_is_invoked_from() {
     assert!(
         !stdout.contains(&wu_path.to_string_lossy().into_owned()),
         "the sweep should not report on the worktree it runs from at all, got: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&container);
+}
+
+#[test]
+fn sweep_no_ops_when_worktree_cleanup_is_disabled() {
+    // Arrange: the same landed, unlocked, otherwise-removable Wu-convention
+    // fixture scenario 1 exercises, then the policy disabled at the repo
+    // tier the same way `tests/config_cli.rs` exercises `config set`.
+    let (container, repo_root, home, wu_path) = build_landed_wu_fixture("sweep-disabled");
+    let set_out = run_playbook(
+        &repo_root,
+        &home,
+        &["config", "set", "worktreeCleanup.enabled", "false"],
+    );
+    assert!(set_out.status.success(), "stderr: {}", stderr_of(&set_out));
+
+    // Act
+    let out = run_playbook(&repo_root, &home, &["worktree", "sweep"]);
+
+    // Assert: left alone, on disk, still registered, policy reported.
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+    assert!(
+        fs::symlink_metadata(&wu_path).is_ok(),
+        "worktree directory should still exist while the policy is disabled: {}",
+        wu_path.display()
+    );
+    assert!(
+        still_registered(&repo_root, &wu_path),
+        "worktree should still be registered while the policy is disabled"
+    );
+    let stdout = stdout_of(&out);
+    assert!(
+        stdout.contains("worktreeCleanup.enabled is false"),
+        "sweep should report the policy as disabled, got: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&container);
+}
+
+#[test]
+fn remove_no_ops_when_worktree_cleanup_is_disabled() {
+    // Arrange: an otherwise-removable Wu-convention fixture, then the policy
+    // disabled at the repo tier, matching the sweep-side case above so the
+    // same setting is proven to gate both subcommands.
+    let (container, repo_root, home, wu_path) = build_landed_wu_fixture("remove-disabled");
+    let set_out = run_playbook(
+        &repo_root,
+        &home,
+        &["config", "set", "worktreeCleanup.enabled", "false"],
+    );
+    assert!(set_out.status.success(), "stderr: {}", stderr_of(&set_out));
+
+    // Act
+    let out = run_playbook(
+        &repo_root,
+        &home,
+        &["worktree", "remove", wu_path.to_str().expect("utf8 path")],
+    );
+
+    // Assert: left alone, on disk, still registered, policy reported.
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+    assert!(
+        fs::symlink_metadata(&wu_path).is_ok(),
+        "worktree directory should still exist while the policy is disabled: {}",
+        wu_path.display()
+    );
+    assert!(
+        still_registered(&repo_root, &wu_path),
+        "worktree should still be registered while the policy is disabled"
+    );
+    let stdout = stdout_of(&out);
+    assert!(
+        stdout.contains("worktreeCleanup.enabled is false"),
+        "remove should report the policy as disabled, got: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&container);
+}
+
+#[test]
+fn sweep_aborts_when_git_worktree_list_fails() {
+    // Arrange: a scratch directory that is not a git repository at all (no
+    // `.git`, no parent directory that is one either), so `git worktree
+    // list --porcelain` itself exits non-zero rather than merely returning
+    // an empty worktree list.
+    let container = scratch("no-git")
+        .canonicalize()
+        .expect("container resolves");
+    let home = container.join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let home = home.canonicalize().expect("home resolves");
+
+    // Act
+    let out = run_playbook(&container, &home, &["worktree", "sweep"]);
+
+    // Assert: aborts cleanly with a non-zero exit and an error on stderr,
+    // nothing printed as a removal candidate on stdout.
+    assert!(
+        !out.status.success(),
+        "sweep should exit non-zero against a non-git directory"
+    );
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("git worktree list --porcelain failed"),
+        "sweep should report the listing failure specifically, got: {stderr}"
+    );
+    assert!(
+        stdout_of(&out).is_empty(),
+        "sweep should not report any removal candidates when the listing itself failed"
+    );
+
+    let _ = fs::remove_dir_all(&container);
+}
+
+/// The repo tier's config file path for the `acme/widgets` fixture repo
+/// `build_landed_wu_fixture` seeds, matching `config::repo_config_path`'s
+/// layout (`tests/config_cli.rs`'s `repo_config_path` pins the same shape
+/// for the `test-owner/test-repo` fixture there).
+fn repo_config_path(home: &Path) -> PathBuf {
+    home.join(".config")
+        .join("playbook")
+        .join("repos")
+        .join("acme")
+        .join("widgets")
+        .join(".config")
+        .join("config.json")
+}
+
+#[test]
+fn sweep_aborts_on_a_malformed_repo_tier_config_file() {
+    // Arrange: the same landed, unlocked, otherwise-removable Wu-convention
+    // fixture scenario 1 exercises, then the repo tier's config file
+    // corrupted with malformed JSON, standing in for a hand-edited or
+    // partially-written tier file.
+    let (container, repo_root, home, wu_path) = build_landed_wu_fixture("sweep-malformed-config");
+    let config_path = repo_config_path(&home);
+    fs::create_dir_all(config_path.parent().expect("config path has a parent"))
+        .expect("create repo tier config dir");
+    fs::write(&config_path, "{not valid json").expect("write malformed config file");
+
+    // Act
+    let out = run_playbook(&repo_root, &home, &["worktree", "sweep"]);
+
+    // Assert: aborts rather than proceeding under default policy values.
+    assert!(
+        !out.status.success(),
+        "sweep should exit non-zero against a malformed config tier file"
+    );
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("not a valid JSON object"),
+        "sweep should report the malformed config reason specifically, got: {stderr}"
+    );
+    assert!(
+        stdout_of(&out).is_empty(),
+        "sweep should not report any removal candidates when config resolution itself failed"
+    );
+    assert!(
+        fs::symlink_metadata(&wu_path).is_ok(),
+        "worktree should not be removed when the sweep aborted on a malformed config file: {}",
+        wu_path.display()
+    );
+    assert!(
+        still_registered(&repo_root, &wu_path),
+        "worktree should still be registered when the sweep aborted on a malformed config file"
+    );
+
+    let _ = fs::remove_dir_all(&container);
+}
+
+#[test]
+fn remove_on_a_path_that_is_not_a_registered_worktree_errors_clearly() {
+    // Arrange: a scratch directory that exists on disk but was never
+    // registered via `git worktree add`, standing in for any path that is
+    // simply not a worktree.
+    let container = scratch("remove-not-registered")
+        .canonicalize()
+        .expect("container resolves");
+    let repo_root = container.join("repo");
+    init_repo_at_epoch(
+        &repo_root,
+        "https://github.com/acme/widgets.git",
+        1_700_000_000,
+    );
+    let repo_root = repo_root.canonicalize().expect("repo root resolves");
+    let home = container.join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let home = home.canonicalize().expect("home resolves");
+    let not_a_worktree = container.join("not-a-worktree");
+    fs::create_dir_all(&not_a_worktree).expect("create non-worktree dir");
+
+    // Act
+    let out = run_playbook(
+        &repo_root,
+        &home,
+        &[
+            "worktree",
+            "remove",
+            not_a_worktree.to_str().expect("utf8 path"),
+        ],
+    );
+
+    // Assert: non-zero exit and a clear error naming the path.
+    assert!(
+        !out.status.success(),
+        "remove should exit non-zero against a path that is not a registered git worktree"
+    );
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("worktree remove:") && stderr.contains("is not a registered git worktree"),
+        "remove should report a clear error naming the path, got: {stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&container);
+}
+
+#[test]
+fn remove_actually_removes_a_landed_unlocked_worktree() {
+    // Arrange: the same landed, unlocked Wu-convention fixture scenario 1
+    // exercises for `sweep`, proving `remove` performs the full removal path
+    // end to end rather than only the disabled-policy or not-found cases.
+    let (container, repo_root, home, wu_path) = build_landed_wu_fixture("remove-landed");
+
+    // Act
+    let out = run_playbook(
+        &repo_root,
+        &home,
+        &["worktree", "remove", wu_path.to_str().expect("utf8 path")],
+    );
+
+    // Assert
+    assert_removed_and_reported(&repo_root, &wu_path, &out);
+
+    let _ = fs::remove_dir_all(&container);
+}
+
+#[test]
+fn remove_refuses_an_unlanded_worktree_and_exits_nonzero() {
+    // Arrange: a Wu-convention worktree on its own branch with a commit that
+    // is never merged into `origin/main`, the same unlanded fixture `sweep`
+    // leaves alone, proving `remove` refuses it too rather than only
+    // covering the disabled-policy, not-found, and landed-removal cases.
+    let container = scratch("remove-unlanded")
+        .canonicalize()
+        .expect("container resolves");
+    let repo_root = container.join("repo");
+    init_repo_at_epoch(
+        &repo_root,
+        "https://github.com/acme/widgets.git",
+        1_700_000_000,
+    );
+    let repo_root = repo_root.canonicalize().expect("repo root resolves");
+    let head = git_stdout(&repo_root, &["rev-parse", "HEAD"]);
+    git_ok(
+        &repo_root,
+        &["update-ref", "refs/remotes/origin/main", &head],
+    );
+    let home = container.join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let home = home.canonicalize().expect("home resolves");
+
+    let wu_path = add_worktree(
+        &repo_root,
+        &home
+            .join(".config")
+            .join("playbook")
+            .join("repos")
+            .join("acme")
+            .join("widgets")
+            .join("wt-def456")
+            .join("worktrees")
+            .join("plan-slug")
+            .join("wu-2"),
+        "wu-2-unlanded",
+    );
+    fs::write(wu_path.join("unmerged.txt"), "work in progress\n")
+        .expect("write unmerged file in worktree");
+    git_ok(&wu_path, &["add", "."]);
+    git_ok(&wu_path, &["commit", "-q", "-m", "unmerged work"]);
+
+    // Act
+    let out = run_playbook(
+        &repo_root,
+        &home,
+        &["worktree", "remove", wu_path.to_str().expect("utf8 path")],
+    );
+
+    // Assert: refused, exits non-zero, left on disk and still registered.
+    assert!(
+        !out.status.success(),
+        "remove should exit non-zero for an unlanded worktree"
+    );
+    assert!(
+        fs::symlink_metadata(&wu_path).is_ok(),
+        "unlanded worktree should not be removed: {}",
+        wu_path.display()
+    );
+    assert!(
+        still_registered(&repo_root, &wu_path),
+        "unlanded worktree should still be a registered git worktree"
+    );
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("not landed, skipping"),
+        "remove should report the unlanded worktree as not landed, got: {stderr}"
     );
 
     let _ = fs::remove_dir_all(&container);

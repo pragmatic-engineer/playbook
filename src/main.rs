@@ -306,11 +306,18 @@ fn main() {
                         }
                     }
                 }
-                // `remove` lands in a later Segment; a bare success here
-                // would let a caller wire it up believing it already works.
-                WorktreeCommand::Remove { path: _ } => {
-                    eprintln!("worktree remove: not implemented yet");
-                    std::process::exit(1);
+                WorktreeCommand::Remove { path } => {
+                    let now_epoch = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    match worktree::remove(&repo_root, &home, repo_slug, &path, now_epoch) {
+                        Ok(line) => println!("{line}"),
+                        Err(err) => {
+                            eprintln!("worktree remove: {err}");
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }
