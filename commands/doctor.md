@@ -389,6 +389,60 @@ Report:
   `config` subcommand, the same underlying condition Layer 6 and Layer 7
   already report as `MISSING`/`UNKNOWN` for their own checks.
 
+## Stale worktrees
+
+This is informational, not one of the eight layers above: a worktree `sweep
+--dry-run` would remove is nothing to "fix" here and now, only to be aware of.
+It never fails the check on its own.
+
+```bash
+if ! command -v playbook >/dev/null 2>&1; then
+  echo "UNKNOWN"
+else
+  sweep_status=0
+  sweep_out=$(playbook worktree sweep --dry-run 2>&1) || sweep_status=$?
+  if [ $sweep_status -ne 0 ]; then
+    echo "ERROR"
+    printf '%s\n' "$sweep_out"
+  else
+    echo "OK"
+    printf '%s\n' "$sweep_out"
+  fi
+fi
+```
+
+`playbook worktree sweep --dry-run` prints one line per registered worktree it
+would act on, naming the path and the reason: `would remove (dry run)` for one
+that has landed and is safe to remove, or a skip reason (`not landed`, `has
+uncommitted changes`, `locked by a live process`, and so on) for one it leaves
+alone. A worktree with nothing to report (for example one with no matching
+convention) prints no line at all, so an empty `sweep_out` is a normal, healthy
+result, not a sign the command failed. On a hard failure (`git worktree list`
+itself failing, or a malformed config tier file), it exits non-zero and prints
+an error naming what went wrong instead.
+
+The reported path itself already names the convention: a path under
+`.claude/worktrees/agent-*` is the Agent-tool convention, one under
+`.worktrees/<repo>/` is the `cc worktree` launcher convention, one under
+`review-worktrees/` is the PR review convention, and one under a
+`repos/<owner>/<repo>/*/worktrees/` tree is the `/playbook:implement`
+Work-Unit convention. When relaying a line, read the convention off the path
+this way rather than treating the line as convention-less.
+
+Report:
+
+- `OK` with output → INFO, one line per worktree the sweep reported, exactly
+  as `playbook worktree sweep --dry-run` printed it, for example `INFO  worktree
+  /path/to/worktree: would remove (dry run)`.
+- `OK` with no output → INFO, "no stale worktrees found".
+- `ERROR` → INFO, print the captured error line(s) plainly; they already name
+  what failed.
+- `UNKNOWN` → INFO, "could not check: playbook worktree unavailable". Covers
+  both `playbook` missing entirely and a `playbook` too old to have the
+  `worktree` subcommand, the same underlying condition Layer 6, Layer 7, and
+  the auto-review config check already report as `MISSING`/`UNKNOWN` for their
+  own checks.
+
 ## Output format
 
 Print a table with one row per layer. Use a clear status marker and a brief
@@ -406,6 +460,7 @@ FAIL  playbook binary not on PATH -- every ported hook is dead; install the rele
 FAIL  hook command points at a missing file: python3 ~/.claude/hooks/memory_context.py -- this hook does nothing every time it fires; playbook init will not remove it, delete the entry from ~/.claude/settings.json by hand
 INFO  autoReview.enabled: true (source: default)
 INFO  autoReview.type: deep (source: default)
+INFO  no stale worktrees found
 ```
 
 If all required layers pass and optional layers are installed, say so in one
