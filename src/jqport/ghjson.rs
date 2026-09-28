@@ -45,6 +45,24 @@ pub fn array_length(json: &str) -> usize {
     }
 }
 
+/// Reads one field from a top-level JSON object as display text: a string
+/// value as-is, a number in its literal form (`42`, not `"42"`), matching
+/// the two real call sites in `commands/quick-review.md` (`.number`, a
+/// number, and `.headRefOid`, a string). Empty on any failure: malformed
+/// JSON, a non-object top-level value, a missing key, or a value of any
+/// other type, the same empty-on-mismatch convention [`bucket_counts`] and
+/// `src/doctor/field.rs` already use.
+pub fn field(json: &str, key: &str) -> String {
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(json) else {
+        return String::new();
+    };
+    match map.get(key) {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +178,65 @@ mod tests {
 
         // Assert
         assert_eq!(got, 0);
+    }
+
+    #[test]
+    fn field_reads_a_string_value() {
+        // Arrange
+        let json = r#"{"headRefOid": "abc123"}"#;
+
+        // Act
+        let got = field(json, "headRefOid");
+
+        // Assert
+        assert_eq!(got, "abc123");
+    }
+
+    #[test]
+    fn field_reads_a_number_value_as_its_literal_text() {
+        // Arrange
+        let json = r#"{"number": 42}"#;
+
+        // Act
+        let got = field(json, "number");
+
+        // Assert
+        assert_eq!(got, "42");
+    }
+
+    #[test]
+    fn field_is_empty_when_the_key_is_missing() {
+        // Arrange
+        let json = r#"{"other": "value"}"#;
+
+        // Act
+        let got = field(json, "number");
+
+        // Assert
+        assert_eq!(got, "");
+    }
+
+    #[test]
+    fn field_is_empty_for_a_non_object_top_level_value() {
+        // Arrange
+        let json = "[1, 2, 3]";
+
+        // Act
+        let got = field(json, "number");
+
+        // Assert
+        assert_eq!(got, "");
+    }
+
+    #[test]
+    fn field_is_empty_for_malformed_json() {
+        // Arrange
+        let json = "not json";
+
+        // Act
+        let got = field(json, "number");
+
+        // Assert
+        assert_eq!(got, "");
     }
 }

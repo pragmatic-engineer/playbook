@@ -110,6 +110,7 @@ pub enum Command {
     },
     /// Hand-written `jq` replacements over a piped `gh` JSON payload, backing
     /// `src/jqport/`.
+    #[command(name = "jqport")]
     JqPort {
         #[command(subcommand)]
         sub: JqPortCommand,
@@ -301,6 +302,12 @@ pub enum JqPortCommand {
     /// Print a piped JSON array's length as a bare integer, 0 for anything
     /// else. Backs `src/jqport/ghjson.rs::array_length`.
     ArrayLength {},
+    /// Print one field from a piped flat JSON object, empty for a missing
+    /// or malformed field. Backs `src/jqport/ghjson.rs::field`.
+    Field {
+        /// The object key to read, e.g. `number` or `headRefOid`.
+        key: String,
+    },
 }
 
 /// `playbook worktree` subcommands, backing `src/worktree/`.

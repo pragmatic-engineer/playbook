@@ -347,6 +347,9 @@ fn main() {
                 JqPortCommand::ArrayLength {} => {
                     println!("{}", jqport::ghjson::array_length(&input));
                 }
+                JqPortCommand::Field { key } => {
+                    println!("{}", jqport::ghjson::field(&input, &key));
+                }
             }
         }
     }
