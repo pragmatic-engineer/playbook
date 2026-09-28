@@ -102,10 +102,7 @@ mod tests {
         let got = bucket_counts(json, &buckets);
 
         // Assert
-        assert_eq!(
-            got,
-            vec![("pass".to_string(), 0), ("fail".to_string(), 0)]
-        );
+        assert_eq!(got, vec![("pass".to_string(), 0), ("fail".to_string(), 0)]);
     }
 
     #[test]
