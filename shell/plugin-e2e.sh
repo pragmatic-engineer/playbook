@@ -43,6 +43,9 @@ pver="$(jq -r '.version // empty' "$REPO/.claude-plugin/plugin.json")"
 [ -n "$pver" ] && ok "plugin.json version=$pver" || bad "plugin.json missing version"
 
 hdr "C. Hook integrity (every hooks.json command resolves and parses)"
+# Needs every command path to resolve and check individually, not a count,
+# and reads the plugin manifest (hooks/hooks.json) rather than a settings.json,
+# so this stays a jq flatten rather than a hook-commands-matching call.
 while IFS= read -r c; do
   path="${c//\"/}"; path="${path/\$\{CLAUDE_PLUGIN_ROOT\}/$REPO}"
   base="$(basename "$path")"
