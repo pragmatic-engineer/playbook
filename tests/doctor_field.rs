@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 //! Binary-spawn tests for `playbook doctor plugin-version`,
-//! `playbook doctor statusline-command`, and `playbook doctor hook-commands`,
-//! the subcommands `commands/doctor.md`'s Layer 6, Layer 5, and Layer 7
-//! blocks call in place of `jq`.
+//! `playbook doctor statusline-command`, `playbook doctor hook-commands`,
+//! `playbook doctor hook-commands-for-event`, and
+//! `playbook doctor hook-commands-matching`, the subcommands
+//! `commands/doctor.md`'s Layer 6, Layer 5, Layer 7, and Layer 2 blocks call
+//! in place of `jq`.
 
 use std::fs;
 use std::path::PathBuf;

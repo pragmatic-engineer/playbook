@@ -75,16 +75,7 @@ pub fn hook_commands(path: &Path) -> Vec<String> {
         let Some(matcher_groups) = event_value.as_array() else {
             continue;
         };
-        for group in matcher_groups {
-            let Some(group_hooks) = group.get("hooks").and_then(Value::as_array) else {
-                continue;
-            };
-            for hook in group_hooks {
-                if let Some(command) = hook.get("command").and_then(Value::as_str) {
-                    out.push(command.to_string());
-                }
-            }
-        }
+        out.extend(commands_in_matcher_groups(matcher_groups));
     }
     out
 }
@@ -111,7 +102,10 @@ pub fn hook_commands_for_event(path: &Path, event: &str, guards: &[&str]) -> Vec
         .iter()
         .map(|guard| {
             let wanted = format!("playbook hook {guard}");
-            let count = commands.iter().filter(|command| **command == wanted).count();
+            let count = commands
+                .iter()
+                .filter(|command| **command == wanted)
+                .count();
             (guard.to_string(), count)
         })
         .collect()
@@ -137,7 +131,10 @@ pub fn hook_commands_matching(path: &Path, event: Option<&str>, pattern: &str) -
         Some(event) => event_hook_commands(path, event),
         None => hook_commands(path),
     };
-    commands.iter().filter(|command| re.is_match(command)).count()
+    commands
+        .iter()
+        .filter(|command| re.is_match(command))
+        .count()
 }
 
 /// Every hook `.command` string wired under one event in a
@@ -160,7 +157,14 @@ fn event_hook_commands(path: &Path, event: &str) -> Vec<String> {
     else {
         return Vec::new();
     };
+    commands_in_matcher_groups(matcher_groups)
+}
 
+/// Every `.command` string under one array of matcher groups (a single
+/// event's value in `settings.json`'s `.hooks`): `.[]?.hooks[]?.command`.
+/// The one step [`hook_commands`] and [`event_hook_commands`] both repeat
+/// once per event they walk.
+fn commands_in_matcher_groups(matcher_groups: &[Value]) -> Vec<String> {
     let mut out = Vec::new();
     for group in matcher_groups {
         let Some(group_hooks) = group.get("hooks").and_then(Value::as_array) else {
@@ -582,6 +586,29 @@ mod tests {
     }
 
     #[test]
+    fn hook_commands_for_event_is_all_zero_when_the_named_event_has_no_hooks_wired() {
+        // Arrange: hooks exist, just none wired under the requested event, the
+        // common case for an event no guard uses yet.
+        let f = Fixture::new(
+            "for-event-event-key-absent",
+            r#"{"hooks": {"Stop": [{"hooks": [{"command": "playbook hook precommit-check"}]}]}}"#,
+        );
+        let guards = ["rm-workspace-guard", "bg-await-guard"];
+
+        // Act
+        let got = hook_commands_for_event(&f.path, "PreToolUse", &guards);
+
+        // Assert
+        assert_eq!(
+            got,
+            vec![
+                ("rm-workspace-guard".to_string(), 0),
+                ("bg-await-guard".to_string(), 0),
+            ]
+        );
+    }
+
+    #[test]
     fn hook_commands_for_event_is_all_zero_when_hooks_is_not_an_object() {
         // Arrange
         let f = Fixture::new(
@@ -671,8 +698,11 @@ mod tests {
         );
 
         // Act
-        let got =
-            hook_commands_matching(&f.path, None, "rm-workspace-guard|bg-await-guard|no-slop-guard");
+        let got = hook_commands_matching(
+            &f.path,
+            None,
+            "rm-workspace-guard|bg-await-guard|no-slop-guard",
+        );
 
         // Assert
         assert_eq!(got, 3);
@@ -743,10 +773,29 @@ mod tests {
     #[test]
     fn hook_commands_matching_is_zero_when_hooks_is_not_an_object() {
         // Arrange
-        let f = Fixture::new("matching-hooks-wrong-shape", r#"{"hooks": "not an object"}"#);
+        let f = Fixture::new(
+            "matching-hooks-wrong-shape",
+            r#"{"hooks": "not an object"}"#,
+        );
 
         // Act
         let got = hook_commands_matching(&f.path, None, "guard");
+
+        // Assert
+        assert_eq!(got, 0);
+    }
+
+    #[test]
+    fn hook_commands_matching_is_zero_when_the_scoped_event_has_no_hooks_wired() {
+        // Arrange: hooks exist, just none wired under the requested event, the
+        // common case for an event no guard uses yet.
+        let f = Fixture::new(
+            "matching-scoped-event-key-absent",
+            r#"{"hooks": {"Stop": [{"hooks": [{"command": "playbook hook no-slop-guard"}]}]}}"#,
+        );
+
+        // Act
+        let got = hook_commands_matching(&f.path, Some("PreToolUse"), "guard");
 
         // Assert
         assert_eq!(got, 0);

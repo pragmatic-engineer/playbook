@@ -339,7 +339,9 @@ fn main() {
                 guards,
             } => {
                 let guard_refs: Vec<&str> = guards.iter().map(String::as_str).collect();
-                for (guard, count) in doctor::field::hook_commands_for_event(&path, &event, &guard_refs) {
+                for (guard, count) in
+                    doctor::field::hook_commands_for_event(&path, &event, &guard_refs)
+                {
                     println!("{guard}={count}");
                 }
             }
