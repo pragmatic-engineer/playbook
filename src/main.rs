@@ -6,9 +6,9 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, config, doctor, gate, hooks, init, manifest, settings, worktree,
+    agents, cc, common, config, doctor, gate, hooks, init, jqport, manifest, settings, worktree,
     AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand,
-    ManifestCommand, MemoryCommand, SettingsCommand, WorktreeCommand,
+    JqPortCommand, ManifestCommand, MemoryCommand, SettingsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -334,6 +334,21 @@ fn main() {
                 }
             }
         },
+        Command::JqPort { sub } => {
+            let mut input = String::new();
+            let _ = std::io::stdin().read_to_string(&mut input);
+            match sub {
+                JqPortCommand::BucketCounts { buckets } => {
+                    let names: Vec<&str> = buckets.iter().map(String::as_str).collect();
+                    for (bucket, count) in jqport::ghjson::bucket_counts(&input, &names) {
+                        println!("{bucket}={count}");
+                    }
+                }
+                JqPortCommand::ArrayLength {} => {
+                    println!("{}", jqport::ghjson::array_length(&input));
+                }
+            }
+        }
     }
 }
 
