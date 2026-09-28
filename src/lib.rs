@@ -13,7 +13,7 @@ pub mod doctor;
 pub mod gate;
 pub mod hooks;
 pub mod init;
-pub mod jqport;
+pub mod json;
 pub mod manifest;
 pub mod settings;
 pub mod worktree;
@@ -109,11 +109,10 @@ pub enum Command {
         sub: WorktreeCommand,
     },
     /// Hand-written `jq` replacements over a piped `gh` JSON payload, backing
-    /// `src/jqport/`.
-    #[command(name = "jqport")]
-    JqPort {
+    /// `src/json/`.
+    Json {
         #[command(subcommand)]
-        sub: JqPortCommand,
+        sub: JsonCommand,
     },
 }
 
@@ -286,24 +285,24 @@ pub enum DoctorCommand {
     },
 }
 
-/// `playbook jqport` subcommands, backing `src/jqport/`. Every subcommand
+/// `playbook json` subcommands, backing `src/json/`. Every subcommand
 /// reads its JSON payload from stdin rather than a path or inline argument,
 /// matching the piped shape a real call site uses:
-/// `gh pr checks ... --json bucket | playbook jqport bucket-counts pass fail`.
+/// `gh pr checks ... --json bucket | playbook json bucket-counts pass fail`.
 #[derive(Subcommand, Debug)]
-pub enum JqPortCommand {
+pub enum JsonCommand {
     /// Tally a piped JSON array's `"bucket"` field against the named
     /// buckets, printing one `bucket=count` line per bucket in the order
-    /// given. Backs `src/jqport/ghjson.rs::bucket_counts`.
+    /// given. Backs `src/json/ghjson.rs::bucket_counts`.
     BucketCounts {
         /// Bucket names to tally, e.g. `pass fail pending`.
         buckets: Vec<String>,
     },
     /// Print a piped JSON array's length as a bare integer, 0 for anything
-    /// else. Backs `src/jqport/ghjson.rs::array_length`.
-    ArrayLength {},
+    /// else. Backs `src/json/ghjson.rs::array_length`.
+    ArrayLength,
     /// Print one field from a piped flat JSON object, empty for a missing
-    /// or malformed field. Backs `src/jqport/ghjson.rs::field`.
+    /// or malformed field. Backs `src/json/ghjson.rs::field`.
     Field {
         /// The object key to read, e.g. `number` or `headRefOid`.
         key: String,

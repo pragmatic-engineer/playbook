@@ -457,10 +457,10 @@ gh pr ready "$BRANCH"
 DEADLINE=$(( $(date +%s) + 1200 ))
 while :; do
   OUT=$(gh pr checks "$PR" --required --json name,bucket,link 2>/dev/null || echo '[]')
-  PEND=$(printf '%s' "$OUT" | playbook jqport bucket-counts pending | cut -d= -f2)
-  FAIL=$(printf '%s' "$OUT" | playbook jqport bucket-counts fail | cut -d= -f2)
-  CANC=$(printf '%s' "$OUT" | playbook jqport bucket-counts cancel | cut -d= -f2)
-  TOT=$(printf '%s' "$OUT" | playbook jqport array-length)
+  PEND=$(printf '%s' "$OUT" | playbook json bucket-counts pending | cut -d= -f2)
+  FAIL=$(printf '%s' "$OUT" | playbook json bucket-counts fail | cut -d= -f2)
+  CANC=$(printf '%s' "$OUT" | playbook json bucket-counts cancel | cut -d= -f2)
+  TOT=$(printf '%s' "$OUT" | playbook json array-length)
   echo "checks total=$TOT pending=$PEND fail=$FAIL cancel=$CANC"
   [ "$TOT" -eq 0 ]    && { echo "CI_VERDICT=NONE"; break; }
   [ "$FAIL" -gt 0 ]   && { echo "CI_VERDICT=FAIL"; break; }

@@ -97,8 +97,8 @@ ARGS="${ARGS// /}"
 if [ -z "$ARGS" ]; then
   # Nothing named to post to: resolve current branch's PR, report-only.
   PR_JSON=$(gh pr view --json number,headRefOid,author,headRefName 2>/dev/null) || { echo "error: no PR found for current branch; create one first or pass a PR number" >&2; exit 1; }
-  PR_NUMBER=$(echo "$PR_JSON" | playbook jqport field number)
-  HEAD_SHA=$(echo "$PR_JSON" | playbook jqport field headRefOid)
+  PR_NUMBER=$(echo "$PR_JSON" | playbook json field number)
+  HEAD_SHA=$(echo "$PR_JSON" | playbook json field headRefOid)
   SELF_MODE=true
 else
   ARGS="${ARGS#\#}"

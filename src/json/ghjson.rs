@@ -138,6 +138,32 @@ mod tests {
     }
 
     #[test]
+    fn bucket_counts_is_all_zero_for_malformed_json() {
+        // Arrange
+        let json = "not json";
+        let buckets = ["pass", "fail"];
+
+        // Act
+        let got = bucket_counts(json, &buckets);
+
+        // Assert
+        assert_eq!(got, vec![("pass".to_string(), 0), ("fail".to_string(), 0)]);
+    }
+
+    #[test]
+    fn bucket_counts_is_all_zero_for_a_non_array_top_level_value() {
+        // Arrange
+        let json = r#"{"bucket": "pass"}"#;
+        let buckets = ["pass", "fail"];
+
+        // Act
+        let got = bucket_counts(json, &buckets);
+
+        // Assert
+        assert_eq!(got, vec![("pass".to_string(), 0), ("fail".to_string(), 0)]);
+    }
+
+    #[test]
     fn array_length_matches_the_element_count_directly() {
         // Arrange
         let json = r#"[
