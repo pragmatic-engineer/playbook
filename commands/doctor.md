@@ -32,18 +32,30 @@ hook, guards included. This layer's job narrows to the one question that is
 still specific to the guards: is each one actually wired to that bare form?
 
 ```bash
-wired=0; problems=""
-for g in rm-workspace-guard bg-await-guard no-slop-guard precommit-check; do
-  n=$(jq -r --arg cmd "playbook hook $g" \
-      '[.hooks.PreToolUse[]?.hooks[]?.command // ""] | map(select(. == $cmd)) | length' \
-      ~/.claude/settings.json 2>/dev/null)
-  if [ "${n:-0}" -gt 0 ]; then
-    wired=$((wired + 1))
-  else
-    problems="$problems $g:NOT_WIRED"
-  fi
-done
-echo "wired=$wired/4$problems"
+wired_status="OK"
+if ! command -v playbook >/dev/null 2>&1; then
+  wired_status="UNKNOWN"
+  hc_out=""
+else
+  hc_out=$(playbook doctor hook-commands-for-event ~/.claude/settings.json PreToolUse \
+    rm-workspace-guard bg-await-guard no-slop-guard precommit-check 2>/dev/null) || wired_status="UNKNOWN"
+fi
+if [ "$wired_status" = "UNKNOWN" ]; then
+  echo "UNKNOWN"
+else
+  wired=0; problems=""
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    guard=${line%%=*}
+    count=${line#*=}
+    if [ "${count:-0}" -gt 0 ]; then
+      wired=$((wired + 1))
+    else
+      problems="$problems $guard:NOT_WIRED"
+    fi
+  done <<< "$hc_out"
+  echo "wired=$wired/4$problems"
+fi
 ```
 
 Report:
@@ -55,6 +67,9 @@ Report:
   the binary. Remediation: `playbook init`, which rewrites every guard's
   command to its bare form unconditionally, or `/playbook:setup` on a
   machine without the binary.
+- `UNKNOWN` → INFO, not a false PASS or FAIL: `playbook` is missing entirely
+  or predates the `hook-commands-for-event` subcommand, so this layer
+  cannot count anything. Layer 6 names which.
 
 ## Layer 3: Launcher (opt-in)
 
