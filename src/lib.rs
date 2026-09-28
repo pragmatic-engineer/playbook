@@ -276,6 +276,26 @@ pub enum DoctorCommand {
         /// Path to the settings.json to read.
         path: PathBuf,
     },
+    /// Print one `guard=count` line per guard, each count the number of
+    /// `.command` entries wired to that guard under one event. Backs Layer 2.
+    HookCommandsForEvent {
+        /// Path to the settings.json to read.
+        path: PathBuf,
+        /// Event name the counts are scoped to, e.g. `PreToolUse`.
+        event: String,
+        /// Bare guard names, e.g. `rm-workspace-guard`.
+        guards: Vec<String>,
+    },
+    /// Print a single count of `.command` entries matching a regex pattern,
+    /// across every event or scoped to one.
+    HookCommandsMatching {
+        /// Path to the settings.json to read.
+        path: PathBuf,
+        /// Regex pattern, matched as an unanchored substring search.
+        pattern: String,
+        /// Event name to scope the count to; omit to count across every event.
+        event: Option<String>,
+    },
 }
 
 /// `playbook worktree` subcommands, backing `src/worktree/`.

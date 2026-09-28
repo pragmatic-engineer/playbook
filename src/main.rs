@@ -333,6 +333,25 @@ fn main() {
                     println!("{command}");
                 }
             }
+            DoctorCommand::HookCommandsForEvent {
+                path,
+                event,
+                guards,
+            } => {
+                let guard_refs: Vec<&str> = guards.iter().map(String::as_str).collect();
+                for (guard, count) in doctor::field::hook_commands_for_event(&path, &event, &guard_refs) {
+                    println!("{guard}={count}");
+                }
+            }
+            DoctorCommand::HookCommandsMatching {
+                path,
+                pattern,
+                event,
+            } => {
+                let count =
+                    doctor::field::hook_commands_matching(&path, event.as_deref(), &pattern);
+                println!("{count}");
+            }
         },
     }
 }

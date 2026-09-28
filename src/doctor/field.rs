@@ -14,6 +14,10 @@
 //! Deliberately not a general JSON query command: each function names the one
 //! shape it reads. A future call site needing a different field gets its own
 //! function here, not a flag on a generic getter.
+//!
+//! Also covers two counting idioms other call sites shelled out to `jq` for:
+//! an exact per-guard command count scoped to one event, and a regex-match
+//! count via the `regex` crate, mirroring `jq`'s `test($pattern)`.
 
 use serde_json::Value;
 use std::path::Path;
@@ -79,6 +83,92 @@ pub fn hook_commands(path: &Path) -> Vec<String> {
                 if let Some(command) = hook.get("command").and_then(Value::as_str) {
                     out.push(command.to_string());
                 }
+            }
+        }
+    }
+    out
+}
+
+/// Counts, for each guard name in `guards`, how many hook `.command` entries
+/// wired under one `settings.json` event equal `"playbook hook <guard>"`
+/// exactly. Mirrors the per-guard `jq` loop `commands/doctor.md`'s Layer 2
+/// block runs once per guard: `--arg event ... --arg cmd ...
+/// '[.hooks[$event][]?.hooks[]?.command // ""] | map(select(. == $cmd)) |
+/// length'`. Guard names are bare (e.g. `rm-workspace-guard`); the `"playbook
+/// hook "` prefix is added internally so callers pass the same names
+/// `settings.json`'s wired commands use. Same empty/zero-on-any-shape-mismatch
+/// behavior as [`hook_commands`]. Returned pairs keep the input `guards`
+/// order.
+///
+/// Diverges from `jq -r` on one edge case: when `.hooks` is a non-null
+/// scalar (a string, say), bracket-indexing it hard-errors in real `jq`
+/// (exit 5, empty stdout) rather than degrading gracefully, where this
+/// returns zero counts. Same unrealistic-shape tradeoff [`hook_commands`]
+/// already documents.
+pub fn hook_commands_for_event(path: &Path, event: &str, guards: &[&str]) -> Vec<(String, usize)> {
+    let commands = event_hook_commands(path, event);
+    guards
+        .iter()
+        .map(|guard| {
+            let wanted = format!("playbook hook {guard}");
+            let count = commands.iter().filter(|command| **command == wanted).count();
+            (guard.to_string(), count)
+        })
+        .collect()
+}
+
+/// Counts hook `.command` entries under `settings.json`'s `.hooks` (every
+/// event, or one when `event` is given) that contain `pattern` as an
+/// unanchored regular expression match, mirroring the repeated `jq
+/// ... | select(test($pattern)) | length` shell idiom found at several call
+/// sites (`jq`'s `test` is an ERE substring search, not a full-string
+/// match). Same empty/zero-on-any-shape-mismatch behavior as
+/// [`hook_commands`]; also zero if `pattern` fails to compile as a regex.
+///
+/// Diverges from `jq -r` on one edge case, the same one [`hook_commands`]
+/// already documents for its own `to_entries` step: any non-object `.hooks`
+/// value, including a missing key, hard-errors in real `jq` (exit 5, empty
+/// stdout) rather than degrading gracefully, where this returns zero.
+pub fn hook_commands_matching(path: &Path, event: Option<&str>, pattern: &str) -> usize {
+    let Ok(re) = regex::Regex::new(pattern) else {
+        return 0;
+    };
+    let commands = match event {
+        Some(event) => event_hook_commands(path, event),
+        None => hook_commands(path),
+    };
+    commands.iter().filter(|command| re.is_match(command)).count()
+}
+
+/// Every hook `.command` string wired under one event in a
+/// `settings.json`-shaped file's `.hooks`, the traversal
+/// [`hook_commands_for_event`] and [`hook_commands_matching`] share:
+/// `.hooks[$event][]?.hooks[]?.command // ""`. Same empty-on-any-shape-mismatch
+/// behavior as [`hook_commands`].
+fn event_hook_commands(path: &Path, event: &str) -> Vec<String> {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return Vec::new();
+    };
+    let Some(matcher_groups) = value
+        .get("hooks")
+        .and_then(Value::as_object)
+        .and_then(|hooks| hooks.get(event))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for group in matcher_groups {
+        let Some(group_hooks) = group.get("hooks").and_then(Value::as_array) else {
+            continue;
+        };
+        for hook in group_hooks {
+            if let Some(command) = hook.get("command").and_then(Value::as_str) {
+                out.push(command.to_string());
             }
         }
     }
@@ -364,5 +454,347 @@ mod tests {
 
         // Assert
         assert!(got.is_empty());
+    }
+
+    #[test]
+    fn hook_commands_for_event_counts_one_for_each_wired_guard() {
+        // Arrange
+        let f = Fixture::new(
+            "for-event-all-wired",
+            r#"{
+                "hooks": {
+                    "PreToolUse": [
+                        {"hooks": [
+                            {"command": "playbook hook rm-workspace-guard"},
+                            {"command": "playbook hook bg-await-guard"},
+                            {"command": "playbook hook no-slop-guard"},
+                            {"command": "playbook hook precommit-check"}
+                        ]}
+                    ]
+                }
+            }"#,
+        );
+        let guards = [
+            "rm-workspace-guard",
+            "bg-await-guard",
+            "no-slop-guard",
+            "precommit-check",
+        ];
+
+        // Act
+        let got = hook_commands_for_event(&f.path, "PreToolUse", &guards);
+
+        // Assert
+        assert_eq!(
+            got,
+            vec![
+                ("rm-workspace-guard".to_string(), 1),
+                ("bg-await-guard".to_string(), 1),
+                ("no-slop-guard".to_string(), 1),
+                ("precommit-check".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn hook_commands_for_event_counts_zero_for_a_missing_guard() {
+        // Arrange
+        let f = Fixture::new(
+            "for-event-one-missing",
+            r#"{
+                "hooks": {
+                    "PreToolUse": [
+                        {"hooks": [
+                            {"command": "playbook hook rm-workspace-guard"},
+                            {"command": "playbook hook no-slop-guard"},
+                            {"command": "playbook hook precommit-check"}
+                        ]}
+                    ]
+                }
+            }"#,
+        );
+        let guards = [
+            "rm-workspace-guard",
+            "bg-await-guard",
+            "no-slop-guard",
+            "precommit-check",
+        ];
+
+        // Act
+        let got = hook_commands_for_event(&f.path, "PreToolUse", &guards);
+
+        // Assert
+        assert_eq!(
+            got,
+            vec![
+                ("rm-workspace-guard".to_string(), 1),
+                ("bg-await-guard".to_string(), 0),
+                ("no-slop-guard".to_string(), 1),
+                ("precommit-check".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn hook_commands_for_event_only_counts_commands_wired_in_the_named_event() {
+        // Arrange: rm-workspace-guard is wired under Stop, not PreToolUse.
+        let f = Fixture::new(
+            "for-event-scoping",
+            r#"{
+                "hooks": {
+                    "PreToolUse": [{"hooks": [{"command": "playbook hook bg-await-guard"}]}],
+                    "Stop": [{"hooks": [{"command": "playbook hook rm-workspace-guard"}]}]
+                }
+            }"#,
+        );
+        let guards = ["rm-workspace-guard", "bg-await-guard"];
+
+        // Act
+        let got = hook_commands_for_event(&f.path, "PreToolUse", &guards);
+
+        // Assert
+        assert_eq!(
+            got,
+            vec![
+                ("rm-workspace-guard".to_string(), 0),
+                ("bg-await-guard".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn hook_commands_for_event_is_all_zero_when_hooks_key_is_absent() {
+        // Arrange
+        let f = Fixture::new("for-event-hooks-absent", r#"{"other": true}"#);
+        let guards = ["rm-workspace-guard", "bg-await-guard"];
+
+        // Act
+        let got = hook_commands_for_event(&f.path, "PreToolUse", &guards);
+
+        // Assert
+        assert_eq!(
+            got,
+            vec![
+                ("rm-workspace-guard".to_string(), 0),
+                ("bg-await-guard".to_string(), 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn hook_commands_for_event_is_all_zero_when_hooks_is_not_an_object() {
+        // Arrange
+        let f = Fixture::new(
+            "for-event-hooks-wrong-shape",
+            r#"{"hooks": "not an object"}"#,
+        );
+        let guards = ["rm-workspace-guard"];
+
+        // Act
+        let got = hook_commands_for_event(&f.path, "PreToolUse", &guards);
+
+        // Assert
+        assert_eq!(got, vec![("rm-workspace-guard".to_string(), 0)]);
+    }
+
+    #[test]
+    fn hook_commands_for_event_is_all_zero_when_event_value_is_not_an_array() {
+        // Arrange
+        let f = Fixture::new(
+            "for-event-event-not-array",
+            r#"{"hooks": {"PreToolUse": "not an array"}}"#,
+        );
+        let guards = ["rm-workspace-guard"];
+
+        // Act
+        let got = hook_commands_for_event(&f.path, "PreToolUse", &guards);
+
+        // Assert
+        assert_eq!(got, vec![("rm-workspace-guard".to_string(), 0)]);
+    }
+
+    #[test]
+    fn hook_commands_for_event_is_all_zero_when_group_has_no_hooks_array() {
+        // Arrange
+        let f = Fixture::new(
+            "for-event-group-no-hooks",
+            r#"{"hooks": {"PreToolUse": [{"matcher": "Write"}]}}"#,
+        );
+        let guards = ["rm-workspace-guard"];
+
+        // Act
+        let got = hook_commands_for_event(&f.path, "PreToolUse", &guards);
+
+        // Assert
+        assert_eq!(got, vec![("rm-workspace-guard".to_string(), 0)]);
+    }
+
+    #[test]
+    fn hook_commands_for_event_is_all_zero_when_command_value_is_not_a_string() {
+        // Arrange: divergence from `jq -r`, documented on `hook_commands`; no
+        // real settings.json ever has a non-string command.
+        let f = Fixture::new(
+            "for-event-non-string-command",
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"command": 5}]}]}}"#,
+        );
+        let guards = ["rm-workspace-guard"];
+
+        // Act
+        let got = hook_commands_for_event(&f.path, "PreToolUse", &guards);
+
+        // Assert
+        assert_eq!(got, vec![("rm-workspace-guard".to_string(), 0)]);
+    }
+
+    #[test]
+    fn hook_commands_matching_counts_matches_across_all_events_when_event_is_none() {
+        // Arrange
+        let f = Fixture::new(
+            "matching-across-events",
+            r#"{
+                "hooks": {
+                    "PreToolUse": [
+                        {"hooks": [
+                            {"command": "playbook hook rm-workspace-guard"},
+                            {"command": "playbook hook bg-await-guard"},
+                            {"command": "/legacy/other.sh"}
+                        ]}
+                    ],
+                    "Stop": [
+                        {"hooks": [
+                            {"command": "playbook hook no-slop-guard"},
+                            {"command": "playbook hook session-init"}
+                        ]}
+                    ]
+                }
+            }"#,
+        );
+
+        // Act
+        let got =
+            hook_commands_matching(&f.path, None, "rm-workspace-guard|bg-await-guard|no-slop-guard");
+
+        // Assert
+        assert_eq!(got, 3);
+    }
+
+    #[test]
+    fn hook_commands_matching_scopes_the_count_to_one_event() {
+        // Arrange
+        let f = Fixture::new(
+            "matching-scoped-event",
+            r#"{
+                "hooks": {
+                    "PreToolUse": [
+                        {"hooks": [
+                            {"command": "playbook hook rm-workspace-guard"},
+                            {"command": "playbook hook bg-await-guard"},
+                            {"command": "/legacy/other.sh"}
+                        ]}
+                    ],
+                    "Stop": [
+                        {"hooks": [
+                            {"command": "playbook hook no-slop-guard"},
+                            {"command": "playbook hook session-init"}
+                        ]}
+                    ]
+                }
+            }"#,
+        );
+
+        // Act
+        let got = hook_commands_matching(
+            &f.path,
+            Some("PreToolUse"),
+            "rm-workspace-guard|bg-await-guard|no-slop-guard",
+        );
+
+        // Assert
+        assert_eq!(got, 2);
+    }
+
+    #[test]
+    fn hook_commands_matching_is_zero_for_a_pattern_matching_nothing() {
+        // Arrange
+        let f = Fixture::new(
+            "matching-no-match",
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"command": "playbook hook rm-workspace-guard"}]}]}}"#,
+        );
+
+        // Act
+        let got = hook_commands_matching(&f.path, None, "no-such-guard");
+
+        // Assert
+        assert_eq!(got, 0);
+    }
+
+    #[test]
+    fn hook_commands_matching_is_zero_when_hooks_key_is_absent() {
+        // Arrange
+        let f = Fixture::new("matching-hooks-absent", r#"{"other": true}"#);
+
+        // Act
+        let got = hook_commands_matching(&f.path, None, "guard");
+
+        // Assert
+        assert_eq!(got, 0);
+    }
+
+    #[test]
+    fn hook_commands_matching_is_zero_when_hooks_is_not_an_object() {
+        // Arrange
+        let f = Fixture::new("matching-hooks-wrong-shape", r#"{"hooks": "not an object"}"#);
+
+        // Act
+        let got = hook_commands_matching(&f.path, None, "guard");
+
+        // Assert
+        assert_eq!(got, 0);
+    }
+
+    #[test]
+    fn hook_commands_matching_is_zero_when_event_value_is_not_an_array() {
+        // Arrange
+        let f = Fixture::new(
+            "matching-event-not-array",
+            r#"{"hooks": {"PreToolUse": "not an array"}}"#,
+        );
+
+        // Act
+        let got = hook_commands_matching(&f.path, None, "guard");
+
+        // Assert
+        assert_eq!(got, 0);
+    }
+
+    #[test]
+    fn hook_commands_matching_is_zero_when_group_has_no_hooks_array() {
+        // Arrange
+        let f = Fixture::new(
+            "matching-group-no-hooks",
+            r#"{"hooks": {"PreToolUse": [{"matcher": "Write"}]}}"#,
+        );
+
+        // Act
+        let got = hook_commands_matching(&f.path, None, "guard");
+
+        // Assert
+        assert_eq!(got, 0);
+    }
+
+    #[test]
+    fn hook_commands_matching_is_zero_when_command_value_is_not_a_string() {
+        // Arrange: divergence from `jq -r`, documented on `hook_commands`; no
+        // real settings.json ever has a non-string command.
+        let f = Fixture::new(
+            "matching-non-string-command",
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"command": 5}]}]}}"#,
+        );
+
+        // Act
+        let got = hook_commands_matching(&f.path, None, "guard");
+
+        // Assert
+        assert_eq!(got, 0);
     }
 }
