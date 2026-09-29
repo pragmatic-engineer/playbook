@@ -99,7 +99,7 @@ scenario_fresh() {
   diff <(jq -S 'del(.hooks)' "$settings") <(jq -S 'del(.hooks)' "$TEMPLATE") >/dev/null \
     || { echo "  non-hooks keys differ from the template"; return 1; }
   local n_ported
-  n_ported="$(jq '[.hooks[]?[]?.hooks[]?.command] | map(select(startswith("playbook hook "))) | length' "$settings")"
+  n_ported="$("$BIN_SRC" doctor hook-commands-matching "$settings" '^playbook hook ')"
   [ "$n_ported" = "18" ] || { echo "  expected 18 ported hook commands (15 distinct), got $n_ported"; return 1; }
 }
 
@@ -133,7 +133,7 @@ EOF
   jq -e '.hooks.Notification[0].hooks[0].command == "/opt/my-custom-notify.sh"' "$settings" >/dev/null 2>&1 \
     || { echo "  user-authored hook entry lost: $(jq -c .hooks.Notification "$settings" 2>/dev/null)"; return 1; }
   local n_ported
-  n_ported="$(jq '[.hooks[]?[]?.hooks[]?.command] | map(select(startswith("playbook hook "))) | length' "$settings")"
+  n_ported="$("$BIN_SRC" doctor hook-commands-matching "$settings" '^playbook hook ')"
   [ "$n_ported" = "18" ] || { echo "  ported hooks not wired alongside the user entry (got $n_ported)"; return 1; }
 }
 

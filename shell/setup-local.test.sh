@@ -99,10 +99,9 @@ scenario_a_default() {
     [ -f "$claude_home/.settings.base.json" ] \
         || { echo "  .settings.base.json not created"; return 1; }
 
-    guards="$(jq '[.hooks.PreToolUse[]?.hooks[]?.command]
-                  | map(select(test("rm-workspace-guard|bg-await-guard|no-slop-guard")))
-                  | length' \
-                "$claude_home/settings.json" 2>/dev/null || echo 0)"
+    guards="$("$REAL_BIN_SRC" doctor hook-commands-matching \
+                "$claude_home/settings.json" 'rm-workspace-guard|bg-await-guard|no-slop-guard' PreToolUse \
+                2>/dev/null || echo 0)"
     [ "${guards:-0}" -ge 3 ] \
         || { echo "  guards=${guards:-0} (expected >=3)"; return 1; }
 

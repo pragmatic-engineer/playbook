@@ -43,6 +43,9 @@ pver="$(jq -r '.version // empty' "$REPO/.claude-plugin/plugin.json")"
 [ -n "$pver" ] && ok "plugin.json version=$pver" || bad "plugin.json missing version"
 
 hdr "C. Hook integrity (every hooks.json command resolves and parses)"
+# Needs every command path to resolve and check individually, not a count,
+# and reads the plugin manifest (hooks/hooks.json) rather than a settings.json,
+# so this stays a jq flatten rather than a hook-commands-matching call.
 while IFS= read -r c; do
   path="${c//\"/}"; path="${path/\$\{CLAUDE_PLUGIN_ROOT\}/$REPO}"
   base="$(basename "$path")"
@@ -111,9 +114,9 @@ fi
 [ -f "$CH/settings.json" ] && ok "settings.json seeded" || bad "settings.json not seeded"
 [ -f "$CH/.settings.base.json" ] && ok ".settings.base.json baseline written" || bad "baseline missing"
 if [ -f "$CH/settings.json" ]; then
-  guards="$(jq -r '[.hooks.PreToolUse[]?.hooks[]?.command] | map(select(test("rm-workspace-guard|bg-await-guard|no-slop-guard|precommit-check"))) | length' "$CH/settings.json" 2>/dev/null)"
+  guards="$("$BIN_SRC" doctor hook-commands-matching "$CH/settings.json" 'rm-workspace-guard|bg-await-guard|no-slop-guard|precommit-check' PreToolUse 2>/dev/null)"
   [ "${guards:-0}" -ge 4 ] && ok "4 safety guards wired in settings.json" || bad "safety guards not wired (found ${guards:-0})"
-  func="$(jq -r '[.hooks[]?[]?.hooks[]?.command] | map(select(test("^playbook hook (session-init|search-counter|post-edit-track)$"))) | length' "$CH/settings.json" 2>/dev/null)"
+  func="$("$BIN_SRC" doctor hook-commands-matching "$CH/settings.json" '^playbook hook (session-init|search-counter|post-edit-track)$' 2>/dev/null)"
   [ "${func:-0}" = "3" ] && ok "functional hooks ARE in settings, wired to the binary (no plugin registry left to double-fire)" || bad "functional hooks not wired in settings (found ${func:-0})"
 fi
 for g in rm-workspace-guard bg-await-guard no-slop-guard precommit-check; do
