@@ -38,9 +38,17 @@ fail() { echo "FAIL: $1${2:+ -- $2}"; (( FAIL++ )) || true; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq not found on PATH (needed to assert on the result, not just to run install.sh)" >&2; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found on PATH (needed for the python3-only scenarios)" >&2; exit 2; }
+command -v cargo >/dev/null 2>&1 || { echo "cargo not found on PATH" >&2; exit 2; }
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT INT TERM
+
+BIN_SRC="${REPO_ROOT}/target/debug/playbook"
+if [ ! -x "$BIN_SRC" ]; then
+  echo "Building playbook (cargo build)..."
+  ( cd "$REPO_ROOT" && cargo build --quiet ) || { echo "cargo build failed" >&2; exit 2; }
+fi
+PLAYBOOK="$BIN_SRC"
 
 seed_shipped_extras() {
   local src="$1"
@@ -190,7 +198,8 @@ scenario_bare_claude_json_gets_the_trust_entry() {
   local rc=$?
   [ "$rc" -eq 0 ] || { echo "  install rc=$rc: $(cat "$log")"; return 1; }
   local got
-  got=$(jq -r --arg p "$home/.config/playbook" '.projects[$p].hasTrustDialogAccepted' "$home/.claude.json" 2>/dev/null)
+  got=$("$PLAYBOOK" json project-field "$home/.config/playbook" hasTrustDialogAccepted \
+    < "$home/.claude.json" 2>/dev/null)
   [ "$got" = "true" ] || { echo "  hasTrustDialogAccepted not set to true: got '$got', file: $(cat "$home/.claude.json")"; return 1; }
 }
 
@@ -208,14 +217,8 @@ scenario_existing_entry_is_updated_not_replaced() {
   seed_shipped_extras "$src"
   write_stub_playbook "$bindir"
   build_minimal_path_dir "$tools" "$install_jq" "$install_python3"
-  jq -n --arg cfg "$home/.config/playbook" --arg other "$home/some/other/project" '
-    {
-      projects: {
-        ($cfg): {hasTrustDialogAccepted: false, lastCost: 1.23},
-        ($other): {hasTrustDialogAccepted: false}
-      }
-    }
-  ' > "$home/.claude.json"
+  printf '{"projects":{"%s":{"hasTrustDialogAccepted":false,"lastCost":1.23},"%s":{"hasTrustDialogAccepted":false}}}' \
+    "$home/.config/playbook" "$home/some/other/project" > "$home/.claude.json"
   log="$d/install.log"
 
   run_install "$src" "$home" "$bindir" "$log" "$tools"
@@ -223,9 +226,9 @@ scenario_existing_entry_is_updated_not_replaced() {
   [ "$rc" -eq 0 ] || { echo "  install rc=$rc: $(cat "$log")"; return 1; }
 
   local trusted sibling other_untouched
-  trusted=$(jq -r --arg p "$home/.config/playbook" '.projects[$p].hasTrustDialogAccepted' "$home/.claude.json")
-  sibling=$(jq -r --arg p "$home/.config/playbook" '.projects[$p].lastCost' "$home/.claude.json")
-  other_untouched=$(jq -r --arg p "$home/some/other/project" '.projects[$p].hasTrustDialogAccepted' "$home/.claude.json")
+  trusted=$("$PLAYBOOK" json project-field "$home/.config/playbook" hasTrustDialogAccepted < "$home/.claude.json")
+  sibling=$("$PLAYBOOK" json project-field "$home/.config/playbook" lastCost < "$home/.claude.json")
+  other_untouched=$("$PLAYBOOK" json project-field "$home/some/other/project" hasTrustDialogAccepted < "$home/.claude.json")
 
   [ "$trusted" = "true" ] || { echo "  existing false entry was not flipped to true: $(cat "$home/.claude.json")"; return 1; }
   [ "$sibling" = "1.23" ] || { echo "  sibling field lastCost was clobbered: $(cat "$home/.claude.json")"; return 1; }
@@ -283,7 +286,8 @@ scenario_broken_jq_falls_through_to_python3() {
   local rc=$?
   [ "$rc" -eq 0 ] || { echo "  install rc=$rc: $(cat "$log")"; return 1; }
   local got
-  got=$(jq -r --arg p "$home/.config/playbook" '.projects[$p].hasTrustDialogAccepted' "$home/.claude.json" 2>/dev/null)
+  got=$("$PLAYBOOK" json project-field "$home/.config/playbook" hasTrustDialogAccepted \
+    < "$home/.claude.json" 2>/dev/null)
   [ "$got" = "true" ] || { echo "  python3 fallback did not run despite jq failing: got '$got', file: $(cat "$home/.claude.json"), log: $(cat "$log")"; return 1; }
 }
 

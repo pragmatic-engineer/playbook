@@ -37,8 +37,8 @@ _cc_clean_resume() {
         return 1
     fi
 
-    if ! command -v jq >/dev/null 2>&1; then
-        printf '%s\n' "-> cc clean: jq required but not found"
+    if ! command -v playbook >/dev/null 2>&1; then
+        printf '%s\n' "-> cc clean: playbook required but not found"
         return 1
     fi
     if ! command -v uuidgen >/dev/null 2>&1; then
@@ -55,10 +55,8 @@ _cc_clean_resume() {
     local total_in
     total_in=$(wc -l < "$old_jsonl" | tr -d ' ')
 
-    jq -c --arg pat "$strip_regexp" '
-        select(.type != "system" or ((.content // "") | test($pat) | not))
-    ' "$old_jsonl" > "$new_jsonl" || {
-        printf '%s\n' "-> cc clean: jq filter failed"
+    playbook json filter-system-lines "$strip_regexp" < "$old_jsonl" > "$new_jsonl" || {
+        printf '%s\n' "-> cc clean: filter-system-lines failed"
         rm -f "$new_jsonl"
         return 1
     }
@@ -69,9 +67,7 @@ _cc_clean_resume() {
 
     # Rewrite sessionId fields so the harness sees a coherent transcript.
     local tmp="$new_jsonl.tmp"
-    jq -c --arg sid "$new_sid" '
-        if .sessionId then .sessionId = $sid else . end
-    ' "$new_jsonl" > "$tmp" && mv "$tmp" "$new_jsonl"
+    playbook json rewrite-session-id "$new_sid" < "$new_jsonl" > "$tmp" && mv "$tmp" "$new_jsonl"
 
     # Copy the tool-results sidecar dir. Copy, not symlink: the harness may
     # write into the new session's sidecar, and symlinks would leak those

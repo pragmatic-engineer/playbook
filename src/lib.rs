@@ -108,8 +108,8 @@ pub enum Command {
         #[command(subcommand)]
         sub: WorktreeCommand,
     },
-    /// Hand-written `jq` replacements over a piped session, `gh`, or file
-    /// JSON payload, backing `src/json/`.
+    /// Hand-written `jq` replacements over a piped session, `gh`, JSONL, or
+    /// file JSON payload, backing `src/json/`.
     Json {
         #[command(subcommand)]
         sub: JsonCommand,
@@ -403,6 +403,69 @@ pub enum JsonCommand {
     /// `render_pr_right` consumes. Backs
     /// `src/json/statusline.rs::pr_fields`.
     PrFields {},
+    /// Drop every `"type":"system"` line whose `content` matches `pattern`,
+    /// passing every other line through unchanged. Backs
+    /// `src/json/jsonl.rs::filter_system_lines`.
+    FilterSystemLines {
+        /// Regex tested against each system line's `content` field.
+        pattern: String,
+    },
+    /// Rewrite every line's string `sessionId` field to `new_sid`, passing
+    /// through a line with no `sessionId` or a non-string one unchanged.
+    /// Backs `src/json/jsonl.rs::rewrite_session_id`.
+    RewriteSessionId {
+        /// Replacement session id.
+        new_sid: String,
+    },
+    /// Exit 0 if stdin parses as JSON, 1 otherwise. Backs
+    /// `src/json/validate.rs::is_valid_json`.
+    ValidJson,
+    /// Exit 0 if the value at `path` inside stdin's JSON is the string
+    /// `expected`, 1 otherwise. Backs `src/json/fieldeq.rs::field_equals`.
+    FieldEquals {
+        /// Dot-separated path; a numeric segment indexes into an array.
+        path: String,
+        /// Expected string value at `path`.
+        expected: String,
+    },
+    /// Print the length (array element count or object key count) of
+    /// `field` in stdin's JSON. Backs `src/json/count.rs::field_length`.
+    FieldLength {
+        /// Top-level field to measure.
+        field: String,
+    },
+    /// Print the raw string value of `key` in stdin's JSON, no trailing
+    /// newline added. Backs `src/json/fields.rs::string_field`. Distinct
+    /// from `StringField`: this variant is used where the call site needs
+    /// no trailing newline on the printed value.
+    RawStringField {
+        /// Top-level field to read.
+        key: String,
+    },
+    /// Print stdin's JSON re-serialized with every object's keys sorted
+    /// recursively, optionally dropping one top-level key first. Backs
+    /// `src/json/canon.rs::canonical_json`.
+    CanonicalJson {
+        /// Top-level key to drop before sorting, if any.
+        #[arg(long)]
+        del: Option<String>,
+    },
+    /// Print every hook `.command` string nested under stdin's JSON's
+    /// `.hooks.<event>`, one per line. Backs
+    /// `src/json/hookevents.rs::hook_commands_for_event`.
+    HookCommandsForEvent {
+        /// Event key under `.hooks` to read, e.g. `PreToolUse`.
+        event: String,
+    },
+    /// Print `.projects[project_path].field` from stdin's JSON, where
+    /// `project_path` is used verbatim as an object key. Backs
+    /// `src/json/claudejson.rs::project_field`.
+    ProjectField {
+        /// Project path key under `.projects`.
+        project_path: String,
+        /// Field to read from that project's entry.
+        field: String,
+    },
 
     /// Structural JSON equality between two files, ignoring key order and
     /// any named top-level keys. Backs `json::jsoncmp::json_equal`.

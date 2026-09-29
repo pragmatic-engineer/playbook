@@ -262,9 +262,9 @@ scenario_f_merge_preserves() {
     PATH="$REAL_BIN_PATH" run_setup "$home" "$claude_home"; rc=$?
     [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
 
-    jq -e '.my_custom_key == "sentinel_value"' "$claude_home/settings.json" \
-        >/dev/null 2>&1 \
-        || { echo "  custom key lost: $(jq -c . "$claude_home/settings.json" 2>/dev/null)"; return 1; }
+    "$REAL_BIN_SRC" json field-equals my_custom_key sentinel_value \
+        < "$claude_home/settings.json" >/dev/null 2>&1 \
+        || { echo "  custom key lost: $(cat "$claude_home/settings.json" 2>/dev/null)"; return 1; }
 }
 
 # ---------------------------------------------------------------------------
@@ -520,7 +520,7 @@ scenario_m_system_prompt_refresh_without_flag() {
 #     .settings.base.json against tests/fixtures/golden/setup-local.clean-install.json,
 #     captured from TODAY's unmodified script before this WU's rewrite.
 #
-#     Compared semantically (jq -S, sorted keys), not byte-for-byte: a fresh
+#     Compared semantically (canonical-json, sorted keys), not byte-for-byte: a fresh
 #     install's settings.json now has alphabetically-sorted top-level keys
 #     instead of the template's own insertion order (disclosed side effect 3
 #     in setup-local.sh's own comment), because `playbook init` always routes
@@ -540,13 +540,13 @@ scenario_n_golden_clean_install() {
     mkdir -p "$claude_home"
     expected_settings="$d/expected-settings.json"
     expected_base="$d/expected-base.json"
-    # -j, not -r: -r appends a trailing newline after the raw string it
-    # prints, which would double up the one already embedded in the field,
-    # a spurious diff every jq -S semantic comparison here would swallow
-    # silently at the value level anyway, but scenario O's byte diff below
-    # would not.
-    jq -j '.settings_json' "$fixture" > "$expected_settings"
-    jq -j '.settings_base_json' "$fixture" > "$expected_base"
+    # string-field prints its field's raw bytes with no trailing newline
+    # added, matching jq -j rather than -r: -r would double up the newline
+    # already embedded in the field, a spurious diff every canonical-json
+    # semantic comparison here would swallow silently at the value level
+    # anyway, but scenario O's byte diff below would not.
+    "$REAL_BIN_SRC" json raw-string-field settings_json < "$fixture" > "$expected_settings"
+    "$REAL_BIN_SRC" json raw-string-field settings_base_json < "$fixture" > "$expected_base"
 
     PATH="$REAL_BIN_PATH" run_setup "$home" "$claude_home"; rc=$?
     [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
@@ -584,12 +584,12 @@ scenario_o_golden_skip_triggering() {
     mkdir -p "$claude_home"
     expected_settings="$d/expected-settings.json"
     expected_base="$d/expected-base.json"
-    # -j, not -r: see scenario N's comment on the same extraction. This
-    # scenario's comparison below is a literal byte cmp, so the extra
-    # trailing newline -r would add is not a false pass here, it is an
-    # outright failure.
-    jq -j '.settings_json' "$fixture" > "$expected_settings"
-    jq -j '.settings_base_json' "$fixture" > "$expected_base"
+    # No trailing newline added: see scenario N's comment on the same
+    # extraction. This scenario's comparison below is a literal byte cmp, so
+    # an extra trailing newline is not a false pass here, it is an outright
+    # failure.
+    "$REAL_BIN_SRC" json raw-string-field settings_json < "$fixture" > "$expected_settings"
+    "$REAL_BIN_SRC" json raw-string-field settings_base_json < "$fixture" > "$expected_base"
 
     # The same collision the fixture was captured against: a customised
     # value the shipped template also updates.
