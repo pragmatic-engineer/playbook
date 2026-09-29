@@ -71,6 +71,53 @@ for pair in "LAYER2:2" "LAYER5:5" "LAYER6:6" "LAYER7:7"; do
   [[ -n "${!var}" ]] || { echo "FATAL: could not extract Layer $num snippet from $DOCTOR_MD" >&2; exit 2; }
 done
 
+# A stub playbook on PATH, isolated to one scenario by prepending its bin dir
+# to a fixed, minimal PATH rather than reusing the caller's. Answers
+# `--version` from `version_line`, and the four `doctor` subcommands
+# `commands/doctor.md` now calls in place of `jq`, by reading the real field(s)
+# straight out of whatever file it is pointed at, so a scenario's fixture
+# content (written by `write_manifest` / `write_statusline_settings` / the
+# Layer 2/7 settings.json fixtures) is the only thing that needs to vary, not
+# the stub itself. Every `doctor` branch forces `exit 0` regardless of
+# whether the match found anything or the path does not exist, matching the
+# real subcommands: they always exit 0, empty output on any failure, never a
+# nonzero exit for a merely-missing field, file, or hooks key. `hook-commands`
+# and `hook-commands-for-event` are both a coarse `grep` over the whole file,
+# not real JSON parsing (neither scopes to the `.hooks` key, and
+# `hook-commands-for-event` does not scope further to its `event` argument the
+# way the real subcommand does), which is fine here since no fixture in this
+# suite has a `"command"` key outside `.hooks`, and no Layer 2 fixture wires
+# more than one event.
+write_stub_binary() {
+  local bindir="$1" version_line="$2"
+  mkdir -p "$bindir"
+  cat > "$bindir/playbook" <<STUB
+#!/usr/bin/env bash
+if [ "\$1" = "--version" ]; then
+  printf '%s\n' "$version_line"
+elif [ "\$1" = "doctor" ] && [ "\$2" = "plugin-version" ]; then
+  sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "\$3" 2>/dev/null
+  exit 0
+elif [ "\$1" = "doctor" ] && [ "\$2" = "statusline-command" ]; then
+  sed -n 's/.*"statusLine"[[:space:]]*:[[:space:]]*{[^}]*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "\$3" 2>/dev/null
+  exit 0
+elif [ "\$1" = "doctor" ] && [ "\$2" = "hook-commands" ]; then
+  grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' "\$3" 2>/dev/null | sed 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/'
+  exit 0
+elif [ "\$1" = "doctor" ] && [ "\$2" = "hook-commands-for-event" ]; then
+  settings_file="\$3"
+  shift 4
+  for guard in "\$@"; do
+    wanted="playbook hook \$guard"
+    count=\$(grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' "\$settings_file" 2>/dev/null | sed 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/' | grep -Fxc -- "\$wanted")
+    echo "\$guard=\$count"
+  done
+  exit 0
+fi
+STUB
+  chmod +x "$bindir/playbook"
+}
+
 # ── Layer 2: safety guards wired ────────────────────────────────────────────
 
 GUARDS=(rm-workspace-guard bg-await-guard no-slop-guard precommit-check)
@@ -103,15 +150,16 @@ write_wired_settings() {
 }
 
 run_layer2() {
-  local home="$1"
-  HOME="$home" bash -c "$LAYER2" 2>&1
+  local home="$1" path="$2"
+  HOME="$home" PATH="$path" bash -c "$LAYER2" 2>&1
 }
 
 # A: all four guards wired in their bare binary form.
 scenario_layer2_all_wired() {
-  local home="$WORK/l2-a" out
+  local home="$WORK/l2-a" bin="$WORK/l2-a-bin" out
   write_wired_settings "$home" "${GUARDS[@]}"
-  out="$(run_layer2 "$home")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == "wired=4/4" ]] || { echo "  got: $out"; return 1; }
 }
 
@@ -120,13 +168,14 @@ scenario_layer2_all_wired() {
 # must read as NOT_WIRED, not as wired, since it is not actually running
 # from the binary.
 scenario_layer2_legacy_command_not_wired() {
-  local home="$WORK/l2-b" out
+  local home="$WORK/l2-b" bin="$WORK/l2-b-bin" out
   write_wired_settings_raw "$home" \
     "rm-workspace-guard:playbook hook rm-workspace-guard" \
     "bg-await-guard:playbook hook bg-await-guard" \
     "no-slop-guard:playbook hook no-slop-guard" \
     "precommit-check:~/.claude/hooks/precommit-check.sh"
-  out="$(run_layer2 "$home")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
   [[ "$out" == "wired=3/4"* ]] || { echo "  wired count wrong: $out"; return 1; }
 }
@@ -135,21 +184,23 @@ scenario_layer2_legacy_command_not_wired() {
 # must not count as that guard being wired. Pins the exact-match comparison
 # in the snippet (`. == $cmd`), not a substring `contains`.
 scenario_layer2_near_miss_command_not_wired() {
-  local home="$WORK/l2-c" out
+  local home="$WORK/l2-c" bin="$WORK/l2-c-bin" out
   write_wired_settings_raw "$home" \
     "rm-workspace-guard:playbook hook rm-workspace-guard-legacy" \
     "bg-await-guard:playbook hook bg-await-guard" \
     "no-slop-guard:playbook hook no-slop-guard" \
     "precommit-check:playbook hook precommit-check"
-  out="$(run_layer2 "$home")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == *"rm-workspace-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
 
 # D: bg-await-guard is not wired into settings.json at all.
 scenario_layer2_not_wired() {
-  local home="$WORK/l2-d" out
+  local home="$WORK/l2-d" bin="$WORK/l2-d-bin" out
   write_wired_settings "$home" rm-workspace-guard no-slop-guard precommit-check
-  out="$(run_layer2 "$home")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == *"bg-await-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
 
@@ -160,9 +211,10 @@ scenario_layer2_not_wired() {
 # NOT_WIRED. A test that only checked the other three guards would let this
 # exact regression back in.
 scenario_layer2_precommit_check_counted() {
-  local home="$WORK/l2-e" out
+  local home="$WORK/l2-e" bin="$WORK/l2-e-bin" out
   write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard
-  out="$(run_layer2 "$home")"
+  write_stub_binary "$bin" ""
+  out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == "wired=3/4"* ]] || { echo "  wired count did not drop: $out"; return 1; }
   [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
@@ -183,41 +235,6 @@ write_statusline_settings() {
   local home="$1" cmd="$2"
   mkdir -p "$home/.claude"
   printf '{"statusLine":{"command":"%s"}}' "$cmd" > "$home/.claude/settings.json"
-}
-
-# A stub playbook on PATH, isolated to one scenario by prepending its bin dir
-# to a fixed, minimal PATH rather than reusing the caller's. Answers
-# `--version` from `version_line`, and the three `doctor` subcommands
-# `commands/doctor.md` now calls in place of `jq`, by reading the real field(s)
-# straight out of whatever file it is pointed at, so a scenario's fixture
-# content (written by `write_manifest` / `write_statusline_settings` / the
-# Layer 7 settings.json fixtures) is the only thing that needs to vary, not
-# the stub itself. Every `doctor` branch forces `exit 0` regardless of
-# whether the match found anything or the path does not exist, matching the
-# real subcommands: they always exit 0, empty output on any failure, never a
-# nonzero exit for a merely-missing field, file, or hooks key. `hook-commands`
-# is a coarse `grep`, not real JSON parsing (it does not scope to the
-# `.hooks` key the way the real subcommand does), which is fine here since no
-# Layer 7 fixture in this suite has a `"command"` key outside `.hooks`.
-write_stub_binary() {
-  local bindir="$1" version_line="$2"
-  mkdir -p "$bindir"
-  cat > "$bindir/playbook" <<STUB
-#!/usr/bin/env bash
-if [ "\$1" = "--version" ]; then
-  printf '%s\n' "$version_line"
-elif [ "\$1" = "doctor" ] && [ "\$2" = "plugin-version" ]; then
-  sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "\$3" 2>/dev/null
-  exit 0
-elif [ "\$1" = "doctor" ] && [ "\$2" = "statusline-command" ]; then
-  sed -n 's/.*"statusLine"[[:space:]]*:[[:space:]]*{[^}]*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "\$3" 2>/dev/null
-  exit 0
-elif [ "\$1" = "doctor" ] && [ "\$2" = "hook-commands" ]; then
-  grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' "\$3" 2>/dev/null | sed 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/'
-  exit 0
-fi
-STUB
-  chmod +x "$bindir/playbook"
 }
 
 # A stub playbook that only understands `--version`, simulating a real
