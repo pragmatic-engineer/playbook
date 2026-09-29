@@ -55,8 +55,8 @@ Usage: eval-review-triage.sh [fixture-file]
 Runs the real review-triage classifier (a live `claude -p --model haiku`
 call) against each fixture PR in fixture-file, fetches that PR's real diff
 via `gh pr diff`, and compares the returned tier map against the fixture's
-ground-truth per-lens `found` fact. Requires network, `gh`, `jq`, and a
-working `claude` CLI with a live API key. NOT part of the default
+ground-truth per-lens `found` fact. Requires network, `gh`, the `playbook`
+binary, and a working `claude` CLI with a live API key. NOT part of the default
 cargo test / shell-ci matrix; run by hand.
 
   fixture-file   defaults to shell/fixtures/review-triage-eval-set.json.
@@ -80,13 +80,13 @@ AGENT_FILE="$REPO_ROOT/agents/review-triage.md"
 
 FIXTURE_FILE="${1:-${REVIEW_TRIAGE_FIXTURES:-$REPO_ROOT/shell/fixtures/review-triage-eval-set.json}}"
 
-command -v jq >/dev/null 2>&1 || _die "jq is required"
 command -v gh >/dev/null 2>&1 || _die "gh is required"
 command -v claude >/dev/null 2>&1 || _die "claude CLI is required (needs a live API key)"
 
 [[ -f "$FIXTURE_FILE" ]] || _die "fixture file not found: $FIXTURE_FILE"
 [[ -f "$AGENT_FILE" ]] || _die "agent file not found: $AGENT_FILE"
-jq empty "$FIXTURE_FILE" 2>/dev/null || _die "fixture file is not valid JSON: $FIXTURE_FILE"
+fixture_file_is_valid_json="$(playbook json is-valid-json < "$FIXTURE_FILE")"
+[[ "$fixture_file_is_valid_json" == "true" ]] || _die "fixture file is not valid JSON: $FIXTURE_FILE"
 
 # Strip the YAML frontmatter (everything between the first two '---' lines),
 # leaving review-triage's classifier prompt body: the same shape the real
@@ -99,7 +99,7 @@ _system_prompt() {
 SYSTEM_PROMPT="$(_system_prompt)"
 [[ -n "$SYSTEM_PROMPT" ]] || _die "could not extract a prompt body from $AGENT_FILE"
 
-FIXTURE_COUNT="$(jq 'length' "$FIXTURE_FILE")"
+FIXTURE_COUNT="$(playbook json array-length < "$FIXTURE_FILE")"
 [[ "$FIXTURE_COUNT" =~ ^[0-9]+$ ]] || _die "could not read fixture count from $FIXTURE_FILE"
 
 # Verdict counters across every (fixture, lens) pair evaluated in the run.
@@ -125,10 +125,10 @@ _record_verdict() {
 printf 'eval-review-triage: %s fixture(s) from %s\n\n' "$FIXTURE_COUNT" "$FIXTURE_FILE"
 
 for (( i = 0; i < FIXTURE_COUNT; i++ )); do
-  fixture_json="$(jq -c ".[$i]" "$FIXTURE_FILE")"
-  fixture_id="$(printf '%s' "$fixture_json" | jq -r '.id')"
-  pr_number="$(printf '%s' "$fixture_json" | jq -r '.pr')"
-  lens_list="$(printf '%s' "$fixture_json" | jq -r '.lenses | keys | join(", ")')"
+  fixture_json="$(playbook json indexed-element "$i" < "$FIXTURE_FILE")"
+  fixture_id="$(printf '%s' "$fixture_json" | playbook json string-field id)"
+  pr_number="$(printf '%s' "$fixture_json" | playbook json string-field pr)"
+  lens_list="$(printf '%s' "$fixture_json" | playbook json lens-names-joined)"
 
   printf '%s (PR #%s) -- lenses: %s\n' "$fixture_id" "$pr_number" "$lens_list"
 
@@ -143,7 +143,7 @@ for (( i = 0; i < FIXTURE_COUNT; i++ )); do
     while IFS= read -r lens; do
       [[ -n "$lens" ]] || continue
       _record_verdict "$lens" errored "gh pr diff $pr_number failed to fetch"
-    done < <(printf '%s' "$fixture_json" | jq -r '.lenses | keys[]')
+    done < <(printf '%s' "$fixture_json" | playbook json lens-names)
     printf '\n'
     continue
   fi
@@ -170,8 +170,8 @@ $diff_text"
   # without it a FAIL run from a broken API key is indistinguishable from
   # one caused by a real classification drift, and this script exists to
   # be the trust gate that FAIL runs need to be debuggable.
-  tier_map=""
-  if ! tier_map="$(printf '%s' "$response" | jq -c '.' 2>/dev/null)"; then
+  tier_map="$(printf '%s' "$response" | playbook json is-valid-json-compact)"
+  if [[ -z "$tier_map" ]]; then
     if [[ -n "$claude_err" ]]; then
       printf '  unparseable classifier response; every lens errored. claude stderr: %s\n' "$claude_err"
     else
@@ -180,7 +180,7 @@ $diff_text"
     while IFS= read -r lens; do
       [[ -n "$lens" ]] || continue
       _record_verdict "$lens" errored "classifier response was not valid JSON${claude_err:+ (claude stderr: $claude_err)}"
-    done < <(printf '%s' "$fixture_json" | jq -r '.lenses | keys[]')
+    done < <(printf '%s' "$fixture_json" | playbook json lens-names)
     printf '\n'
     continue
   fi
@@ -193,8 +193,8 @@ $diff_text"
   #   found=false, tier=cheap-check or full-lens -> non-critical mismatch
   while IFS= read -r lens; do
     [[ -n "$lens" ]] || continue
-    found="$(printf '%s' "$fixture_json" | jq -r --arg l "$lens" '.lenses[$l].found')"
-    tier="$(printf '%s' "$tier_map" | jq -r --arg l "$lens" 'if type == "object" and has($l) then (.[$l].tier // "") else "" end')"
+    found="$(printf '%s' "$fixture_json" | playbook json lens-found "$lens")"
+    tier="$(printf '%s' "$tier_map" | playbook json lens-tier "$lens")"
 
     if [[ -z "$tier" ]]; then
       _record_verdict "$lens" errored "classifier response missing a tier for lens '$lens'"
@@ -217,7 +217,7 @@ $diff_text"
           _record_verdict "$lens" errored "unrecognised tier '$tier' for lens '$lens'"
         fi ;;
     esac
-  done < <(printf '%s' "$fixture_json" | jq -r '.lenses | keys[]')
+  done < <(printf '%s' "$fixture_json" | playbook json lens-names)
 
   printf '\n'
 done

@@ -5,4 +5,5 @@
 //! named per shape/operation rather than one generic query command,
 //! extending `src/doctor/field.rs`'s established pattern.
 
+pub mod evalfixture;
 pub mod ghjson;

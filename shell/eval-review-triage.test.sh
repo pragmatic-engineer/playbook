@@ -6,14 +6,20 @@
 # shell/eval-review-triage.sh. Shims both external processes the script
 # under test calls (`gh pr diff` and `command claude -p --model haiku`) via
 # a temp PATH directory, following shell/worktree.test.sh's sentinel-shim
-# pattern (see its scenario_maybe_rebase_conflict, lines ~503-586). `jq` is
-# NOT shimmed; the real one is used, since it is already required by this
-# repo's toolchain and the script under test depends on its real behavior.
+# pattern (see its scenario_maybe_rebase_conflict, lines ~503-586). JSON
+# handling, both in the script under test and in this harness's own
+# fixture-validity checks, goes through `playbook json`, not `jq`.
 #
 # This test issues ZERO live network or `claude` API calls: every `gh` and
 # `claude` invocation the script under test makes is intercepted by a fake
 # executable placed earlier on PATH, which prints fixed canned output and
 # records itself via a sentinel/call-count file.
+#
+# `playbook` itself is real, not shimmed: the script under test calls bare
+# `playbook json <verb>`, and this harness's own fixture-validity checks do
+# the same, so a real binary (built once, staged on PATH below) must resolve
+# as a bare command exactly as it does in an installed environment. Follows
+# shell/install-seed.test.sh's BIN_SRC convention.
 #
 # Run:  bash shell/eval-review-triage.test.sh
 # Exit: 0 if all scenarios pass, non-zero otherwise.
@@ -21,6 +27,14 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$SCRIPT_DIR/eval-review-triage.sh"
+REPO_ROOT="${SCRIPT_DIR}/.."
+
+command -v cargo >/dev/null 2>&1 || { echo "cargo not found on PATH" >&2; exit 2; }
+BIN_SRC="${REPO_ROOT}/target/debug/playbook"
+if [ ! -x "$BIN_SRC" ]; then
+  echo "Building playbook (cargo build)..."
+  ( cd "$REPO_ROOT" && cargo build --quiet ) || { echo "cargo build failed" >&2; exit 2; }
+fi
 
 PASS=0
 FAIL=0
@@ -33,6 +47,15 @@ run_scenario() {
 
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
+
+# Stage the real playbook binary on PATH once, ahead of everything else:
+# every scenario's mk_shims-built PATH is "$shim_dir:$PATH", so this stays
+# resolvable regardless of what each shim dir adds for gh/claude.
+REAL_BIN_DIR="$SCRATCH/real-playbook-bin"
+mkdir -p "$REAL_BIN_DIR"
+cp "$BIN_SRC" "$REAL_BIN_DIR/playbook"
+chmod 0755 "$REAL_BIN_DIR/playbook"
+PATH="$REAL_BIN_DIR:$PATH"
 
 # ── shim builder ──────────────────────────────────────────────────────────
 #
@@ -142,7 +165,7 @@ scenario_match() {
   {"id": "scn1-match", "pr": 101, "lenses": {"security": {"found": true}}}
 ]
 EOF
-  jq empty "$fixture" || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
 
   mk_shims "$dir" ok
   cat > "$dir/response.json" <<'EOF'
@@ -171,7 +194,7 @@ scenario_critical() {
   {"id": "scn2-critical", "pr": 102, "lenses": {"security": {"found": true}}}
 ]
 EOF
-  jq empty "$fixture" || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
 
   mk_shims "$dir" ok
   cat > "$dir/response.json" <<'EOF'
@@ -197,7 +220,7 @@ scenario_noncritical() {
   {"id": "scn3-noncritical", "pr": 103, "lenses": {"security": {"found": false}}}
 ]
 EOF
-  jq empty "$fixture" || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
 
   mk_shims "$dir" ok
   cat > "$dir/response.json" <<'EOF'
@@ -230,7 +253,7 @@ scenario_partial() {
   }
 ]
 EOF
-  jq empty "$fixture" || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
 
   mk_shims "$dir" ok
   # Only "security" gets a tier; "correctness" is absent entirely.
@@ -265,7 +288,7 @@ scenario_malformed() {
   }
 ]
 EOF
-  jq empty "$fixture" || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
 
   mk_shims "$dir" ok
   printf 'not valid json at all {[garbage\n' > "$dir/response.json"
@@ -292,7 +315,7 @@ scenario_fetch_fail() {
   {"id": "scn6-fetchfail", "pr": 106, "lenses": {"security": {"found": true}}}
 ]
 EOF
-  jq empty "$fixture" || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
 
   mk_shims "$dir" fail
   cat > "$dir/response.json" <<'EOF'
@@ -323,7 +346,7 @@ scenario_summary_pass() {
   {"id": "scn7a-noncrit", "pr": 108, "lenses": {"security": {"found": false}}}
 ]
 EOF
-  jq empty "$fixture" || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
 
   mk_shims "$dir" ok
   # Same "full-lens" tier for every call: found=true -> match,
@@ -362,7 +385,7 @@ scenario_summary_fail() {
   {"id": "scn7b-critical", "pr": 209, "lenses": {"security": {"found": true}}}
 ]
 EOF
-  jq empty "$fixture" || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
 
   mk_shims "$dir" ok
   # Default response ("full-lens") applies to calls 1 and 2 (match, then
@@ -396,7 +419,7 @@ EOF
 scenario_args() {
   local dir fixture_pos fixture_env
 
-  # -h/--help exits 0 with usage text, before any gh/claude/jq dependency
+  # -h/--help exits 0 with usage text, before any gh/claude dependency
   # check and without a fixture file: run with a PATH that has NEITHER gh
   # nor claude shimmed (only whatever real PATH provides), to prove the
   # usage path never needs them.
@@ -423,8 +446,8 @@ EOF
   {"id": "argtest-env", "pr": 302, "lenses": {"security": {"found": true}}}
 ]
 EOF
-  jq empty "$fixture_pos" || { echo "  BUG: invalid fixture JSON"; return 1; }
-  jq empty "$fixture_env" || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture_pos")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
+  [[ "$(playbook json is-valid-json < "$fixture_env")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
 
   # (a) positional argument alone (no env var set) is used.
   run_eval "$dir" "$fixture_pos" ""

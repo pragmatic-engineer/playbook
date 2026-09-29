@@ -371,6 +371,38 @@ fn main() {
                 JsonCommand::Field { key } => {
                     println!("{}", json::ghjson::field(&input, &key));
                 }
+                JsonCommand::IsValidJson => {
+                    println!("{}", json::evalfixture::is_valid_json(&input));
+                }
+                JsonCommand::IndexedElement { index } => {
+                    println!(
+                        "{}",
+                        json::evalfixture::indexed_element(&input, index).unwrap_or_default()
+                    );
+                }
+                JsonCommand::StringField { key } => {
+                    println!("{}", json::evalfixture::string_field(&input, &key));
+                }
+                JsonCommand::LensNamesJoined => {
+                    println!("{}", json::evalfixture::lens_names_joined(&input));
+                }
+                JsonCommand::LensNames => {
+                    for name in json::evalfixture::lens_names(&input) {
+                        println!("{name}");
+                    }
+                }
+                JsonCommand::IsValidJsonCompact => {
+                    println!(
+                        "{}",
+                        json::evalfixture::is_valid_json_compact(&input).unwrap_or_default()
+                    );
+                }
+                JsonCommand::LensFound { lens } => {
+                    println!("{}", json::evalfixture::lens_found(&input, &lens));
+                }
+                JsonCommand::LensTier { lens } => {
+                    println!("{}", json::evalfixture::lens_tier(&input, &lens));
+                }
             }
         }
     }

@@ -108,7 +108,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: WorktreeCommand,
     },
-    /// Hand-written `jq` replacements over a piped `gh` JSON payload, backing
+    /// Hand-written `jq` replacements over a piped JSON payload, backing
     /// `src/json/`.
     Json {
         #[command(subcommand)]
@@ -305,6 +305,23 @@ pub enum DoctorCommand {
     },
 }
 
+/// `playbook worktree` subcommands, backing `src/worktree/`.
+#[derive(Subcommand, Debug)]
+pub enum WorktreeCommand {
+    /// Scan every registered worktree, classify it, and remove any that
+    /// have landed and are not locked (or are locked by a dead process).
+    Sweep {
+        /// Print what would be removed without touching any worktree.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Apply the same landed/lock checks to one worktree path.
+    Remove {
+        /// Worktree path to check, as printed by `git worktree list`.
+        path: PathBuf,
+    },
+}
+
 /// `playbook json` subcommands, backing `src/json/`. Every subcommand
 /// reads its JSON payload from stdin rather than a path or inline argument,
 /// matching the piped shape a real call site uses:
@@ -327,22 +344,45 @@ pub enum JsonCommand {
         /// The object key to read, e.g. `number` or `headRefOid`.
         key: String,
     },
-}
-
-/// `playbook worktree` subcommands, backing `src/worktree/`.
-#[derive(Subcommand, Debug)]
-pub enum WorktreeCommand {
-    /// Scan every registered worktree, classify it, and remove any that
-    /// have landed and are not locked (or are locked by a dead process).
-    Sweep {
-        /// Print what would be removed without touching any worktree.
-        #[arg(long)]
-        dry_run: bool,
+    /// True/false for whether the piped input is syntactically valid JSON.
+    /// Backs `evalfixture::is_valid_json`.
+    IsValidJson,
+    /// Compact JSON text of the element at `index` in a piped top-level
+    /// array, empty for an out-of-bounds index or a non-array top-level
+    /// value. Backs `evalfixture::indexed_element`.
+    IndexedElement {
+        /// Zero-based index into the piped array.
+        index: usize,
     },
-    /// Apply the same landed/lock checks to one worktree path.
-    Remove {
-        /// Worktree path to check, as printed by `git worktree list`.
-        path: PathBuf,
+    /// One field from a piped top-level JSON object as display text, empty
+    /// for a missing key or malformed input. Backs
+    /// `evalfixture::string_field`.
+    StringField {
+        /// The object key to read, e.g. `id` or `pr`.
+        key: String,
+    },
+    /// Keys of the piped input's `.lenses` object, sorted alphabetically and
+    /// joined with `", "`. Backs `evalfixture::lens_names_joined`.
+    LensNamesJoined,
+    /// Keys of the piped input's `.lenses` object, sorted alphabetically,
+    /// one per line. Backs `evalfixture::lens_names`.
+    LensNames,
+    /// Reserializes the piped input without extra whitespace, empty for
+    /// malformed input. Backs `evalfixture::is_valid_json_compact`.
+    IsValidJsonCompact,
+    /// Raw text of `.lenses[lens].found` in the piped input; prints `null`
+    /// for a missing lens key or missing `found` field. Backs
+    /// `evalfixture::lens_found`.
+    LensFound {
+        /// Lens name to read, e.g. `correctness`.
+        lens: String,
+    },
+    /// Raw text of `.[lens].tier` in the piped input; empty for a
+    /// non-object top-level value, a missing lens key, or a missing/null
+    /// `tier` field. Backs `evalfixture::lens_tier`.
+    LensTier {
+        /// Lens name to read, e.g. `correctness`.
+        lens: String,
     },
 }
 
