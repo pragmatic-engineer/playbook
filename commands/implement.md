@@ -94,7 +94,7 @@ fi
 found=0
 for f in "$PLANS_DIR"/*.md "$ROOT"/docs/adr/*-blueprint.md; do
   [ -f "$f" ] || continue
-  case "$f" in *-quality.md|*.checkpoint.md) continue;; esac
+  case "$f" in *-quality.md|*.checkpoint.md|*.gate-source*.md) continue;; esac
   found=1
   title=$(grep -m1 '^#\{1,\} ' "$f" | sed 's/^#\{1,\} *//')
   st=$(grep -m1 -iE 'status' "$f" | grep -ioE 'proposed|accepted|implemented' | head -1)
@@ -147,7 +147,7 @@ Every `gate record`/`gate check` call below takes `--source <source-path>`, wher
 
 Max 3 iterations per phase; revise on FAIL, recording again after every retry's return so a later PASS overwrites an earlier FAIL (`gate record` upserts on `(plan_slug, phase)`; only the last recorded value before the check below matters).
 
-Before proceeding past this gate, run `playbook gate check <plan-slug> implement fact-check adversarial test-review --source <source-path>`. Only continue to Step 4.5 if it exits 0; on a non-zero exit, report exactly which phase(s) are missing or failed, per `gate check`'s own output (copy it verbatim rather than re-narrating it). A FAIL blocks execution unless the user explicitly overrides (or `--auto --force`): the override never changes or fakes `gate check`'s result, it is an explicit, recorded decision to proceed despite a real, honestly reported non-zero exit, not a claim that the gate actually passed. `--force` overrides the block; it must never write a fake PASS into the database. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record gotchas and rejected alternatives as memory facts (one file write per fact); otherwise skip silently.
+Before proceeding past this gate, run `playbook gate check <plan-slug> implement fact-check adversarial test-review --source <source-path>`. Only continue to Step 4.5 if it exits 0; on a non-zero exit, report exactly which phase(s) are missing, failed, or stale, per `gate check`'s own output (copy it verbatim rather than re-narrating it). A FAIL blocks execution unless the user explicitly overrides (or `--auto --force`): the override never changes or fakes `gate check`'s result, it is an explicit, recorded decision to proceed despite a real, honestly reported non-zero exit, not a claim that the gate actually passed. A STALE phase is different: it means that phase's recorded verdict no longer matches the current source hash, not that the phase's own review was wrong, so re-run that same phase against the current source without revising anything, since revising in response to a STALE would itself cascade staleness onto sibling phases. `--force` overrides the block; it must never write a fake PASS into the database. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record gotchas and rejected alternatives as memory facts (one file write per fact); otherwise skip silently.
 
 ## Step 4.5: Delivery Strategy Gate (MUST, before executing)
 
