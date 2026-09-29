@@ -94,6 +94,7 @@ pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
 }
 
 /// Insert or replace the `(plan_slug, phase)` row with the given values.
+#[allow(clippy::too_many_arguments)]
 pub fn upsert_phase(
     conn: &rusqlite::Connection,
     plan_slug: &str,
