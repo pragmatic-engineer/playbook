@@ -12,13 +12,32 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${SCRIPT_DIR}/memory-context.sh"
+REPO_ROOT="${SCRIPT_DIR}/.."
 
 PASS=0
 FAIL=0
 
+command -v cargo >/dev/null 2>&1 || { echo "cargo not found on PATH" >&2; exit 2; }
+
+BIN_SRC="${REPO_ROOT}/target/debug/playbook"
+if [ ! -x "$BIN_SRC" ]; then
+  echo "Building playbook (cargo build)..."
+  ( cd "$REPO_ROOT" && cargo build --quiet ) || { echo "cargo build failed" >&2; exit 2; }
+fi
+
 WORK="$(mktemp -d)"
 # shellcheck disable=SC2064
 trap "rm -rf '${WORK}'" EXIT INT TERM
+
+# Stage the real playbook binary on its own scratch dir and put that dir
+# first on PATH, so the bare `playbook` call inside memory-context.sh
+# resolves exactly as it would in a real install, with no dependency on an
+# ambient install.
+BIN_DIR="${WORK}/bin"
+mkdir -p "$BIN_DIR"
+cp "$BIN_SRC" "$BIN_DIR/playbook"
+chmod 0755 "$BIN_DIR/playbook"
+export PATH="${BIN_DIR}:/usr/bin:/bin:/usr/sbin:/sbin"
 
 # HOME isolation so a bug that falls back to the default graph path would
 # hit an empty scratch tree, never the user's real ~/.claude/memory/memory.graph.json.
