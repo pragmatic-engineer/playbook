@@ -89,6 +89,12 @@ pub fn run(
     input: &str,
     source: &str,
 ) -> Result<(), String> {
+    if input == "-" && source == "-" {
+        return Err(
+            "input and source cannot both read from stdin ('-'); stdin can only be drained once"
+                .to_string(),
+        );
+    }
     let raw = read_input(input)?;
     let Some(verdict) = extract_verdict(&raw) else {
         return Err(format!("no VERDICT line found in {input}"));
@@ -214,5 +220,21 @@ mod tests {
 
         // Assert
         assert_eq!(result, Some(Verdict::Pass));
+    }
+
+    #[test]
+    fn run_rejects_stdin_used_for_both_input_and_source() {
+        // Arrange: the guard must fire before either stdin read, so no real
+        // stdin content is needed for this to be exercised.
+
+        // Act
+        let result = run("plan-a", "cmd", "phase", "-", "-");
+
+        // Assert
+        let err = result.expect_err("both '-' should be rejected");
+        assert!(
+            err.contains("input") && err.contains("source") && err.contains("stdin"),
+            "error should name the input/source stdin conflict, got: {err}"
+        );
     }
 }

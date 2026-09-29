@@ -53,8 +53,13 @@ fn ensure_source_hash_column(conn: &rusqlite::Connection) -> Result<(), String> 
         )
         .map_err(|e| format!("failed to inspect gate_phases schema: {e}"))?;
     if !has_column {
-        conn.execute_batch("ALTER TABLE gate_phases ADD COLUMN source_hash TEXT")
-            .map_err(|e| format!("failed to add source_hash column: {e}"))?;
+        if let Err(e) = conn.execute_batch("ALTER TABLE gate_phases ADD COLUMN source_hash TEXT") {
+            // Two processes can both see the column absent and race the
+            // ALTER; the loser's "duplicate column" failure means it exists.
+            if !e.to_string().contains("duplicate column") {
+                return Err(format!("failed to add source_hash column: {e}"));
+            }
+        }
     }
     Ok(())
 }
@@ -562,6 +567,57 @@ mod tests {
 
         // Assert
         assert_eq!(row.source_hash, None);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Two connections to the same legacy database both see the column
+    /// absent; the second's own `ALTER TABLE` fails once the first commits it.
+    #[test]
+    fn ensure_source_hash_column_tolerates_concurrent_alter_race() {
+        // Arrange: a legacy table (no source_hash column), plus conn_a
+        // holding the write lock the way its own in-progress ALTER would.
+        let dir = scratch_dir("source-hash-alter-race");
+        fs::create_dir_all(&dir).expect("create scratch dir");
+        let path = dir.join("state.db");
+        let conn_a = rusqlite::Connection::open(&path).expect("open conn_a");
+        conn_a
+            .execute_batch(
+                "CREATE TABLE gate_phases (
+                    plan_slug TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    verdict TEXT NOT NULL,
+                    evidence TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (plan_slug, phase)
+                )",
+            )
+            .expect("create legacy schema");
+        conn_a
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("begin immediate on conn_a");
+
+        let conn_b = rusqlite::Connection::open(&path).expect("open conn_b");
+        conn_b
+            .busy_timeout(Duration::from_millis(2000))
+            .expect("busy_timeout on conn_b");
+        let handle = std::thread::spawn(move || ensure_source_hash_column(&conn_b));
+
+        // Let conn_b's thread reach its own ALTER and start waiting on
+        // conn_a's write lock before conn_a's ALTER commits underneath it.
+        std::thread::sleep(Duration::from_millis(200));
+        conn_a
+            .execute_batch("ALTER TABLE gate_phases ADD COLUMN source_hash TEXT")
+            .expect("conn_a adds the column first");
+        conn_a.execute_batch("COMMIT").expect("commit conn_a");
+
+        // Act
+        let result = handle.join().expect("conn_b thread should not panic");
+
+        // Assert: conn_b's own ALTER fails with duplicate column, and that
+        // failure must be tolerated as success rather than propagated.
+        assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
 
         let _ = fs::remove_dir_all(&dir);
     }
