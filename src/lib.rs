@@ -13,6 +13,7 @@ pub mod doctor;
 pub mod gate;
 pub mod hooks;
 pub mod init;
+pub mod json;
 pub mod manifest;
 pub mod settings;
 pub mod worktree;
@@ -106,6 +107,12 @@ pub enum Command {
     Worktree {
         #[command(subcommand)]
         sub: WorktreeCommand,
+    },
+    /// Hand-written `jq` replacements over a piped `gh` JSON payload, backing
+    /// `src/json/`.
+    Json {
+        #[command(subcommand)]
+        sub: JsonCommand,
     },
 }
 
@@ -295,6 +302,30 @@ pub enum DoctorCommand {
         pattern: String,
         /// Event name to scope the count to; omit to count across every event.
         event: Option<String>,
+    },
+}
+
+/// `playbook json` subcommands, backing `src/json/`. Every subcommand
+/// reads its JSON payload from stdin rather than a path or inline argument,
+/// matching the piped shape a real call site uses:
+/// `gh pr checks ... --json bucket | playbook json bucket-counts pass fail`.
+#[derive(Subcommand, Debug)]
+pub enum JsonCommand {
+    /// Tally a piped JSON array's `"bucket"` field against the named
+    /// buckets, printing one `bucket=count` line per bucket in the order
+    /// given. Backs `src/json/ghjson.rs::bucket_counts`.
+    BucketCounts {
+        /// Bucket names to tally, e.g. `pass fail pending`.
+        buckets: Vec<String>,
+    },
+    /// Print a piped JSON array's length as a bare integer, 0 for anything
+    /// else. Backs `src/json/ghjson.rs::array_length`.
+    ArrayLength,
+    /// Print one field from a piped flat JSON object, empty for a missing
+    /// or malformed field. Backs `src/json/ghjson.rs::field`.
+    Field {
+        /// The object key to read, e.g. `number` or `headRefOid`.
+        key: String,
     },
 }
 

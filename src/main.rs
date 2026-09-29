@@ -6,8 +6,8 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, config, doctor, gate, hooks, init, manifest, settings, worktree,
-    AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand,
+    agents, cc, common, config, doctor, gate, hooks, init, json, manifest, settings, worktree,
+    AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand, JsonCommand,
     ManifestCommand, MemoryCommand, SettingsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
@@ -355,6 +355,24 @@ fn main() {
                 println!("{count}");
             }
         },
+        Command::Json { sub } => {
+            let mut input = String::new();
+            let _ = std::io::stdin().read_to_string(&mut input);
+            match sub {
+                JsonCommand::BucketCounts { buckets } => {
+                    let names: Vec<&str> = buckets.iter().map(String::as_str).collect();
+                    for (bucket, count) in json::ghjson::bucket_counts(&input, &names) {
+                        println!("{bucket}={count}");
+                    }
+                }
+                JsonCommand::ArrayLength => {
+                    println!("{}", json::ghjson::array_length(&input));
+                }
+                JsonCommand::Field { key } => {
+                    println!("{}", json::ghjson::field(&input, &key));
+                }
+            }
+        }
     }
 }
 
