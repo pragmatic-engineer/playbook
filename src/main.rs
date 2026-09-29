@@ -356,8 +356,7 @@ fn main() {
             }
         },
         Command::Json { sub } => {
-            let mut input = String::new();
-            let _ = std::io::stdin().read_to_string(&mut input);
+            let input = read_stdin_to_string();
             match sub {
                 JsonCommand::BucketCounts { buckets } => {
                     let names: Vec<&str> = buckets.iter().map(String::as_str).collect();
@@ -402,6 +401,25 @@ fn main() {
                 }
                 JsonCommand::LensTier { lens } => {
                     println!("{}", json::evalfixture::lens_tier(&input, &lens));
+                }
+                JsonCommand::Equal { a, b, ignore_keys } => {
+                    let ignore_keys: Vec<&str> = ignore_keys.iter().map(String::as_str).collect();
+                    if let Err(message) = json::jsoncmp::json_equal(&a, &b, &ignore_keys) {
+                        eprintln!("{message}");
+                        std::process::exit(1);
+                    }
+                }
+                JsonCommand::RemoveKeys { keys } => {
+                    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+                    println!("{}", json::settingsjson::remove_keys_print(&input, &keys));
+                }
+                JsonCommand::KeysSorted => {
+                    for key in json::keylist::top_level_keys_sorted(&input) {
+                        println!("{key}");
+                    }
+                }
+                JsonCommand::AddMarkerKey { key } => {
+                    println!("{}", json::settingsjson::add_marker_key_print(&input, &key));
                 }
             }
         }
@@ -457,6 +475,18 @@ fn parse_config_value(key: &str, value: &str) -> Result<serde_json::Value, confi
         },
         _ => Ok(serde_json::Value::String(value.to_string())),
     }
+}
+
+/// Reads all of stdin into a `String`, for the `json` subcommands that
+/// take their JSON document piped in. Panics on a read failure: unlike
+/// [`read_hook_input`], these commands have no silent-empty fallback that
+/// would make sense, since an empty document is itself valid JSON input.
+fn read_stdin_to_string() -> String {
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .expect("stdin should be readable");
+    input
 }
 
 /// Read the hook payload the same way common.py does: `HOOK_INPUT` env var

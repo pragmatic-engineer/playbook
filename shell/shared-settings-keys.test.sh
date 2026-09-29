@@ -14,17 +14,25 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${SCRIPT_DIR}/.."
 SEED="${SCRIPT_DIR}/../settings.shared.json"
 PASS=0
 FAIL=0
 
-if ! command -v jq >/dev/null 2>&1; then
-  echo "SKIP: jq not available; shared settings key-set tests need jq"
-  exit 0
-fi
+command -v cargo >/dev/null 2>&1 || { echo "cargo not found on PATH" >&2; exit 2; }
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT INT TERM
+
+BIN_SRC="${REPO_ROOT}/target/debug/playbook"
+if [ ! -x "$BIN_SRC" ]; then
+  echo "Building playbook (cargo build)..."
+  ( cd "$REPO_ROOT" && cargo build --quiet ) || { echo "cargo build failed" >&2; exit 2; }
+fi
+BIN_DIR="$WORK/bin"
+mkdir -p "$BIN_DIR"
+cp "$BIN_SRC" "$BIN_DIR/playbook"
+chmod 0755 "$BIN_DIR/playbook"
 
 pass() { echo "PASS: $1"; (( PASS++ )) || true; }
 fail() { echo "FAIL: $1${2:+ -> $2}"; (( FAIL++ )) || true; }
@@ -63,7 +71,7 @@ KEYS
 assert_key_set() {
   local label="$1" file="$2"
   local actual="${WORK}/actual-keys.txt"
-  jq -r 'keys_unsorted[]' "$file" | sort > "$actual"
+  "$BIN_DIR/playbook" json keys-sorted < "$file" > "$actual"
   if diff -q "$EXPECTED" "$actual" >/dev/null 2>&1; then
     pass "$label"
   else
@@ -79,7 +87,7 @@ assert_key_set "committed seed matches pinned key set" "$SEED"
 
 # B: a fixture copy with an EXTRA key fails, naming the extra key.
 FIXTURE_EXTRA="${WORK}/seed-extra.json"
-jq '. + {"zzExtraKey": true}' "$SEED" > "$FIXTURE_EXTRA"
+"$BIN_DIR/playbook" json add-marker-key zzExtraKey < "$SEED" > "$FIXTURE_EXTRA"
 extra_output="$(assert_key_set "fixture with extra key" "$FIXTURE_EXTRA" 2>&1)"
 if [[ "$extra_output" == FAIL:* && "$extra_output" == *"zzExtraKey"* ]]; then
   pass "extra-key drift fails and names the extra key"
@@ -89,7 +97,7 @@ fi
 
 # C: a fixture copy with a key REMOVED fails, naming the missing key.
 FIXTURE_MISSING="${WORK}/seed-missing.json"
-jq 'del(.editorMode)' "$SEED" > "$FIXTURE_MISSING"
+"$BIN_DIR/playbook" json remove-keys editorMode < "$SEED" > "$FIXTURE_MISSING"
 missing_output="$(assert_key_set "fixture with removed key" "$FIXTURE_MISSING" 2>&1)"
 if [[ "$missing_output" == FAIL:* && "$missing_output" == *"editorMode"* ]]; then
   pass "removed-key drift fails and names the missing key"

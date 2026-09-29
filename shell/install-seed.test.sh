@@ -96,8 +96,9 @@ scenario_fresh() {
   local settings="$home/.claude/settings.json"
   [ -f "$settings" ] || { echo "  settings.json not created"; return 1; }
   jq -e . "$settings" >/dev/null 2>&1 || { echo "  settings.json is not valid JSON"; return 1; }
-  diff <(jq -S 'del(.hooks)' "$settings") <(jq -S 'del(.hooks)' "$TEMPLATE") >/dev/null \
-    || { echo "  non-hooks keys differ from the template"; return 1; }
+  local err
+  err="$("$BIN_DIR/playbook" json equal "$settings" "$TEMPLATE" --ignore-keys hooks 2>&1)" \
+    || { echo "  non-hooks keys differ from the template: $err"; return 1; }
   local n_ported
   n_ported="$("$BIN_SRC" doctor hook-commands-matching "$settings" '^playbook hook ')"
   [ "$n_ported" = "18" ] || { echo "  expected 18 ported hook commands (15 distinct), got $n_ported"; return 1; }
