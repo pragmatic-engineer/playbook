@@ -32,6 +32,7 @@ fn reopen_after_upserts_does_not_duplicate_rows() {
         "first evidence",
         "cmd-1",
         "2026-01-01T00:00:00Z",
+        "test-hash",
     )
     .expect("first upsert");
     upsert_phase(
@@ -42,6 +43,7 @@ fn reopen_after_upserts_does_not_duplicate_rows() {
         "second evidence",
         "cmd-2",
         "2026-01-02T00:00:00Z",
+        "test-hash",
     )
     .expect("second upsert");
     drop(conn);
@@ -75,6 +77,7 @@ fn cross_plan_isolation_holds_through_real_open_db() {
         "a-evidence",
         "a-cmd",
         "2026-01-01T00:00:00Z",
+        "test-hash",
     )
     .expect("upsert plan-a");
     upsert_phase(
@@ -85,6 +88,7 @@ fn cross_plan_isolation_holds_through_real_open_db() {
         "b-evidence",
         "b-cmd",
         "2026-01-02T00:00:00Z",
+        "test-hash",
     )
     .expect("upsert plan-b");
 
@@ -100,6 +104,48 @@ fn cross_plan_isolation_holds_through_real_open_db() {
     assert_eq!(row_a.verdict, "PASS");
     assert_eq!(row_b.verdict, "FAIL");
     assert_ne!(row_a.evidence, row_b.evidence);
+}
+
+#[test]
+fn open_db_against_legacy_six_column_schema_adds_source_hash_column() {
+    // Arrange: a database file shaped exactly like the pre-migration
+    // schema, written with a raw connection so open_db never touches it first.
+    let path = scratch_db_path("legacy-schema");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    let legacy_conn = rusqlite::Connection::open(&path).expect("open legacy conn");
+    legacy_conn
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS gate_phases (
+    plan_slug TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK(verdict IN ('PASS','FAIL','WARN','INCONCLUSIVE')),
+    evidence TEXT NOT NULL,
+    command TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (plan_slug, phase)
+) WITHOUT ROWID",
+        )
+        .expect("create legacy schema");
+    drop(legacy_conn);
+
+    // Act
+    let result = open_db(&path);
+
+    // Assert
+    assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
+    let conn = result.unwrap();
+    let mut stmt = conn.prepare("PRAGMA table_info(gate_phases)").unwrap();
+    let names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+    assert!(
+        names.contains(&"source_hash".to_string()),
+        "expected source_hash column after open_db, got columns {names:?}"
+    );
 }
 
 /// Reads `src/gate/db.rs` from disk, greps for the deleted gitignore shape-check by name, proving it is gone, not just unreferenced.

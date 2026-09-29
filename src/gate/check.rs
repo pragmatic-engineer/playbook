@@ -7,11 +7,13 @@
 
 use crate::common::paths::{repo_scoped_dir, RepoScope};
 use crate::gate::db;
+use crate::gate::hash;
 use crate::manifest;
 
 /// One phase's resolved state: `Missing` covers a phase never recorded
-/// (`db::query_phase` returned `None`); the other four mirror
-/// `record::Verdict`'s four keywords as read back from the database.
+/// (`db::query_phase` returned `None`); `Stale` covers a recorded row whose
+/// `source_hash` no longer matches the current source; the other four
+/// mirror `record::Verdict`'s four keywords as read back from the database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PhaseState {
     Missing,
@@ -19,6 +21,7 @@ enum PhaseState {
     Fail,
     Warn,
     Inconclusive,
+    Stale,
 }
 
 impl PhaseState {
@@ -33,11 +36,12 @@ impl PhaseState {
             PhaseState::Fail => "FAIL",
             PhaseState::Warn => "WARN",
             PhaseState::Inconclusive => "INCONCLUSIVE",
+            PhaseState::Stale => "STALE",
         }
     }
 
-    /// PASS and WARN both satisfy a gate; FAIL, INCONCLUSIVE, and MISSING do
-    /// not.
+    /// PASS and WARN both satisfy a gate; FAIL, INCONCLUSIVE, MISSING, and
+    /// STALE do not.
     fn satisfied(&self) -> bool {
         matches!(self, PhaseState::Pass | PhaseState::Warn)
     }
@@ -60,18 +64,27 @@ impl PhaseState {
 /// Query every phase in `phases` for `plan_slug` and render a per-phase
 /// `"<phase>: <STATE>"` line. `command` is accepted for CLI-shape parity
 /// with `gate record` but is not part of the `(plan_slug, phase)` lookup
-/// key `db::query_phase` uses, so it plays no role in the result.
+/// key `db::query_phase` uses, so it plays no role in the result. `source`
+/// is hashed once and compared against each recorded row's `source_hash`;
+/// a mismatch (or a row with no stored hash) resolves that phase STALE.
 ///
 /// Returns `Ok(output)` when every named phase is satisfied (PASS or WARN),
 /// with `output` holding one line per phase. Returns `Err` otherwise: for
 /// zero phase names, a pinned "no phases specified" message; for one or
-/// more unsatisfied phases (Missing, FAIL, or INCONCLUSIVE), the same
+/// more unsatisfied phases (Missing, FAIL, INCONCLUSIVE, or STALE), the same
 /// per-phase lines as the success case, so every offending phase is still
-/// individually named; for a database failure, that failure's message.
-pub fn run(plan_slug: &str, _command: &str, phases: &[String]) -> Result<String, String> {
+/// individually named; for a database or source-read failure, that
+/// failure's message.
+pub fn run(
+    plan_slug: &str,
+    _command: &str,
+    phases: &[String],
+    source: &str,
+) -> Result<String, String> {
     if phases.is_empty() {
         return Err("no phases specified; provide at least one phase name to check".to_string());
     }
+    let current_hash = hash::read_and_hash(source)?;
 
     let repo_root =
         manifest::check::toplevel().ok_or_else(|| "not inside a git repository".to_string())?;
@@ -90,7 +103,14 @@ pub fn run(plan_slug: &str, _command: &str, phases: &[String]) -> Result<String,
     for phase in phases {
         let state = match db::query_phase(&conn, plan_slug, phase)? {
             None => PhaseState::Missing,
-            Some(row) => PhaseState::from_verdict(&row.verdict),
+            Some(row) => {
+                let is_fresh = row.source_hash.as_deref() == Some(current_hash.as_str());
+                if is_fresh {
+                    PhaseState::from_verdict(&row.verdict)
+                } else {
+                    PhaseState::Stale
+                }
+            }
         };
         if !state.satisfied() {
             all_satisfied = false;
@@ -146,12 +166,31 @@ mod tests {
     }
 
     #[test]
+    fn stale_label_is_not_a_substring_of_any_other_label() {
+        // Arrange
+        let stale = PhaseState::Stale.label();
+        let others = [
+            PhaseState::Missing.label(),
+            PhaseState::Pass.label(),
+            PhaseState::Fail.label(),
+            PhaseState::Warn.label(),
+            PhaseState::Inconclusive.label(),
+        ];
+
+        // Act, Assert
+        for other in others {
+            assert!(!stale.contains(other), "STALE must not contain {other}");
+            assert!(!other.contains(stale), "{other} must not contain STALE");
+        }
+    }
+
+    #[test]
     fn zero_phases_is_a_pinned_error_not_a_silent_pass() {
         // Arrange
         let phases: Vec<String> = Vec::new();
 
         // Act
-        let result = run("plan-a", "gate-run", &phases);
+        let result = run("plan-a", "gate-run", &phases, "unused-source");
 
         // Assert
         let err = result.expect_err("zero phases must be an error, not a silent pass");

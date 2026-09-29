@@ -291,6 +291,7 @@ jobs:
           fi
           work="$(mktemp -d)"
           (cd "$work" && git init -q && git remote add origin https://github.com/smoke-test/smoke-test.git)
-          echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check -)
-          (cd "$work" && "$bin" gate check smoke-test ci fact-check)
+          echo "VERDICT: PASS" > "$work/source.txt"
+          echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check - --source "$work/source.txt")
+          (cd "$work" && "$bin" gate check smoke-test ci fact-check --source "$work/source.txt")
           echo "gate record/check round-tripped a real PASS through rusqlite on ${{ matrix.target }}"
