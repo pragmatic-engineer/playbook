@@ -108,8 +108,8 @@ pub enum Command {
         #[command(subcommand)]
         sub: WorktreeCommand,
     },
-    /// Hand-written `jq` replacements over file or piped JSON, backing
-    /// `src/json/`.
+    /// Hand-written `jq` replacements over a piped session, `gh`, or file
+    /// JSON payload, backing `src/json/`.
     Json {
         #[command(subcommand)]
         sub: JsonCommand,
@@ -384,6 +384,25 @@ pub enum JsonCommand {
         /// Lens name to read, e.g. `correctness`.
         lens: String,
     },
+    /// Print the fifteen `key=value` session fields `statusline.sh`'s
+    /// `eval` consumes. Backs `src/json/statusline.rs::session_fields`.
+    SessionFields {
+        /// `$PWD` fallback used when the piped JSON has no `.cwd` or
+        /// `.workspace.current_dir`.
+        pwd: String,
+    },
+    /// Reshape a piped raw `gh api graphql` CI status response into
+    /// `{"statusCheckRollup": [...]}`, ready to pipe into `ci-rollup`. Backs
+    /// `src/json/statusline.rs::graphql_ci_checks`.
+    GraphqlCiChecks {},
+    /// Print a piped `.statusCheckRollup` array's rollup as one line,
+    /// `state failed running total`. Backs
+    /// `src/json/statusline.rs::ci_rollup`.
+    CiRollup {},
+    /// Print the ten `key=value` PR fields `statusline.sh`'s
+    /// `render_pr_right` consumes. Backs
+    /// `src/json/statusline.rs::pr_fields`.
+    PrFields {},
 
     /// Structural JSON equality between two files, ignoring key order and
     /// any named top-level keys. Backs `json::jsoncmp::json_equal`.

@@ -428,6 +428,19 @@ fn main() {
                         println!("{output}");
                     }
                 }
+                JsonCommand::SessionFields { pwd } => {
+                    print!("{}", json::statusline::session_fields(&input, &pwd));
+                }
+                JsonCommand::GraphqlCiChecks {} => {
+                    print!("{}", json::statusline::graphql_ci_checks(&input));
+                }
+                JsonCommand::CiRollup {} => {
+                    let (state, failed, running, total) = json::statusline::ci_rollup(&input);
+                    println!("{state} {failed} {running} {total}");
+                }
+                JsonCommand::PrFields {} => {
+                    print!("{}", json::statusline::pr_fields(&input));
+                }
             }
         }
     }

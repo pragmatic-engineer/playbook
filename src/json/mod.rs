@@ -11,3 +11,4 @@ pub mod jsoncmp;
 pub mod keylist;
 pub mod memorycontext;
 pub mod settingsjson;
+pub mod statusline;
