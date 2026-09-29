@@ -90,6 +90,7 @@ done
 # more than one event.
 write_stub_binary() {
   local bindir="$1" version_line="$2"
+  local gate_help="${3:-Usage: playbook gate record <PLAN_SLUG> <COMMAND> <PHASE> <INPUT>}"
   mkdir -p "$bindir"
   cat > "$bindir/playbook" <<STUB
 #!/usr/bin/env bash
@@ -112,6 +113,9 @@ elif [ "\$1" = "doctor" ] && [ "\$2" = "hook-commands-for-event" ]; then
     count=\$(grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' "\$settings_file" 2>/dev/null | sed 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/' | grep -Fxc -- "\$wanted")
     echo "\$guard=\$count"
   done
+  exit 0
+elif [ "\$1" = "gate" ] && [ "\$2" = "record" ] && [ "\$3" = "--help" ]; then
+  printf '%s\n' "$gate_help"
   exit 0
 fi
 STUB
@@ -375,7 +379,7 @@ scenario_layer6_match() {
   write_stub_binary "$bin" "playbook 0.10.0"
   write_manifest "$plugin" "0.10.0"
   out="$(run_layer6 "$home" "$bin:/usr/bin:/bin" "$plugin")"
-  [[ "$out" == "MATCH 0.10.0" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == $'MATCH 0.10.0\nGATE_SOURCE=MISSING' ]] || { echo "  got: $out"; return 1; }
 }
 
 # L: same stub, manifest reports a different version -> SKEW, both named.
@@ -385,7 +389,7 @@ scenario_layer6_skew() {
   write_stub_binary "$bin" "playbook 0.10.0"
   write_manifest "$plugin" "0.9.1"
   out="$(run_layer6 "$home" "$bin:/usr/bin:/bin" "$plugin")"
-  [[ "$out" == "SKEW binary=0.10.0 plugin=0.9.1" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == $'SKEW binary=0.10.0 plugin=0.9.1\nGATE_SOURCE=MISSING' ]] || { echo "  got: $out"; return 1; }
 }
 
 # M: the stub prints nothing for --version, so the resolved binary is not the
@@ -395,7 +399,7 @@ scenario_layer6_no_version() {
   mkdir -p "$home"
   write_stub_binary "$bin" ""
   out="$(run_layer6 "$home" "$bin:/usr/bin:/bin")"
-  [[ "$out" == "NO_VERSION" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == $'NO_VERSION\nGATE_SOURCE=MISSING' ]] || { echo "  got: $out"; return 1; }
 }
 
 # N: the stub resolves but no manifest can be found to compare against.
@@ -404,7 +408,7 @@ scenario_layer6_present_no_baseline() {
   mkdir -p "$home"
   write_stub_binary "$bin" "playbook 0.10.0"
   out="$(run_layer6 "$home" "$bin:/usr/bin:/bin")"
-  [[ "$out" == "PRESENT_NO_BASELINE 0.10.0" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == $'PRESENT_NO_BASELINE 0.10.0\nGATE_SOURCE=MISSING' ]] || { echo "  got: $out"; return 1; }
 }
 
 # W: the binary resolves and reports a version, but predates the `doctor`
@@ -416,7 +420,33 @@ scenario_layer6_too_old() {
   write_stub_binary_without_doctor "$bin" "playbook 0.12.0"
   write_manifest "$plugin" "0.12.0"
   out="$(run_layer6 "$home" "$bin:/usr/bin:/bin" "$plugin")"
-  [[ "$out" == "TOO_OLD 0.12.0" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == $'TOO_OLD 0.12.0\nGATE_SOURCE=MISSING' ]] || { echo "  got: $out"; return 1; }
+}
+
+# AA: the stub's `gate record --help` output lists `--source`, simulating a
+# binary that already supports gate staleness enforcement -> GATE_SOURCE=OK.
+scenario_layer6_gate_source_ok() {
+  local home="$WORK/l6-aa" bin="$WORK/l6-aa-bin" plugin="$WORK/l6-aa-plugin" out
+  mkdir -p "$home"
+  write_stub_binary "$bin" "playbook 0.10.0" \
+    "Usage: playbook gate record --source <SOURCE> <PLAN_SLUG> <COMMAND> <PHASE> <INPUT>"
+  write_manifest "$plugin" "0.10.0"
+  out="$(run_layer6 "$home" "$bin:/usr/bin:/bin" "$plugin")"
+  [[ "$out" == $'MATCH 0.10.0\nGATE_SOURCE=OK' ]] || { echo "  got: $out"; return 1; }
+}
+
+# AB: the stub's `gate record --help` output has no `--source` at all,
+# simulating a binary built before it shipped -> GATE_SOURCE=MISSING,
+# independent of an otherwise-matching version (regression pin: this must
+# fire even when SKEW itself would report MATCH, per doctor.md's own note
+# that the two are independent verdicts).
+scenario_layer6_gate_source_missing() {
+  local home="$WORK/l6-ab" bin="$WORK/l6-ab-bin" plugin="$WORK/l6-ab-plugin" out
+  mkdir -p "$home"
+  write_stub_binary "$bin" "playbook 0.10.0"
+  write_manifest "$plugin" "0.10.0"
+  out="$(run_layer6 "$home" "$bin:/usr/bin:/bin" "$plugin")"
+  [[ "$out" == $'MATCH 0.10.0\nGATE_SOURCE=MISSING' ]] || { echo "  got: $out"; return 1; }
 }
 
 run_scenario "J: playbook absent from PATH -> MISSING"                         scenario_layer6_missing
@@ -425,6 +455,8 @@ run_scenario "L: binary and manifest disagree -> SKEW binary=.. plugin=.."     s
 run_scenario "M: --version prints nothing -> NO_VERSION"                       scenario_layer6_no_version
 run_scenario "N: binary present, no manifest found -> PRESENT_NO_BASELINE"     scenario_layer6_present_no_baseline
 run_scenario "W: binary predates doctor subcommand -> TOO_OLD <ver>"           scenario_layer6_too_old
+run_scenario "AA: gate record --help lists --source -> GATE_SOURCE=OK"        scenario_layer6_gate_source_ok
+run_scenario "AB: gate record --help has no --source -> GATE_SOURCE=MISSING"  scenario_layer6_gate_source_missing
 
 # ── Layer 7: no hook command points at a missing file ───────────────────────
 
