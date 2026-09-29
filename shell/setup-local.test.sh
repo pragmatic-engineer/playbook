@@ -551,10 +551,11 @@ scenario_n_golden_clean_install() {
     PATH="$REAL_BIN_PATH" run_setup "$home" "$claude_home"; rc=$?
     [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
 
-    diff <(jq -S . "$claude_home/settings.json") <(jq -S . "$expected_settings") \
-        || { echo "  settings.json diverged from the clean-install golden fixture (semantic diff)"; return 1; }
-    diff <(jq -S . "$claude_home/.settings.base.json") <(jq -S . "$expected_base") \
-        || { echo "  .settings.base.json diverged from the clean-install golden fixture (semantic diff)"; return 1; }
+    local err
+    err="$("$REAL_BIN_DIR/playbook" json equal "$claude_home/settings.json" "$expected_settings" 2>&1)" \
+        || { echo "  settings.json diverged from the clean-install golden fixture (semantic diff): $err"; return 1; }
+    err="$("$REAL_BIN_DIR/playbook" json equal "$claude_home/.settings.base.json" "$expected_base" 2>&1)" \
+        || { echo "  .settings.base.json diverged from the clean-install golden fixture (semantic diff): $err"; return 1; }
 }
 
 # ---------------------------------------------------------------------------

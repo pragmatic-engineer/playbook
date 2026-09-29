@@ -108,7 +108,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: WorktreeCommand,
     },
-    /// Hand-written `jq` replacements over a piped JSON payload, backing
+    /// Hand-written `jq` replacements over file or piped JSON, backing
     /// `src/json/`.
     Json {
         #[command(subcommand)]
@@ -383,6 +383,34 @@ pub enum JsonCommand {
     LensTier {
         /// Lens name to read, e.g. `correctness`.
         lens: String,
+    },
+
+    /// Structural JSON equality between two files, ignoring key order and
+    /// any named top-level keys. Backs `json::jsoncmp::json_equal`.
+    Equal {
+        /// First file to compare.
+        a: PathBuf,
+        /// Second file to compare.
+        b: PathBuf,
+        /// Top-level keys to drop from both documents before comparing.
+        #[arg(long, value_delimiter = ',')]
+        ignore_keys: Vec<String>,
+    },
+    /// Removes top-level keys from a JSON document read on stdin and prints
+    /// the result on stdout. Backs `json::settingsjson::remove_keys_print`.
+    RemoveKeys {
+        /// Top-level keys to drop.
+        keys: Vec<String>,
+    },
+    /// Prints a JSON document's top-level keys, sorted, one per line, read
+    /// on stdin. Backs `json::keylist::top_level_keys_sorted`.
+    KeysSorted,
+    /// Adds one boolean-true marker key to a JSON document read on stdin
+    /// and prints the result on stdout. Backs
+    /// `json::settingsjson::add_marker_key_print`.
+    AddMarkerKey {
+        /// Top-level key to set to `true`.
+        key: String,
     },
 }
 

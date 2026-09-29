@@ -7,3 +7,6 @@
 
 pub mod evalfixture;
 pub mod ghjson;
+pub mod jsoncmp;
+pub mod keylist;
+pub mod settingsjson;
