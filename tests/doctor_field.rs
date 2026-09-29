@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 //! Binary-spawn tests for `playbook doctor plugin-version`,
-//! `playbook doctor statusline-command`, and `playbook doctor hook-commands`,
-//! the subcommands `commands/doctor.md`'s Layer 6, Layer 5, and Layer 7
-//! blocks call in place of `jq`.
+//! `playbook doctor statusline-command`, `playbook doctor hook-commands`,
+//! `playbook doctor hook-commands-for-event`, and
+//! `playbook doctor hook-commands-matching`, the subcommands
+//! `commands/doctor.md`'s Layer 6, Layer 5, Layer 7, and Layer 2 blocks call
+//! in place of `jq`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -255,6 +257,287 @@ fn matches_the_jq_pipeline_on_malformed_hooks_shapes() {
             .output()
             .expect("jq should run");
         let rust_out = run(&["doctor", "hook-commands", f.path.to_str().unwrap()]);
+
+        assert_eq!(
+            stdout_of(&rust_out),
+            stdout_of(&jq_out),
+            "mismatch for case {tag}"
+        );
+    }
+}
+
+/// Differential against the real per-guard `jq` loop `commands/doctor.md`'s
+/// Layer 2 block runs once per guard. Skipped when `jq` is absent, same as
+/// the tests above.
+#[test]
+fn hook_commands_for_event_matches_the_jq_per_guard_loop() {
+    if Command::new("jq").arg("--version").output().is_err() {
+        eprintln!("SKIP: jq not installed");
+        return;
+    }
+
+    let f = Fixture::new(
+        "jq-diff-for-event",
+        r#"{
+            "hooks": {
+                "PreToolUse": [
+                    {"hooks": [
+                        {"command": "playbook hook rm-workspace-guard"},
+                        {"command": "playbook hook bg-await-guard"},
+                        {"command": "playbook hook no-slop-guard"}
+                    ]}
+                ],
+                "Stop": [
+                    {"hooks": [{"command": "playbook hook precommit-check"}]}
+                ]
+            }
+        }"#,
+    );
+
+    let guards = [
+        "rm-workspace-guard",
+        "bg-await-guard",
+        "no-slop-guard",
+        "precommit-check",
+    ];
+
+    let mut jq_lines = Vec::new();
+    for g in guards {
+        let cmd = format!("playbook hook {g}");
+        let out = Command::new("jq")
+            .args([
+                "-r",
+                "--arg",
+                "event",
+                "PreToolUse",
+                "--arg",
+                "cmd",
+                &cmd,
+                "[.hooks[$event][]?.hooks[]?.command // \"\"] | map(select(. == $cmd)) | length",
+            ])
+            .arg(&f.path)
+            .output()
+            .expect("jq should run");
+        let n = stdout_of(&out).trim().to_string();
+        jq_lines.push(format!("{g}={n}"));
+    }
+    let jq_expected = format!("{}\n", jq_lines.join("\n"));
+
+    let mut args = vec![
+        "doctor",
+        "hook-commands-for-event",
+        f.path.to_str().unwrap(),
+        "PreToolUse",
+    ];
+    args.extend(guards);
+    let rust_out = run(&args);
+
+    assert_eq!(stdout_of(&rust_out), jq_expected);
+}
+
+/// Same malformed `.hooks` shapes as `matches_the_jq_pipeline_on_malformed_hooks_shapes`,
+/// checked against `hook-commands-for-event` instead of `hook-commands`.
+/// Skipped when `jq` is absent, same as the tests above.
+#[test]
+fn hook_commands_for_event_matches_jq_on_malformed_hooks_shapes() {
+    if Command::new("jq").arg("--version").output().is_err() {
+        eprintln!("SKIP: jq not installed");
+        return;
+    }
+
+    let cases: &[(&str, &str)] = &[
+        ("hooks-key-missing", r#"{"other": true}"#),
+        ("hooks-not-an-object", r#"{"hooks": "not an object"}"#),
+        (
+            "event-value-not-an-array",
+            r#"{"hooks": {"PreToolUse": "not an array"}}"#,
+        ),
+        (
+            "group-with-no-hooks-array",
+            r#"{"hooks": {"PreToolUse": [{"matcher": "Write"}]}}"#,
+        ),
+        (
+            "hook-with-no-command-field",
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"matcher": "Write"}]}]}}"#,
+        ),
+    ];
+
+    let guard = "rm-workspace-guard";
+    let cmd = format!("playbook hook {guard}");
+
+    for (tag, contents) in cases {
+        // Real jq hard-errors (exit 5, empty stdout) indexing `.hooks[$event]`
+        // when `.hooks` is a non-null scalar, so there is no jq stdout to
+        // diff against for this one case; the Rust side's zero count is a
+        // documented divergence, not a bug (see `hook_commands_for_event`'s
+        // doc comment).
+        if *tag == "hooks-not-an-object" {
+            continue;
+        }
+
+        let f = Fixture::new(&format!("jq-diff-for-event-malformed-{tag}"), contents);
+
+        let jq_out = Command::new("jq")
+            .args([
+                "-r",
+                "--arg",
+                "event",
+                "PreToolUse",
+                "--arg",
+                "cmd",
+                &cmd,
+                "[.hooks[$event][]?.hooks[]?.command // \"\"] | map(select(. == $cmd)) | length",
+            ])
+            .arg(&f.path)
+            .output()
+            .expect("jq should run");
+        let n = stdout_of(&jq_out).trim().to_string();
+        let expected = format!("{guard}={n}\n");
+
+        let rust_out = run(&[
+            "doctor",
+            "hook-commands-for-event",
+            f.path.to_str().unwrap(),
+            "PreToolUse",
+            guard,
+        ]);
+
+        assert_eq!(stdout_of(&rust_out), expected, "mismatch for case {tag}");
+    }
+}
+
+/// Differential against the real `jq ... | select(test($pattern))` idiom
+/// this subcommand replaces at several call sites. Skipped when `jq` is
+/// absent, same as the tests above.
+#[test]
+fn hook_commands_matching_matches_the_jq_select_test_idiom() {
+    if Command::new("jq").arg("--version").output().is_err() {
+        eprintln!("SKIP: jq not installed");
+        return;
+    }
+
+    let f = Fixture::new(
+        "jq-diff-matching",
+        r#"{
+            "hooks": {
+                "PreToolUse": [
+                    {"hooks": [
+                        {"command": "playbook hook rm-workspace-guard"},
+                        {"command": "playbook hook bg-await-guard"}
+                    ]}
+                ],
+                "Stop": [
+                    {"hooks": [{"command": "playbook hook no-slop-guard"}]}
+                ]
+            }
+        }"#,
+    );
+
+    let pattern = "rm-workspace-guard|bg-await-guard|no-slop-guard";
+
+    let jq_all = Command::new("jq")
+        .args([
+            "-r",
+            "--arg",
+            "pattern",
+            pattern,
+            "[.hooks | to_entries[]? | .value[]? | .hooks[]?.command // empty] | map(select(test($pattern))) | length",
+        ])
+        .arg(&f.path)
+        .output()
+        .expect("jq should run");
+    let jq_scoped = Command::new("jq")
+        .args([
+            "-r",
+            "--arg",
+            "event",
+            "PreToolUse",
+            "--arg",
+            "pattern",
+            pattern,
+            "[.hooks[$event][]?.hooks[]?.command // empty] | map(select(test($pattern))) | length",
+        ])
+        .arg(&f.path)
+        .output()
+        .expect("jq should run");
+
+    let rust_all = run(&[
+        "doctor",
+        "hook-commands-matching",
+        f.path.to_str().unwrap(),
+        pattern,
+    ]);
+    let rust_scoped = run(&[
+        "doctor",
+        "hook-commands-matching",
+        f.path.to_str().unwrap(),
+        pattern,
+        "PreToolUse",
+    ]);
+
+    assert_eq!(stdout_of(&rust_all), stdout_of(&jq_all));
+    assert_eq!(stdout_of(&rust_scoped), stdout_of(&jq_scoped));
+}
+
+/// Same malformed `.hooks` shapes as `matches_the_jq_pipeline_on_malformed_hooks_shapes`,
+/// checked against `hook-commands-matching` instead of `hook-commands`.
+/// Skipped when `jq` is absent, same as the tests above.
+#[test]
+fn hook_commands_matching_matches_jq_on_malformed_hooks_shapes() {
+    if Command::new("jq").arg("--version").output().is_err() {
+        eprintln!("SKIP: jq not installed");
+        return;
+    }
+
+    let cases: &[(&str, &str)] = &[
+        ("hooks-key-missing", r#"{"other": true}"#),
+        ("hooks-not-an-object", r#"{"hooks": "not an object"}"#),
+        (
+            "event-value-not-an-array",
+            r#"{"hooks": {"PreToolUse": "not an array"}}"#,
+        ),
+        (
+            "group-with-no-hooks-array",
+            r#"{"hooks": {"PreToolUse": [{"matcher": "Write"}]}}"#,
+        ),
+        (
+            "hook-with-no-command-field",
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"matcher": "Write"}]}]}}"#,
+        ),
+    ];
+
+    let pattern = "guard";
+
+    for (tag, contents) in cases {
+        // Real jq's `to_entries` hard-errors (exit 5, empty stdout) on any
+        // non-object `.hooks` value, including a missing key (`null`) or a
+        // string, so there is no jq stdout to diff against for these two
+        // cases; the Rust side's zero count is a documented divergence, not
+        // a bug (see `hook_commands_matching`'s doc comment).
+        if *tag == "hooks-key-missing" || *tag == "hooks-not-an-object" {
+            continue;
+        }
+
+        let f = Fixture::new(&format!("jq-diff-matching-malformed-{tag}"), contents);
+
+        let jq_out = Command::new("jq")
+            .args([
+                "-r",
+                "--arg",
+                "pattern",
+                pattern,
+                "[.hooks | to_entries[]? | .value[]? | .hooks[]?.command // empty] | map(select(test($pattern))) | length",
+            ])
+            .arg(&f.path)
+            .output()
+            .expect("jq should run");
+
+        let rust_out = run(&[
+            "doctor",
+            "hook-commands-matching",
+            f.path.to_str().unwrap(),
+            pattern,
+        ]);
 
         assert_eq!(
             stdout_of(&rust_out),
