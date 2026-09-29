@@ -7,13 +7,18 @@
 //! `tests/gate_db.rs` uses) before spawning the binary for the invocation
 //! under test.
 
-use playbook::gate::db;
+use playbook::gate::{check, db, hash};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// `check_in_process` mutates the process cwd and `$HOME`, both process-wide
+/// state, so every call serialises through this lock.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 struct Fixture {
     repo: PathBuf,
@@ -84,17 +89,75 @@ impl Fixture {
     /// Seed a phase row directly through the library, bypassing `gate
     /// record`'s CLI: `gate check` needs pre-existing rows to query.
     fn seed(&self, plan_slug: &str, phase: &str, verdict: &str) {
+        self.seed_with_hash(plan_slug, phase, verdict, Some("seed-source-hash"));
+    }
+
+    /// Seed a phase row with an explicit `source_hash`, or `None` to
+    /// simulate a pre-migration row that predates the column.
+    fn seed_with_hash(
+        &self,
+        plan_slug: &str,
+        phase: &str,
+        verdict: &str,
+        source_hash: Option<&str>,
+    ) {
         let conn = db::open_db(&self.db_path()).expect("open db for seed");
-        db::upsert_phase(
-            &conn,
-            plan_slug,
-            phase,
-            verdict,
-            "evidence",
-            "seed-cmd",
-            "2026-01-01T00:00:00Z",
-        )
-        .expect("seed upsert");
+        match source_hash {
+            Some(hash) => db::upsert_phase(
+                &conn,
+                plan_slug,
+                phase,
+                verdict,
+                "evidence",
+                "seed-cmd",
+                "2026-01-01T00:00:00Z",
+                hash,
+            )
+            .expect("seed upsert with hash"),
+            None => {
+                conn.execute(
+                    "INSERT OR REPLACE INTO gate_phases \
+                     (plan_slug, phase, verdict, evidence, command, recorded_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    rusqlite::params![
+                        plan_slug,
+                        phase,
+                        verdict,
+                        "evidence",
+                        "seed-cmd",
+                        "2026-01-01T00:00:00Z"
+                    ],
+                )
+                .map(|_| ())
+                .expect("seed raw insert without source_hash");
+            }
+        }
+    }
+
+    /// Calls `check::run` in this process rather than spawning the binary,
+    /// since the CLI has no `--source` flag yet. Serialises through
+    /// `ENV_LOCK` since it mutates cwd and `$HOME`.
+    fn check_in_process(
+        &self,
+        plan_slug: &str,
+        command: &str,
+        phases: &[String],
+        source: &str,
+    ) -> Result<String, String> {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous_dir = std::env::current_dir().expect("read current dir");
+        let previous_home = std::env::var_os("HOME");
+        std::env::set_current_dir(&self.repo).expect("cd into fixture repo");
+        std::env::set_var("HOME", &self.home);
+
+        let result = check::run(plan_slug, command, phases, source);
+
+        std::env::set_current_dir(&previous_dir).expect("restore cwd");
+        match previous_home {
+            Some(home) => std::env::set_var("HOME", home),
+            None => std::env::remove_var("HOME"),
+        }
+        result
     }
 
     fn run(&self, plan_slug: &str, command: &str, phases: &[&str]) -> std::process::Output {
@@ -283,4 +346,115 @@ fn gate_check_errors_when_worktree_scoping_cannot_resolve() {
         !f.repo.join(".claude").join("state.db").exists(),
         "must never fall back to reading/writing a repo-local state.db"
     );
+}
+
+#[test]
+fn recorded_pass_checked_against_same_source_resolves_pass_and_is_satisfied() {
+    // Arrange
+    let f = Fixture::new("stale-pass-same-source");
+    let source = f.repo.join("source-a.txt");
+    fs::write(&source, "content A").expect("write source file");
+    let recorded_hash = hash::hash_hex(b"content A");
+    f.seed_with_hash("plan-a", "spec", "PASS", Some(&recorded_hash));
+    let phases = vec!["spec".to_string()];
+
+    // Act
+    let result = f.check_in_process("plan-a", "gate-run", &phases, source.to_str().unwrap());
+
+    // Assert
+    let output = result.expect("matching source content should pass, not error");
+    assert!(output.contains("PASS"), "got: {output}");
+}
+
+#[test]
+fn recorded_pass_checked_against_different_source_resolves_stale_and_is_not_satisfied() {
+    // Arrange
+    let f = Fixture::new("stale-pass-diff-source");
+    let recorded_hash = hash::hash_hex(b"content A");
+    f.seed_with_hash("plan-a", "spec", "PASS", Some(&recorded_hash));
+    let source_b = f.repo.join("source-b.txt");
+    fs::write(&source_b, "content B").expect("write source file");
+    let phases = vec!["spec".to_string()];
+
+    // Act
+    let result = f.check_in_process("plan-a", "gate-run", &phases, source_b.to_str().unwrap());
+
+    // Assert
+    let err = result.expect_err("mismatched source content must not silently pass");
+    assert!(err.contains("STALE"), "got: {err}");
+}
+
+/// Mirrors `each_single_phase_state_maps_to_its_own_exit_code`'s table-driven
+/// style: a pre-migration row (no stored `source_hash`) must resolve STALE
+/// regardless of its stored verdict, confirming no verdict-specific branch
+/// short-circuits the NULL check first.
+#[test]
+fn pre_migration_rows_with_no_source_hash_resolve_stale_regardless_of_verdict() {
+    // Arrange
+    let verdicts = ["PASS", "FAIL"];
+
+    for verdict in verdicts {
+        let f = Fixture::new(&format!("stale-legacy-{}", verdict.to_lowercase()));
+        f.seed_with_hash("plan-a", "spec", verdict, None);
+        let source = f.repo.join("source.txt");
+        fs::write(&source, "any content").expect("write source file");
+        let phases = vec!["spec".to_string()];
+
+        // Act
+        let result = f.check_in_process("plan-a", "gate-run", &phases, source.to_str().unwrap());
+
+        // Assert
+        let err = result.expect_err(&format!(
+            "a pre-migration {verdict} row must resolve STALE, not pass silently"
+        ));
+        assert!(err.contains("STALE"), "verdict {verdict}: got {err}");
+    }
+}
+
+#[test]
+fn three_phases_in_one_run_carry_distinct_fail_missing_stale_labels() {
+    // Arrange
+    let f = Fixture::new("stale-three-phases");
+    let source_b = f.repo.join("source-b.txt");
+    fs::write(&source_b, "content B").expect("write source file");
+    let current_hash = hash::hash_hex(b"content B");
+    f.seed_with_hash("plan-a", "broken", "FAIL", Some(&current_hash));
+    let stale_hash = hash::hash_hex(b"content A");
+    f.seed_with_hash("plan-a", "spec", "PASS", Some(&stale_hash));
+    // "unrecorded" is deliberately never seeded.
+    let phases = vec![
+        "broken".to_string(),
+        "unrecorded".to_string(),
+        "spec".to_string(),
+    ];
+
+    // Act
+    let result = f.check_in_process("plan-a", "gate-run", &phases, source_b.to_str().unwrap());
+
+    // Assert
+    let err = result.expect_err("a run with any unsatisfied phase must error");
+    assert!(err.contains("broken: FAIL"), "got: {err}");
+    assert!(err.contains("unrecorded: MISSING"), "got: {err}");
+    assert!(err.contains("spec: STALE"), "got: {err}");
+}
+
+#[test]
+fn nonexistent_source_path_returns_err() {
+    // Arrange
+    let f = Fixture::new("stale-nonexistent-source");
+    f.seed_with_hash("plan-a", "spec", "PASS", Some("any-hash"));
+    let phases = vec!["spec".to_string()];
+    let missing_source = f.repo.join("does-not-exist.txt");
+
+    // Act
+    let result = f.check_in_process(
+        "plan-a",
+        "gate-run",
+        &phases,
+        missing_source.to_str().unwrap(),
+    );
+
+    // Assert
+    let err = result.expect_err("a nonexistent source path must be a clear error");
+    assert!(err.contains("failed to read"), "got: {err}");
 }
