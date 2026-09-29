@@ -16,7 +16,6 @@
 
 # Core: required by hooks and the cc launcher
 brew "git"          # used everywhere; hooks drive git directly
-brew "jq"           # JSON parsing in hooks and statusline.sh
 brew "just"         # task runner; see justfile (replaced the Makefile)
 
 # Statusline and PR/CI integration

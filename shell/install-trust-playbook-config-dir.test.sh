@@ -22,7 +22,9 @@
 # actually runs must not depend on which JSON tool happens to be installed
 # on the machine running this suite (macOS ships no /usr/bin/jq; Linux CI
 # images vary on python3), so both are exercised explicitly rather than
-# whichever one the host happens to resolve first.
+# whichever one the host happens to resolve first. jq is not a required
+# repo dependency, so the jq variant of B and C is skipped, not failed,
+# on a host with no working jq anywhere on disk.
 #
 # Run:  bash shell/install-trust-playbook-config-dir.test.sh
 set -u
@@ -36,7 +38,6 @@ FAIL=0
 pass() { echo "PASS: $1"; (( PASS++ )) || true; }
 fail() { echo "FAIL: $1${2:+ -- $2}"; (( FAIL++ )) || true; }
 
-command -v jq >/dev/null 2>&1 || { echo "jq not found on PATH (needed to assert on the result, not just to run install.sh)" >&2; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found on PATH (needed for the python3-only scenarios)" >&2; exit 2; }
 command -v cargo >/dev/null 2>&1 || { echo "cargo not found on PATH" >&2; exit 2; }
 
@@ -291,10 +292,24 @@ scenario_broken_jq_falls_through_to_python3() {
   [ "$got" = "true" ] || { echo "  python3 fallback did not run despite jq failing: got '$got', file: $(cat "$home/.claude.json"), log: $(cat "$log")"; return 1; }
 }
 
+# jq is optional (install.sh falls back to python3), so a host with no
+# working jq anywhere on disk skips the jq variant of B and C rather than
+# failing the whole suite over a tool this repo no longer requires.
+HAVE_JQ=0
+resolve_working_binary jq --version >/dev/null 2>&1 && HAVE_JQ=1
+
 run_scenario "A: no ~/.claude.json at all -> clean no-op, file stays absent" scenario_no_claude_json_is_a_clean_noop
-run_scenario "B(jq): bare {} gets the trust entry created via jq" scenario_bare_claude_json_gets_the_trust_entry 1 0
+if [ "$HAVE_JQ" = "1" ]; then
+  run_scenario "B(jq): bare {} gets the trust entry created via jq" scenario_bare_claude_json_gets_the_trust_entry 1 0
+else
+  echo "SKIP: B(jq) - no working jq on this host, jq branch not exercised"
+fi
 run_scenario "B(python3): bare {} gets the trust entry created via python3" scenario_bare_claude_json_gets_the_trust_entry 0 1
-run_scenario "C(jq): an existing false entry is flipped to true without clobbering siblings or other projects, via jq" scenario_existing_entry_is_updated_not_replaced 1 0
+if [ "$HAVE_JQ" = "1" ]; then
+  run_scenario "C(jq): an existing false entry is flipped to true without clobbering siblings or other projects, via jq" scenario_existing_entry_is_updated_not_replaced 1 0
+else
+  echo "SKIP: C(jq) - no working jq on this host, jq branch not exercised"
+fi
 run_scenario "C(python3): same, via python3" scenario_existing_entry_is_updated_not_replaced 0 1
 run_scenario "D: neither jq nor python3 resolvable -> warns, does not fail, does not touch the file" scenario_no_json_tool_warns_but_does_not_fail
 run_scenario "E: jq present but failing falls through to python3, not just a warning" scenario_broken_jq_falls_through_to_python3
