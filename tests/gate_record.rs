@@ -7,13 +7,41 @@
 //! re-recording the same `(plan_slug, phase)` must overwrite, not
 //! duplicate. Both need a real DB file and exit code to check against.
 
-use playbook::gate::db;
+use playbook::gate::{db, hash, record};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// `record::run` shells out through `manifest::check::toplevel` and
+/// `paths::home_dir`, both of which read the process's own cwd/`$HOME`
+/// rather than an injectable parameter, so a direct-call test must serialise
+/// on those process-wide values the way `tests/worktree_sweep.rs`'s
+/// `CWD_LOCK` does.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Runs `f` with the process cwd set to `repo` and `$HOME` set to `home`,
+/// restoring both afterward, for the tests below that call `record::run`
+/// in-process rather than spawning the compiled binary.
+fn with_repo_and_home<T>(repo: &Path, home: &Path, f: impl FnOnce() -> T) -> T {
+    let _guard = lock_env();
+    let prev_cwd = std::env::current_dir().expect("read current dir");
+    let prev_home = std::env::var_os("HOME");
+    std::env::set_current_dir(repo).expect("cd into repo");
+    std::env::set_var("HOME", home);
+    let out = f();
+    std::env::set_current_dir(&prev_cwd).expect("restore cwd");
+    match prev_home {
+        Some(v) => std::env::set_var("HOME", v),
+        None => std::env::remove_var("HOME"),
+    }
+    out
+}
 
 struct Fixture {
     repo: PathBuf,
@@ -269,6 +297,7 @@ fn legacy_claude_state_db_migrates_on_first_gate_record_call() {
         "pre-migration evidence",
         "old-cmd",
         "2026-01-01T00:00:00Z",
+        "test-hash",
     )
     .expect("seed pre-migration row");
     drop(legacy_conn);
@@ -304,4 +333,113 @@ fn legacy_claude_state_db_migrates_on_first_gate_record_call() {
         .expect("query")
         .expect("this call's own recording should still have landed");
     assert_eq!(new_row.verdict, "PASS");
+}
+
+#[test]
+fn run_records_source_hash_matching_hash_hex_of_source_content() {
+    // Arrange
+    let f = Fixture::new("source-hash-direct");
+    let input = f.write_input("report.md", "VERDICT: PASS");
+    let source_content = "content A";
+    let source = f.write_input("source-a.txt", source_content);
+
+    // Act
+    let result = with_repo_and_home(&f.repo, &f.home, || {
+        record::run(
+            "plan-a",
+            "spec-review",
+            "spec",
+            input.to_str().expect("utf8 path"),
+            source.to_str().expect("utf8 path"),
+        )
+    });
+
+    // Assert
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    let conn = db::open_db(&f.db_path()).expect("open db after run");
+    let row = db::query_phase(&conn, "plan-a", "spec")
+        .expect("query should not error")
+        .expect("row should exist after run");
+    assert_eq!(
+        row.source_hash,
+        Some(hash::hash_hex(source_content.as_bytes()))
+    );
+}
+
+#[test]
+fn re_running_with_different_source_content_overwrites_the_stored_hash() {
+    // Arrange
+    let f = Fixture::new("source-hash-overwrite");
+    let first_input = f.write_input("first.md", "VERDICT: WARN");
+    let first_source = f.write_input("source-first.txt", "content A");
+    let second_input = f.write_input("second.md", "VERDICT: PASS");
+    let second_source_content = "content B";
+    let second_source = f.write_input("source-second.txt", second_source_content);
+
+    // Act
+    let (first_result, second_result) = with_repo_and_home(&f.repo, &f.home, || {
+        let first = record::run(
+            "plan-a",
+            "spec-review",
+            "spec",
+            first_input.to_str().expect("utf8 path"),
+            first_source.to_str().expect("utf8 path"),
+        );
+        let second = record::run(
+            "plan-a",
+            "spec-review-2",
+            "spec",
+            second_input.to_str().expect("utf8 path"),
+            second_source.to_str().expect("utf8 path"),
+        );
+        (first, second)
+    });
+
+    // Assert
+    assert!(
+        first_result.is_ok(),
+        "first run should succeed: {first_result:?}"
+    );
+    assert!(
+        second_result.is_ok(),
+        "second run should succeed: {second_result:?}"
+    );
+    let conn = db::open_db(&f.db_path()).expect("open db after two runs");
+    let row = db::query_phase(&conn, "plan-a", "spec")
+        .expect("query should not error")
+        .expect("row should exist after two runs");
+    assert_eq!(
+        row.source_hash,
+        Some(hash::hash_hex(second_source_content.as_bytes())),
+        "the second run's source hash should have overwritten the first"
+    );
+}
+
+#[test]
+fn run_with_a_nonexistent_source_path_errors_and_leaves_the_database_untouched() {
+    // Arrange
+    let f = Fixture::new("source-missing");
+    let input = f.write_input("report.md", "VERDICT: PASS");
+    let missing_source = f.repo.join("does-not-exist.txt");
+
+    // Act
+    let result = with_repo_and_home(&f.repo, &f.home, || {
+        record::run(
+            "plan-a",
+            "spec-review",
+            "spec",
+            input.to_str().expect("utf8 path"),
+            missing_source.to_str().expect("utf8 path"),
+        )
+    });
+
+    // Assert
+    assert!(result.is_err(), "expected Err for a missing source path");
+    let row = db::open_db(&f.db_path())
+        .and_then(|conn| db::query_phase(&conn, "plan-a", "spec"))
+        .expect("open/query should not error even though nothing was ever written");
+    assert!(
+        row.is_none(),
+        "no row should have been written when the source path does not exist"
+    );
 }

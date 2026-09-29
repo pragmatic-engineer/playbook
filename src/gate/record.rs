@@ -7,6 +7,7 @@
 
 use crate::common::paths::{repo_scoped_dir, RepoScope};
 use crate::gate::db;
+use crate::gate::hash;
 use crate::manifest;
 use std::fmt;
 use std::io::Read;
@@ -79,13 +80,20 @@ pub fn extract_verdict(raw: &str) -> Option<Verdict> {
     result
 }
 
-/// Read `input`, extract its verdict, and upsert it into the worktree-scoped
-/// gate-check database. `Err` without ever calling [`db::upsert_phase`] when no valid `VERDICT:` line is found, so a bad report never overwrites a good one.
-pub fn run(plan_slug: &str, command: &str, phase: &str, input: &str) -> Result<(), String> {
+/// Read `input`, extract its verdict, hash `source`, and upsert both; never
+/// calls [`db::upsert_phase`] if either step fails, so a bad report never overwrites a good one.
+pub fn run(
+    plan_slug: &str,
+    command: &str,
+    phase: &str,
+    input: &str,
+    source: &str,
+) -> Result<(), String> {
     let raw = read_input(input)?;
     let Some(verdict) = extract_verdict(&raw) else {
         return Err(format!("no VERDICT line found in {input}"));
     };
+    let source_hash = hash::read_and_hash(source)?;
 
     let repo_root =
         manifest::check::toplevel().ok_or_else(|| "not inside a git repository".to_string())?;
@@ -108,7 +116,7 @@ pub fn run(plan_slug: &str, command: &str, phase: &str, input: &str) -> Result<(
         &raw,
         command,
         &recorded_at,
-        "",
+        &source_hash,
     )
 }
 
