@@ -108,6 +108,7 @@ pub fn run(plan_slug: &str, command: &str, phase: &str, input: &str) -> Result<(
         &raw,
         command,
         &recorded_at,
+        "",
     )
 }
 
