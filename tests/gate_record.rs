@@ -104,6 +104,8 @@ impl Fixture {
         path
     }
 
+    /// `--source` reuses `input`: both flags accept arbitrary content and
+    /// these tests have no reason for the two to differ.
     fn run(
         &self,
         plan_slug: &str,
@@ -113,6 +115,8 @@ impl Fixture {
     ) -> std::process::Output {
         Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(["gate", "record", plan_slug, command, phase])
+            .arg(input)
+            .arg("--source")
             .arg(input)
             .current_dir(&self.repo)
             .env("HOME", &self.home)

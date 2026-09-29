@@ -216,6 +216,10 @@ pub enum GateCommand {
         phase: String,
         /// Path to the phase agent's raw output, or "-" to read stdin.
         input: String,
+        /// Path to the source content this verdict is evidence for; hashed
+        /// and stored so a later `check` can detect a stale verdict.
+        #[arg(long)]
+        source: String,
     },
     /// Query one or more previously recorded phase verdicts for a plan;
     /// exit 0 only if every named phase is PASS or WARN.
@@ -232,6 +236,12 @@ pub enum GateCommand {
         /// and exit code 1, since clap's own missing-argument usage error
         /// exits with a different code (2) than the plan requires here.
         phases: Vec<String>,
+        /// Path to the current source content, hashed and compared against
+        /// each recorded verdict's stored hash to detect staleness. Named,
+        /// not positional: `phases` has no `num_args` bound and would
+        /// otherwise silently absorb it.
+        #[arg(long)]
+        source: String,
     },
 }
 

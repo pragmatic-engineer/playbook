@@ -16,6 +16,10 @@ use std::sync::Mutex;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Content `seed`'s default hash and `Fixture::run`'s spawned `--source`
+/// both derive from, so a seeded row resolves fresh rather than STALE.
+const SEED_SOURCE_CONTENT: &str = "seed source content";
+
 /// `check_in_process` mutates the process cwd and `$HOME`, both process-wide
 /// state, so every call serialises through this lock.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -89,7 +93,8 @@ impl Fixture {
     /// Seed a phase row directly through the library, bypassing `gate
     /// record`'s CLI: `gate check` needs pre-existing rows to query.
     fn seed(&self, plan_slug: &str, phase: &str, verdict: &str) {
-        self.seed_with_hash(plan_slug, phase, verdict, Some("seed-source-hash"));
+        let source_hash = hash::hash_hex(SEED_SOURCE_CONTENT.as_bytes());
+        self.seed_with_hash(plan_slug, phase, verdict, Some(&source_hash));
     }
 
     /// Seed a phase row with an explicit `source_hash`, or `None` to
@@ -160,10 +165,17 @@ impl Fixture {
         result
     }
 
+    /// Writes a source file matching `seed`'s stored hash and passes it as
+    /// `--source`, so a seeded row resolves its intended verdict rather than
+    /// STALE.
     fn run(&self, plan_slug: &str, command: &str, phases: &[&str]) -> std::process::Output {
+        let source = self.repo.join("seed-source.txt");
+        fs::write(&source, SEED_SOURCE_CONTENT).expect("source fixture should write");
         Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(["gate", "check", plan_slug, command])
             .args(phases)
+            .arg("--source")
+            .arg(&source)
             .current_dir(&self.repo)
             .env("HOME", &self.home)
             .output()
