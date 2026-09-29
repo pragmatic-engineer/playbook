@@ -52,7 +52,8 @@ pver="$("$PLAYBOOK" doctor plugin-version "$REPO/.claude-plugin/plugin.json")"
 hdr "C. Hook integrity (every hooks.json command resolves and parses)"
 # Needs every command path to resolve and check individually, not a count,
 # and reads the plugin manifest (hooks/hooks.json) rather than a settings.json,
-# so this stays a jq flatten rather than a hook-commands-matching call.
+# so this uses the raw hook-commands listing rather than a
+# hook-commands-matching count.
 while IFS= read -r c; do
   path="${c//\"/}"; path="${path/\$\{CLAUDE_PLUGIN_ROOT\}/$REPO}"
   base="$(basename "$path")"

@@ -60,7 +60,8 @@ SETTINGS="$CH/settings.json"
 # --- 1. exactly 15 distinct hook names -------------------------------------
 # Ported hooks: bare `playbook hook <name>`. Guards: `~/.claude/hooks/<name>.sh`.
 # Needs the raw command strings themselves (to strip down to bare names below),
-# not a count, so this stays a jq flatten rather than a hook-commands-matching call.
+# not a count, so this uses the raw hook-commands listing rather than a
+# hook-commands-matching count.
 NAMES_FILE="$WORK/names.txt"
 "$PLAYBOOK" doctor hook-commands "$SETTINGS" 2>/dev/null \
   | sed -E \
