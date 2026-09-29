@@ -257,7 +257,7 @@ fn session_init_falls_back_to_a_native_graph_read() {
     fs::write(
         memory_dir.join("memory.graph.json"),
         format!(
-            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"native-fact-one","description":"parsed straight from the graph file, no jq involved","project":"{repo_slug}"}}],"edges":[]}}"#
+            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"native-fact-one","description":"parsed straight from the graph file, no script involved","project":"{repo_slug}"}}],"edges":[]}}"#
         ),
     )
     .unwrap();
@@ -273,15 +273,15 @@ fn session_init_falls_back_to_a_native_graph_read() {
         "additionalContext should carry the fact name: {context}"
     );
     assert!(
-        context.contains("parsed straight from the graph file, no jq involved"),
+        context.contains("parsed straight from the graph file, no script involved"),
         "additionalContext should carry the fact description: {context}"
     );
 }
 
 /// The far more common production trigger for the fallback than an unset
 /// `CLAUDE_PLUGIN_ROOT`: the script is present and runs, but exits 0 with
-/// empty stdout because `jq` is not on PATH
-/// (`command -v jq >/dev/null 2>&1 || exit 0`, shell/memory-context.sh:53).
+/// empty stdout because the `playbook` binary is not on PATH
+/// (`command -v playbook >/dev/null 2>&1 || exit 0`, shell/memory-context.sh:53).
 /// That empty output must still fall through to the native fallback rather
 /// than short-circuiting on "the script ran, so trust it."
 #[test]
@@ -289,7 +289,7 @@ fn session_init_falls_back_to_native_graph_read_when_script_produces_no_output()
     use std::os::unix::fs::PermissionsExt;
 
     // Arrange: a scratch plugin root whose shell/memory-context.sh stands in
-    // for the real script's jq-missing exit.
+    // for the real script's playbook-missing exit.
     let work = scratch_dir("script-empty-stdout");
     let repo_slug = "acme/widget";
     let repo_dir = work.join("repo");
@@ -334,8 +334,8 @@ fn session_init_falls_back_to_native_graph_read_when_script_produces_no_output()
 /// The native fallback shares `MEMORY_BODY_CAP_CHARS` with the graph-backed
 /// slice, so it truncates the same way: an early fact survives, a fact
 /// placed past the boundary does not. Its rendering has no "Facts:\n"
-/// preamble, unlike the jq-backed slice, so the boundary math is computed
-/// against its own "name: description" lines rather than the jq path's.
+/// preamble, unlike the script-backed slice, so the boundary math is computed
+/// against its own "name: description" lines rather than the script path's.
 #[test]
 fn session_init_caps_the_native_graph_fallback() {
     // Arrange: 120 facts, each rendering as "fact-NNN: desc-NNN-<140 x's>"
@@ -740,7 +740,7 @@ fn session_init_injects_a_pinned_fact_independent_of_general_memory_slice() {
     .unwrap();
 
     // Act: no CLAUDE_PLUGIN_ROOT, so the general memory slice runs through
-    // its native fallback rather than the jq-backed script.
+    // its native fallback rather than the script-backed path.
     let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
     let context = additional_context(&outcome.stdout);
 
