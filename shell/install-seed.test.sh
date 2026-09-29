@@ -28,7 +28,6 @@ FAIL=0
 pass() { echo "PASS: $1"; (( PASS++ )) || true; }
 fail() { echo "FAIL: $1"; (( FAIL++ )) || true; }
 
-command -v jq >/dev/null 2>&1 || { echo "jq not found on PATH" >&2; exit 2; }
 command -v cargo >/dev/null 2>&1 || { echo "cargo not found on PATH" >&2; exit 2; }
 
 BIN_SRC="${REPO_ROOT}/target/debug/playbook"
@@ -36,6 +35,7 @@ if [ ! -x "$BIN_SRC" ]; then
   echo "Building playbook (cargo build)..."
   ( cd "$REPO_ROOT" && cargo build --quiet ) || { echo "cargo build failed" >&2; exit 2; }
 fi
+PLAYBOOK="$BIN_SRC"
 
 # Single top-level scratch dir; each scenario carves out its own subtree.
 WORK="$(mktemp -d)"
@@ -95,7 +95,7 @@ scenario_fresh() {
   [ "$rc" -eq 0 ] || { echo "  install rc=$rc: $(cat "$log")"; return 1; }
   local settings="$home/.claude/settings.json"
   [ -f "$settings" ] || { echo "  settings.json not created"; return 1; }
-  jq -e . "$settings" >/dev/null 2>&1 || { echo "  settings.json is not valid JSON"; return 1; }
+  "$BIN_SRC" json valid-json < "$settings" >/dev/null 2>&1 || { echo "  settings.json is not valid JSON"; return 1; }
   local err
   err="$("$BIN_DIR/playbook" json equal "$settings" "$TEMPLATE" --ignore-keys hooks 2>&1)" \
     || { echo "  non-hooks keys differ from the template: $err"; return 1; }
@@ -131,8 +131,9 @@ EOF
   run_install "$src" "$home" "$log"; rc=$?
   [ "$rc" -eq 0 ] || { echo "  install rc=$rc: $(cat "$log")"; return 1; }
   local settings="$home/.claude/settings.json"
-  jq -e '.hooks.Notification[0].hooks[0].command == "/opt/my-custom-notify.sh"' "$settings" >/dev/null 2>&1 \
-    || { echo "  user-authored hook entry lost: $(jq -c .hooks.Notification "$settings" 2>/dev/null)"; return 1; }
+  "$PLAYBOOK" json field-equals hooks.Notification.0.hooks.0.command "/opt/my-custom-notify.sh" \
+    < "$settings" >/dev/null 2>&1 \
+    || { echo "  user-authored hook entry lost: $(cat "$settings" 2>/dev/null)"; return 1; }
   local n_ported
   n_ported="$("$BIN_SRC" doctor hook-commands-matching "$settings" '^playbook hook ')"
   [ "$n_ported" = "18" ] || { echo "  ported hooks not wired alongside the user entry (got $n_ported)"; return 1; }
@@ -158,7 +159,7 @@ scenario_copy_loop_skips_shipped_settings() {
   local settings="$home/.claude/settings.json"
   [ -f "$settings" ] || { echo "  settings.json not created"; return 1; }
   grep -q 'SHIPPED SENTINEL' "$settings" && { echo "  copy loop did NOT skip settings.json (sentinel landed)"; return 1; }
-  jq -e . "$settings" >/dev/null 2>&1 || { echo "  settings.json is not valid JSON"; return 1; }
+  "$PLAYBOOK" json valid-json < "$settings" >/dev/null 2>&1 || { echo "  settings.json is not valid JSON"; return 1; }
   return 0
 }
 

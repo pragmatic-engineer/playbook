@@ -441,6 +441,45 @@ fn main() {
                 JsonCommand::PrFields {} => {
                     print!("{}", json::statusline::pr_fields(&input));
                 }
+                JsonCommand::FilterSystemLines { pattern } => {
+                    print!("{}", json::jsonl::filter_system_lines(&input, &pattern));
+                }
+                JsonCommand::RewriteSessionId { new_sid } => {
+                    print!("{}", json::jsonl::rewrite_session_id(&input, &new_sid));
+                }
+                JsonCommand::ValidJson => {
+                    if !json::validate::is_valid_json(&input) {
+                        std::process::exit(1);
+                    }
+                }
+                JsonCommand::FieldEquals { path, expected } => {
+                    if !json::fieldeq::field_equals(&input, &path, &expected) {
+                        std::process::exit(1);
+                    }
+                }
+                JsonCommand::FieldLength { field } => {
+                    println!("{}", json::count::field_length(&input, &field));
+                }
+                JsonCommand::RawStringField { key } => {
+                    print!("{}", json::fields::string_field(&input, &key));
+                }
+                JsonCommand::CanonicalJson { del } => {
+                    println!("{}", json::canon::canonical_json(&input, del.as_deref()));
+                }
+                JsonCommand::HookCommandsForEvent { event } => {
+                    for command in json::hookevents::hook_commands_for_event(&input, &event) {
+                        println!("{command}");
+                    }
+                }
+                JsonCommand::ProjectField {
+                    project_path,
+                    field,
+                } => {
+                    println!(
+                        "{}",
+                        json::claudejson::project_field(&input, &project_path, &field)
+                    );
+                }
             }
         }
     }

@@ -27,7 +27,6 @@ FAIL=0
 pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1"; FAIL=$((FAIL + 1)); }
 
-command -v jq >/dev/null 2>&1 || { echo "jq not found on PATH" >&2; exit 2; }
 command -v cargo >/dev/null 2>&1 || { echo "cargo not found on PATH" >&2; exit 2; }
 
 BIN_SRC="$REPO_ROOT/target/debug/playbook"
@@ -63,7 +62,7 @@ SETTINGS="$CH/settings.json"
 # Needs the raw command strings themselves (to strip down to bare names below),
 # not a count, so this stays a jq flatten rather than a hook-commands-matching call.
 NAMES_FILE="$WORK/names.txt"
-jq -r '[.hooks[]?[]?.hooks[]?.command] | .[]' "$SETTINGS" 2>/dev/null \
+"$PLAYBOOK" doctor hook-commands "$SETTINGS" 2>/dev/null \
   | sed -E \
       -e 's#^playbook hook ([a-z0-9-]+)$#\1#' \
       -e 's#^~/\.claude/hooks/([a-z0-9-]+)\.sh$#\1#' \
@@ -189,7 +188,7 @@ Body text.
 EOF
   run_ported rebuild-memory-graph "$home" "{\"tool_input\":{\"file_path\":\"$f\"}}" >/dev/null
   [ -f "$home/.config/playbook/memory/memory.graph.json" ] \
-    && [ "$(jq '.edges|length' "$home/.config/playbook/memory/memory.graph.json" 2>/dev/null)" = "1" ]
+    && [ "$("$PLAYBOOK" json field-length edges < "$home/.config/playbook/memory/memory.graph.json" 2>/dev/null)" = "1" ]
 }
 
 test_auto_model_detect() {
@@ -220,13 +219,13 @@ test_memory_capture() {
   mkdir -p "$dir"
   : > "$dir/capture-due"
   out="$(run_ported memory-capture "$home" "{\"session_id\":\"$sid\"}")"
-  printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1
+  printf '%s' "$out" | "$PLAYBOOK" json field-equals decision block >/dev/null 2>&1
 }
 
 test_rm_workspace_guard() {
   local out
   out="$(run_guard rm-workspace-guard '{"tool_input":{"command":"rm -rf /etc/hosts"}}')"
-  printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
+  printf '%s' "$out" | "$PLAYBOOK" json field-equals hookSpecificOutput.permissionDecision deny >/dev/null 2>&1
 }
 
 test_bg_await_guard() {

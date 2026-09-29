@@ -21,7 +21,14 @@ warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; WARN=$((WARN+1)); }
 hdr()  { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 
 command -v claude >/dev/null 2>&1 || { echo "claude CLI not found on PATH" >&2; exit 2; }
-command -v jq >/dev/null 2>&1 || { echo "jq not found on PATH" >&2; exit 2; }
+command -v cargo >/dev/null 2>&1 || { echo "cargo not found on PATH" >&2; exit 2; }
+
+BIN_SRC="$REPO/target/debug/playbook"
+if [ ! -x "$BIN_SRC" ]; then
+  echo "Building playbook (cargo build)..."
+  ( cd "$REPO" && cargo build --quiet ) || { echo "cargo build failed" >&2; exit 2; }
+fi
+PLAYBOOK="$BIN_SRC"
 
 hdr "A. Manifest validation (claude plugin validate --strict)"
 [ ! -f "$REPO/.claude-plugin/marketplace.json" ] && ok "marketplace.json not in plugin repo" || bad "marketplace.json still in plugin repo"
@@ -35,10 +42,10 @@ fi
 
 hdr "B. JSON well-formedness and required plugin.json fields"
 for f in .claude-plugin/plugin.json hooks/hooks.json; do
-  if jq empty "$REPO/$f" 2>/dev/null; then ok "$f is valid JSON"; else bad "$f invalid JSON"; fi
+  if "$PLAYBOOK" json valid-json < "$REPO/$f" 2>/dev/null; then ok "$f is valid JSON"; else bad "$f invalid JSON"; fi
 done
-pname="$(jq -r '.name // empty' "$REPO/.claude-plugin/plugin.json")"
-pver="$(jq -r '.version // empty' "$REPO/.claude-plugin/plugin.json")"
+pname="$("$PLAYBOOK" json raw-string-field name < "$REPO/.claude-plugin/plugin.json")"
+pver="$("$PLAYBOOK" doctor plugin-version "$REPO/.claude-plugin/plugin.json")"
 [ -n "$pname" ] && ok "plugin.json name=$pname" || bad "plugin.json missing name"
 [ -n "$pver" ] && ok "plugin.json version=$pver" || bad "plugin.json missing version"
 
@@ -57,7 +64,7 @@ while IFS= read -r c; do
   else
     bad "hook missing: $path"
   fi
-done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$REPO/hooks/hooks.json")
+done < <("$PLAYBOOK" doctor hook-commands "$REPO/hooks/hooks.json")
 
 hdr "D. Component frontmatter (each tracked skill/command/agent has a description)"
 missing=0
@@ -74,7 +81,8 @@ if ! ( cd "$REPO" && git archive --format=tar HEAD 2>/dev/null | tar -x -C "$L" 
   cp -R "$REPO"/commands "$REPO"/skills "$REPO"/agents "$REPO"/hooks "$REPO"/.claude-plugin "$L/" 2>/dev/null
 fi
 [ -f "$L/.claude-plugin/plugin.json" ] || bad "archive missing .claude-plugin/plugin.json"
-jq -n '{name:"e2e-local",owner:{name:"e2e",email:"e2e@localhost"},plugins:[{name:"playbook",source:"./"}]}' > "$L/.claude-plugin/marketplace.json"
+printf '%s' '{"name":"e2e-local","owner":{"name":"e2e","email":"e2e@localhost"},"plugins":[{"name":"playbook","source":"./"}]}' \
+  > "$L/.claude-plugin/marketplace.json"
 export CLAUDE_CONFIG_DIR="$BASE/cfg"
 claude plugin marketplace add "$L" </dev/null >/dev/null 2>&1 && ok "marketplace add (clean config)" || bad "marketplace add"
 claude plugin install "playbook@e2e-local" </dev/null >/dev/null 2>&1 && ok "plugin install" || bad "plugin install"
@@ -87,7 +95,7 @@ ag_expected=0
 for f in "$REPO"/agents/*.md; do
   [ "$(basename "$f")" = "_TEMPLATE.md" ] || ag_expected=$((ag_expected+1))
 done
-hk_expected="$(jq '.hooks | keys | length' "$REPO/hooks/hooks.json")"
+hk_expected="$("$PLAYBOOK" json field-length hooks < "$REPO/hooks/hooks.json")"
 [ "${ag:-0}" = "$ag_expected" ] && ok "inventory Agents=$ag_expected" || bad "inventory Agents=$ag (expected $ag_expected)"
 [ "${hk:-0}" = "$hk_expected" ] && ok "inventory Hooks=$hk_expected event types" || bad "inventory Hooks=$hk (expected $hk_expected)"
 for a in reviewer auditor git; do
