@@ -199,6 +199,11 @@ else
   elif [ "$bin_ver" = "$man_ver" ]; then echo "MATCH $bin_ver"
   else echo "SKEW binary=$bin_ver plugin=$man_ver"
   fi
+  if playbook gate record --help 2>/dev/null | grep -q -- '--source'; then
+    echo "GATE_SOURCE=OK"
+  else
+    echo "GATE_SOURCE=MISSING"
+  fi
 fi
 ```
 
@@ -227,6 +232,18 @@ Report:
   it against the plugin manifest. Not the same as `PRESENT_NO_BASELINE`: here a
   manifest may well exist, the binary is just too old to read it this way.
   Remediation: update `playbook`.
+- `GATE_SOURCE=MISSING` → **FAIL, independent of the SKEW verdict above.**
+  `gate record`/`gate check` both require a `--source` flag as of the gate
+  staleness enforcement change; a binary built before that ships with neither
+  flag, so every `/playbook:plan`, `/playbook:adr`, and `/playbook:implement`
+  quality gate call fails outright, not just reads stale. Unlike `SKEW`, this
+  is not a direction-unknown comparison: a binary missing the flag is broken
+  for this purpose regardless of whether it is otherwise ahead of or behind
+  the plugin manifest. Remediation: update `playbook` to a version that
+  supports gate staleness enforcement.
+- `GATE_SOURCE=OK` → no separate report line; folded into the `MATCH`/`SKEW`/
+  etc. verdict above, since the installed binary already supports the flag
+  every current caller passes.
 
 **Layer numbering: do not renumber.** ADR 0007's WU-12 specified this as "Layer
 5" and a statusline-existence check as "Layer 6", written before PR #143 shipped

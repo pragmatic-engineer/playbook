@@ -139,9 +139,9 @@ impl Fixture {
         }
     }
 
-    /// Calls `check::run` in this process rather than spawning the binary,
-    /// since the CLI has no `--source` flag yet. Serialises through
-    /// `ENV_LOCK` since it mutates cwd and `$HOME`.
+    /// Calls `check::run` directly in this process, avoiding a binary spawn
+    /// for scenarios that don't need to exercise the CLI layer itself.
+    /// Serialises through `ENV_LOCK` since it mutates cwd and `$HOME`.
     fn check_in_process(
         &self,
         plan_slug: &str,
@@ -165,12 +165,19 @@ impl Fixture {
         result
     }
 
-    /// Writes a source file matching `seed`'s stored hash and passes it as
-    /// `--source`, so a seeded row resolves its intended verdict rather than
-    /// STALE.
-    fn run(&self, plan_slug: &str, command: &str, phases: &[&str]) -> std::process::Output {
+    /// Writes `source_content` to a file and passes it as `--source`. `run`
+    /// delegates here with `SEED_SOURCE_CONTENT` so a seeded row resolves
+    /// its intended verdict; a caller passing different content exercises a
+    /// STALE mismatch through the real CLI.
+    fn run_with_source(
+        &self,
+        plan_slug: &str,
+        command: &str,
+        phases: &[&str],
+        source_content: &str,
+    ) -> std::process::Output {
         let source = self.repo.join("seed-source.txt");
-        fs::write(&source, SEED_SOURCE_CONTENT).expect("source fixture should write");
+        fs::write(&source, source_content).expect("source fixture should write");
         Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(["gate", "check", plan_slug, command])
             .args(phases)
@@ -180,6 +187,13 @@ impl Fixture {
             .env("HOME", &self.home)
             .output()
             .expect("playbook binary should spawn")
+    }
+
+    /// Writes a source file matching `seed`'s stored hash and passes it as
+    /// `--source`, so a seeded row resolves its intended verdict rather than
+    /// STALE.
+    fn run(&self, plan_slug: &str, command: &str, phases: &[&str]) -> std::process::Output {
+        self.run_with_source(plan_slug, command, phases, SEED_SOURCE_CONTENT)
     }
 }
 
@@ -312,6 +326,34 @@ fn fail_and_missing_phases_in_one_invocation_are_both_named_distinctly() {
     assert!(
         stderr.contains("unrecorded: MISSING"),
         "the MISSING phase must be individually named: {stderr}"
+    );
+}
+
+#[test]
+fn mismatched_source_through_the_real_binary_exits_nonzero_and_reports_stale() {
+    // Arrange
+    let f = Fixture::new("cli-stale");
+    f.seed("plan-a", "spec", "PASS");
+
+    // Act
+    let out = f.run_with_source(
+        "plan-a",
+        "gate-run",
+        &["spec"],
+        "different content entirely",
+    );
+
+    // Assert
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected exit 1: {}",
+        stdout_of(&out)
+    );
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("spec: STALE"),
+        "a source mismatch through the real CLI must report STALE: {stderr}"
     );
 }
 
