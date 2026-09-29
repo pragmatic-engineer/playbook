@@ -201,7 +201,13 @@ After the user approves all drafts, run the three-phase gate before finalising. 
 
 Spawn each delegated agent with a stable `name`. `TaskStop` it only once you have its verdict or have made one post-idle `SendMessage` attempt; stopping is destructive and unrecoverable for a read-only agent. A spawned agent stays idle-alive for follow-ups and this flow never reuses a finished one, so an unstopped agent lingers as a background process.
 
+Throughout this stage, `<record-slug>` is `adr-{base}`, where `{base}` is the record's filename without extension (from Stage 2's Determine the filename step, e.g. `docs/adr/0016-foo-bar.md` gives `<record-slug>` of `adr-0016-foo-bar`). Every `gate record`/`gate check` call below uses `<record-slug>` directly, already carrying its `adr-` prefix; do not prefix it again. That prefix keeps this record's gate rows distinct from `/playbook:plan` and `/playbook:implement` runs sharing the same per-repo-checkout gate database, since `gate_phases`' primary key carries no command column of its own.
+
+**Gate source has two tiers.** Before each phase's own dispatch (its initial dispatch and any retry of that specific phase), snapshot the record file's content followed by the blueprint file's content (record content alone for a `--record-only` ADR) to a phase-specific scratch file, e.g. `/tmp/<repo>/adr-<record-slug>-source.<phase-name>.md` (`<phase-name>` is `fact-check`, `adversarial`, or `test-review`). That phase's `gate record` call always points `--source` at its own snapshot, frozen at the moment that phase was dispatched, never at a sibling phase's file: Phase 2 and Phase 3 dispatch in parallel, so if Phase 2 FAILs and gets revised before Phase 3 returns, Phase 3 must still record its verdict against what it actually reviewed, not the just-revised content. A separate shared scratch file, e.g. `/tmp/<repo>/adr-<record-slug>-source.md`, stays refreshed on every revision exactly as before; this is `<gate-source-path>`, used only by this stage's final Gate Check, which needs the current, fully up-to-date record and blueprint rather than any one phase's frozen snapshot.
+
 ### Phase 1: Fact-Check
+
+**Before Phase 1's first dispatch, and before each retry of Phase 1**, snapshot the record (and blueprint, if any) to `/tmp/<repo>/adr-<record-slug>-source.fact-check.md`, Phase 1's own snapshot, and refresh the shared `<gate-source-path>` alongside it.
 
 Spawn a `fact-checker` agent with the record (and blueprint, if any). It verifies: file paths in the system snapshot and file plans exist; function/type signatures referenced are accurate; the plan is consistent with existing patterns; the work unit dependency graph is acyclic and each Parallel group's WUs have disjoint files with no dependency on each other; if a memory store was loaded in Stage 1, known gotchas related to the topic are accounted for. Returns a PASS/FAIL/WARN report. Phase 1 folds a Verification Summary into the report, reusing the `playbook:grounding-review` table shape:
 
@@ -215,15 +221,27 @@ Spawn a `fact-checker` agent with the record (and blueprint, if any). It verifie
 Confidence: HIGH | MEDIUM | LOW
 ```
 
-After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).**
+**Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/adr-<record-slug>-fact-check.txt`, then run `playbook gate record <record-slug> adr fact-check <that file> --source /tmp/<repo>/adr-<record-slug>-source.fact-check.md`. Do this every time Phase 1 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so a stale FAIL from an earlier iteration is overwritten once a later iteration passes, and only the last recording before this stage's Gate Check matters.
+
+After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).** A revised record or blueprint means re-writing this phase's own snapshot, and the shared `<gate-source-path>`, before this phase re-runs.
 
 ### Phase 2: Adversarial Review
 
-Spawn a `critic` agent with focus `decision`, given the record, blueprint, and the Phase 1 report. It challenges the decision: simpler alternatives, scope creep, over-engineering, missing error paths, blast radius, contradictions with the fact-check. After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record any rejected simpler alternative (with reasoning) as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).**
+**Before Phase 2's own dispatch, and before each retry of Phase 2**, snapshot the record (and blueprint, if any) to `/tmp/<repo>/adr-<record-slug>-source.adversarial.md`, Phase 2's own snapshot, and refresh the shared `<gate-source-path>` alongside it.
+
+Spawn a `critic` agent with focus `decision`, given the record, blueprint, and the Phase 1 report. It challenges the decision: simpler alternatives, scope creep, over-engineering, missing error paths, blast radius, contradictions with the fact-check.
+
+**Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/adr-<record-slug>-adversarial.txt`, then run `playbook gate record <record-slug> adr adversarial <that file> --source /tmp/<repo>/adr-<record-slug>-source.adversarial.md`. Do this every time Phase 2 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before this stage's Gate Check matters.
+
+After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record any rejected simpler alternative (with reasoning) as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).** A revised record or blueprint means re-writing this phase's own snapshot, and the shared `<gate-source-path>`, before this phase re-runs.
 
 ### Phase 3: Test Review
 
-Spawn a `test-reviewer` agent with the blueprint's test plan and the Phase 1 report (it runs in parallel with Phase 2). For a `--record-only` ADR with no blueprint tests, this is typically `PASS: N/A (no test plan)`. For a blueprint with Gherkin scenarios or TDD cycles, evaluate them against `playbook:engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength. **FAIL → revise the test plan and re-run (max 3).**
+**Before Phase 3's own dispatch, and before each retry of Phase 3**, snapshot the blueprint's test plan (and record, if any) to `/tmp/<repo>/adr-<record-slug>-source.test-review.md`, Phase 3's own snapshot, and refresh the shared `<gate-source-path>` alongside it.
+
+Spawn a `test-reviewer` agent with the blueprint's test plan and the Phase 1 report (it runs in parallel with Phase 2). For a `--record-only` ADR with no blueprint tests, this is typically `PASS: N/A (no test plan)`. For a blueprint with Gherkin scenarios or TDD cycles, evaluate them against `playbook:engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
+
+**Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/adr-<record-slug>-test-review.txt`, then run `playbook gate record <record-slug> adr test-review <that file> --source /tmp/<repo>/adr-<record-slug>-source.test-review.md`. Do this every time Phase 3 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before this stage's Gate Check matters. **FAIL → revise the test plan and re-run (max 3).** A revised record or blueprint means re-writing this phase's own snapshot, and the shared `<gate-source-path>`, before this phase re-runs.
 
 ### Structural Checks
 
@@ -235,7 +253,9 @@ Spawn a `test-reviewer` agent with the blueprint's test plan and the Phase 1 rep
 
 ### Gate Result
 
-Present the result. FAILs block finalisation; WARNs are informational. If the user explicitly overrides a FAIL, record the override in the quality report file: `Quality gate override: proceeding despite FAIL on <check> because <reason>`.
+**Gate check (MUST, before presenting the result):** run `playbook gate check <record-slug> adr fact-check adversarial test-review --source <gate-source-path>`, using the shared gate source file in its current, fully refreshed state (never a phase's per-phase snapshot). Everything above, the phase reports and the Structural Checks, is for the human reading it; this command's exit code is what actually decides whether Stage 3 may finalise. Exit 0: proceed to present the result below and continue to Stage 4. Non-zero exit: do NOT present a "gate passed" result and do NOT proceed to Stage 4; report the command's own output verbatim, since it already names exactly which phase is MISSING, FAIL, STALE, or INCONCLUSIVE, never re-narrate it in your own words. For a FAIL or INCONCLUSIVE phase, revise and re-run it on that phase's own retry loop above. For a STALE phase, re-run that same phase against the current source without revising anything: STALE only means its recorded verdict's hash no longer matches the current draft, not that the phase's own review was wrong, and revising content in response would itself cascade staleness onto sibling phases.
+
+A non-zero exit blocks finalisation unless the user explicitly overrides: the override never changes or fakes `gate check`'s result, it is an explicit, recorded decision to proceed despite a real, honestly reported non-zero exit, not a claim that the gate actually passed. Present the result, now backed by the recorded verdicts above rather than only the in-session agent responses. FAILs block finalisation; WARNs are informational. If the user explicitly overrides a FAIL, record the override in the quality report file: `Quality gate override: proceeding despite FAIL on <check> because <reason>`.
 
 ```
 ## Quality Gate Result

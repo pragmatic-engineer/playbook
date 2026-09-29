@@ -27,6 +27,7 @@ const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS gate_phases (
     evidence TEXT NOT NULL,
     command TEXT NOT NULL,
     recorded_at TEXT NOT NULL,
+    source_hash TEXT,
     PRIMARY KEY (plan_slug, phase)
 ) WITHOUT ROWID";
 
@@ -38,6 +39,29 @@ pub struct GatePhaseRow {
     pub evidence: String,
     pub command: String,
     pub recorded_at: String,
+    pub source_hash: Option<String>,
+}
+
+/// Adds `gate_phases.source_hash` to a database created before this column
+/// existed, so an old database file keeps opening instead of erroring.
+fn ensure_source_hash_column(conn: &rusqlite::Connection) -> Result<(), String> {
+    let has_column: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('gate_phases') WHERE name = 'source_hash')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("failed to inspect gate_phases schema: {e}"))?;
+    if !has_column {
+        if let Err(e) = conn.execute_batch("ALTER TABLE gate_phases ADD COLUMN source_hash TEXT") {
+            // Two processes can both see the column absent and race the
+            // ALTER; the loser's "duplicate column" failure means it exists.
+            if !e.to_string().contains("duplicate column") {
+                return Err(format!("failed to add source_hash column: {e}"));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Open (creating if missing) the SQLite database at `path`, ensuring the
@@ -64,11 +88,13 @@ pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
         .map_err(|e| format!("failed to set journal_mode=WAL: {e}"))?;
     conn.execute_batch(SCHEMA_SQL)
         .map_err(|e| format!("failed to create gate_phases schema: {e}"))?;
+    ensure_source_hash_column(&conn)?;
 
     Ok(conn)
 }
 
 /// Insert or replace the `(plan_slug, phase)` row with the given values.
+#[allow(clippy::too_many_arguments)]
 pub fn upsert_phase(
     conn: &rusqlite::Connection,
     plan_slug: &str,
@@ -77,12 +103,21 @@ pub fn upsert_phase(
     evidence: &str,
     command: &str,
     recorded_at: &str,
+    source_hash: &str,
 ) -> Result<(), String> {
     conn.execute(
         "INSERT OR REPLACE INTO gate_phases \
-         (plan_slug, phase, verdict, evidence, command, recorded_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![plan_slug, phase, verdict, evidence, command, recorded_at],
+         (plan_slug, phase, verdict, evidence, command, recorded_at, source_hash) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![
+            plan_slug,
+            phase,
+            verdict,
+            evidence,
+            command,
+            recorded_at,
+            source_hash
+        ],
     )
     .map_err(|e| format!("failed to upsert gate phase {plan_slug}/{phase}: {e}"))?;
     Ok(())
@@ -96,7 +131,7 @@ pub fn query_phase(
     phase: &str,
 ) -> Result<Option<GatePhaseRow>, String> {
     conn.query_row(
-        "SELECT verdict, evidence, command, recorded_at FROM gate_phases \
+        "SELECT verdict, evidence, command, recorded_at, source_hash FROM gate_phases \
          WHERE plan_slug = ?1 AND phase = ?2",
         rusqlite::params![plan_slug, phase],
         |row| {
@@ -105,6 +140,7 @@ pub fn query_phase(
                 evidence: row.get(1)?,
                 command: row.get(2)?,
                 recorded_at: row.get(3)?,
+                source_hash: row.get(4)?,
             })
         },
     )
@@ -337,6 +373,7 @@ mod tests {
             "ev",
             "cmd",
             "2026-01-01T00:00:00Z",
+            "test-hash",
         )
         .expect("upsert before reopen");
         drop(conn);
@@ -372,6 +409,7 @@ mod tests {
             "first evidence",
             "cmd-1",
             "2026-01-01T00:00:00Z",
+            "test-hash",
         )
         .expect("first upsert");
 
@@ -384,6 +422,7 @@ mod tests {
             "second evidence",
             "cmd-2",
             "2026-01-02T00:00:00Z",
+            "test-hash",
         )
         .expect("second upsert");
 
@@ -414,6 +453,7 @@ mod tests {
             "ev",
             "cmd",
             "2026-01-01T00:00:00Z",
+            "test-hash",
         );
 
         // Assert
@@ -439,6 +479,7 @@ mod tests {
             "a-evidence",
             "a-cmd",
             "2026-01-01T00:00:00Z",
+            "test-hash",
         )
         .expect("upsert plan-a");
         upsert_phase(
@@ -449,6 +490,7 @@ mod tests {
             "b-evidence",
             "b-cmd",
             "2026-01-02T00:00:00Z",
+            "test-hash",
         )
         .expect("upsert plan-b");
 
@@ -464,6 +506,119 @@ mod tests {
         assert_eq!(row_a.verdict, "PASS");
         assert_eq!(row_b.verdict, "FAIL");
         assert_ne!(row_a.evidence, row_b.evidence);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upsert_phase_stores_and_query_phase_returns_source_hash() {
+        // Arrange
+        let dir = scratch_dir("source-hash-roundtrip");
+        let path = dir.join("state.db");
+        let conn = open_db(&path).expect("open");
+
+        // Act
+        upsert_phase(
+            &conn,
+            "plan-a",
+            "spec",
+            "PASS",
+            "ev",
+            "cmd",
+            "2026-01-01T00:00:00Z",
+            "abc123hash",
+        )
+        .expect("upsert with source_hash");
+        let row = query_phase(&conn, "plan-a", "spec")
+            .expect("query")
+            .expect("row should exist");
+
+        // Assert
+        assert_eq!(row.source_hash, Some("abc123hash".to_string()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn query_phase_returns_none_source_hash_for_pre_migration_row() {
+        // Arrange: a raw insert that omits source_hash, simulating a row
+        // written before the column existed.
+        let dir = scratch_dir("source-hash-legacy-row");
+        let path = dir.join("state.db");
+        let conn = open_db(&path).expect("open");
+        conn.execute(
+            "INSERT INTO gate_phases \
+             (plan_slug, phase, verdict, evidence, command, recorded_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                "plan-a",
+                "spec",
+                "PASS",
+                "ev",
+                "cmd",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .expect("raw insert without source_hash");
+
+        // Act
+        let row = query_phase(&conn, "plan-a", "spec")
+            .expect("query")
+            .expect("row should exist");
+
+        // Assert
+        assert_eq!(row.source_hash, None);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Two connections to the same legacy database both see the column
+    /// absent; the second's own `ALTER TABLE` fails once the first commits it.
+    #[test]
+    fn ensure_source_hash_column_tolerates_concurrent_alter_race() {
+        // Arrange: a legacy table (no source_hash column), plus conn_a
+        // holding the write lock the way its own in-progress ALTER would.
+        let dir = scratch_dir("source-hash-alter-race");
+        fs::create_dir_all(&dir).expect("create scratch dir");
+        let path = dir.join("state.db");
+        let conn_a = rusqlite::Connection::open(&path).expect("open conn_a");
+        conn_a
+            .execute_batch(
+                "CREATE TABLE gate_phases (
+                    plan_slug TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    verdict TEXT NOT NULL,
+                    evidence TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (plan_slug, phase)
+                )",
+            )
+            .expect("create legacy schema");
+        conn_a
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("begin immediate on conn_a");
+
+        let conn_b = rusqlite::Connection::open(&path).expect("open conn_b");
+        conn_b
+            .busy_timeout(Duration::from_millis(2000))
+            .expect("busy_timeout on conn_b");
+        let handle = std::thread::spawn(move || ensure_source_hash_column(&conn_b));
+
+        // Let conn_b's thread reach its own ALTER and start waiting on
+        // conn_a's write lock before conn_a's ALTER commits underneath it.
+        std::thread::sleep(Duration::from_millis(200));
+        conn_a
+            .execute_batch("ALTER TABLE gate_phases ADD COLUMN source_hash TEXT")
+            .expect("conn_a adds the column first");
+        conn_a.execute_batch("COMMIT").expect("commit conn_a");
+
+        // Act
+        let result = handle.join().expect("conn_b thread should not panic");
+
+        // Assert: conn_b's own ALTER fails with duplicate column, and that
+        // failure must be tolerated as success rather than propagated.
+        assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
 
         let _ = fs::remove_dir_all(&dir);
     }

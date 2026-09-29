@@ -166,7 +166,8 @@ fn main() {
                 command,
                 phase,
                 input,
-            } => match gate::record::run(&plan_slug, &command, &phase, &input) {
+                source,
+            } => match gate::record::run(&plan_slug, &command, &phase, &input, &source) {
                 Ok(()) => println!("gate record: recorded {phase} verdict for {plan_slug}"),
                 Err(err) => {
                     eprintln!("gate record: {err}");
@@ -177,7 +178,8 @@ fn main() {
                 plan_slug,
                 command,
                 phases,
-            } => match gate::check::run(&plan_slug, &command, &phases) {
+                source,
+            } => match gate::check::run(&plan_slug, &command, &phases, &source) {
                 Ok(output) => println!("{output}"),
                 Err(err) => {
                     eprintln!("gate check: {err}");

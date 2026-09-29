@@ -1968,6 +1968,8 @@ mod gate_worktree_scoping {
         Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(["gate", "record", plan_slug, "gate-run", phase])
             .arg(input)
+            .arg("--source")
+            .arg(input)
             .current_dir(repo)
             .env("HOME", home)
             .output()
