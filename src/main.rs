@@ -421,6 +421,13 @@ fn main() {
                 JsonCommand::AddMarkerKey { key } => {
                     println!("{}", json::settingsjson::add_marker_key_print(&input, &key));
                 }
+                JsonCommand::MemoryContext { graph_file, repo } => {
+                    let graph_json = std::fs::read_to_string(&graph_file).unwrap_or_default();
+                    let output = json::memorycontext::render_memory_context(&graph_json, &repo);
+                    if !output.is_empty() {
+                        println!("{output}");
+                    }
+                }
             }
         }
     }

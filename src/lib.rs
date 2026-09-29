@@ -412,6 +412,16 @@ pub enum JsonCommand {
         /// Top-level key to set to `true`.
         key: String,
     },
+    /// Render the repo-scoped `Facts:`/`Edges:`/`Anchors:` markdown slice of
+    /// a memory graph, ported from `shell/memory-context.sh`'s `jq` filter.
+    /// Prints nothing (rather than a blank line) when the render is empty,
+    /// so the shell script's own `-n "$output"` gate still short-circuits.
+    MemoryContext {
+        /// Path to the memory graph JSON file.
+        graph_file: PathBuf,
+        /// Repo slug (`owner/name`) to scope facts to.
+        repo: String,
+    },
 }
 
 /// Every hook Claude Code can invoke, one per entry in hooks.json. Kebab-case
