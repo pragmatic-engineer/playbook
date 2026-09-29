@@ -9,7 +9,7 @@ This page covers requirements, the full local install path with the curl one-lin
 | `claude` on PATH, v2.1.121+ | recommended | Claude Code itself. Below the minimum, or missing entirely, `install.sh` skips the plugin step with an upgrade hint rather than failing; the rest of the install (binary, hooks, guards, settings) still completes |
 | `bash` | required | hooks and the setup script run in bash |
 | zsh | required for `cc worktree` | the worktree subcommand is zsh-only; all other `cc` subcommands and `ccd` work in bash |
-| `git`, `jq`, `shasum` | required | used by hooks and the install script |
+| `git`, `shasum` | required | used by hooks and the install script |
 | `python3` 3.9+ | required | used by two bash hooks (path resolution and the memory-graph rebuild); the hooks themselves are bash |
 | `gh` | optional | statusline PR and CI status |
 | `agent-browser` | optional | browser automation MCP used by `/playbook:plan` for web-only tickets and attachments |
