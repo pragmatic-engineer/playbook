@@ -315,55 +315,20 @@ if [[ ! -d "$CACHE_DIR" ]]; then
     mkdir -p "$CACHE_DIR" 2>/dev/null && chmod 700 "$CACHE_DIR" 2>/dev/null
 fi
 
-# jq program shared by the PR-path CI rollup and the standalone CI rollup.
-# Input: any object with a .statusCheckRollup array (may be absent).
-# Output: one line "state failed running total"  (state: none | fail | running | pass).
-JQ_CI_ROLLUP='
-    def is_failed:
-        (((.conclusion // "") | ascii_downcase) | (. == "failure" or . == "cancelled" or . == "timed_out" or . == "action_required" or . == "startup_failure" or . == "stale"))
-        or (((.state // "") | ascii_downcase) | (. == "failure" or . == "error"));
-    def is_running:
-        (((.status // "") | ascii_downcase) | (. == "in_progress" or . == "queued" or . == "pending" or . == "waiting"))
-        or (((.state // "") | ascii_downcase) | (. == "pending"));
-    (.statusCheckRollup // []) as $checks
-    | ($checks | length) as $total
-    | ($checks | map(select(is_failed)) | length) as $failed
-    | ($checks | map(select(is_running)) | length) as $running
-    | (if $total == 0 then "none"
-       elif $failed > 0 then "fail"
-       elif $running > 0 then "running"
-       else "pass" end) as $state
-    | "\($state) \($failed) \($running) \($total)"
-'
-
 # ┌──────────────────────────────────────────────────────────────────────────────┐
 # │  Parse JSON Input                                                            │
 # │                                                                              │
-# │  Claude Code pipes session state as JSON to stdin. A single jq call          │
-# │  extracts all fields at once using @sh quoting, then eval sets them as       │
-# │  shell variables. This avoids spawning jq multiple times.                    │
+# │  Claude Code pipes session state as JSON to stdin. `playbook json           │
+# │  session-fields` extracts all fields at once using @sh-style quoting, then  │
+# │  eval sets them as shell variables. This avoids spawning a jq process.      │
 # └──────────────────────────────────────────────────────────────────────────────┘
 
 input=$(cat 2>/dev/null || true)
 
-if command -v jq >/dev/null 2>&1 && [[ -n "$input" ]]; then
-    _jq_out=$(printf '%s' "$input" | jq -r '
-        @sh "cwd=\(.cwd // .workspace.current_dir // env.PWD // "")",
-        @sh "session_id=\(.session_id // "")",
-        @sh "model=\(.model.display_name // "")",
-        @sh "used=\(.context_window.used_percentage // "")",
-        @sh "ctx_total_tokens=\(.context_window.total_input_tokens // "")",
-        @sh "ctx_window_size=\(.context_window.context_window_size // "")",
-        @sh "cache_create=\(.context_window.current_usage.cache_creation_input_tokens // "")",
-        @sh "cache_read=\(.context_window.current_usage.cache_read_input_tokens // "")",
-        @sh "rl_5h=\(.rate_limits.five_hour.used_percentage // "")",
-        @sh "rl_5h_reset=\(.rate_limits.five_hour.resets_at // "")",
-        @sh "rl_7d=\(.rate_limits.seven_day.used_percentage // "")",
-        @sh "json_effort=\(.effort.level // "")",
-        @sh "json_thinking=\(if .thinking.enabled then "true" else "" end)",
-        @sh "cost_usd=\(.cost.total_cost_usd // "")",
-        @sh "wall_ms=\(.cost.total_duration_ms // "")"
-    ' 2>/dev/null) && eval "$_jq_out" 2>/dev/null || true
+# playbook is optional, matching this script's memory-is-optional philosophy:
+# a missing binary just leaves these variables unset rather than erroring.
+if command -v playbook >/dev/null 2>&1 && [[ -n "$input" ]]; then
+    _jq_out=$(printf '%s' "$input" | playbook json session-fields "$PWD" 2>/dev/null) && eval "$_jq_out" 2>/dev/null || true
 fi
 
 cwd="${cwd:-$PWD}"
@@ -542,44 +507,13 @@ render_pr_right() {
 
     [[ -n "$pr_json" ]] || return 0
 
-    # Single jq pass: extract all PR fields + CI rollup in one fork.
-    # (CI rollup uses the same is_failed/is_running logic as $JQ_CI_ROLLUP.)
+    # Extract all PR fields + CI rollup in one pass via playbook json
+    # pr-fields (same fail-beats-running-beats-pass precedence as the
+    # standalone CI rollup below).
     # ci_* are NOT declared local: the standalone CI block reads them after return.
     local _pr_out pr_number pr_author pr_review pr_state pr_merged_at pr_closed_at
     local jira_from_body ci_summary pr_pending pr_completed
-    _pr_out=$(printf '%s' "$pr_json" | jq -r '
-        def is_failed:
-            (((.conclusion // "") | ascii_downcase) | (. == "failure" or . == "cancelled" or . == "timed_out" or . == "action_required" or . == "startup_failure" or . == "stale"))
-            or (((.state // "") | ascii_downcase) | (. == "failure" or . == "error"));
-        def is_running:
-            (((.status // "") | ascii_downcase) | (. == "in_progress" or . == "queued" or . == "pending" or . == "waiting"))
-            or (((.state // "") | ascii_downcase) | (. == "pending"));
-        (.reviewRequests // []) as $req
-        | [$req[]? | (.login // .name // "team")] as $pending_logins
-        | (.statusCheckRollup // []) as $checks
-        | ($checks | length) as $ci_total
-        | ($checks | map(select(is_failed)) | length) as $ci_failed
-        | ($checks | map(select(is_running)) | length) as $ci_running
-        | (if $ci_total == 0 then "none"
-           elif $ci_failed > 0 then "fail"
-           elif $ci_running > 0 then "running"
-           else "pass" end) as $ci_st
-        | @sh "pr_number=\(.number // "" | tostring | if . == "null" then "" else . end)",
-          @sh "pr_author=\(.author.login // "")",
-          @sh "pr_review=\(.reviewDecision // "")",
-          @sh "pr_state=\(.state // "")",
-          @sh "pr_merged_at=\(.mergedAt // "")",
-          @sh "pr_closed_at=\(.closedAt // "")",
-          @sh "jira_from_body=\(.body // "" | [scan("[A-Z][A-Z0-9]+-[0-9]+")] | if length > 0 then .[0] else "" end)",
-          @sh "ci_summary=\("\($ci_st) \($ci_failed) \($ci_running) \($ci_total)")",
-          @sh "pr_pending=\([$pending_logins[]] | join("\n"))",
-          @sh "pr_completed=\([.latestReviews[]? |
-              select(.author.login != "coderabbitai" and .state != "COMMENTED"
-                  and ([.author.login] | inside($pending_logins) | not)) |
-              (if .state == "APPROVED" then "g"
-               elif .state == "CHANGES_REQUESTED" then "r"
-               else "d" end) + ":" + .author.login + ":" + (.submittedAt // "")] | join("\n"))"
-    ' 2>/dev/null) && eval "$_pr_out" 2>/dev/null || true
+    _pr_out=$(printf '%s' "$pr_json" | playbook json pr-fields 2>/dev/null) && eval "$_pr_out" 2>/dev/null || true
 
     # Populate CI globals (gated by is_workspace_project / STATUSLINE_CI_ROOTS).
     # The standalone CI block below skips its own fetch when ci_state is already set.
@@ -750,10 +684,10 @@ if [[ "$SHOW_CI" == true ]] && is_workspace_project "$cwd" \
     fi
 
     if [[ -n "$ci_json" ]]; then
-        # Reshape into {statusCheckRollup: [...]} then apply the shared CI rollup program.
+        # Reshape into {statusCheckRollup: [...]} then apply the shared CI rollup logic.
         ci_summary=$(printf '%s' "$ci_json" \
-            | jq '{statusCheckRollup: (.data.repository.ref.target.statusCheckRollup.contexts.nodes // [])}' 2>/dev/null \
-            | jq -r "$JQ_CI_ROLLUP" 2>/dev/null)
+            | playbook json graphql-ci-checks 2>/dev/null \
+            | playbook json ci-rollup 2>/dev/null)
         read -r ci_state ci_failed ci_running ci_total <<< "$ci_summary"
     fi
 

@@ -11,6 +11,21 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${SCRIPT_DIR}/.."
+
+# statusline.sh shells out to `playbook json <verb>` for CI-rollup and PR/Jira
+# rendering. Build it once and put it on PATH so those calls resolve even
+# when nothing has installed playbook globally, matching how the other
+# behavioral suites (install-seed.test.sh, setup-local.test.sh) stage it.
+command -v cargo >/dev/null 2>&1 || { echo "cargo not found on PATH" >&2; exit 2; }
+BIN_SRC="${REPO_ROOT}/target/debug/playbook"
+if [ ! -x "$BIN_SRC" ]; then
+    echo "Building playbook (cargo build)..."
+    ( cd "$REPO_ROOT" && cargo build --quiet ) || { echo "cargo build failed" >&2; exit 2; }
+fi
+PATH="$(dirname "$BIN_SRC"):$PATH"
+export PATH
+
 # shellcheck source=statusline.sh
 source "$SCRIPT_DIR/../statusline.sh" </dev/null
 
