@@ -33,3 +33,4 @@ How the machine works.
 
 - [Launcher and hooks](internals/01-launcher-and-hooks.md): the `cc` launcher, the worktree engine, and the hook lifecycle.
 - [Model routing and memory](internals/02-model-routing-and-memory.md): how the session model is chosen, and the memory graph mechanics.
+- [Worktree engine](internals/03-worktree.md): the `cc worktree` background subshell, node_modules cloning, and rebase conflict resolution.
