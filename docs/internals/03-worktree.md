@@ -16,6 +16,14 @@ Once `_wt_main` prints `Ready:`, it starts a background subshell and calls `diso
 
 The subshell runs with `</dev/null >/dev/null 2>&1` and is disowned, so all its output is silenced. Anything visible on-screen before `Ready:` comes from foreground code in `_wt_main` or `_wt_maybe_rebase`.
 
+## Independent daily sweep
+
+The sweep in step 7 above is not the only trigger for `playbook worktree sweep`'s cleanup logic. `maybe_sweep_worktrees` (`src/hooks/session_init.rs`) runs it again on every Claude Code `SessionStart`, independent of creating a worktree at all. It checks the same `worktreeCleanup.enabled` config key, then rate-limits itself to once per 24 hours per repo using a marker file's modified time, so it does not run on every single session start, only the first one after the previous day's run.
+
+This means a repo gets swept two ways: eagerly, every time `cc worktree` creates one (step 7 above), and independently, once a day, the next time any Claude Code session opens in that repo. Both call the same underlying sweep function. The overlap is deliberate defense in depth, not duplication to fix.
+
+The one gap neither path closes: a repo nobody opens anymore is swept by neither trigger, since both need a session or launcher event in that repo to fire. This is a known limitation, not a bug. Fixing it would mean building a real OS-level scheduler (cron, launchd, or similar), which nothing in this codebase does today for any purpose; that's a bigger decision to make only if real evidence shows disk usage from abandoned repos is actually a problem, not something to build speculatively.
+
 ## Auto-push and upstream tracking
 
 `_wt_setup_upstream` checks whether the remote branch exists. If it does, it sets the local tracking ref with `git branch --set-upstream-to`. If it doesn't, it runs `git push -u <remote> <branch>` to create it. This fires a CI job without a manual push step.
