@@ -38,11 +38,22 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How long to wait for `git rev-parse --show-toplevel` before giving up.
 /// Matches hooks/memory-anchors.py:114's `timeout=5`.
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Total budget for `run_prompt`'s staleness-check loop across all matched
+/// facts; `GIT_TIMEOUT` only bounds one call, not the chain of them.
+const STALENESS_BUDGET: Duration = Duration::from_secs(3);
+
+/// Pure wrapper around the deadline comparison, so the boundary condition is
+/// directly testable without depending on real elapsed wall-clock time or a
+/// real `git` subprocess in a test.
+fn within_staleness_budget(deadline: Instant) -> bool {
+    Instant::now() < deadline
+}
 
 pub fn run(payload: &Payload) {
     let dir = session_dir(payload);
@@ -165,6 +176,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
 
     let mut newly_seen = Vec::new();
     let mut bodies = Vec::new();
+    let staleness_deadline = Instant::now() + STALENESS_BUDGET;
     for row in &matches {
         let from_id = row.get(1).cloned().unwrap_or_default();
         if from_id.is_empty() || seen.contains(&from_id) {
@@ -180,8 +192,13 @@ fn run_prompt(payload: &Payload, dir: &str) {
         let Some(body) = read_fact_body(&file) else {
             continue;
         };
-        let anchor = row.first().cloned().unwrap_or_default();
-        let note = staleness_note(&root, &from_id, &anchor);
+        // Past budget: skip the staleness check, not the recall itself.
+        let note = if within_staleness_budget(staleness_deadline) {
+            let anchor = row.first().cloned().unwrap_or_default();
+            staleness_note(&root, &from_id, &anchor)
+        } else {
+            ""
+        };
         bodies.push(format!("### {name}{note}\n{body}"));
         newly_seen.push(from_id);
     }
@@ -622,5 +639,51 @@ fn write_index_atomically(idx_path: &Path, rows: &[String]) {
     }
     if fs::rename(&tmp_path, idx_path).is_err() {
         let _ = fs::remove_file(&tmp_path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staleness_budget_is_three_seconds() {
+        // Arrange / Act / Assert: pins the chosen constant so a future
+        // change to it is a deliberate edit, not an accidental drift.
+        assert_eq!(STALENESS_BUDGET, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn within_budget_before_deadline() {
+        // Arrange
+        let deadline = Instant::now() + Duration::from_secs(10);
+
+        // Act
+        let got = within_staleness_budget(deadline);
+
+        // Assert
+        assert!(
+            got,
+            "a deadline well in the future must still be within budget"
+        );
+    }
+
+    #[test]
+    fn not_within_budget_after_deadline() {
+        // Arrange: a deadline already in the past, as the staleness loop
+        // would see once the aggregate budget has been spent by earlier,
+        // slow per-fact checks.
+        let deadline = Instant::now() - Duration::from_secs(1);
+
+        // Act
+        let got = within_staleness_budget(deadline);
+
+        // Assert
+        assert!(
+            !got,
+            "an expired deadline must report over budget, so the caller skips \
+             the next per-fact staleness check instead of starting another \
+             potentially slow git call"
+        );
     }
 }
