@@ -284,7 +284,8 @@ fn api_data_ingests_transcripts_and_returns_the_fixture_totals() {
     let data: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(data["totals"]["messages"], 3);
     assert_eq!(data["totals"]["output_tokens"], 1470);
-    assert!((data["totals"]["cost_usd"].as_f64().unwrap() - 0.14045815).abs() < 1e-9);
+    assert!((data["totals"]["cost_usd"].as_f64().unwrap() - 0.0973221).abs() < 1e-9);
+    assert_eq!(data["totals"]["unpriced_messages"], 0);
     assert_eq!(data["groups"]["model"].as_array().unwrap().len(), 3);
     assert_eq!(data["groups"]["account"][0]["key"], "dev@example.com");
     assert_eq!(data["groups"]["day"].as_array().unwrap().len(), 2);

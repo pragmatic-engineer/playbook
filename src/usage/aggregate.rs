@@ -114,6 +114,18 @@ pub fn group_usage(events: &[UsageEvent], dim: Dimension) -> Vec<Group> {
     groups.into_values().collect()
 }
 
+/// How many messages used a model with no known price (counted as $0), and
+/// which models, sorted.
+pub fn unpriced_models(events: &[UsageEvent]) -> (usize, Vec<String>) {
+    let mut models: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut count = 0;
+    for event in events.iter().filter(|e| e.unpriced) {
+        count += 1;
+        models.insert(event.model.clone());
+    }
+    (count, models.into_iter().collect())
+}
+
 /// Invocation counts per name for one tool kind, most used first, then by name.
 pub fn count_tools(tools: &[ToolInvocationEvent], kind: ToolKind) -> Vec<(String, u64)> {
     let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
@@ -144,10 +156,21 @@ mod tests {
             branch: "b".into(),
             input_tokens: 1,
             output_tokens: out,
-            cache_creation_tokens: 0,
-            cache_read_tokens: 0,
             cost_usd: cost,
+            ..UsageEvent::default()
         }
+    }
+
+    #[test]
+    fn unpriced_models_counts_flagged_messages_and_lists_models_once() {
+        let mut events = sample();
+        events[0].unpriced = true;
+        events[0].model = "mystery".into();
+        events[2].unpriced = true;
+        events[2].model = "mystery".into();
+
+        assert_eq!(unpriced_models(&events), (2, vec!["mystery".to_string()]));
+        assert_eq!(unpriced_models(&sample()), (0, vec![]));
     }
 
     // 2026-09-01 (Tue) 08:51, 2026-09-01 09:00, 2026-09-02 (Wed) 00:00.

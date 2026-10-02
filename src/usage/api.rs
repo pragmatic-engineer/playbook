@@ -5,7 +5,7 @@
 //! server-rendered charts. Built from the same aggregation the terminal
 //! summary uses.
 
-use super::aggregate::{count_tools, group_usage, Dimension, Group};
+use super::aggregate::{count_tools, group_usage, unpriced_models, Dimension, Group};
 use super::svg::bar_chart;
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
 use serde_json::{json, Value};
@@ -41,6 +41,7 @@ pub fn data_json(usage: &[UsageEvent], tools: &[ToolInvocationEvent], now: i64) 
     let days = group_usage(usage, Dimension::Day);
     let models = group_usage(usage, Dimension::Model);
     let recent = days.len().saturating_sub(CHART_DAYS);
+    let (unpriced_messages, unpriced_model_names) = unpriced_models(usage);
 
     let dims = [
         ("day", Dimension::Day),
@@ -66,6 +67,8 @@ pub fn data_json(usage: &[UsageEvent], tools: &[ToolInvocationEvent], now: i64) 
             "cache_creation_tokens": usage.iter().map(|e| e.cache_creation_tokens).sum::<u64>(),
             "cache_read_tokens": usage.iter().map(|e| e.cache_read_tokens).sum::<u64>(),
             "cost_usd": usage.iter().map(|e| e.cost_usd).sum::<f64>(),
+            "unpriced_messages": unpriced_messages,
+            "unpriced_models": unpriced_model_names,
         },
         "groups": groups,
         "skills": counts_json(count_tools(tools, ToolKind::Skill)),
@@ -96,7 +99,19 @@ mod tests {
             cache_creation_tokens: 1,
             cache_read_tokens: 2,
             cost_usd: cost,
+            ..UsageEvent::default()
         }
+    }
+
+    #[test]
+    fn totals_report_unpriced_messages_and_their_models() {
+        let mut usage = vec![event(1788252682, "sonnet", 0.25)];
+        usage[0].unpriced = true;
+
+        let data = data_json(&usage, &[], 1788400000);
+
+        assert_eq!(data["totals"]["unpriced_messages"], 1);
+        assert_eq!(data["totals"]["unpriced_models"][0], "sonnet");
     }
 
     #[test]

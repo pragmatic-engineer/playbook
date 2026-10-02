@@ -9,7 +9,7 @@
 //! content block), each repeating the same `usage`. Events are therefore
 //! deduped by `message.id` (usage) and `tool_use.id` (tools), not by line.
 
-use super::pricing::cost_usd;
+use super::repo::RepoResolver;
 use super::{Events, ToolInvocationEvent, ToolKind, UsageEvent, UsageSource};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -44,6 +44,7 @@ impl UsageSource for ClaudeCodeSource {
         let mut usage_index: HashMap<String, usize> = HashMap::new();
         let mut tools: Vec<ToolInvocationEvent> = Vec::new();
         let mut tool_seen: HashMap<String, ()> = HashMap::new();
+        let mut repos = RepoResolver::default();
 
         for file in files {
             let Ok(text) = fs::read_to_string(&file) else {
@@ -66,7 +67,7 @@ impl UsageSource for ClaudeCodeSource {
                 if timestamp < watermark {
                     continue;
                 }
-                if let Some(event) = usage_event(&value, timestamp) {
+                if let Some(event) = usage_event(&value, timestamp, &mut repos) {
                     match usage_index.get(&event.event_id) {
                         Some(&i) if event.output_tokens > usage[i].output_tokens => {
                             usage[i] = event
@@ -121,35 +122,37 @@ fn token(usage: &Value, key: &str) -> u64 {
     usage.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
-fn usage_event(line: &Value, timestamp: i64) -> Option<UsageEvent> {
+/// Tokens written to the one hour cache, from `usage.cache_creation`. Absent
+/// means the whole write counts as the five minute cache.
+fn one_hour_cache_tokens(usage: &Value) -> u64 {
+    usage
+        .get("cache_creation")
+        .map(|tiers| token(tiers, "ephemeral_1h_input_tokens"))
+        .unwrap_or(0)
+}
+
+fn usage_event(line: &Value, timestamp: i64, repos: &mut RepoResolver) -> Option<UsageEvent> {
     let message = line.get("message")?;
     let event_id = message.get("id")?.as_str()?.to_string();
     let usage = message.get("usage")?;
-    let model = str_field(message, "model").to_string();
-    let input = token(usage, "input_tokens");
-    let output = token(usage, "output_tokens");
     let cache_write = token(usage, "cache_creation_input_tokens");
-    let cache_read = token(usage, "cache_read_input_tokens");
-    let cwd = str_field(line, "cwd");
-    Some(UsageEvent {
+    let mut event = UsageEvent {
         event_id,
         timestamp,
         session_id: str_field(line, "sessionId").to_string(),
-        account: String::new(),
-        cost_usd: cost_usd(&model, input, output, cache_write, cache_read),
-        model,
+        model: str_field(message, "model").to_string(),
         effort: str_field(line, "effort").to_string(),
-        repo: Path::new(cwd)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string(),
+        repo: repos.resolve(str_field(line, "cwd")),
         branch: str_field(line, "gitBranch").to_string(),
-        input_tokens: input,
-        output_tokens: output,
+        input_tokens: token(usage, "input_tokens"),
+        output_tokens: token(usage, "output_tokens"),
         cache_creation_tokens: cache_write,
-        cache_read_tokens: cache_read,
-    })
+        cache_creation_1h_tokens: one_hour_cache_tokens(usage),
+        cache_read_tokens: token(usage, "cache_read_input_tokens"),
+        ..UsageEvent::default()
+    };
+    event.apply_pricing();
+    Some(event)
 }
 
 fn tool_events(line: &Value, timestamp: i64) -> Vec<ToolInvocationEvent> {
@@ -267,7 +270,8 @@ mod tests {
             ),
             (2, 770, 29653, 22178)
         );
-        assert!((a.cost_usd - 0.12940815).abs() < 1e-9);
+        // Sonnet 5 is 2/10, all five minute cache: 2*2 + 770*10 + 29653*2.5 + 22178*0.2.
+        assert!((a.cost_usd - 0.0862721).abs() < 1e-9);
 
         let b = &events.usage[1];
         assert_eq!(
@@ -280,6 +284,43 @@ mod tests {
         let c = &events.usage[2];
         assert_eq!((c.event_id.as_str(), c.effort.as_str()), ("msg_C", ""));
         assert!((c.cost_usd - 0.0035).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cache_tiers_repo_markers_and_unpriced_models_come_through() {
+        let events = ClaudeCodeSource::new(root("tiers"))
+            .events_since(0)
+            .unwrap();
+        let by_id = |id: &str| events.usage.iter().find(|e| e.event_id == id).unwrap();
+
+        // Opus 5.5 is 4/20: 1000*4 + 500*20 + 2000*4*1.25 + 4000*4*2 + 10000*4*0.05.
+        let t1 = by_id("msg_T1");
+        assert_eq!(
+            (t1.cache_creation_tokens, t1.cache_creation_1h_tokens),
+            (6000, 4000)
+        );
+        assert!((t1.cost_usd - 0.058).abs() < 1e-9 && !t1.unpriced);
+        assert_eq!(
+            t1.repo, "playbook",
+            "a .claude/worktrees path names its repo"
+        );
+
+        // Opus 4.9 is not in the price table, so it is flagged, not guessed.
+        let t2 = by_id("msg_T2");
+        assert_eq!((t2.cost_usd, t2.unpriced), (0.0, true));
+        assert_eq!(
+            t2.repo, "ward",
+            "a .git/review-worktrees path names its repo"
+        );
+
+        // No tokens means nothing to price, even for an unknown model.
+        let t3 = by_id("msg_T3");
+        assert_eq!((t3.cost_usd, t3.unpriced), (0.0, false));
+
+        // No tier breakdown: the whole write is the five minute cache.
+        let t4 = by_id("msg_T4");
+        assert_eq!(t4.cache_creation_1h_tokens, 0);
+        assert!((t4.cost_usd - 0.0025).abs() < 1e-9);
     }
 
     #[test]

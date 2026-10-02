@@ -70,14 +70,14 @@ fn bare_usage_ingests_and_prints_a_summary_with_fixture_values() {
     );
     let text = stdout(&out);
     assert!(
-        text.contains("3 messages, $0.1405 estimated cost"),
+        text.contains("3 messages, $0.0973 estimated cost"),
         "{text}"
     );
     let row = text
         .lines()
         .find(|l| l.contains("claude-sonnet-5"))
         .unwrap();
-    assert!(row.contains("770") && row.contains("0.1294"), "{row}");
+    assert!(row.contains("770") && row.contains("0.0863"), "{row}");
     assert!(text.contains("dev@example.com"), "{text}");
 }
 
