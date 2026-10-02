@@ -8,7 +8,7 @@
 pub const REFRESH_MS: u32 = 5000;
 
 pub const CONTENT_SECURITY_POLICY: &str =
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'";
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'";
 
 pub const HTML: &str = r##"<!doctype html>
 <html lang="en">

@@ -63,6 +63,14 @@ pub fn host_allowed(host: Option<&str>, port: u16) -> bool {
     .any(|allowed| allowed == host)
 }
 
+/// Browsers label every request with `Sec-Fetch-Site`. The page's own fetch is
+/// `same-origin` and a typed URL is `none`; another site's page is
+/// `cross-site` or `same-site` and must not make the server ingest. A client
+/// that sends no label (curl) is not a browser page and is allowed.
+pub fn fetch_site_allowed(value: Option<&str>) -> bool {
+    matches!(value, None | Some("same-origin") | Some("none"))
+}
+
 /// What the server answers for a path: (status, content type, body).
 /// `load_data` runs only for `/api/data`.
 pub fn respond_to(
@@ -181,11 +189,18 @@ pub fn run_stop(paths: &Paths) -> Result<String, String> {
     let Some(found) = lock::read_lock(&paths.lock) else {
         return Ok("usage dashboard: nothing is running".to_string());
     };
-    // Only a live server is signalled: a stale lock's pid may now belong to
-    // an unrelated process.
+    // Only a live dashboard server is signalled: a stale or tampered lock's
+    // pid may now belong to an unrelated process.
     if !lock::is_live(found) {
         lock::clear_lock(&paths.lock);
         return Ok("usage dashboard: nothing is running (removed a stale lock)".to_string());
+    }
+    if !lock::is_dashboard_process(found.pid) {
+        lock::clear_lock(&paths.lock);
+        return Ok(
+            "usage dashboard: nothing is running (removed a lock whose pid is not the dashboard server)"
+                .to_string(),
+        );
     }
     terminate(found.pid)?;
     let deadline = Instant::now() + STOP_TIMEOUT;
@@ -220,6 +235,14 @@ fn terminate(_pid: u32) -> Result<(), String> {
     Err("the usage dashboard is only supported on macOS and Linux".to_string())
 }
 
+fn header_value(request: &tiny_http::Request, name: &'static str) -> Option<String> {
+    request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv(name))
+        .map(|h| h.value.as_str().to_string())
+}
+
 /// The detached child: bind first, then claim the lock with the real port. A
 /// loser of a start-up race closes its listener and returns without serving.
 pub fn serve(paths: &Paths) -> Result<(), String> {
@@ -238,20 +261,23 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
         return Ok(());
     }
     for request in server.incoming_requests() {
-        let host = request
-            .headers()
-            .iter()
-            .find(|h| h.field.equiv("Host"))
-            .map(|h| h.value.as_str().to_string());
+        let host = header_value(&request, "Host");
+        let fetch_site = header_value(&request, "Sec-Fetch-Site");
         let path = request.url().split('?').next().unwrap_or("/").to_string();
-        let (status, content_type, body) = if host_allowed(host.as_deref(), port) {
-            respond_to(&path, || load_data(paths))
-        } else {
+        let (status, content_type, body) = if !host_allowed(host.as_deref(), port) {
             (
                 403,
                 "text/plain; charset=utf-8",
                 "forbidden host".to_string(),
             )
+        } else if path == "/api/data" && !fetch_site_allowed(fetch_site.as_deref()) {
+            (
+                403,
+                "text/plain; charset=utf-8",
+                "forbidden origin".to_string(),
+            )
+        } else {
+            respond_to(&path, || load_data(paths))
         };
         let mut response = tiny_http::Response::from_string(body).with_status_code(status);
         let mut headers = vec![
@@ -305,6 +331,58 @@ mod tests {
             respond_to("/nope", || panic!("unknown paths load nothing")).0,
             404
         );
+    }
+
+    #[test]
+    fn only_same_origin_or_unlabelled_requests_may_fetch_the_data() {
+        assert!(fetch_site_allowed(None));
+        assert!(fetch_site_allowed(Some("same-origin")));
+        assert!(fetch_site_allowed(Some("none")));
+        assert!(!fetch_site_allowed(Some("cross-site")));
+        assert!(!fetch_site_allowed(Some("same-site")));
+        assert!(!fetch_site_allowed(Some("")));
+    }
+
+    #[test]
+    fn the_page_policy_forbids_framing_and_other_origins() {
+        assert!(page::CONTENT_SECURITY_POLICY.contains("frame-ancestors 'none'"));
+        assert!(page::CONTENT_SECURITY_POLICY.contains("default-src 'none'"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_never_signals_a_live_process_that_is_not_the_dashboard() {
+        use super::super::lock::SOCKET_LOCK;
+        use std::process::Command;
+
+        let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Arrange: a lock naming a live, unrelated process and a listening
+        // port, which is exactly what a reused pid looks like.
+        let home = crate::common::test_support::scratch_dir("dash-stop-foreign");
+        let paths = Paths::from_home(&home);
+        std::fs::create_dir_all(paths.lock.parent().unwrap()).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut bystander = Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .expect("sleep starts");
+        let port = listener.local_addr().unwrap().port();
+        std::fs::write(&paths.lock, format!("{} {port}\n", bystander.id())).unwrap();
+
+        // Act
+        let message = run_stop(&paths).expect("stop reports, it does not fail");
+
+        // Assert
+        let still_running = bystander.try_wait().expect("wait works").is_none();
+        let _ = bystander.kill();
+        let _ = bystander.wait();
+        assert!(
+            still_running,
+            "an unrelated process must never be signalled"
+        );
+        assert!(message.contains("not the dashboard server"), "{message}");
+        assert!(!paths.lock.exists(), "the bogus lock must be removed");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
