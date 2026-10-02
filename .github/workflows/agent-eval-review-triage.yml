@@ -31,7 +31,7 @@
 # cleanly (not a failure) when it's absent, rather than surface a confusing
 # credential error on an external contributor's PR.
 
-name: eval-review-triage
+name: Agent Eval Review Triage
 
 on:
   pull_request:
@@ -41,14 +41,14 @@ on:
       - shell/eval-review-triage.sh
       - shell/fixtures/review-triage-eval-set.json
       # Editing this workflow runs it, so a change to it tests itself.
-      - .github/workflows/eval-review-triage.yml
+      - .github/workflows/agent-eval-review-triage.yml
   # Manual run from the Actions tab, e.g. to re-run the eval without touching the watched files.
   workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: eval-review-triage-${{ github.event.pull_request.number || github.run_id }}
+  group: agent-eval-review-triage-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
