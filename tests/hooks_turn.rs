@@ -1491,7 +1491,7 @@ mod memory_capture {
             .join("runtime")
             .join("handoff");
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(format!("{slug}-test.md"));
+        let path = dir.join(format!("{slug}-1000-1.md"));
         fs::write(&path, "HANDOFF").unwrap();
         path
     }

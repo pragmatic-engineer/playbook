@@ -59,13 +59,19 @@ This is the section where "we did not verify X" or "Y depends on Z which is not 
 
 ## Where to Write It
 
-Default: print the handoff to the conversation as plain Markdown. The user can copy it into a note, a PR description, an issue, or wherever they want.
+Print the handoff to the conversation as plain Markdown, then save it for the next session in one Bash call by piping the same document to `playbook handoff save`:
 
-**Always also write to a fixed internal directory**, so a later session can reload it automatically (see `docs/adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md`): compute `project-slug` as the current working directory with every non-alphanumeric character replaced by `-` (the exact `${PWD//[^a-zA-Z0-9]/-}` expansion `shell/shared/config-drift.sh` already uses for the same reason, keyed by directory rather than by git remote so two worktrees of the same repo never collide), and write the document to `~/.config/playbook/runtime/handoff/<project-slug>-<unique-suffix>.md`, creating the `handoff/` directory if it does not exist. `<unique-suffix>` is `$(date +%s)-$$` (epoch seconds plus the shell PID): two sessions in the same directory clearing around the same moment get distinct files instead of one overwriting the other. This is not the user-facing path below, and the "never write to a path not explicitly provided" rule does not apply to it. Don't worry about cleanup: the read side (`SessionStart`, per `src/hooks/session_init.rs`) glob-matches every `<project-slug>-*.md`, reads the most recently modified one or two, and deletes every match it finds, so leftover files never accumulate past the next session start in that directory.
+```bash
+playbook handoff save <<'HANDOFF_EOF'
+<the handoff document>
+HANDOFF_EOF
+```
 
-If the user passes a path as an argument (e.g. `/session-handoff docs/handoffs/2026-06-22.md`), additionally write the document to that file. Create parent directories as needed. Confirm the written path in one line after the document.
+The command keys the file by the current directory, so a later session started in that directory loads it on its own after `/clear`. It prints the saved path. It refuses empty input. Pass `--dir <path>` to save for a directory other than the current one.
 
-If the argument is a bare filename with no directory, write it to the current working directory. Never write to a path that was not explicitly provided, this rule governs only the user-facing path, not the fixed internal one above.
+If the user passes a path as an argument (e.g. `/session-handoff docs/handoffs/2026-06-22.md`), additionally write the document to that file. Create parent directories as needed. Confirm the written path in one line after the document. A bare filename with no directory goes in the current working directory. Never write to a path that was not explicitly provided; this rule governs the user-facing path, not `playbook handoff save`.
+
+End with one line: run `/clear`, and the next session loads the handoff automatically, or run `/playbook:session-start` to load it on demand.
 
 ## What NOT to Include
 

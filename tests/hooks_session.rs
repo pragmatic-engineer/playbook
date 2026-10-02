@@ -981,7 +981,7 @@ static HANDOFF_SUFFIX_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// repeated calls within one test.
 fn write_handoff(home: &Path, cwd: &Path, contents: &str) -> PathBuf {
     let n = HANDOFF_SUFFIX_COUNTER.fetch_add(1, Ordering::Relaxed);
-    write_handoff_suffixed(home, cwd, contents, &format!("{n}-test"))
+    write_handoff_suffixed(home, cwd, contents, &format!("{n}-1"))
 }
 
 fn write_handoff_suffixed(home: &Path, cwd: &Path, contents: &str, suffix: &str) -> PathBuf {
@@ -1212,7 +1212,7 @@ fn session_init_caps_injected_handoffs_but_still_deletes_every_match() {
     let mut paths = Vec::new();
     for (n, age_hours) in [(1, 4), (2, 3), (3, 2), (4, 1)] {
         let marker = format!("HANDOFFMARKER-{n}");
-        let path = write_handoff_suffixed(&home, &repo_dir, &marker, &format!("cap-{n}"));
+        let path = write_handoff_suffixed(&home, &repo_dir, &marker, &format!("{}-9", 2000 + n));
         let file = fs::File::open(&path).unwrap();
         file.set_modified(now - std::time::Duration::from_secs(age_hours * 3600))
             .unwrap();

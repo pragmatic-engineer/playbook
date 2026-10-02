@@ -11,6 +11,7 @@ pub mod common;
 pub mod config;
 pub mod doctor;
 pub mod gate;
+pub mod handoff;
 pub mod hooks;
 pub mod init;
 pub mod json;
@@ -135,6 +136,34 @@ pub enum Command {
         /// Absolute path of the directory to trust.
         path: String,
     },
+    /// Save and show session handoffs, backing `src/handoff/`.
+    Handoff {
+        #[command(subcommand)]
+        sub: HandoffCommand,
+    },
+}
+
+/// `playbook handoff` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum HandoffCommand {
+    /// Save the handoff markdown on stdin so the next session in this
+    /// directory loads it.
+    Save {
+        /// Directory the handoff belongs to; defaults to the current one.
+        #[arg(long)]
+        dir: Option<String>,
+    },
+    /// Print this directory's handoff without consuming it.
+    Show {
+        /// Print every waiting handoff, not just the freshest.
+        #[arg(long)]
+        all: bool,
+        /// Directory to show; defaults to the current one.
+        #[arg(long)]
+        dir: Option<String>,
+    },
+    /// Show the last SessionStart events and this directory's handoff counts.
+    Status,
 }
 
 /// Which worktree-scoped storage directory `playbook path` resolves under
