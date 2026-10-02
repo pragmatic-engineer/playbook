@@ -6,10 +6,10 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, config, doctor, gate, hooks, init, json, manifest, pr, settings, trust,
-    usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DashboardCommand,
-    DoctorCommand, GateCommand, JsonCommand, ManifestCommand, MemoryCommand, PrCommand,
-    SettingsCommand, UsageCommand, WorktreeCommand,
+    agents, cc, common, config, doctor, gate, handoff, hooks, init, json, manifest, pr, settings,
+    trust, usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand,
+    DashboardCommand, DoctorCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
+    MemoryCommand, PrCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -554,6 +554,24 @@ fn main() {
         }
         Command::Trust { path } => {
             let _ = trust::run(&path);
+        }
+        Command::Handoff { sub } => {
+            let result = match sub {
+                HandoffCommand::Save { dir } => {
+                    let mut text = String::new();
+                    let _ = std::io::stdin().read_to_string(&mut text);
+                    handoff::run_save(dir.as_deref(), &text)
+                }
+                HandoffCommand::Show { all, dir } => handoff::run_show(dir.as_deref(), all),
+                HandoffCommand::Status => Ok(handoff::run_status()),
+            };
+            match result {
+                Ok(output) => println!("{output}"),
+                Err(err) => {
+                    eprintln!("handoff: {err}");
+                    std::process::exit(1);
+                }
+            }
         }
     }
 }
