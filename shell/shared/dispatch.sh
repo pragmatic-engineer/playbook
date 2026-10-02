@@ -25,20 +25,6 @@ _cc_opt_takes_value() {
     esac
 }
 
-# Pre-trust the launch directory so Claude Code's first-launch trust dialog
-# never blocks it. Best-effort: never fails or delays the launch. A binary too
-# old to have `trust` is silent (plugin files can update before the binary).
-_cc_trust_launch_dir() {
-    command -v playbook >/dev/null 2>&1 || return 0
-    local err
-    err="$(playbook trust "$PWD" 2>&1 >/dev/null)" || true
-    case "$err" in
-        ''|*"unrecognized subcommand"*) ;;
-        *) printf '%s\n' "-> cc: trust: ${err%%$'\n'*}" >&2 ;;
-    esac
-    return 0
-}
-
 _claude() {
     _cc_bust_cache
     clear
@@ -72,10 +58,11 @@ _claude() {
         esac
     done
 
-    # Subcommands that launch nothing, or re-enter _claude, skip the trust.
+    # Best-effort: pre-trust the launch dir. Silent, never fails the launch.
+    # list/prune launch nothing, worktree/new re-enter _claude (trusted there).
     case "${1:-}" in
         list|ls|--list|prune|--prune|worktree|--worktree|new|--new) ;;
-        *) _cc_trust_launch_dir ;;
+        *) command -v playbook >/dev/null 2>&1 && playbook trust "$PWD" >/dev/null 2>&1 || true ;;
     esac
 
     case "${1:-}" in

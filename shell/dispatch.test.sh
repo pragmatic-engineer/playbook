@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENGINE="${SCRIPT_DIR}/shared/dispatch.sh"
 PASS=0
 FAIL=0
-TOTAL=9
+TOTAL=8
 
 if ! command -v zsh >/dev/null 2>&1; then
   echo "SKIP: zsh not available; dispatch.zsh tests need zsh"
@@ -41,7 +41,7 @@ chmod +x "$TMP/bin/claude"
 
 # playbook stub: records "playbook <args>" to the same record file, so the
 # order of trust and claude calls is provable. $PLAYBOOK_STUB_MODE picks the
-# behaviour: ok (default), old (a binary with no `trust` subcommand), warn.
+# behaviour: ok (default) or old (a binary with no `trust` subcommand).
 cat > "$TMP/bin/playbook" << 'SHIM'
 #!/bin/sh
 printf 'playbook' >> "$DISPATCH_RECORD"
@@ -49,7 +49,6 @@ for a in "$@"; do printf ' %s' "$a"; done >> "$DISPATCH_RECORD"
 printf '\n' >> "$DISPATCH_RECORD"
 case "${PLAYBOOK_STUB_MODE:-ok}" in
   old) echo "error: unrecognized subcommand 'trust'" >&2; exit 2 ;;
-  warn) echo "playbook trust: could not write the file" >&2; exit 0 ;;
 esac
 exit 0
 SHIM
@@ -256,19 +255,6 @@ scenario_trust_old_binary_silent() {
   grep -q '^claude' "$rec" || { echo "  claude was not launched"; return 1; }
 }
 
-# ── Scenario 8 ───────────────────────────────────────────────────────────────
-# A real trust warning is shown as one line, and the launch still happens.
-scenario_trust_warning_shown() {
-  local rec="$TMP/s8_record" home="$TMP/s8_home" dir out
-  dir="$(new_launch_dir s8)"
-  mkdir -p "$home"; : > "$rec"
-  out="$(PLAYBOOK_STUB_MODE=warn launch_in "$dir" "$rec" "$home" 2>&1)"
-
-  [ "$out" = "-> cc: trust: playbook trust: could not write the file" ] \
-    || { echo "  unexpected output: $out"; return 1; }
-  grep -q '^claude' "$rec" || { echo "  claude was not launched"; return 1; }
-}
-
 # ── Scenario 9 ───────────────────────────────────────────────────────────────
 # No playbook on PATH at all: the launch is untouched and nothing is printed.
 scenario_trust_missing_playbook() {
@@ -296,7 +282,6 @@ run_scenario "-n consumes value; raw path fires _cc_find_session_by_title"      
 run_scenario "trust gets the launch dir, and runs before claude"                     scenario_trust_dir_and_order
 run_scenario "every launch path trusts once; list and prune never do"                scenario_trust_once_per_path
 run_scenario "a binary without trust is silent and the launch proceeds"              scenario_trust_old_binary_silent
-run_scenario "a real trust warning is shown and the launch proceeds"                 scenario_trust_warning_shown
 run_scenario "no playbook on PATH: the launch is untouched"                          scenario_trust_missing_playbook
 
 echo "${PASS}/${TOTAL} scenarios passed"
