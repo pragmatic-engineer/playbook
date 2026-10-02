@@ -226,7 +226,8 @@ fn main() {
         Command::Pr { sub } => {
             let gh = pr::shared::RealGhClient;
             match sub {
-                PrCommand::Prepare { base, ticket } => {
+                PrCommand::Prepare { base, ticket, dir } => {
+                    enter_dir("pr prepare", dir.as_deref());
                     match pr::prepare::run(&gh, base.as_deref(), ticket.as_deref()) {
                         Ok(output) => println!("{output}"),
                         Err(err) => {
@@ -239,13 +240,19 @@ fn main() {
                     title,
                     body_file,
                     base,
-                } => match pr::create::run(&gh, &title, &body_file, base.as_deref()) {
-                    Ok(output) => println!("{output}"),
-                    Err(err) => {
-                        eprintln!("pr create: {err}");
-                        std::process::exit(1);
+                    dir,
+                } => {
+                    // A relative body path is relative to where the caller ran.
+                    let body_file = absolute_from_cwd(&body_file);
+                    enter_dir("pr create", dir.as_deref());
+                    match pr::create::run(&gh, &title, &body_file, base.as_deref()) {
+                        Ok(output) => println!("{output}"),
+                        Err(err) => {
+                            eprintln!("pr create: {err}");
+                            std::process::exit(1);
+                        }
                     }
-                },
+                }
             }
         }
         Command::Config { sub } => {
@@ -629,4 +636,25 @@ fn read_hook_input() -> String {
     let mut buf = String::new();
     let _ = std::io::stdin().read_to_string(&mut buf);
     buf
+}
+
+/// Makes a relative path absolute against the current directory.
+fn absolute_from_cwd(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() {
+        return path.to_string();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(p).to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string())
+}
+
+/// Moves into `--dir` before any git or gh call, so a shell that resets to
+/// another checkout can still act on a worktree. Exits 1 on a bad path.
+fn enter_dir(label: &str, dir: Option<&str>) {
+    let Some(dir) = dir else { return };
+    if let Err(err) = pr::shared::enter_dir(dir) {
+        eprintln!("{label}: {err}");
+        std::process::exit(1);
+    }
 }

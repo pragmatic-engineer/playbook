@@ -4,6 +4,7 @@
 //! `pr create`: everything after the title and body are written (validate,
 //! push, confirm the push landed, open the draft PR, confirm its base).
 
+use crate::pr::guard::{attribution_problems, dash_problems};
 use crate::pr::shared::{current_branch, git, git_net, resolve_base, GhClient};
 use std::path::Path;
 
@@ -22,6 +23,41 @@ pub fn verify_pushed_sha(local: &str, remote: &str) -> Result<(), String> {
     };
     Err(format!(
         "the remote branch is at {remote}, local HEAD is {local}; the push did not land"
+    ))
+}
+
+/// Runs the attribution and dash checks over the title, the body file, and
+/// every commit message about to be published. Never edits anything.
+fn refuse_bad_text(title: &str, body_file: &str, base: &str) -> Result<(), String> {
+    let body = std::fs::read_to_string(body_file)
+        .map_err(|e| format!("could not read PR body file {body_file}: {e}"))?;
+    let log = git(&[
+        "log",
+        &format!("origin/{base}..HEAD"),
+        "--format=%h%x1f%B%x1e",
+    ])?;
+    let commits: Vec<(String, String)> = log
+        .split('\x1e')
+        .filter_map(|rec| rec.trim().split_once('\x1f'))
+        .map(|(sha, msg)| (sha.to_string(), msg.to_string()))
+        .collect();
+    let mut problems = attribution_problems(title, &body, &commits);
+    if !problems.is_empty() {
+        problems.push(
+            "fix: rewrite the title or body, or amend the named commit, before pushing".to_string(),
+        );
+    }
+    let dashes = dash_problems(title, &body);
+    if !dashes.is_empty() {
+        problems.extend(dashes);
+        problems.push("fix: replace each dash with a comma, colon, or parentheses".to_string());
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "refusing to push or create:\n{}",
+        problems.join("\n")
     ))
 }
 
@@ -50,6 +86,8 @@ pub fn run(
             "on the base branch ({base}); create a feature branch first"
         ));
     }
+
+    refuse_bad_text(title, body_file, &base)?;
 
     git_net(&["push", "-u", "origin", &format!("HEAD:refs/heads/{branch}")]).map_err(|e| {
         format!("push of {branch} failed; not creating a PR (it would be missing your local commits): {e}")

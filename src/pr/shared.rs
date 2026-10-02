@@ -94,6 +94,22 @@ pub(crate) fn reject_option_like(kind: &str, value: &str) -> Result<(), String> 
     Ok(())
 }
 
+/// Changes the process directory to `dir`, which must exist and sit inside a
+/// git work tree. The CLI is single threaded and short lived, so this is safe.
+pub fn enter_dir(dir: &str) -> Result<(), String> {
+    let path = Path::new(dir)
+        .canonicalize()
+        .map_err(|e| format!("--dir {dir}: {e}"))?;
+    if !path.is_dir() {
+        return Err(format!("--dir {dir} is not a directory"));
+    }
+    std::env::set_current_dir(&path).map_err(|e| format!("--dir {dir}: {e}"))?;
+    match git(&["rev-parse", "--is-inside-work-tree"]) {
+        Ok(out) if out == "true" => Ok(()),
+        _ => Err(format!("--dir {dir} is not inside a git work tree")),
+    }
+}
+
 /// The checked-out branch, or an error on a detached HEAD.
 pub(crate) fn current_branch() -> Result<String, String> {
     let branch = git(&["branch", "--show-current"])?;
