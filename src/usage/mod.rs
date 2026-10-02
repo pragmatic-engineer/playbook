@@ -6,10 +6,13 @@
 //! an agent's own file format, so a second source only implements the trait.
 
 pub mod account;
+pub mod aggregate;
 pub mod claude_code;
 pub mod db;
 pub mod ingest;
 pub mod pricing;
+pub mod run;
+pub mod summary;
 
 /// One assistant message's token usage and derived cost. `event_id` is the
 /// source's own unique message id, the dedup key (a message can span several
