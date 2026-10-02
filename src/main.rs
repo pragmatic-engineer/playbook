@@ -6,9 +6,9 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, config, doctor, gate, hooks, init, json, manifest, settings, worktree,
-    AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand, JsonCommand,
-    ManifestCommand, MemoryCommand, SettingsCommand, WorktreeCommand,
+    agents, cc, common, config, doctor, gate, hooks, init, json, manifest, settings, trust,
+    worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand,
+    JsonCommand, ManifestCommand, MemoryCommand, SettingsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -483,6 +483,9 @@ fn main() {
                     );
                 }
             }
+        }
+        Command::Trust { path } => {
+            let _ = trust::run(&path);
         }
     }
 }
