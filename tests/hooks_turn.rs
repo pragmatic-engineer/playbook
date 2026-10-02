@@ -33,6 +33,8 @@ fn scratch_home(tag: &str) -> PathBuf {
 /// trailing newline stripped, and the exit code.
 fn run_hook(name: &str, home: &Path, stdin: &str) -> (String, i32) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", name])
         .env("HOME", home)
         .env_remove("HOOK_INPUT")
@@ -59,6 +61,8 @@ fn run_hook(name: &str, home: &Path, stdin: &str) -> (String, i32) {
 /// Used by tests asserting a failure is surfaced there, not swallowed.
 fn run_hook_capturing_stderr(name: &str, home: &Path, stdin: &str) -> (String, String, i32) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", name])
         .env("HOME", home)
         .env_remove("HOOK_INPUT")
@@ -1453,6 +1457,8 @@ mod memory_capture {
     /// `logical_cwd()` prefers `PWD`, so this sets both explicitly.
     fn run_hook_at(cwd: &Path, home: &Path, stdin: &str) -> (String, i32) {
         let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "memory-capture"])
             .current_dir(cwd)
             .env("HOME", home)

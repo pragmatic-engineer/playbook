@@ -70,19 +70,32 @@ To see the worst case, a marker was created for a fixed `--session-id`. The hook
 
 ### Hook by hook, with hooks on
 
-Playbook has no CI or headless detection today: nothing reads `CI` or a headless variable. Each hook is judged for a normal `claude -p` run in a clean CI `HOME`. The last column holds recommendations, not code.
+Each hook was judged for a normal `claude -p` run in a clean CI `HOME`. The last column held the recommendation; the next section says what shipped.
 
 | Hook | Headless behavior (tested) | Recommended change |
 |---|---|---|
-| `session-init` | Exits 0 and writes `session-start.log`. On a cold `HOME` it injects about 800 bytes (an async and deferred-tool discipline note). Its nudges are switched off by `AUTO_LEARN_NUDGE=0`, `SKILLS_PRIMER=0`, and `ASYNC_DISCIPLINE=0`; with all three off it injects nothing. | When `PLAYBOOK_HEADLESS=1` (or `CI=true`), skip every nudge and inject only memory the run needs. |
-| `session-init` worktree sweep | Rate limited to once a day and gated by `worktreeCleanup.enabled`. A fresh CI checkout has nothing to sweep. No harm seen. | Skip it headless: an ephemeral runner has no stale worktrees. |
-| `session-init` config drift and memory injection | A cold `HOME` has no memory, so nothing is injected. A warm `HOME` (restored cache) would inject memory and spend tokens. | Make memory injection opt in headless. |
-| `memory-capture` (Stop) | Blocks only when `capture-due` exists, and only `statusline.sh` writes it, so it does not fire headless. If forced, it adds 2 turns and ends cleanly. | Return early when headless, so a stray marker can never change the final `result`. |
-| `memory-anchors`, `auto-model-detect` (UserPromptSubmit) | Fire and print nothing on a cold `HOME`. `auto-model-detect` only suggests a model. | Skip `auto-model-detect` headless. |
+| `session-init` | Exits 0 and writes `session-start.log`. On a cold `HOME` it injects about 800 bytes (an async and deferred-tool discipline note). Its nudges are switched off by `AUTO_LEARN_NUDGE=0`, `SKILLS_PRIMER=0`, and `ASYNC_DISCIPLINE=0`; with all three off it injects nothing. | Done: headless skips every nudge and injects no memory unless `PLAYBOOK_HEADLESS_MEMORY=1`. |
+| `session-init` worktree sweep | Rate limited to once a day and gated by `worktreeCleanup.enabled`. A fresh CI checkout has nothing to sweep. No harm seen. | Done: skipped headless. |
+| `session-init` config drift and memory injection | A cold `HOME` has no memory, so nothing is injected. A warm `HOME` (restored cache) would inject memory and spend tokens. | Done: opt in with `PLAYBOOK_HEADLESS_MEMORY=1`. |
+| `memory-capture` (Stop) | Blocks only when `capture-due` exists, and only `statusline.sh` writes it, so it does not fire headless. If forced, it adds 2 turns and ends cleanly. | Done: never blocks headless, and never when `stop_hook_active` is true. |
+| `memory-anchors`, `auto-model-detect` (UserPromptSubmit) | Fire and print nothing on a cold `HOME`. `auto-model-detect` only suggests a model. | Done: `auto-model-detect` is silent headless. |
 | `preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check` (PreToolUse) | Fire and stay quiet. These are safety guards. | Keep them on. They are the reason to run with hooks. |
 | `search-counter`, `post-edit-track`, `session-clean-exit` | Write small files under `runtime/`. Harmless. | None, or skip the writes headless. |
 
-No hook reads a TTY or prompts: only `src/hooks/mod.rs` touches stdin, to read the hook payload. One switch, `PLAYBOOK_HEADLESS`, with `CI=true` as an alias, would cover every row.
+No hook reads a TTY or prompts: only `src/hooks/mod.rs` touches stdin, to read the hook payload.
+
+## The headless switch
+
+One switch covers every row above. `PLAYBOOK_HEADLESS` set to `1`, `true`, `yes`, or `on` turns headless mode on, and `0`, `false`, `no`, or `off` forces it off. When `PLAYBOOK_HEADLESS` is unset, `CI=true` (or `CI=1`) turns it on, so a developer who runs with `CI=true` locally can opt out with `PLAYBOOK_HEADLESS=0`. The check lives in `src/common/headless.rs`.
+
+When headless:
+
+- `session-init` skips the worktree sweep, the handoff load, and the three nudges (the same effect as `AUTO_LEARN_NUDGE=0`, `SKILLS_PRIMER=0`, and `ASYNC_DISCIPLINE=0`). It injects no memory either, unless `PLAYBOOK_HEADLESS_MEMORY=1` opts memory in. It still writes `session-start.log`.
+- `memory-capture` (Stop) never blocks, even if a `capture-due` marker exists.
+- `auto-model-detect` stays silent.
+- The safety guards (`preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) behave exactly as they do interactively.
+
+`memory-capture` returns without blocking when headless. Interactive runs keep the bounded re-block from ADR 0009: it blocks at most twice, the second block escalates the handoff nudge, and then it releases, so it cannot loop. It deliberately does not read `stop_hook_active`, because that field would end the escalation after the first block.
 
 ## What must never run unattended
 

@@ -87,6 +87,8 @@ fn run_hook(
         .current_dir(cwd)
         .env("HOME", home)
         .env_remove("HOOK_INPUT")
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .env_remove("CLAUDE_PLUGIN_ROOT")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

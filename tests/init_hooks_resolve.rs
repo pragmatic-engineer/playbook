@@ -101,6 +101,8 @@ fn all_hook_commands(settings: &Value) -> Vec<String> {
 /// actually wrote.
 fn accepted_hook_names() -> Vec<String> {
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", "--help"])
         .output()
         .expect("playbook binary should spawn");
@@ -168,6 +170,8 @@ fn every_wired_command_after_a_real_init_resolves_to_something_that_actually_run
     // Act: a real `playbook init` against a clean scratch HOME, the exact
     // machine shape both defects reached production on.
     let status = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .arg("init")
         .env("HOME", &home)
         .env("CLAUDE_PLUGIN_ROOT", self_root())

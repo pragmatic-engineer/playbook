@@ -134,6 +134,9 @@ const IMPLEMENT_MSG: &str = r#"This prompt looks like it's ready to build: an ap
 /// UserPromptSubmit entry point. Never panics: a missing prompt, a slash
 /// command, a short prompt, or plain prose all fall through silently.
 pub fn run(payload: &Payload) {
+    if crate::common::headless::is_headless() {
+        return;
+    }
     let prompt = payload.field(".prompt");
     if prompt.is_empty() || prompt.starts_with('/') {
         return;

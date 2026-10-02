@@ -34,6 +34,8 @@ impl Env {
 
     fn run_in(&self, cwd: &Path, args: &[&str], stdin: &str) -> (i32, String, String) {
         let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(args)
             .current_dir(cwd)
             .env("HOME", &self.home)
