@@ -44,13 +44,23 @@ pub fn is_live(lock: Lock) -> bool {
     pid_is_alive(lock.pid) && port_accepts_connections(lock.port)
 }
 
+/// The directory lock beside `path`. Its parent is created first: `mkdir`
+/// fails when the parent is missing, and `with_dir_lock` then fails open, so
+/// two starters on a fresh home would both run unguarded.
+fn guard_path(path: &Path) -> PathBuf {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    PathBuf::from(format!("{}.guard", path.display()))
+}
+
 /// Claims the lock for `me` unless a DIFFERENT live server already holds it.
 /// Returns whether `me` now owns it. The check and the write happen under one
 /// directory lock, so two servers racing to start cannot both win; the loser
 /// must see `false` and stop, since an atomic write alone does not stop a
 /// process that is already running.
 pub fn try_claim(path: &Path, me: Lock) -> bool {
-    let guard = PathBuf::from(format!("{}.guard", path.display()));
+    let guard = guard_path(path);
     let (acquired, won) = with_dir_lock(&guard, LOCK_RETRIES, LOCK_RETRY_DELAY, || {
         if let Some(existing) = read_lock(path) {
             if existing != me && is_live(existing) {
@@ -69,7 +79,7 @@ pub fn try_claim(path: &Path, me: Lock) -> bool {
 /// under the same directory lock as `try_claim`, so a starter cannot delete
 /// a lock another starter's server has just claimed.
 pub fn clear_if_stale(path: &Path) {
-    let guard = PathBuf::from(format!("{}.guard", path.display()));
+    let guard = guard_path(path);
     let (acquired, ()) = with_dir_lock(&guard, LOCK_RETRIES, LOCK_RETRY_DELAY, || {
         if !read_lock(path).is_some_and(is_live) {
             clear_lock(path);
@@ -194,6 +204,31 @@ mod tests {
     }
 
     #[test]
+    fn claiming_in_a_missing_directory_does_not_wait_out_the_lock_retries() {
+        let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch_dir("lock-fresh-dir");
+        let path = dir.join("dashboard.lock");
+        let started = std::time::Instant::now();
+
+        let won = try_claim(
+            &path,
+            Lock {
+                pid: std::process::id(),
+                port: 1,
+            },
+        );
+
+        // An unguarded fail-open costs the full retry budget (about 1s).
+        assert!(won);
+        assert!(
+            started.elapsed() < Duration::from_millis(800),
+            "{:?}",
+            started.elapsed()
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_stale_holder_is_replaced() {
         let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scratch_dir("lock-stale");
@@ -217,8 +252,8 @@ mod tests {
     #[test]
     fn racing_claimants_produce_exactly_one_winner() {
         let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // The directory is deliberately not created: a fresh home has none.
         let dir = scratch_dir("lock-race");
-        fs::create_dir_all(&dir).unwrap();
         let path = dir.join("dashboard.lock");
         // Eight claimants, each a live listener on its own port under this
         // live pid, so whichever writes first is a live holder the rest lose to.

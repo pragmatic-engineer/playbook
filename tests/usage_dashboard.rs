@@ -108,9 +108,10 @@ fn http_status(port: u16, path: &str) -> u16 {
     response.status().as_u16()
 }
 
-fn serve_process_count() -> usize {
+fn serve_process_count(exe: &std::path::Path) -> usize {
+    let pattern = format!("{} usage dashboard --serve", exe.display());
     let out = Command::new("pgrep")
-        .args(["-f", "usage dashboard --serve"])
+        .args(["-f", &pattern])
         .output()
         .unwrap();
     String::from_utf8_lossy(&out.stdout).lines().count()
@@ -180,17 +181,23 @@ fn a_server_killed_out_of_band_is_recovered_on_the_next_call() {
 fn two_concurrent_starts_leave_exactly_one_server() {
     let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new("race");
-    let before = serve_process_count();
-
-    let spawn_piped = |home: &Home| {
-        home.command(&["usage", "dashboard"])
+    // A uniquely named copy of the binary, so only this test's servers match
+    // the process count, whatever else is running on the machine.
+    let exe = home.0.join("playbook-race");
+    fs::copy(env!("CARGO_BIN_EXE_playbook"), &exe).unwrap();
+    let spawn_piped = || {
+        let mut command = Command::new(&exe);
+        command
+            .args(["usage", "dashboard"])
+            .env("HOME", &home.0)
+            .env("PLAYBOOK_USAGE_NO_BROWSER", "1")
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap()
+            .stderr(Stdio::piped());
+        command.spawn().unwrap()
     };
-    let a = spawn_piped(&home);
-    let b = spawn_piped(&home);
+
+    let a = spawn_piped();
+    let b = spawn_piped();
     let (a, b) = (a.wait_with_output().unwrap(), b.wait_with_output().unwrap());
 
     let (a_text, b_text) = (stdout(&a), stdout(&b));
@@ -204,8 +211,14 @@ fn two_concurrent_starts_leave_exactly_one_server() {
         "both callers must report the winner"
     );
     wait_until("the losing server to exit", || {
-        serve_process_count() == before + 1
+        serve_process_count(&exe) == 1
     });
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        serve_process_count(&exe),
+        1,
+        "the loser must not come back or linger"
+    );
     let (pid, port) = home.lock().unwrap();
     assert!(alive(pid));
     assert_eq!(http_status(port, "/"), 200);
