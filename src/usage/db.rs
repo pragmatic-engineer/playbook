@@ -84,6 +84,18 @@ pub fn advance_watermark(conn: &Connection, source: &str, watermark: i64) -> Res
     .map_err(|e| format!("failed to advance watermark for {source}: {e}"))
 }
 
+/// Like `advance_watermark`, but never moves it backwards: a slower ingest
+/// that read an older watermark must not undo a newer one.
+pub fn raise_watermark(conn: &Connection, source: &str, watermark: i64) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO usage_watermarks (source, watermark) VALUES (?1, ?2)
+         ON CONFLICT(source) DO UPDATE SET watermark = MAX(watermark, excluded.watermark)",
+        params![source, watermark],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("failed to raise watermark for {source}: {e}"))
+}
+
 fn exists(conn: &Connection, table: &str, event_id: &str) -> Result<bool, String> {
     conn.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE event_id = ?1)"),

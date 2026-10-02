@@ -378,3 +378,55 @@ fn a_request_with_a_foreign_host_header_is_refused() {
         "no data may leak to a foreign host"
     );
 }
+
+#[test]
+fn ingest_running_beside_the_server_never_breaks_its_reads_or_loses_events() {
+    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new("wal");
+    let project = home.0.join(".claude/projects/proj-wal");
+    fs::create_dir_all(&project).unwrap();
+    let port = start(&home);
+    const FILES: usize = 25;
+
+    // One writer: each round adds a transcript with one new message, then
+    // runs `usage ingest` as a separate process against the same database
+    // the server is reading and ingesting into.
+    let writer_home = home.0.clone();
+    let writer_project = project.clone();
+    let writer = std::thread::spawn(move || {
+        for i in 0..FILES {
+            let line = format!(
+                "{{\"type\":\"assistant\",\"uuid\":\"u{i}\",\"sessionId\":\"s\",\"timestamp\":\"2026-09-05T10:00:{i:02}.000Z\",\"cwd\":\"/w/r\",\"gitBranch\":\"b\",\"message\":{{\"id\":\"msg_wal_{i}\",\"model\":\"claude-sonnet-5\",\"content\":[],\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}}}\n"
+            );
+            fs::write(writer_project.join(format!("t{i}.jsonl")), line).unwrap();
+            let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+                .args(["usage", "ingest"])
+                .env("HOME", &writer_home)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "ingest failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    });
+
+    // The reader polls the server the whole time; every answer must be a 200.
+    let mut polls = 0;
+    while !writer.is_finished() {
+        let (status, body) = http_get(port, "/api/data");
+        assert_eq!(status, 200, "a poll failed mid-ingest: {body}");
+        polls += 1;
+    }
+    writer.join().unwrap();
+
+    let (status, body) = http_get(port, "/api/data");
+    let data: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(
+        data["totals"]["messages"], FILES,
+        "no event may be lost or doubled"
+    );
+    assert!(polls > 0);
+}
