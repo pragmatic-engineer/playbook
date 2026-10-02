@@ -174,7 +174,7 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 | `/playbook:doctor` | Checks the seven layers and prints a pass/info table with a remediation hint for each miss. |
 | `/playbook:plan` | One continuous session from a raw idea or a settled direction to a verified, parallel-safe plan saved for `/playbook:implement`. |
 | `/playbook:implement` | Executes a `/playbook:plan` plan or `/playbook:adr` blueprint with subagents and TDD, committing each work unit. `--auto` opens a PR. |
-| `/playbook:adr` | Creates an Architecture Decision Record through investigate, draft, quality-gate, finalise. Saves to `.claude/adr/`. |
+| `/playbook:adr` | Creates an Architecture Decision Record through investigate, draft, quality-gate, finalise. Saves to `docs/adr/`. |
 | `/playbook:commit-and-push` | Writes a commit message from the staged diff, commits signed, optionally rebases, then pushes. |
 | `/playbook:create-pull-request` | Opens a PR with pre-flight checks, a conventional-commit title, and the team PR template. |
 | `/playbook:quick-review` | Single-pass PR review using the `grounding-review` discipline, posted as a pending GitHub review. |
@@ -211,7 +211,7 @@ Full documentation: [`docs/index.md`](docs/index.md).
 
 ## Memory
 
-One markdown store at `~/.claude/memory/`, global and per-project, local-only and never committed. See [docs/concepts/02-memory-system.md](docs/concepts/02-memory-system.md).
+One markdown store at `~/.config/playbook/memory/`, global and per-project, local-only and never committed. See [docs/concepts/02-memory-system.md](docs/concepts/02-memory-system.md).
 
 ## Security
 

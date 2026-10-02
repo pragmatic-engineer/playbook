@@ -39,14 +39,13 @@ Fans out a swarm of specialist reviewer subagents in parallel (logic, test, secu
 /playbook:deep-review               # current branch's PR, auto-selects reviewers from the diff
 /playbook:deep-review 123           # PR #123
 /playbook:deep-review 123 --all     # every reviewer regardless of diff content
-/playbook:deep-review --quick       # core reviewers only
 /playbook:deep-review --preset security   # security + data + types + logic
 /playbook:deep-review --self        # local self-review, never posts to GitHub
 ```
 
-Available presets: `security`, `architecture`, `data`, `docs`, `thorough`.
+Available presets: `security`, `architecture`, `data`, `docs`.
 
-In `auto` mode (the default), conditional reviewers (architecture, migration, docs, complexity, and others) activate based on what the diff contains. The orchestrating session runs on Opus; the specialist subagents run on Sonnet. See [06-internals-memory-and-routing.md](../internals/02-model-routing-and-memory.md) for why.
+In `auto` mode (the default), conditional reviewers (architecture, migration, docs, complexity, and others) activate based on what the diff contains. The command and its full-lens `reviewer` subagents run on Opus; a lens the triage step marks narrow gets a `cheap-checker` on Haiku. See [Model routing and memory](../internals/02-model-routing-and-memory.md) for why.
 
 Use `/playbook:quick-review` for everyday PRs. Reach for `/playbook:deep-review` when the change is large, risky, or touches multiple layers.
 

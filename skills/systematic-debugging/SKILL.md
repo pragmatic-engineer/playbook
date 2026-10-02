@@ -151,4 +151,4 @@ But 95% of "no root cause" cases are incomplete investigation. Be honest about w
 
 ## Memory
 
-When the investigation surfaces a durable root cause or gotcha (true regardless of this one bug), and a project memory store exists at `~/.claude/memory/<owner>/<repo>/` (derive `<owner>/<repo>` from `git remote get-url origin`), save it as a project memory fact with `anchors:` to the files involved. This turns a hard debugging session into a fact the next run reads first. If there is no project store, skip it.
+When the investigation surfaces a durable root cause or gotcha (true regardless of this one bug), and a project memory store exists at `~/.config/playbook/memory/<owner>/<repo>/` (derive `<owner>/<repo>` from `git remote get-url origin`), save it as a project memory fact with `anchors:` to the files involved. This turns a hard debugging session into a fact the next run reads first. If there is no project store, skip it.

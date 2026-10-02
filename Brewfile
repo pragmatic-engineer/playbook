@@ -3,7 +3,7 @@
 #
 # Dependencies for this ~/.claude config (hooks, shell/, statusline).
 #
-# The canonical dependency list. `/setup` reads the `brew "X"` formula names
+# The canonical dependency list. `/playbook:setup` reads the `brew "X"` formula names
 # from here and runs a per-dependency check-then-install (shell/ensure-deps.sh):
 # for each one it uses the version already on PATH (brew, nvm, pyenv, system, a
 # manual install) and installs via brew only when the tool is missing, so an
@@ -22,11 +22,11 @@ brew "just"         # task runner; see justfile (replaced the Makefile)
 brew "gh"           # statusline PR and CI status (optional but recommended)
 brew "node"         # statusline shows the active Node version (installed only if no node is on PATH)
 
-# Browser automation (optional): agent-browser MCP, used by /brainstorm for web-only tickets and attachments
+# Browser automation (optional): agent-browser MCP, used by /playbook:plan for web-only tickets and attachments
 brew "agent-browser"  # register: claude mcp add --scope user agent-browser -- agent-browser mcp --tools core
 
 # Atlassian CLI (optional): Jira and Confluence from the terminal, used by
-# /learn-project when no Atlassian MCP server is connected. Ships from
+# /playbook:learn-project when no Atlassian MCP server is connected. Ships from
 # Atlassian's own tap, so the tap line below is required before the formula
 # resolves. Homebrew also refuses formulae from an untrusted third-party tap:
 # review it, then run `brew trust atlassian/acli` once. That step is left to you

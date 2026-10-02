@@ -63,7 +63,7 @@ pub enum Command {
         #[arg(long)]
         aliases: bool,
     },
-    /// Shared-settings seed subcommands (`gen` today; `check` from WU-21).
+    /// Shared-settings seed subcommands (`gen` and `check`).
     Settings {
         #[command(subcommand)]
         sub: SettingsCommand,
@@ -183,7 +183,7 @@ pub enum SettingsCommand {
 /// `playbook memory` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum MemoryCommand {
-    /// Rebuild `~/.claude/memory/memory.graph.json` from every fact on disk.
+    /// Rebuild `~/.config/playbook/memory/memory.graph.json` from every fact on disk.
     ///
     /// The PostToolUse hook rebuilds automatically when a fact is saved, so
     /// this is only needed after hand-editing fact files. Forcing it through
@@ -276,7 +276,7 @@ pub enum PrCommand {
 #[derive(Subcommand, Debug)]
 pub enum GateCommand {
     /// Parse a phase agent's raw output for a `VERDICT:` line and upsert it
-    /// into the gate-check database at `.claude/state.db`.
+    /// into the gate-check database under `~/.config/playbook`.
     Record {
         /// Plan slug the recorded phase belongs to.
         plan_slug: String,
