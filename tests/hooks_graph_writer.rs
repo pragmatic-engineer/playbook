@@ -59,6 +59,8 @@ fn read_graph(home: &Path) -> Value {
 
 fn run_playbook(home: &Path, args: &[&str], hook_input: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("HOME", home)
@@ -1644,6 +1646,8 @@ fn memory_rebuild_subcommand_rebuilds_with_no_payload_where_the_hook_skips() {
 
     // Act: the hook, told about a file outside the memory dir, must not rebuild
     let hook = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", "rebuild-memory-graph"])
         .env("HOME", &home)
         .env(
@@ -1665,6 +1669,8 @@ fn memory_rebuild_subcommand_rebuilds_with_no_payload_where_the_hook_skips() {
 
     // Act: the subcommand, with no payload whatsoever
     let forced = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(["memory", "rebuild"])
         .env("HOME", &home)
         .output()

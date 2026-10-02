@@ -31,6 +31,8 @@ fn scratch_dir(tag: &str) -> PathBuf {
 /// Returns `(stdout, exit_code)`.
 fn fire(hook_name: &str, home: &Path, payload: &str) -> (String, i32) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", hook_name])
         .env("HOME", home)
         .stdin(Stdio::piped())

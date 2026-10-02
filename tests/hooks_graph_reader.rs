@@ -81,6 +81,8 @@ fn write_graph(home: &Path, content: &str) {
 
 fn run_playbook(home: &Path, args: &[&str], hook_input: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(args)
         .current_dir(repo_dir(home))
         .env("HOME", home)

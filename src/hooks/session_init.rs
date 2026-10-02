@@ -84,22 +84,35 @@ pub fn run(payload: &Payload) {
     prepare_memory_store();
     zero_session_state(&dir);
     clear_statusline_cache();
-    maybe_sweep_worktrees(&home, &repo_root);
+    // Headless runs (CI, `claude -p`) have no stale worktrees, no person to nudge,
+    // and no handoff to consume: they inject nothing unless memory is opted in.
+    let headless = crate::common::headless::is_headless();
+    if !headless {
+        maybe_sweep_worktrees(&home, &repo_root);
+    }
 
     let (system_message, mut extra_context) = check_config_drift(payload, &dir, &plugin_root);
 
-    append_promoted_facts(&mut extra_context, &repo_root);
-    append_memory_slice(&mut extra_context, &plugin_root, &repo_root);
-    let injected = append_handoff_slice(&mut extra_context);
+    if !headless || crate::common::headless::headless_memory_enabled() {
+        append_promoted_facts(&mut extra_context, &repo_root);
+        append_memory_slice(&mut extra_context, &plugin_root, &repo_root);
+    }
+    let injected = if headless {
+        0
+    } else {
+        append_handoff_slice(&mut extra_context)
+    };
     crate::handoff::log_start(
         &payload.field(".source"),
         &payload.field(".session_id"),
         &crate::handoff::current_slug(),
         injected,
     );
-    append_auto_learn_nudge(&mut extra_context, &repo_root);
-    append_skills_primer(&mut extra_context, &home);
-    append_async_discipline(&mut extra_context);
+    if !headless {
+        append_auto_learn_nudge(&mut extra_context, &repo_root);
+        append_skills_primer(&mut extra_context, &home);
+        append_async_discipline(&mut extra_context);
+    }
 
     emit(&system_message, &extra_context);
 }
