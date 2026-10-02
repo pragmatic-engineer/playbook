@@ -257,6 +257,9 @@ pub enum PrCommand {
         /// Ticket id to cite; defaults to one found in the branch name.
         #[arg(long)]
         ticket: Option<String>,
+        /// Work in this directory (inside the repo or worktree) instead of the cwd.
+        #[arg(long)]
+        dir: Option<String>,
     },
     /// Push the branch and open a draft PR from a drafted title and body.
     Create {
@@ -269,6 +272,9 @@ pub enum PrCommand {
         /// Base branch for the PR; defaults to the repo's default branch.
         #[arg(long)]
         base: Option<String>,
+        /// Work in this directory (inside the repo or worktree) instead of the cwd.
+        #[arg(long)]
+        dir: Option<String>,
     },
 }
 
