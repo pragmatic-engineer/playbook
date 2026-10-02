@@ -33,6 +33,8 @@ fn scratch(tag: &str) -> PathBuf {
 fn run_guard(name: &str, command: &str) -> String {
     let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", name])
         .env("HOOK_INPUT", payload)
         .output()
@@ -51,6 +53,8 @@ fn run_guard(name: &str, command: &str) -> String {
 fn run_guard_via_stdin(name: &str, command: &str) -> String {
     let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", name])
         .env_remove("HOOK_INPUT")
         .stdin(Stdio::piped())
@@ -578,6 +582,8 @@ mod rm_workspace_guard {
     fn malformed_payloads_exit_silently() {
         for raw in ["", "{", "null", r#"{"tool_input":{}}"#] {
             let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+                .env_remove("CI")
+                .env_remove("PLAYBOOK_HEADLESS")
                 .args(["hook", "rm-workspace-guard"])
                 .env("HOOK_INPUT", raw)
                 .output()
@@ -626,6 +632,8 @@ mod precommit_check {
     fn warns_in(dir: &PathBuf, command: &str) -> bool {
         let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "precommit-check"])
             .current_dir(dir)
             .env("HOOK_INPUT", payload)
@@ -723,6 +731,8 @@ mod precommit_check {
         let payload =
             serde_json::json!({ "tool_input": { "command": "git commit -m x" } }).to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "precommit-check"])
             .current_dir(&dir)
             .env("HOOK_INPUT", payload)
@@ -753,6 +763,8 @@ mod bg_await_guard {
         })
         .to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "bg-await-guard"])
             .env("HOOK_INPUT", payload)
             .output()
@@ -833,6 +845,8 @@ mod bg_await_guard {
         })
         .to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "bg-await-guard"])
             .env("HOOK_INPUT", payload)
             .env("BG_AWAIT_GUARD", "0")
@@ -851,6 +865,8 @@ mod bg_await_guard {
             r#"{"tool_input":{"command":"npm install"}}"#,
         ] {
             let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+                .env_remove("CI")
+                .env_remove("PLAYBOOK_HEADLESS")
                 .args(["hook", "bg-await-guard"])
                 .env("HOOK_INPUT", raw)
                 .output()
@@ -962,6 +978,8 @@ mod no_slop_guard {
             serde_json::json!({ "tool_input": { "command": "git commit -m \"a \u{2014} b\"" } })
                 .to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "no-slop-guard"])
             .env("HOOK_INPUT", payload)
             .env("NO_SLOP_GUARD", "0")
@@ -998,6 +1016,8 @@ mod no_slop_guard {
             r#"{"tool_input":null}"#,
         ] {
             let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+                .env_remove("CI")
+                .env_remove("PLAYBOOK_HEADLESS")
                 .args(["hook", "no-slop-guard"])
                 .env("HOOK_INPUT", raw)
                 .output()
@@ -1018,6 +1038,8 @@ mod no_slop_guard {
         })
         .to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "no-slop-guard"])
             .env("HOOK_INPUT", payload)
             .output()
@@ -1035,6 +1057,8 @@ mod no_slop_guard {
         })
         .to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "no-slop-guard"])
             .env("HOOK_INPUT", payload)
             .output()
@@ -1129,6 +1153,8 @@ mod no_slop_guard {
         })
         .to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "no-slop-guard"])
             .env("HOOK_INPUT", payload)
             .env("NO_SLOP_GUARD", "0")
@@ -1147,6 +1173,8 @@ mod no_slop_guard {
             r#"{"tool_input":{"file_path":"src/lib.rs"}}"#,
         ] {
             let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+                .env_remove("CI")
+                .env_remove("PLAYBOOK_HEADLESS")
                 .args(["hook", "no-slop-guard"])
                 .env("HOOK_INPUT", raw)
                 .output()
@@ -1169,6 +1197,8 @@ mod no_slop_guard {
         })
         .to_string();
         let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "no-slop-guard"])
             .env_remove("HOOK_INPUT")
             .stdin(Stdio::piped())

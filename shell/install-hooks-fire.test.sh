@@ -19,6 +19,9 @@
 # Run:  bash shell/install-hooks-fire.test.sh
 set -u
 
+# A CI runner sets CI=true, which means headless; these hooks must run as a person would see them.
+export PLAYBOOK_HEADLESS=0
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL="$REPO_ROOT/install.sh"
 

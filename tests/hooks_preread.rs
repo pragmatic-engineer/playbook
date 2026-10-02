@@ -33,6 +33,8 @@ fn scratch_dir(tag: &str) -> PathBuf {
 /// at `home`.
 fn run_hook(name: &str, home: &Path, stdin_json: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", name])
         .env("HOME", home)
         .env_remove("HOOK_INPUT")
