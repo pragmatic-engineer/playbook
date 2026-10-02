@@ -7,7 +7,7 @@
 
 use super::db;
 use super::UsageSource;
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct IngestStats {
@@ -27,8 +27,11 @@ pub fn ingest(
     let watermark = db::get_watermark(conn, name)?;
     let events = source.events_since(watermark)?;
 
-    let tx = conn
-        .unchecked_transaction()
+    // IMMEDIATE takes the write lock up front, so a second ingest waits out
+    // `busy_timeout` instead of failing with "database is locked" when its
+    // stale read snapshot cannot upgrade to a write. It also makes the
+    // event_id pre-filter below race-free.
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
         .map_err(|e| format!("failed to begin ingest transaction: {e}"))?;
     let mut stats = IngestStats::default();
     let mut newest = watermark;
@@ -56,7 +59,7 @@ pub fn ingest(
         stats.tools_inserted += 1;
     }
 
-    db::advance_watermark(&tx, name, newest)?;
+    db::raise_watermark(&tx, name, newest)?;
     tx.commit()
         .map_err(|e| format!("failed to commit ingest transaction: {e}"))?;
     Ok(stats)
@@ -143,6 +146,19 @@ mod tests {
         assert_eq!(again.duplicates_skipped, 8);
         let tools = db::load_tool_events(&conn).unwrap();
         assert_eq!(tools[0].kind, ToolKind::Skill);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_slower_ingest_cannot_move_the_watermark_backwards() {
+        let dir = scratch_dir("usage-raise");
+        let conn = db::open_db(&dir.join("usage.db")).unwrap();
+        db::advance_watermark(&conn, "fake", 900).unwrap();
+
+        db::raise_watermark(&conn, "fake", 100).unwrap();
+        assert_eq!(db::get_watermark(&conn, "fake").unwrap(), 900);
+        db::raise_watermark(&conn, "fake", 1200).unwrap();
+        assert_eq!(db::get_watermark(&conn, "fake").unwrap(), 1200);
         let _ = fs::remove_dir_all(dir);
     }
 
