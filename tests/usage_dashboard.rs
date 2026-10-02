@@ -73,6 +73,15 @@ impl Home {
         let mut parts = text.split_whitespace();
         Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
     }
+
+    /// The session token, read from the lock the way the browser link carries it.
+    fn token(&self) -> String {
+        let text = fs::read_to_string(self.lock_path()).expect("a lock file");
+        text.split_whitespace()
+            .nth(2)
+            .expect("a token field")
+            .to_string()
+    }
 }
 
 impl Drop for Home {
@@ -278,8 +287,12 @@ fn stop_ends_the_server_and_clears_the_lock_and_is_safe_when_nothing_runs() {
     assert!(stdout(&again).contains("nothing is running"));
 }
 
-fn http_get(port: u16, path: &str) -> (u16, String) {
-    let mut response = ureq::get(&format!("http://127.0.0.1:{port}{path}"))
+fn http_get_with(port: u16, path: &str, token: Option<&str>) -> (u16, String) {
+    let mut request = ureq::get(&format!("http://127.0.0.1:{port}{path}"));
+    if let Some(token) = token {
+        request = request.header("X-Playbook-Token", token);
+    }
+    let mut response = request
         .config()
         .http_status_as_error(false)
         .build()
@@ -293,6 +306,11 @@ fn start(home: &Home) -> u16 {
     port_in(&stdout(&home.run(&["usage", "dashboard"])))
 }
 
+/// GET with the session token, as the page does.
+fn http_get(home: &Home, port: u16, path: &str) -> (u16, String) {
+    http_get_with(port, path, Some(&home.token()))
+}
+
 #[test]
 fn api_data_ingests_transcripts_and_returns_the_fixture_totals() {
     let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -300,7 +318,7 @@ fn api_data_ingests_transcripts_and_returns_the_fixture_totals() {
     home.seed("usage/proj-one/s1.jsonl");
     let port = start(&home);
 
-    let (status, body) = http_get(port, "/api/data");
+    let (status, body) = http_get(&home, port, "/api/data");
 
     assert_eq!(status, 200);
     let data: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -328,7 +346,7 @@ fn api_data_reports_skill_and_agent_counts() {
     home.seed("tools/proj-one/s2.jsonl");
     let port = start(&home);
 
-    let (_, body) = http_get(port, "/api/data");
+    let (_, body) = http_get(&home, port, "/api/data");
 
     let data: serde_json::Value = serde_json::from_str(&body).unwrap();
     let names = |key: &str| -> Vec<String> {
@@ -348,10 +366,12 @@ fn a_new_transcript_shows_up_on_the_next_request_without_a_restart() {
     let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new("refresh");
     let port = start(&home);
-    let empty: serde_json::Value = serde_json::from_str(&http_get(port, "/api/data").1).unwrap();
+    let empty: serde_json::Value =
+        serde_json::from_str(&http_get(&home, port, "/api/data").1).unwrap();
 
     home.seed("usage/proj-one/s1.jsonl");
-    let filled: serde_json::Value = serde_json::from_str(&http_get(port, "/api/data").1).unwrap();
+    let filled: serde_json::Value =
+        serde_json::from_str(&http_get(&home, port, "/api/data").1).unwrap();
 
     assert_eq!(empty["totals"]["messages"], 0);
     assert_eq!(filled["totals"]["messages"], 3);
@@ -438,13 +458,13 @@ fn ingest_running_beside_the_server_never_breaks_its_reads_or_loses_events() {
     // The reader polls the server the whole time; every answer must be a 200.
     let mut polls = 0;
     while !writer.is_finished() {
-        let (status, body) = http_get(port, "/api/data");
+        let (status, body) = http_get(&home, port, "/api/data");
         assert_eq!(status, 200, "a poll failed mid-ingest: {body}");
         polls += 1;
     }
     writer.join().unwrap();
 
-    let (status, body) = http_get(port, "/api/data");
+    let (status, body) = http_get(&home, port, "/api/data");
     let data: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(status, 200);
     assert_eq!(
