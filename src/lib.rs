@@ -228,6 +228,21 @@ pub enum AgentsCommand {
 pub enum UsageCommand {
     /// Read new session history into the usage store, without printing a summary.
     Ingest,
+    /// Open the local usage dashboard, starting its server if needed.
+    Dashboard {
+        /// Internal: run as the detached server process.
+        #[arg(long, hide = true)]
+        serve: bool,
+        #[command(subcommand)]
+        sub: Option<DashboardCommand>,
+    },
+}
+
+/// `playbook usage dashboard` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum DashboardCommand {
+    /// Stop the running dashboard server.
+    Stop,
 }
 
 /// `playbook pr` subcommands, backing `src/pr/`.
