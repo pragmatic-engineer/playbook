@@ -18,6 +18,7 @@ pub struct Paths {
     pub claude_projects: PathBuf,
     pub claude_json: PathBuf,
     pub db: PathBuf,
+    pub lock: PathBuf,
 }
 
 impl Paths {
@@ -26,12 +27,16 @@ impl Paths {
             claude_projects: home.join(".claude").join("projects"),
             claude_json: home.join(".claude.json"),
             db: playbook_root_from(home).join("usage").join("usage.db"),
+            lock: playbook_root_from(home)
+                .join("usage")
+                .join("dashboard.lock"),
         }
     }
 
     pub fn real() -> Self {
         let mut paths = Self::from_home(&crate::common::home_dir());
         paths.db = usage_db_dir().join("usage.db");
+        paths.lock = usage_db_dir().join("dashboard.lock");
         paths
     }
 }
