@@ -85,3 +85,10 @@ maintainer-personal home-directory write grant and narrowed
 `Bash(**/.claude/**)` to `Bash($HOME/.claude/**)`. Both changes are
 documented in their own PRs; this is the recorded reason for the divergence
 the paragraph above asks for.
+
+**Note (2026-10-02):** the two `setup-local.*.json` fixtures were regenerated
+again, by removing the single `Bash(jq:*)` allowlist line from the captured
+`settings_json` and `settings_base_json` strings. `jq` is no longer a
+dependency (every call site moved to `playbook json`, and the installer now
+uses `playbook trust`), so the shared settings and permissions templates no
+longer grant it. This is an intentional behaviour change, not a drift to hide.
