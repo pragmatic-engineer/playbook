@@ -40,16 +40,20 @@ on:
       - agents/review-triage.md
       - shell/eval-review-triage.sh
       - shell/fixtures/review-triage-eval-set.json
+      # Editing this workflow runs it, so a change to it tests itself.
+      - .github/workflows/eval-review-triage.yml
+  # Manual run from the Actions tab, e.g. to re-run the eval without touching the watched files.
+  workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: eval-review-triage-${{ github.event.pull_request.number }}
+  group: eval-review-triage-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   eval:
-    if: github.event.pull_request.draft == false
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -96,4 +100,8 @@ jobs:
             echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not set (expected on fork PR runs, which get no repository secrets); skipping the live eval."
             exit 0
           fi
+          # shell/eval-review-triage.sh calls `playbook json ...`, so the binary has to be on PATH.
+          # Built after the token check so runs that skip the live eval don't pay for the compile.
+          cargo build
+          export PATH="$PWD/target/debug:$PATH"
           bash shell/eval-review-triage.sh
