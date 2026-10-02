@@ -35,6 +35,10 @@ impl UsageSource for ClaudeCodeSource {
         let mut files = Vec::new();
         collect_jsonl(&self.root, &mut files);
         files.sort();
+        // A file last modified before the watermark cannot hold a newer
+        // event, so unchanged transcripts are never re-read. This keeps a
+        // repeated ingest (the dashboard polls every few seconds) cheap.
+        files.retain(|f| !modified_before(f, watermark));
 
         let mut usage: Vec<UsageEvent> = Vec::new();
         let mut usage_index: HashMap<String, usize> = HashMap::new();
@@ -97,6 +101,16 @@ fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+fn modified_before(path: &Path, watermark: i64) -> bool {
+    let Ok(modified) = fs::metadata(path).and_then(|m| m.modified()) else {
+        return false;
+    };
+    let Ok(since_epoch) = modified.duration_since(std::time::UNIX_EPOCH) else {
+        return false;
+    };
+    i64::try_from(since_epoch.as_secs()).is_ok_and(|secs| secs < watermark)
 }
 
 fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -302,6 +316,32 @@ mod tests {
             ],
             "tu_4 appears on two lines but is one invocation"
         );
+    }
+
+    #[test]
+    fn a_transcript_older_than_the_watermark_is_not_read_at_all() {
+        let dir = crate::common::test_support::scratch_dir("old-transcript");
+        let project = dir.join("p");
+        fs::create_dir_all(&project).unwrap();
+        let file = project.join("s.jsonl");
+        fs::copy(root("usage").join("proj-one/s1.jsonl"), &file).unwrap();
+        let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1000);
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let source = ClaudeCodeSource::new(dir.clone());
+
+        let skipped = source.events_since(2000).unwrap();
+        let read = source.events_since(0).unwrap();
+
+        // The file's events are newer than 2000, but the file itself was
+        // last modified at 1000, so it is skipped without being parsed.
+        assert!(skipped.usage.is_empty());
+        assert_eq!(read.usage.len(), 3);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
