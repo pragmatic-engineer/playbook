@@ -293,3 +293,103 @@ fn a_base_starting_with_a_dash_is_refused_before_anything_is_pushed() {
     assert_eq!(gh.count("pr_create"), 0);
     assert!(!remote_has_branch(&fx, "feat/x"));
 }
+
+fn create_with_body(fx: &Fixture, gh: &FakeGh, title: &str, text: &str) -> Result<String, String> {
+    let path = fx.state.join("guard-body.md");
+    fs::create_dir_all(&fx.state).expect("state dir");
+    fs::write(&path, text).expect("body");
+    let body_file = path.to_str().expect("utf8").to_string();
+    in_dir(&fx.work, || run(gh, title, &body_file, None))
+}
+
+fn assert_nothing_published(fx: &Fixture, gh: &FakeGh) {
+    assert_eq!(gh.count("pr_create"), 0, "no PR may be created");
+    assert!(!remote_has_branch(fx, "feat/x"), "nothing may be pushed");
+}
+
+#[test]
+fn attribution_in_the_body_blocks_the_push_and_names_the_line() {
+    // Arrange
+    let fx = Fixture::new("attr-body", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    let gh = FakeGh::creating(URL);
+
+    // Act
+    let err = create_with_body(&fx, &gh, "feat: x", "ok\nClaude-Session: https://x\n")
+        .expect_err("refused");
+
+    // Assert
+    assert_eq!(
+        err,
+        "refusing to push or create:\nbody line 2 carries AI attribution\n\
+         fix: rewrite the title or body, or amend the named commit, before pushing"
+    );
+    assert_nothing_published(&fx, &gh);
+}
+
+#[test]
+fn attribution_in_a_commit_message_blocks_the_push_and_names_the_sha() {
+    // Arrange
+    let fx = Fixture::new("attr-commit", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    fs::write(fx.work.join("b.txt"), "b\n").expect("write");
+    git(&fx.work, &["add", "-A"]);
+    git(
+        &fx.work,
+        &[
+            "commit",
+            "--quiet",
+            "-m",
+            "feat: b",
+            "-m",
+            "Co-Authored-By: Claude <noreply@anthropic.com>",
+        ],
+    );
+    let sha = git(&fx.work, &["rev-parse", "--short", "HEAD"]);
+    let gh = FakeGh::creating(URL);
+
+    // Act
+    let err = create_with_body(&fx, &gh, "feat: x", "body\n").expect_err("refused");
+
+    // Assert
+    assert!(
+        err.contains(&format!("commit {sha} carries AI attribution")),
+        "got {err}"
+    );
+    assert_nothing_published(&fx, &gh);
+}
+
+#[test]
+fn a_dash_in_the_title_blocks_the_push() {
+    // Arrange
+    let fx = Fixture::new("dash-title", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    let gh = FakeGh::creating(URL);
+
+    // Act
+    let err = create_with_body(&fx, &gh, "feat \u{2014} x", "body\n").expect_err("refused");
+
+    // Assert
+    assert_eq!(
+        err,
+        "refusing to push or create:\nline 0 (title) has a em (U+2014) dash\n\
+         fix: replace each dash with a comma, colon, or parentheses"
+    );
+    assert_nothing_published(&fx, &gh);
+}
+
+#[test]
+fn dashes_inside_code_do_not_block_a_clean_pr() {
+    // Arrange
+    let fx = Fixture::new("dash-code", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    let gh = FakeGh::creating(URL);
+    let text = "use `a \u{2013} b`\n```\nx \u{2014} y\n```\n";
+
+    // Act
+    let got = create_with_body(&fx, &gh, "feat: x", text);
+
+    // Assert
+    assert!(got.is_ok(), "{got:?}");
+    assert_eq!(gh.count("pr_create"), 1);
+}
