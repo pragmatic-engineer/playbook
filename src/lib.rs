@@ -116,6 +116,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: JsonCommand,
     },
+    /// Pre-trust an absolute directory in `~/.claude.json` so Claude Code's
+    /// first-launch trust dialog never blocks `cc`/`ccd`. Always exits 0.
+    Trust {
+        /// Absolute path of the directory to trust.
+        path: String,
+    },
 }
 
 /// Which worktree-scoped storage directory `playbook path` resolves under

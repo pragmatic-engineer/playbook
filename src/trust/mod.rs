@@ -275,6 +275,9 @@ mod tests {
         let link = dir.join(".claude.json");
         symlink(&target, &link).expect("symlink is creatable");
         let link_target_before = fs::read_link(&link).expect("link is readable");
+        let link_ino_before = fs::symlink_metadata(&link)
+            .expect("link has metadata")
+            .ino();
         let ino_before = fs::metadata(&target).expect("target has metadata").ino();
 
         // Act
@@ -290,6 +293,13 @@ mod tests {
             .expect("link has metadata")
             .file_type()
             .is_symlink());
+        let link_ino_after = fs::symlink_metadata(&link)
+            .expect("link has metadata")
+            .ino();
+        assert_eq!(
+            link_ino_before, link_ino_after,
+            "the symlink itself must never be replaced"
+        );
         let after = fs::metadata(&target).expect("target has metadata");
         assert_ne!(
             ino_before,
