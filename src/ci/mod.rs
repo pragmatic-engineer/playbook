@@ -50,8 +50,14 @@ impl Report {
         self.count(Status::Fail)
     }
 
+    /// 1 when a check failed, or, with `strict`, when any check was skipped:
+    /// a job pointed at the wrong directory must not pass by checking nothing.
+    pub fn exit_code(&self, strict: bool) -> i32 {
+        i32::from(self.failed() > 0 || (strict && self.count(Status::Skip) > 0))
+    }
+
     /// One line per check (extra lines of a long detail indented), then the totals.
-    pub fn to_text(&self) -> String {
+    pub fn to_text(&self, strict: bool) -> String {
         let mut out = String::new();
         for check in &self.checks {
             let mut lines = check.detail.lines();
@@ -71,10 +77,13 @@ impl Report {
             self.failed(),
             self.count(Status::Skip)
         ));
+        if strict && self.count(Status::Skip) > 0 {
+            out.push_str(" (strict: a skipped check fails the run)");
+        }
         out
     }
 
-    pub fn to_json(&self) -> String {
+    pub fn to_json(&self, strict: bool) -> String {
         let checks: Vec<_> = self
             .checks
             .iter()
@@ -85,6 +94,7 @@ impl Report {
             "passed": self.count(Status::Pass),
             "failed": self.failed(),
             "skipped": self.count(Status::Skip),
+            "strict": strict,
         })
         .to_string()
     }
@@ -160,18 +170,19 @@ fn checkout_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// CLI entry. Returns the text to print and the exit code (1 when any check fails).
-pub fn run(dir: Option<&str>, as_json: bool) -> Result<(String, i32), String> {
+/// CLI entry. Returns the text to print and the exit code (1 when any check
+/// fails, or with `strict` when any is skipped).
+pub fn run(dir: Option<&str>, as_json: bool, strict: bool) -> Result<(String, i32), String> {
     if let Some(dir) = dir {
         enter_dir(dir)?;
     }
     let report = run_in(&checkout_root());
     let text = if as_json {
-        report.to_json()
+        report.to_json(strict)
     } else {
-        report.to_text()
+        report.to_text(strict)
     };
-    Ok((text, i32::from(report.failed() > 0)))
+    Ok((text, report.exit_code(strict)))
 }
 
 #[cfg(test)]
@@ -197,7 +208,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            r.to_text(),
+            r.to_text(false),
             "PASS manifest: check-manifest: OK (3 tracked files)\n\
              FAIL agents: 1 problem:\n  bad.md: model 'gpt'\n\
              SKIP settings: no shared settings templates\n\
@@ -209,7 +220,7 @@ mod tests {
     fn json_has_the_stable_field_names() {
         let r = report(&[("manifest", Status::Pass, "ok")]);
 
-        let value: serde_json::Value = serde_json::from_str(&r.to_json()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&r.to_json(false)).unwrap();
 
         assert_eq!(
             value,
@@ -218,8 +229,34 @@ mod tests {
                 "passed": 1,
                 "failed": 0,
                 "skipped": 0,
+                "strict": false,
             })
         );
+    }
+
+    #[test]
+    fn strict_makes_a_skip_fail_the_run_and_says_so() {
+        let r = report(&[
+            ("a", Status::Pass, "ok"),
+            ("b", Status::Skip, "no agents directory"),
+        ]);
+
+        assert_eq!(r.exit_code(false), 0);
+        assert_eq!(r.exit_code(true), 1);
+        assert!(r.to_text(true).ends_with(
+            "ci: 1 passed, 0 failed, 1 skipped (strict: a skipped check fails the run)"
+        ));
+        assert!(r
+            .to_text(false)
+            .ends_with("ci: 1 passed, 0 failed, 1 skipped"));
+    }
+
+    #[test]
+    fn strict_with_nothing_skipped_changes_nothing() {
+        let r = report(&[("a", Status::Pass, "ok")]);
+
+        assert_eq!(r.exit_code(true), 0);
+        assert_eq!(r.to_text(true), r.to_text(false));
     }
 
     #[test]

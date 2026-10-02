@@ -108,6 +108,9 @@ pub enum Command {
         /// Print one JSON object instead of text.
         #[arg(long)]
         json: bool,
+        /// Also exit 1 when a check is skipped (for example in the wrong directory).
+        #[arg(long)]
+        strict: bool,
         /// Run in this directory instead of the cwd.
         #[arg(long)]
         dir: Option<String>,
