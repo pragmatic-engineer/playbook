@@ -29,7 +29,7 @@ fn has_line(out: &str, line: &str) -> bool {
     out.lines().any(|l| l == line)
 }
 
-const OVER_1000: &str = "needs explicit justification in the PR body";
+const OVER_NOTE: &str = "needs explicit justification in the PR body";
 
 #[test]
 fn an_open_pr_returns_ok_with_the_redirect_and_runs_no_further_checks() {
@@ -225,7 +225,7 @@ fn size_verdicts_pin_every_threshold_boundary() {
         |n: usize| format!("VERDICT size: SOFT - {n} lines is above the 500-line soft limit");
     let over = |n: usize| {
         format!(
-            "VERDICT size: OVER - {n} lines is above the 1000-line enforced limit and {OVER_1000}"
+            "VERDICT size: OVER - {n} lines is above the 1000-line enforced limit and {OVER_NOTE}"
         )
     };
     let cases: Vec<(usize, String)> = vec![
@@ -363,4 +363,19 @@ fn the_diff_is_written_to_the_state_dir_and_its_path_is_printed() {
     );
     let diff = fs::read_to_string(&expected_path).expect("diff file exists");
     assert!(diff.contains("+hello"), "diff was {diff}");
+}
+
+#[test]
+fn an_unknown_base_names_the_missing_remote_ref_instead_of_claiming_nothing_is_ahead() {
+    // Arrange
+    let fx = Fixture::new("nobase", "feat/x");
+    fx.commit_lines("a.txt", 2);
+
+    // Act
+    let got = fx.run(&FakeGh::default(), Some("no-such-branch"), None);
+
+    // Assert
+    let err = got.expect_err("the base does not exist on origin");
+    assert!(err.contains("origin/no-such-branch"), "got {err}");
+    assert!(!err.contains("nothing ahead"), "got {err}");
 }

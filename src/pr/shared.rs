@@ -23,9 +23,8 @@ fn branch_slug(branch: &str) -> String {
         .collect()
 }
 
-/// The scratch directory for `branch`'s PR files, under this worktree's
-/// repo-scoped storage. Both subcommands resolve it here so they cannot
-/// disagree on where the diff and body live.
+/// The per-branch scratch directory both subcommands read and write, under
+/// this worktree's repo-scoped storage.
 pub fn pr_state_dir(branch: &str) -> Result<PathBuf, String> {
     let base = repo_scoped_dir(RepoScope::Worktree).ok_or_else(|| {
         "could not resolve a worktree-scoped storage location; this repo needs a git \
@@ -38,9 +37,8 @@ pub fn pr_state_dir(branch: &str) -> Result<PathBuf, String> {
 /// How long a `git` call that talks to the network may take.
 const NET_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Runs a local `git` command and returns its trimmed stdout. Local commands
-/// are read with `output()` (not `run_with_timeout`) because that helper
-/// never drains the pipes, so a large `git diff` would stall it.
+/// Runs a local `git` command, returning stdout without trailing whitespace.
+/// Uses `output()`, not `run_with_timeout`, which never drains the pipes.
 pub(crate) fn git(args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .args(args)
@@ -50,7 +48,9 @@ pub(crate) fn git(args: &[&str]) -> Result<String, String> {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
 }
 
 /// Runs a `git` command that talks to the network, bounded by `NET_TIMEOUT`.
@@ -62,7 +62,9 @@ pub(crate) fn git_net(args: &[&str]) -> Result<String, String> {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
 }
 
 /// Runs a local `git` command with stdout going straight to `path`, so a
@@ -148,7 +150,9 @@ fn gh(args: &[&str]) -> Result<String, String> {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
 }
 
 impl GhClient for RealGhClient {

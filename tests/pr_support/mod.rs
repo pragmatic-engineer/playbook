@@ -129,6 +129,8 @@ pub struct FakeGh {
     pub created_url: String,
     /// What `pr_view_base` reports; `None` echoes the base the PR was created with.
     pub reported_base: Option<String>,
+    /// Makes `pr_view_base` fail with this message.
+    pub base_view_error: Option<String>,
     pub calls: RefCell<Vec<String>>,
     pub created_base: RefCell<String>,
 }
@@ -166,6 +168,9 @@ impl GhClient for FakeGh {
     }
     fn pr_view_base(&self, _branch: &str) -> Result<String, String> {
         self.calls.borrow_mut().push("pr_view_base".into());
+        if let Some(err) = &self.base_view_error {
+            return Err(err.clone());
+        }
         Ok(self
             .reported_base
             .clone()

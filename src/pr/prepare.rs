@@ -71,8 +71,8 @@ pub fn prepare(
 
     let remote_base = format!("origin/{base}");
     let ahead = git(&["rev-list", "--count", &format!("{remote_base}..HEAD")])
-        .ok()
-        .and_then(|n| n.parse::<u64>().ok())
+        .map_err(|e| format!("could not compare against {remote_base}: {e}"))?
+        .parse::<u64>()
         .unwrap_or(0);
     if ahead == 0 {
         return Err(format!(

@@ -60,14 +60,19 @@ pub fn run(
 
     let url = gh.pr_create(title, body_file, &base)?;
 
-    // The create command's own success message is not proof of the base.
-    if gh.pr_view_base(&branch)? != base {
-        gh.pr_edit_base(&branch, &base)?;
+    // The create command's own success message is not proof of the base. The
+    // PR exists by now, so a failed check is a warning that keeps the URL.
+    let mut report = format!("PR: {url}\nCreated draft PR: {title} ({branch} -> {base})");
+    match gh.pr_view_base(&branch) {
+        Ok(actual) if actual == base => {}
+        Ok(_) => gh.pr_edit_base(&branch, &base).map_err(|e| {
+            format!("PR {url} was opened against the wrong base and correcting it to {base} failed: {e}")
+        })?,
+        Err(e) => report.push_str(&format!(
+            "\nWARN: could not verify the PR's base ({e}); check that it is {base}"
+        )),
     }
-
-    Ok(format!(
-        "PR: {url}\nCreated draft PR: {title} ({branch} -> {base})"
-    ))
+    Ok(report)
 }
 
 #[cfg(test)]

@@ -153,3 +153,29 @@ fn a_pr_already_on_the_right_base_is_not_edited() {
     // Assert
     assert_eq!(gh.count("pr_edit_base"), 0);
 }
+
+#[test]
+fn a_failed_base_check_after_creation_still_reports_the_url_with_a_warning() {
+    // Arrange
+    let fx = Fixture::new("viewfail", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    let gh = FakeGh {
+        base_view_error: Some("gh is rate limited".into()),
+        ..FakeGh::creating(URL)
+    };
+
+    // Act
+    let got = create(&fx, &gh, "feat(pr): add a thing", None)
+        .expect("the PR exists, so this is not an error");
+
+    // Assert
+    assert!(
+        got.lines().any(|l| l == format!("PR: {URL}")),
+        "the URL must survive: {got}"
+    );
+    assert!(
+        got.contains("WARN: could not verify the PR's base"),
+        "got {got}"
+    );
+    assert_eq!(gh.count("pr_create"), 1);
+}
