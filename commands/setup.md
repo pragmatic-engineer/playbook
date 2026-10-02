@@ -70,7 +70,7 @@ non-interactive run would contradict what `--yes` says it does.
 - Add `--system-prompt` if Q2 answer is "Yes (Recommended)" OR
   `--use-system-prompt` or `--yes` was in `$ARGUMENTS`.
 
-The script always runs (guards and settings run regardless of the answers):
+The script always runs (guards and settings run regardless of the answers). It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/shell/setup-local.sh" [flags]
