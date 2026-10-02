@@ -79,8 +79,8 @@ const OVERSIZED_FACT_BYTES: u64 = 2000;
 /// otherwise it re-blocks up to `REBLOCK_CAP` times, then fails open.
 pub fn run(payload: &Payload) {
     // Headless runs have no person to nudge, and a Stop hook that blocks only
-    // adds turns. `stop_hook_active` means this turn was already blocked once.
-    if crate::common::headless::is_headless() || payload.field(".stop_hook_active") == "true" {
+    // adds turns. Interactive runs keep the bounded re-block below (ADR 0009).
+    if crate::common::headless::is_headless() {
         return;
     }
     let dir = session_dir(payload);

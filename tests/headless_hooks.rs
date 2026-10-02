@@ -260,3 +260,85 @@ fn safety_guards_behave_identically_headless_and_not() {
         "the guard must still deny: {out}"
     );
 }
+
+const STOP_SID: &str = "hl-stop";
+
+fn stop_payload(extra_fields: &str) -> String {
+    format!(r#"{{"hook_event_name":"Stop","session_id":"{STOP_SID}"{extra_fields}}}"#)
+}
+
+/// Writes the `capture-due` marker `statusline.sh` leaves, so the hook has a
+/// reason to block. Returns the session directory.
+fn arm_capture_due(w: &World) -> PathBuf {
+    let dir = w
+        .home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(STOP_SID);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("capture-due"), "").unwrap();
+    dir
+}
+
+#[test]
+fn headless_stop_never_blocks_even_with_a_capture_marker() {
+    let w = world("stop-headless");
+    let dir = arm_capture_due(&w);
+
+    let (out, code) = run_hook(
+        &w,
+        "memory-capture",
+        &stop_payload(""),
+        &[("PLAYBOOK_HEADLESS", "1")],
+    );
+
+    assert_eq!((out.trim(), code), ("", 0));
+    assert!(
+        !dir.join("capture-attempts").exists(),
+        "a headless Stop must not even count an attempt"
+    );
+}
+
+#[test]
+fn ci_true_alone_stops_the_stop_hook_from_blocking() {
+    let w = world("stop-ci");
+    arm_capture_due(&w);
+
+    let (out, code) = run_hook(&w, "memory-capture", &stop_payload(""), &[("CI", "true")]);
+
+    assert_eq!((out.trim(), code), ("", 0));
+}
+
+#[test]
+fn interactive_stop_still_blocks_with_the_reblock_count() {
+    let w = world("stop-interactive");
+    arm_capture_due(&w);
+
+    let (out, code) = run_hook(&w, "memory-capture", &stop_payload(""), &[]);
+
+    assert_eq!(code, 0);
+    assert!(out.contains(r#""decision":"block""#), "output: {out}");
+    assert!(out.contains("re-block 1 of 2"), "output: {out}");
+}
+
+#[test]
+fn interactive_stop_ignores_stop_hook_active_so_the_bounded_reblock_still_escalates() {
+    // ADR 0009 bounds the re-block by its own cap of 2. Honoring
+    // `stop_hook_active` would end the escalation after the first block.
+    let w = world("stop-active");
+    arm_capture_due(&w);
+    let active = stop_payload(r#","stop_hook_active":true"#);
+
+    let (first, _) = run_hook(&w, "memory-capture", &active, &[]);
+    let (second, _) = run_hook(&w, "memory-capture", &active, &[]);
+    let (third, _) = run_hook(&w, "memory-capture", &active, &[]);
+
+    assert!(first.contains("re-block 1 of 2"), "first: {first}");
+    assert!(second.contains("re-block 2 of 2"), "second: {second}");
+    assert_eq!(
+        third.trim(),
+        "",
+        "the cap releases after two blocks: {third}"
+    );
+}

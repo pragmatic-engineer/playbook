@@ -94,7 +94,7 @@ When headless:
 - `auto-model-detect` stays silent.
 - The safety guards (`preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) behave exactly as they do interactively.
 
-Separately from the switch, `memory-capture` now returns without blocking whenever the payload carries `stop_hook_active: true`. Claude Code sets that when a Stop hook already blocked the turn, so a blocking Stop hook cannot loop. The marker is kept, so the next Stop still nudges, and the re-block cap of 2 still applies.
+`memory-capture` returns without blocking when headless. Interactive runs keep the bounded re-block from ADR 0009: it blocks at most twice, the second block escalates the handoff nudge, and then it releases, so it cannot loop. It deliberately does not read `stop_hook_active`, because that field would end the escalation after the first block.
 
 ## What must never run unattended
 
