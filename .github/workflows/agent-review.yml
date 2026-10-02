@@ -13,7 +13,7 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write
-    uses: protocortex/agent-workflows/.github/workflows/agent-review.yml@v1.5.1
+    uses: protocortex/agent-workflows/.github/workflows/agent-review.yml@v1.6.0
     with:
       pr_number: ${{ github.event.pull_request.number }}
       branch: ${{ github.event.pull_request.head.ref }}
