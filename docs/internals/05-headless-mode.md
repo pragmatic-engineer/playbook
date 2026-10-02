@@ -21,6 +21,7 @@ All run with `CI=true`, stdin from `/dev/null`, and an empty `HOME`.
 | `agents check` | yes | needs a checkout (`agents/`); exit 1 outside one |
 | `manifest check .` | yes | exit 0 on a clean tree |
 | `settings check <template> <perms> <root>` | yes | three required arguments |
+| `ci [--json] [--dir <path>]` | yes | runs the three checks above in one step: one line each, exit 1 if any fails; outside a playbook checkout every check is skipped and it exits 0 |
 | `gate record` and `gate check` | yes | need `--source <plan file>` and a git `origin` remote; no remote exits 1 with a clear message; an edited plan reads `STALE`; a missing phase reads `MISSING`, exit 1 |
 | `usage`, `usage ingest` | yes | no transcripts: exit 0, "No usage recorded yet" |
 | `handoff save`, `handoff show`, `handoff status` | yes | `save` reads stdin and refuses empty input |
@@ -113,16 +114,14 @@ jobs:
           install -m 0755 "$A" /usr/local/bin/playbook
         env:
           GH_TOKEN: ${{ github.token }}
-      - run: playbook agents check
-      - run: playbook manifest check .
-      - run: playbook settings check settings.shared.json permissions.shared.json .
+      - run: playbook ci
 ```
 
-State between runs: these checks create nothing. A gate check needs the `state.db` under `~/.config/playbook/repos/...`, so cache that directory if a pipeline records gates in one job and checks them in another.
+`playbook ci` prints `PASS`, `FAIL`, or `SKIP` with a reason for each check, then `ci: N passed, M failed, K skipped`. A check whose inputs are missing is skipped, so the step is safe in any repository. State between runs: these checks create nothing. A gate check needs the `state.db` under `~/.config/playbook/repos/...`, so cache that directory if a pipeline records gates in one job and checks them in another.
 
 ## Recommended build order
 
-1. Ship the no-model checks above as a documented snippet, and a `playbook ci` command that runs them together with one exit code.
+1. Done: the no-model checks are a documented snippet, and `playbook ci` runs them together with one exit code (`--json` prints a single object for a pipeline to parse).
 2. Add `--output-format json` style output to `gate check` and `doctor` so a pipeline can parse results.
 3. Give each command that asks a question a headless rule: a flag that presets every answer, or a hard stop with a clear message.
 4. Only then run commands under `claude -p`, with a wrapper that fails on `permission_denials`, sets `--max-turns` and `--max-budget-usd`, and never passes `bypassPermissions`.
