@@ -16,6 +16,7 @@ pub mod init;
 pub mod json;
 pub mod manifest;
 pub mod settings;
+pub mod usage;
 pub mod worktree;
 
 use clap::{Parser, Subcommand, ValueEnum};
