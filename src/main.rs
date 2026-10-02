@@ -7,9 +7,9 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     agents, cc, common, config, doctor, gate, hooks, init, json, manifest, pr, settings, trust,
-    usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand,
-    GateCommand, JsonCommand, ManifestCommand, MemoryCommand, PrCommand, SettingsCommand,
-    UsageCommand, WorktreeCommand,
+    usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DashboardCommand,
+    DoctorCommand, GateCommand, JsonCommand, ManifestCommand, MemoryCommand, PrCommand,
+    SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -165,6 +165,27 @@ fn main() {
             let paths = usage::run::Paths::real();
             let result = match sub {
                 Some(UsageCommand::Ingest) => usage::run::run_ingest(&paths),
+                Some(UsageCommand::Dashboard { serve: true, .. }) => {
+                    usage::dashboard::serve(&paths).map(|()| String::new())
+                }
+                Some(UsageCommand::Dashboard {
+                    sub: Some(DashboardCommand::Stop),
+                    ..
+                }) => usage::dashboard::run_stop(&paths),
+                Some(UsageCommand::Dashboard { .. }) => {
+                    let exe = std::env::current_exe().unwrap_or_default();
+                    // Test seam: lets spawned-binary tests skip launching a
+                    // real browser. Never set in production.
+                    if std::env::var_os("PLAYBOOK_USAGE_NO_BROWSER").is_some() {
+                        usage::dashboard::run_dashboard(&paths, &exe, &usage::dashboard::no_browser)
+                    } else {
+                        usage::dashboard::run_dashboard(
+                            &paths,
+                            &exe,
+                            &usage::dashboard::open_in_browser,
+                        )
+                    }
+                }
                 None => usage::run::run_summary(&paths),
             };
             match result {

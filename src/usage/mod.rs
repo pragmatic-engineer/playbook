@@ -8,8 +8,10 @@
 pub mod account;
 pub mod aggregate;
 pub mod claude_code;
+pub mod dashboard;
 pub mod db;
 pub mod ingest;
+pub mod lock;
 pub mod pricing;
 pub mod run;
 pub mod summary;
