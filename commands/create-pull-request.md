@@ -52,9 +52,7 @@ ES="${CLAUDE_PLUGIN_ROOT}/skills/engineering-standards/SKILL.md"
 [ -r "$ES" ] || { echo "ERROR: $ES not found under \$CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead." >&2; exit 1; }
 
 # Process-scoped names: two runs (even against different repos) never share
-# a fixed /tmp path and overwrite each other's extracts. $PR_TMP isn't set
-# yet at this point (Step 1 derives it from the branch name), so this can't
-# reuse it.
+# a fixed /tmp path and overwrite each other's extracts.
 EXTRACT_DIR="/tmp/create-pr-step0-$$"
 mkdir -p "$EXTRACT_DIR"
 CORE="$EXTRACT_DIR/writing-style-core.md"
