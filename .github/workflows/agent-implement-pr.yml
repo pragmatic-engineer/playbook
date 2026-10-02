@@ -9,6 +9,10 @@ on:
 jobs:
   implement-pr:
     if: github.event.label.name == 'agent:implement-pr'
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
     uses: protocortex/agent-workflows/.github/workflows/agent-implement-pr.yml@v1.4.1
     with:
       pr_number: ${{ github.event.pull_request.number }}
