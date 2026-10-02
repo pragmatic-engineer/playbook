@@ -43,7 +43,6 @@
       "Read(**/.claude/**)",
       "Edit(**/.claude/**)",
       "Bash($HOME/.claude/**)",
-      "Bash(jq:*)",
       "Bash(gh:*)",
       "Bash(file:*)",
       "Bash(git:*)",
