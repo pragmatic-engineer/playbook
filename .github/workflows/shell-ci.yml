@@ -47,10 +47,10 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Install shellcheck, zsh, and jq
-        # macOS runners ship zsh and jq; only Linux needs the apt install.
+      - name: Install shellcheck and zsh
+        # macOS runners ship zsh; only Linux needs the apt install.
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y shellcheck zsh jq
+        run: sudo apt-get update && sudo apt-get install -y shellcheck zsh
 
       - name: ShellCheck (.sh files)
         # Lint once, on Linux only: shellcheck is not preinstalled on macOS
