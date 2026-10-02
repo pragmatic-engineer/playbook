@@ -6,8 +6,8 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, config, doctor, gate, handoff, hooks, init, json, manifest, pr, settings,
-    trust, usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand,
+    agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, pr,
+    settings, trust, usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand,
     DashboardCommand, DoctorCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
     MemoryCommand, PrCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
@@ -222,6 +222,16 @@ fn main() {
                     std::process::exit(1);
                 }
             },
+        },
+        Command::Ci { json, dir } => match ci::run(dir.as_deref(), json) {
+            Ok((text, code)) => {
+                println!("{text}");
+                std::process::exit(code);
+            }
+            Err(err) => {
+                eprintln!("ci: {err}");
+                std::process::exit(1);
+            }
         },
         Command::Pr { sub } => {
             let gh = pr::shared::RealGhClient;

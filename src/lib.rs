@@ -7,6 +7,7 @@
 
 pub mod agents;
 pub mod cc;
+pub mod ci;
 pub mod common;
 pub mod config;
 pub mod doctor;
@@ -100,6 +101,16 @@ pub enum Command {
     Pr {
         #[command(subcommand)]
         sub: PrCommand,
+    },
+    /// Run the model-free repo checks (manifest, agents, settings) in one step.
+    /// Prints one line per check and exits 1 if any fails; safe in CI.
+    Ci {
+        /// Print one JSON object instead of text.
+        #[arg(long)]
+        json: bool,
+        /// Run in this directory instead of the cwd.
+        #[arg(long)]
+        dir: Option<String>,
     },
     /// Playbook's own tiered (repo < org < global < default) config
     /// subcommands, backing `src/config/`.
