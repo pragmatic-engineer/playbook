@@ -16,6 +16,23 @@ use std::time::Duration;
 const LOCK_RETRIES: u32 = 50;
 const LOCK_DELAY: Duration = Duration::from_millis(10);
 
+/// CLI entry: trusts `path` in the real `~/.claude.json`. Never returns an
+/// error, so a trust failure can never block the launch that called it.
+pub fn run(path: &str) -> Result<(), String> {
+    run_with_home(&crate::common::home_dir(), path)
+}
+
+/// Same as `run` with an explicit home, so tests never read the real `$HOME`.
+pub fn run_with_home(home: &Path, path: &str) -> Result<(), String> {
+    if home.as_os_str().is_empty() || path.is_empty() {
+        return Ok(());
+    }
+    if let Err(message) = write_trust_entry(&home.join(".claude.json"), path) {
+        eprintln!("playbook trust: {message}");
+    }
+    Ok(())
+}
+
 /// Marks `project_path` as trusted in the file at `claude_json_path`.
 /// A missing file is a silent no-op; this never originates Claude's state.
 pub(crate) fn write_trust_entry(claude_json_path: &Path, project_path: &str) -> Result<(), String> {
@@ -344,6 +361,103 @@ mod tests {
         assert_eq!(got, Ok(()));
         assert_eq!(mode, 0o600, "the oauth-bearing file must stay private");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_with_home_is_ok_and_silent_when_no_claude_json_exists() {
+        // Arrange
+        let home = scratch("trust-run-missing");
+
+        // Act
+        let got = run_with_home(&home, "/work/a");
+
+        // Assert
+        assert_eq!(got, Ok(()));
+        assert!(!home.join(".claude.json").exists());
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn run_with_home_never_errors_on_malformed_json() {
+        // Arrange
+        let home = scratch("trust-run-malformed");
+        fs::write(home.join(".claude.json"), "{ not json").expect("fixture is writable");
+
+        // Act
+        let got = run_with_home(&home, "/work/a");
+
+        // Assert
+        assert_eq!(got, Ok(()));
+        assert_eq!(
+            fs::read_to_string(home.join(".claude.json")).expect("readable"),
+            "{ not json"
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn run_with_home_writes_the_entry_for_a_valid_file() {
+        // Arrange
+        let home = scratch("trust-run-valid");
+        fs::write(home.join(".claude.json"), "{}").expect("fixture is writable");
+
+        // Act
+        let got = run_with_home(&home, "/work/a");
+
+        // Assert
+        assert_eq!(got, Ok(()));
+        assert_eq!(
+            read_json(&home.join(".claude.json")),
+            json!({"projects": {"/work/a": {"hasTrustDialogAccepted": true}}})
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_with_home_never_errors_when_the_file_cannot_be_written() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Arrange
+        let home = scratch("trust-run-readonly");
+        fs::write(home.join(".claude.json"), "{}").expect("fixture is writable");
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o555)).expect("chmod works");
+
+        // Act
+        let got = run_with_home(&home, "/work/a");
+
+        // Assert
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o755)).expect("restore works");
+        assert_eq!(got, Ok(()));
+        assert_eq!(
+            fs::read_to_string(home.join(".claude.json")).expect("readable"),
+            "{}"
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn run_with_home_ignores_an_empty_project_path() {
+        // Arrange
+        let home = scratch("trust-run-empty-path");
+        fs::write(home.join(".claude.json"), "{}").expect("fixture is writable");
+
+        // Act
+        let got = run_with_home(&home, "");
+
+        // Assert
+        assert_eq!(got, Ok(()));
+        assert_eq!(read_json(&home.join(".claude.json")), json!({}));
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn run_with_home_ignores_an_unresolved_home() {
+        // Act
+        let got = run_with_home(Path::new(""), "/work/a");
+
+        // Assert
+        assert_eq!(got, Ok(()));
     }
 
     #[test]
