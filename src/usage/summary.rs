@@ -67,7 +67,7 @@ pub fn render(usage: &[UsageEvent], tools: &[ToolInvocationEvent]) -> String {
     let recent = days.len().saturating_sub(RECENT_DAYS);
     group_table(
         &mut out,
-        &format!("day (last {RECENT_DAYS})"),
+        &format!("day (UTC, last {RECENT_DAYS})"),
         &days[recent..],
     );
     for dim in [

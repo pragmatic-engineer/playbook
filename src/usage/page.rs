@@ -52,7 +52,7 @@ th:first-child, td:first-child { text-align:left; }
 </main>
 <script>
 const REFRESH_MS = 5000;
-const TABLES = [["day","By day"],["week","By week (starting Monday)"],["model","By model"],["repo","By repo"],["branch","By branch"],["effort","By effort"],["account","By account"]];
+const TABLES = [["day","By day (UTC)"],["week","By week (UTC, starting Monday)"],["model","By model"],["repo","By repo"],["branch","By branch"],["effort","By effort"],["account","By account"]];
 const COLUMNS = [["messages","Messages"],["input_tokens","Input"],["output_tokens","Output"],["cache_creation_tokens","Cache write"],["cache_read_tokens","Cache read"],["cost_usd","Cost (USD)"]];
 
 function el(tag, text, className) {

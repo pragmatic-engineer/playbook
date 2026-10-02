@@ -38,7 +38,6 @@ pub fn pr_state_dir(branch: &str) -> Result<PathBuf, String> {
 const NET_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Runs a local `git` command, returning stdout without trailing whitespace.
-/// Uses `output()`, not `run_with_timeout`, which never drains the pipes.
 pub(crate) fn git(args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .args(args)
@@ -84,12 +83,24 @@ pub(crate) fn git_to_file(args: &[&str], path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Refuses a branch or base name that starts with `-`: git and gh would read
+/// it as an option, not a name.
+pub(crate) fn reject_option_like(kind: &str, value: &str) -> Result<(), String> {
+    if value.starts_with('-') {
+        return Err(format!(
+            "{kind} {value:?} starts with '-', so git and gh would read it as an option"
+        ));
+    }
+    Ok(())
+}
+
 /// The checked-out branch, or an error on a detached HEAD.
 pub(crate) fn current_branch() -> Result<String, String> {
     let branch = git(&["branch", "--show-current"])?;
     if branch.is_empty() {
         return Err("detached HEAD; checkout a branch first".to_string());
     }
+    reject_option_like("branch", &branch)?;
     Ok(branch)
 }
 
@@ -99,6 +110,12 @@ pub fn resolve_base(
     gh: &dyn GhClient,
     base_arg: Option<&str>,
 ) -> Result<(String, &'static str), String> {
+    let (base, source) = pick_base(gh, base_arg)?;
+    reject_option_like("base branch", &base)?;
+    Ok((base, source))
+}
+
+fn pick_base(gh: &dyn GhClient, base_arg: Option<&str>) -> Result<(String, &'static str), String> {
     if let Some(base) = base_arg.filter(|b| !b.is_empty()) {
         return Ok((base.to_string(), "--base flag"));
     }
@@ -134,6 +151,18 @@ pub trait GhClient {
     fn pr_edit_base(&self, branch: &str, base: &str) -> Result<(), String>;
 }
 
+/// Reads `gh pr view --json url,state` output. A PR missing either field is
+/// treated as no PR; output that is not JSON is an error.
+fn parse_pr_view(out: &str) -> Result<Option<ExistingPr>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(out).map_err(|e| format!("gh pr view returned bad JSON: {e}"))?;
+    let field = |name: &str| value.get(name).and_then(|v| v.as_str()).map(str::to_string);
+    match (field("url"), field("state")) {
+        (Some(url), Some(state)) => Ok(Some(ExistingPr { url, state })),
+        _ => Ok(None),
+    }
+}
+
 /// Shells out to the real `gh` binary.
 pub struct RealGhClient;
 
@@ -159,16 +188,10 @@ impl GhClient for RealGhClient {
     fn pr_view(&self, branch: &str) -> Result<Option<ExistingPr>, String> {
         // A branch with no PR makes `gh pr view` exit non-zero, which is the
         // normal "nothing there yet" answer, not a failure.
-        let Ok(out) = gh(&["pr", "view", branch, "--json", "url,state"]) else {
+        let Ok(out) = gh(&["pr", "view", "--json", "url,state", "--", branch]) else {
             return Ok(None);
         };
-        let value: serde_json::Value =
-            serde_json::from_str(&out).map_err(|e| format!("gh pr view returned bad JSON: {e}"))?;
-        let field = |name: &str| value.get(name).and_then(|v| v.as_str()).map(str::to_string);
-        match (field("url"), field("state")) {
-            (Some(url), Some(state)) => Ok(Some(ExistingPr { url, state })),
-            _ => Ok(None),
-        }
+        parse_pr_view(&out)
     }
 
     fn repo_default_branch(&self) -> Result<Option<String>, String> {
@@ -202,17 +225,18 @@ impl GhClient for RealGhClient {
         gh(&[
             "pr",
             "view",
-            branch,
             "--json",
             "baseRefName",
             "-q",
             ".baseRefName",
+            "--",
+            branch,
         ])
         .map_err(|e| format!("gh pr view failed: {e}"))
     }
 
     fn pr_edit_base(&self, branch: &str, base: &str) -> Result<(), String> {
-        gh(&["pr", "edit", branch, "--base", base])
+        gh(&["pr", "edit", "--base", base, "--", branch])
             .map(|_| ())
             .map_err(|e| format!("gh pr edit failed: {e}"))
     }
@@ -222,44 +246,74 @@ impl GhClient for RealGhClient {
 mod tests {
     use super::*;
 
-    struct CannedGh;
+    // Output shapes of `gh pr view --json url,state`, as gh prints them.
+    const OPEN_PR: &str = r#"{"state":"OPEN","url":"https://github.com/o/r/pull/9"}"#;
+    const MERGED_PR: &str = r#"{"state":"MERGED","url":"https://github.com/o/r/pull/3"}"#;
 
-    impl GhClient for CannedGh {
-        fn pr_view(&self, _branch: &str) -> Result<Option<ExistingPr>, String> {
+    #[test]
+    fn an_open_pr_parses_to_its_url_and_state() {
+        assert_eq!(
+            parse_pr_view(OPEN_PR),
             Ok(Some(ExistingPr {
-                url: "https://example.test/pr/7".to_string(),
+                url: "https://github.com/o/r/pull/9".to_string(),
                 state: "OPEN".to_string(),
             }))
+        );
+    }
+
+    #[test]
+    fn a_merged_pr_keeps_its_state_so_the_caller_can_ignore_it() {
+        let got = parse_pr_view(MERGED_PR).unwrap().unwrap();
+        assert_eq!(got.state, "MERGED");
+    }
+
+    #[test]
+    fn a_pr_missing_a_field_counts_as_no_pr() {
+        assert_eq!(parse_pr_view(r#"{"state":"OPEN"}"#), Ok(None));
+        assert_eq!(parse_pr_view(r#"{"url":"https://x/pull/1"}"#), Ok(None));
+        assert_eq!(parse_pr_view("{}"), Ok(None));
+    }
+
+    #[test]
+    fn output_that_is_not_json_is_an_error() {
+        let err = parse_pr_view("no pull requests found").expect_err("not JSON");
+        assert!(err.starts_with("gh pr view returned bad JSON"), "got {err}");
+    }
+
+    #[test]
+    fn a_name_starting_with_a_dash_is_refused() {
+        assert!(reject_option_like("base branch", "--upload-pack=x").is_err());
+        assert!(reject_option_like("branch", "-x").is_err());
+        assert_eq!(reject_option_like("branch", "feat/-x"), Ok(()));
+        assert_eq!(reject_option_like("branch", "main"), Ok(()));
+    }
+
+    struct DefaultBranch(&'static str);
+
+    impl GhClient for DefaultBranch {
+        fn pr_view(&self, _branch: &str) -> Result<Option<ExistingPr>, String> {
+            Ok(None)
         }
         fn repo_default_branch(&self) -> Result<Option<String>, String> {
-            Ok(Some("develop".to_string()))
+            Ok(Some(self.0.to_string()))
         }
         fn pr_create(&self, _t: &str, _b: &str, _base: &str) -> Result<String, String> {
-            Ok("https://example.test/pr/8".to_string())
+            Err("not used".to_string())
         }
         fn pr_view_base(&self, _branch: &str) -> Result<String, String> {
-            Ok("main".to_string())
+            Err("not used".to_string())
         }
         fn pr_edit_base(&self, _branch: &str, _base: &str) -> Result<(), String> {
-            Ok(())
+            Err("not used".to_string())
         }
     }
 
     #[test]
-    fn a_trait_object_returns_exactly_the_canned_pr_view_response() {
-        // Arrange
-        let gh: &dyn GhClient = &CannedGh;
+    fn a_dash_prefixed_base_is_refused_from_the_flag_and_from_the_repo_default() {
+        let flag = resolve_base(&DefaultBranch("main"), Some("--upload-pack=x"));
+        let repo = resolve_base(&DefaultBranch("-evil"), None);
 
-        // Act
-        let got = gh.pr_view("feat/x").expect("canned response");
-
-        // Assert
-        assert_eq!(
-            got,
-            Some(ExistingPr {
-                url: "https://example.test/pr/7".to_string(),
-                state: "OPEN".to_string(),
-            })
-        );
+        assert!(flag.expect_err("flag").contains("starts with '-'"));
+        assert!(repo.expect_err("repo default").contains("starts with '-'"));
     }
 }

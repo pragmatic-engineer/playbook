@@ -5,13 +5,32 @@
 //! Paths that would call the real `gh` are covered through the `GhClient`
 //! fake in `tests/pr_prepare.rs` and `tests/pr_create.rs` instead.
 
+use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-fn playbook(args: &[&str]) -> Output {
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// An empty directory used as both cwd and HOME, so no run can touch the
+/// developer's checkout, remote, or config.
+fn scratch() -> PathBuf {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("playbook-pr-cli-{}-{n}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    dir
+}
+
+fn playbook_in(dir: &PathBuf, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(args)
+        .current_dir(dir)
+        .env("HOME", dir)
         .output()
         .expect("playbook should spawn")
+}
+
+fn playbook(args: &[&str]) -> Output {
+    playbook_in(&scratch(), args)
 }
 
 fn stdout(out: &Output) -> String {
@@ -58,18 +77,27 @@ fn pr_create_without_a_title_is_a_usage_error() {
 fn pr_create_with_an_overlong_title_exits_non_zero_without_touching_anything() {
     // Arrange
     let title = "a".repeat(73);
+    let dir = scratch();
+    let body = dir.join("x.md");
 
     // Act
-    let out = playbook(&[
-        "pr",
-        "create",
-        "--title",
-        &title,
-        "--body-file",
-        "/tmp/x.md",
-    ]);
+    let out = playbook_in(
+        &dir,
+        &[
+            "pr",
+            "create",
+            "--title",
+            &title,
+            "--body-file",
+            body.to_str().expect("utf8"),
+        ],
+    );
 
     // Assert
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("limit 72"));
+    assert!(
+        !dir.join(".git").exists(),
+        "nothing may be initialised here"
+    );
 }
