@@ -94,6 +94,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: GateCommand,
     },
+    /// The mechanical half of `/playbook:create-pull-request`, backing
+    /// `src/pr/`.
+    Pr {
+        #[command(subcommand)]
+        sub: PrCommand,
+    },
     /// Playbook's own tiered (repo < org < global < default) config
     /// subcommands, backing `src/config/`.
     Config {
@@ -222,6 +228,33 @@ pub enum AgentsCommand {
 pub enum UsageCommand {
     /// Read new session history into the usage store, without printing a summary.
     Ingest,
+}
+
+/// `playbook pr` subcommands, backing `src/pr/`.
+#[derive(Subcommand, Debug)]
+pub enum PrCommand {
+    /// Resolve the branch and base, run the pre-flight checks, write the diff
+    /// to a scratch file, and print labeled lines for the PR drafter.
+    Prepare {
+        /// Base branch for the PR; defaults to the repo's default branch.
+        #[arg(long)]
+        base: Option<String>,
+        /// Ticket id to cite; defaults to one found in the branch name.
+        #[arg(long)]
+        ticket: Option<String>,
+    },
+    /// Push the branch and open a draft PR from a drafted title and body.
+    Create {
+        /// PR title, at most 72 characters.
+        #[arg(long)]
+        title: String,
+        /// Path to the file holding the PR body.
+        #[arg(long)]
+        body_file: String,
+        /// Base branch for the PR; defaults to the repo's default branch.
+        #[arg(long)]
+        base: Option<String>,
+    },
 }
 
 /// `playbook gate` subcommands, backing `src/gate/`.

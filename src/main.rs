@@ -6,9 +6,10 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, config, doctor, gate, hooks, init, json, manifest, settings, trust, usage,
-    worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand,
-    JsonCommand, ManifestCommand, MemoryCommand, SettingsCommand, UsageCommand, WorktreeCommand,
+    agents, cc, common, config, doctor, gate, hooks, init, json, manifest, pr, settings, trust,
+    usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand,
+    GateCommand, JsonCommand, ManifestCommand, MemoryCommand, PrCommand, SettingsCommand,
+    UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -201,6 +202,31 @@ fn main() {
                 }
             },
         },
+        Command::Pr { sub } => {
+            let gh = pr::shared::RealGhClient;
+            match sub {
+                PrCommand::Prepare { base, ticket } => {
+                    match pr::prepare::run(&gh, base.as_deref(), ticket.as_deref()) {
+                        Ok(output) => println!("{output}"),
+                        Err(err) => {
+                            eprintln!("pr prepare: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                PrCommand::Create {
+                    title,
+                    body_file,
+                    base,
+                } => match pr::create::run(&gh, &title, &body_file, base.as_deref()) {
+                    Ok(output) => println!("{output}"),
+                    Err(err) => {
+                        eprintln!("pr create: {err}");
+                        std::process::exit(1);
+                    }
+                },
+            }
+        }
         Command::Config { sub } => {
             let home = common::home_dir();
             let slug = common::repo_slug();
