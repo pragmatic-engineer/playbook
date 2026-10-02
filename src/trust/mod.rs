@@ -102,6 +102,15 @@ fn merge_and_swap(
     ))
 }
 
+/// Whether `claude_json_path` already trusts `project_path`. A missing or
+/// unreadable file reads as not trusted.
+pub(crate) fn is_trusted(claude_json_path: &Path, project_path: &str) -> bool {
+    fs::read_to_string(claude_json_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .is_some_and(|root| is_already_trusted(&root, project_path))
+}
+
 fn is_already_trusted(root: &Value, project_path: &str) -> bool {
     root.get("projects")
         .and_then(|projects| projects.get(project_path))

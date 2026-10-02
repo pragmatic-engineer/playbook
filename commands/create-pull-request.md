@@ -1,46 +1,45 @@
 ---
 description: Create a pull request with pre-flight checks, a conventional-commit title, and the team PR template, following engineering-standards and writing-style.
 allowed-tools: Bash, Read, Skill
-argument-hint: "[--ready] [--base <branch>] [--ticket <ID>]"
+argument-hint: "[--ready] [--base <branch>] [--ticket <ID>] [--dir <path>]"
 context: fork
 agent: git
 ---
 
 # Create Pull Request
 
-Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `playbook:engineering-standards` (readiness, size) and `playbook:writing-style` (voice, banned words, no dashes). Every PR opens as a **draft**, always: `--ready` no longer publishes it immediately, it marks it for promotion to ready once Step 9's self-review passes, since a human should never be the first reviewer of unreviewed code.
+Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `playbook:engineering-standards` (readiness, size) and `playbook:writing-style` (voice, banned words, no dashes). Every PR opens as a **draft**, always: `--ready` no longer publishes it immediately, it marks it for promotion to ready once Step 5's self-review passes, since a human should never be the first reviewer of unreviewed code.
 
 This creates a **new** PR. If one already exists for the branch, this stops and points you at `/playbook:address-pr-comments` or `/playbook:quick-review`.
 
 ## Run this now
 
-Execute the steps below immediately, end to end, running every bash block for real. Do **not** narrate a plan, summarize `git status`, offer a numbered menu, or ask "what would you like me to do?" / "proceed? [Y/n]". There is **no confirmation gate**.
+Execute the steps below immediately, end to end, running every command for real. Do **not** narrate a plan, summarize `git status`, offer a numbered menu, or ask "what would you like me to do?" / "proceed? [Y/n]". There is **no confirmation gate**.
 
-Run end to end: auto-detect the base and ticket, draft the title and body, then push and create. Readiness problems (uncommitted work, a diff over the soft or enforced size limit, no tests) print as warnings and never pause. Only the hard aborts (on the base branch, nothing ahead of base, an existing PR, a diff over the 1500-line hard size limit) stop the run.
+The mechanical work (base and ticket detection, pre-flight checks, diff gathering, push, PR creation, base check) lives in two compiled commands, `playbook pr prepare` and `playbook pr create`. Your job is the judgment in between: read the diff, then write the title and the body. Readiness problems (uncommitted work, a diff over the soft or enforced size limit, no tests) print as warnings and never pause. Only the hard aborts (on the base branch, nothing ahead of base, an existing PR, a diff over the 1500-line hard size limit) stop the run.
 
 This command is built to run in an isolated subagent (`context: fork`) so the diff and drafting stay out of the main context. When it forks, your final message is the only thing the main conversation sees, so end with a concise outcome summary (the PR URL, title, base, and draft state). If you are instead reading this in the main conversation, run it here exactly the same way; do not wait for a fork and do not defer to the user.
 
 ## Argument flags
 
-Parse these from `$ARGUMENTS` **once**, in Step 1, and persist them to `$PR_TMP/args.env`. Every later step `source`s that file instead of re-deriving flag values from `$ARGUMENTS` by hand.
+Read these from `$ARGUMENTS` once and remember them. `--base`, `--ticket`, and `--dir` go straight onto the two `playbook pr` calls, and `--ready` is read by Step 5.
 
-> **Why a file, not re-parsed per step:** each bash block runs in its own shell; nothing set inline in one block survives to the next. Persist to disk, don't re-derive `$ARGUMENTS` from memory each step.
-
-- `--ready` → promote the PR to ready once Step 9's self-review passes, instead of leaving it a draft. Parsed into `READY_FLAG` in Step 1. Does NOT skip the draft stage: every PR opens as a draft regardless of this flag.
-- `--base <branch>` → override the base branch. Parsed into `BASE_ARG` in Step 1.
-- `--ticket <ID>` → force the ticket, skipping branch auto-detect (`none` omits the line). Parsed into `TICKET_ARG` in Step 1.
+- `--ready` → promote the PR to ready once Step 5's self-review passes, instead of leaving it a draft. Does NOT skip the draft stage: every PR opens as a draft regardless of this flag.
+- `--base <branch>` → override the base branch. Pass it to both `playbook pr` calls.
+- `--ticket <ID>` → force the ticket, skipping branch auto-detect (`none` omits the line). Pass it to `playbook pr prepare`.
+- `--dir <path>` → publish the branch checked out in this directory. A caller that names a directory or branch outside the shell's current directory (for example `/playbook:implement` publishing a Segment that lives in a git worktree) passes it here. Pass it to both `playbook pr` calls. A forked shell can reset to the main checkout between calls, so without `--dir` the command acts on whatever repo the shell is in.
 - `--help` → print the usage block above and stop.
 
-There is no confirmation flag or gate: the command always runs end to end, auto-detecting base and ticket, then pushing and creating.
+There is no confirmation flag or gate: the command always runs end to end.
 
 ## Execution rules
 
-1. Run every bash block for real. Do not simulate output; use the real result to drive the next step.
+1. Run every command for real. Do not simulate output; use the real result to drive the next step.
 2. Do not assume git state, diff contents, or `gh` output. Check them.
-3. Combine independent bash operations into single tool calls.
+3. Copy what `playbook pr prepare` and `playbook pr create` print. Never recompute or restate a value one of them already computed.
 4. Never run destructive git commands (`reset --hard`, `push --force`, `clean -f`) or skip hooks (`--no-verify`).
 5. Derive the title and body from the actual diff and commit log, never from the branch name alone or from memory.
-6. Pass the PR body via `--body-file`, never `--body "..."`, to preserve formatting.
+6. Pass the PR body with `--body-file`, never inline, to preserve formatting.
 
 ## Step 0: Load the skill rules (MUST run before drafting title or body)
 
@@ -53,9 +52,7 @@ ES="${CLAUDE_PLUGIN_ROOT}/skills/engineering-standards/SKILL.md"
 [ -r "$ES" ] || { echo "ERROR: $ES not found under \$CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead." >&2; exit 1; }
 
 # Process-scoped names: two runs (even against different repos) never share
-# a fixed /tmp path and overwrite each other's extracts. $PR_TMP isn't set
-# yet at this point (Step 1 derives it from the branch name), so this can't
-# reuse it.
+# a fixed /tmp path and overwrite each other's extracts.
 EXTRACT_DIR="/tmp/create-pr-step0-$$"
 mkdir -p "$EXTRACT_DIR"
 CORE="$EXTRACT_DIR/writing-style-core.md"
@@ -92,220 +89,41 @@ Read all four printed paths with the Read tool now. Together they carry the same
 
 The PR title and body are read by another engineer, so they use the humane `playbook:writing-style` register (warm, contractions, active voice), NOT the terse operator voice. Where they conflict, `playbook:writing-style` wins for anything posted to GitHub.
 
-## Step 1: Parse flags, establish context, resolve the base branch
+## Step 1: Prepare (version check, pre-flight, diff, ticket)
 
-First, establish `CURRENT_BRANCH` and `PR_TMP` (needed before anything else can be persisted), and stop early if a PR already exists:
-
-```bash
-set -euo pipefail
-
-CURRENT_BRANCH=$(git branch --show-current)
-if [ -z "$CURRENT_BRANCH" ]; then echo "ERROR: detached HEAD; checkout a branch first"; exit 1; fi
-
-PR_TMP="/tmp/create-pr/$(basename "$(git rev-parse --show-toplevel)")/$(echo "$CURRENT_BRANCH" | tr '/' '-')"
-mkdir -p "$PR_TMP"
-echo "Branch: $CURRENT_BRANCH"
-echo "TMP: $PR_TMP"
-
-EXISTING=$(gh pr view "$CURRENT_BRANCH" --json url,state -q 'select(.state=="OPEN") | .url' 2>/dev/null || true)
-if [ -n "$EXISTING" ]; then
-  echo "A PR already exists: $EXISTING"
-  echo "Use /playbook:address-pr-comments or /playbook:quick-review instead."
-  exit 0
-fi
-```
-
-Now parse **every** flag out of `$ARGUMENTS` in a single pass and write them to `$PR_TMP/args.env`. This is the only place flags are parsed from `$ARGUMENTS`; every later step sources this file instead of re-deriving flag values by hand:
+One command does it all. It resolves the branch and the base (flag, then the repo default, then `main`), refuses to run on the base branch, with nothing ahead of it, or over 1500 changed lines, prints the readiness lines, writes the diff and commit log to a file, and detects the ticket. Pass only the flags the caller gave:
 
 ```bash
-cat > "$PR_TMP/args.env" << 'ARGS_EOF'
-BASE_ARG=""
-TICKET_ARG=""
-READY_FLAG=""
-ARGS_EOF
+playbook pr prepare --help >/dev/null 2>&1 || { echo "ERROR: this command needs a newer playbook binary; run the playbook installer again to upgrade it." >&2; exit 1; }
+playbook pr prepare [--base <branch>] [--ticket <ID>] [--dir <path>]
 ```
 
-**MUST:** immediately re-open `$PR_TMP/args.env` with the Edit tool and fill in the real values by reading `$ARGUMENTS` carefully:
-- if `$ARGUMENTS` contains `--base <branch>`, set `BASE_ARG="<branch>"` (the exact branch name, verbatim, nothing else on that line).
-- if `$ARGUMENTS` contains `--ticket <ID>`, set `TICKET_ARG="<ID>"`.
-- if `$ARGUMENTS` contains `--ready`, set `READY_FLAG="--ready"`.
-- leave any flag that is not present as `""`. Do not guess a value that was not actually passed.
+If the first line fails, stop and tell the user to upgrade the playbook binary. There is no fallback.
 
-Then resolve the base branch from the persisted flag and verify what was parsed before moving on:
+What it prints:
 
-```bash
-source "$PR_TMP/args.env"
-echo "parsed: BASE_ARG='${BASE_ARG}' TICKET_ARG='${TICKET_ARG}' READY_FLAG='${READY_FLAG}'"
+- `branch=`, `state_dir=`, `base=<branch> (source: ...)`, and `commits_ahead= changed_lines= dirty_files= test_files_touched=`.
+- A `VERDICT` line each for dirty files, size, and tests. **Copy every `VERDICT` line verbatim into the readiness block.** Do not recompute or paraphrase them. Every `VERDICT` is non-blocking: print them and move on without pausing.
+- The diff stat and commit log, then `diff_file=<path>` and `ticket=<ID or empty>`.
 
-# Resolve base: flag > repo default (gh) > git symbolic-ref > main
-if [ -n "$BASE_ARG" ]; then
-  BASE_BRANCH="$BASE_ARG"
-  BASE_SOURCE="--base flag"
-else
-  BASE_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null \
-    || git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' \
-    || echo main)
-  BASE_SOURCE="repo default"
-fi
-echo "BASE_BRANCH=$BASE_BRANCH" >> "$PR_TMP/args.env"
+If it prints `A PR already exists: <url>` it exited 0: report that and stop. Any other non-zero exit is a hard stop: report its message and stop.
 
-if [ "$CURRENT_BRANCH" = "$BASE_BRANCH" ]; then
-  echo "ERROR: on the base branch ($BASE_BRANCH); create a feature branch first"; exit 1
-fi
+Read the file named by `diff_file=` with the Read tool. This is the source of truth for the title and body. If it is large, read it in chunks; do not skip it.
 
-git fetch origin "$BASE_BRANCH" --quiet 2>/dev/null || true
-echo "Resolved base: $BASE_BRANCH (source: $BASE_SOURCE)"
-```
+If `ticket=` holds a real ID (not empty, not `none`), the body's first line is `Ticket: <ID>`. If empty or `none`, omit the line without asking.
 
-**Hard check, not a sanity note (MUST run before continuing to Step 2), as its
-own bash block.** Write the raw `$ARGUMENTS` text into a heredoc with a QUOTED
-delimiter (`<<'RAWARGS_EOF'`, not `<<RAWARGS_EOF`): a quoted heredoc needs no
-escaping regardless of content, while a single-quoted string breaks open on an
-apostrophe or backtick in `$ARGUMENTS`. Re-read the actual invocation text now
-if there is any doubt about transcribing it exactly:
+## Step 2: Generate the title (conventional commits)
 
-```bash
-RAW_ARGUMENTS=$(cat <<'RAWARGS_EOF'
-<the literal, unmodified $ARGUMENTS text for this invocation>
-RAWARGS_EOF
-)
-source "$PR_TMP/args.env"
-if echo "$RAW_ARGUMENTS" | grep -q -- '--base' && [ -z "$BASE_ARG" ]; then
-  echo "ERROR: --base is present in the invocation but BASE_ARG in args.env is empty. Re-open $PR_TMP/args.env with the Edit tool, set BASE_ARG to the branch named after --base, then re-run Step 1's base-resolution block before continuing." >&2
-  exit 1
-fi
-echo "Hard check passed: --base presence in \$ARGUMENTS matches BASE_ARG."
-```
-
-**This check is only as reliable as the `RAW_ARGUMENTS` transcription above
-it.** Transcribe `$ARGUMENTS` exactly. A bare substring match on `--base` can
-false-positive on argument text that merely mentions the string in prose; that
-fails safe (a fixable hard-abort), so it's an accepted limitation.
-
-If this exits non-zero, fix `$PR_TMP/args.env` with the Edit tool and re-run the
-base-resolution block above; do not proceed to Step 2 on a non-zero exit here.
-Opening a PR against the wrong base is a correctness bug, not a style nit,
-especially for stacked PRs.
-
-## Step 2: Pre-flight checks (engineering-standards)
-
-```bash
-# Fresh shell: re-derive PR_TMP the same way Step 1 did, then source the
-# flags Step 1 persisted (BASE_BRANCH included) instead of assuming they
-# survived from the previous block.
-CURRENT_BRANCH=$(git branch --show-current)
-PR_TMP="/tmp/create-pr/$(basename "$(git rev-parse --show-toplevel)")/$(echo "$CURRENT_BRANCH" | tr '/' '-')"
-source "$PR_TMP/args.env"
-
-# Commits ahead of base
-AHEAD=$(git rev-list --count "origin/$BASE_BRANCH..HEAD" 2>/dev/null || echo 0)
-# Size (additions + deletions)
-SHORTSTAT=$(git diff --shortstat "origin/$BASE_BRANCH...HEAD")
-CHANGED=$(echo "$SHORTSTAT" | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | paste -sd+ - | bc 2>/dev/null || echo 0)
-# Uncommitted work that would be left out of the PR
-DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
-# Does the diff touch any test files?
-# Anchor the directory patterns with (^|/): git returns repo-relative paths with
-# no leading slash, so a bare `/tests?/` never matches a top-level `tests/` dir
-# and every Rust PR reads as "no tests". Also count Rust inline `#[cfg(test)]`
-# AND `#[test]`: a new test module adds the former, but the far more common
-# case, a new test function dropped into an already-existing `mod tests`
-# block, adds only the latter and was previously invisible to this check.
-TESTS=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" | grep -ciE '(\.test\.|\.spec\.|_test\.|test_|(^|/)tests?/|(^|/)__tests__/)' || true)
-INLINE_TESTS=$(git diff -U0 "origin/$BASE_BRANCH...HEAD" -- '*.rs' | grep -cE '^\+.*#\[(cfg\(test\)|test)\]' || true)
-TESTS=$((TESTS + INLINE_TESTS))
-
-echo "commits_ahead=$AHEAD changed_lines=${CHANGED:-0} dirty_files=$DIRTY test_files_touched=$TESTS"
-
-# Hard stops (always end the run): nothing to PR, or over the 1500-line hard size limit.
-if [ "$AHEAD" -eq 0 ]; then
-  echo "ABORT: nothing ahead of $BASE_BRANCH; there is nothing to open a PR for"; exit 1
-fi
-if [ "${CHANGED:-0}" -gt 1500 ]; then
-  echo "ABORT: ${CHANGED} changed lines is over the 1500-line hard size limit; split the work into smaller PRs"; exit 1
-fi
-
-# Thresholds are applied HERE, not narrated downstream: the script decides,
-# the caller copies the VERDICT lines verbatim, never restating them from memory.
-verdict() { printf 'VERDICT %s\n' "$1"; }
-
-if [ "$DIRTY" -gt 0 ]; then
-  verdict "dirty: WARN - $DIRTY uncommitted file(s) will NOT be in the PR"
-else
-  verdict "dirty: OK - nothing uncommitted"
-fi
-
-if [ "${CHANGED:-0}" -gt 1000 ]; then
-  verdict "size: OVER - ${CHANGED} lines is above the 1000-line enforced limit and needs explicit justification in the PR body"
-elif [ "${CHANGED:-0}" -gt 500 ]; then
-  verdict "size: SOFT - ${CHANGED} lines is above the 500-line soft limit"
-else
-  verdict "size: OK - ${CHANGED:-0} lines"
-fi
-
-if [ "$TESTS" -eq 0 ]; then
-  verdict "tests: NONE - the diff adds no test files or inline test blocks; the readiness criteria expect tests for behaviour changes"
-else
-  verdict "tests: OK - $TESTS test file(s) or inline test block(s) touched"
-fi
-```
-
-**Copy every `VERDICT` line verbatim into the readiness block.** Do not
-recompute, re-derive, or paraphrase them. If a `VERDICT` contradicts your own
-reading of the diff, the `VERDICT` is right; report it as-is.
-
-The two hard stops (`AHEAD` = 0, `CHANGED` > 1500) have already exited above.
-Every `VERDICT` is non-blocking: print them and move on without pausing.
-
-## Step 3: Gather the diff and commit history
-
-```bash
-CURRENT_BRANCH=$(git branch --show-current)
-PR_TMP="/tmp/create-pr/$(basename "$(git rev-parse --show-toplevel)")/$(echo "$CURRENT_BRANCH" | tr '/' '-')"
-source "$PR_TMP/args.env"
-
-echo "=== diff stat ==="
-git diff --stat "origin/$BASE_BRANCH...HEAD"
-echo "=== commit log ==="
-git log "origin/$BASE_BRANCH..HEAD" --format='%h %s'
-git diff "origin/$BASE_BRANCH...HEAD" > "$PR_TMP/pr-diff.txt"
-echo "Full diff: $PR_TMP/pr-diff.txt ($(wc -l < "$PR_TMP/pr-diff.txt") lines)"
-```
-
-Read `$PR_TMP/pr-diff.txt` with the Read tool. This is the source of truth for the title and body. If it is large, read it in chunks; do not skip it.
-
-## Step 4: Detect the ticket (optional)
-
-```bash
-CURRENT_BRANCH=$(git branch --show-current)
-PR_TMP="/tmp/create-pr/$(basename "$(git rev-parse --show-toplevel)")/$(echo "$CURRENT_BRANCH" | tr '/' '-')"
-source "$PR_TMP/args.env"
-
-if [ -n "$TICKET_ARG" ]; then
-  TICKET="$TICKET_ARG"   # may be the literal "none"
-else
-  # First PROJECT-1234 style token in the branch name
-  TICKET=$(echo "$CURRENT_BRANCH" | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | head -1 || true)
-fi
-echo "TICKET=${TICKET:-<none>}"
-```
-
-- If `TICKET` is a real ID (not empty, not `none`) → include `Ticket: <ID>` as the first line of the body.
-- If empty → the branch has no ticket; omit the line without asking.
-- If `none` → omit the line.
-
-## Step 5: Generate the title (conventional commits)
-
-Derive the title from the diff and commit log gathered in Step 3.
+Derive the title from the diff and commit log gathered in Step 1.
 
 - Format: `type(scope): summary`, e.g. `feat(auth): add SSO retry logic`. Scope is optional.
 - Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`.
 - Imperative mood ("add", not "added" or "adds"), no trailing period.
-- **Length: 72 characters maximum**, counting the entire line including the `type(scope):` prefix. This is a hard limit, not a target. If the draft exceeds it, tighten the summary (drop the scope, cut filler, shorten wording) until it fits; never open a PR with a title over 72 characters. Verify the count before creating the PR, e.g. `printf '%s' "$TITLE" | wc -m` must be `<= 72`.
+- **Length: 72 characters maximum**, counting the entire line including the `type(scope):` prefix. This is a hard limit, not a target. If the draft exceeds it, tighten the summary (drop the scope, cut filler, shorten wording) until it fits; never open a PR with a title over 72 characters. `playbook pr create` re-checks the length and refuses a longer title before it pushes anything.
 - The summary states the **effect** of the change, not a list of files.
 - The ticket goes in the body, not the title.
 
-## Step 6: Generate the body (MANDATORY template)
+## Step 3: Generate the body (MANDATORY template)
 
 Fill this template exactly. Keep the section order. Follow `playbook:writing-style` throughout: active voice, contractions, no banned words, no em or en dashes, no "This PR..." filler.
 
@@ -331,82 +149,34 @@ Ticket: PROJECT-1234
 
 Rules for filling it:
 
-1. **`Ticket:` line**: include only when Step 4 found a real ID; otherwise delete the line so the body starts at `## Summary`.
+1. **`Ticket:` line**: include only when Step 1 printed a real `ticket=` ID; otherwise delete the line so the body starts at `## Summary`.
 2. **Summary**: the why, not the what. One or two sentences. If the title is `fix(cache): stop stale reads after invalidation`, the Summary explains why stale reads mattered, not that you changed the cache.
 3. **What Changed**: every bullet maps to something real in the diff. Group by concept, don't enumerate files. Use the same terms the code uses (if it's a "handler", don't call it a "controller").
 4. **Notes for reviewers**: drop the heading entirely if empty. Don't leave "N/A".
 5. **Related work**: drop the heading entirely if empty.
 6. No trailing "generated by" footer. No test-count noise. If CI covers it, the reviewer sees CI.
+7. The body must carry no AI attribution (no `Claude-Session:` trailer, no `claude.ai/code/session` link, no co-author line naming Claude or Anthropic, no "generated with" footer) and no em or en dashes outside code. `playbook pr create` checks the title, the body, and every commit message, and refuses to push if it finds any.
 
-Write the finished body to a file:
+## Step 4: Push and create
+
+Every PR opens as a **draft**, unconditionally. `--ready` is not used here: Step 5 reads it, after the self-review, to decide whether to promote the draft.
+
+Write the finished body to `<state_dir>/pr-body.md` (the `state_dir=` value from Step 1) and create the PR in one command:
 
 ```bash
-CURRENT_BRANCH=$(git branch --show-current)
-PR_TMP="/tmp/create-pr/$(basename "$(git rev-parse --show-toplevel)")/$(echo "$CURRENT_BRANCH" | tr '/' '-')"
-
-cat > "$PR_TMP/pr-body.md" << 'PRBODY_EOF'
+cat > "<state_dir>/pr-body.md" <<'PRBODY_EOF'
 <the filled template goes here>
 PRBODY_EOF
-echo "Body written: $PR_TMP/pr-body.md"
+playbook pr create --title "<title>" --body-file "<state_dir>/pr-body.md" [--base <branch>] [--dir <path>]
 ```
 
-## Step 7: Push and create
+It checks the title length and the attribution and dash rules, pushes (a rejected push stops the run before any PR exists), confirms the remote carries your HEAD, opens the draft, and checks that the PR's base matches the one resolved in Step 1, correcting it if not. It prints `PR: <url>` and a one-line summary.
 
-Every PR opens as a **draft**, unconditionally. `READY_FLAG` (from `$PR_TMP/args.env`, parsed once in Step 1) is NOT used here: it's read by Step 9, after the self-review, to decide whether to promote the draft. This step never publishes a PR ready for review directly.
+If it refuses with a list of problems, nothing was pushed or created: fix the title or body (or amend the named commit) and run it again. If a run fails after the PR already exists, running it again reuses the open PR and finishes the base check.
 
-```bash
-CURRENT_BRANCH=$(git branch --show-current)
-PR_TMP="/tmp/create-pr/$(basename "$(git rev-parse --show-toplevel)")/$(echo "$CURRENT_BRANCH" | tr '/' '-')"
-source "$PR_TMP/args.env"
+Report the PR URL and a one-line summary (title, base, draft state), and say whether `--ready` was passed: Step 5 reads it to decide what happens next.
 
-# Hard limit: PR title is at most 72 characters (whole line, prefix included).
-TITLE_LEN=$(printf '%s' "$TITLE" | wc -m | tr -d ' ')
-if [ "$TITLE_LEN" -gt 72 ]; then
-  echo "error: PR title is $TITLE_LEN characters (limit 72); tighten it before creating the PR: $TITLE" >&2
-  exit 1
-fi
-
-# Always draft: --ready (READY_FLAG) is Step 9's job, after the self-review, not this step's.
-DRAFT_ARG="--draft"
-
-echo "Creating PR: $CURRENT_BRANCH -> $BASE_BRANCH (draft: $([ -n "$DRAFT_ARG" ] && echo yes || echo no))"
-
-# The push MUST gate the create. This block has no `set -e`, so without the
-# explicit check a rejected push (non-fast-forward, network, no write access)
-# falls straight through and `gh pr create` opens a PR against whatever the
-# remote branch held before, silently missing the local commits.
-if ! git push -u origin "HEAD:refs/heads/$CURRENT_BRANCH"; then
-  echo "ABORT: push of $CURRENT_BRANCH failed; not creating a PR (it would be missing your local commits)" >&2
-  exit 1
-fi
-
-# Confirm the remote actually carries this HEAD before opening the PR.
-LOCAL_SHA=$(git rev-parse HEAD)
-REMOTE_SHA=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" | cut -f1)
-if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
-  echo "ABORT: origin/$CURRENT_BRANCH is at ${REMOTE_SHA:-<missing>}, local HEAD is $LOCAL_SHA; the push did not land" >&2
-  exit 1
-fi
-
-gh pr create \
-  --title "$TITLE" \
-  --body-file "$PR_TMP/pr-body.md" \
-  --base "$BASE_BRANCH" \
-  $DRAFT_ARG
-```
-
-**Verify after creation, do not trust the command's own success message:** run `gh pr view "$CURRENT_BRANCH" --json baseRefName,headRefName -q '{base:.baseRefName,head:.headRefName}'` and confirm `base` matches the `BASE_BRANCH` resolved in Step 1. If it does not, the PR was opened against the wrong base; fix it immediately with `gh pr edit "$CURRENT_BRANCH" --base "$BASE_BRANCH"` before reporting success in Step 8.
-
-## Step 8: Report
-
-```bash
-PR_URL=$(gh pr view "$CURRENT_BRANCH" --json url -q .url 2>/dev/null || true)
-echo "PR: $PR_URL"
-```
-
-Show the PR URL and a one-line summary (title, base, draft state). Include the `READY_FLAG` value from `$PR_TMP/args.env`: Step 9 below reads it to decide what happens next.
-
-## Step 9: Self-review before ready (for the orchestrating session, not this forked agent)
+## Step 5: Self-review before ready (for the orchestrating session, not this forked agent)
 
 This step is not executable from inside this command's own forked context: it runs as `context: fork, agent: git`, and the `git` agent's tools are `Bash, Read, Skill` only, no `Agent`. It cannot spawn `deep-review`'s reviewer swarm itself. This step is the instruction the orchestrating session (whoever invoked this skill) follows after it returns:
 
@@ -418,7 +188,7 @@ This step is not executable from inside this command's own forked context: it ru
      - `quick`: run `/playbook:quick-review --self` instead. Run `/clear` first too: `quick-review --self` is report-only and asks no follow-up questions, so a fresh context is not strictly needed here, but clearing costs nothing and keeps the same safety margin as the `deep` path.
    - Fallback, config read error: if either `playbook config get` call above itself errors (a non-zero exit, or a line that does not contain the expected token; this happens when a config file at some tier is malformed JSON or is not an object), **do not** block PR creation and **do not** silently skip the review. Fall back to today's default: run `/clear`, then run `/playbook:deep-review --self`. Name what `playbook config get` printed to stderr in the final report, so a broken config file degrades to the known-safe default instead of a silent skip or a hard failure.
 2. Fix any findings the review surfaces. A push updates the draft automatically, no new PR needed.
-3. If `READY_FLAG` was `--ready` (the caller wanted this published, not left as a draft): run `gh pr ready <branch>` now, after step 1 decided whether a review runs (and after fixing any findings when it did), not before. `--ready` means "ready once step 1 has run," whether that ran a review or explicitly skipped one for a disabled repo; it never means "skip step 1."
-4. If `READY_FLAG` was empty: stop after step 1. The caller asked for a draft; leave it one.
+3. If `--ready` was passed (the caller wanted this published, not left as a draft): run `gh pr ready <branch>` now, after step 1 decided whether a review runs (and after fixing any findings when it did), not before. `--ready` means "ready once step 1 has run," whether that ran a review or explicitly skipped one for a disabled repo; it never means "skip step 1."
+4. If `--ready` was not passed: stop after step 1. The caller asked for a draft; leave it one.
 
 Never skip straight to `gh pr ready` on a fresh draft without running step 1 first, even when step 1 concludes with "review skipped" rather than an actual review.

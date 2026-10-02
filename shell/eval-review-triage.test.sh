@@ -468,6 +468,35 @@ EOF
   assert_not_contains "$EVAL_OUT" "argtest-env" || return 1
 }
 
+# ── scenario 9: fenced or prose-wrapped JSON is still parsed ──────────────
+#
+# haiku routinely wraps the tier map in a ```json fence (and sometimes adds a
+# sentence around it), which the script used to reject as not valid JSON.
+
+scenario_fenced() {
+  local dir fixture
+  dir="$(mktemp -d -p "$SCRATCH")"
+  fixture="$dir/fixture.json"
+
+  cat > "$fixture" <<'EOF'
+[
+  {"id": "scn9a-fenced", "pr": 109, "lenses": {"security": {"found": true}}},
+  {"id": "scn9b-prose", "pr": 110, "lenses": {"security": {"found": true}}}
+]
+EOF
+  [[ "$(playbook json is-valid-json < "$fixture")" == "true" ]] || { echo "  BUG: invalid fixture JSON"; return 1; }
+
+  mk_shims "$dir" ok
+  printf '%s\n' '```json' '{"security": {"tier": "full-lens", "reason": "auth path touched"}}' '```' > "$dir/response_1.json"
+  printf '%s\n' 'Here is the classification:' '```json' '{"security": {"tier": "full-lens", "reason": "auth path touched"}}' '```' 'Let me know if you need more.' > "$dir/response_2.json"
+
+  run_eval "$dir" "$fixture" ""
+
+  [[ "$EVAL_RC" -eq 0 ]] || { echo "  expected exit 0, got $EVAL_RC"; echo "$EVAL_OUT"; return 1; }
+  assert_not_contains "$EVAL_OUT" "classifier response was not valid JSON" || return 1
+  assert_contains "$EVAL_OUT" "PASS:" || return 1
+}
+
 # ── run all scenarios ──────────────────────────────────────────────────────
 
 run_scenario "1: match verdict"                                    scenario_match
@@ -479,6 +508,7 @@ run_scenario "6: gh fetch failure never invokes claude"            scenario_fetc
 run_scenario "7a: summary counts (match + non-critical), PASS"     scenario_summary_pass
 run_scenario "7b: summary counts (+ critical), FAIL"                scenario_summary_fail
 run_scenario "8: -h/--help and fixture-file precedence"            scenario_args
+run_scenario "9: fenced or prose-wrapped JSON still parses"        scenario_fenced
 
 TOTAL=$(( PASS + FAIL ))
 echo ""

@@ -10,7 +10,7 @@ This page covers requirements, the full local install path with the curl one-lin
 | `bash` | required | hooks and the setup script run in bash |
 | zsh | required for `cc worktree` | the worktree subcommand is zsh-only; all other `cc` subcommands and `ccd` work in bash |
 | `git`, `shasum` | required | used by hooks and the install script |
-| `python3` | optional | `install.sh` uses it to mark `~/.config/playbook` as trusted in `~/.claude.json`; without it the step warns and continues |
+| `python3` | optional | only a temporary fallback for `install.sh` when the installed `playbook` binary is too old to have `playbook trust`; without it the step warns and continues |
 | `gh` | optional | statusline PR and CI status |
 | `agent-browser` | optional | browser automation MCP used by `/playbook:plan` for web-only tickets and attachments |
 
@@ -27,7 +27,7 @@ Open a new terminal (or source your rc file) afterwards so the binary resolves o
 Pass `--yes` to accept every default without prompting. Pin a version:
 
 ```bash
-PLAYBOOK_REF=v0.15.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+PLAYBOOK_REF=v0.16.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
 
 Install files only (no plugin, no local wiring):

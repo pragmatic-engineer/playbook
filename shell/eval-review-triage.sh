@@ -172,6 +172,24 @@ $diff_text"
   # be the trust gate that FAIL runs need to be debuggable.
   tier_map="$(printf '%s' "$response" | playbook json is-valid-json-compact)"
   if [[ -z "$tier_map" ]]; then
+    # haiku usually wraps the JSON in a ```json fence, sometimes with a
+    # sentence around it. Retry on the span from the first "{" to the last "}".
+    stripped="$(printf '%s' "$response" | awk '
+      { lines[NR] = $0 }
+      END {
+        for (i = 1; i <= NR; i++) if (index(lines[i], "{") && !start) { start = i; sc = index(lines[i], "{") }
+        for (i = NR; i >= 1; i--) if (index(lines[i], "}") && !stop) { stop = i; for (c = length(lines[i]); c > 0; c--) if (substr(lines[i], c, 1) == "}") { ec = c; break } }
+        if (!start || !stop || stop < start) exit
+        for (i = start; i <= stop; i++) {
+          l = lines[i]
+          if (i == stop) l = substr(l, 1, ec)
+          if (i == start) l = substr(l, sc)
+          print l
+        }
+      }')"
+    [[ -n "$stripped" ]] && tier_map="$(printf '%s' "$stripped" | playbook json is-valid-json-compact)"
+  fi
+  if [[ -z "$tier_map" ]]; then
     if [[ -n "$claude_err" ]]; then
       printf '  unparseable classifier response; every lens errored. claude stderr: %s\n' "$claude_err"
     else

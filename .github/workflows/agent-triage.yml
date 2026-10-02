@@ -13,7 +13,7 @@ jobs:
       contents: read
       issues: write
       id-token: write
-    uses: protocortex/agent-workflows/.github/workflows/agent-triage.yml@v1.6.0
+    uses: protocortex/agent-workflows/.github/workflows/agent-triage.yml@v1
     with:
       issue_number: ${{ github.event.issue.number }}
       issue_title: ${{ github.event.issue.title }}
