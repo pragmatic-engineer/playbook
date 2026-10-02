@@ -63,11 +63,22 @@ pub fn run(
         .to_string();
     verify_pushed_sha(&local, &remote)?;
 
-    let url = gh.pr_create(title, body_file, &base)?;
+    // A re-run after a partial success (the PR was created but its base fix
+    // failed, or gh timed out after creating it) reuses the open PR.
+    let (url, summary) = match gh.pr_view(&branch)? {
+        Some(pr) if pr.state == "OPEN" => (
+            pr.url,
+            format!("Using the already open PR ({branch} -> {base})"),
+        ),
+        _ => (
+            gh.pr_create(title, body_file, &base)?,
+            format!("Created draft PR: {title} ({branch} -> {base})"),
+        ),
+    };
 
     // The create command's own success message is not proof of the base. The
     // PR exists by now, so a failed check is a warning that keeps the URL.
-    let mut report = format!("PR: {url}\nCreated draft PR: {title} ({branch} -> {base})");
+    let mut report = format!("PR: {url}\n{summary}");
     match gh.pr_view_base(&branch) {
         Ok(actual) if actual == base => {}
         Ok(_) => gh.pr_edit_base(&branch, &base).map_err(|e| {

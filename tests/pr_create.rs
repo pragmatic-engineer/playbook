@@ -25,7 +25,12 @@ fn create(fx: &Fixture, gh: &FakeGh, title: &str, base: Option<&str>) -> Result<
 }
 
 fn remote_has_branch(fx: &Fixture, branch: &str) -> bool {
-    !git(&fx.bare, &["branch", "--list", branch]).is_empty()
+    let reference = format!("refs/heads/{branch}");
+    !git(
+        &fx.bare,
+        &["for-each-ref", "--format=%(refname)", &reference],
+    )
+    .is_empty()
 }
 
 #[test]
@@ -201,4 +206,90 @@ fn running_on_the_base_branch_never_pushes_to_it() {
         "origin/main must not move"
     );
     assert_eq!(gh.count("pr_create"), 0);
+}
+
+fn open_pr(url: &str) -> Option<playbook::pr::shared::ExistingPr> {
+    Some(playbook::pr::shared::ExistingPr {
+        url: url.to_string(),
+        state: "OPEN".to_string(),
+    })
+}
+
+#[test]
+fn a_rerun_reuses_the_open_pr_and_still_corrects_its_base() {
+    // Arrange: a first run created the PR, then its base fix failed.
+    let fx = Fixture::new("rerun", "feat/x");
+    fx.publish_base_as("release");
+    fx.commit_lines("a.txt", 2);
+    let gh = FakeGh {
+        existing: open_pr("https://example.test/pr/77"),
+        reported_base: Some("main".into()),
+        ..FakeGh::creating(URL)
+    };
+
+    // Act
+    let got = create(&fx, &gh, "feat(pr): add a thing", Some("release")).expect("exits 0");
+
+    // Assert
+    assert!(
+        got.lines().any(|l| l == "PR: https://example.test/pr/77"),
+        "got {got}"
+    );
+    assert_eq!(gh.count("pr_create"), 0, "the open PR must be reused");
+    assert_eq!(gh.count("pr_edit_base:feat/x:release"), 1);
+}
+
+#[test]
+fn a_merged_pr_on_the_branch_does_not_block_creating_a_new_one() {
+    // Arrange
+    let fx = Fixture::new("merged", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    let gh = FakeGh {
+        existing: Some(playbook::pr::shared::ExistingPr {
+            url: "https://example.test/pr/3".to_string(),
+            state: "MERGED".to_string(),
+        }),
+        ..FakeGh::creating(URL)
+    };
+
+    // Act
+    let got = create(&fx, &gh, "feat(pr): add a thing", None).expect("creates");
+
+    // Assert
+    assert!(got.lines().any(|l| l == format!("PR: {URL}")), "got {got}");
+    assert_eq!(gh.count("pr_create"), 1);
+}
+
+#[test]
+fn a_branch_name_starting_with_a_dash_is_refused_before_anything_is_pushed() {
+    // Arrange
+    let fx = Fixture::new("dashbranch", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    fx.checkout_dash_branch("-weird");
+    let gh = FakeGh::creating(URL);
+
+    // Act
+    let err = create(&fx, &gh, "feat(pr): add a thing", None).expect_err("refused");
+
+    // Assert
+    assert!(err.contains("starts with '-'"), "got {err}");
+    assert_eq!(gh.count("pr_create"), 0);
+    assert!(!remote_has_branch(&fx, "-weird"));
+}
+
+#[test]
+fn a_base_starting_with_a_dash_is_refused_before_anything_is_pushed() {
+    // Arrange
+    let fx = Fixture::new("dashbase", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    let gh = FakeGh::creating(URL);
+
+    // Act
+    let err =
+        create(&fx, &gh, "feat(pr): add a thing", Some("--upload-pack=x")).expect_err("refused");
+
+    // Assert
+    assert!(err.contains("starts with '-'"), "got {err}");
+    assert_eq!(gh.count("pr_create"), 0);
+    assert!(!remote_has_branch(&fx, "feat/x"));
 }
