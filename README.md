@@ -182,6 +182,7 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 | `/playbook:address-pr-comments` | Walks unresolved PR comments, applies fixes or drafts replies, then pushes and posts replies. |
 | `/playbook:learn-project` | Analyses the repo (git history, code, PRs, JIRA/Confluence) and writes distilled facts to memory. Read-only; confirms before writing. |
 | `/playbook:repo-audit` | Read-only four-phase repository audit (discovery, findings, strategy, task plan). |
+| `/playbook:session-start` | Loads the handoff the last session saved for this directory and orients the session from it, with no copy and paste. |
 
 ## Skills
 
@@ -194,7 +195,7 @@ Skills live in `skills/` and load on demand. See [docs/authoring/01-commands-ski
 | `engineering-standards` | Code design rules, PR readiness, test types, mocking rules, incremental delivery, deployment flow. |
 | `engineering-standards-javascript` | JS/TS companion to `engineering-standards`; covers Zod validation and Jest/Vitest mocking. |
 | `writing-style` | Voice rules for human-facing prose; spartan, active voice, contractions, no dashes. |
-| `session-handoff` | Decision-first handoff so the next session picks up cold without rereading the thread. |
+| `session-handoff` | Decision-first handoff, saved with `playbook handoff save`, so the next session picks up cold without rereading the thread. |
 
 ## Docs
 
