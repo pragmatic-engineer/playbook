@@ -152,6 +152,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     // See migrate_memory's own doc comment for what this single call covers.
     let memory_step = memory_migrate::migrate_memory(&paths.home, &paths.claude_home);
 
+    let trust_step = trust_config_dir_step(&paths.home);
+
     InitOutcome {
         steps: vec![
             shell_runtime_step,
@@ -161,7 +163,27 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
             hooks_step,
             shim_step,
             memory_step,
+            trust_step,
         ],
+    }
+}
+
+/// Marks `~/.config/playbook` as trusted in `~/.claude.json`, so a session
+/// started in that folder skips Claude Code's trust dialog. Best-effort: a
+/// missing file or any failure is reported as skipped, never as a failure.
+fn trust_config_dir_step(home: &Path) -> StepReport {
+    let claude_json = home.join(".claude.json");
+    let config_dir = home.join(".config").join("playbook");
+    let dir = config_dir.to_string_lossy();
+    if !claude_json.exists() {
+        return StepReport::skipped("trust", "no ~/.claude.json yet; nothing to update");
+    }
+    if crate::trust::is_trusted(&claude_json, &dir) {
+        return StepReport::already_correct("trust", "config dir already trusted");
+    }
+    match crate::trust::write_trust_entry(&claude_json, &dir) {
+        Ok(()) => StepReport::wired("trust", format!("trusted {dir}")),
+        Err(err) => StepReport::skipped("trust", format!("could not update ~/.claude.json: {err}")),
     }
 }
 
