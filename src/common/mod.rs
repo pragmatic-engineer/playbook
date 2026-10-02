@@ -22,7 +22,7 @@ pub use emit::{
     emit_block, emit_pre_context, emit_pre_deny, emit_prompt_context, emit_system_message,
 };
 pub use paths::{
-    cc_state_dir, memory_dir, playbook_root, repo_scoped_dir, runtime_root, RepoScope,
+    cc_state_dir, memory_dir, playbook_root, repo_scoped_dir, runtime_root, usage_db_dir, RepoScope,
 };
 pub use payload::Payload;
 pub use proc::run_with_timeout;
