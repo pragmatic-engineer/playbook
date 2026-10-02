@@ -5,6 +5,7 @@
 //! lives, ingest incrementally, render.
 
 use super::account::account_label;
+use super::backfill;
 use super::claude_code::ClaudeCodeSource;
 use super::db::{load_tool_events, load_usage_events, open_db};
 use super::ingest::{ingest, IngestStats};
@@ -45,6 +46,7 @@ impl Paths {
 pub fn ingest_new(paths: &Paths) -> Result<(Connection, IngestStats), String> {
     let conn = open_db(&paths.db)?;
     let source = ClaudeCodeSource::new(paths.claude_projects.clone());
+    backfill::run_once(&source, &conn)?;
     let account = account_label(&paths.claude_json);
     let stats = ingest(&source, &account, &conn)?;
     Ok((conn, stats))

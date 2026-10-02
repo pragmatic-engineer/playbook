@@ -4,7 +4,7 @@
 //! Plain-text usage report for the terminal. Structured on purpose: whatever
 //! agent is driving the session can read it and give the insights itself.
 
-use super::aggregate::{count_tools, group_usage, Dimension, Group};
+use super::aggregate::{count_tools, group_usage, unpriced_models, Dimension, Group};
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
 use std::fmt::Write;
 
@@ -54,6 +54,14 @@ pub fn render(usage: &[UsageEvent], tools: &[ToolInvocationEvent]) -> String {
         usage.len(),
         total_cost
     );
+    let (unpriced, models) = unpriced_models(usage);
+    if unpriced > 0 {
+        let _ = writeln!(
+            out,
+            "Note: {unpriced} messages are unpriced (no known price for {}); they count as $0.",
+            models.join(", ")
+        );
+    }
 
     let days = group_usage(usage, Dimension::Day);
     let recent = days.len().saturating_sub(RECENT_DAYS);
@@ -102,6 +110,7 @@ mod tests {
             cache_creation_tokens: 29653,
             cache_read_tokens: 22178,
             cost_usd: 0.12940815,
+            ..UsageEvent::default()
         };
 
         let text = render(&[event], &[]);
@@ -114,5 +123,24 @@ mod tests {
         assert!(row.contains("770") && row.contains("22178/29653") && row.contains("0.1294"));
         assert!(text.contains("2026-09-01"));
         assert!(text.contains("dev@example.com"));
+    }
+
+    #[test]
+    fn unpriced_messages_are_reported_honestly_under_the_header() {
+        let mut event = UsageEvent {
+            event_id: "e".into(),
+            timestamp: 1788252682,
+            model: "claude-future-9".into(),
+            input_tokens: 5,
+            ..UsageEvent::default()
+        };
+        event.apply_pricing();
+
+        let text = render(&[event], &[]);
+
+        assert!(text.contains(
+            "Note: 1 messages are unpriced (no known price for claude-future-9); they count as $0."
+        ));
+        assert!(!render(&[], &[]).contains("unpriced"));
     }
 }
