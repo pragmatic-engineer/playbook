@@ -83,8 +83,18 @@ fn start(home: &Home) -> u16 {
         .unwrap_or_else(|| panic!("no port in: {text}"))
 }
 
-fn get(port: u16, path: &str, site: Option<&str>) -> (u16, Option<String>) {
-    let mut request = ureq::get(&format!("http://127.0.0.1:{port}{path}"));
+/// The session token the server wrote into its lock, as the opened link carries it.
+fn token(home: &Home) -> String {
+    let text = fs::read_to_string(home.usage_dir().join("dashboard.lock")).expect("a lock file");
+    text.split_whitespace()
+        .nth(2)
+        .expect("a token field")
+        .to_string()
+}
+
+fn get(port: u16, path: &str, site: Option<&str>, token: &str) -> (u16, Option<String>) {
+    let mut request =
+        ureq::get(&format!("http://127.0.0.1:{port}{path}")).header("X-Playbook-Token", token);
     if let Some(site) = site {
         request = request.header("Sec-Fetch-Site", site);
     }
@@ -116,7 +126,11 @@ fn another_sites_page_cannot_make_the_server_ingest_but_the_page_itself_can() {
         (Some("cross-site"), 403),
         (Some("same-site"), 403),
     ] {
-        assert_eq!(get(port, "/api/data", site).0, expected, "{site:?}");
+        assert_eq!(
+            get(port, "/api/data", site, &token(&home)).0,
+            expected,
+            "{site:?}"
+        );
     }
 }
 
@@ -126,7 +140,7 @@ fn the_page_forbids_being_framed() {
     let home = Home::new("csp");
     let port = start(&home);
 
-    let (status, policy) = get(port, "/", None);
+    let (status, policy) = get(port, "/", None, "");
 
     assert_eq!(status, 200);
     let policy = policy.expect("the page carries a policy");
@@ -139,7 +153,7 @@ fn the_usage_directory_database_and_lock_are_owner_only() {
     let home = Home::new("modes");
     home.seed();
     let port = start(&home);
-    assert_eq!(get(port, "/api/data", None).0, 200);
+    assert_eq!(get(port, "/api/data", None, &token(&home)).0, 200);
 
     let mode = |p: PathBuf| fs::metadata(p).unwrap().permissions().mode() & 0o777;
 

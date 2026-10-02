@@ -36,7 +36,7 @@ Ingest keeps a watermark per source (the newest timestamp it has read). It skips
 
 ## The dashboard server
 
-`playbook usage dashboard` is a short-lived process. It checks the lock file `~/.config/playbook/usage/dashboard.lock`, which holds a pid and a port. A lock counts as live only when the process is alive and the port answers, so a killed server does not leave a dead lock behind. If the lock is live, the command opens the browser and exits. If not, it starts a detached copy of the same binary (a hidden `--serve` flag, `setsid`, no terminal) and waits up to 5 seconds for it to report its port.
+`playbook usage dashboard` is a short-lived process. It checks the lock file `~/.config/playbook/usage/dashboard.lock`, which holds a pid, a port and the session token (mode 0600, in a 0700 folder). A lock in the older two field format has no token, so the command stops that old server (only if it really is a dashboard server) and starts a new one. A lock counts as live only when the process is alive and the port answers, so a killed server does not leave a dead lock behind. If the lock is live, the command opens the browser and exits. If not, it starts a detached copy of the same binary (a hidden `--serve` flag, `setsid`, no terminal) and waits up to 5 seconds for it to report its port.
 
 The server binds `127.0.0.1` on a port the OS picks, so there is never a port clash and no `sudo`. It writes its own lock after it binds. Two commands started at once both start a server, but only one can claim the lock, and the other exits. `stop` signals only a live server, never a stale pid that may belong to something else now.
 
@@ -44,10 +44,16 @@ It uses `tiny_http`, which is synchronous. This binary has no async runtime on p
 
 The page polls `/api/data` every 5 seconds. That endpoint ingests anything new, then returns the totals, every grouping and two charts. The charts are inline SVG drawn on the server, with every label escaped.
 
+The page is three same-origin files: `/` (HTML), `/app.css` and `/app.js`. They hold no data and need no token. Only `/api/data` does.
+
 Because a browser can reach the server, it is locked down:
 
+- **Session token.** Each server start makes a random 32 byte token (read from `/dev/urandom`, 64 hex characters) and keeps it in the lock file. `/api/data` needs it in the `X-Playbook-Token` header and answers 401 without it. The comparison does not stop at the first wrong byte. This keeps another user account on the same machine from reading your usage data (it includes your account email, repo and branch names, and spend), because they cannot read your 0600 lock file.
+- **The link carries the token in the fragment.** `playbook usage dashboard` opens and prints `http://127.0.0.1:<port>/#<token>`, and the same for the `playbook.localhost` alias. A browser never sends the fragment to the server, so it stays out of requests and logs. The page reads it, removes it from the address bar with `history.replaceState`, and keeps it in `sessionStorage` so a reload still works. If the token is missing or rejected, the page stops polling and tells you to run `playbook usage dashboard` for a fresh link. A new server start means a new token.
+- **Accepted limit:** while the browser opener runs, the link is on its command line, so another user can see it in `ps` for a moment. The token only works for that one server run, and stopping the server ends it.
 - It answers only when the `Host` header is `127.0.0.1`, `localhost` or `playbook.localhost` on its own port. Any other host gets a 403, which stops a web page from using DNS rebinding to read your usage data.
-- It sends a Content-Security-Policy that allows no outside resources, and `nosniff`.
+- `/api/data` also refuses a request a browser labels `Sec-Fetch-Site: cross-site` or `same-site`, so another site cannot make the server ingest.
+- **Script policy.** The policy is `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, with `nosniff`. Nothing is inline, so neither scripts nor styles allow `'unsafe-inline'`, and the chart SVG uses classes, not `style=` attributes. The policy is sent with the page, the script and the stylesheet.
 - The page puts text into the DOM with `textContent`. The one `innerHTML` use is the escaped SVG.
 
 ## Adding another agent
@@ -56,7 +62,7 @@ Because a browser can reach the server, it is locked down:
 
 ## Tests
 
-Tests run against hand-written transcripts in `tests/fixtures/usage/` and a scratch `HOME`, never your real `~/.claude`. Server tests set `PLAYBOOK_USAGE_NO_BROWSER=1` so no browser opens, and they serialize behind a lock because they bind real sockets. One test runs `usage ingest` in a loop while polling the server, to prove reads never fail and no event is lost or doubled.
+Tests run against hand-written transcripts in `tests/fixtures/usage/` and a scratch `HOME`, never your real `~/.claude`. Server tests (`tests/usage_dashboard.rs`, `tests/usage_auth.rs`) set `PLAYBOOK_USAGE_NO_BROWSER=1` so no browser opens, and they serialize behind a lock because they bind real sockets. One test runs `usage ingest` in a loop while polling the server, to prove reads never fail and no event is lost or doubled.
 
 ## Limits
 

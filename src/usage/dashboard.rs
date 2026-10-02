@@ -7,7 +7,7 @@
 //! with a hidden flag) that outlives its parent, so no other `playbook`
 //! command ever waits on it.
 
-use super::lock::{self, Lock};
+use super::lock::{self, Lock, Token};
 use super::page;
 use super::run::Paths;
 use std::path::Path;
@@ -20,14 +20,16 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub type Opener<'a> = &'a dyn Fn(&str) -> Result<(), String>;
 
-pub fn ip_url(port: u16) -> String {
-    format!("http://127.0.0.1:{port}")
+/// The link the browser opens. The token rides in the fragment, which a
+/// browser never sends to the server, so it stays out of requests and logs.
+pub fn ip_url(port: u16, token: &Token) -> String {
+    format!("http://127.0.0.1:{port}/#{}", token.as_str())
 }
 
 /// `*.localhost` resolves to loopback on macOS and most Linux resolvers but
 /// not all, so it is only ever printed, never used to open the browser.
-pub fn alias_url(port: u16) -> String {
-    format!("http://playbook.localhost:{port}")
+pub fn alias_url(port: u16, token: &Token) -> String {
+    format!("http://playbook.localhost:{port}/#{}", token.as_str())
 }
 
 pub fn open_in_browser(url: &str) -> Result<(), String> {
@@ -71,14 +73,19 @@ pub fn fetch_site_allowed(value: Option<&str>) -> bool {
     matches!(value, None | Some("same-origin") | Some("none"))
 }
 
-/// What the server answers for a path: (status, content type, body).
-/// `load_data` runs only for `/api/data`.
+/// What the server answers for a path: (status, content type, body). The page
+/// assets carry no data and need no token. `load_data` runs only for
+/// `/api/data`, and only when `token_ok`.
 pub fn respond_to(
     path: &str,
+    token_ok: bool,
     load_data: impl FnOnce() -> Result<String, String>,
 ) -> (u16, &'static str, String) {
     match path {
         "/" => (200, "text/html; charset=utf-8", page::HTML.to_string()),
+        "/app.js" => (200, "text/javascript; charset=utf-8", page::JS.to_string()),
+        "/app.css" => (200, "text/css; charset=utf-8", page::CSS.to_string()),
+        "/api/data" if !token_ok => (401, "text/plain; charset=utf-8", "unauthorized".to_string()),
         "/api/data" => match load_data() {
             Ok(body) => (200, "application/json", body),
             Err(e) => (
@@ -153,8 +160,26 @@ fn wait_for_live_lock(path: &Path) -> Result<Lock, String> {
     }
 }
 
+/// An older server wrote a two field lock and has no token, so nothing can
+/// authenticate to it. Retire it (only if it really is a dashboard server)
+/// rather than leave it running without an owner.
+fn retire_legacy_server(paths: &Paths) {
+    let Some((pid, port)) = lock::read_legacy_lock(&paths.lock) else {
+        return;
+    };
+    let named_is_live = crate::worktree::pid_is_alive(pid) && lock::port_accepts_connections(port);
+    if named_is_live && lock::is_dashboard_process(pid) && terminate(pid).is_ok() {
+        let deadline = Instant::now() + STOP_TIMEOUT;
+        while crate::worktree::pid_is_alive(pid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    lock::clear_lock(&paths.lock);
+}
+
 /// `playbook usage dashboard`.
 pub fn run_dashboard(paths: &Paths, exe: &Path, open: Opener) -> Result<String, String> {
+    retire_legacy_server(paths);
     lock::clear_if_stale(&paths.lock);
     let existing = lock::read_lock(&paths.lock).filter(|l| lock::is_live(*l));
     let (running, started) = match existing {
@@ -165,7 +190,7 @@ pub fn run_dashboard(paths: &Paths, exe: &Path, open: Opener) -> Result<String, 
         }
     };
 
-    let url = ip_url(running.port);
+    let url = ip_url(running.port, &running.token);
     let opened = open(&url);
     let mut out = format!(
         "usage dashboard {} on {url}\n  also: {} (works where *.localhost resolves)",
@@ -174,7 +199,7 @@ pub fn run_dashboard(paths: &Paths, exe: &Path, open: Opener) -> Result<String, 
         } else {
             "already running"
         },
-        alias_url(running.port),
+        alias_url(running.port, &running.token),
     );
     if let Err(e) = opened {
         out.push_str(&format!(
@@ -253,9 +278,11 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
         .to_ip()
         .map(|addr| addr.port())
         .ok_or("the dashboard server has no IP address")?;
+    let token = Token::generate()?;
     let me = Lock {
         pid: std::process::id(),
         port,
+        token,
     };
     if !lock::try_claim(&paths.lock, me) {
         return Ok(());
@@ -263,6 +290,8 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
     for request in server.incoming_requests() {
         let host = header_value(&request, "Host");
         let fetch_site = header_value(&request, "Sec-Fetch-Site");
+        let token_ok =
+            header_value(&request, "X-Playbook-Token").is_some_and(|given| token.matches(&given));
         let path = request.url().split('?').next().unwrap_or("/").to_string();
         let (status, content_type, body) = if !host_allowed(host.as_deref(), port) {
             (
@@ -277,7 +306,7 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
                 "forbidden origin".to_string(),
             )
         } else {
-            respond_to(&path, || load_data(paths))
+            respond_to(&path, token_ok, || load_data(paths))
         };
         let mut response = tiny_http::Response::from_string(body).with_status_code(status);
         let mut headers = vec![
@@ -285,7 +314,7 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
             ("Cache-Control", "no-store"),
             ("X-Content-Type-Options", "nosniff"),
         ];
-        if content_type.starts_with("text/html") {
+        if status == 200 && path != "/api/data" {
             headers.push(("Content-Security-Policy", page::CONTENT_SECURITY_POLICY));
         }
         for (name, value) in headers {
@@ -302,33 +331,45 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn tok() -> Token {
+        Token::parse(&"ab".repeat(32)).expect("64 hex characters")
+    }
+
     #[test]
-    fn urls_use_the_ip_for_launching_and_the_alias_only_for_display() {
-        assert_eq!(ip_url(4242), "http://127.0.0.1:4242");
-        assert_eq!(alias_url(4242), "http://playbook.localhost:4242");
+    fn urls_carry_the_token_in_the_fragment_only() {
+        let hex = "ab".repeat(32);
+
+        assert_eq!(
+            ip_url(4242, &tok()),
+            format!("http://127.0.0.1:4242/#{hex}")
+        );
+        assert_eq!(
+            alias_url(4242, &tok()),
+            format!("http://playbook.localhost:4242/#{hex}")
+        );
     }
 
     #[test]
     fn root_serves_the_page_data_runs_the_loader_and_anything_else_is_a_404() {
         let (status, content_type, body) =
-            respond_to("/", || panic!("the page must not load data"));
+            respond_to("/", false, || panic!("the page must not load data"));
         assert_eq!(status, 200);
         assert!(content_type.starts_with("text/html"));
-        assert!(body.contains("fetch('/api/data')"));
+        assert!(body.contains("/app.js"));
 
         let (status, content_type, body) =
-            respond_to("/api/data", || Ok("{\"ok\":true}".to_string()));
+            respond_to("/api/data", true, || Ok("{\"ok\":true}".to_string()));
         assert_eq!(
             (status, content_type, body.as_str()),
             (200, "application/json", "{\"ok\":true}")
         );
 
-        let (status, _, body) = respond_to("/api/data", || Err("db locked".to_string()));
+        let (status, _, body) = respond_to("/api/data", true, || Err("db locked".to_string()));
         assert_eq!(status, 500);
         assert!(body.contains("db locked"));
 
         assert_eq!(
-            respond_to("/nope", || panic!("unknown paths load nothing")).0,
+            respond_to("/nope", true, || panic!("unknown paths load nothing")).0,
             404
         );
     }
@@ -341,12 +382,6 @@ mod tests {
         assert!(!fetch_site_allowed(Some("cross-site")));
         assert!(!fetch_site_allowed(Some("same-site")));
         assert!(!fetch_site_allowed(Some("")));
-    }
-
-    #[test]
-    fn the_page_policy_forbids_framing_and_other_origins() {
-        assert!(page::CONTENT_SECURITY_POLICY.contains("frame-ancestors 'none'"));
-        assert!(page::CONTENT_SECURITY_POLICY.contains("default-src 'none'"));
     }
 
     #[cfg(unix)]
@@ -367,7 +402,11 @@ mod tests {
             .spawn()
             .expect("sleep starts");
         let port = listener.local_addr().unwrap().port();
-        std::fs::write(&paths.lock, format!("{} {port}\n", bystander.id())).unwrap();
+        std::fs::write(
+            &paths.lock,
+            format!("{} {port} {}\n", bystander.id(), tok().as_str()),
+        )
+        .unwrap();
 
         // Act
         let message = run_stop(&paths).expect("stop reports, it does not fail");
@@ -394,5 +433,37 @@ mod tests {
         assert!(!host_allowed(Some("127.0.0.1:9"), 4242));
         assert!(!host_allowed(Some("127.0.0.1"), 4242));
         assert!(!host_allowed(None, 4242));
+    }
+
+    #[test]
+    fn the_data_route_needs_the_token_and_the_assets_do_not() {
+        let never = || -> Result<String, String> { panic!("data must not load without the token") };
+
+        let (status, _, body) = respond_to("/api/data", false, never);
+        assert_eq!((status, body.as_str()), (401, "unauthorized"));
+
+        for (path, kind) in [
+            ("/", "text/html"),
+            ("/app.js", "text/javascript"),
+            ("/app.css", "text/css"),
+        ] {
+            let (status, content_type, body) = respond_to(path, false, never);
+            assert_eq!(status, 200, "{path}");
+            assert!(content_type.starts_with(kind), "{path}: {content_type}");
+            assert!(
+                !body.contains(tok().as_str()),
+                "{path} must not carry the token"
+            );
+        }
+    }
+
+    #[test]
+    fn the_page_assets_hold_no_usage_data() {
+        for path in ["/", "/app.js", "/app.css"] {
+            let (_, _, body) = respond_to(path, false, || panic!("no data"));
+            for leaked in ["dev@example.com", "\"cost_usd\":", "\"messages\":"] {
+                assert!(!body.contains(leaked), "{path} has {leaked}");
+            }
+        }
     }
 }
