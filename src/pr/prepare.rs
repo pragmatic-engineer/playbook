@@ -6,7 +6,8 @@
 //! ticket), printed as labeled lines the calling command copies verbatim.
 
 use crate::pr::shared::{
-    current_branch, git, git_net, git_to_file, pr_state_dir, resolve_base, GhClient,
+    current_branch, git, git_net, git_to_file, pr_state_dir, reject_option_like, resolve_base,
+    GhClient,
 };
 use regex::Regex;
 use std::fs;
@@ -47,6 +48,7 @@ pub fn prepare(
     base_arg: Option<&str>,
     ticket_arg: Option<&str>,
 ) -> Result<String, String> {
+    reject_option_like("branch", branch)?;
     fs::create_dir_all(state_dir)
         .map_err(|e| format!("could not create {}: {e}", state_dir.display()))?;
 
@@ -66,8 +68,17 @@ pub fn prepare(
         ));
     }
     // After the on-base check so an immediate abort never pays for a fetch.
-    // A failed fetch is not fatal: the local ref may still be good enough.
-    let _ = git_net(&["fetch", "origin", &base, "--quiet"]);
+    // A failed fetch is not fatal, but the output says the ref may be stale.
+    let fetch_warning = git_net(&["fetch", "origin", &base, "--quiet"])
+        .err()
+        .map(|e| {
+            // git's error spans lines; the output is one labeled line per fact.
+            let reason: Vec<&str> = e.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+            let reason = reason.join("; ");
+            format!(
+                "WARN fetch: could not fetch origin/{base} ({reason}); results use the local ref"
+            )
+        });
 
     let remote_base = format!("origin/{base}");
     let ahead = git(&["rev-list", "--count", &format!("{remote_base}..HEAD")])
@@ -98,7 +109,7 @@ pub fn prepare(
     let stat = git(&["diff", "--stat", &range]).unwrap_or_default();
     let log = git(&["log", &format!("{remote_base}..HEAD"), "--format=%h %s"]).unwrap_or_default();
 
-    let out = vec![
+    let mut out = vec![
         format!("branch={branch}"),
         format!("state_dir={}", state_dir.display()),
         format!("base={base} (source: {source})"),
@@ -106,13 +117,16 @@ pub fn prepare(
         dirty_verdict(dirty),
         size_verdict(changed),
         tests_verdict(tests),
+    ];
+    out.extend(fetch_warning);
+    out.extend([
         "=== diff stat ===".to_string(),
         stat,
         "=== commit log ===".to_string(),
         log,
         format!("diff_file={}", diff_file.display()),
         format!("ticket={}", ticket(branch, ticket_arg)),
-    ];
+    ]);
     Ok(out.join("\n"))
 }
 

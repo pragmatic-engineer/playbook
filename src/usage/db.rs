@@ -170,6 +170,44 @@ pub fn insert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<(), Strin
     .map_err(|e2| format!("failed to insert usage event {}: {e2}", e.event_id))
 }
 
+/// Inserts the event, or when its id is already stored raises the token
+/// counts to the larger values. A message is written as several lines whose
+/// output count can grow, so a poll that saw it early must not freeze a
+/// partial count. Returns the number of rows written (0 when nothing grew).
+pub fn upsert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<usize, String> {
+    conn.execute(
+        "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+            repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+            cache_read_tokens, cost_usd, cache_creation_1h_tokens)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT(event_id) DO UPDATE SET
+            input_tokens = excluded.input_tokens,
+            output_tokens = excluded.output_tokens,
+            cache_creation_tokens = excluded.cache_creation_tokens,
+            cache_read_tokens = excluded.cache_read_tokens,
+            cost_usd = excluded.cost_usd,
+            cache_creation_1h_tokens = excluded.cache_creation_1h_tokens
+         WHERE excluded.output_tokens > usage_events.output_tokens",
+        params![
+            e.event_id,
+            e.timestamp,
+            e.session_id,
+            e.account,
+            e.model,
+            e.effort,
+            e.repo,
+            e.branch,
+            to_i64(e.input_tokens),
+            to_i64(e.output_tokens),
+            to_i64(e.cache_creation_tokens),
+            to_i64(e.cache_read_tokens),
+            e.cost_usd,
+            to_i64(e.cache_creation_1h_tokens)
+        ],
+    )
+    .map_err(|e2| format!("failed to upsert usage event {}: {e2}", e.event_id))
+}
+
 pub fn count_usage_events(conn: &Connection) -> Result<i64, String> {
     conn.query_row("SELECT COUNT(*) FROM usage_events", [], |row| row.get(0))
         .map_err(|e| format!("failed to count usage events: {e}"))
