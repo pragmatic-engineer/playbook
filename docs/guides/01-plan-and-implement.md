@@ -125,7 +125,7 @@ With no arguments, it lists saved plans to pick from. If the reference isn't a r
 2. A subagent writes the minimal implementation to pass. Tests must pass.
 3. A subagent refactors without changing behavior. Tests stay green.
 
-Pass `--no-tdd` to write tests and implementation together instead.
+Pass `--no-tdd` to write tests and implementation together instead. Pass `--no-tests` to write no new tests for the run, which suits a config-only, docs-only, or mechanical change. It is a logged, per-run override of the testing standard, never a default, and `--auto` never picks it.
 
 **One commit per Work Unit (savepoint).** Each red/green/refactor subagent checkpoints its own step with a small `wip` commit as it goes. Once a WU's last step passes review, the orchestrator squashes its checkpoints into one commit and stages exactly that WU's files. Each deliverable becomes its own small savepoint commit, even when WUs ran concurrently, and each Segment's commits land on that Segment's branch. If a step's subagent dies or goes idle mid-WU, `/playbook:implement` resumes from its last `wip` commit instead of redoing the whole Work Unit.
 
