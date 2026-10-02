@@ -113,7 +113,7 @@ ask() {
 #
 # Best-effort: a missing ~/.claude.json is a silent no-op (this script never
 # creates Claude Code's own state file), and any failure only warns, never
-# fails the install. Prefers `playbook trust`, which merges atomically and
+# fails the install. Uses `playbook trust`, which merges atomically and
 # never touches any other project's entry.
 trust_playbook_config_dir() {
     local claude_json="$HOME/.claude.json" bin="$PLAYBOOK_BIN_DIR/playbook" err
@@ -129,47 +129,7 @@ trust_playbook_config_dir() {
         return 0
     fi
 
-    trust_with_python3
-}
-
-# Temporary: only for an installed binary older than the first release that
-# ships `playbook trust`. Remove once that release is the minimum. Writes
-# through the existing inode (`cat >`, not `mv`) so a symlinked
-# ~/.claude.json keeps pointing at the same real file.
-trust_with_python3() {
-    local claude_json="$HOME/.claude.json" tmp
-    [ -f "$claude_json" ] || return 0
-
-    tmp="$(mktemp "${claude_json}.XXXXXX")" || {
-        warn "could not create a temp file to update $claude_json; skipping the $PLAYBOOK_CONFIG_DIR trust entry."
-        return 0
-    }
-    chmod 600 "$tmp" 2>/dev/null || true
-
-    local updated=1
-    if command -v python3 >/dev/null 2>&1; then
-        python3 - "$claude_json" "$PLAYBOOK_CONFIG_DIR" "$tmp" 2>/dev/null <<'PYEOF' || true
-import json, sys
-claude_json, path, tmp = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(claude_json) as f:
-    data = json.load(f)
-projects = data.setdefault("projects", {})
-entry = projects.setdefault(path, {})
-entry["hasTrustDialogAccepted"] = True
-with open(tmp, "w") as f:
-    json.dump(data, f, indent=2)
-PYEOF
-        [ -s "$tmp" ] && updated=0
-    fi
-
-    if [ "$updated" -eq 0 ]; then
-        cat "$tmp" > "$claude_json"
-        rm -f "$tmp"
-        log "Marked $PLAYBOOK_CONFIG_DIR as a trusted workspace"
-    else
-        rm -f "$tmp"
-        warn "could not update $claude_json to trust $PLAYBOOK_CONFIG_DIR (python3 is missing or failed); if you ever run claude directly in that folder, accept its trust dialog manually."
-    fi
+    warn "the installed playbook binary has no 'trust' command, so $PLAYBOOK_CONFIG_DIR was not marked trusted; upgrade playbook and run: playbook trust \"$PLAYBOOK_CONFIG_DIR\""
     return 0
 }
 
