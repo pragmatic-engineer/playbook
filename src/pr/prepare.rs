@@ -5,7 +5,9 @@
 //! title and body (branch and base, size and test checks, the diff, the
 //! ticket), printed as labeled lines the calling command copies verbatim.
 
-use crate::pr::shared::{git, git_net, git_to_file, pr_state_dir, resolve_base, GhClient};
+use crate::pr::shared::{
+    current_branch, git, git_net, git_to_file, pr_state_dir, resolve_base, GhClient,
+};
 use regex::Regex;
 use std::fs;
 use std::path::Path;
@@ -34,14 +36,6 @@ pub fn run(
     let branch = current_branch()?;
     let state_dir = pr_state_dir(&branch)?;
     prepare(&state_dir, &branch, gh, base_arg, ticket_arg)
-}
-
-fn current_branch() -> Result<String, String> {
-    let branch = git(&["branch", "--show-current"])?;
-    if branch.is_empty() {
-        return Err("detached HEAD; checkout a branch first".to_string());
-    }
-    Ok(branch)
 }
 
 /// The injectable core of `run`: `state_dir` and `branch` are parameters so a

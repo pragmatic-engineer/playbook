@@ -82,6 +82,15 @@ pub(crate) fn git_to_file(args: &[&str], path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The checked-out branch, or an error on a detached HEAD.
+pub(crate) fn current_branch() -> Result<String, String> {
+    let branch = git(&["branch", "--show-current"])?;
+    if branch.is_empty() {
+        return Err("detached HEAD; checkout a branch first".to_string());
+    }
+    Ok(branch)
+}
+
 /// Resolves the PR's base branch and says where it came from: the flag,
 /// then the repo's default branch, then `origin/HEAD`, then `main`.
 pub fn resolve_base(

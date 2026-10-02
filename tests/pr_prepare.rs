@@ -5,153 +5,23 @@
 //! and a fake `GhClient` so no test needs GitHub. `prepare` runs git in the
 //! process cwd, so every test serialises on it like `tests/gate_record.rs`.
 
+mod pr_support;
+
 use playbook::pr::prepare::prepare;
-use playbook::pr::shared::{ExistingPr, GhClient};
-use std::cell::RefCell;
+use playbook::pr::shared::ExistingPr;
+use pr_support::{git, in_dir, FakeGh, Fixture};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn in_dir<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let prev = std::env::current_dir().expect("cwd");
-    std::env::set_current_dir(dir).expect("cd");
-    let out = f();
-    std::env::set_current_dir(prev).expect("restore cwd");
-    out
+trait RunPrepare {
+    fn run(&self, gh: &FakeGh, base: Option<&str>, ticket: Option<&str>) -> Result<String, String>;
 }
 
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .expect("git should spawn");
-    assert!(
-        out.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
-}
-
-/// A work repo on a feature branch whose `origin` is a local bare repo.
-struct Fixture {
-    work: PathBuf,
-    bare: PathBuf,
-    state: PathBuf,
-}
-
-impl Fixture {
-    fn new(tag: &str, branch: &str) -> Self {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root =
-            std::env::temp_dir().join(format!("playbook-pr-prep-{tag}-{}-{n}", std::process::id()));
-        fs::create_dir_all(&root).expect("root");
-        let root = root.canonicalize().expect("canonicalize");
-        let bare = root.join("origin.git");
-        let work = root.join("work");
-        fs::create_dir_all(&bare).expect("bare dir");
-        fs::create_dir_all(&work).expect("work dir");
-        git(&bare, &["init", "--quiet", "--bare", "-b", "main"]);
-        git(&work, &["init", "--quiet", "-b", "main"]);
-        for (k, v) in [
-            ("user.name", "Test"),
-            ("user.email", "test@example.test"),
-            ("commit.gpgsign", "false"),
-        ] {
-            git(&work, &["config", k, v]);
-        }
-        git(
-            &work,
-            &["remote", "add", "origin", bare.to_str().expect("utf8")],
-        );
-        fs::write(work.join("README.md"), "base\n").expect("readme");
-        git(&work, &["add", "-A"]);
-        git(&work, &["commit", "--quiet", "-m", "base"]);
-        git(&work, &["push", "--quiet", "-u", "origin", "main"]);
-        git(&work, &["checkout", "--quiet", "-b", branch]);
-        Self {
-            work,
-            bare,
-            state: root.join("state"),
-        }
-    }
-
-    fn commit_file(&self, path: &str, content: &str) {
-        let full = self.work.join(path);
-        fs::create_dir_all(full.parent().expect("parent")).expect("mkdir");
-        fs::write(&full, content).expect("write");
-        git(&self.work, &["add", "-A"]);
-        git(
-            &self.work,
-            &["commit", "--quiet", "-m", &format!("add {path}")],
-        );
-    }
-
-    fn commit_lines(&self, path: &str, n: usize) {
-        self.commit_file(path, &"line\n".repeat(n));
-    }
-
-    /// Publish `main`'s tip under another branch name and refresh the local
-    /// remote-tracking refs, so `origin/<name>` resolves.
-    fn publish_base_as(&self, name: &str) {
-        git(
-            &self.work,
-            &[
-                "push",
-                "--quiet",
-                "origin",
-                &format!("main:refs/heads/{name}"),
-            ],
-        );
-        git(&self.work, &["fetch", "--quiet", "origin"]);
-    }
-
+impl RunPrepare for Fixture {
     fn run(&self, gh: &FakeGh, base: Option<&str>, ticket: Option<&str>) -> Result<String, String> {
-        let branch = git(&self.work, &["branch", "--show-current"]);
+        let branch = self.branch();
         in_dir(&self.work, || {
             prepare(&self.state, &branch, gh, base, ticket)
         })
-    }
-}
-
-#[derive(Default)]
-struct FakeGh {
-    existing: Option<ExistingPr>,
-    default_branch: Option<String>,
-    calls: RefCell<Vec<&'static str>>,
-}
-
-impl FakeGh {
-    fn called(&self, name: &str) -> bool {
-        self.calls.borrow().iter().any(|c| *c == name)
-    }
-}
-
-impl GhClient for FakeGh {
-    fn pr_view(&self, _branch: &str) -> Result<Option<ExistingPr>, String> {
-        self.calls.borrow_mut().push("pr_view");
-        Ok(self.existing.clone())
-    }
-    fn repo_default_branch(&self) -> Result<Option<String>, String> {
-        self.calls.borrow_mut().push("repo_default_branch");
-        Ok(self.default_branch.clone())
-    }
-    fn pr_create(&self, _t: &str, _b: &str, _base: &str) -> Result<String, String> {
-        unreachable!("prepare never creates a PR")
-    }
-    fn pr_view_base(&self, _branch: &str) -> Result<String, String> {
-        unreachable!("prepare never reads a PR base")
-    }
-    fn pr_edit_base(&self, _branch: &str, _base: &str) -> Result<(), String> {
-        unreachable!("prepare never edits a PR")
     }
 }
 
@@ -186,7 +56,7 @@ fn an_open_pr_returns_ok_with_the_redirect_and_runs_no_further_checks() {
          Use /playbook:address-pr-comments or /playbook:quick-review instead."
     );
     assert!(
-        !gh.called("repo_default_branch"),
+        gh.count("repo_default_branch") == 0,
         "no further checks may run"
     );
 }
@@ -250,7 +120,7 @@ fn the_base_flag_wins_and_the_repo_default_is_never_asked() {
         has_line(&got, "base=release (source: --base flag)"),
         "got {got}"
     );
-    assert!(!gh.called("repo_default_branch"));
+    assert!(gh.count("repo_default_branch") == 0);
 }
 
 #[test]
