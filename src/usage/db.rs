@@ -7,8 +7,8 @@
 //! other processes, which is what WAL mode and `busy_timeout` are for.
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
+use crate::common::atomic::ensure_private_dir;
 use rusqlite::{params, Connection, OptionalExtension};
-use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
@@ -47,9 +47,10 @@ const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 /// Open (creating if missing) the usage database at `path`.
 pub fn open_db(path: &Path) -> Result<Connection, String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
+        ensure_private_dir(parent)
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
     }
+    make_db_file_private(path)?;
     let conn = Connection::open(path)
         .map_err(|e| format!("failed to open usage database at {}: {e}", path.display()))?;
     // Before any statement that can contend for the write lock; a fresh
@@ -62,6 +63,28 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
         .map_err(|e| format!("failed to create usage schema: {e}"))?;
     ensure_cache_1h_column(&conn)?;
     Ok(conn)
+}
+
+/// The data names the account, repos, and branches, so the file is owner-only
+/// on unix. Created first so SQLite never makes it with the default umask, and
+/// the WAL and shm files copy this mode. An older, wider file is tightened.
+fn make_db_file_private(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let error = |e: std::io::Error| format!("failed to secure {}: {e}", path.display());
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(path)
+            .map_err(error)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(error)?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 /// Adds `cache_creation_1h_tokens` to a database created before it existed.
@@ -276,6 +299,36 @@ pub fn load_tool_events(conn: &Connection) -> Result<Vec<ToolInvocationEvent>, S
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
+    use std::fs;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_database_and_its_directory_are_owner_only_and_an_older_file_is_tightened() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+
+        // Arrange: a database from before this change, readable by others.
+        let dir = scratch_dir("usage-private").join("usage");
+        let path = dir.join("usage.db");
+        drop(open_db(&path).unwrap());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Act
+        let conn = open_db(&path).unwrap();
+        conn.execute("INSERT INTO usage_watermarks VALUES ('s', 1)", [])
+            .unwrap();
+
+        // Assert
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&path), 0o600);
+        let wal = dir.join("usage.db-wal");
+        assert!(
+            wal.exists() && mode(&wal) & 0o077 == 0,
+            "the WAL must be private too"
+        );
+        let _ = fs::remove_dir_all(dir.parent().unwrap());
+    }
 
     #[test]
     fn open_creates_all_three_tables_in_wal_mode() {

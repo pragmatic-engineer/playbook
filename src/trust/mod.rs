@@ -6,7 +6,7 @@
 //! RESOLVED target, so a symlinked file stays a symlink and a concurrent
 //! reader never sees a torn file.
 
-use crate::common::atomic::with_dir_lock;
+use crate::common::atomic::{acquire_dir_lock, remove_stale_lock_dir, STALE_LOCK_AGE};
 use serde_json::{Map, Value};
 use std::fs;
 use std::io::Write;
@@ -15,6 +15,9 @@ use std::time::Duration;
 
 const LOCK_RETRIES: u32 = 50;
 const LOCK_DELAY: Duration = Duration::from_millis(10);
+/// How often the merge restarts when the file changes under it before the
+/// swap, so a concurrent writer's change is never overwritten with old data.
+const MERGE_ATTEMPTS: u32 = 3;
 
 /// CLI entry: trusts `path` in the real `~/.claude.json`. Never returns an
 /// error, so a trust failure can never block the launch that called it.
@@ -24,7 +27,11 @@ pub fn run(path: &str) -> Result<(), String> {
 
 /// Same as `run` with an explicit home, so tests never read the real `$HOME`.
 pub fn run_with_home(home: &Path, path: &str) -> Result<(), String> {
-    if home.as_os_str().is_empty() || path.is_empty() {
+    if home.as_os_str().is_empty() {
+        return Ok(());
+    }
+    if !Path::new(path).is_absolute() {
+        eprintln!("playbook trust: ignoring {path:?}: the path must be absolute");
         return Ok(());
     }
     if let Err(message) = write_trust_entry(&home.join(".claude.json"), path) {
@@ -40,12 +47,15 @@ pub(crate) fn write_trust_entry(claude_json_path: &Path, project_path: &str) -> 
         return Ok(());
     };
     let lock_path = lock_path_for(&real_path);
-    let (acquired, result) = with_dir_lock(&lock_path, LOCK_RETRIES, LOCK_DELAY, || {
-        merge_and_swap(&real_path, project_path)
-    });
-    if acquired {
-        let _ = fs::remove_dir(&lock_path);
+    remove_stale_lock_dir(&lock_path, STALE_LOCK_AGE);
+    if !acquire_dir_lock(&lock_path, LOCK_RETRIES, LOCK_DELAY) {
+        return Err(format!(
+            "could not take the write lock beside {}; skipped rather than risk overwriting a concurrent change",
+            real_path.display()
+        ));
     }
+    let result = merge_and_swap(&real_path, project_path, &mut || {});
+    let _ = fs::remove_dir(&lock_path);
     result
 }
 
@@ -57,23 +67,39 @@ fn lock_path_for(real_path: &Path) -> PathBuf {
     real_path.with_file_name(format!("{name}.lock"))
 }
 
-fn merge_and_swap(real_path: &Path, project_path: &str) -> Result<(), String> {
-    let original = fs::read_to_string(real_path)
-        .map_err(|e| format!("could not read {}: {e}", real_path.display()))?;
-    let mut root: Value = serde_json::from_str(&original)
-        .map_err(|e| format!("could not parse {}: {e}", real_path.display()))?;
+/// Reads, merges, and swaps. `before_swap` runs after the merge is computed
+/// and before the file is compared again, so a test can play the concurrent
+/// writer; production passes a no-op.
+fn merge_and_swap(
+    real_path: &Path,
+    project_path: &str,
+    before_swap: &mut dyn FnMut(),
+) -> Result<(), String> {
+    for _ in 0..MERGE_ATTEMPTS {
+        let original = fs::read_to_string(real_path)
+            .map_err(|e| format!("could not read {}: {e}", real_path.display()))?;
+        let mut root: Value = serde_json::from_str(&original)
+            .map_err(|e| format!("could not parse {}: {e}", real_path.display()))?;
 
-    if is_already_trusted(&root, project_path) {
-        return Ok(());
-    }
-    set_trusted(&mut root, project_path)?;
+        if is_already_trusted(&root, project_path) {
+            return Ok(());
+        }
+        set_trusted(&mut root, project_path)?;
 
-    let mut contents = serde_json::to_string_pretty(&root)
-        .map_err(|e| format!("could not serialize the updated document: {e}"))?;
-    if original.ends_with('\n') {
-        contents.push('\n');
+        let mut contents = serde_json::to_string_pretty(&root)
+            .map_err(|e| format!("could not serialize the updated document: {e}"))?;
+        if original.ends_with('\n') {
+            contents.push('\n');
+        }
+        before_swap();
+        if fs::read_to_string(real_path).is_ok_and(|now| now == original) {
+            return swap_in(real_path, &contents);
+        }
     }
-    swap_in(real_path, &contents)
+    Err(format!(
+        "{} kept changing while it was being updated; skipped",
+        real_path.display()
+    ))
 }
 
 fn is_already_trusted(root: &Value, project_path: &str) -> bool {
@@ -102,9 +128,29 @@ fn set_trusted(root: &mut Value, project_path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Creates the tmp file exclusively and owner-only, so it never follows a
+/// planted symlink and the OAuth data is never readable by others. A leftover
+/// at the same name is removed first (`remove_file` unlinks a symlink itself).
+fn create_private_tmp(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            fs::remove_file(path)?;
+            options.open(path)
+        }
+        other => other,
+    }
+}
+
 /// Writes `contents` to a tmp file beside `real_path`, then renames it over
 /// `real_path`. Same directory keeps the rename atomic; the original mode is
-/// copied so a private file does not become world-readable.
+/// set on the open handle before any data is written.
 fn swap_in(real_path: &Path, contents: &str) -> Result<(), String> {
     let parent = real_path
         .parent()
@@ -116,12 +162,11 @@ fn swap_in(real_path: &Path, contents: &str) -> Result<(), String> {
     ));
     let write_error = |e: std::io::Error| format!("could not write {}: {e}", tmp_path.display());
 
-    let mut tmp_file = fs::File::create(&tmp_path).map_err(write_error)?;
-    let staged = tmp_file
-        .write_all(contents.as_bytes())
-        .and_then(|()| tmp_file.sync_all())
-        .and_then(|()| fs::metadata(real_path))
-        .and_then(|meta| fs::set_permissions(&tmp_path, meta.permissions()));
+    let mut tmp_file = create_private_tmp(&tmp_path).map_err(write_error)?;
+    let staged = fs::metadata(real_path)
+        .and_then(|meta| tmp_file.set_permissions(meta.permissions()))
+        .and_then(|()| tmp_file.write_all(contents.as_bytes()))
+        .and_then(|()| tmp_file.sync_all());
     if let Err(e) = staged {
         let _ = fs::remove_file(&tmp_path);
         return Err(write_error(e));
@@ -361,7 +406,9 @@ mod tests {
         let dir = scratch("trust-mode");
         let file = dir.join(".claude.json");
         fs::write(&file, "{}").expect("fixture is writable");
-        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).expect("chmod works");
+        // 0o640 differs from both a 022 and a 077 umask default, so dropping
+        // the mode copy fails this test whatever the umask is.
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).expect("chmod works");
 
         // Act
         let got = write_trust_entry(&file, "/work/a");
@@ -369,8 +416,174 @@ mod tests {
         // Assert
         let mode = fs::metadata(&file).expect("metadata").permissions().mode() & 0o777;
         assert_eq!(got, Ok(()));
-        assert_eq!(mode, 0o600, "the oauth-bearing file must stay private");
+        assert_eq!(mode, 0o640, "the original mode must survive the swap");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_tmp_file_never_follows_a_planted_symlink() {
+        // Arrange: a symlink at the predictable tmp name pointing at a victim.
+        let dir = scratch("trust-planted-link");
+        let file = dir.join(".claude.json");
+        let victim = dir.join("victim.txt");
+        fs::write(&file, "{}").expect("fixture is writable");
+        fs::write(&victim, "keep me").expect("victim is writable");
+        let tmp_name = format!(
+            ".trust-tmp-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        );
+        std::os::unix::fs::symlink(&victim, dir.join(&tmp_name)).expect("symlink is creatable");
+
+        // Act
+        let got = write_trust_entry(&file, "/work/a");
+
+        // Assert
+        assert_eq!(got, Ok(()));
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "keep me");
+        assert_eq!(
+            read_json(&file),
+            json!({"projects": {"/work/a": {"hasTrustDialogAccepted": true}}})
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_tmp_file_is_owner_only_while_it_holds_the_data() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Arrange
+        let dir = scratch("trust-tmp-mode");
+        let tmp = dir.join("tmp-file");
+
+        // Act
+        let handle = create_private_tmp(&tmp).expect("tmp is creatable");
+
+        // Assert
+        let mode = handle.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode & 0o077,
+            0,
+            "group and other must have no access: {mode:o}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_lock_that_cannot_be_taken_skips_the_write() {
+        // Arrange: a fresh lock directory held by someone else.
+        let dir = scratch("trust-lock-held");
+        let file = dir.join(".claude.json");
+        fs::write(&file, "{}").expect("fixture is writable");
+        fs::create_dir(dir.join(".claude.json.lock")).expect("lock dir is creatable");
+
+        // Act
+        let got = write_trust_entry(&file, "/work/a");
+
+        // Assert
+        assert!(got.is_err(), "{got:?}");
+        assert_eq!(read_json(&file), json!({}));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_lock_directory_does_not_block_the_write() {
+        // Arrange: a lock left behind by a killed holder, well past the limit.
+        let dir = scratch("trust-lock-stale");
+        let file = dir.join(".claude.json");
+        let lock = dir.join(".claude.json.lock");
+        fs::write(&file, "{}").expect("fixture is writable");
+        fs::create_dir(&lock).expect("lock dir is creatable");
+        let past = std::time::SystemTime::now() - crate::common::atomic::STALE_LOCK_AGE * 3;
+        fs::File::open(&lock)
+            .and_then(|h| h.set_modified(past))
+            .expect("mtime is settable");
+        let started = std::time::Instant::now();
+
+        // Act
+        let got = write_trust_entry(&file, "/work/a");
+
+        // Assert
+        assert_eq!(got, Ok(()));
+        assert!(
+            started.elapsed() < Duration::from_millis(400),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(!lock.exists(), "the lock must be released afterward");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_change_made_during_the_merge_is_kept_not_overwritten() {
+        // Arrange: another writer adds a project after our merge is computed.
+        let dir = scratch("trust-concurrent");
+        let file = dir.join(".claude.json");
+        fs::write(&file, r#"{"projects":{}}"#).expect("fixture is writable");
+        let mut interfered = false;
+        let mut other_writer = || {
+            if !interfered {
+                interfered = true;
+                fs::write(&file, r#"{"projects":{"/other":{"seen":1}}}"#).expect("writable");
+            }
+        };
+
+        // Act
+        let got = merge_and_swap(&file, "/work/a", &mut other_writer);
+
+        // Assert
+        assert_eq!(got, Ok(()));
+        assert_eq!(
+            read_json(&file),
+            json!({"projects": {
+                "/other": {"seen": 1},
+                "/work/a": {"hasTrustDialogAccepted": true}
+            }})
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_that_never_stops_changing_is_skipped_with_an_error() {
+        // Arrange: the other writer changes the file on every attempt.
+        let dir = scratch("trust-churn");
+        let file = dir.join(".claude.json");
+        fs::write(&file, "{}").expect("fixture is writable");
+        let mut counter = 0;
+        let mut churn = || {
+            counter += 1;
+            fs::write(&file, format!(r#"{{"n":{counter}}}"#)).expect("writable");
+        };
+
+        // Act
+        let got = merge_and_swap(&file, "/work/a", &mut churn);
+
+        // Assert
+        assert!(got.is_err(), "{got:?}");
+        assert!(!fs::read_to_string(&file)
+            .unwrap()
+            .contains("hasTrustDialogAccepted"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_relative_or_home_relative_path_is_ignored_and_writes_nothing() {
+        // Arrange
+        let home = scratch("trust-run-relative");
+        fs::write(home.join(".claude.json"), "{}").expect("fixture is writable");
+
+        for bad in ["relative/dir", "~", "~/work", "."] {
+            // Act
+            let got = run_with_home(&home, bad);
+
+            // Assert
+            assert_eq!(got, Ok(()), "{bad}");
+            assert_eq!(read_json(&home.join(".claude.json")), json!({}), "{bad}");
+        }
+        let _ = fs::remove_dir_all(&home);
     }
 
     #[test]

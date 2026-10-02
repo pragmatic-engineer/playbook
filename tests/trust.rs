@@ -115,6 +115,26 @@ fn unwritable_directory_exits_zero_and_warns_on_stderr() {
 }
 
 #[test]
+fn a_relative_path_exits_zero_warns_and_writes_nothing() {
+    // Arrange
+    let home = scratch_home("relative");
+    fs::write(home.join(".claude.json"), "{}").expect("fixture is writable");
+
+    // Act
+    let out = trust(&home, "relative/dir");
+
+    // Assert
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success());
+    assert!(stderr.contains("must be absolute"), "got: {stderr}");
+    assert_eq!(
+        fs::read_to_string(home.join(".claude.json")).expect("readable"),
+        "{}"
+    );
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn help_describes_the_path_argument() {
     // Act
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))

@@ -51,9 +51,38 @@ pub(crate) fn with_dir_lock<T>(
     (acquired, f())
 }
 
+/// A lock directory older than this belongs to a holder that died inside its
+/// critical section, which takes well under a second.
+pub(crate) const STALE_LOCK_AGE: Duration = Duration::from_secs(10);
+
+/// Removes the lock directory at `lock_path` when it is older than `max_age`.
+/// A killed holder leaves its directory behind, and every later caller would
+/// otherwise wait out the retry budget and then run unguarded forever.
+pub(crate) fn remove_stale_lock_dir(lock_path: &Path, max_age: Duration) {
+    let age = fs::metadata(lock_path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok());
+    if age.is_some_and(|age| age > max_age) {
+        let _ = fs::remove_dir(lock_path);
+    }
+}
+
+/// Creates `dir` (and any missing parents) and makes the leaf owner-only on
+/// unix, for state that holds account or repo names.
+pub(crate) fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
 /// Try to `mkdir` `lock_path`, retrying up to `retries` times with `delay`
 /// between attempts. Returns whether this call created the directory.
-fn acquire_dir_lock(lock_path: &Path, retries: u32, delay: Duration) -> bool {
+pub(crate) fn acquire_dir_lock(lock_path: &Path, retries: u32, delay: Duration) -> bool {
     let mut attempts = 0;
     loop {
         if fs::create_dir(lock_path).is_ok() {
@@ -168,6 +197,53 @@ mod tests {
         seen.sort_unstable();
         assert_eq!(seen, (0..thread_count).collect::<Vec<_>>());
 
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    fn age_dir(dir: &Path, age: Duration) {
+        let past = std::time::SystemTime::now() - age;
+        fs::File::open(dir)
+            .and_then(|handle| handle.set_modified(past))
+            .expect("a directory's mtime is settable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_old_lock_directory_is_removed_and_a_fresh_one_is_kept() {
+        // Arrange
+        let root = scratch_dir("atomic-stale-lock");
+        let old = root.join("old.lock");
+        let fresh = root.join("fresh.lock");
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&fresh).unwrap();
+        age_dir(&old, STALE_LOCK_AGE * 3);
+
+        // Act
+        remove_stale_lock_dir(&old, STALE_LOCK_AGE);
+        remove_stale_lock_dir(&fresh, STALE_LOCK_AGE);
+
+        // Assert
+        assert!(!old.exists(), "a dead holder's directory must be cleared");
+        assert!(fresh.exists(), "a live holder's directory must stay");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_private_directory_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Arrange
+        let root = scratch_dir("atomic-private-dir");
+        let dir = root.join("usage");
+
+        // Act
+        ensure_private_dir(&dir).unwrap();
+
+        // Assert
+        let mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
         let _ = fs::remove_dir_all(&root);
     }
 }
