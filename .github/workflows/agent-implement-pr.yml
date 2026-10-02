@@ -13,7 +13,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
-    uses: protocortex/agent-workflows/.github/workflows/agent-implement-pr.yml@v1.4.1
+    uses: protocortex/agent-workflows/.github/workflows/agent-implement-pr.yml@v1.4.2
     with:
       pr_number: ${{ github.event.pull_request.number }}
       branch: ${{ github.event.pull_request.head.ref }}
