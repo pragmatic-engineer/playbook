@@ -9,6 +9,11 @@ on:
 jobs:
   implement:
     if: github.event.label.name == 'agent:implement'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
     uses: protocortex/agent-workflows/.github/workflows/agent-implement.yml@v1.4.1
     with:
       issue_number: ${{ github.event.issue.number }}
