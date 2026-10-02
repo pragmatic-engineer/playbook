@@ -58,6 +58,13 @@ _claude() {
         esac
     done
 
+    # Best-effort: pre-trust the launch dir. Silent, never fails the launch.
+    # list/prune launch nothing, worktree/new re-enter _claude (trusted there).
+    case "${1:-}" in
+        list|ls|--list|prune|--prune|worktree|--worktree|new|--new) ;;
+        *) command -v playbook >/dev/null 2>&1 && playbook trust "$PWD" >/dev/null 2>&1 || true ;;
+    esac
+
     case "${1:-}" in
         clean|--clean)
             shift

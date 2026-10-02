@@ -6,6 +6,8 @@ The `cc` launcher is the entry point for every session. It wraps `claude` with a
 
 The launcher has two thin entry points, `shell/zsh/cc.zsh` and `shell/bash/cc.sh`, one per shell. Each sources the same module files from `shell/shared/` (bust-cache, worktree, config-drift, retention, sessions, clean-resume, dispatch), which define the internal `_claude` dispatcher and the two public functions `cc` and `ccd`. The implementation is shared, so bash and zsh behave identically. `ccd` is `cc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
 
+On every launch, `cc` and `ccd` first run `playbook trust "$PWD"`, so Claude Code's trust dialog never blocks the directory you start in. It is best-effort: it never delays or fails the launch, and an older `playbook` binary without the subcommand is skipped silently.
+
 On every invocation, `cc` passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` to `claude`. After `claude` exits, it runs `_cc_prune` to keep only the newest `CCD_KEEP` transcripts (default 5, floor 2) per project. Older transcripts plus their sidecars and runtime state are deleted.
 
 ### Subcommands

@@ -10,7 +10,7 @@ This page covers requirements, the full local install path with the curl one-lin
 | `bash` | required | hooks and the setup script run in bash |
 | zsh | required for `cc worktree` | the worktree subcommand is zsh-only; all other `cc` subcommands and `ccd` work in bash |
 | `git`, `shasum` | required | used by hooks and the install script |
-| `python3` | optional | `install.sh` uses it to mark `~/.config/playbook` as trusted in `~/.claude.json`; without it the step warns and continues |
+| `python3` | optional | only a temporary fallback for `install.sh` when the installed `playbook` binary is too old to have `playbook trust`; without it the step warns and continues |
 | `gh` | optional | statusline PR and CI status |
 | `agent-browser` | optional | browser automation MCP used by `/playbook:plan` for web-only tickets and attachments |
 

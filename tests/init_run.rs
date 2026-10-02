@@ -223,11 +223,11 @@ fn fresh_config_gets_fully_wired() {
         }
         // `memory` has nothing to migrate on a fresh machine with no
         // legacy `~/.claude/memory`.
-        if step.name == "memory" {
+        if step.name == "memory" || step.name == "trust" {
             assert_eq!(
                 step.status,
                 StepStatus::Skipped,
-                "expected '{}' to be skipped with no legacy memory present: {}",
+                "expected '{}' to be skipped with no legacy memory or ~/.claude.json: {}",
                 step.name,
                 step.detail
             );
@@ -582,11 +582,12 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     for step in &second.steps {
         // `system-prompt` and `memory` stay `Skipped` on both runs: neither
         // has anything to act on in this fixture.
-        let expected = if step.name == "system-prompt" || step.name == "memory" {
-            StepStatus::Skipped
-        } else {
-            StepStatus::AlreadyCorrect
-        };
+        let expected =
+            if step.name == "system-prompt" || step.name == "memory" || step.name == "trust" {
+                StepStatus::Skipped
+            } else {
+                StepStatus::AlreadyCorrect
+            };
         assert_eq!(
             step.status, expected,
             "expected '{}' to report no change on a second run: {}",
@@ -1101,4 +1102,89 @@ fn crash_between_file_copy_and_settings_rewrite_leaves_old_wiring_intact() {
     );
 
     let _ = fs::remove_dir_all(&home);
+}
+
+// ── trust step ───────────────────────────────────────────────────────────────
+
+fn trusted(claude_json: &Path, dir: &Path) -> bool {
+    let doc: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(claude_json).unwrap()).unwrap();
+    doc["projects"][dir.to_str().unwrap()]["hasTrustDialogAccepted"] == true
+}
+
+#[test]
+fn init_trusts_the_config_dir_and_leaves_siblings_alone() {
+    // Arrange: an existing ~/.claude.json with another project and a key.
+    let home = scratch_home("trust-adds");
+    let claude_json = home.join(".claude.json");
+    fs::write(
+        &claude_json,
+        r#"{"numStartups":3,"projects":{"/other":{"hasTrustDialogAccepted":false,"x":1}}}"#,
+    )
+    .unwrap();
+    let config_dir = home.join(".config").join("playbook");
+
+    // Act
+    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+
+    // Assert
+    let step = find_step(&outcome, "trust");
+    assert_eq!(step.status, StepStatus::Wired, "{}", step.detail);
+    assert!(trusted(&claude_json, &config_dir));
+    let doc: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
+    assert_eq!(doc["numStartups"], 3);
+    assert_eq!(doc["projects"]["/other"]["hasTrustDialogAccepted"], false);
+    assert_eq!(doc["projects"]["/other"]["x"], 1);
+}
+
+#[test]
+fn a_second_init_changes_nothing_in_claude_json() {
+    // Arrange
+    let home = scratch_home("trust-twice");
+    let claude_json = home.join(".claude.json");
+    fs::write(&claude_json, "{}").unwrap();
+    run(&base_paths(&home, Some(ShellKind::Bash)));
+    let first = fs::read(&claude_json).unwrap();
+
+    // Act
+    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+
+    // Assert
+    assert_eq!(
+        find_step(&outcome, "trust").status,
+        StepStatus::AlreadyCorrect
+    );
+    assert_eq!(fs::read(&claude_json).unwrap(), first);
+}
+
+#[test]
+fn init_never_creates_claude_json() {
+    // Arrange
+    let home = scratch_home("trust-absent");
+
+    // Act
+    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+
+    // Assert
+    assert_eq!(find_step(&outcome, "trust").status, StepStatus::Skipped);
+    assert!(!home.join(".claude.json").exists());
+}
+
+#[test]
+fn a_malformed_claude_json_warns_and_init_still_succeeds() {
+    // Arrange
+    let home = scratch_home("trust-malformed");
+    let claude_json = home.join(".claude.json");
+    fs::write(&claude_json, "{ not json").unwrap();
+
+    // Act
+    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+
+    // Assert: reported as skipped with the reason, the file untouched.
+    let step = find_step(&outcome, "trust");
+    assert_eq!(step.status, StepStatus::Skipped);
+    assert!(step.detail.contains("could not"), "{}", step.detail);
+    assert!(outcome.ok());
+    assert_eq!(fs::read_to_string(&claude_json).unwrap(), "{ not json");
 }
