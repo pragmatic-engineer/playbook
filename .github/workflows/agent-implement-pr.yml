@@ -1,0 +1,25 @@
+# Managed by the agent-factory GitHub App, do not edit by hand, changes will be
+# overwritten on the next provisioning run. Job logic lives in protocortex/agent-workflows.
+name: Agent Implement PR
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+jobs:
+  implement-pr:
+    if: github.event.label.name == 'agent:implement-pr'
+    uses: protocortex/agent-workflows/.github/workflows/agent-implement-pr.yml@v1.4.1
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      branch: ${{ github.event.pull_request.head.ref }}
+      branch_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_state: ${{ github.event.pull_request.state }}
+      install_command: "npm ci"
+      build_command: "npm run build"
+      node_version: "22"
+      model: "claude-sonnet-5-5"
+      effort: "medium"
+      timeout_minutes: 60
+      extra_allowed_domains: ""
+    secrets: inherit
