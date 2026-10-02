@@ -130,7 +130,7 @@ jobs:
       - run: playbook ci
 ```
 
-`playbook ci` prints `PASS`, `FAIL`, or `SKIP` with a reason for each check, then `ci: N passed, M failed, K skipped`. A check whose inputs are missing is skipped, so the step is safe in any repository. State between runs: these checks create nothing. A gate check needs the `state.db` under `~/.config/playbook/repos/...`, so cache that directory if a pipeline records gates in one job and checks them in another.
+`playbook ci` prints `PASS`, `FAIL`, or `SKIP` with a reason for each check, then `ci: N passed, M failed, K skipped`. Add `--strict` to fail the run when any check is skipped, so a job pointed at the wrong directory cannot pass by checking nothing. A check whose inputs are missing is skipped, so the step is safe in any repository. State between runs: these checks create nothing. A gate check needs the `state.db` under `~/.config/playbook/repos/...`, so cache that directory if a pipeline records gates in one job and checks them in another.
 
 ## Recommended build order
 

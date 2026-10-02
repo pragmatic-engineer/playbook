@@ -223,7 +223,7 @@ fn main() {
                 }
             },
         },
-        Command::Ci { json, dir } => match ci::run(dir.as_deref(), json) {
+        Command::Ci { json, strict, dir } => match ci::run(dir.as_deref(), json, strict) {
             Ok((text, code)) => {
                 println!("{text}");
                 std::process::exit(code);

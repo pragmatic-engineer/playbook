@@ -155,7 +155,8 @@ fn json_output_is_one_object_with_the_exact_field_names() {
         .map(String::as_str)
         .collect();
     keys.sort_unstable();
-    assert_eq!(keys, ["checks", "failed", "passed", "skipped"]);
+    assert_eq!(keys, ["checks", "failed", "passed", "skipped", "strict"]);
+    assert_eq!(value["strict"], false);
     assert_eq!(
         (
             value["passed"].as_u64(),
@@ -185,4 +186,48 @@ fn a_missing_dir_is_an_error_not_a_skip() {
 
     assert_eq!(run.code, 1);
     assert_eq!(run.stdout, "");
+}
+
+#[test]
+fn strict_outside_a_checkout_exits_one_and_names_the_skips() {
+    let cwd = scratch("strict-outside");
+    let home = scratch("strict-outside-home");
+
+    let run = ci(&cwd, &home, &["--strict"]);
+
+    assert_eq!(run.code, 1, "output: {}", run.stdout);
+    assert!(
+        run.stdout
+            .ends_with("ci: 0 passed, 0 failed, 3 skipped (strict: a skipped check fails the run)"),
+        "output: {}",
+        run.stdout
+    );
+}
+
+#[test]
+fn strict_in_this_repo_still_passes() {
+    let home = scratch("strict-repo-home");
+
+    let run = ci(Path::new(repo_root()), &home, &["--strict"]);
+
+    assert_eq!(run.code, 0, "output: {}", run.stdout);
+    assert!(
+        run.stdout.ends_with("ci: 3 passed, 0 failed, 0 skipped"),
+        "output: {}",
+        run.stdout
+    );
+}
+
+#[test]
+fn strict_json_reports_the_flag_and_the_failing_exit() {
+    let cwd = scratch("strict-json");
+    let home = scratch("strict-json-home");
+
+    let run = ci(&cwd, &home, &["--strict", "--json"]);
+
+    let value: serde_json::Value = serde_json::from_str(&run.stdout).expect("one JSON object");
+    assert_eq!(run.code, 1);
+    assert_eq!(value["strict"], true);
+    assert_eq!(value["skipped"], 3);
+    assert_eq!(value["failed"], 0);
 }
