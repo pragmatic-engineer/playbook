@@ -6,9 +6,9 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, common, config, doctor, gate, hooks, init, json, manifest, settings, trust,
+    agents, cc, common, config, doctor, gate, hooks, init, json, manifest, settings, trust, usage,
     worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DoctorCommand, GateCommand,
-    JsonCommand, ManifestCommand, MemoryCommand, SettingsCommand, WorktreeCommand,
+    JsonCommand, ManifestCommand, MemoryCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -160,6 +160,20 @@ fn main() {
                 }
             }
         },
+        Command::Usage { sub } => {
+            let paths = usage::run::Paths::real();
+            let result = match sub {
+                Some(UsageCommand::Ingest) => usage::run::run_ingest(&paths),
+                None => usage::run::run_summary(&paths),
+            };
+            match result {
+                Ok(output) => println!("{}", output.trim_end()),
+                Err(err) => {
+                    eprintln!("usage: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Command::Gate { sub } => match sub {
             GateCommand::Record {
                 plan_slug,
