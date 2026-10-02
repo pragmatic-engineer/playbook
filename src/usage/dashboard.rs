@@ -8,6 +8,7 @@
 //! command ever waits on it.
 
 use super::lock::{self, Lock};
+use super::page;
 use super::run::Paths;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -49,16 +50,49 @@ pub fn no_browser(_url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Hosts the server answers to. A page on another origin, including a
+/// DNS-rebinding one, arrives with a different `Host`, so it gets nothing.
+pub fn host_allowed(host: Option<&str>, port: u16) -> bool {
+    let Some(host) = host else { return false };
+    [
+        format!("127.0.0.1:{port}"),
+        format!("localhost:{port}"),
+        format!("playbook.localhost:{port}"),
+    ]
+    .iter()
+    .any(|allowed| allowed == host)
+}
+
 /// What the server answers for a path: (status, content type, body).
-pub fn route(path: &str) -> (u16, &'static str, String) {
+/// `load_data` runs only for `/api/data`.
+pub fn respond_to(
+    path: &str,
+    load_data: impl FnOnce() -> Result<String, String>,
+) -> (u16, &'static str, String) {
     match path {
-        "/" => (
-            200,
-            "text/html; charset=utf-8",
-            "<!doctype html><title>playbook usage</title><h1>playbook usage dashboard</h1>".into(),
-        ),
-        _ => (404, "text/plain; charset=utf-8", "not found".into()),
+        "/" => (200, "text/html; charset=utf-8", page::HTML.to_string()),
+        "/api/data" => match load_data() {
+            Ok(body) => (200, "application/json", body),
+            Err(e) => (
+                500,
+                "application/json",
+                serde_json::json!({ "error": e }).to_string(),
+            ),
+        },
+        _ => (404, "text/plain; charset=utf-8", "not found".to_string()),
     }
+}
+
+/// Ingest anything new, then build the dashboard JSON.
+fn load_data(paths: &Paths) -> Result<String, String> {
+    let (conn, _) = super::run::ingest_new(paths)?;
+    let usage = super::db::load_usage_events(&conn)?;
+    let tools = super::db::load_tool_events(&conn)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
+    serde_json::to_string(&super::api::data_json(&usage, &tools, now))
+        .map_err(|e| format!("failed to encode usage data: {e}"))
 }
 
 #[cfg(unix)]
@@ -204,13 +238,35 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
         return Ok(());
     }
     for request in server.incoming_requests() {
+        let host = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("Host"))
+            .map(|h| h.value.as_str().to_string());
         let path = request.url().split('?').next().unwrap_or("/").to_string();
-        let (status, content_type, body) = route(&path);
-        let header = tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes())
-            .map_err(|_| "invalid content type header".to_string())?;
-        let response = tiny_http::Response::from_string(body)
-            .with_status_code(status)
-            .with_header(header);
+        let (status, content_type, body) = if host_allowed(host.as_deref(), port) {
+            respond_to(&path, || load_data(paths))
+        } else {
+            (
+                403,
+                "text/plain; charset=utf-8",
+                "forbidden host".to_string(),
+            )
+        };
+        let mut response = tiny_http::Response::from_string(body).with_status_code(status);
+        let mut headers = vec![
+            ("Content-Type", content_type),
+            ("Cache-Control", "no-store"),
+            ("X-Content-Type-Options", "nosniff"),
+        ];
+        if content_type.starts_with("text/html") {
+            headers.push(("Content-Security-Policy", page::CONTENT_SECURITY_POLICY));
+        }
+        for (name, value) in headers {
+            if let Ok(header) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+                response.add_header(header);
+            }
+        }
         let _ = request.respond(response);
     }
     Ok(())
@@ -227,11 +283,38 @@ mod tests {
     }
 
     #[test]
-    fn root_serves_html_and_anything_else_is_a_404() {
-        let (status, content_type, body) = route("/");
+    fn root_serves_the_page_data_runs_the_loader_and_anything_else_is_a_404() {
+        let (status, content_type, body) =
+            respond_to("/", || panic!("the page must not load data"));
         assert_eq!(status, 200);
         assert!(content_type.starts_with("text/html"));
-        assert!(body.contains("playbook usage dashboard"));
-        assert_eq!(route("/nope").0, 404);
+        assert!(body.contains("fetch('/api/data')"));
+
+        let (status, content_type, body) =
+            respond_to("/api/data", || Ok("{\"ok\":true}".to_string()));
+        assert_eq!(
+            (status, content_type, body.as_str()),
+            (200, "application/json", "{\"ok\":true}")
+        );
+
+        let (status, _, body) = respond_to("/api/data", || Err("db locked".to_string()));
+        assert_eq!(status, 500);
+        assert!(body.contains("db locked"));
+
+        assert_eq!(
+            respond_to("/nope", || panic!("unknown paths load nothing")).0,
+            404
+        );
+    }
+
+    #[test]
+    fn only_loopback_hosts_for_this_port_are_allowed() {
+        assert!(host_allowed(Some("127.0.0.1:4242"), 4242));
+        assert!(host_allowed(Some("localhost:4242"), 4242));
+        assert!(host_allowed(Some("playbook.localhost:4242"), 4242));
+        assert!(!host_allowed(Some("evil.example:4242"), 4242));
+        assert!(!host_allowed(Some("127.0.0.1:9"), 4242));
+        assert!(!host_allowed(Some("127.0.0.1"), 4242));
+        assert!(!host_allowed(None, 4242));
     }
 }
