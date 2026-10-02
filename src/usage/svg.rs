@@ -29,6 +29,19 @@ pub fn escape(text: &str) -> String {
     out
 }
 
+/// `claude-haiku-4-5-20251001` shows as `haiku-4-5` on an axis: the vendor
+/// prefix and a trailing eight digit date add nothing there. The tooltip keeps
+/// the full name.
+pub fn display_label(label: &str) -> String {
+    let name = label.strip_prefix("claude-").unwrap_or(label);
+    match name.rsplit_once('-') {
+        Some((head, tail)) if tail.len() == 8 && tail.bytes().all(|b| b.is_ascii_digit()) => {
+            head.to_string()
+        }
+        _ => name.to_string(),
+    }
+}
+
 fn short(label: &str) -> String {
     if label.chars().count() <= MAX_LABEL_CHARS {
         return label.to_string();
@@ -80,7 +93,7 @@ pub fn bar_chart(title: &str, unit: &str, bars: &[(String, f64)]) -> String {
         if bars.len() <= MAX_LABELLED_BARS || i % (bars.len() / MAX_LABELLED_BARS + 1) == 0 {
             svg.push_str(&format!(
                 "<text class=\"tick\" x=\"{cx:.1}\" y=\"{ty}\" text-anchor=\"end\" transform=\"rotate(-35 {cx:.1} {ty})\">{}</text>",
-                escape(&short(label)),
+                escape(&short(&display_label(label))),
                 cx = x + bar_w / 2.0,
                 ty = TOP + plot_h + 14.0
             ));
@@ -131,6 +144,48 @@ mod tests {
         assert!(!svg.contains("<img"));
         assert!(svg.contains("&lt;img"));
         assert!(svg.contains("t&quot;itle"));
+    }
+
+    #[test]
+    fn model_names_lose_the_vendor_prefix_and_trailing_date_on_the_axis() {
+        for (given, shown) in [
+            ("claude-haiku-4-5-20251001", "haiku-4-5"),
+            ("claude-opus-5-5", "opus-5-5"),
+            ("claude-sonnet-5", "sonnet-5"),
+            ("<synthetic>", "<synthetic>"),
+            ("2026-09-30", "2026-09-30"),
+            ("claude-opus-4-8", "opus-4-8"),
+        ] {
+            assert_eq!(display_label(given), shown, "{given}");
+        }
+    }
+
+    #[test]
+    fn the_axis_shows_the_short_name_and_the_tooltip_the_full_one() {
+        let model = vec![("claude-haiku-4-5-20251001".to_string(), 3.0)];
+
+        let svg = bar_chart("Cost per model", "USD", &model);
+
+        assert!(svg.contains(">haiku-4-5</text>"), "{svg}");
+        assert!(svg.contains("<title>claude-haiku-4-5-20251001: 3.0000</title>"));
+        // The text of every `<text ...>X</text>` element, nothing else.
+        let texts: Vec<&str> = svg
+            .split("</text>")
+            .filter_map(|chunk| chunk.rsplit_once('>').map(|(_, text)| text))
+            .collect();
+        assert!(texts.contains(&"haiku-4-5"), "{texts:?}");
+        assert!(
+            texts.iter().all(|text| !text.contains("claude-")),
+            "no axis text may show the long name: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn the_title_reads_name_then_one_parenthesised_unit_note() {
+        let svg = bar_chart("Cost per day", "USD, UTC", &bars());
+
+        assert!(svg.contains(">Cost per day (USD, UTC)</text>"), "{svg}");
+        assert!(!svg.contains(") ("), "no doubled parentheses: {svg}");
     }
 
     #[test]
