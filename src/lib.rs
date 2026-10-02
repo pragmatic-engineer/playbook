@@ -82,6 +82,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: AgentsCommand,
     },
+    /// Token and cost usage across sessions, backing `src/usage/`. Bare
+    /// `playbook usage` prints a summary.
+    Usage {
+        #[command(subcommand)]
+        sub: Option<UsageCommand>,
+    },
     /// Gate-check database subcommands, backing `src/gate/`.
     Gate {
         #[command(subcommand)]
@@ -208,6 +214,13 @@ pub enum AgentsCommand {
         /// the current directory.
         agents_dir: Option<PathBuf>,
     },
+}
+
+/// `playbook usage` subcommands, backing `src/usage/`.
+#[derive(Subcommand, Debug)]
+pub enum UsageCommand {
+    /// Read new session history into the usage store, without printing a summary.
+    Ingest,
 }
 
 /// `playbook gate` subcommands, backing `src/gate/`.
