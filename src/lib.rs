@@ -16,6 +16,7 @@ pub mod init;
 pub mod json;
 pub mod manifest;
 pub mod settings;
+pub mod trust;
 pub mod usage;
 pub mod worktree;
 
