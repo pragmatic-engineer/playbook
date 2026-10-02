@@ -6,8 +6,9 @@
 
 use crate::common::paths::{repo_scoped_dir, RepoScope};
 use crate::common::proc::run_with_timeout;
-use std::path::PathBuf;
-use std::process::Command;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 /// How long a `gh` call may take; PR creation talks to the network.
@@ -32,6 +33,75 @@ pub fn pr_state_dir(branch: &str) -> Result<PathBuf, String> {
             .to_string()
     })?;
     Ok(base.join("pr").join(branch_slug(branch)))
+}
+
+/// How long a `git` call that talks to the network may take.
+const NET_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Runs a local `git` command and returns its trimmed stdout. Local commands
+/// are read with `output()` (not `run_with_timeout`) because that helper
+/// never drains the pipes, so a large `git diff` would stall it.
+pub(crate) fn git(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("could not run git {}: {e}", args.join(" ")))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Runs a `git` command that talks to the network, bounded by `NET_TIMEOUT`.
+pub(crate) fn git_net(args: &[&str]) -> Result<String, String> {
+    let mut command = Command::new("git");
+    command.args(args);
+    let output = run_with_timeout(&mut command, NET_TIMEOUT)
+        .ok_or_else(|| format!("git {} did not finish in time", args.join(" ")))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Runs a local `git` command with stdout going straight to `path`, so a
+/// diff of any size never passes through memory or a pipe.
+pub(crate) fn git_to_file(args: &[&str], path: &Path) -> Result<(), String> {
+    let file =
+        fs::File::create(path).map_err(|e| format!("could not create {}: {e}", path.display()))?;
+    let status = Command::new("git")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(file))
+        .status()
+        .map_err(|e| format!("could not run git {}: {e}", args.join(" ")))?;
+    if !status.success() {
+        return Err(format!("git {} failed", args.join(" ")));
+    }
+    Ok(())
+}
+
+/// Resolves the PR's base branch and says where it came from: the flag,
+/// then the repo's default branch, then `origin/HEAD`, then `main`.
+pub fn resolve_base(
+    gh: &dyn GhClient,
+    base_arg: Option<&str>,
+) -> Result<(String, &'static str), String> {
+    if let Some(base) = base_arg.filter(|b| !b.is_empty()) {
+        return Ok((base.to_string(), "--base flag"));
+    }
+    if let Some(base) = gh.repo_default_branch()?.filter(|b| !b.is_empty()) {
+        return Ok((base, "repo default"));
+    }
+    if let Ok(reference) = git(&["symbolic-ref", "refs/remotes/origin/HEAD"]) {
+        if let Some(base) = reference.strip_prefix("refs/remotes/origin/") {
+            if !base.is_empty() {
+                return Ok((base.to_string(), "git symbolic-ref"));
+            }
+        }
+    }
+    Ok(("main".to_string(), "fallback"))
 }
 
 /// An open or closed PR already attached to a branch.
