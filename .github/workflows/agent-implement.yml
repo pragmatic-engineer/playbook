@@ -14,7 +14,7 @@ jobs:
       issues: write
       pull-requests: write
       id-token: write
-    uses: protocortex/agent-workflows/.github/workflows/agent-implement.yml@v1.4.3
+    uses: protocortex/agent-workflows/.github/workflows/agent-implement.yml@v1.5.0
     with:
       issue_number: ${{ github.event.issue.number }}
       issue_title: ${{ github.event.issue.title }}
