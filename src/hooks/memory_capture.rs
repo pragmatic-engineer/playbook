@@ -34,7 +34,6 @@
 //!    that a corrupted `edits.jsonl` only happens if something other than
 //!    this toolkit's own trusted writer touches the file.
 
-use crate::cc::{logical_cwd, project_slug};
 use crate::common::paths::memory_dir;
 use crate::common::{emit_block, home_dir, session_dir, Payload};
 use crate::hooks::memory_signals;
@@ -231,26 +230,14 @@ fn read_start_ts(session_dir: &Path) -> SystemTime {
         .unwrap_or_else(SystemTime::now)
 }
 
-/// Freshest mtime among this worktree's handoff files (`<slug>-*.md` under
-/// the playbook runtime root), directory-scoped like `session_init.rs`'s read side.
+/// Freshest mtime among this directory's unread handoff files, keyed the same
+/// way as the SessionStart read side.
 fn freshest_handoff_mtime() -> Option<SystemTime> {
-    let slug = project_slug(&logical_cwd());
+    let slug = crate::handoff::current_slug();
     if slug.is_empty() {
         return None;
     }
-    let dir = crate::common::paths::runtime_root().join("handoff");
-    let prefix = format!("{slug}-");
-    let entries = fs::read_dir(&dir).ok()?;
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().into_string().ok()?;
-            if !name.starts_with(&prefix) || !name.ends_with(".md") {
-                return None;
-            }
-            entry.metadata().ok()?.modified().ok()
-        })
-        .max()
+    crate::handoff::freshest_mtime(&crate::handoff::root(), &slug)
 }
 
 /// Scans facts touched since `memory.signals.json`'s cursor for
