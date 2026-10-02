@@ -74,7 +74,7 @@ pub fn data_json(usage: &[UsageEvent], tools: &[ToolInvocationEvent], now: i64) 
         "skills": counts_json(count_tools(tools, ToolKind::Skill)),
         "agents": counts_json(count_tools(tools, ToolKind::Agent)),
         "charts": {
-            "cost_by_day": bar_chart("Cost per day (UTC)", "USD", &cost_bars(&days[recent..])),
+            "cost_by_day": bar_chart("Cost per day", "USD, UTC", &cost_bars(&days[recent..])),
             "cost_by_model": bar_chart("Cost per model", "USD", &cost_bars(&models)),
         },
     })
@@ -145,6 +145,20 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn chart_titles_have_one_unit_note_and_model_axis_labels_are_short() {
+        let usage = vec![event(1788252682, "claude-sonnet-5-5", 0.25)];
+
+        let data = data_json(&usage, &[], 1788400000);
+
+        let day = data["charts"]["cost_by_day"].as_str().unwrap();
+        let model = data["charts"]["cost_by_model"].as_str().unwrap();
+        assert!(day.contains(">Cost per day (USD, UTC)</text>"), "{day}");
+        assert!(model.contains(">Cost per model (USD)</text>"), "{model}");
+        assert!(model.contains(">sonnet-5-5</text>"), "{model}");
+        assert!(model.contains("<title>claude-sonnet-5-5: "), "{model}");
     }
 
     #[test]
