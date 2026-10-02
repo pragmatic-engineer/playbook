@@ -15,6 +15,7 @@ pub mod hooks;
 pub mod init;
 pub mod json;
 pub mod manifest;
+pub mod pr;
 pub mod settings;
 pub mod trust;
 pub mod usage;
