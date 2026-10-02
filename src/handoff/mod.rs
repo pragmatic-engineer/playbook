@@ -31,9 +31,22 @@ pub fn root() -> PathBuf {
     crate::common::paths::runtime_root().join("handoff")
 }
 
+/// Longest key kept. The file name adds an epoch, a pid, and `.md`, and a
+/// file name tops out at 255 bytes, so a very deep path keeps its tail, the
+/// most specific part. Both sides go through `key`, so they still agree.
+const MAX_KEY_LEN: usize = 150;
+
+fn key(path: &str) -> String {
+    let slug = crate::cc::project_slug(path);
+    if slug.len() <= MAX_KEY_LEN {
+        return slug;
+    }
+    slug[slug.len() - MAX_KEY_LEN..].to_string()
+}
+
 /// The key for the directory this process runs in (`$PWD` first, like Claude Code).
 pub fn current_slug() -> String {
-    crate::cc::project_slug(&crate::cc::logical_cwd())
+    key(&crate::cc::logical_cwd())
 }
 
 /// The key for `--dir`: the path as given made absolute, never canonicalized,
@@ -51,7 +64,7 @@ pub fn slug_for_dir(dir: &str) -> Result<String, String> {
     if !tidy.is_dir() {
         return Err(format!("--dir {dir} is not a directory"));
     }
-    Ok(crate::cc::project_slug(&tidy.to_string_lossy()))
+    Ok(key(&tidy.to_string_lossy()))
 }
 
 /// `<slug>-<epoch>-<pid>.md`. The rest after the slug must be two digit runs,
@@ -494,6 +507,18 @@ mod tests {
         let when = SystemTime::now() - day(age_days);
         let file = fs::File::options().write(true).open(path).unwrap();
         file.set_modified(when).unwrap();
+    }
+
+    #[test]
+    fn a_very_deep_path_still_gives_a_key_that_fits_a_file_name() {
+        let deep = format!("/{}", "segment/".repeat(60));
+
+        let k = key(&deep);
+
+        assert_eq!(k.len(), MAX_KEY_LEN);
+        assert!(format!("{k}-1790000000-99999.md").len() < 255);
+        assert_eq!(key(&deep), k, "the key is stable");
+        assert!(is_handoff_for(&format!("{k}-1790000000-99999.md"), &k));
     }
 
     #[test]
