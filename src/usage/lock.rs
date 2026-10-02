@@ -20,22 +20,99 @@ const PS_TIMEOUT: Duration = Duration::from_secs(2);
 const LOCK_RETRIES: u32 = 50;
 const LOCK_RETRY_DELAY: Duration = Duration::from_millis(20);
 
+const TOKEN_BYTES: usize = 32;
+const TOKEN_HEX_LEN: usize = TOKEN_BYTES * 2;
+
+/// The per-session secret the data route requires. Hex text, fixed size so a
+/// `Lock` stays `Copy`. `Debug` hides it, so it cannot reach a log or an error.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Token([u8; TOKEN_HEX_LEN]);
+
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Token(hidden)")
+    }
+}
+
+impl Token {
+    /// 32 random bytes from the system, hex encoded.
+    #[cfg(unix)]
+    pub fn generate() -> Result<Token, String> {
+        use std::io::Read;
+        let mut raw = [0u8; TOKEN_BYTES];
+        fs::File::open("/dev/urandom")
+            .and_then(|mut f| f.read_exact(&mut raw))
+            .map_err(|e| format!("could not read random bytes for the session token: {e}"))?;
+        let mut hex = [0u8; TOKEN_HEX_LEN];
+        for (i, byte) in raw.iter().enumerate() {
+            hex[i * 2] = HEX[usize::from(byte >> 4)];
+            hex[i * 2 + 1] = HEX[usize::from(byte & 0x0f)];
+        }
+        Ok(Token(hex))
+    }
+
+    #[cfg(not(unix))]
+    pub fn generate() -> Result<Token, String> {
+        Err("the usage dashboard is only supported on macOS and Linux".to_string())
+    }
+
+    /// Exactly 64 lowercase hex characters, or `None`.
+    pub fn parse(text: &str) -> Option<Token> {
+        let bytes = text.as_bytes();
+        if bytes.len() != TOKEN_HEX_LEN || !bytes.iter().all(|b| HEX.contains(b)) {
+            return None;
+        }
+        let mut hex = [0u8; TOKEN_HEX_LEN];
+        hex.copy_from_slice(bytes);
+        Some(Token(hex))
+    }
+
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.0).unwrap_or_default()
+    }
+
+    /// Compares without stopping at the first differing byte.
+    pub fn matches(&self, candidate: &str) -> bool {
+        let given = candidate.as_bytes();
+        let mut diff = u8::from(given.len() != self.0.len());
+        for (i, expected) in self.0.iter().enumerate() {
+            diff |= expected ^ given.get(i).copied().unwrap_or(0);
+        }
+        diff == 0
+    }
+}
+
+const HEX: &[u8; 16] = b"0123456789abcdef";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lock {
     pub pid: u32,
     pub port: u16,
+    pub token: Token,
 }
 
 /// Pids 0 and 1 are never a dashboard server: signalling 0 hits the caller's
-/// whole process group, so a lock naming either reads as garbled.
+/// whole process group, so a lock naming either reads as garbled. A lock
+/// without a token is the older two field format and reads as `None`.
 pub fn read_lock(path: &Path) -> Option<Lock> {
     let text = fs::read_to_string(path).ok()?;
     let mut parts = text.split_whitespace();
     let lock = Lock {
         pid: parts.next()?.parse().ok()?,
         port: parts.next()?.parse().ok()?,
+        token: Token::parse(parts.next()?)?,
     };
     (lock.pid > 1 && lock.port > 0).then_some(lock)
+}
+
+/// The pid and port of an older two field lock, so an upgrade can retire the
+/// server it names instead of leaving it running without an owner.
+pub fn read_legacy_lock(path: &Path) -> Option<(u32, u16)> {
+    let text = fs::read_to_string(path).ok()?;
+    let mut parts = text.split_whitespace();
+    let pid: u32 = parts.next()?.parse().ok()?;
+    let port: u16 = parts.next()?.parse().ok()?;
+    (parts.next().is_none() && pid > 1 && port > 0).then_some((pid, port))
 }
 
 pub fn clear_lock(path: &Path) {
@@ -128,7 +205,12 @@ fn write_atomically(path: &Path, lock: Lock) -> bool {
         }
     }
     let tmp = PathBuf::from(format!("{}.tmp.{}", path.display(), lock.pid));
-    if write_private(&tmp, &format!("{} {}\n", lock.pid, lock.port)).is_err() {
+    if write_private(
+        &tmp,
+        &format!("{} {} {}\n", lock.pid, lock.port, lock.token.as_str()),
+    )
+    .is_err()
+    {
         let _ = fs::remove_file(&tmp);
         return false;
     }
@@ -163,6 +245,10 @@ mod tests {
     use crate::common::test_support::scratch_dir;
     use std::net::TcpListener;
 
+    fn tok() -> Token {
+        Token::parse(&"ab".repeat(32)).expect("64 hex characters")
+    }
+
     fn free_port_with_nothing_listening() -> u16 {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -179,12 +265,13 @@ mod tests {
         assert_eq!(read_lock(&path), None);
         fs::write(&path, "not a lock").unwrap();
         assert_eq!(read_lock(&path), None);
-        fs::write(&path, "42 8080\n").unwrap();
+        fs::write(&path, format!("42 8080 {}\n", tok().as_str())).unwrap();
         assert_eq!(
             read_lock(&path),
             Some(Lock {
                 pid: 42,
-                port: 8080
+                port: 8080,
+                token: tok(),
             })
         );
         let _ = fs::remove_dir_all(dir);
@@ -196,8 +283,13 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("dashboard.lock");
 
-        for text in ["0 8080\n", "1 8080\n", "4242 0\n"] {
-            fs::write(&path, text).unwrap();
+        let token = tok();
+        for text in [
+            format!("0 8080 {}\n", token.as_str()),
+            format!("1 8080 {}\n", token.as_str()),
+            format!("4242 0 {}\n", token.as_str()),
+        ] {
+            fs::write(&path, &text).unwrap();
             assert_eq!(read_lock(&path), None, "{text:?}");
         }
         let _ = fs::remove_dir_all(dir);
@@ -248,6 +340,7 @@ mod tests {
         let holder = Lock {
             pid: std::process::id(),
             port: listener.local_addr().unwrap().port(),
+            token: tok(),
         };
         assert!(try_claim(&path, holder));
         let guard = PathBuf::from(format!("{}.guard", path.display()));
@@ -264,6 +357,7 @@ mod tests {
             Lock {
                 pid: 0x7fff_fffd,
                 port: 9,
+                token: tok(),
             },
         );
 
@@ -289,7 +383,8 @@ mod tests {
         // Pid 0x7fff_fffe is far above any real pid limit.
         assert!(!is_live(Lock {
             pid: 0x7fff_fffe,
-            port
+            port,
+            token: tok(),
         }));
     }
 
@@ -300,7 +395,8 @@ mod tests {
 
         assert!(!is_live(Lock {
             pid: std::process::id(),
-            port
+            port,
+            token: tok(),
         }));
     }
 
@@ -312,7 +408,8 @@ mod tests {
 
         assert!(is_live(Lock {
             pid: std::process::id(),
-            port
+            port,
+            token: tok(),
         }));
     }
 
@@ -325,10 +422,12 @@ mod tests {
         let winner = Lock {
             pid: std::process::id(),
             port: listener.local_addr().unwrap().port(),
+            token: tok(),
         };
         let loser = Lock {
             pid: 0x7fff_fffd,
             port: 9,
+            token: tok(),
         };
 
         assert!(try_claim(&path, winner));
@@ -350,6 +449,7 @@ mod tests {
             Lock {
                 pid: std::process::id(),
                 port: 1,
+                token: tok(),
             },
         );
 
@@ -371,10 +471,12 @@ mod tests {
         let stale = Lock {
             pid: 0x7fff_fffe,
             port: free_port_with_nothing_listening(),
+            token: tok(),
         };
         let fresh = Lock {
             pid: std::process::id(),
             port: 1,
+            token: tok(),
         };
         assert!(try_claim(&path, stale));
 
@@ -400,6 +502,7 @@ mod tests {
             .map(|l| Lock {
                 pid: std::process::id(),
                 port: l.local_addr().unwrap().port(),
+                token: tok(),
             })
             .collect();
 
@@ -419,6 +522,86 @@ mod tests {
             .collect();
         assert_eq!(winners.len(), 1, "exactly one claimant may own the lock");
         assert_eq!(read_lock(&path), Some(winners[0]));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tokens_parse_only_as_64_lowercase_hex_characters() {
+        assert!(Token::parse(&"0f".repeat(32)).is_some());
+        for bad in [
+            "",
+            "abc",
+            &"AB".repeat(32),
+            &"zz".repeat(32),
+            &"ab".repeat(33),
+        ] {
+            assert!(Token::parse(bad).is_none(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_token_matches_only_itself_and_never_prints() {
+        let token = tok();
+
+        assert!(token.matches(token.as_str()));
+        assert!(!token.matches(""));
+        assert!(!token.matches(&"ab".repeat(31)));
+        assert!(!token.matches(&format!("{}0", token.as_str())));
+        assert!(!token.matches(&"cd".repeat(32)));
+        assert_eq!(format!("{token:?}"), "Token(hidden)");
+        assert!(!format!(
+            "{:?}",
+            Lock {
+                pid: 5,
+                port: 6,
+                token
+            }
+        )
+        .contains("abab"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_tokens_are_random_hex() {
+        let (a, b) = (Token::generate().unwrap(), Token::generate().unwrap());
+
+        assert_ne!(a, b);
+        assert_eq!(a.as_str().len(), 64);
+        assert!(Token::parse(a.as_str()).is_some());
+    }
+
+    #[test]
+    fn a_two_field_lock_is_the_old_format_and_reads_as_none() {
+        let dir = scratch_dir("lock-legacy");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("dashboard.lock");
+        fs::write(&path, "4242 8080\n").unwrap();
+
+        assert_eq!(read_lock(&path), None);
+        assert_eq!(read_legacy_lock(&path), Some((4242, 8080)));
+        fs::write(&path, format!("4242 8080 {}\n", tok().as_str())).unwrap();
+        assert_eq!(read_legacy_lock(&path), None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_lock_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch_dir("lock-mode");
+        let path = dir.join("dashboard.lock");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let me = Lock {
+            pid: std::process::id(),
+            port: listener.local_addr().unwrap().port(),
+            token: tok(),
+        };
+
+        assert!(try_claim(&path, me));
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
         let _ = fs::remove_dir_all(dir);
     }
 }
