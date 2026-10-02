@@ -8,6 +8,7 @@
 
 #![cfg(unix)]
 
+use std::cell::Cell;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
@@ -20,7 +21,9 @@ use std::time::{Duration, Instant};
 static SOCKET_LOCK: Mutex<()> = Mutex::new(());
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-struct Home(PathBuf);
+/// The second field records that a server start was attempted, so teardown
+/// knows to wait for a slow starter's lock.
+struct Home(PathBuf, Cell<bool>);
 
 impl Home {
     fn new(tag: &str) -> Self {
@@ -28,10 +31,13 @@ impl Home {
         let dir =
             std::env::temp_dir().join(format!("playbook-dash-{}-{tag}-{n}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        Home(dir.canonicalize().unwrap())
+        Home(dir.canonicalize().unwrap(), Cell::new(false))
     }
 
     fn command(&self, args: &[&str]) -> Command {
+        if args == ["usage", "dashboard"] {
+            self.1.set(true);
+        }
         let mut command = Command::new(env!("CARGO_BIN_EXE_playbook"));
         command
             .args(args)
@@ -71,6 +77,14 @@ impl Home {
 
 impl Drop for Home {
     fn drop(&mut self) {
+        // A starter that gave up waiting may still bind and write its lock
+        // after the test body ends: wait for it, or it would outlive the test.
+        if self.1.get() {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while self.lock().is_none() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
         let _ = self.run(&["usage", "dashboard", "stop"]);
         if let Some((pid, _)) = self.lock() {
             let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
@@ -122,13 +136,20 @@ fn http_status(port: u16, path: &str) -> u16 {
     response.status().as_u16()
 }
 
-fn serve_process_count(exe: &std::path::Path) -> usize {
+fn serve_pids(exe: &std::path::Path) -> Vec<u32> {
     let pattern = format!("{} usage dashboard --serve", exe.display());
     let out = Command::new("pgrep")
         .args(["-f", &pattern])
         .output()
         .unwrap();
-    String::from_utf8_lossy(&out.stdout).lines().count()
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .collect()
+}
+
+fn serve_process_count(exe: &std::path::Path) -> usize {
+    serve_pids(exe).len()
 }
 
 #[test]
@@ -210,6 +231,7 @@ fn two_concurrent_starts_leave_exactly_one_server() {
         command.spawn().unwrap()
     };
 
+    home.1.set(true);
     let a = spawn_piped();
     let b = spawn_piped();
     let (a, b) = (a.wait_with_output().unwrap(), b.wait_with_output().unwrap());
@@ -228,12 +250,12 @@ fn two_concurrent_starts_leave_exactly_one_server() {
         serve_process_count(&exe) == 1
     });
     std::thread::sleep(Duration::from_millis(500));
-    assert_eq!(
-        serve_process_count(&exe),
-        1,
-        "the loser must not come back or linger"
-    );
     let (pid, port) = home.lock().unwrap();
+    assert_eq!(
+        serve_pids(&exe),
+        vec![pid],
+        "the one process left must be the lock's winner, and the loser must not come back"
+    );
     assert!(alive(pid));
     assert_eq!(http_status(port, "/"), 200);
 }

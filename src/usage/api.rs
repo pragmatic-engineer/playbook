@@ -74,7 +74,7 @@ pub fn data_json(usage: &[UsageEvent], tools: &[ToolInvocationEvent], now: i64) 
         "skills": counts_json(count_tools(tools, ToolKind::Skill)),
         "agents": counts_json(count_tools(tools, ToolKind::Agent)),
         "charts": {
-            "cost_by_day": bar_chart("Cost per day", "USD", &cost_bars(&days[recent..])),
+            "cost_by_day": bar_chart("Cost per day (UTC)", "USD", &cost_bars(&days[recent..])),
             "cost_by_model": bar_chart("Cost per model", "USD", &cost_bars(&models)),
         },
     })

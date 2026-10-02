@@ -61,12 +61,18 @@ impl Fixture {
         let work = root.join("work");
         fs::create_dir_all(&bare).expect("bare dir");
         fs::create_dir_all(&work).expect("work dir");
+        let hooks = root.join("no-hooks");
+        fs::create_dir_all(&hooks).expect("hooks dir");
         git(&bare, &["init", "--quiet", "--bare", "-b", "main"]);
         git(&work, &["init", "--quiet", "-b", "main"]);
+        // Local config beats the global one the code under test also reads, so
+        // a global hook or signing setting cannot reach these repos.
         for (k, v) in [
             ("user.name", "Test"),
             ("user.email", "test@example.test"),
             ("commit.gpgsign", "false"),
+            ("push.gpgSign", "false"),
+            ("core.hooksPath", hooks.to_str().expect("utf8")),
         ] {
             git(&work, &["config", k, v]);
         }
@@ -114,6 +120,19 @@ impl Fixture {
             ],
         );
         git(&self.work, &["fetch", "--quiet", "origin"]);
+    }
+
+    /// Checks out a branch whose name starts with `-`, which `git branch`
+    /// refuses to create but `update-ref` can.
+    pub fn checkout_dash_branch(&self, name: &str) {
+        git(
+            &self.work,
+            &["update-ref", &format!("refs/heads/{name}"), "HEAD"],
+        );
+        git(
+            &self.work,
+            &["symbolic-ref", "HEAD", &format!("refs/heads/{name}")],
+        );
     }
 
     pub fn branch(&self) -> String {

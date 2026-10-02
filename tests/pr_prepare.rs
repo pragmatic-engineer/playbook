@@ -379,3 +379,76 @@ fn an_unknown_base_names_the_missing_remote_ref_instead_of_claiming_nothing_is_a
     assert!(err.contains("origin/no-such-branch"), "got {err}");
     assert!(!err.contains("nothing ahead"), "got {err}");
 }
+
+#[test]
+fn a_failed_fetch_adds_a_warn_line_and_the_run_continues() {
+    // Arrange: origin/main exists locally, then origin becomes unreachable.
+    let fx = Fixture::new("offline", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    let gone = fx.bare.with_file_name("gone.git");
+    git(
+        &fx.work,
+        &["remote", "set-url", "origin", gone.to_str().expect("utf8")],
+    );
+
+    // Act
+    let out = fx.run(&FakeGh::default(), None, None).expect("not fatal");
+
+    // Assert
+    let warn = out
+        .lines()
+        .find(|l| l.starts_with("WARN fetch:"))
+        .unwrap_or_else(|| panic!("no WARN fetch line in {out}"));
+    assert!(
+        warn.starts_with("WARN fetch: could not fetch origin/main (")
+            && warn.ends_with("); results use the local ref"),
+        "got {warn}"
+    );
+    let warn_at = out.lines().position(|l| l == warn).unwrap();
+    let stat_at = out.lines().position(|l| l == "=== diff stat ===").unwrap();
+    assert!(warn_at < stat_at, "the warning belongs with the verdicts");
+}
+
+#[test]
+fn a_successful_fetch_prints_no_warn_line() {
+    // Arrange
+    let fx = Fixture::new("online", "feat/x");
+    fx.commit_lines("a.txt", 2);
+
+    // Act
+    let out = fx.run(&FakeGh::default(), None, None).expect("prepares");
+
+    // Assert
+    assert!(!out.lines().any(|l| l.starts_with("WARN fetch:")), "{out}");
+}
+
+#[test]
+fn a_base_starting_with_a_dash_is_refused() {
+    // Arrange
+    let fx = Fixture::new("dashbase", "feat/x");
+    fx.commit_lines("a.txt", 2);
+
+    // Act
+    let err = fx
+        .run(&FakeGh::default(), Some("--upload-pack=x"), None)
+        .expect_err("refused");
+
+    // Assert
+    assert!(err.contains("starts with '-'"), "got {err}");
+}
+
+#[test]
+fn a_branch_starting_with_a_dash_is_refused() {
+    // Arrange
+    let fx = Fixture::new("dashbranch", "feat/x");
+    fx.commit_lines("a.txt", 2);
+    let gh = FakeGh::default();
+
+    // Act
+    let err =
+        in_dir(&fx.work, || prepare(&fx.state, "-weird", &gh, None, None)).expect_err("refused");
+
+    // Assert
+    assert!(err.contains("starts with '-'"), "got {err}");
+    assert_eq!(gh.count("pr_view"), 0, "nothing runs after the refusal");
+}

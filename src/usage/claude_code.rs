@@ -14,6 +14,7 @@ use super::{Events, ToolInvocationEvent, ToolKind, UsageEvent, UsageSource};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 pub struct ClaudeCodeSource {
@@ -47,30 +48,30 @@ impl UsageSource for ClaudeCodeSource {
         let mut repos = RepoResolver::default();
 
         for file in files {
-            let Ok(text) = fs::read_to_string(&file) else {
-                continue;
-            };
-            for line in text.lines() {
+            read_lines(&file, &mut |line| {
                 let Ok(value) = serde_json::from_str::<Value>(line) else {
-                    continue;
+                    return;
                 };
                 if value.get("type").and_then(Value::as_str) != Some("assistant") {
-                    continue;
+                    return;
                 }
                 let Some(timestamp) = value
                     .get("timestamp")
                     .and_then(Value::as_str)
                     .and_then(parse_iso8601_utc)
                 else {
-                    continue;
+                    return;
                 };
                 if timestamp < watermark {
-                    continue;
+                    return;
                 }
                 if let Some(event) = usage_event(&value, timestamp, &mut repos) {
                     match usage_index.get(&event.event_id) {
                         Some(&i) if event.output_tokens > usage[i].output_tokens => {
-                            usage[i] = event
+                            // Keep the larger counts but the message's first timestamp.
+                            let first = usage[i].timestamp.min(event.timestamp);
+                            usage[i] = event;
+                            usage[i].timestamp = first;
                         }
                         Some(_) => {}
                         None => {
@@ -84,9 +85,61 @@ impl UsageSource for ClaudeCodeSource {
                         tools.push(tool);
                     }
                 }
-            }
+            });
         }
         Ok(Events { usage, tools })
+    }
+}
+
+/// A line longer than this is skipped, so one corrupt or huge line cannot
+/// exhaust memory.
+const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+
+/// Calls `f` for each line of `path`, decoding every line on its own. A line
+/// with invalid UTF-8 is decoded lossily and an oversized line is skipped, so
+/// a bad byte costs at most that one line, never the whole transcript. A read
+/// error ends the file.
+fn read_lines(path: &Path, f: &mut dyn FnMut(&str)) {
+    let Ok(file) = fs::File::open(path) else {
+        return;
+    };
+    let mut reader = BufReader::new(file);
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        buf.clear();
+        let read = (&mut reader)
+            .take(MAX_LINE_BYTES as u64 + 1)
+            .read_until(b'\n', &mut buf);
+        match read {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        if buf.len() > MAX_LINE_BYTES && !buf.ends_with(b"\n") {
+            if skip_to_newline(&mut reader).is_err() {
+                return;
+            }
+            continue;
+        }
+        f(String::from_utf8_lossy(&buf).trim_end_matches(['\n', '\r']));
+    }
+}
+
+fn skip_to_newline(reader: &mut impl BufRead) -> std::io::Result<()> {
+    loop {
+        let (found, used) = {
+            let available = reader.fill_buf()?;
+            if available.is_empty() {
+                return Ok(());
+            }
+            match available.iter().position(|&b| b == b'\n') {
+                Some(i) => (true, i + 1),
+                None => (false, available.len()),
+            }
+        };
+        reader.consume(used);
+        if found {
+            return Ok(());
+        }
     }
 }
 
@@ -171,7 +224,7 @@ fn tool_events(line: &Value, timestamp: i64) -> Vec<ToolInvocationEvent> {
             let input = b.get("input")?;
             let (kind, name) = match b.get("name")?.as_str()? {
                 "Skill" => (ToolKind::Skill, str_field(input, "skill")),
-                "Agent" => {
+                "Agent" | "Task" => {
                     let subagent = str_field(input, "subagent_type");
                     let name = if subagent.is_empty() {
                         str_field(input, "description")
@@ -392,5 +445,66 @@ mod tests {
         let events = source.events_since(0).unwrap();
 
         assert!(events.usage.is_empty() && events.tools.is_empty());
+    }
+
+    fn message_line(id: &str, cwd: &str, content: &str) -> Vec<u8> {
+        format!(
+            "{{\"type\":\"assistant\",\"sessionId\":\"s\",\"timestamp\":\"2026-09-01T08:51:22.000Z\",\"cwd\":\"{cwd}\",\"gitBranch\":\"b\",\"message\":{{\"id\":\"{id}\",\"model\":\"claude-sonnet-5\",\"content\":{content},\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}}}\n"
+        )
+        .into_bytes()
+    }
+
+    fn events_from(name: &str, bytes: &[u8]) -> Events {
+        let dir = crate::common::test_support::scratch_dir(name);
+        fs::create_dir_all(dir.join("p")).unwrap();
+        fs::write(dir.join("p/s.jsonl"), bytes).unwrap();
+        let events = ClaudeCodeSource::new(dir.clone()).events_since(0).unwrap();
+        let _ = fs::remove_dir_all(dir);
+        events
+    }
+
+    #[test]
+    fn a_bad_utf8_byte_costs_only_its_own_line() {
+        let mut bytes = message_line("msg_1", "/x/r", "[]");
+        // Invalid UTF-8 inside a string value: the line still reads, lossily.
+        let mut bad = message_line("msg_bad", "/x/PLACEHOLDER", "[]");
+        let at = bad.windows(11).position(|w| w == b"PLACEHOLDER").unwrap();
+        bad.splice(at..at + 11, [0xff, 0xfe]);
+        bytes.extend(bad);
+        // Invalid UTF-8 that breaks the JSON itself: only this line is lost.
+        bytes.extend(b"{\"type\":\"assistant\",\xff\n");
+        bytes.extend(message_line("msg_2", "/x/r", "[]"));
+
+        let events = events_from("bad-utf8", &bytes);
+
+        let ids: Vec<&str> = events.usage.iter().map(|e| e.event_id.as_str()).collect();
+        assert_eq!(ids, vec!["msg_1", "msg_bad", "msg_2"]);
+    }
+
+    #[test]
+    fn an_oversized_line_is_skipped_and_the_next_line_still_reads() {
+        let mut bytes = b"{\"type\":\"assistant\",\"pad\":\"".to_vec();
+        bytes.extend(vec![b'A'; MAX_LINE_BYTES + 10]);
+        bytes.extend(b"\"}\n");
+        bytes.extend(message_line("msg_after", "/x/r", "[]"));
+
+        let events = events_from("huge-line", &bytes);
+
+        let ids: Vec<&str> = events.usage.iter().map(|e| e.event_id.as_str()).collect();
+        assert_eq!(ids, vec!["msg_after"]);
+    }
+
+    #[test]
+    fn the_older_task_tool_name_counts_as_an_agent() {
+        let content = r#"[{"type":"tool_use","id":"tu_old","name":"Task","input":{"subagent_type":"Explore","description":"look"}}]"#;
+
+        let events = events_from("task-tool", &message_line("msg_t", "/x/r", content));
+
+        let got: Vec<(&str, &str, &str)> = events
+            .tools
+            .iter()
+            .map(|t| (t.event_id.as_str(), t.kind.as_str(), t.name.as_str()))
+            .collect();
+        assert_eq!(got, vec![("tu_old", "agent", "Explore")]);
     }
 }
