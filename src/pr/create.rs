@@ -45,6 +45,11 @@ pub fn run(
 
     let branch = current_branch()?;
     let (base, _) = resolve_base(gh, base_arg)?;
+    if branch == base {
+        return Err(format!(
+            "on the base branch ({base}); create a feature branch first"
+        ));
+    }
 
     git_net(&["push", "-u", "origin", &format!("HEAD:refs/heads/{branch}")]).map_err(|e| {
         format!("push of {branch} failed; not creating a PR (it would be missing your local commits): {e}")

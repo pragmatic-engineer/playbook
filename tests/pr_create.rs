@@ -179,3 +179,26 @@ fn a_failed_base_check_after_creation_still_reports_the_url_with_a_warning() {
     );
     assert_eq!(gh.count("pr_create"), 1);
 }
+
+#[test]
+fn running_on_the_base_branch_never_pushes_to_it() {
+    // Arrange: a local commit on `main` that origin does not have yet.
+    let fx = Fixture::new("onbase", "feat/x");
+    git(&fx.work, &["checkout", "--quiet", "main"]);
+    fx.commit_lines("local-only.txt", 2);
+    let before = git(&fx.bare, &["rev-parse", "refs/heads/main"]);
+    let gh = FakeGh::creating(URL);
+
+    // Act
+    let got = create(&fx, &gh, "feat(pr): add a thing", None);
+
+    // Assert
+    let err = got.expect_err("main is the base");
+    assert!(err.contains("on the base branch (main)"), "got {err}");
+    assert_eq!(
+        git(&fx.bare, &["rev-parse", "refs/heads/main"]),
+        before,
+        "origin/main must not move"
+    );
+    assert_eq!(gh.count("pr_create"), 0);
+}
