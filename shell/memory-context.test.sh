@@ -40,7 +40,7 @@ chmod 0755 "$BIN_DIR/playbook"
 export PATH="${BIN_DIR}:/usr/bin:/bin:/usr/sbin:/sbin"
 
 # HOME isolation so a bug that falls back to the default graph path would
-# hit an empty scratch tree, never the user's real ~/.claude/memory/memory.graph.json.
+# hit an empty scratch tree, never the user's real ~/.config/playbook/memory/memory.graph.json.
 export HOME="${WORK}/home"
 mkdir -p "$HOME"
 

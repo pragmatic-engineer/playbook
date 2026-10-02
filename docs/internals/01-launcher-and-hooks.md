@@ -56,7 +56,7 @@ The 15 hooks reach `~/.claude/settings.json`'s `.hooks` object through two diffe
 
 The real mechanism is Rust code. `playbook init` runs a `wire` step (`src/init/wire.rs`) that unconditionally upserts every entry from two hardcoded tables into `.hooks`: `PORTED_HOOK_SPECS` (the 11 functional hooks, 13 registration entries in total, since `memory-anchors` fires on both `PreToolUse` and `UserPromptSubmit`, and `session-clean-exit` fires on both `Stop` and `SessionEnd`) and `GUARD_SPECS` (the same 4 guards `settings.shared.json` already carries, upserted again idempotently in the same bare form; `no-slop-guard` carries two entries since it fires on two matchers). `src/init/run.rs` orders the "settings" step (seed or merge `settings.shared.json` in) before the "hooks" step (`wire`), so `wire` always has a `.hooks` object to upsert into. `wire` recognizes a hook's legacy command too, either the old `<name>.py` path or the old guard `<name>.sh` path, and rewrites that same array slot instead of appending a duplicate, so a machine mid-migration, or a repeat `playbook init` run, self-heals without drift.
 
-`hooks/lib/common.sh` still exists in this repo, but no Rust hook sources it. Only the legacy shell guard scripts it was written for (`hooks/precommit-check.sh`, `hooks/no-dash-guard.sh`, `hooks/bg-await-guard.sh`) still source it, and those scripts are no longer wired into `settings.json` now that every `GUARD_SPECS` entry points at the compiled binary.
+The old shell guard scripts (`hooks/precommit-check.sh`, `hooks/no-dash-guard.sh`, `hooks/bg-await-guard.sh`) and their shared `hooks/lib/common.sh` are gone. Every `GUARD_SPECS` entry points at the compiled binary, and `hooks/lib/` now holds only `config-hash.sh`.
 
 ### SessionStart
 

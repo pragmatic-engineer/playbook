@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! `~/.claude/memory/memory.signals.json` data layer: hit counters, staleness
+//! `~/.config/playbook/memory/memory.signals.json` data layer: hit counters, staleness
 //! stamps, and a consolidation cursor. Every reader/writer of this file goes through this module's lock, so no caller's update is silently dropped by another's.
 
 use crate::common::atomic::with_dir_lock;
