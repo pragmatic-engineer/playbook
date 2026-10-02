@@ -34,6 +34,11 @@ pub fn runtime_root() -> PathBuf {
     playbook_root().join("runtime")
 }
 
+/// `$HOME/.config/playbook/usage`: the durable, cross-project usage store.
+pub fn usage_db_dir() -> PathBuf {
+    playbook_root().join("usage")
+}
+
 /// `$HOME/.config/playbook/cc-state`: per-project config-drift baselines.
 pub fn cc_state_dir() -> PathBuf {
     playbook_root().join("cc-state")

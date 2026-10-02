@@ -7,6 +7,8 @@
 
 pub mod account;
 pub mod claude_code;
+pub mod db;
+pub mod ingest;
 pub mod pricing;
 
 /// One assistant message's token usage and derived cost. `event_id` is the
