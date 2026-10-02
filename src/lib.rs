@@ -16,6 +16,7 @@ pub mod init;
 pub mod json;
 pub mod manifest;
 pub mod settings;
+pub mod trust;
 pub mod usage;
 pub mod worktree;
 
@@ -114,6 +115,12 @@ pub enum Command {
     Json {
         #[command(subcommand)]
         sub: JsonCommand,
+    },
+    /// Pre-trust an absolute directory in `~/.claude.json` so Claude Code's
+    /// first-launch trust dialog never blocks `cc`/`ccd`. Always exits 0.
+    Trust {
+        /// Absolute path of the directory to trust.
+        path: String,
     },
 }
 
