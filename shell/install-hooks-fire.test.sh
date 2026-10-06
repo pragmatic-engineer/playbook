@@ -5,7 +5,7 @@
 # install-hooks-fire.test.sh: WU-11's headline acceptance criterion. Installs
 # into a scratch HOME via install.sh (the PLAYBOOK_SRC local-source seam, no
 # network), reads the command strings the resulting settings.json carries,
-# asserts exactly 15 distinct hook names (11 ported hooks wired as `playbook
+# asserts exactly 17 distinct hook names (13 ported hooks wired as `playbook
 # hook <name>`, 4 safety guards wired as `~/.claude/hooks/<name>.sh`), then
 # EXECUTES every one of them with a hook-specific payload and asserts a
 # hook-specific observable effect. The name list is derived from settings.json
@@ -60,7 +60,7 @@ fi
 SETTINGS="$CH/settings.json"
 [ -f "$SETTINGS" ] || { fail "settings.json not written by install"; cat "$WORK/install.log"; }
 
-# --- 1. exactly 15 distinct hook names -------------------------------------
+# --- 1. exactly 17 distinct hook names -------------------------------------
 # Ported hooks: bare `playbook hook <name>`. Guards: `~/.claude/hooks/<name>.sh`.
 # Needs the raw command strings themselves (to strip down to bare names below),
 # not a count, so this uses the raw hook-commands listing rather than a
@@ -73,10 +73,10 @@ NAMES_FILE="$WORK/names.txt"
   | sort -u > "$NAMES_FILE"
 
 n_names="$(wc -l < "$NAMES_FILE" | tr -d ' ')"
-if [ "${n_names:-0}" -eq 15 ]; then
-  pass "settings.json wires exactly 15 distinct hook names"
+if [ "${n_names:-0}" -eq 17 ]; then
+  pass "settings.json wires exactly 17 distinct hook names"
 else
-  fail "expected 15 distinct hook names, got ${n_names:-0}: $(tr '\n' ' ' < "$NAMES_FILE")"
+  fail "expected 17 distinct hook names, got ${n_names:-0}: $(tr '\n' ' ' < "$NAMES_FILE")"
 fi
 
 # --- 2. execute every one and assert its observable -------------------------
@@ -263,6 +263,48 @@ test_precommit_check() {
   [ -n "$out" ] && [[ "$out" != *'"permissionDecision":"deny"'* ]]
 }
 
+# run_auto_hook <name> <mode> <payload>: fires an auto-mode hook with the mode
+# env var unset (empty <mode>) or set to <mode>, in a scratch HOME so no real
+# config can flip the result. Stdout goes to $AUTO_OUT; returns the exit code.
+AUTO_OUT="$WORK/auto-hook.out"
+run_auto_hook() {
+  local name="$1" mode="$2" payload="$3" home rc
+  local -a mode_env=()
+  [ -n "$mode" ] && mode_env=(PLAYBOOK_MODE="$mode")
+  home="$(mktemp -d)"
+  ( cd "$home" && printf '%s' "$payload" \
+      | env -u PLAYBOOK_MODE -u XDG_CONFIG_HOME HOME="$home" "${mode_env[@]+"${mode_env[@]}"}" \
+          "$PLAYBOOK" hook "$name" 2>/dev/null ) > "$AUTO_OUT"
+  rc=$?
+  rm -rf "$home"
+  return "$rc"
+}
+
+test_auto_guard() {
+  local ask_payload prompt_payload
+  ask_payload='{"session_id":"fire-auto-guard","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]}}'
+  prompt_payload='{"session_id":"fire-auto-guard","hook_event_name":"UserPromptSubmit","prompt":"hi"}'
+  # ask mode (nothing set): stays silent
+  run_auto_hook auto-guard "" "$ask_payload" || return 1
+  [ ! -s "$AUTO_OUT" ] || return 1
+  # auto mode: denies the question and adds the standing note to a prompt
+  run_auto_hook auto-guard auto "$ask_payload" || return 1
+  [[ "$(cat "$AUTO_OUT")" == *'"permissionDecision":"deny"'* ]] || return 1
+  run_auto_hook auto-guard auto "$prompt_payload" || return 1
+  [[ "$(cat "$AUTO_OUT")" == *"AUTO MODE is on"* ]]
+}
+
+test_auto_cost() {
+  local payload
+  payload='{"session_id":"fire-auto-cost","hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"prompt":"x"}}'
+  # ask mode (nothing set): stays silent
+  run_auto_hook auto-cost "" "$payload" || return 1
+  [ ! -s "$AUTO_OUT" ] || return 1
+  # auto mode with no transcript the spend is unreadable, so a non-read tool is denied
+  run_auto_hook auto-cost auto "$payload" || return 1
+  [[ "$(cat "$AUTO_OUT")" == *'"permissionDecision":"deny"'* && "$(cat "$AUTO_OUT")" == *"cost unreadable"* ]]
+}
+
 run_case_for() {  # <name>: dispatches to the matching test_*, or returns 9
   case "$1" in
     session-init)         test_session_init ;;
@@ -280,6 +322,8 @@ run_case_for() {  # <name>: dispatches to the matching test_*, or returns 9
     bg-await-guard)       test_bg_await_guard ;;
     no-slop-guard)        test_no_slop_guard ;;
     precommit-check)      test_precommit_check ;;
+    auto-guard)           test_auto_guard ;;
+    auto-cost)            test_auto_cost ;;
     *) return 9 ;;
   esac
 }
