@@ -399,6 +399,71 @@ fn set_outside_any_git_repo_with_default_repo_tier_fails_clearly_not_a_crash() {
     assert!(!stderr.is_empty());
 }
 
+/// Runs `config set --global -- <key> <value>` and returns the output. The
+/// `--` lets a negative value reach the validator instead of the flag parser.
+fn set_global(home: &Path, key: &str, value: &str) -> Output {
+    let cwd = scratch_dir("set-validated-cwd");
+    run_playbook(&cwd, home, &["config", "set", "--global", "--", key, value])
+}
+
+#[test]
+fn set_rejects_an_out_of_range_auto_or_fix_value_with_a_clear_message_and_writes_nothing() {
+    // Arrange: (key, value, what the message must say)
+    let rows = [
+        ("auto.budgetUsd", "0", "at least 0.01"),
+        ("auto.budgetUsd", "-5", "at least 0.01"),
+        ("auto.budgetUsd", "0.004", "at least 0.01"),
+        ("auto.budgetUsd", "abc", "auto.budgetUsd"),
+        ("auto.warnPct", "0", "between 1 and 100"),
+        ("auto.warnPct", "101", "between 1 and 100"),
+        ("fix.maxFiles", "0", "positive integer"),
+        ("fix.maxLines", "0", "positive integer"),
+    ];
+    for (key, value, message) in rows {
+        let home = scratch_dir("set-validated-home");
+
+        // Act
+        let out = set_global(&home, key, value);
+
+        // Assert
+        assert!(!out.status.success(), "{key} {value} must exit non-zero");
+        let stderr = stderr_of(&out);
+        assert!(stderr.contains(key), "{key} {value}: {stderr}");
+        assert!(stderr.contains(message), "{key} {value}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{key} {value}: {stderr}");
+        assert!(
+            !global_config_path(&home).exists(),
+            "{key} {value}: nothing may be written"
+        );
+    }
+}
+
+#[test]
+fn set_writes_valid_auto_and_fix_values_including_a_fractional_budget() {
+    // Arrange
+    let rows = [
+        ("auto.budgetUsd", "2.5"),
+        ("auto.warnPct", "100"),
+        ("fix.maxFiles", "99"),
+        ("fix.maxLines", "1"),
+    ];
+    for (key, value) in rows {
+        let home = scratch_dir("set-valid-home");
+
+        // Act
+        let out = set_global(&home, key, value);
+
+        // Assert
+        assert!(out.status.success(), "{key} {value}: {}", stderr_of(&out));
+        let stored: Value = serde_json::from_str(
+            &fs::read_to_string(global_config_path(&home)).expect("config file is written"),
+        )
+        .expect("config file is JSON");
+        let leaf = key.split('.').fold(&stored, |node, segment| &node[segment]);
+        assert_eq!(leaf.to_string(), value, "{key}");
+    }
+}
+
 /// Plants `contents` as the config file at `path`, creating its directory.
 fn plant_config(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().expect("config path has a parent")).expect("config dir");

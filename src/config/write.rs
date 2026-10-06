@@ -97,16 +97,45 @@ fn validate_key_and_value(key: &str, value: &Value) -> Result<(), ConfigError> {
         }
     }
     if matches!(default, Value::Number(_)) {
-        // `as_i64` screens out fractional and out-of-i64-range values
-        // (`None`); the `n >= 0` guard then screens out negatives.
-        if !matches!(value.as_i64(), Some(n) if n >= 0) {
-            return Err(ConfigError::InvalidNumber {
-                key: key.to_string(),
-                value: value.to_string(),
-            });
-        }
+        validate_number(key, value)?;
     }
     Ok(())
+}
+
+/// `auto.budgetUsd` takes any number of at least one cent, since the spend cap
+/// is held in whole cents, so a fractional budget works.
+/// `auto.warnPct` takes a whole number within 1 to 100, the `fix.` limits a
+/// whole number of at least 1, and every other numeric key 0 or more.
+fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
+    let whole = value.as_i64();
+    let (valid, constraint) = match key {
+        "auto.budgetUsd" => (
+            value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.01),
+            "a number of at least 0.01",
+        ),
+        "auto.warnPct" => (
+            whole.is_some_and(|n| (1..=100).contains(&n)),
+            "a whole number between 1 and 100",
+        ),
+        "fix.maxFiles" | "fix.maxLines" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
+        _ => {
+            return match whole {
+                Some(n) if n >= 0 => Ok(()),
+                _ => Err(ConfigError::InvalidNumber {
+                    key: key.to_string(),
+                    value: value.to_string(),
+                }),
+            }
+        }
+    };
+    if valid {
+        return Ok(());
+    }
+    Err(ConfigError::OutOfRange {
+        key: key.to_string(),
+        value: value.to_string(),
+        constraint,
+    })
 }
 
 /// Build `tier`'s file path under `home`, the same construction `resolve`

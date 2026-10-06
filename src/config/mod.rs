@@ -51,6 +51,13 @@ pub enum ConfigError {
     /// `value` is a JSON number but not a non-negative integer (negative,
     /// or fractional such as `3.5`).
     InvalidNumber { key: String, value: String },
+    /// `value` is a number outside the range `key` documents, for example a
+    /// budget of 0.
+    OutOfRange {
+        key: String,
+        value: String,
+        constraint: &'static str,
+    },
     /// A write targeted the org or repo tier but no `repo_slug` was
     /// available to build that tier's path from.
     MissingRepoContext,
@@ -87,6 +94,14 @@ impl std::fmt::Display for ConfigError {
             ConfigError::InvalidNumber { key, value } => write!(
                 f,
                 "config key {key} does not accept '{value}', must be a non-negative integer"
+            ),
+            ConfigError::OutOfRange {
+                key,
+                value,
+                constraint,
+            } => write!(
+                f,
+                "config key {key} does not accept '{value}', must be {constraint}"
             ),
             ConfigError::MissingRepoContext => write!(
                 f,
