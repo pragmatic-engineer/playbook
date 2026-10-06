@@ -23,6 +23,14 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 
 Open a new terminal (or source your rc file) afterwards so the binary resolves on `PATH`.
 
+Re-running the installer upgrades in place. It keeps the binary it replaces as `playbook.<version>.bak` next to it (for example `~/.local/bin/playbook.0.17.0.bak`), and the newest three are kept. To roll back, move the backup over the binary:
+
+```bash
+mv -f ~/.local/bin/playbook.0.17.0.bak ~/.local/bin/playbook
+```
+
+If the old binary could not report its version, the backup is named `playbook.unknown-<UTC timestamp>.bak`. A failed backup only prints a warning and the install goes on. Uninstall removes the backups too.
+
 Pass `--yes` to accept every default without prompting. Pin a version:
 
 ```bash

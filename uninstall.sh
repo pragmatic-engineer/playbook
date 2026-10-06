@@ -262,6 +262,13 @@ else
     log "No playbook binary at $BIN_DIR; nothing to remove"
 fi
 
+# install.sh keeps the binary it replaces as playbook.<version>.bak beside it.
+for _bak in "$BIN_DIR"/playbook.*.bak; do
+    [ -f "$_bak" ] || continue
+    rm -f "$_bak"
+    log "Removed $_bak"
+done
+
 # Strips the two-line block install.sh appends: the "# playbook binary"
 # marker and the export immediately after it. Anchored on the marker rather
 # than on any `export PATH` line, so a user's own PATH edits are never touched.
