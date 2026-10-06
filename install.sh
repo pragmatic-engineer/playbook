@@ -276,6 +276,46 @@ release_asset_name() {
     esac
 }
 
+# Copies the installed binary to playbook.<version>.bak beside it, so a bad
+# release can be rolled back with one mv. $1 is the binary about to replace
+# it: an identical one needs no backup. Keeps the newest 3 backups. Returns
+# non-zero on any failure; the caller decides that is not fatal.
+backup_previous_binary() {
+    local new_bin="$1"
+    local current="$PLAYBOOK_BIN_DIR/playbook"
+    [ -f "$current" ] || return 0
+    if cmp -s "$current" "$new_bin"; then
+        return 0
+    fi
+
+    local old_version
+    old_version="$("$current" --version 2>/dev/null </dev/null | tail -n 1 | awk '{print $NF}')" || old_version=""
+    # The version becomes part of a file name, so accept only a plain token.
+    case "$old_version" in
+        ""|*[!A-Za-z0-9._+-]*) old_version="unknown-$(date -u +%Y%m%dT%H%M%SZ)" ;;
+    esac
+
+    local bak="$PLAYBOOK_BIN_DIR/playbook.$old_version.bak"
+    if [ -e "$bak" ]; then
+        log "Keeping the existing backup $bak"
+        return 0
+    fi
+
+    local bak_tmp
+    bak_tmp="$(mktemp "$PLAYBOOK_BIN_DIR/.playbook.bak.XXXXXX")" || return 1
+    if ! { cp "$current" "$bak_tmp" && chmod 0755 "$bak_tmp" && mv -f "$bak_tmp" "$bak"; }; then
+        rm -f "$bak_tmp"
+        return 1
+    fi
+    log "Kept the previous binary as $bak. To roll back: mv -f $bak $current"
+
+    # Newest first by modification time; drop everything past the third.
+    # shellcheck disable=SC2012 # names are ours: version tokens are validated above
+    ls -t "$PLAYBOOK_BIN_DIR"/playbook.*.bak 2>/dev/null | tail -n +4 \
+        | while IFS= read -r _old; do [ -n "$_old" ] && rm -f "$_old"; done \
+        || true
+}
+
 # Fetches, verifies, and installs the release binary matching $RESOLVED_TAG.
 # Refuses when the tag is not a confirmed release (a PLAYBOOK_REF pin, or the
 # no-release-published fallback in resolve_tarball_url): a branch or a commit
@@ -330,6 +370,9 @@ install_release_binary() {
 
     # ---- first durable write: everything above here leaves no trace on failure.
     mkdir -p "$PLAYBOOK_BIN_DIR"
+    # A safety net, not a gate: a failed backup must never stop the install.
+    backup_previous_binary "$STAGE/playbook" \
+        || warn "could not back up the previous playbook binary; continuing without a backup"
     local bin_tmp
     bin_tmp="$(mktemp "$PLAYBOOK_BIN_DIR/.playbook.XXXXXX")"
     cp "$STAGE/playbook" "$bin_tmp"
