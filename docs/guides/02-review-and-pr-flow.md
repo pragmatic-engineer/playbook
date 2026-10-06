@@ -45,7 +45,7 @@ Fans out a swarm of specialist reviewer subagents in parallel (logic, test, secu
 
 Available presets: `security`, `architecture`, `data`, `docs`.
 
-In `auto` mode (the default), conditional reviewers (architecture, migration, docs, complexity, and others) activate based on what the diff contains. The command and its full-lens `reviewer` subagents run on Opus; a lens the triage step marks narrow gets a `cheap-checker` on Haiku. See [Model routing and memory](../internals/02-model-routing-and-memory.md) for why.
+By default, conditional reviewers (architecture, migration, docs, complexity, and others) activate based on what the diff contains. The command and its full-lens `reviewer` subagents run on Opus; a lens the triage step marks narrow gets a `cheap-checker` on Haiku. See [Model routing and memory](../internals/02-model-routing-and-memory.md) for why.
 
 Use `/playbook:quick-review` for everyday PRs. Reach for `/playbook:deep-review` when the change is large, risky, or touches multiple layers.
 
@@ -83,6 +83,14 @@ For each comment, you choose: `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit`, 
 At the end it invokes `commit-and-push -A`, then posts any queued replies. It never resolves threads; resolving is the reviewer's call.
 
 Bot authors (CodeRabbit, Copilot review, Greptile, github-actions, and others) are skipped by default. Pass `--bots` to include them.
+
+## Auto mode
+
+These commands read the run mode first. In `ask` mode, which is the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](../../README.md#auto-mode) for how the mode is set.
+
+- `/playbook:commit-and-push` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
+- `/playbook:quick-review` and `/playbook:deep-review` run as `--self`. They report locally and never post a review to GitHub, because a posted review speaks as you.
+- `/playbook:address-pr-comments` refuses to run. It replies on GitHub in your name, so each reply needs your approval.
 
 ## A typical review cycle
 

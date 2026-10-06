@@ -174,6 +174,7 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 | `/playbook:doctor` | Checks the seven layers and prints a pass/info table with a remediation hint for each miss. |
 | `/playbook:plan` | One continuous session from a raw idea or a settled direction to a verified, parallel-safe plan saved for `/playbook:implement`. |
 | `/playbook:implement` | Executes a `/playbook:plan` plan or `/playbook:adr` blueprint with subagents and TDD, committing each work unit. `--auto` opens a PR. |
+| `/playbook:fix` | Fixes one small bug end to end: a failing test, the smallest fix, one pull request. Hands off to `/playbook:plan` when the fix is not small. |
 | `/playbook:adr` | Creates an Architecture Decision Record through investigate, draft, quality-gate, finalise. Saves to `docs/adr/`. |
 | `/playbook:commit-and-push` | Writes a commit message from the staged diff, commits signed, optionally rebases, then pushes. |
 | `/playbook:create-pull-request` | Opens a PR with pre-flight checks, a conventional-commit title, and the team PR template. |
@@ -183,6 +184,46 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 | `/playbook:learn-project` | Analyses the repo (git history, code, PRs, JIRA/Confluence) and writes distilled facts to memory. Read-only; confirms before writing. |
 | `/playbook:repo-audit` | Read-only four-phase repository audit (discovery, findings, strategy, task plan). |
 | `/playbook:session-start` | Loads the handoff the last session saved for this directory and orients the session from it, with no copy and paste. |
+
+## Auto mode
+
+Auto mode lets a command run without asking you questions. It takes the recommended answer at each decision, writes it to an Assumptions list in the final output, and keeps going. The default is `ask`, where every command asks as usual.
+
+Set the mode with the `mode` setting (`ask` or `auto`). Playbook picks the first one it finds:
+
+1. The command flag: `--auto` or `--ask`.
+2. The `PLAYBOOK_MODE` environment variable.
+3. The `mode` config setting.
+
+```bash
+playbook mode auto      # turn auto on for this repo
+playbook mode ask       # turn it off
+playbook mode status    # show the mode and where it came from
+```
+
+`playbook mode auto` is saved in the repo config, so it stays on until you turn it off. Only you should run these. If auto comes from `PLAYBOOK_MODE`, unset the variable to leave it.
+
+**Plan design.** Plain `--auto` never approves a design for you. `/playbook:plan --auto` answers only the Work Unit and Segment questions and stops at the design approval. Pass `--auto-design` to let it approve the design too. Every choice it makes is logged.
+
+**What auto will not do.**
+
+- `/playbook:setup`, `/playbook:adr`, and `/playbook:address-pr-comments` refuse to run in auto and say why.
+- Reviews never post to GitHub. `/playbook:quick-review` and `/playbook:deep-review` run as `--self`.
+- `/playbook:learn-project` stages its candidates and writes nothing to live memory.
+- Auto never force-pushes.
+- Auto doesn't run the self-review on a new pull request.
+- `/playbook:implement` never picks the `land` boundary by itself. You must pass `--boundary=land`.
+
+**What the hooks do.** Two hooks watch every session whose resolved mode is `auto`:
+
+- The question hook (`auto-guard`) denies the question tool, so the model takes the recommended option instead. It also adds a one line reminder to each prompt.
+- The spend cap hook totals what the session has cost. At `auto.warnPct` (default 70) of `auto.budgetUsd` (default 5, in US dollars) it warns once. At the cap it denies every tool except reading files, `git status`, `git diff`, `playbook mode status`, and writing a short note about where the work stopped. Cost is the larger of two numbers: the session transcript total, including subagent files, and the cost reported by the status line. If the cost can't be read, the hook treats it as over the cap: it stops the session and asks the model to report, without a park note. The cap is per session, so `/clear` or a resume starts a new count. Change it with `playbook config set auto.budgetUsd <usd>`.
+
+While auto is on, the model cannot switch the mode, change the `mode`, `auto.*`, or `fix.*` settings, or edit the config files. Only you can, by typing the command yourself. At the cap it also cannot raise the cap. The one exception is when the cost is unreadable: then it may run `playbook mode ask` to leave auto.
+
+**Flags do not reach hooks.** The hooks have no access to your command flags. They read only `PLAYBOOK_MODE` and the config. If you run a command with `--auto` while the resolved mode is `ask`, you get auto behavior in the command text only: no question hook and no spend cap. `playbook mode status --flag auto` prints a warning line when the flag and the hooks disagree. To get the hooks, run `playbook mode auto` or set `PLAYBOOK_MODE=auto`. The reverse also holds: `--ask` while the mode is auto still has the question tool denied.
+
+**Limits.** The cap and the hooks are a guardrail against runaway spend and honest mistakes. They are not a security boundary against a model that tries to defeat them. Auto does not answer permission prompts, so run it in a permission mode you trust or the session can stall. `PLAYBOOK_HEADLESS` is a separate setting and does not turn auto on. See [docs/internals/05-headless-mode.md](docs/internals/05-headless-mode.md).
 
 ## Skills
 

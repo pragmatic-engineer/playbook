@@ -97,15 +97,39 @@ When headless:
 
 `memory-capture` returns without blocking when headless. Interactive runs keep the bounded re-block from ADR 0009: it blocks at most twice, the second block escalates the handoff nudge, and then it releases, so it cannot loop. It deliberately does not read `stop_hook_active`, because that field would end the escalation after the first block.
 
-## What must never run unattended
+## Auto mode and unattended runs
 
-- `/playbook:implement` with `--boundary=land`. It merges code with no human review.
-- Anything that pushes, opens PRs, or merges: `playbook pr create`, `/playbook:create-pull-request`, `gh pr merge`.
-- `/playbook:plan`, `/playbook:adr`, and `/playbook:learn-project`. They are interviews. `AskUserQuestion` is absent and the model just writes the question as text.
-- `/playbook:setup` unless `--yes` is passed, because it asks via `AskUserQuestion`.
+This section describes how auto mode is designed to work. It was not part of the tested runs above.
+
+Whether a command may ask questions is a separate setting from headless mode. `PLAYBOOK_HEADLESS` is independent of the `mode` setting: headless only quiets the session nudges and the memory Stop hook, and it never turns auto on. Auto never turns headless on either. Under `claude -p` the question tool is absent, so set `PLAYBOOK_MODE=auto` as well when a command must run with no one to answer. See [Auto mode](../../README.md#auto-mode) in the README for the setting, the spend cap, and the limits.
+
+### Supported in auto
+
+These commands read the mode first and take the recommended answer instead of asking. Each records those answers in an Assumptions list in its final output.
+
+- `/playbook:plan`: answers the convergent phase (Work Units and Segments) on its own. Plain auto stops at the design approval. Only `--auto-design` approves a design.
+- `/playbook:implement` and `/playbook:fix`: pick the recommended delivery options and run to a pull request.
+- `/playbook:commit-and-push` and `/playbook:create-pull-request`: run end to end.
+- `/playbook:quick-review` and `/playbook:deep-review`: run as `--self`, so the review stays local and is never posted.
+- `/playbook:learn-project`: runs as `--stage`, so candidates go to the staging area and nothing reaches the live memory store.
+- `/playbook:repo-audit`, `/playbook:doctor`, and `/playbook:session-start`: behave the same in either mode.
+
+### Refused in auto
+
+`/playbook:setup`, `/playbook:adr`, and `/playbook:address-pr-comments` stop with one line. Each needs a person: setup changes your global settings and shell files, an ADR records a decision someone has to own, and replies on GitHub speak in your name.
+
+### Never done in auto
+
+- Auto never force-pushes and never uses a forced lease. A push that needs a force is parked and reported.
+- `/playbook:implement` never picks the `land` boundary on its own. `land` merges each Segment with no human review, so it runs only with an explicit `--boundary=land`.
+- Reviews are never posted.
+
+### Still unsafe unattended
+
+- Anything that merges, such as `gh pr merge`, or `/playbook:implement` with `--boundary=land`.
 - A model that reads untrusted pull request text (titles, bodies, comments, diffs from forks) with write or shell tools. That text is prompt injection input.
 
-Commands that ask a person today: `implement` (delivery questions unless `--auto` and flags preset them), `plan` (the divergent phase always asks, even with `--auto`), `adr`, `setup` (`--yes` skips), `address-pr-comments` (per-comment gates, `-y` skips only the last), `quick-review` (asks how to submit), `learn-project` (asks if the Jira or Confluence target is ambiguous). `commit-and-push`, `create-pull-request`, `deep-review`, `session-start`, `doctor`, and `repo-audit` run without questions.
+Commands that still ask a person in ask mode: `implement` (delivery questions unless flags preset them), `plan` (the divergent phase), `adr`, `setup`, `address-pr-comments`, `quick-review` (asks how to submit), `deep-review` (asks which findings to post), `learn-project` (asks if the Jira or Confluence target is ambiguous), and `fix` (confirms before commit). `commit-and-push`, `create-pull-request`, `session-start`, `doctor`, and `repo-audit` run without questions.
 
 ## GitHub Actions
 
@@ -132,12 +156,10 @@ jobs:
 
 `playbook ci` prints `PASS`, `FAIL`, or `SKIP` with a reason for each check, then `ci: N passed, M failed, K skipped`. Add `--strict` to fail the run when any check is skipped, so a job pointed at the wrong directory cannot pass by checking nothing. A check whose inputs are missing is skipped, so the step is safe in any repository. State between runs: these checks create nothing. A gate check needs the `state.db` under `~/.config/playbook/repos/...`, so cache that directory if a pipeline records gates in one job and checks them in another.
 
-## Recommended build order
+## Next steps for unattended runs
 
-1. Done: the no-model checks are a documented snippet, and `playbook ci` runs them together with one exit code (`--json` prints a single object for a pipeline to parse).
-2. Add `--output-format json` style output to `gate check` and `doctor` so a pipeline can parse results.
-3. Give each command that asks a question a headless rule: a flag that presets every answer, or a hard stop with a clear message.
-4. Only then run commands under `claude -p`, with a wrapper that fails on `permission_denials`, sets `--max-turns` and `--max-budget-usd`, and never passes `bypassPermissions`.
+1. Add `--output-format json` style output to `gate check` and `doctor` so a pipeline can parse results.
+2. Only then run commands under `claude -p`, with a wrapper that fails on `permission_denials`, sets `--max-turns` and `--max-budget-usd`, and never passes `bypassPermissions`.
 
 ## Open items
 
