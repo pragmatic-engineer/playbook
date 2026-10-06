@@ -9,10 +9,11 @@
 //! both ahead of the real tools on a scratch `PATH`, so the shipped functions
 //! run unmodified. Every install run exits non-zero after the binary is
 //! placed, because the stub serves no source tarball; the binary and its
-//! backup are written before that point, so no test asserts on the exit
-//! status. `$HOME` and `$PLAYBOOK_BIN_DIR` are scratch directories and every
-//! inherited `PLAYBOOK_*`, `CLAUDE_*`, `XDG_*` and `CI` variable is removed, so
-//! a developer's real install can never be read or modified.
+//! backup are written before that point, so installs are checked for their
+//! `Installed playbook` line instead of an exit status. `$HOME` and
+//! `$PLAYBOOK_BIN_DIR` are scratch directories and every inherited
+//! `PLAYBOOK_*`, `CLAUDE_*`, `XDG_*` and `CI` variable is removed, so a
+//! developer's real install can never be read or modified.
 
 #![cfg(unix)]
 
@@ -134,7 +135,9 @@ impl Sandbox {
             .unwrap_or_default()
     }
 
-    /// Installs a fake release `version`, returning stdout then stderr.
+    /// Installs a fake release `version`, returning stdout then stderr. Fails
+    /// the test unless the run got as far as announcing the new binary, so a
+    /// run that died early cannot pass on its absence of side effects.
     fn install(&self, version: &str) -> String {
         self.install_with_path_prefix(version, None)
     }
@@ -164,13 +167,23 @@ impl Sandbox {
             .env("STUB_BODY", format!("{{\"tag_name\": \"v{version}\"}}"))
             .env("STUB_ASSET_BODY", body)
             .env("STUB_SUMS_BODY", sums);
-        combined_output(&mut command)
+        let out = combined_output(&mut command);
+        assert!(
+            out.contains(&format!("Installed playbook {version}")),
+            "install did not reach the end of the binary step: {out}"
+        );
+        out
     }
 
     fn uninstall(&self) {
         let mut command = self.script_command("uninstall.sh");
         command.args(["--yes", "--force"]);
-        combined_output(&mut command);
+        let out = command.output().expect("bash should spawn");
+        assert!(
+            out.status.success(),
+            "uninstall.sh exited with {}",
+            out.status
+        );
     }
 
     /// What the installed binary prints for `--version`.
@@ -333,7 +346,10 @@ fn an_existing_same_version_backup_is_kept() {
 fn only_the_newest_three_backups_are_kept() {
     // Arrange
     let sandbox = Sandbox::new("prune");
-    let versions = ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"];
+    // 1.2.0 sorts after 1.10.0 and 1.11.0 by name but is the newest backup, and
+    // 1.9.0 sorts last by name but is the oldest, so only an mtime ordering
+    // keeps the right three.
+    let versions = ["1.9.0", "1.10.0", "1.11.0", "1.2.0", "1.3.0"];
     sandbox.install(versions[0]);
 
     // Act: each upgrade backs up the previous version, then that backup is
@@ -347,9 +363,9 @@ fn only_the_newest_three_backups_are_kept() {
     assert_eq!(
         sandbox.backups(),
         [
-            "playbook.1.1.0.bak",
-            "playbook.1.2.0.bak",
-            "playbook.1.3.0.bak"
+            "playbook.1.10.0.bak",
+            "playbook.1.11.0.bak",
+            "playbook.1.2.0.bak"
         ]
     );
 }
@@ -386,12 +402,10 @@ fn a_failing_backup_warns_and_still_installs() {
     let out = sandbox.install_with_path_prefix("1.2.3", Some(&sandbox.failing_cp));
 
     // Assert
-    let warned = out.lines().any(|line| {
-        line.find("warning")
-            .zip(line.rfind("backup"))
-            .is_some_and(|(warning, backup)| warning < backup)
-    });
-    assert!(warned, "expected a backup warning in: {out}");
+    assert!(
+        out.contains("could not back up the previous playbook binary"),
+        "expected the backup warning in: {out}"
+    );
     assert!(out.contains("Installed playbook 1.2.3"), "{out}");
     assert_eq!(sandbox.installed_version(), "playbook 1.2.3");
     assert_eq!(sandbox.backups(), Vec::<String>::new());
@@ -409,9 +423,10 @@ fn an_identical_reinstall_makes_no_backup() {
     sandbox.install("1.2.3");
 
     // Act
-    sandbox.install("1.2.3");
+    let out = sandbox.install("1.2.3");
 
     // Assert
+    assert!(out.contains("Installed playbook 1.2.3"), "{out}");
     assert_eq!(sandbox.backups(), Vec::<String>::new());
 }
 
