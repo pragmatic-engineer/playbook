@@ -17,6 +17,7 @@ pub mod hooks;
 pub mod init;
 pub mod json;
 pub mod manifest;
+pub mod mode;
 pub mod pr;
 pub mod settings;
 pub mod trust;
@@ -155,6 +156,38 @@ pub enum Command {
         #[command(subcommand)]
         sub: HandoffCommand,
     },
+    /// Set or show whether playbook asks questions (`ask`) or decides on its
+    /// own (`auto`).
+    Mode {
+        #[command(subcommand)]
+        sub: ModeCommand,
+    },
+}
+
+/// `playbook mode` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ModeCommand {
+    /// Turn auto mode on for this repo.
+    Auto,
+    /// Turn auto mode off for this repo.
+    Ask,
+    /// Show the resolved mode and where it came from.
+    Status {
+        /// Print one JSON object instead of a line of text.
+        #[arg(long)]
+        json: bool,
+        /// Report as if a command ran with `--auto` or `--ask`, and warn when
+        /// the hooks would disagree.
+        #[arg(long, value_enum)]
+        flag: Option<ModeArg>,
+    },
+}
+
+/// A mode as typed on the command line.
+#[derive(ValueEnum, Debug, Clone, Copy)]
+pub enum ModeArg {
+    Ask,
+    Auto,
 }
 
 /// `playbook handoff` subcommands.

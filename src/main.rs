@@ -6,10 +6,10 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, pr,
+    agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, mode, pr,
     settings, trust, usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand,
     DashboardCommand, DoctorCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
-    MemoryCommand, PrCommand, SettingsCommand, UsageCommand, WorktreeCommand,
+    MemoryCommand, ModeArg, ModeCommand, PrCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -274,14 +274,8 @@ fn main() {
                 Some(slug.as_str())
             };
             match sub {
-                ConfigCommand::Get { key } => match config::resolve(&key, &home, repo_slug) {
-                    Ok((value, source)) => {
-                        println!(
-                            "{key}: {} (source: {})",
-                            format_config_value(&value),
-                            source_label(source)
-                        );
-                    }
+                ConfigCommand::Get { key } => match config::resolve_valid(&key, &home, repo_slug) {
+                    Ok(resolved) => print_resolved("config get", &key, resolved),
                     Err(err) => {
                         eprintln!("config get: {err}");
                         std::process::exit(1);
@@ -321,14 +315,8 @@ fn main() {
                 }
                 ConfigCommand::List => {
                     for &key in config::keys::KNOWN_KEYS {
-                        match config::resolve(key, &home, repo_slug) {
-                            Ok((value, source)) => {
-                                println!(
-                                    "{key}: {} (source: {})",
-                                    format_config_value(&value),
-                                    source_label(source)
-                                );
-                            }
+                        match config::resolve_valid(key, &home, repo_slug) {
+                            Ok(resolved) => print_resolved("config list", key, resolved),
                             Err(err) => {
                                 eprintln!("config list: {err}");
                                 std::process::exit(1);
@@ -583,6 +571,29 @@ fn main() {
                 }
             }
         }
+        Command::Mode { sub } => {
+            let to_mode = |arg: ModeArg| match arg {
+                ModeArg::Ask => common::mode::Mode::Ask,
+                ModeArg::Auto => common::mode::Mode::Auto,
+            };
+            match sub {
+                ModeCommand::Auto => exit_on_mode_error(mode::run_set(common::mode::Mode::Auto)),
+                ModeCommand::Ask => exit_on_mode_error(mode::run_set(common::mode::Mode::Ask)),
+                ModeCommand::Status { json, flag } => {
+                    println!("{}", mode::run_status(flag.map(to_mode), json));
+                }
+            }
+        }
+    }
+}
+
+fn exit_on_mode_error(result: Result<String, String>) {
+    match result {
+        Ok(output) => println!("{output}"),
+        Err(err) => {
+            eprintln!("mode: {err}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -597,14 +608,28 @@ fn source_label(source: config::Source) -> &'static str {
     }
 }
 
-/// Render a resolved config value the way a shell script or a human reading
-/// `playbook config get`/`list` output expects: a bare `deep`, not the
-/// JSON-quoted `"deep"` a raw `Value`'s `Display` impl would print.
-fn format_config_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
+/// Print one `config get`/`list` line: a bare `deep`, not the JSON-quoted
+/// `"deep"` a raw `Value`'s `Display` impl would print, so a shell script can
+/// read it. An ignored invalid value is named in the source and warned about
+/// on stderr.
+fn print_resolved(
+    command: &str,
+    key: &str,
+    (value, source, ignored): (
+        serde_json::Value,
+        config::Source,
+        Option<config::IgnoredValue>,
+    ),
+) {
+    let mut origin = source_label(source).to_string();
+    if let Some(ignored) = ignored {
+        eprintln!("{command}: warning: {}", ignored.warning);
+        origin = format!("{origin}, {} value ignored", source_label(ignored.tier));
     }
+    println!(
+        "{key}: {} (source: {origin})",
+        common::mode::value_text(&value)
+    );
 }
 
 /// Parse `config set`'s raw `value` string into the JSON type `key` expects,
