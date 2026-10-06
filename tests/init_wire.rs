@@ -17,7 +17,7 @@
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
-//!   and all 15 ported hooks (the 11 functional hooks plus the 4 safety
+//!   and all 16 ported hooks (the 12 functional hooks plus the 4 safety
 //!   guards) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
@@ -229,6 +229,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "post-edit-track",
         "rebuild-memory-graph",
         "auto-model-detect",
+        "auto-guard",
         "precompact-warn",
         "session-clean-exit",
         "memory-capture",
@@ -243,7 +244,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly all 15 ported HookName variants in binary form"
+        "wiring should register exactly all 16 ported HookName variants in binary form"
     );
 }
 
@@ -527,5 +528,50 @@ fn renamed_guard_replaces_an_already_bare_old_name_not_orphan_it() {
     assert!(
         commands.contains(&"playbook hook no-slop-guard".to_string()),
         "the renamed guard must be wired: {commands:?}"
+    );
+}
+
+/// Every `(matcher, command)` pair registered under `event`, with the matcher
+/// as `None` for a group that has none.
+fn event_registrations(settings: &Value, event: &str) -> Vec<(Option<String>, String)> {
+    let mut found = Vec::new();
+    let groups = settings["hooks"][event]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for group in groups {
+        let matcher = group
+            .get("matcher")
+            .and_then(Value::as_str)
+            .map(String::from);
+        for entry in group["hooks"].as_array().cloned().unwrap_or_default() {
+            if let Some(cmd) = entry.get("command").and_then(Value::as_str) {
+                found.push((matcher.clone(), cmd.to_string()));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn auto_guard_is_wired_on_ask_user_question_and_on_every_prompt() {
+    // Arrange
+    let path = scratch_settings_path("auto-guard");
+    let command = "playbook hook auto-guard";
+
+    // Act
+    wire(&path).expect("wire should succeed on a fresh install");
+    let settings = read_json(&path);
+
+    // Assert
+    let pre_tool = event_registrations(&settings, "PreToolUse");
+    assert!(
+        pre_tool.contains(&(Some("AskUserQuestion".to_string()), command.to_string())),
+        "auto-guard must sit under PreToolUse matcher AskUserQuestion: {pre_tool:?}"
+    );
+    let prompt = event_registrations(&settings, "UserPromptSubmit");
+    assert!(
+        prompt.contains(&(None, command.to_string())),
+        "auto-guard must sit under UserPromptSubmit with no matcher: {prompt:?}"
     );
 }

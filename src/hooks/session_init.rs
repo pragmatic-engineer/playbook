@@ -14,6 +14,7 @@
 //! shelling out itself, or the script it calls, failing degrades quietly
 //! rather than breaking the hook.
 
+use crate::common::mode::{resolve_for_hook, Mode, Source};
 use crate::common::{config_hash, home_dir, repo_slug, run_with_timeout, session_dir, Payload};
 use crate::hooks::memory_signals;
 use crate::init::run::StepStatus;
@@ -92,6 +93,7 @@ pub fn run(payload: &Payload) {
     }
 
     let (system_message, mut extra_context) = check_config_drift(payload, &dir, &plugin_root);
+    append_auto_mode_note(&mut extra_context);
 
     if !headless || crate::common::headless::headless_memory_enabled() {
         append_promoted_facts(&mut extra_context, &repo_root);
@@ -115,6 +117,30 @@ pub fn run(payload: &Payload) {
     }
 
     emit(&system_message, &extra_context);
+}
+
+/// Tells the model it is running unattended and tells the user how to turn
+/// it off, since a `mode` set in config persists across sessions. Runs
+/// regardless of headless: headless quiets nudges, it does not end auto.
+fn append_auto_mode_note(extra_context: &mut String) {
+    let resolved = resolve_for_hook();
+    if resolved.mode != Mode::Auto {
+        return;
+    }
+    // `playbook mode ask` only writes the config, so it cannot undo an
+    // environment variable.
+    let (origin, off_switch) = match resolved.source {
+        Source::Env => ("source: env", "unset `PLAYBOOK_MODE`"),
+        _ => (
+            "source: config, set for this repo",
+            "run `playbook mode ask`",
+        ),
+    };
+    let note = format!(
+        "AUTO MODE is on ({origin}): wherever the command allows it, take the recommended \
+        answer and log it as an assumption instead of asking. To turn it off, {off_switch}."
+    );
+    push_context(extra_context, &note);
 }
 
 /// Defensive fallback for a session starting before `playbook init` is
