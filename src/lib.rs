@@ -7,6 +7,7 @@
 
 pub mod agents;
 pub mod cc;
+pub mod check;
 pub mod ci;
 pub mod common;
 pub mod config;
@@ -102,6 +103,12 @@ pub enum Command {
     Pr {
         #[command(subcommand)]
         sub: PrCommand,
+    },
+    /// Message checks for callers that are not an agent hook, such as a git
+    /// `commit-msg` hook or CI.
+    Check {
+        #[command(subcommand)]
+        sub: CheckCommand,
     },
     /// Run the model-free repo checks (manifest, agents, settings) in one step.
     /// Prints one line per check and exits 1 if any fails; safe in CI.
@@ -319,6 +326,18 @@ pub enum UsageCommand {
 pub enum DashboardCommand {
     /// Stop the running dashboard server.
     Stop,
+}
+
+/// `playbook check` subcommands, backing `src/check.rs`.
+#[derive(Subcommand, Debug)]
+pub enum CheckCommand {
+    /// Exit 0 when the commit message in FILE is pristine, otherwise print one
+    /// line per problem and exit 1: no AI attribution, and only `Refs`,
+    /// `Signed-off-by` and `Co-authored-by` trailers.
+    CommitMsg {
+        /// Path to the commit message file, such as git's `.git/COMMIT_EDITMSG`.
+        file: PathBuf,
+    },
 }
 
 /// `playbook pr` subcommands, backing `src/pr/`.

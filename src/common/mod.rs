@@ -6,6 +6,7 @@
 //! primitives, so there is exactly one implementation to keep correct.
 
 pub mod atomic;
+pub mod attribution;
 pub mod config_hash;
 pub mod counter;
 pub mod emit;

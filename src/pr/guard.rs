@@ -4,21 +4,10 @@
 //! Mechanical text checks `pr create` runs before it pushes: no AI
 //! attribution anywhere, and no em or en dashes in the title or body.
 
+use crate::common::attribution::{attribution_hit, disallowed_trailers};
+
 const EM_DASH: char = '\u{2014}';
 const EN_DASH: char = '\u{2013}';
-
-/// Whether one line carries AI attribution. Case-insensitive.
-fn attribution_hit(line: &str) -> bool {
-    let lower = line.to_lowercase();
-    let trimmed = lower.trim_start();
-    trimmed.starts_with("claude-session:")
-        || lower.contains("claude.ai/code/session")
-        || (trimmed.starts_with("co-authored-by:")
-            && (lower.contains("claude") || lower.contains("anthropic")))
-        || lower.contains("generated with claude")
-        || lower.contains("generated with [claude")
-        || line.contains('\u{1F916}')
-}
 
 /// Attribution found in the title, the body, or a commit message. `commits`
 /// is `(short sha, full message)`. Each hit names its place.
@@ -35,6 +24,10 @@ pub fn attribution_problems(title: &str, body: &str, commits: &[(String, String)
     for (sha, message) in commits {
         if message.lines().any(attribution_hit) {
             out.push(format!("commit {sha} carries AI attribution"));
+        } else if !disallowed_trailers(message).is_empty() {
+            out.push(format!(
+                "commit {sha} has a trailer other than Refs, Signed-off-by or Co-authored-by"
+            ));
         }
     }
     out
@@ -135,6 +128,18 @@ mod tests {
             vec![
                 "title carries AI attribution".to_string(),
                 "commit abc1234 carries AI attribution".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn a_commit_trailer_outside_the_allowed_set_names_its_commit() {
+        let got = attribution_problems("t", "", &[commit("abc1234", "feat: x\n\nChange-Id: I1")]);
+        assert_eq!(
+            got,
+            vec![
+                "commit abc1234 has a trailer other than Refs, Signed-off-by or Co-authored-by"
+                    .to_string()
             ]
         );
     }

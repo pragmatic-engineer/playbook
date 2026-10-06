@@ -6,10 +6,11 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, mode, pr,
-    settings, trust, usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand,
-    DashboardCommand, DoctorCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
-    MemoryCommand, ModeArg, ModeCommand, PrCommand, SettingsCommand, UsageCommand, WorktreeCommand,
+    agents, cc, check, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest,
+    mode, pr, settings, trust, usage, worktree, AgentsCommand, CcCommand, CheckCommand, Cli,
+    Command, ConfigCommand, DashboardCommand, DoctorCommand, GateCommand, HandoffCommand,
+    JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand, SettingsCommand,
+    UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -219,6 +220,21 @@ fn main() {
                 Ok(output) => println!("{output}"),
                 Err(err) => {
                     eprintln!("gate check: {err}");
+                    std::process::exit(1);
+                }
+            },
+        },
+        Command::Check { sub } => match sub {
+            CheckCommand::CommitMsg { file } => match check::commit_msg(&file) {
+                Ok(problems) if problems.is_empty() => {}
+                Ok(problems) => {
+                    for problem in problems {
+                        eprintln!("commit-msg: {problem}");
+                    }
+                    std::process::exit(1);
+                }
+                Err(err) => {
+                    eprintln!("commit-msg: {err}");
                     std::process::exit(1);
                 }
             },
