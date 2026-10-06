@@ -92,3 +92,9 @@ again, by removing the single `Bash(jq:*)` allowlist line from the captured
 dependency (every call site moved to `playbook json`, and the installer now
 uses `playbook trust`), so the shared settings and permissions templates no
 longer grant it. This is an intentional behaviour change, not a drift to hide.
+
+**Note (2026-10-06):** the two `setup-local.*.json` fixtures were regenerated
+again to add what auto mode ships: the `auto-guard` hook on `AskUserQuestion`
+and on `UserPromptSubmit`, the `auto-cost` hook on every `PreToolUse`, and the
+`Bash(playbook mode status:*)` and `Bash(playbook mode ask)` allowlist
+entries. These are intentional additions, not a drift to hide.

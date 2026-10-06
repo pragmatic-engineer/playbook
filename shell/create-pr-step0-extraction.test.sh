@@ -25,9 +25,14 @@ fail() { echo "FAIL: $1${2:+ -- $2}"; (( FAIL++ )) || true; }
 [ -f "$CMD_FILE" ] || { echo "commands/create-pull-request.md not found" >&2; exit 2; }
 
 # Extract the fenced bash block under "## Step 0", not any other step's
-# block: isolate the Step 0 section first, then pull its one ```bash fence.
+# block: isolate the Step 0 section first, then pull the ```bash fence that
+# does the extraction (the section also holds a short mode-read fence).
 STEP0_SECTION="$(sed -n '/^## Step 0:/,/^## Step 1:/p' "$CMD_FILE")"
-STEP0_BASH="$(printf '%s\n' "$STEP0_SECTION" | sed -n '/^```bash$/,/^```$/p' | sed '1d;$d')"
+STEP0_BASH="$(printf '%s\n' "$STEP0_SECTION" | awk '
+  /^```bash$/ { infence = 1; block = ""; next }
+  /^```$/     { if (infence && block ~ /EXTRACT_DIR=/) { printf "%s", block; exit } infence = 0; next }
+  infence     { block = block $0 "\n" }
+')"
 [ -n "$STEP0_BASH" ] || { echo "could not extract Step 0's bash block from $CMD_FILE" >&2; exit 2; }
 
 WORK="$(mktemp -d)"
