@@ -1,7 +1,7 @@
 ---
 description: Use when an approved plan or ADR blueprint already exists and the user says let's implement this, let's build this, or start on it. Execute-only, it does not design new scope. Runs the plan on Sonnet, delegating edits to subagents, committing each Work Unit as a savepoint, and delivering PR-sized Segments as one small pull request each (independent off the default branch when disjoint, stacked when they truly depend on each other), asking the delivery strategy up front. Ends with a refinement pass and an adversarial review.
-allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
-argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--no-tdd] [--no-tests] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause|land>] [--all-lenses] [--help]"
+allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill, AskUserQuestion
+argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--ask] [--no-tdd] [--no-tests] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause|land>] [--all-lenses] [--help]"
 model: sonnet
 effort: high
 ---
@@ -10,7 +10,7 @@ effort: high
 
 Execute an approved implementation plan or ADR blueprint. **This command is execute-only: it does NOT design or plan new scope.** Produce the plan with `/playbook:plan` (or `/playbook:adr` for an architectural decision) first, then implement it here. The one exception is the Step 8 refinement pass, which re-plans and applies behaviour-preserving cleanups to the code it just wrote (never new features).
 
-**Incremental delivery.** `/playbook:implement` delivers the plan as PR-sized **Segments**, not one big change: it executes Segment by Segment, commits each Work Unit as a savepoint, and opens one small pull request per Segment (independent off the default branch when Segments are disjoint, stacked only when they truly depend on each other). Before executing, it asks how to deliver (PR topology and Segment-boundary behaviour) and recommends an option based on the plan's scope; under `--auto` it self-selects the recommended options and records them as assumptions. This follows `playbook:engineering-standards`: PRs under 500 lines, one concern each, "ship a sequence of small PRs".
+**Incremental delivery.** `/playbook:implement` delivers the plan as PR-sized **Segments**, not one big change: it executes Segment by Segment, commits each Work Unit as a savepoint, and opens one small pull request per Segment (independent off the default branch when Segments are disjoint, stacked only when they truly depend on each other). Before executing, it prompts for how to deliver (PR topology and Segment-boundary behaviour) and recommends an option based on the plan's scope; in auto mode it self-selects the recommended options and records them as assumptions. This follows `playbook:engineering-standards`: PRs under 500 lines, one concern each, "ship a sequence of small PRs".
 
 Invoked as `/playbook:implement`. The remaining arguments are the task reference and flags.
 
@@ -38,6 +38,8 @@ OPTIONS:
   --auto     Autonomous: execute Segments in dependency order, each Work Unit
              committed as a savepoint, then open the PR set (no prompts;
              self-selects the recommended delivery strategy)
+  --ask      Interactive: prompt at each decision, even when the environment
+             or the repo config sets auto mode
   --no-tdd   Write tests alongside implementation instead of red/green/refactor;
              also presets the TDD-approach question and skips it (default: ask)
   --no-tests Write no new tests for this run (config-only, docs-only, or
@@ -59,7 +61,7 @@ OPTIONS:
              full-lens
 
 DELIVERY: /playbook:implement splits the plan into PR-sized Segments and, before
-executing, asks three things (unless preset by flag or running --auto):
+executing, prompts for three things (unless preset by flag or running --auto):
   - PR topology: independent (default, disjoint Segments) | stacked (dependency chain) | single
   - Boundary:    savepoint (default) | pause | land (opt-in, merges each Segment)
 It honors the plan's Segments but re-splits any whose real diff exceeds the
@@ -73,6 +75,25 @@ REFINEMENT: after implementing, /playbook:implement runs one pass (self quick-re
 SOLID/DRY/KISS/YAGNI simplify, executed autonomously) then an adversarial
 review, before opening the PR set (or finishing, per the chosen boundary).
 ```
+
+## Step 0: Read the run mode
+
+Do this first, after the `--help` check above and before anything else. Read the mode from the CLI:
+
+```bash
+playbook mode status --json
+```
+
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+- **`ask` mode:** behave exactly as this file describes for an interactive run. Every prompt below stays.
+- **`auto` mode:** take the recommended answer at each decision instead of prompting, and record every answer you chose yourself in an Assumptions list. Print that list in the final output.
+
+Everything below that says `--auto` applies whenever the mode is auto, whether it came from the flag, the environment or the repo config.
+
+### Auto path
+
+In auto mode this command never force-pushes and never uses a forced lease. A push rejected as non-fast-forward parks the Segment and reports, so a person can decide what to do.
 
 ## Execution Rules (MUST)
 
@@ -222,7 +243,7 @@ On a **ledger-driven resume** (Step 5 ledger, e.g. after `/clear`, a crash, or a
 **Re-split guard (MUST, hard limit = 1500 changed lines; Segments target under 500).** After a Segment's WUs are committed, measure its real diff against its base: `git diff --shortstat <segment-base>...HEAD`. If changed lines exceed 1500, split the Segment at WU boundaries, in git:
 
 1. Pick the last WU that keeps the Segment at or under budget; call its commit `<split-sha>`.
-2. `git branch <type>/<plan-slug>-s<N>b-<seg-slug> HEAD` to save the excess commits, then `git reset --hard <split-sha>` on the current Segment branch to drop them from it.
+2. Rename the current Segment branch to hold the excess commits: `git branch -m <current-branch> <type>/<plan-slug>-s<N>b-<seg-slug>`. Then create the trimmed Segment branch at the split point under the original name and switch to it: `git switch -c <current-branch> <split-sha>`. No branch is reset.
 3. The new `s<N>b` Segment branches off the trimmed current Segment (its `<segment-base>` is `<split-sha>`; under **independent** it still branches off the default branch); its PR targets the current Segment's branch under stacked, the default branch under independent, or the current Segment's (shared) branch under single. The `b` suffix avoids colliding with a planned `s<N+1>`. **Under single topology this means the re-split adds one follow-up PR** stacked on the shared branch: single still ships one PR normally, but the 1500 hard limit is never breached, so an overflowing single plan yields the shared-branch PR plus one follow-up.
 4. **Deliver `s<N>b` as the very next Segment**, before any pre-planned `s<N+1>`, then continue the outer loop. Note the re-split (new Segment id, split point) in the ledger and the final report.
 
@@ -318,7 +339,7 @@ If a commit, squash, or cherry-pick fails, retry once, then stop and report.
 2. If that dispatch is still alive but idle, `TaskStop` it before dispatching a replacement. Two write-capable agents in the same tree risks a corrupted tree, not a recovery.
 3. Find the WU's tree (its worktree, if still present, else the Segment branch) and its base SHA from the ledger. A missing worktree only means recreate it before continuing; it does not mean there's nothing to resume; a single-WU wave never had one, and its `wip` commits live on the Segment branch itself.
 4. `git log --oneline <wu-base-sha>..HEAD` in that tree lists the `wip` commits landed so far. The last one's step and scenario say what's next (none found: start the WU from scratch, first scenario, RED).
-5. Re-run the scoped verify against the tree's current state before trusting that last commit (the same Verify-by-diff principle above, applied to the last checkpoint instead of the whole WU). If it doesn't hold, `git reset --hard` past it and redo that step.
+5. Re-run the scoped verify against the tree's current state before trusting that last commit (the same Verify-by-diff principle above, applied to the last checkpoint instead of the whole WU). If it doesn't hold, drop that last checkpoint commit with `git reset --keep HEAD~1` (it refuses instead of discarding local edits that conflict), then redo that step from the previous checkpoint.
 6. Continue the WU's per-scenario loop from there, dispatching fresh implementers only for what remains.
 
 This restores the work, not the agent: nothing revives a dead or unreachable dispatch (per `playbook:delegating-subagents`, `SendMessage`-based recovery is unreliable for this agent type too). The existing "3 fix retries then stop" rule (Error handling, below) is unchanged and still governs a scenario whose verify genuinely fails after a real, confirmed attempt; this procedure targets the separate case of a dispatch that died or went silent with real, uncommitted-but-checkpointed progress on disk.

@@ -1,7 +1,7 @@
 ---
 description: Walk unresolved PR review comments one at a time, apply fixes or draft replies, then commit-and-push and post replies with the new SHA.
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, Skill
-argument-hint: "[PR number] [--bots] [--dry-run] [-y|--yes]"
+argument-hint: "[PR number] [--bots] [--dry-run] [-y|--yes] [--auto] [--ask]"
 model: opus
 effort: high
 ---
@@ -9,6 +9,20 @@ effort: high
 # Address PR Comments
 
 Iterate through unresolved review-thread comments and PR-level comments on a pull request. For each one: read the code, propose a fix or reply, get user approval, apply the edit (or post the reply), and move on. At the end, hand off to `/playbook:commit-and-push -A` and then post any queued thread replies that cite the resulting commit SHA.
+
+## Step 0: Read the run mode
+
+Do this first. Read the mode from the CLI:
+
+```bash
+playbook mode status --json
+```
+
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:address-pr-comments needs a person to run it, because it replies on GitHub in your name and each reply needs your approval." Do not run any later step.
+
+In `ask` mode, behave exactly as this file describes.
 
 ## Discipline: receiving review feedback
 
@@ -43,6 +57,7 @@ Parse `$ARGUMENTS` token-by-token:
 - `--bots` -> `INCLUDE_BOTS=true` (default: skip CodeRabbit, Copilot review, Greptile, github-actions, etc).
 - `--dry-run` -> `DRY_RUN=true` (list everything but never edit files, never post replies, never commit).
 - `--yes` or `-y` -> `AUTO_COMMIT=true` (skip the final "proceed with commit?" gate; per-comment gates still apply).
+- `--auto` or `--ask` -> the run mode, already read in Step 0.
 - Empty or unmatched -> resolve PR from the current branch.
 
 ## Execution rules
@@ -69,6 +84,7 @@ for tok in $ARGS; do
     --bots) INCLUDE_BOTS=true ;;
     --dry-run) DRY_RUN=true ;;
     -y|--yes) AUTO_COMMIT=true ;;
+    --auto|--ask) ;;
     \#[0-9]*) PR_NUMBER="${tok#\#}" ;;
     [0-9]*) PR_NUMBER="$tok" ;;
     *) echo "warning: ignoring unknown arg '$tok'" >&2 ;;

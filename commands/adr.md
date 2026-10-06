@@ -1,7 +1,7 @@
 ---
 description: Use when recording a significant, hard-to-reverse architectural decision, or when the user is choosing between named options and the choice is expensive to undo. Creates a fact-checked ADR with an optional execution blueprint and saves it to docs/adr/.
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
-argument-hint: "<topic> [--record-only] [--list] [--help]"
+argument-hint: "<topic> [--record-only] [--list] [--auto] [--ask] [--help]"
 model: opus
 effort: high
 ---
@@ -35,6 +35,8 @@ OPTIONS:
   --help         Show this help
   --record-only  Write the decision record without an execution blueprint
   --list         List existing ADRs in docs/adr/
+  --auto         Run unattended (this command stops, it needs a person)
+  --ask          Force the interactive mode
 
 NOTE: every ADR should have a companion execution blueprint. Use --record-only
 only when the blueprint comes in a follow-up session.
@@ -47,6 +49,20 @@ EXAMPLES:
 
 Records save to docs/adr/ (tracked) as NNNN-{kebab}.md.
 ```
+
+## Step 0: Read the run mode
+
+Do this first, after the `--help` check above. Read the mode from the CLI:
+
+```bash
+playbook mode status --json
+```
+
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:adr needs a person to run it, because an ADR records a decision that a person has to make and own." Do not run any later step.
+
+In `ask` mode, behave exactly as this file describes.
 
 ## Execution Rules (MUST)
 
@@ -64,7 +80,7 @@ Records save to docs/adr/ (tracked) as NNNN-{kebab}.md.
 
 If no flags match, run the full workflow with the remaining text as the topic.
 
-## Step 0: Load Writing Discipline (MUST, before any drafting)
+## Load Writing Discipline (MUST, before any drafting)
 
 Invoke the `playbook:writing-style` skill (voice, banned words, prose rules) and the `playbook:grounding-research` skill (evidence and citations). Every ADR title, context line, alternative, and rejection note MUST follow them. ADR-specific rules on top:
 

@@ -1,7 +1,7 @@
 ---
 description: Deeply learn the current project (git history, PRs, JIRA, Confluence), store distilled topics in the memory system (routed per-project vs global), and export a navigable memory.graph.json of the memory graph.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, WebFetch
-argument-hint: "[--refresh] [--graph-only] [--stage] [--from-staged] [--max-prs N] [--max-commits N]"
+argument-hint: "[--refresh] [--graph-only] [--stage] [--from-staged] [--max-prs N] [--max-commits N] [--auto] [--ask]"
 model: opus
 effort: high
 ---
@@ -19,6 +19,7 @@ Parse `$ARGUMENTS`:
 - `--stage` → run collection and analysis (Phases 0-2) but don't write to the live store or ask for confirmation. Write candidate facts to `~/.config/playbook/memory/<owner>/<repo>/staging/` for later review, then stop. See **Staging mode**. Use for unattended or session-end runs.
 - `--from-staged` → skip collection; load candidates from `~/.config/playbook/memory/<owner>/<repo>/staging/`, run the normal confirm-and-write flow (Phases 3-4.5), then clear the staging area.
 - `--max-prs N` (default 200) and `--max-commits N` (default: all, summarized) → bound scope on large repos.
+- `--auto` or `--ask` → set the run mode for this run. Step 0 reads it.
 - Anything else → ignore with a one-line warning; don't abort.
 
 ## Execution rules
@@ -31,6 +32,23 @@ Parse `$ARGUMENTS`:
 6. **Delivery differs per agent tier, per `playbook:delegating-subagents` (invoke it before dispatching).** `collector` holds `Bash`, so it MUST write its findings to a named absolute path under `/tmp/learn-project/<owner>-<repo>/` (`mkdir -p` it first) and return only a one-line count; read those files after each collector finishes, goes idle, or is given up on, because an Agent-tool spawn often completes and returns nothing. `analyst` is structurally read-only and cannot write a file, so its candidate facts come back only by return value, which may not arrive. Either way, an agent that delivered nothing did NOT run: name it as missing rather than proceeding with a partial picture, since a fact written from a half-collected repo is worse than a missing one and much harder to notice later.
 7. No silent truncation. If you cap commits/PRs or skip a source, the final report says so.
 8. Never persist secrets. Tokens, keys, or credentials seen in configs/CI must never enter a memory fact.
+
+## Step 0: Read the run mode
+
+Do this first, before Phase 0. Read the mode from the CLI:
+
+```bash
+playbook mode status --json
+```
+
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+- **`ask` mode:** behave exactly as this file describes.
+- **`auto` mode:** follow the Auto path below.
+
+### Auto path
+
+In auto mode behave as `--stage`: collect and analyse, then write the candidates to the staging area and stop. The Phase 3 write question ("Write these to memory?") is skipped in that path, and nothing reaches the live store. Where Phase 0 would ask which JIRA key or Confluence space to use, take the most likely one and name it in the report. If `--from-staged` was also passed, stop with one line: "Auto mode does not promote staged facts; run /playbook:learn-project --from-staged --ask."
 
 ## Phase 0: Preflight and scope
 

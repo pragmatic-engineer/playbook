@@ -1,7 +1,7 @@
 ---
 description: Use when an idea needs to become a plan, whether it is still raw and undirected or the direction is already settled, or when the user says let's brainstorm this, let's plan this, let's scope this, explore this idea, or break this down. One continuous, interview-driven session that challenges the premise, weighs 2-3 approaches, then interviews for Work Units and Segments, and produces a verified, self-contained implementation plan ready for /playbook:implement.
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill, WebFetch
-argument-hint: "[idea | PROJ-123 | ./prompt.md] [--ticket <id>] [--depth 0-2] [--adr] [--auto] [--help]"
+argument-hint: "[idea | PROJ-123 | ./prompt.md] [--ticket <id>] [--depth 0-2] [--adr] [--auto] [--auto-design] [--ask] [--help]"
 model: opus
 effort: high
 ---
@@ -41,11 +41,14 @@ OPTIONS:
                answer for every Work Unit and Segment decision and recording
                it as an assumption, then runs the quality gate and saves
                without pausing. The divergent phase (approach selection, the
-               /playbook:adr route check, design approval) always stops for
-               a human, regardless of this flag. See Autonomous Mode below;
-               this is a narrower, intentionally different scope than the
-               old /playbook:scope --auto, which also auto-picked the
-               approach on a raw topic-only invocation.
+               /playbook:adr route check, design approval) still needs you.
+               Plain --auto stops at Step 6 with a message unless you approve
+               the design. See Autonomous Mode below.
+  --auto-design  Implies --auto and also self-answers Steps 3 to 6: discovery,
+               the approach, the /playbook:adr route check and the design
+               approval. Every choice is logged in the Assumptions list.
+  --ask        Interactive: prompts at each decision, even when the
+               environment or the repo config sets auto mode.
   --help       Show this help
 
 Asks one question at a time with a recommended answer. Given a ticket id,
@@ -61,12 +64,12 @@ file at $(playbook path plans)/<topic-slug>.md.
 
 ## Core Rules (MUST)
 
-**Autonomous mode (`--auto`) narrows to the convergent phase only.** When `--auto` is set, the divergent phase (Steps 1 through 6) still asks every question it normally would: approach selection, the `/playbook:adr` route check, and the Step 6 design approval are unconditional human gates that no flag skips. From Step 7 onward, `--auto` resolves every decision yourself, taking the answer you would have recommended, recording it in an **Assumptions** list, and skipping the Step 8 and Step 11 confirmation pauses. See **Autonomous Mode (`--auto`)** below for the full boundary and why it changed from `/playbook:scope`'s old behavior. The rules below otherwise describe the default interactive mode.
+**Autonomous mode (`--auto`) narrows to the convergent phase only.** Step 0 reads the run mode before anything else. When `--auto` is set, the divergent phase (Steps 1 through 6) still puts every question to you that it normally would: approach selection, the `/playbook:adr` route check, and the Step 6 design approval are human gates that plain `--auto` never skips. Only `--auto-design` self-answers them, and it logs every choice. From Step 7 onward, `--auto` resolves every decision yourself, taking the answer you would have recommended, recording it in an **Assumptions** list, and skipping the Step 8 and Step 11 confirmation pauses. See **Autonomous Mode (`--auto`)** below for the full boundary and why it changed from `/playbook:scope`'s old behavior. The rules below otherwise describe the default interactive mode.
 
 1. **Ask ONE question at a time.** Not two, not a batch. One question, wait for the answer, then the next. Batch at most 2 into one numbered round only when neither could plausibly depend on exploration or terminology the other's answer might surface, true independence, not just topical proximity (Step 3 covers this in detail). The very first message is always a single question, never a round: there's no established frontier yet to batch from.
 2. **Explore before asking.** If the codebase, the memory stores, or an in-progress checkpoint settles a question, resolve it yourself and report what you found. Only ask about intent, constraints, and preferences the code can't answer.
 3. **Challenge the premise (divergent phase only).** Don't accept the framing at face value. Ask whether this is the right problem, whether a simpler direction meets the goal, and what "done" actually looks like. Once Step 6 approves a design, stop relitigating it: the convergent phase plans the approved direction, it doesn't reopen it.
-4. **Present a design and get unconditional approval before continuing (Step 6).** Hard gate, every time, even for a small idea, even under `--auto`. The design can be a few sentences, but you MUST present it and get a yes before Step 7 starts.
+4. **Present a design and get unconditional approval before continuing (Step 6).** Hard gate, every time, even for a small idea, even under plain `--auto`. Only `--auto-design` approves it for you, and it logs that choice. The design can be a few sentences, but you MUST present it and get a yes before Step 7 starts.
 5. **Walk the decision tree in the convergent phase.** Each answer may open new branches. Track which are resolved and which are still open. Don't jump to unrelated topics while a branch has unresolved dependencies.
 6. **Do NOT write real code.** The output is a plan file, not implementation. The one narrow exception is Step 5.5's optional validation spike: throwaway code to check a single uncertain premise, never part of the saved plan's content, never the start of the real build.
 7. **Do NOT produce Work Units, Segments, or file-level plan detail before Step 6 approves the design, and not until every convergent branch is resolved.** The divergent phase decides direction; the convergent phase (Step 7 onward) turns an approved direction into a plan `/playbook:implement` can run.
@@ -80,11 +83,22 @@ Resolve the argument in this order:
 3. **Plain text:** otherwise the argument is the idea seed.
 4. **No argument:** ask what we're exploring before anything else.
 
-Strip `--ticket <id>`, `--depth <n>`, `--adr`, and `--auto` (like `--help`) before resolving the seed. Don't read `.gitignore`d files even if the seed or ticket mentions them.
+Strip `--ticket <id>`, `--depth <n>`, `--adr`, `--auto-design`, `--auto`, and `--ask` (like `--help`) before resolving the seed. Don't read `.gitignore`d files even if the seed or ticket mentions them.
 
 ## How It Works
 
-### Step 0: Load skills and check for an in-progress checkpoint
+### Step 0: Read the run mode, load skills and check for an in-progress checkpoint
+
+**Read the run mode (MUST, first).** Run:
+
+```bash
+playbook mode status --json
+```
+
+Add `--flag auto` if the arguments contain `--auto` or `--auto-design`. Add `--flag ask` if they contain `--ask`. If `--ask` comes with either auto flag, stop with one line: "--ask and --auto conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+- **`ask` mode:** behave exactly as this file describes. Every question below stays.
+- **`auto` mode:** take the recommended answer at each decision instead of asking, within the limits in Autonomous Mode below, and record every answer you chose yourself in an **Assumptions** list. Print that list in the final output. Auto mode that comes from the environment or the repo config acts like plain `--auto`. Only the `--auto-design` flag, given on the command line, self-answers the design.
 
 **Load skills.** Load `playbook:writing-style` (voice, banned words, no dashes; every question and every written section follows it) and `playbook:grounding-research` (cite `file:line`, tag `[unverified]` when you can't confirm; governs the context digest and any self-answering).
 
@@ -100,7 +114,7 @@ fi
 CHECKPOINT="$PLANS_DIR/<topic-slug>.checkpoint.md"
 ```
 
-- **Found:** read it. Show its `Goal:` line and its last-modified date (not a bare yes/no), then ask once: **"Found an in-progress plan for `<topic>` last touched `<date>`, goal: `<goal-line>`. Resume it? I'd recommend yes because picking up mid-session avoids redoing settled decisions."**
+- **Found:** read it. Show its `Goal:` line and its last-modified date (not a bare yes/no), then ask once (in auto mode, take the recommended answer, yes, and record it as an assumption): **"Found an in-progress plan for `<topic>` last touched `<date>`, goal: `<goal-line>`. Resume it? I'd recommend yes because picking up mid-session avoids redoing settled decisions."**
   - **Yes:** load its Decisions Made, Out of Scope, Open Risks, chosen Approach, `Design approved` marker, and the Work Units/Segments table as far as they got. Resume from the first step whose output the checkpoint doesn't yet have: only a Goal and no Decisions Made resumes at Step 1; an Approach with no `Design approved` marker resumes at Step 5 (the route check still needs an answer); a `Design approved` marker with no Work Units resumes at Step 7. Never resume at Step 7 on an Approach alone: Step 6's approval is a hard gate (Core Rules), and a checkpoint that hasn't recorded it hasn't cleared that gate yet, no matter how settled the approach looks.
   - **No:** start fresh. The stale checkpoint is not deleted here: it gets overwritten in place as new decisions are appended through Step 3 onward (see the write shape below), and only Step 12 deletes it, once a completed plan actually replaces it. Silently deleting a stale checkpoint the moment someone declines to resume would destroy a session's progress on a whim, on the chance they meant to resume a different topic under the same seed.
 - **Not found:** proceed to Step 1 with nothing to resume.
@@ -191,7 +205,7 @@ Consolidate into a short cited digest (a few bullets, each with `file:line`). Th
 
 ### Step 3: Interactive discovery
 
-Ask questions one at a time by default, each with a recommended answer and reasoning, each following from the last. Cover:
+Ask questions one at a time by default, each with a recommended answer and reasoning, each following from the last. Under `--auto-design`, do not stop for answers: take the recommended answer to each question, record it in the Assumptions list with its reason, and checkpoint it like any other decision. Cover:
 
 - **Purpose:** why this, why now? What breaks or stays broken without it?
 - **Success criteria:** what does "done" look like, observably?
@@ -234,11 +248,11 @@ Scale the depth: 2-4 questions for a small idea, more for a broad one. Don't ove
 
 ### Step 3.5: Draft and confirm the problem statement
 
-Synthesize the running document's problem section from the Step 3 answers: Purpose and Success criteria become Problem and Goals, Non-goals stays Non-goals, and a new Requirements section states the user-facing capabilities this needs, in behavior terms, not implementation. Present it and ask: **"Does this capture the problem and what it needs to do? Anything to add or change?"** Revise until confirmed. This is the requirements gate: Step 4 designs approaches against a confirmed problem statement, not an implicit one. Keep this section free of scope details, technical approach, or components: those come later, once a direction is chosen. This stays folded into the one running document rather than a separate file: there's no PRD to hand off, because nothing hands off until Step 12.
+Synthesize the running document's problem section from the Step 3 answers: Purpose and Success criteria become Problem and Goals, Non-goals stays Non-goals, and a new Requirements section states the user-facing capabilities this needs, in behavior terms, not implementation. Present it and ask: **"Does this capture the problem and what it needs to do? Anything to add or change?"** Revise until confirmed. Under `--auto-design`, confirm it yourself and log that in the Assumptions list. This is the requirements gate: Step 4 designs approaches against a confirmed problem statement, not an implicit one. Keep this section free of scope details, technical approach, or components: those come later, once a direction is chosen. This stays folded into the one running document rather than a separate file: there's no PRD to hand off, because nothing hands off until Step 12.
 
 ### Step 4: Propose approaches
 
-Present 2-3 distinct approaches with their trade-offs. Lead with your recommendation and say why. Keep each approach to what matters: what it does, its main cost, and what it rules out. Let the user pick or push back.
+Present 2-3 distinct approaches with their trade-offs. Lead with your recommendation and say why. Keep each approach to what matters: what it does, its main cost, and what it rules out. Let the user pick or push back. Under `--auto-design`, pick your recommended approach and log the choice and the reason in the Assumptions list.
 
 **Checkpoint the chosen approach (MUST).** The moment the user picks one, write it to the checkpoint's `Approach` field and rewrite the file using Step 0's locked write shape.
 
@@ -246,13 +260,13 @@ Present 2-3 distinct approaches with their trade-offs. Lead with your recommenda
 
 Look at the chosen direction against a three-part test, all required: the decision is hard to reverse once made, it would be non-obvious to a future reader why it was made this way, and it's the product of a genuine trade-off, not a forced or obvious choice. When all three hold (a data model, a public contract, a cross-cutting dependency are common shapes), flag it and offer `/playbook:adr` for the deep record: **"This carries an architectural call worth a formal record. Route to /playbook:adr for that decision? I'd recommend yes because it's hard to reverse."** `--adr` forces this recommendation without running the three-part test.
 
-**This fires unconditionally regardless of `--auto`.** Even in autonomous mode, the divergent phase, including this route check, always stops for a human: `--auto` only reaches its self-answering behavior from Step 7 onward (see Autonomous Mode below). Record the answer (recommend `/playbook:adr` or not) either way; Step 12 surfaces it. Answering this question does not end the session: whether or not the user wants an ADR, the flow continues into Step 5.5 and onward to a saved implementation plan. An ADR and an implementation plan are not alternatives, they're two different artifacts this decision may need.
+**This fires unconditionally under plain `--auto`.** Even in autonomous mode, the divergent phase, including this route check, still stops for a human: `--auto` only reaches its self-answering behavior from Step 7 onward (see Autonomous Mode below). Under `--auto-design`, take the recommended answer and log it in the Assumptions list. Record the answer (recommend `/playbook:adr` or not) either way; Step 12 surfaces it. Answering this question does not end the session: whether or not the user wants an ADR, the flow continues into Step 5.5 and onward to a saved implementation plan. An ADR and an implementation plan are not alternatives, they're two different artifacts this decision may need.
 
 **Checkpoint the route-check answer (MUST).** Write the recommendation and the user's answer to the checkpoint's `Decisions Made` list and rewrite the file using Step 0's locked write shape.
 
 ### Step 5.5: Offer a validation spike
 
-If the chosen approach rests on a premise Step 2 tagged LOW confidence, offer to check it before writing anything down: **"This approach assumes [premise], which I couldn't verify. Want a quick throwaway spike to check it first?"** Skip this step entirely when nothing is LOW confidence.
+If the chosen approach rests on a premise Step 2 tagged LOW confidence, offer to check it before writing anything down: **"This approach assumes [premise], which I couldn't verify. Want a quick throwaway spike to check it first?"** Skip this step entirely when nothing is LOW confidence. Under `--auto-design`, answer no and carry the premise forward as an open item.
 
 On yes:
 
@@ -267,7 +281,11 @@ The spike is disposable and scoped to one premise. It never becomes part of the 
 
 Present the design in sections scaled to complexity: a few sentences where it's straightforward, more where it's nuanced. The problem and requirements are already confirmed (Step 3.5); cover the chosen approach, the key components and their boundaries, and the main risks. Ask after each section whether it looks right. Revise until the user approves. Do NOT continue into Step 7 before approval, even under `--auto`.
 
-**Checkpoint the approval (MUST).** The moment the user approves, set the checkpoint's `Design approved` marker and rewrite the file using Step 0's locked write shape. This is the field Step 0's resume logic checks before it will resume at Step 7: an `Approach` alone never implies approval.
+**In plain `--auto`, the run never approves the design for you and stops here.** If the user has not approved the design in this session, end the run with this message: "The design needs your approval. Approve it in this session, or rerun with `--auto-design` to let the run approve it and log each choice." Do not start Step 7.
+
+**With `--auto-design`,** approve the design yourself. Log the approval in the Assumptions list, with the main risks you accepted, and continue.
+
+**Checkpoint the approval (MUST).** The moment the design is approved, set the checkpoint's `Design approved` marker and rewrite the file using Step 0's locked write shape. This is the field Step 0's resume logic checks before it will resume at Step 7: an `Approach` alone never implies approval.
 
 Keep applying the domain glossary discipline from Step 3 here too: a term that turns out ambiguous while presenting the design gets the same treatment, resolved and written to `GLOSSARY.md` immediately, with the same locked append.
 
@@ -275,7 +293,7 @@ Keep applying the domain glossary discipline from Step 3 here too: a term that t
 
 ### Step 7: Convergent interview for Work Units and Segments
 
-**This is where `--auto` starts applying.** Everything from here through Step 11 can be self-answered under `--auto`; everything before this point cannot (see Autonomous Mode below).
+**This is where `--auto` starts applying.** Everything from here through Step 11 can be self-answered under `--auto`; everything before this point cannot, unless `--auto-design` is set (see Autonomous Mode below).
 
 Skip Goal clarification and Scope boundaries here: Step 3.5 already confirmed the problem, goals, and non-goals, and re-asking them would relitigate a decision the divergent phase already settled. Start directly at implementation-detail questions, aimed first at whatever's still open: Step 2's dropped or LOW-confidence premises, and Step 5.5's spike findings if any are still unresolved. Those are exactly the premises the divergent phase couldn't fully verify.
 
@@ -520,8 +538,8 @@ Only after the user approves. The plans directory lives outside this repo checko
 3. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist the plan's accepted key decisions (from both the divergent and convergent phases) as project memory facts (`type: project`, `anchors:` to the files they touch). The graph rebuilds automatically on fact save via the PostToolUse hook. Otherwise skip.
 4. Tell the user:
    - "Saved to `<plans-dir>/<topic-slug>.md`" (`<plans-dir>` is `playbook path plans`'s resolved path).
-   - "Run `/clear`, then implement it with a clean context: `/playbook:implement <plans-dir>/<topic-slug>.md`." This session's back-and-forth is exactly what a fresh execution phase shouldn't carry forward; there's no way to clear it from inside this session, so say so instead of leaving it implicit.
-   - If Step 5 recommended it or `--adr` was set: "Want to record the architectural call too? Run `/clear`, then `/playbook:adr` for that decision." Note it's a separate command producing a separate artifact, not a replacement for the saved plan.
+   - "Run `/clear`, then implement it with a clean context: `/playbook:implement <plans-dir>/<topic-slug>.md`." This session's back-and-forth is exactly what a fresh execution phase shouldn't carry forward; there's no way to clear it from inside this session, so say so instead of leaving it implicit. **In auto mode,** skip the `/clear` instruction and hand the saved plan path straight to `/playbook:implement`: print `/playbook:implement <plans-dir>/<topic-slug>.md` as the next command to run.
+   - If Step 5 recommended it or `--adr` was set: "Want to record the architectural call too? Run `/clear`, then `/playbook:adr` for that decision." Note it's a separate command producing a separate artifact, not a replacement for the saved plan. In auto mode, leave out the `/clear` here too.
    - **In `--auto`:** also list the **Assumptions** made (especially any `OPEN` ones) so the user can audit the autonomous choices before running `/playbook:implement`.
 
 ### Teardown (MUST run, even on failure or abort)
@@ -530,13 +548,14 @@ Only after the user approves. The plans directory lives outside this repo checko
 
 ## Autonomous Mode (`--auto`)
 
-`--auto` is scoped narrower than the old `/playbook:scope --auto`: it automates only the convergent phase, Step 7 onward. The divergent phase, Steps 1 through 6, always stops for a human, regardless of flags: approach selection (Step 4), the `/playbook:adr` route check (Step 5), and the design approval (Step 6) are unconditional gates. This is an intentional, stated breaking change from today's `/playbook:scope --auto`, which, on a raw topic-only invocation with no prior design doc, auto-answered approach selection too. Now that the divergent phase and the convergent phase are one command instead of two, letting `--auto` skip the divergent phase's gates would mean nobody ever looks at the chosen direction before the plan gets written, which is a materially bigger risk than skipping the old `/playbook:scope --auto`'s implementation-detail assumptions.
+`--auto` is scoped narrower than the old `/playbook:scope --auto`: it automates only the convergent phase, Step 7 onward. The divergent phase, Steps 1 through 6, stops for a human under plain `--auto`: approach selection (Step 4), the `/playbook:adr` route check (Step 5), and the design approval (Step 6) are unconditional gates. This is an intentional, stated breaking change from today's `/playbook:scope --auto`, which, on a raw topic-only invocation with no prior design doc, auto-answered approach selection too. Now that the divergent phase and the convergent phase are one command instead of two, letting plain `--auto` skip the divergent phase's gates would mean nobody ever looks at the chosen direction before the plan gets written, which is a materially bigger risk than skipping the old `/playbook:scope --auto`'s implementation-detail assumptions.
 
-Enable when `--auto` appears in the arguments; it's stripped (like `--help`) before resolving the topic seed. From Step 7 onward:
+Enable when Step 0 resolves the mode to auto (the `--auto` flag, `PLAYBOOK_MODE`, or the repo config); the flags are stripped (like `--help`) before resolving the topic seed. From Step 7 onward:
 
 - **No questions.** For every decision Step 7 would ask, take the answer you would have recommended ("I'd recommend X because Y") and proceed. Still do the Step 2 research first: explore the codebase and, if a memory store is present, read it too, since a preference or convention there may override your default choice. When no memory store exists, skip that step silently.
 - **Record assumptions.** Every self-made decision from Step 7 onward goes into an **Assumptions** list with its rationale, so the user can audit what was chosen for them. When you're genuinely split on a decision, record it as an `OPEN` assumption (with the leading option and why) rather than silently picking.
 - **Skip the confirmation gates.** Do not pause at Step 8 ("Does this capture everything?") or Step 11 ("Does this plan look right?"). Fold the Design Summary and the Assumptions list into the saved plan instead.
+- **`--auto-design` also self-answers Steps 3 to 6.** It is opt-in on the command line only; the environment and the repo config never turn it on. It takes the recommended answer to every discovery question, the problem statement check, the approach, the `/playbook:adr` route check, the spike offer (no) and the design approval, and logs each one in the Assumptions list with its reason. Plain `--auto` never approves the design: it stops at Step 6 with a message.
 - **Quality gate still runs (Step 10).** It needs no user input. If a phase still FAILs after its 3 iterations, STOP: do not save; report the failing checks and the assumptions made. No user is present to override a FAIL in `--auto`.
 - **Save and report (Step 12).** On a passing gate, save the plan and quality report, then tell the user the paths, the assumptions made (flag any `OPEN` ones), and to run `/playbook:implement` when ready. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist the accepted decisions there; otherwise skip.
 

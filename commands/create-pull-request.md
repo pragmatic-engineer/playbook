@@ -1,7 +1,7 @@
 ---
 description: Create a pull request with pre-flight checks, a conventional-commit title, and the team PR template, following engineering-standards and writing-style.
 allowed-tools: Bash, Read, Skill
-argument-hint: "[--ready] [--base <branch>] [--ticket <ID>] [--dir <path>]"
+argument-hint: "[--ready] [--base <branch>] [--ticket <ID>] [--dir <path>] [--auto] [--ask]"
 context: fork
 agent: git
 ---
@@ -28,6 +28,7 @@ Read these from `$ARGUMENTS` once and remember them. `--base`, `--ticket`, and `
 - `--base <branch>` → override the base branch. Pass it to both `playbook pr` calls.
 - `--ticket <ID>` → force the ticket, skipping branch auto-detect (`none` omits the line). Pass it to `playbook pr prepare`.
 - `--dir <path>` → publish the branch checked out in this directory. A caller that names a directory or branch outside the shell's current directory (for example `/playbook:implement` publishing a Segment that lives in a git worktree) passes it here. Pass it to both `playbook pr` calls. A forked shell can reset to the main checkout between calls, so without `--dir` the command acts on whatever repo the shell is in.
+- `--auto` or `--ask` → set the run mode for this run. Step 0 reads it.
 - `--help` → print the usage block above and stop.
 
 There is no confirmation flag or gate: the command always runs end to end.
@@ -41,9 +42,24 @@ There is no confirmation flag or gate: the command always runs end to end.
 5. Derive the title and body from the actual diff and commit log, never from the branch name alone or from memory.
 6. Pass the PR body with `--body-file`, never inline, to preserve formatting.
 
-## Step 0: Load the skill rules (MUST run before drafting title or body)
+## Step 0: Read the run mode and load the skill rules (MUST run before drafting title or body)
 
-This step needs four things: `playbook:writing-style`'s voice/banned-words/dash rules, its "When creating PRs" guidance, its "Prohibited GitHub Content" rules (the PR title and body are posted to GitHub, so these apply), and `playbook:engineering-standards`' PR readiness criteria and size limits (used in Step 2). Reading each full skill file to get a subset that small is most of Step 0's own cost, so extract only those sections with `sed` instead of invoking the Skill tool. A guard checks each extracted block for a marker string, and for the one range whose end-marker is exact heading text rather than a heading *level* (engineering-standards' Readiness+Size slice), also checks that a later section's heading is ABSENT, so a rename of the end-marker heading fails loudly instead of silently pulling everything through end of file:
+**Read the run mode first.** Run:
+
+```bash
+playbook mode status --json
+```
+
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+- **`ask` mode:** behave exactly as this file describes.
+- **`auto` mode:** follow the Auto path below.
+
+### Auto path
+
+In auto mode, skip the `/clear` self-review in Step 5. When `/playbook:implement` opened this PR, its review already covered the code. Any other caller gets no review here, and the final report says that no self-review ran. If `--ready` was passed, it still promotes the draft.
+
+**Then load the skill rules.** This step needs four things: `playbook:writing-style`'s voice/banned-words/dash rules, its "When creating PRs" guidance, its "Prohibited GitHub Content" rules (the PR title and body are posted to GitHub, so these apply), and `playbook:engineering-standards`' PR readiness criteria and size limits (used in Step 2). Reading each full skill file to get a subset that small is most of Step 0's own cost, so extract only those sections with `sed` instead of invoking the Skill tool. A guard checks each extracted block for a marker string, and for the one range whose end-marker is exact heading text rather than a heading *level* (engineering-standards' Readiness+Size slice), also checks that a later section's heading is ABSENT, so a rename of the end-marker heading fails loudly instead of silently pulling everything through end of file:
 
 ```bash
 WS="${CLAUDE_PLUGIN_ROOT}/skills/writing-style/SKILL.md"

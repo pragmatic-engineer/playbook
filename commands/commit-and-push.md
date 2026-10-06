@@ -1,7 +1,7 @@
 ---
 description: Use when committing staged changes with a generated message and pushing. Handles staging, formatting, a signed commit, optional rebase, and push.
 allowed-tools: Bash, Read, Skill
-argument-hint: "[--all|-A] [--update|-u] [--amend|-a]"
+argument-hint: "[--all|-A] [--update|-u] [--amend|-a] [--auto] [--ask]"
 context: fork
 agent: git
 ---
@@ -38,6 +38,23 @@ Combined flags are fine: `-Au`, `-a -u`, etc. No flags means every variable stay
 6. Never skip hooks (`--no-verify`, `--no-gpg-sign`).
 7. Never amend automatically: only when `AMEND_COMMIT=true`.
 8. Pass commit messages via heredoc to preserve formatting, never `-m "..."` for multi-line.
+
+## Step 0: Read the run mode
+
+Do this first. Read the mode from the CLI:
+
+```bash
+playbook mode status --json
+```
+
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+- **`ask` mode:** behave exactly as this file describes.
+- **`auto` mode:** follow the Auto path below. Set `AUTO_MODE=true` at the top of the Step 4 block.
+
+### Auto path
+
+In auto mode this command never force-pushes and never uses a forced lease. When `git ls-remote --heads origin <branch>` shows the remote branch absent, push plainly: no force is needed. A push that would need a force (after an amend or a rebase in this run) stops and reports; nothing is pushed. The commit stays on the local branch, and a person decides how to publish it.
 
 ## Step 1: Stage, format, emit context
 
@@ -177,8 +194,10 @@ Run commit + rebase + push in a single bash block. Replace `<message>` with the 
 ```bash
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 # Set AMEND_COMMIT=true here too when -a was passed (this block reads it for the
-# push decision below), matching Step 1; leave false otherwise.
+# push decision below), matching Step 1; leave false otherwise. Set AUTO_MODE=true
+# when Step 0 read auto mode.
 AMEND_COMMIT=false
+AUTO_MODE=false
 
 # Commit (signed + signoff). Heredoc preserves formatting.
 git commit ${AMEND_FLAG} --signoff --gpg-sign --file - <<'EOF'
@@ -226,7 +245,25 @@ fi
 # rebased THIS run (below): that lease is evaluated against a ref refreshed
 # by our own `git fetch` earlier in this same block, not by a just-failed
 # push, so it protects correctly rather than rubber-stamping a stale check.
-if [ "$AMEND_COMMIT" = "true" ] || [ "$REBASED_THIS_RUN" = "true" ]; then
+#
+# In auto mode a force is never used. Exit status 2 from ls-remote means the
+# branch is absent on the remote, so a plain push is enough; any other result
+# (the branch exists, or the lookup failed) with an amend or rebase stops
+# instead.
+REMOTE_ABSENT=false
+if [ "$AUTO_MODE" = "true" ]; then
+  git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1
+  [ $? -eq 2 ] && REMOTE_ABSENT=true
+fi
+if [ "$AUTO_MODE" = "true" ] && [ "$REMOTE_ABSENT" = "true" ]; then
+  if ! git push origin "HEAD:refs/heads/$BRANCH" 2>&1; then
+    echo "ERROR: push to '$BRANCH' was rejected. Nothing was forced." >&2
+    exit 1
+  fi
+elif [ "$AUTO_MODE" = "true" ] && { [ "$AMEND_COMMIT" = "true" ] || [ "$REBASED_THIS_RUN" = "true" ]; }; then
+  echo "PARKED: pushing '$BRANCH' would need a force, and auto mode never forces. The commit is local only. Push it by hand when you have checked the remote." >&2
+  exit 1
+elif [ "$AMEND_COMMIT" = "true" ] || [ "$REBASED_THIS_RUN" = "true" ]; then
   git push --force-with-lease origin "HEAD:refs/heads/$BRANCH" 2>&1
 else
   if ! git push origin "HEAD:refs/heads/$BRANCH" 2>&1; then

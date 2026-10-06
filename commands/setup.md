@@ -1,7 +1,7 @@
 ---
 description: Interactive setup for pragmatic-engineer/playbook. Wires safety guards, seeds or merges settings.json, and asks whether to install the shell launchers and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
-argument-hint: "[--install-aliases] [--use-system-prompt] [--yes]"
+argument-hint: "[--install-aliases] [--use-system-prompt] [--yes] [--auto] [--ask]"
 model: sonnet
 effort: low
 ---
@@ -12,9 +12,23 @@ Wire the always-on safety guards and seed or merge settings.json. Optionally
 install the shell launchers (cc/ccd) and the custom system prompt. Each step
 is idempotent; re-running /playbook:setup is safe and only changes what is missing.
 
+## Step 0: Read the run mode
+
+Do this first. Read the mode from the CLI:
+
+```bash
+playbook mode status --json
+```
+
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:setup needs a person to run it, because it changes your global settings and shell files outside this repo." Do not run any later step.
+
+In `ask` mode, behave exactly as this file describes.
+
 ## Step 1: Parse arguments
 
-Parse `$ARGUMENTS`.
+Parse `$ARGUMENTS`. Step 0 already read `--auto` and `--ask`, so they are not typos.
 
 If `$ARGUMENTS` contains any of `--install-aliases`, `--use-system-prompt`, or
 `--yes`, run non-interactively. Skip the questions in Step 2. Build the flag
