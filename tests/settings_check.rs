@@ -279,6 +279,40 @@ fn real_settings_shared_json_validates() {
     assert!(out.status.success(), "expected exit 0: {}", stderr_of(&out));
 }
 
+// The model may read the mode and leave auto without a prompt. Switching to
+// auto stays a prompt, so `playbook mode:*` must never be allowed.
+#[test]
+fn shipped_permissions_allow_only_the_safe_playbook_mode_commands() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let allow_list = |file: &str, pointer: &str| -> Vec<String> {
+        let raw = fs::read_to_string(repo_root.join(file)).expect("shipped file is readable");
+        let json: serde_json::Value = serde_json::from_str(&raw).expect("shipped file is JSON");
+        json.pointer(pointer)
+            .and_then(|allow| allow.as_array())
+            .expect("allow list is an array")
+            .iter()
+            .filter_map(|entry| entry.as_str().map(str::to_string))
+            .collect()
+    };
+
+    for (file, pointer) in [
+        ("permissions.shared.json", "/allow"),
+        ("settings.shared.json", "/permissions/allow"),
+    ] {
+        let allow = allow_list(file, pointer);
+        let mode_entries: Vec<&str> = allow
+            .iter()
+            .map(String::as_str)
+            .filter(|entry| entry.starts_with("Bash(playbook mode"))
+            .collect();
+        assert_eq!(
+            mode_entries,
+            ["Bash(playbook mode status:*)", "Bash(playbook mode ask)"],
+            "{file} must allow exactly status and ask"
+        );
+    }
+}
+
 #[test]
 fn both_install_prefixes_resolve() {
     let f = Fixture::new("dual");

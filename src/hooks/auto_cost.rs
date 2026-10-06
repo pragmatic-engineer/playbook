@@ -12,7 +12,8 @@
 //! At the warn tier the hook adds one note, and at the cap it denies every
 //! tool outside a short safe list. When the spend cannot be read, including a
 //! transcript with unpriced models and no telemetry, it fails closed the same
-//! way.
+//! way. Under the cap it also denies the model changing its
+//! own guard: the `mode`, `auto.*` and `fix.*` settings and the config files.
 
 use crate::common::atomic::{remove_stale_lock_dir, with_dir_lock, STALE_LOCK_AGE};
 use crate::common::mode::{resolve, resolve_for_hook_at, Mode, Source};
@@ -119,7 +120,7 @@ pub fn run(payload: &Payload) {
     let root = playbook_root_from(&home);
     let is_auto = resolve_for_hook_at(env.as_deref(), &home, slug).mode == Mode::Auto;
     if is_auto || config_broke_mid_session(payload, &root, &home, slug) {
-        enforce(payload, &Limits::read(&home, slug));
+        enforce(payload, &Limits::read(&home, slug), &root);
     }
 }
 
@@ -170,7 +171,7 @@ impl Limits {
     }
 }
 
-fn enforce(payload: &Payload, limits: &Limits) {
+fn enforce(payload: &Payload, limits: &Limits, root: &Path) {
     let state = refresh(payload).filter(State::is_readable);
     let dir = PathBuf::from(session_dir(payload));
     let park_note = dir.join("park-note.md");
@@ -187,6 +188,10 @@ fn enforce(payload: &Payload, limits: &Limits) {
         }
         return;
     }
+    if call.changes_the_guard(root) {
+        emit_pre_deny(SELF_PROTECTION_REASON);
+        return;
+    }
     let mut notes = Vec::new();
     if !limits.budget_is_valid && claim(&dir.join("budget-note")) {
         notes.push(INVALID_BUDGET_NOTE.to_string());
@@ -200,6 +205,8 @@ fn enforce(payload: &Payload, limits: &Limits) {
 }
 
 const UNREADABLE_REASON: &str = "cost unreadable: the session spend can't be checked. Stop here and report to the user. Reading files still works, and `playbook mode ask` is allowed.";
+const SELF_PROTECTION_REASON: &str =
+    "Auto mode settings are locked while auto is on. Ask the user to run this command themselves.";
 const INVALID_BUDGET_NOTE: &str = "auto.budgetUsd must be a number of at least 0.01, so the default cap of $5 applies. Fix it with `playbook config set auto.budgetUsd <usd>`.";
 
 fn budget_reached_reason(park_note: &Path) -> String {
@@ -255,6 +262,357 @@ impl ToolCall {
     fn is_mode_escape(&self) -> bool {
         self.tool == "Bash" && self.command == MODE_ESCAPE
     }
+
+    fn changes_the_guard(&self, root: &Path) -> bool {
+        match self.tool.as_str() {
+            "Bash" => is_guarded_command(&self.command),
+            "Write" | "Edit" => is_config_file(Path::new(&self.file_path), root),
+            _ => false,
+        }
+    }
+}
+
+/// True when some simple command in `command` runs `playbook` to switch the
+/// mode or to set `mode`, `auto.*` or `fix.*`. Quoted text is data, so prose
+/// that merely mentions such a command is left alone.
+///
+/// This is a guardrail against the model drifting, not a security boundary.
+/// It does not look into `bash -c`, `eval` or a script fed to a shell through
+/// a heredoc, nor into `$(...)` inside double quotes, and it cannot see what
+/// variables, aliases or functions expand to.
+fn is_guarded_command(command: &str) -> bool {
+    simple_commands(command)
+        .iter()
+        .any(|words| is_guarded_invocation(words))
+}
+
+fn is_guarded_invocation(words: &[String]) -> bool {
+    let Some(start) = program_index(words) else {
+        return false;
+    };
+    let mut args = &words[start + 1..];
+    match program_name(&words[start]).as_str() {
+        "playbook" => {}
+        "cargo" => match cargo_run_args(args) {
+            Some(rest) => args = rest,
+            None => return false,
+        },
+        _ => return false,
+    }
+    match args {
+        [mode, level, ..] if mode == "mode" => level == "ask" || level == "auto",
+        [config, set, rest @ ..] if config == "config" && set == "set" => rest
+            .iter()
+            .find(|word| !word.starts_with('-'))
+            .is_some_and(|key| {
+                key == "mode" || key.starts_with("auto.") || key.starts_with("fix.")
+            }),
+        _ => false,
+    }
+}
+
+/// What follows `--` in `cargo run ... -- <args>`, which a workspace binary
+/// receives as its own arguments.
+fn cargo_run_args(args: &[String]) -> Option<&[String]> {
+    let subcommand = args.iter().find(|word| !word.starts_with(['-', '+']))?;
+    if subcommand != "run" && subcommand != "r" {
+        return None;
+    }
+    let dashes = args.iter().position(|word| word == "--")?;
+    Some(&args[dashes + 1..])
+}
+
+const SHELL_KEYWORDS: [&str; 10] = [
+    "if", "then", "else", "elif", "while", "until", "do", "!", "{", "}",
+];
+const WRAPPERS: [&str; 7] = ["env", "command", "exec", "time", "nice", "timeout", "sudo"];
+
+/// The index of the word that names the program: past leading assignments,
+/// redirections, shell keywords and wrappers such as `env` or `sudo`.
+fn program_index(words: &[String]) -> Option<usize> {
+    let mut at = 0;
+    while let Some(word) = words.get(at) {
+        let redirect = redirect_len(word);
+        if redirect > 0 {
+            at += redirect;
+        } else if is_assignment(word) || SHELL_KEYWORDS.contains(&word.as_str()) {
+            at += 1;
+        } else if WRAPPERS.contains(&program_name(word).as_str()) {
+            at = after_wrapper(words, at);
+        } else {
+            return Some(at);
+        }
+    }
+    None
+}
+
+/// The index just past the wrapper at `at` and its own options. Always moves
+/// forward.
+fn after_wrapper(words: &[String], at: usize) -> usize {
+    let wrapper = program_name(&words[at]);
+    let takes_value: &[&str] = match wrapper.as_str() {
+        "env" => &["-u", "-C", "--unset", "--chdir"],
+        "exec" => &["-a"],
+        "nice" => &["-n", "--adjustment"],
+        "timeout" => &["-s", "-k", "--signal", "--kill-after"],
+        "sudo" => &[
+            "-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-r", "-t", "-U",
+        ],
+        _ => &[],
+    };
+    let mut next = at + 1;
+    while let Some(word) = words.get(next) {
+        if takes_value.contains(&word.as_str()) {
+            next += 2;
+        } else if word == "--" {
+            next += 1;
+            break;
+        } else if (word.len() > 1 && word.starts_with('-'))
+            || (wrapper == "env" && is_assignment(word))
+        {
+            next += 1;
+        } else {
+            break;
+        }
+    }
+    if wrapper == "timeout" {
+        next += 1;
+    }
+    next.min(words.len())
+}
+
+/// The words a redirection takes: the operator word, plus its target when
+/// the operator stands alone.
+fn redirect_len(word: &str) -> usize {
+    let operator = word.trim_start_matches(|c: char| c.is_ascii_digit());
+    if !operator.starts_with(['<', '>']) {
+        0
+    } else if operator.chars().all(|c| c == '<' || c == '>') {
+        2
+    } else {
+        1
+    }
+}
+
+/// The lowercase file name of `word`, so `/usr/bin/Playbook` is `playbook`.
+fn program_name(word: &str) -> String {
+    Path::new(word)
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().to_lowercase())
+}
+
+fn is_assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Splits `command` on unquoted separators into simple commands, each a list
+/// of words with their quotes removed. Heredoc bodies and comments are
+/// dropped, since neither is run by this shell.
+fn simple_commands(command: &str) -> Vec<Vec<String>> {
+    Lexer {
+        chars: command.chars().collect(),
+        at: 0,
+        commands: Vec::new(),
+        words: Vec::new(),
+        word: None,
+        heredocs: Vec::new(),
+    }
+    .run()
+}
+
+struct Heredoc {
+    delimiter: String,
+    strip_tabs: bool,
+}
+
+struct Lexer {
+    chars: Vec<char>,
+    at: usize,
+    commands: Vec<Vec<String>>,
+    words: Vec<String>,
+    /// The word being read. `Some("")` after an empty quoted string.
+    word: Option<String>,
+    /// Heredocs opened on the current line, whose bodies start at its end.
+    heredocs: Vec<Heredoc>,
+}
+
+impl Lexer {
+    fn run(mut self) -> Vec<Vec<String>> {
+        while let Some(c) = self.take() {
+            match c {
+                '\'' => self.single_quoted(),
+                '"' => self.double_quoted(),
+                '\\' => self.escaped(),
+                '#' if self.word.is_none() => self.skip_comment(),
+                '<' if self.looking_at("<<") => {
+                    self.at += 2;
+                    self.push_str("<<<");
+                }
+                '<' if self.looking_at("<") => self.heredoc(),
+                ';' | '&' | '|' | '(' | ')' | '`' => self.end_command(),
+                '\n' | '\r' => {
+                    self.end_command();
+                    if c == '\n' {
+                        self.skip_heredoc_bodies();
+                    }
+                }
+                c if c.is_whitespace() => self.end_word(),
+                c => self.push_str(c.encode_utf8(&mut [0; 4])),
+            }
+        }
+        self.end_command();
+        self.commands
+    }
+
+    fn take(&mut self) -> Option<char> {
+        let c = self.chars.get(self.at).copied();
+        self.at += 1;
+        c
+    }
+
+    fn looking_at(&self, text: &str) -> bool {
+        text.chars()
+            .enumerate()
+            .all(|(i, c)| self.chars.get(self.at + i) == Some(&c))
+    }
+
+    fn push_str(&mut self, text: &str) {
+        self.word.get_or_insert_with(String::new).push_str(text);
+    }
+
+    fn end_word(&mut self) {
+        if let Some(word) = self.word.take() {
+            self.words.push(word);
+        }
+    }
+
+    fn end_command(&mut self) {
+        self.end_word();
+        if !self.words.is_empty() {
+            self.commands.push(std::mem::take(&mut self.words));
+        }
+    }
+
+    fn single_quoted(&mut self) {
+        let mut text = String::new();
+        while let Some(c) = self.take().filter(|&c| c != '\'') {
+            text.push(c);
+        }
+        self.push_str(&text);
+    }
+
+    fn double_quoted(&mut self) {
+        let mut text = String::new();
+        while let Some(c) = self.take().filter(|&c| c != '"') {
+            match c {
+                '\\' => text.extend(self.take()),
+                c => text.push(c),
+            }
+        }
+        self.push_str(&text);
+    }
+
+    /// A backslash makes the next character part of the word, and joins a
+    /// line break to the next line.
+    fn escaped(&mut self) {
+        match self.take() {
+            Some('\n') | None => {}
+            Some(c) => self.push_str(c.encode_utf8(&mut [0; 4])),
+        }
+    }
+
+    fn skip_comment(&mut self) {
+        while self.chars.get(self.at).is_some_and(|&c| c != '\n') {
+            self.at += 1;
+        }
+    }
+
+    /// Reads the delimiter after `<<` and queues the body for the next line
+    /// break. The delimiter is not an argument of the command.
+    fn heredoc(&mut self) {
+        self.at += 1;
+        let strip_tabs = self.looking_at("-");
+        if strip_tabs {
+            self.at += 1;
+        }
+        while self.looking_at(" ") || self.looking_at("\t") {
+            self.at += 1;
+        }
+        let delimiter = self.delimiter();
+        if !delimiter.is_empty() {
+            self.heredocs.push(Heredoc {
+                delimiter,
+                strip_tabs,
+            });
+        }
+    }
+
+    fn delimiter(&mut self) -> String {
+        let mut delimiter = String::new();
+        let mut quote = None;
+        while let Some(&c) = self.chars.get(self.at) {
+            match (quote, c) {
+                (None, '\'' | '"') => quote = Some(c),
+                (Some(open), c) if c == open => quote = None,
+                (None, '\\') => {}
+                (None, c) if c.is_whitespace() || ";&|()<>".contains(c) => break,
+                (_, c) => delimiter.push(c),
+            }
+            self.at += 1;
+        }
+        delimiter
+    }
+
+    fn skip_heredoc_bodies(&mut self) {
+        for heredoc in std::mem::take(&mut self.heredocs) {
+            while self.at < self.chars.len() {
+                let end = (self.at..self.chars.len())
+                    .find(|&i| self.chars[i] == '\n')
+                    .unwrap_or(self.chars.len());
+                let line: String = self.chars[self.at..end].iter().collect();
+                self.at = (end + 1).min(self.chars.len());
+                let line = line.trim_end_matches('\r');
+                let line = match heredoc.strip_tabs {
+                    true => line.trim_start_matches('\t'),
+                    false => line,
+                };
+                if line == heredoc.delimiter {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// The three config tier files under `root`, with the owner and repo as
+/// wildcards. `.` and `..` are resolved lexically, never on disk, and case is
+/// ignored because the default macOS and Windows filesystems ignore it.
+fn is_config_file(path: &Path, root: &Path) -> bool {
+    let lowercase = |path: &Path| PathBuf::from(path.to_string_lossy().to_lowercase());
+    let (path, root) = (lowercase(path), lowercase(root));
+    let mut normal = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normal.pop();
+            }
+            part => normal.push(part),
+        }
+    }
+    let Ok(rel) = normal.strip_prefix(&root) else {
+        return false;
+    };
+    let parts: Vec<&str> = rel
+        .components()
+        .map(|part| part.as_os_str().to_str().unwrap_or_default())
+        .collect();
+    matches!(
+        parts.as_slice(),
+        ["config.json"] | ["orgs", _, "config.json"] | ["repos", _, _, ".config", "config.json"]
+    )
 }
 
 /// Compares paths lexically, ignoring `.` segments. A `..` never matches, and
