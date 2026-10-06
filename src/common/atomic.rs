@@ -121,6 +121,30 @@ pub fn atomic_append(file: &str, line: &str) {
     }
 }
 
+/// Replaces the contents of `path` with `content` through a temp file in the
+/// same directory and a rename, so a reader never sees a partial file. The
+/// file keeps its permissions, and a failed write leaves it as it was.
+pub fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let result = fs::write(&tmp, content)
+        .and_then(|()| match fs::metadata(path) {
+            Ok(meta) => fs::set_permissions(&tmp, meta.permissions()),
+            Err(_) => Ok(()),
+        })
+        .and_then(|()| fs::rename(&tmp, path));
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +269,36 @@ mod tests {
         let mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_atomic_replaces_the_content_and_keeps_the_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = scratch_dir("atomic-write");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("msg");
+        fs::write(&file, "old").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+
+        write_atomic(&file, "new").unwrap();
+
+        assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        let leftovers: Vec<_> = fs::read_dir(&root).unwrap().collect();
+        assert_eq!(leftovers.len(), 1, "the temp file is gone");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_atomic_into_a_missing_directory_fails_without_a_stray_file() {
+        let root = scratch_dir("atomic-write-missing");
+
+        let result = write_atomic(&root.join("nope").join("msg"), "x");
+
+        assert!(result.is_err());
+        assert!(!root.exists());
     }
 }

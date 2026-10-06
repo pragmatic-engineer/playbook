@@ -4,30 +4,24 @@
 //! Mechanical text checks `pr create` runs before it pushes: no AI
 //! attribution anywhere, and no em or en dashes in the title or body.
 
-use crate::common::attribution::{attribution_hit, disallowed_trailers};
+use crate::common::attribution::{problems, prose_problems};
 
 const EM_DASH: char = '\u{2014}';
 const EN_DASH: char = '\u{2013}';
 
 /// Attribution found in the title, the body, or a commit message. `commits`
-/// is `(short sha, full message)`. Each hit names its place.
+/// is `(short sha, full message)`. Each hit names its place, never the text.
 pub fn attribution_problems(title: &str, body: &str, commits: &[(String, String)]) -> Vec<String> {
     let mut out = Vec::new();
-    if attribution_hit(title) {
+    if !prose_problems(title).is_empty() {
         out.push("title carries AI attribution".to_string());
     }
-    for (i, line) in body.lines().enumerate() {
-        if attribution_hit(line) {
-            out.push(format!("body line {} carries AI attribution", i + 1));
-        }
+    for (n, _) in prose_problems(body) {
+        out.push(format!("body line {n} carries AI attribution"));
     }
     for (sha, message) in commits {
-        if message.lines().any(attribution_hit) {
+        if !problems(message).is_empty() {
             out.push(format!("commit {sha} carries AI attribution"));
-        } else if !disallowed_trailers(message).is_empty() {
-            out.push(format!(
-                "commit {sha} has a trailer other than Refs, Signed-off-by or Co-authored-by"
-            ));
         }
     }
     out
@@ -133,21 +127,31 @@ mod tests {
     }
 
     #[test]
-    fn a_commit_trailer_outside_the_allowed_set_names_its_commit() {
-        let got = attribution_problems("t", "", &[commit("abc1234", "feat: x\n\nChange-Id: I1")]);
+    fn a_commit_trailer_from_a_person_is_allowed() {
+        let message = "feat: x\n\nbody\n\nChange-Id: I1\nCo-Authored-By: Sam <s@x.y>";
+
+        let got = attribution_problems("t", "", &[commit("abc1234", message)]);
+
+        assert_eq!(got, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_commit_co_author_that_names_an_ai_names_its_commit() {
+        let message = "feat: x\n\nbody\n\nCo-Authored-By:Claude <noreply@anthropic.com>";
+
+        let got = attribution_problems("t", "", &[commit("abc1234", message)]);
+
         assert_eq!(
             got,
-            vec![
-                "commit abc1234 has a trailer other than Refs, Signed-off-by or Co-authored-by"
-                    .to_string()
-            ]
+            vec!["commit abc1234 carries AI attribution".to_string()]
         );
     }
 
     #[test]
-    fn a_coauthor_who_is_a_person_is_allowed() {
-        let got = attribution_problems("t", "Co-Authored-By: Sam <s@x.y>", &[]);
-        assert!(got.is_empty());
+    fn a_pr_body_credit_line_for_an_ai_is_found_by_its_line() {
+        let got = attribution_problems("t", "ok\nCo-Authored-By : Claude <a@b>", &[]);
+
+        assert_eq!(got, vec!["body line 2 carries AI attribution".to_string()]);
     }
 
     #[test]

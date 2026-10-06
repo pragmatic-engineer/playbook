@@ -7,7 +7,6 @@
 
 pub mod agents;
 pub mod cc;
-pub mod check;
 pub mod ci;
 pub mod common;
 pub mod config;
@@ -20,6 +19,7 @@ pub mod json;
 pub mod manifest;
 pub mod mode;
 pub mod pr;
+pub mod sanitize;
 pub mod settings;
 pub mod trust;
 pub mod usage;
@@ -104,11 +104,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: PrCommand,
     },
-    /// Message checks for callers that are not an agent hook, such as a git
-    /// `commit-msg` hook or CI.
-    Check {
+    /// Remove AI attribution from message text for callers that are not an
+    /// agent hook, such as a git `commit-msg` hook or CI.
+    Sanitize {
         #[command(subcommand)]
-        sub: CheckCommand,
+        sub: SanitizeCommand,
     },
     /// Run the model-free repo checks (manifest, agents, settings) in one step.
     /// Prints one line per check and exits 1 if any fails; safe in CI.
@@ -328,15 +328,26 @@ pub enum DashboardCommand {
     Stop,
 }
 
-/// `playbook check` subcommands, backing `src/check.rs`.
+/// `playbook sanitize` subcommands, backing `src/sanitize.rs`. Each rewrites
+/// FILE in place unless `--check` is given, and prints one line per removed
+/// line to stderr: its number and the shape of the attribution, never its text.
 #[derive(Subcommand, Debug)]
-pub enum CheckCommand {
-    /// Exit 0 when the commit message in FILE is pristine, otherwise print one
-    /// line per problem and exit 1: no AI attribution, and only `Refs`,
-    /// `Signed-off-by` and `Co-authored-by` trailers.
+pub enum SanitizeCommand {
+    /// Sanitize a commit message file, such as git's `.git/COMMIT_EDITMSG`.
     CommitMsg {
-        /// Path to the commit message file, such as git's `.git/COMMIT_EDITMSG`.
         file: PathBuf,
+        /// Report what would be removed and exit 1 if anything would, without
+        /// writing.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Sanitize a PR title or body saved to FILE.
+    PrText {
+        file: PathBuf,
+        /// Report what would be removed and exit 1 if anything would, without
+        /// writing.
+        #[arg(long)]
+        check: bool,
     },
 }
 
