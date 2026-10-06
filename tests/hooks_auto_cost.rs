@@ -1776,7 +1776,34 @@ fn an_unreadable_config_does_not_start_enforcing_in_a_session_it_never_tracked()
     assert!(!session.dir().join(STATE_FILE).exists());
 }
 
+// Self-protection. While `auto` runs under the cap the model must not be able
+// to lower or switch off its own guard, so the hook denies the commands and
+// file writes that change `mode`, `auto.*` or `fix.*`. A command is denied
+// when it CONTAINS a guarded invocation. It is split into simple commands on
+// unquoted `;`, `&`, `|`, `(`, `)`, backticks and line breaks, with quotes
+// removed from the words, so quoted prose is data and never an invocation.
+// Heredoc bodies and comments are skipped. In each simple command, leading
+// `NAME=value` words, redirections, shell keywords (`if`, `then`, `do`, ...)
+// and the wrappers `env`, `command`, `exec`, `time`, `nice`, `timeout` and
+// `sudo` (with their options) are skipped, and the next word, by its file
+// name and ignoring case, must be `playbook`, or `cargo run -- ...` for the
+// same arguments. The invocation is guarded when it is `mode ask`,
+// `mode auto`, or `config set` whose key (the first word after `set` that does
+// not start with `-`) is `mode` or starts with `auto.` or `fix.`. Words after
+// the guarded ones do not matter. `bash -c` and the like are not looked into.
+
+const SELF_PROTECTION_REASON: &str = "locked while auto is on";
+
 impl Session {
+    /// Auto from `from`, cap 5, 1.00 spent since the baseline: under the cap
+    /// and under the warn tier.
+    fn under_budget(tag: &str, from: AutoFrom) -> Self {
+        let session = Self::auto_from(tag, from);
+        session.seed_budget(json!(5), 70);
+        session.baseline_then_report("1.00");
+        session
+    }
+
     fn tier_files(&self) -> [(&'static str, PathBuf); 3] {
         let root = self.s.home.join(".config/playbook");
         [
@@ -1784,5 +1811,328 @@ impl Session {
             ("org", root.join("orgs/acme/config.json")),
             ("repo", root.join("repos/acme/widgets/.config/config.json")),
         ]
+    }
+}
+
+fn both_sources() -> [(AutoFrom, &'static str); 2] {
+    [(AutoFrom::Config, "config"), (AutoFrom::Env, "env")]
+}
+
+#[test]
+fn mode_switches_and_guarded_config_writes_are_denied_in_auto_under_the_cap() {
+    // Arrange
+    let guarded = [
+        "playbook mode ask",
+        "playbook mode auto",
+        "playbook config set auto.budgetUsd 1000",
+        "playbook config set auto.warnPct 100",
+        "playbook config set auto.anything 1",
+        "playbook config set fix.maxFiles 99",
+        "playbook config set fix.maxLines 1",
+        "playbook config set mode ask",
+        "playbook config set mode auto",
+        "playbook config set --global mode ask",
+        "playbook config set mode ask --org",
+        "playbook config set --org auto.budgetUsd 1000",
+    ];
+    for (from, source) in both_sources() {
+        let session = Session::under_budget(&format!("guard-{source}"), from);
+        for command in guarded {
+            // Act
+            let outcome = session.bash(command);
+
+            // Assert
+            let reason = outcome.reason(&format!("{source}: {command}"));
+            assert!(
+                reason.to_lowercase().contains(SELF_PROTECTION_REASON),
+                "{source}: {command}: {reason}"
+            );
+        }
+    }
+}
+
+#[test]
+fn read_only_mode_and_config_commands_and_near_misses_are_not_denied() {
+    // Arrange
+    let allowed = [
+        "playbook mode status",
+        "playbook mode status --json",
+        "playbook config get mode",
+        "playbook config get auto.budgetUsd",
+        "playbook config list",
+        "playbook config set other.key x",
+        "playbook config set autoReview.enabled false",
+        "playbook config set model x",
+        "playbook config set modes x",
+        "playbook config set fixes.maxFiles 1",
+        "playbook config set worktreeCleanup.staleAfterDays 7",
+        "playbook mode",
+        "playbook modes ask",
+        "playbookx mode ask",
+        "echo playbook mode ask",
+        "git commit -m 'document playbook mode ask'",
+    ];
+    for (from, source) in both_sources() {
+        let session = Session::under_budget(&format!("near-miss-{source}"), from);
+        for command in allowed {
+            // Act
+            let outcome = session.bash(command);
+
+            // Assert
+            assert!(
+                !outcome.is_denied(),
+                "{source}: {command:?} must not be denied: {outcome:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_guarded_invocation_anywhere_in_the_command_string_is_denied() {
+    // Arrange
+    let guarded = [
+        "playbook mode ask && echo done",
+        "playbook mode ask; echo done",
+        "playbook mode ask | cat",
+        "playbook mode ask || true",
+        "playbook mode ask &",
+        "cd x && playbook mode ask",
+        "cd x; playbook mode auto",
+        "true || playbook config set mode ask",
+        "echo hi | playbook config set auto.budgetUsd 1000",
+        "echo hi\nplaybook mode ask",
+        "echo hi\r\nplaybook mode ask",
+        "playbook   mode   ask",
+        "  playbook mode ask  ",
+        "playbook\tmode\task",
+        "playbook config  set   auto.warnPct   100",
+        "PLAYBOOK_MODE=ask playbook mode ask",
+        "A=1 B=2 playbook config set mode ask",
+        "env playbook mode ask",
+        "env A=1 playbook mode ask",
+        "command playbook mode auto",
+        "exec playbook mode ask",
+        "/usr/local/bin/playbook mode ask",
+        "./target/debug/playbook config set fix.maxFiles 99",
+        "playbook mode ask --extra",
+        r#"playbook mode "ask""#,
+        r#"playbook mode 'auto'"#,
+        r#"playbook config set "auto.budgetUsd" 1000"#,
+        "playbook config set 'mode' ask",
+        "'playbook' mode ask",
+        r#""playbook" mode ask"#,
+        r"play\book mode ask",
+        "(playbook mode ask)",
+        "( cd x && playbook mode ask )",
+        "echo $(playbook mode ask)",
+        "echo `playbook mode ask`",
+        "if true; then playbook mode ask; fi",
+        "for i in 1; do playbook mode ask; done",
+        "{ playbook mode ask; }",
+        "! playbook mode ask",
+        "env -i playbook mode ask",
+        "env -u HOME A=1 playbook mode ask",
+        "command -p playbook mode ask",
+        "exec -a x playbook mode ask",
+        "time playbook mode ask",
+        "time -p playbook mode ask",
+        "nice playbook mode ask",
+        "nice -n 5 playbook mode ask",
+        "timeout 5 playbook mode ask",
+        "timeout -s KILL 5 playbook mode ask",
+        "sudo playbook mode ask",
+        "sudo -u root playbook config set auto.budgetUsd 100",
+        "sudo env -i nice timeout 9 playbook mode auto",
+        "cargo run -- config set auto.budgetUsd 100",
+        "cargo run -q --release -- mode ask",
+        "cargo r -- config set mode ask",
+        "PLAYBOOK mode ask",
+        "/usr/local/bin/Playbook mode auto",
+        ">/dev/null playbook mode ask",
+        "2>/dev/null playbook mode ask",
+        "cat <<EOF >/dev/null\nnote\nEOF\nplaybook mode ask",
+        "cat <<'EOF'\nplaybook mode auto\nEOF\nplaybook mode ask",
+        "cat <<-EOF\n\tbody\n\tEOF\nplaybook mode ask",
+        "echo hi # note\nplaybook mode ask",
+    ];
+    let session = Session::under_budget("whole-command", AutoFrom::Config);
+
+    for command in guarded {
+        // Act
+        let outcome = session.bash(command);
+
+        // Assert
+        outcome.reason(&format!("{command:?}"));
+    }
+}
+
+#[test]
+fn a_guarded_word_that_is_not_a_leading_playbook_invocation_is_not_denied() {
+    // Arrange: the match is on the invocation, not on the words anywhere
+    let allowed = [
+        "echo done && echo playbook mode ask",
+        "cat notes.md | grep playbook mode ask",
+        "ls; echo mode ask",
+        "playbook mode status && echo mode ask",
+        r#"git commit -m "docs: explain it; playbook mode ask turns it off""#,
+        "git commit -m 'fix: x && playbook config set auto.budgetUsd 1000'",
+        r#"echo "playbook mode ask""#,
+        r#"echo 'a | playbook mode auto'"#,
+        r#"git commit -m "a (playbook mode ask) b""#,
+        "cat <<EOF\nplaybook config set auto.budgetUsd 10\nEOF",
+        "cat <<'EOF' > notes.md\nplaybook mode ask\nEOF",
+        "cat <<-EOF\n\tplaybook mode ask\n\tEOF",
+        "cat <<EOF | grep x\nplaybook mode ask\nEOF",
+        "echo hi # playbook mode ask",
+        "# playbook mode ask",
+        "cargo run -- mode status",
+        "cargo test -- mode ask",
+        "cargo build --release",
+        "time ls",
+        "sudo ls",
+        "env",
+        "timeout 5 npm test",
+        "git commit -m x <<< 'playbook mode ask'",
+    ];
+    let session = Session::under_budget("not-leading", AutoFrom::Config);
+
+    for command in allowed {
+        // Act
+        let outcome = session.bash(command);
+
+        // Assert
+        assert!(!outcome.is_denied(), "{command:?}: {outcome:?}");
+    }
+}
+
+#[test]
+fn write_and_edit_of_every_config_tier_file_are_denied_in_auto_under_the_cap() {
+    // Arrange
+    for (from, source) in both_sources() {
+        let session = Session::under_budget(&format!("config-files-{source}"), from);
+        let root = session.s.home.join(".config/playbook");
+        let mut targets: Vec<(String, String)> = session
+            .tier_files()
+            .into_iter()
+            .map(|(tier, path)| (tier.to_string(), path.to_string_lossy().into_owned()))
+            .collect();
+        let root = root.to_string_lossy();
+        targets.push(("dot segment".into(), format!("{root}/./config.json")));
+        targets.push((
+            "parent segment".into(),
+            format!("{root}/runtime/../config.json"),
+        ));
+        targets.push(("upper case file".into(), format!("{root}/CONFIG.JSON")));
+        targets.push((
+            "upper case directories".into(),
+            root.to_uppercase() + "/Repos/Acme/Widgets/.Config/Config.json",
+        ));
+
+        for (label, path) in targets {
+            for tool in ["Write", "Edit"] {
+                // Act
+                let input = json!({"file_path": path, "content": "{}", "old_string": "a", "new_string": "b"});
+                let outcome = session.call(tool, input);
+
+                // Assert
+                let reason = outcome.reason(&format!("{source}: {tool} {label} {path}"));
+                assert!(
+                    reason.to_lowercase().contains(SELF_PROTECTION_REASON),
+                    "{source}: {tool} {label}: {reason}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn write_and_edit_of_other_files_are_not_denied_in_auto_under_the_cap() {
+    // Arrange
+    let session = Session::under_budget("other-files", AutoFrom::Config);
+    let root = session.s.home.join(".config/playbook");
+    let root = root.to_string_lossy();
+    let home = session.s.home.to_string_lossy();
+    let paths = [
+        format!("{root}/config.json.bak"),
+        format!("{root}/orgs/acme/notes.md"),
+        format!("{root}/repos/acme/widgets/.config/other.json"),
+        format!("{root}/runtime/{}/note.md", session.sid),
+        format!("{home}/project/config.json"),
+        "src/main.rs".to_string(),
+    ];
+
+    for path in paths {
+        for tool in ["Write", "Edit"] {
+            // Act
+            let outcome = session.call(tool, json!({"file_path": path}));
+
+            // Assert
+            assert!(!outcome.is_denied(), "{tool} {path}: {outcome:?}");
+        }
+    }
+}
+
+#[test]
+fn a_self_protection_deny_does_not_use_up_the_warn_note() {
+    // Arrange: 3.50 of a 5.00 cap, which is exactly the warn tier
+    let session = Session::auto("guard-then-warn");
+    session.seed_budget(json!(5), 70);
+    session.baseline_then_report("3.50");
+
+    // Act
+    let guarded = session.bash("playbook mode ask");
+    let marker_after_deny = session.warned_markers();
+    let next = session.bash("npm test");
+
+    // Assert
+    guarded.reason("guarded command at the warn tier");
+    assert!(
+        marker_after_deny.is_empty(),
+        "the deny must not claim the note"
+    );
+    assert!(
+        matches!(next, Outcome::Note(_)),
+        "the warn note is still owed: {next:?}"
+    );
+}
+
+#[test]
+fn ask_mode_leaves_self_protection_commands_and_config_writes_alone() {
+    // Arrange: rows are (config mode, PLAYBOOK_MODE)
+    let rows: [(&str, &str, Option<&str>); 2] = [
+        ("config ask", "ask", None),
+        ("env ask beats config auto", "auto", Some("ask")),
+    ];
+    for (n, (label, config, env_mode)) in rows.into_iter().enumerate() {
+        let session = Session::auto(&format!("guard-ask-{n}"));
+        session.s.seed_mode_config(config);
+        session.append_telemetry("1.0");
+        let before = tree(&session.runtime_root());
+        let env: Vec<(&str, &str)> = env_mode.map(|m| ("PLAYBOOK_MODE", m)).into_iter().collect();
+        let config_file = session.tier_files()[0].1.to_string_lossy().into_owned();
+        let calls = [
+            ("Bash", json!({"command": "playbook mode auto"})),
+            ("Bash", json!({"command": "cd x && playbook mode ask"})),
+            (
+                "Bash",
+                json!({"command": "playbook config set auto.budgetUsd 1000"}),
+            ),
+            ("Write", json!({"file_path": config_file})),
+            ("Edit", json!({"file_path": config_file})),
+        ];
+
+        for (tool, input) in calls {
+            // Act
+            let (out, code) =
+                session.run_with(&session.tool_payload(tool, input.clone()), Some("0"), &env);
+
+            // Assert
+            assert_eq!(code, 0, "{label}: {tool} {input}");
+            assert!(
+                out.trim().is_empty(),
+                "{label}: {tool} {input}: printed {out}"
+            );
+        }
+        assert_eq!(tree(&session.runtime_root()), before, "{label}");
     }
 }

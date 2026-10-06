@@ -47,7 +47,9 @@
     "Bash(grep:*)",
     "Bash(echo:*)",
     "Bash(which:*)",
-    "Bash(mkdir:*)"
+    "Bash(mkdir:*)",
+    "Bash(playbook mode status:*)",
+    "Bash(playbook mode ask)"
   ],
   "deny": [
     "Read(**/.env)",
