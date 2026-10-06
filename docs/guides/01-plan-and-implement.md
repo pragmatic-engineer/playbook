@@ -92,9 +92,11 @@ A Segment targets under 500 changed lines (a Segment over 1000 needs justificati
 /playbook:plan "add --json flag to export command" --auto
 ```
 
-`--auto` is narrower than the old two-command flow's autonomous mode: it only automates the convergent phase, Work Units and Segments. The divergent phase, approach selection, the `/playbook:adr` route check, and design approval, always stops for a human, regardless of `--auto`. This is an intentional breaking change: the old flow's `--auto`, on a raw topic-only invocation with no prior design doc, used to auto-answer approach selection too.
+`--auto` is narrower than the old two-command flow's autonomous mode: it only automates the convergent phase, Work Units and Segments. The divergent phase, approach selection, the `/playbook:adr` route check, and design approval, stops for a human under plain `--auto`. Plain `--auto` never approves a design. This is an intentional breaking change: the old flow's `--auto`, on a raw topic-only invocation with no prior design doc, used to auto-answer approach selection too.
 
 Once the design is approved, `--auto` takes the answer it would have recommended for every convergent decision, records it in an Assumptions list, runs the quality gate, and saves the plan without pausing. A gate FAIL stops the run; it reports the failing checks and the assumptions made. On success, it lists all assumptions so you audit the autonomous choices before running `/playbook:implement`.
+
+To let the divergent phase run unattended too, pass `--auto-design`. It implies `--auto` and also answers discovery, the approach, the `/playbook:adr` route check, and the design approval, logging every choice in the Assumptions list. Only the flag does this. Auto mode that comes from `PLAYBOOK_MODE` or the repo config acts like plain `--auto`.
 
 ## Implementing with /playbook:implement
 
@@ -140,6 +142,31 @@ Pass `--no-tdd` to write tests and implementation together instead. Pass `--no-t
 ```
 
 `--auto` executes the Segments in dependency order without pausing, committing each Work Unit as a savepoint, then opens the PR set once the adversarial review passes. It self-selects the delivery strategy (stacked topology, or independent when Segments are disjoint; savepoints) and records it as an assumption. Each Segment lands on its own branch off the default branch (or the previous Segment, when stacked). A gate FAIL blocks unless you also pass `--force` (logged to the quality report).
+
+Auto mode can also come from `PLAYBOOK_MODE` or `playbook mode auto`, not only from the flag. In auto mode `/playbook:implement` never force-pushes: a push that would need a force parks the Segment and reports. It never picks the `land` boundary on its own, so `--boundary=land` must be explicit. See [Auto mode](../../README.md#auto-mode) for the spend cap and its limits.
+
+## Fixing a small bug with /playbook:fix
+
+`/playbook:fix` takes a small, well understood bug from report to pull request in one pass, with no plan file. Pass an issue number or a short description:
+
+```bash
+/playbook:fix #123
+/playbook:fix "export drops the last row when the file is empty"
+```
+
+It states the bug in one sentence, writes a test that fails because of the bug, finds the root cause, makes the smallest change that fixes it, and runs the tests around it. Then it commits through `/playbook:commit-and-push` and opens one pull request through `/playbook:create-pull-request`. It does not clean up nearby code. Other bugs it notices go in the final report.
+
+**When it stops and hands off to `/playbook:plan`.** The fix is not small if any of these is true:
+
+1. More than `fix.maxFiles` files change (default 3).
+2. More than `fix.maxLines` lines change, not counting the new test (default 500).
+3. The root cause is still unclear after two tested hypotheses.
+4. The fix needs a new dependency, a schema change, a config format change, or a public interface change.
+5. No failing test is possible for the bug.
+
+It then stops making changes, says which rule fired, and does not open a pull request. In `ask` mode it asks whether to start `/playbook:plan` now. In auto mode it starts `/playbook:plan` with the hand-off, and that run stops at the design approval unless you pass `--auto-design`. Change the limits with `playbook config set fix.maxFiles <n>` and `playbook config set fix.maxLines <n>`.
+
+In `ask` mode it asks for the missing detail when the report is vague, and asks you to confirm before it commits. In auto mode it takes the most likely reading, commits once the scoped tests pass, and prints an Assumptions list.
 
 ## Worked example
 
