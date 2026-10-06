@@ -7,6 +7,7 @@
 
 pub mod atomic;
 pub mod attribution;
+pub mod cli_opts;
 pub mod config_hash;
 pub mod counter;
 pub mod emit;
