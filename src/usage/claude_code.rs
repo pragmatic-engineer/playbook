@@ -171,13 +171,13 @@ fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-fn token(usage: &Value, key: &str) -> u64 {
+pub(crate) fn token(usage: &Value, key: &str) -> u64 {
     usage.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
 /// Tokens written to the one hour cache, from `usage.cache_creation`. Absent
 /// means the whole write counts as the five minute cache.
-fn one_hour_cache_tokens(usage: &Value) -> u64 {
+pub(crate) fn one_hour_cache_tokens(usage: &Value) -> u64 {
     usage
         .get("cache_creation")
         .map(|tiers| token(tiers, "ephemeral_1h_input_tokens"))

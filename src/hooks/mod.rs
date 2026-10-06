@@ -11,6 +11,7 @@
 use crate::common::payload::Payload;
 use crate::HookName;
 
+pub mod auto_cost;
 pub mod auto_guard;
 pub mod auto_model_detect;
 pub mod bg_await_guard;
@@ -51,6 +52,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::NoSlopGuard => no_slop_guard::run(payload),
         HookName::PrecommitCheck => precommit_check::run(payload),
         HookName::AutoGuard => auto_guard::run(payload),
+        HookName::AutoCost => auto_cost::run(payload),
     }
 }
 
