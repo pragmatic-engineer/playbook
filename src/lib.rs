@@ -690,6 +690,7 @@ pub enum HookName {
     NoSlopGuard,
     PrecommitCheck,
     AutoGuard,
+    AutoCost,
 }
 
 /// `cc` launcher subcommands, matching `shell/shared/dispatch.sh:59-100`. No
