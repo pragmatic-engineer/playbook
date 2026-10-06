@@ -1,0 +1,13 @@
+[package]
+name = "tls-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls", "platform-verifier"] }
+
+[profile.release]
+opt-level = "z"

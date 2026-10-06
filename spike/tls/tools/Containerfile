@@ -1,0 +1,5 @@
+FROM scratch
+COPY tls-spike /tls-spike
+COPY ca.pem /certs/bundle.pem
+COPY ca.pem /certsdir/ca.pem
+ENTRYPOINT ["/tls-spike"]
