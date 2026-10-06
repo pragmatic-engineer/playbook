@@ -41,6 +41,9 @@ enum Auto {
     SkipsSelfReview,
     /// Asks nothing, so Step 0 is only the mode read.
     Unchanged,
+    /// Asks only inside an explicit `if mode is ask` branch, so an
+    /// unattended run never reaches a question.
+    AsksOnlyInAskMode,
 }
 
 /// One command file and which structural rules apply to it.
@@ -121,6 +124,11 @@ const COMMANDS: &[CommandSpec] = &[
         asks: false,
         auto: Auto::Unchanged,
     },
+    CommandSpec {
+        name: "fix",
+        asks: true,
+        auto: Auto::AsksOnlyInAskMode,
+    },
 ];
 
 fn rows(auto: Auto) -> impl Iterator<Item = &'static CommandSpec> {
@@ -195,6 +203,15 @@ impl CommandFile {
             .collect()
     }
 
+    /// The raw value of a top-level frontmatter key, quotes included.
+    fn frontmatter_value(&self, key: &str) -> Option<String> {
+        let prefix = format!("{key}:");
+        self.frontmatter()
+            .iter()
+            .find_map(|l| l.strip_prefix(&prefix))
+            .map(|v| v.trim().to_owned())
+    }
+
     /// Markdown headings outside fenced code blocks, so a `# comment` inside
     /// a shell example is not mistaken for a section.
     fn headings(&self) -> Vec<Heading> {
@@ -208,11 +225,10 @@ impl CommandFile {
             if in_fence {
                 continue;
             }
-            let level = text.chars().take_while(|&c| c == '#').count();
-            if (1..=6).contains(&level) && text[level..].starts_with(' ') {
+            if let Some(title) = heading_title(text) {
                 out.push(Heading {
-                    level,
-                    title: text[level..].trim().to_owned(),
+                    level: text.chars().take_while(|&c| c == '#').count(),
+                    title: title.to_owned(),
                     line,
                 });
             }
@@ -339,6 +355,64 @@ fn is_ask(line: &str) -> bool {
 
 fn require_section(file: &CommandFile, found: Option<Section>, what: &str) -> Section {
     found.unwrap_or_else(|| panic!("commands/{}.md has no {what} section", file.name))
+}
+
+/// The phrase that marks a branch taken only when the user can be asked.
+const ASK_BRANCH: &str = "if mode is ask";
+
+/// Per line: true for a fence delimiter and for every line inside a fenced
+/// code block.
+fn fence_flags(lines: &[String]) -> Vec<bool> {
+    let mut in_fence = false;
+    lines
+        .iter()
+        .map(|l| {
+            if l.trim_start().starts_with("```") {
+                in_fence = !in_fence;
+                true
+            } else {
+                in_fence
+            }
+        })
+        .collect()
+}
+
+fn indent_of(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+fn heading_title(line: &str) -> Option<&str> {
+    let level = line.chars().take_while(|&c| c == '#').count();
+    ((1..=6).contains(&level) && line[level..].starts_with(' ')).then(|| line[level..].trim())
+}
+
+fn is_bullet(line: &str) -> bool {
+    static BULLET: OnceLock<Regex> = OnceLock::new();
+    BULLET
+        .get_or_init(|| Regex::new(r"^\s*([-*+]|\d+[.)])\s+").expect("bullet pattern"))
+        .is_match(line)
+}
+
+/// Whether the ask on `lines[idx]` sits behind an `if mode is ask` branch:
+/// the title of its nearest enclosing heading, or the first line of its own
+/// bullet or of any bullet enclosing it, contains the phrase. Lines before
+/// `first` (the frontmatter) are never read.
+fn is_behind_ask_branch(lines: &[String], first: usize, idx: usize) -> bool {
+    let fenced = fence_flags(lines);
+    let mut indent = indent_of(&lines[idx]);
+    for i in (first..=idx).rev().filter(|&i| !fenced[i]) {
+        if let Some(title) = heading_title(&lines[i]) {
+            return title.to_lowercase().contains(ASK_BRANCH);
+        }
+        let encloses = i == idx || indent_of(&lines[i]) < indent;
+        if is_bullet(&lines[i]) && encloses {
+            if lines[i].to_lowercase().contains(ASK_BRANCH) {
+                return true;
+            }
+            indent = indent_of(&lines[i]);
+        }
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -579,7 +653,7 @@ fn plan_step6_says_plain_auto_stops_with_a_message() {
 }
 
 #[test]
-fn auto_design_appears_in_plan_and_in_no_other_command() {
+fn auto_design_appears_in_plan_and_in_the_fix_hand_off_only() {
     // Arrange
     let mut with_flag: Vec<String> = fs::read_dir(commands_dir())
         .expect("commands directory should be readable")
@@ -602,7 +676,7 @@ fn auto_design_appears_in_plan_and_in_no_other_command() {
     with_flag.sort();
 
     // Assert
-    assert_eq!(with_flag, vec!["plan".to_owned()]);
+    assert_eq!(with_flag, vec!["fix".to_owned(), "plan".to_owned()]);
 }
 
 // ---------------------------------------------------------------------------
@@ -992,6 +1066,255 @@ fn commands_that_never_ask_need_only_a_read_line_in_step0() {
         failures.is_empty(),
         "read-only Step 0 problems:\n{}",
         failures.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// fix
+// ---------------------------------------------------------------------------
+
+/// The `escalat` section of `fix.md`, where the hand-off rules live.
+fn escalation_section(file: &CommandFile) -> Section {
+    require_section(
+        file,
+        file.section(|t| t.to_lowercase().contains("escalat")),
+        "escalation",
+    )
+}
+
+#[test]
+fn fix_command_file_exists() {
+    // Arrange
+    let path = commands_dir().join("fix.md");
+
+    // Act
+    let exists = path.is_file();
+
+    // Assert
+    assert!(exists, "{} does not exist", path.display());
+}
+
+#[test]
+fn fix_frontmatter_has_description_tools_and_the_argument_hint() {
+    // Arrange
+    let file = load("fix");
+
+    // Act
+    let description = file.frontmatter_value("description");
+    let hint = file.frontmatter_value("argument-hint");
+    let tools = file.allowed_tools();
+
+    // Assert
+    assert!(
+        description.is_some_and(|d| !d.is_empty()),
+        "fix needs a non-empty description"
+    );
+    assert!(
+        hint.as_deref()
+            .is_some_and(|h| h.contains("[#issue | description] [--auto] [--ask]")),
+        "fix argument-hint {hint:?} must contain `[#issue | description] [--auto] [--ask]`"
+    );
+    for needed in ["Bash", "Read", "Skill"] {
+        assert!(
+            tools.iter().any(|t| t == needed),
+            "fix allowed-tools {tools:?} lacks {needed}"
+        );
+    }
+}
+
+#[test]
+fn fix_escalation_names_all_five_rules() {
+    // Arrange
+    let file = load("fix");
+    let section = escalation_section(&file);
+    let text = file.text_of(&section);
+    let rules = [
+        (
+            "more than fix.maxFiles files",
+            r"(?is)more than[^.]*fix\.maxFiles[^.]*files",
+        ),
+        (
+            "more than fix.maxLines lines, excluding the new test",
+            r"(?is)more than[^.]*fix\.maxLines[^.]*excluding the new test",
+        ),
+        (
+            "root cause unclear after two tested hypotheses",
+            r"(?is)root cause[^.]*unclear[^.]*two tested hypotheses",
+        ),
+        (
+            "new dependency, schema, config format or public interface",
+            r"(?is)new dependency[^.]*schema[^.]*config[- ]format[^.]*public[- ]interface",
+        ),
+        ("no failing test possible", r"(?i)\bno failing test\b"),
+    ];
+
+    // Act
+    let missing: Vec<&str> = rules
+        .iter()
+        .filter(|(_, pattern)| !Regex::new(pattern).expect("rule pattern").is_match(&text))
+        .map(|(name, _)| *name)
+        .collect();
+
+    // Assert
+    assert!(
+        missing.is_empty(),
+        "the `{}` section does not state these escalation rules: {missing:?}",
+        section.title
+    );
+}
+
+#[test]
+fn fix_reads_both_thresholds_through_playbook_config_get() {
+    // Arrange
+    let file = load("fix");
+    let text = file.lines[file.body_start..].join("\n");
+
+    // Act
+    let missing: Vec<&str> = ["fix.maxFiles", "fix.maxLines"]
+        .into_iter()
+        .filter(|key| !text.contains(&format!("playbook config get {key}")))
+        .collect();
+
+    // Assert
+    assert!(
+        missing.is_empty(),
+        "fix never runs `playbook config get` for {missing:?}"
+    );
+}
+
+#[test]
+fn fix_escalation_hands_off_to_plan_and_states_which_rule_fired() {
+    // Arrange
+    let file = load("fix");
+    let section = escalation_section(&file);
+    let text = file.text_of(&section);
+    let states_rule = Regex::new(r"(?is)\bwhich rule (fired|triggered)\b").expect("rule pattern");
+
+    // Act
+    let hands_off = text.contains("/playbook:plan");
+
+    // Assert
+    assert!(
+        hands_off,
+        "the `{}` section must hand off to `/playbook:plan`",
+        section.title
+    );
+    assert!(
+        states_rule.is_match(&text),
+        "the `{}` section must say it states which rule fired",
+        section.title
+    );
+}
+
+#[test]
+fn fix_every_ask_sits_behind_an_if_mode_is_ask_branch() {
+    // Arrange
+    let mut failures = Vec::new();
+
+    for spec in rows(Auto::AsksOnlyInAskMode) {
+        let file = load(spec.name);
+        let fenced = fence_flags(&file.lines);
+
+        // Act
+        for (i, line) in file.lines.iter().enumerate().skip(file.body_start) {
+            if fenced[i] || !is_ask(line) {
+                continue;
+            }
+
+            // Assert
+            if !is_behind_ask_branch(&file.lines, file.body_start, i) {
+                failures.push(format!(
+                    "{}: line {} asks outside an `{ASK_BRANCH}` branch: {}",
+                    spec.name,
+                    i + 1,
+                    line.trim()
+                ));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "unconditional asks:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn ask_branch_parser_accepts_headings_and_bullets_and_rejects_the_rest() {
+    // Arrange
+    let lines = |text: &str| -> Vec<String> { text.lines().map(str::to_owned).collect() };
+    let behind = [
+        "### If mode is ask\nAsk the user which test to keep.",
+        "## Step 3\n- If mode is ask, ask the user which test to keep.",
+        "## Step 3\n- If mode is ask:\n  - Ask the user which test to keep.",
+        "## Step 3\n- If mode is ask:\n  Ask the user which test to keep.",
+    ];
+    let not_behind = [
+        "## Step 3\nAsk the user which test to keep.",
+        "## Step 3\n- Ask the user which test to keep.",
+        "### If mode is ask\n## Step 4\nAsk the user which test to keep.",
+        "- If mode is ask:\n  - Pick one.\n\n- Ask the user which test to keep.",
+        "## Step 3\n```\n# if mode is ask\n```\nAsk the user which test to keep.",
+    ];
+    let ask_index = |l: &[String]| {
+        l.iter()
+            .position(|x| is_ask(x))
+            .expect("fixture has an ask")
+    };
+
+    // Act
+    let missed: Vec<&&str> = behind
+        .iter()
+        .filter(|t| {
+            let l = lines(t);
+            !is_behind_ask_branch(&l, 0, ask_index(&l))
+        })
+        .collect();
+    let false_hits: Vec<&&str> = not_behind
+        .iter()
+        .filter(|t| {
+            let l = lines(t);
+            is_behind_ask_branch(&l, 0, ask_index(&l))
+        })
+        .collect();
+
+    // Assert
+    assert!(missed.is_empty(), "parser rejected gated asks: {missed:?}");
+    assert!(
+        false_hits.is_empty(),
+        "parser accepted ungated asks: {false_hits:?}"
+    );
+}
+
+#[test]
+fn fix_opens_its_pull_request_through_the_create_pull_request_skill() {
+    // Arrange
+    let file = load("fix");
+    let fenced = fence_flags(&file.lines);
+    let tools = file.allowed_tools();
+
+    // Act
+    let names_skill = file.lines[file.body_start..]
+        .iter()
+        .any(|l| l.contains("/playbook:create-pull-request"));
+    let raw_calls: Vec<usize> = (file.body_start..file.lines.len())
+        .filter(|&i| fenced[i] && file.lines[i].contains("gh pr create"))
+        .map(|i| i + 1)
+        .collect();
+
+    // Assert
+    assert!(
+        names_skill,
+        "fix must open its PR through `/playbook:create-pull-request`"
+    );
+    assert!(
+        tools.iter().any(|t| t == "Skill"),
+        "fix allowed-tools {tools:?} lacks Skill, so it cannot invoke the skill"
+    );
+    assert!(
+        raw_calls.is_empty(),
+        "fix runs `gh pr create` directly on lines {raw_calls:?}"
     );
 }
 
