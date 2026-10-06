@@ -5,8 +5,8 @@
 # install-hooks-fire.test.sh: WU-11's headline acceptance criterion. Installs
 # into a scratch HOME via install.sh (the PLAYBOOK_SRC local-source seam, no
 # network), reads the command strings the resulting settings.json carries,
-# asserts exactly 17 distinct hook names (13 ported hooks wired as `playbook
-# hook <name>`, 4 safety guards wired as `~/.claude/hooks/<name>.sh`), then
+# asserts exactly 17 distinct hook names (13 functional hooks and 4 safety
+# guards, all wired as `playbook hook <name>`), then
 # EXECUTES every one of them with a hook-specific payload and asserts a
 # hook-specific observable effect. The name list is derived from settings.json
 # itself, not hardcoded: a name present there with no case below FAILS rather
