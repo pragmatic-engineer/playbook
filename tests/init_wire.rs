@@ -17,7 +17,7 @@
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
-//!   and all 16 ported hooks (the 12 functional hooks plus the 4 safety
+//!   and all 17 ported hooks (the 13 functional hooks plus the 4 safety
 //!   guards) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
@@ -230,6 +230,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "rebuild-memory-graph",
         "auto-model-detect",
         "auto-guard",
+        "auto-cost",
         "precompact-warn",
         "session-clean-exit",
         "memory-capture",
@@ -244,7 +245,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly all 16 ported HookName variants in binary form"
+        "wiring should register exactly all 17 ported HookName variants in binary form"
     );
 }
 
@@ -574,4 +575,62 @@ fn auto_guard_is_wired_on_ask_user_question_and_on_every_prompt() {
         prompt.contains(&(None, command.to_string())),
         "auto-guard must sit under UserPromptSubmit with no matcher: {prompt:?}"
     );
+}
+
+#[test]
+fn auto_cost_is_wired_on_every_pre_tool_use_with_no_matcher() {
+    // Arrange
+    let path = scratch_settings_path("auto-cost");
+    let command = "playbook hook auto-cost";
+
+    // Act
+    wire(&path).expect("wire should succeed on a fresh install");
+    let settings = read_json(&path);
+
+    // Assert: exactly one registration, and it has no matcher, so it fires on
+    // every tool call
+    let pre_tool = event_registrations(&settings, "PreToolUse");
+    let wired: Vec<_> = pre_tool.iter().filter(|(_, cmd)| cmd == command).collect();
+    assert_eq!(
+        wired,
+        vec![&(None, command.to_string())],
+        "auto-cost must sit under PreToolUse with no matcher: {pre_tool:?}"
+    );
+    let anywhere_else = ["UserPromptSubmit", "SessionStart", "Stop", "PostToolUse"]
+        .into_iter()
+        .any(|event| {
+            event_registrations(&settings, event)
+                .iter()
+                .any(|(_, cmd)| cmd == command)
+        });
+    assert!(!anywhere_else, "auto-cost is a PreToolUse hook only");
+}
+
+#[test]
+fn auto_guard_and_auto_cost_carry_the_ten_second_timeout_of_the_other_guards() {
+    // Arrange
+    let path = scratch_settings_path("auto-timeouts");
+
+    // Act
+    wire(&path).expect("wire should succeed on a fresh install");
+    let settings = read_json(&path);
+
+    // Assert
+    let mut checked = 0;
+    for groups in settings["hooks"]
+        .as_object()
+        .expect("hooks is an object")
+        .values()
+    {
+        for group in groups.as_array().expect("event holds groups") {
+            for entry in group["hooks"].as_array().expect("group holds hooks") {
+                let command = entry["command"].as_str().unwrap_or_default();
+                if command == "playbook hook auto-guard" || command == "playbook hook auto-cost" {
+                    assert_eq!(entry["timeout"], 10, "{command} needs a timeout: {entry}");
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 3, "auto-guard on two events and auto-cost on one");
 }

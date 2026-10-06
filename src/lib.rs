@@ -741,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn hook_help_lists_all_fifteen_hook_names() {
+    fn hook_help_lists_every_hook_name() {
         // Arrange
         let names = [
             "session-init",
@@ -752,6 +752,8 @@ mod tests {
             "post-edit-track",
             "rebuild-memory-graph",
             "auto-model-detect",
+            "auto-guard",
+            "auto-cost",
             "precompact-warn",
             "session-clean-exit",
             "memory-capture",

@@ -25,6 +25,12 @@
 //! of the last read, and `unpriced` is set once a model outside the price table
 //! was seen. The tests never read `inode`; how a replaced file is detected is
 //! up to the hook. Transcript costs are token counts derived from `pricing::cost_usd`.
+//!
+//! Enforcement is read from stdout. The hook prints nothing to allow a call, a
+//! `hookSpecificOutput` with `hookEventName` `PreToolUse` and an
+//! `additionalContext` for a note, or the same with `permissionDecision`
+//! `deny` and a `permissionDecisionReason`. The warn tier leaves a `warned`
+//! marker file in the session dir.
 
 #[path = "support/auto_env.rs"]
 mod auto_env;
@@ -47,17 +53,113 @@ const INTERVAL_VAR: &str = "PLAYBOOK_AUTO_COST_INTERVAL_MS";
 
 static LINE_ID: AtomicU64 = AtomicU64::new(0);
 
+/// Where auto comes from: the config file, or `PLAYBOOK_MODE=auto` over a
+/// config that says ask.
+#[derive(Clone, Copy, PartialEq)]
+enum AutoFrom {
+    Config,
+    Env,
+}
+
 struct Session {
     s: Scratch,
     sid: String,
+    env: Vec<(&'static str, &'static str)>,
 }
 
 impl Session {
     fn auto(tag: &str) -> Self {
+        Self::auto_from(tag, AutoFrom::Config)
+    }
+
+    fn auto_from(tag: &str, from: AutoFrom) -> Self {
         let s = scratch(tag);
-        s.seed_mode_config("auto");
         let sid = format!("sid-{tag}");
-        Session { s, sid }
+        let (mode, env) = match from {
+            AutoFrom::Config => ("auto", vec![]),
+            AutoFrom::Env => ("ask", vec![("PLAYBOOK_MODE", "auto")]),
+        };
+        s.seed_mode_config(mode);
+        Session { s, sid, env }
+    }
+
+    /// Rewrites the global config with the given `auto.budgetUsd` and
+    /// `auto.warnPct`, keeping the mode the session was built with.
+    fn seed_budget(&self, budget_usd: Value, warn_pct: impl Into<Value>) {
+        let mode = if self.env.is_empty() { "auto" } else { "ask" };
+        let config =
+            json!({"mode": mode, "auto": {"budgetUsd": budget_usd, "warnPct": warn_pct.into()}});
+        fs::write(
+            self.s.home.join(".config/playbook/config.json"),
+            config.to_string(),
+        )
+        .expect("config file is writable");
+    }
+
+    fn park_note(&self) -> String {
+        self.dir()
+            .join("park-note.md")
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// A PreToolUse payload for `tool` with `input`, on this session.
+    fn tool_payload(&self, tool: &str, input: Value) -> String {
+        let mut value: Value = serde_json::from_str(&self.payload()).expect("payload is JSON");
+        value["tool_name"] = json!(tool);
+        value["tool_input"] = input;
+        value.to_string()
+    }
+
+    /// The same payload with no `session_id`.
+    fn anonymous_tool_payload(&self, tool: &str, input: Value) -> String {
+        let mut value: Value =
+            serde_json::from_str(&self.tool_payload(tool, input)).expect("payload is JSON");
+        value.as_object_mut().expect("object").remove("session_id");
+        value.to_string()
+    }
+
+    /// Runs the hook on a tool call and parses what it printed.
+    fn call(&self, tool: &str, input: Value) -> Outcome {
+        self.call_payload(&self.tool_payload(tool, input))
+    }
+
+    fn call_payload(&self, payload: &str) -> Outcome {
+        let (out, code) = self.run_with(payload, Some("0"), &[]);
+        assert_eq!(code, 0, "the hook must exit 0 whatever it decides");
+        outcome(&out)
+    }
+
+    fn bash(&self, command: &str) -> Outcome {
+        self.call("Bash", json!({"command": command}))
+    }
+
+    /// Spends nothing on call 1 (telemetry 0.00 baselines at zero), then
+    /// reports `usd` on the telemetry feed without calling the hook.
+    fn baseline_then_report(&self, usd: &str) {
+        self.append_telemetry("0.00");
+        assert_eq!(self.bash("git status"), Outcome::Silent, "baseline call");
+        self.append_telemetry(usd);
+    }
+
+    /// A session whose spend has reached the cap of 5.
+    fn at_budget(tag: &str, from: AutoFrom) -> Self {
+        let session = Self::auto_from(tag, from);
+        session.seed_budget(json!(5), 70);
+        session.baseline_then_report("5.00");
+        session
+    }
+
+    fn warned_markers(&self) -> Vec<String> {
+        fs::read_dir(self.dir())
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|name| name.starts_with("warned"))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn runtime_root(&self) -> PathBuf {
@@ -102,6 +204,7 @@ impl Session {
             command.env(INTERVAL_VAR, ms);
         }
         let mut child = command
+            .envs(self.env.iter().copied())
             .envs(env.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -145,6 +248,48 @@ impl Session {
             &self.dir().join("telemetry.jsonl"),
             &format!(r#"{{"ts":1,"cost_usd":{cost_usd},"used_pct":0}}"#),
         );
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Outcome {
+    Silent,
+    Note(String),
+    Deny(String),
+}
+
+fn outcome(out: &str) -> Outcome {
+    if out.trim().is_empty() {
+        return Outcome::Silent;
+    }
+    let value: Value =
+        serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("not JSON ({e}): {out}"));
+    let inner = &value["hookSpecificOutput"];
+    assert_eq!(inner["hookEventName"], "PreToolUse", "{out}");
+    let text = |key: &str| {
+        inner[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("{key} missing in {out}"))
+            .to_string()
+    };
+    if inner["permissionDecision"] == "deny" {
+        Outcome::Deny(text("permissionDecisionReason"))
+    } else {
+        Outcome::Note(text("additionalContext"))
+    }
+}
+
+impl Outcome {
+    fn is_denied(&self) -> bool {
+        matches!(self, Outcome::Deny(_))
+    }
+
+    /// The deny reason, panicking with `label` when the call was not denied.
+    fn reason(&self, label: &str) -> &str {
+        match self {
+            Outcome::Deny(reason) => reason,
+            other => panic!("{label}: expected a deny, got {other:?}"),
+        }
     }
 }
 
@@ -1005,4 +1150,639 @@ fn concurrent_first_calls_leave_exactly_one_baseline_file() {
     assert_eq!(baseline(file_entry(&state, "main.jsonl")), 400);
     assert_eq!(state["telemetry"]["baseline_cents"], 400);
     assert_eq!(effective(&state), 0);
+}
+
+#[test]
+fn the_warn_tier_fires_once_at_the_warn_percentage_of_the_cap() {
+    // Arrange: cap 5, warnPct 70, so the tier starts at 350 cents
+    let session = Session::auto("warn-edges");
+    session.seed_budget(json!(5), 70);
+    session.append_telemetry("0.00");
+    assert_eq!(session.bash("npm test"), Outcome::Silent, "baseline call");
+
+    // Act and Assert: one cent under the tier
+    session.append_telemetry("3.49");
+    assert_eq!(session.bash("npm test"), Outcome::Silent, "3.49");
+    assert!(session.warned_markers().is_empty(), "no marker at 3.49");
+
+    // Act and Assert: exactly on the tier, one note and one marker
+    session.append_telemetry("3.50");
+    let Outcome::Note(note) = session.bash("npm test") else {
+        panic!("3.50 must give a pre-context note");
+    };
+    assert!(note.to_lowercase().contains("budget"), "note: {note}");
+    assert_eq!(session.warned_markers(), vec!["warned".to_string()]);
+
+    // Act and Assert: still at 3.50 and then higher, no second note
+    assert_eq!(session.bash("npm test"), Outcome::Silent, "second 3.50");
+    session.append_telemetry("4.99");
+    assert_eq!(
+        session.bash("npm test"),
+        Outcome::Silent,
+        "4.99 denies nothing"
+    );
+}
+
+#[test]
+fn the_hard_cap_denies_non_safe_tools_at_exactly_the_cap_and_keeps_the_safe_list() {
+    // Arrange
+    let session = Session::auto("cap-edge");
+    session.seed_budget(json!(5), 70);
+    session.baseline_then_report("4.99");
+    assert!(!session.bash("npm test").is_denied(), "4.99 denies nothing");
+
+    // Act
+    session.append_telemetry("5.00");
+    let denied = session.bash("npm test");
+    let read = session.call("Read", json!({"file_path": "/etc/hosts"}));
+
+    // Assert
+    denied.reason("5.00 on a non-safe tool");
+    assert!(!read.is_denied(), "5.00 still allows the safe list");
+}
+
+#[test]
+fn the_deny_at_budget_reached_asks_for_a_park_note_and_a_report() {
+    // Arrange
+    let session = Session::at_budget("deny-reason", AutoFrom::Config);
+
+    // Act
+    let outcome = session.bash("npm test");
+
+    // Assert
+    let reason = outcome.reason("budget reached");
+    assert!(reason.contains("budget reached"), "reason: {reason}");
+    assert!(reason.contains(&session.park_note()), "reason: {reason}");
+    assert!(reason.contains("report to the user"), "reason: {reason}");
+}
+
+#[test]
+fn the_safe_list_at_budget_reached_allows_read_only_tools() {
+    // Arrange
+    let session = Session::at_budget("safe-tools", AutoFrom::Config);
+    let cases = [
+        ("Read", json!({"file_path": "/etc/hosts"})),
+        ("Grep", json!({"pattern": "fn main"})),
+        ("Glob", json!({"pattern": "**/*.rs"})),
+    ];
+
+    for (tool, input) in cases {
+        // Act
+        let outcome = session.call(tool, input);
+
+        // Assert
+        assert!(!outcome.is_denied(), "{tool} is on the safe list");
+    }
+}
+
+#[test]
+fn bash_is_safe_at_budget_reached_only_for_the_four_exact_commands() {
+    // Arrange
+    let session = Session::at_budget("safe-bash", AutoFrom::Config);
+    let allowed = [
+        "git status",
+        "git diff",
+        "playbook mode status",
+        "playbook mode status --json",
+    ];
+    let denied = [
+        "git push",
+        "git status --short",
+        "git diff HEAD",
+        "playbook mode status --jsonx",
+        "playbook mode ask",
+        "playbook mode auto",
+    ];
+
+    // Act and Assert
+    for command in allowed {
+        assert!(
+            !session.bash(command).is_denied(),
+            "{command:?} must be allowed"
+        );
+    }
+    for command in denied {
+        session.bash(command).reason(command);
+    }
+}
+
+#[test]
+fn a_shell_metacharacter_appended_to_a_safe_command_is_denied() {
+    // Arrange
+    let session = Session::at_budget("safe-bash-meta", AutoFrom::Config);
+    let suffixes = [
+        ";",
+        "&",
+        "&&",
+        "|",
+        "`",
+        "$(x)",
+        ">",
+        "<",
+        "\nrm -rf x",
+        " ",
+        "\n",
+    ];
+
+    for suffix in suffixes {
+        let command = format!("git status{suffix}");
+
+        // Act
+        let outcome = session.bash(&command);
+
+        // Assert
+        outcome.reason(&format!("{command:?}"));
+    }
+}
+
+#[test]
+fn write_is_safe_at_budget_reached_only_to_the_park_note_path() {
+    // Arrange
+    let session = Session::at_budget("safe-write", AutoFrom::Config);
+    let dir = session.dir().to_string_lossy().into_owned();
+    let cases = [
+        (session.park_note(), true),
+        (format!("{dir}/./park-note.md"), true),
+        ("park-note.md".to_string(), false),
+        (format!("{dir}/../park-note.md"), false),
+        (format!("{dir}/park-note.md.bak"), false),
+        (format!("{dir}/../x"), false),
+    ];
+
+    for (path, allowed) in cases {
+        // Act
+        let outcome = session.call("Write", json!({"file_path": path, "content": "stopped"}));
+
+        // Assert
+        assert_eq!(
+            !outcome.is_denied(),
+            allowed,
+            "Write to {path}: {outcome:?}"
+        );
+    }
+}
+
+#[test]
+fn edit_is_denied_at_budget_reached_even_on_the_park_note() {
+    // Arrange
+    let session = Session::at_budget("safe-edit", AutoFrom::Config);
+
+    // Act
+    let outcome = session.call(
+        "Edit",
+        json!({"file_path": session.park_note(), "old_string": "a", "new_string": "b"}),
+    );
+
+    // Assert
+    outcome.reason("Edit");
+}
+
+#[test]
+fn playbook_mode_ask_is_denied_at_budget_reached_so_the_model_cannot_lift_the_cap() {
+    // Arrange
+    let session = Session::at_budget("cap-no-escape", AutoFrom::Config);
+
+    // Act
+    let outcome = session.bash("playbook mode ask");
+
+    // Assert
+    let reason = outcome.reason("mode ask");
+    assert!(reason.contains("budget reached"), "reason: {reason}");
+}
+
+#[test]
+fn an_unreadable_cost_fails_closed_and_only_then_allows_mode_ask() {
+    // Arrange: no transcript file and no telemetry
+    let session = Session::auto("unreadable-cost");
+
+    // Act
+    let bash = session.bash("npm test");
+    let write = session.call(
+        "Write",
+        json!({"file_path": session.park_note(), "content": "x"}),
+    );
+    let read = session.call("Read", json!({"file_path": "/etc/hosts"}));
+    let escape = session.bash("playbook mode ask");
+    let not_exact = session.bash("playbook mode ask; rm -rf x");
+
+    // Assert
+    let reason = bash.reason("Bash");
+    assert!(reason.contains("cost unreadable"), "reason: {reason}");
+    assert!(reason.contains("Stop here"), "reason: {reason}");
+    assert!(reason.contains("report to the user"), "reason: {reason}");
+    assert!(
+        reason.contains("`playbook mode ask` is allowed"),
+        "reason: {reason}"
+    );
+    write.reason("Write");
+    assert!(!read.is_denied(), "the safe list stays allowed");
+    assert!(!escape.is_denied(), "exact playbook mode ask is the escape");
+    not_exact.reason("mode ask is exact match only");
+}
+
+#[test]
+fn a_missing_session_id_denies_non_safe_tools_and_keeps_the_escape() {
+    // Arrange
+    let session = Session::auto("no-sid");
+    let call = |tool: &str, input: Value| {
+        session.call_payload(&session.anonymous_tool_payload(tool, input))
+    };
+
+    // Act
+    let bash = call("Bash", json!({"command": "npm test"}));
+    let read = call("Read", json!({"file_path": "/etc/hosts"}));
+    let escape = call("Bash", json!({"command": "playbook mode ask"}));
+
+    // Assert
+    let reason = bash.reason("Bash");
+    assert!(reason.contains("cost unreadable"), "reason: {reason}");
+    assert!(!read.is_denied(), "the safe list stays allowed");
+    assert!(!escape.is_denied(), "the escape still works");
+}
+
+#[derive(Clone, Copy, Debug)]
+enum State {
+    BudgetReached,
+    CostUnreadable,
+    MissingSessionId,
+}
+
+#[test]
+fn the_escape_table_holds_for_every_state_and_auto_source() {
+    // Arrange: rows are (state, auto source). Whether `mode ask` is allowed
+    // and which reason is shown depend on the state alone.
+    let states = [
+        State::BudgetReached,
+        State::CostUnreadable,
+        State::MissingSessionId,
+    ];
+    for (n, state) in states.into_iter().enumerate() {
+        for from in [AutoFrom::Config, AutoFrom::Env] {
+            let tag = format!("escape-{n}-{}", from == AutoFrom::Env);
+            let label = format!("{state:?} / env={}", from == AutoFrom::Env);
+            let session = match state {
+                State::BudgetReached => Session::at_budget(&tag, from),
+                State::CostUnreadable | State::MissingSessionId => {
+                    let session = Session::auto_from(&tag, from);
+                    session.seed_budget(json!(5), 70);
+                    session
+                }
+            };
+            let call = |tool: &str, input: Value| match state {
+                State::MissingSessionId => {
+                    session.call_payload(&session.anonymous_tool_payload(tool, input))
+                }
+                _ => session.call(tool, input),
+            };
+
+            // Act
+            let ask = call("Bash", json!({"command": "playbook mode ask"}));
+            let other = call("Bash", json!({"command": "npm test"}));
+            let read = call("Read", json!({"file_path": "/etc/hosts"}));
+
+            // Assert
+            let reason = other.reason(&label);
+            match state {
+                State::BudgetReached => {
+                    ask.reason(&label);
+                    assert!(reason.contains("budget reached"), "{label}: {reason}");
+                    assert!(reason.contains(&session.park_note()), "{label}: {reason}");
+                }
+                State::CostUnreadable | State::MissingSessionId => {
+                    assert!(!ask.is_denied(), "{label}: mode ask must be allowed");
+                    assert!(reason.contains("cost unreadable"), "{label}: {reason}");
+                    assert!(reason.contains("Stop here"), "{label}: {reason}");
+                }
+            }
+            assert!(!read.is_denied(), "{label}: the safe list stays allowed");
+        }
+    }
+}
+
+#[test]
+fn auto_cost_alone_allows_ask_user_question_under_the_cap() {
+    // Arrange: the real AskUserQuestion capture on this session, 1.00 spent
+    let session = Session::auto("ask-user-question");
+    session.seed_budget(json!(5), 70);
+    session.baseline_then_report("1.00");
+    let mut value: Value =
+        serde_json::from_str(include_str!("fixtures/hooks/pre-askuserquestion.json"))
+            .expect("fixture is JSON");
+    value["session_id"] = json!(session.sid);
+    value["transcript_path"] = json!(session.transcript().to_string_lossy());
+
+    // Act
+    let (out, code) = session.run_with(&value.to_string(), Some("0"), &[]);
+
+    // Assert
+    assert_eq!(code, 0);
+    assert!(out.trim().is_empty(), "printed {out}");
+}
+
+#[test]
+fn an_invalid_budget_in_the_config_falls_back_to_five_with_a_one_time_note() {
+    // Arrange: rows are the invalid values a hand-edited file can hold
+    let rows = [json!(0), json!("banana"), json!(-3), json!(0.004)];
+    for (n, invalid) in rows.into_iter().enumerate() {
+        let session = Session::auto(&format!("bad-budget-{n}"));
+        session.seed_budget(invalid.clone(), 70);
+        session.append_telemetry("0.00");
+
+        // Act
+        let first = session.bash("npm test");
+        session.append_telemetry("1.00");
+        let second = session.bash("npm test");
+        session.append_telemetry("5.00");
+        let at_default_cap = session.bash("npm test");
+
+        // Assert
+        let Outcome::Note(note) = first else {
+            panic!("{invalid}: the first call must warn about the budget, got {first:?}");
+        };
+        assert!(note.contains("auto.budgetUsd"), "{invalid}: {note}");
+        assert!(note.contains("0.01"), "{invalid}: {note}");
+        assert!(note.contains("$5"), "{invalid}: {note}");
+        assert_eq!(second, Outcome::Silent, "{invalid}: the note is one-time");
+        at_default_cap.reason(&format!("{invalid}: the default cap of 5 applies"));
+    }
+}
+
+#[test]
+fn a_warn_percentage_that_is_not_a_whole_number_from_one_to_a_hundred_falls_back_to_seventy() {
+    // Arrange: rows are (hand-edited warnPct, cents where the first note fires)
+    // against a cap of 5, so the default 70 means 350 cents.
+    let rows = [
+        (json!(0), 350),
+        (json!(150), 350),
+        (json!(70.5), 350),
+        (json!("high"), 350),
+        (json!(50), 250),
+    ];
+    for (n, (pct, tier_cents)) in rows.into_iter().enumerate() {
+        let session = Session::auto(&format!("bad-warn-pct-{n}"));
+        session.seed_budget(json!(5), pct.clone());
+        session.append_telemetry("0.00");
+        assert_eq!(
+            session.bash("git status"),
+            Outcome::Silent,
+            "{pct}: baseline"
+        );
+
+        // Act
+        session.append_telemetry(&format!("{:.2}", (tier_cents - 1) as f64 / 100.0));
+        let below = session.bash("npm test");
+        session.append_telemetry(&format!("{:.2}", tier_cents as f64 / 100.0));
+        let at_tier = session.bash("npm test");
+
+        // Assert
+        assert_eq!(below, Outcome::Silent, "{pct}: one cent under the tier");
+        assert!(
+            matches!(at_tier, Outcome::Note(_)),
+            "{pct}: the note is due at {tier_cents} cents: {at_tier:?}"
+        );
+    }
+}
+
+#[test]
+fn pre_existing_and_falling_cost_never_deny() {
+    // Arrange: rows are how call 1 meets a cost of 4.0 against a cap of 5
+    for (n, via_transcript) in [false, true].into_iter().enumerate() {
+        let session = Session::auto(&format!("no-deny-{n}"));
+        session.seed_budget(json!(5), 70);
+        if via_transcript {
+            write_cost(&session.transcript(), 4.0);
+        } else {
+            session.append_telemetry("4.0");
+        }
+
+        // Act: the first call already sees 4.0, which is past the warn tier in
+        // absolute terms but is the baseline
+        let first = session.bash("npm test");
+
+        // Assert
+        assert_eq!(
+            first,
+            Outcome::Silent,
+            "first call, transcript={via_transcript}"
+        );
+        assert!(session.warned_markers().is_empty());
+    }
+
+    // Arrange: a telemetry cost that drops below the baseline
+    let session = Session::auto("no-deny-negative");
+    session.seed_budget(json!(5), 70);
+    session.append_telemetry("4.0");
+    assert_eq!(session.bash("git status"), Outcome::Silent, "baseline call");
+
+    // Act
+    session.append_telemetry("3.0");
+    let lower = session.bash("npm test");
+    session.append_telemetry("4.5");
+    let climbing = session.bash("npm test");
+
+    // Assert
+    assert_eq!(lower, Outcome::Silent, "negative delta");
+    assert_eq!(climbing, Outcome::Silent, "delta of 50 cents");
+}
+
+#[test]
+fn eight_processes_crossing_the_warn_tier_together_leave_one_marker() {
+    // Smoke check: it can catch a gross failure, not prove the race is absent.
+    // Arrange: baseline 0.00 settled, then the tier is crossed before any call
+    let session = Session::auto("concurrent-warn");
+    session.seed_budget(json!(5), 70);
+    session.baseline_then_report("3.50");
+    let payload = session.tool_payload("Bash", json!({"command": "npm test"}));
+
+    // Act: start eight hook processes before any is waited on
+    let mut children: Vec<_> = (0..8)
+        .map(|_| {
+            let mut command = hook_command(&session.s, HOOK);
+            command
+                .env(INTERVAL_VAR, "0")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("playbook spawns")
+        })
+        .collect();
+    for child in &mut children {
+        child
+            .stdin
+            .take()
+            .expect("stdin is piped")
+            .write_all(payload.as_bytes())
+            .expect("stdin accepts the payload");
+    }
+    let outcomes: Vec<Outcome> = children
+        .into_iter()
+        .map(|child| {
+            let out = child.wait_with_output().expect("playbook exits");
+            assert_eq!(out.status.code(), Some(0));
+            outcome(&String::from_utf8_lossy(&out.stdout))
+        })
+        .collect();
+
+    // Assert: the marker was created once, and only its creator wrote a note
+    assert_eq!(session.warned_markers(), vec!["warned".to_string()]);
+    let notes = outcomes
+        .iter()
+        .filter(|o| matches!(o, Outcome::Note(_)))
+        .count();
+    assert_eq!(notes, 1, "outcomes: {outcomes:?}");
+    assert!(!outcomes.iter().any(Outcome::is_denied));
+}
+
+/// Makes `dir` read-only until dropped.
+#[cfg(unix)]
+struct ReadOnly(PathBuf);
+
+#[cfg(unix)]
+impl ReadOnly {
+    /// `None` when the mode does not stop this process writing, as for root.
+    fn lock(dir: &Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o555)).expect("chmod");
+        let guard = ReadOnly(dir.to_path_buf());
+        fs::write(dir.join("probe"), "").is_err().then_some(guard)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnly {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_baseline_that_cannot_be_stored_fails_closed() {
+    // Arrange: the session dir exists but cannot be written, so every call
+    // would otherwise take a fresh baseline and never see the spend grow
+    let session = Session::auto("unwritable-baseline");
+    session.seed_budget(json!(5), 70);
+    write_cost(&session.transcript(), 1.0);
+    fs::create_dir_all(session.dir()).expect("session dir");
+    let Some(_locked) = ReadOnly::lock(&session.dir()) else {
+        return;
+    };
+
+    // Act
+    let bash = session.bash("npm test");
+    let read = session.call("Read", json!({"file_path": "/etc/hosts"}));
+    let escape = session.bash("playbook mode ask");
+
+    // Assert
+    let reason = bash.reason("Bash");
+    assert!(reason.contains("cost unreadable"), "reason: {reason}");
+    assert!(!read.is_denied(), "the safe list stays allowed");
+    assert!(!escape.is_denied(), "the escape stays allowed");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stored_baseline_keeps_enforcing_when_a_later_write_fails() {
+    // Arrange: call 1 stores the baseline, then the session dir turns read-only
+    let session = Session::auto("unwritable-later");
+    session.seed_budget(json!(5), 70);
+    session.baseline_then_report("0.00");
+    let Some(_locked) = ReadOnly::lock(&session.dir()) else {
+        return;
+    };
+
+    // Act
+    session.append_telemetry("1.00");
+    let under = session.bash("npm test");
+    session.append_telemetry("5.00");
+    let at_cap = session.bash("npm test");
+
+    // Assert: the loaded baseline still measures the spend
+    assert_eq!(under, Outcome::Silent);
+    assert!(at_cap.reason("5.00 spent").contains("budget reached"));
+}
+
+#[test]
+fn a_model_missing_from_the_price_table_without_telemetry_fails_closed() {
+    // Arrange: a transcript whose only spend is on an unpriced model
+    let session = Session::auto("unpriced-no-telemetry");
+    session.seed_budget(json!(5), 70);
+    append(
+        &session.transcript(),
+        &message_line("msg_unpriced", "claude-model-not-in-the-table", 9_000_000),
+    );
+
+    // Act
+    let bash = session.bash("npm test");
+    let read = session.call("Read", json!({"file_path": "/etc/hosts"}));
+    let escape = session.bash("playbook mode ask");
+
+    // Assert
+    let reason = bash.reason("Bash");
+    assert!(reason.contains("cost unreadable"), "reason: {reason}");
+    assert!(!read.is_denied(), "the safe list stays allowed");
+    assert!(!escape.is_denied(), "the escape stays allowed");
+}
+
+#[test]
+fn an_unpriced_model_is_tolerated_when_telemetry_reports_the_cost() {
+    // Arrange
+    let session = Session::auto("unpriced-with-telemetry");
+    session.seed_budget(json!(5), 70);
+    session.append_telemetry("0.00");
+    append(
+        &session.transcript(),
+        &message_line("msg_unpriced", "claude-model-not-in-the-table", 9_000_000),
+    );
+
+    // Act
+    let first = session.bash("npm test");
+    session.append_telemetry("5.00");
+    let at_cap = session.bash("npm test");
+
+    // Assert: telemetry is the readable source, and it still trips the cap
+    assert_eq!(first, Outcome::Silent);
+    assert!(at_cap.reason("5.00 spent").contains("budget reached"));
+}
+
+#[test]
+fn a_config_that_turns_unreadable_mid_session_keeps_the_cap_on() {
+    // Arrange: a session at its cap whose config file then becomes garbage
+    let session = Session::at_budget("config-broken", AutoFrom::Config);
+    fs::write(session.tier_files()[0].1.clone(), "{not json").expect("config rewrite");
+
+    // Act
+    let bash = session.bash("npm test");
+
+    // Assert
+    let reason = bash.reason("npm test");
+    assert!(reason.contains("budget reached"), "reason: {reason}");
+}
+
+#[test]
+fn an_unreadable_config_does_not_start_enforcing_in_a_session_it_never_tracked() {
+    // Arrange: no state file exists for this session
+    let session = Session::auto("config-broken-fresh");
+    fs::write(session.tier_files()[0].1.clone(), "{not json").expect("config rewrite");
+
+    // Act
+    let (out, code) = session.run();
+
+    // Assert
+    assert_eq!(code, 0);
+    assert!(out.trim().is_empty(), "printed {out}");
+    assert!(!session.dir().join(STATE_FILE).exists());
+}
+
+impl Session {
+    fn tier_files(&self) -> [(&'static str, PathBuf); 3] {
+        let root = self.s.home.join(".config/playbook");
+        [
+            ("global", root.join("config.json")),
+            ("org", root.join("orgs/acme/config.json")),
+            ("repo", root.join("repos/acme/widgets/.config/config.json")),
+        ]
+    }
 }

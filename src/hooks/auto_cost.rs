@@ -8,25 +8,33 @@
 //! each read from its own byte offset) and the statusline telemetry. Values
 //! are rounded to integer cents before they are subtracted. The result is
 //! persisted as `<session dir>/auto-cost.json`.
+//!
+//! At the warn tier the hook adds one note, and at the cap it denies every
+//! tool outside a short safe list. When the spend cannot be read, including a
+//! transcript with unpriced models and no telemetry, it fails closed the same
+//! way.
 
 use crate::common::atomic::{remove_stale_lock_dir, with_dir_lock, STALE_LOCK_AGE};
 use crate::common::mode::{resolve, resolve_for_hook_at, Mode, Source};
+use crate::common::paths::playbook_root_from;
 use crate::common::payload::Payload;
-use crate::common::{home_dir, paths::playbook_root_from, repo_slug, session_dir};
+use crate::common::{
+    emit_pre_context, emit_pre_deny, home_dir, repo_slug, session_dir, session_id,
+};
 use crate::config;
 use crate::usage::claude_code::{one_hour_cache_tokens, token};
 use crate::usage::UsageEvent;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{hash_map::DefaultHasher, BTreeMap};
-use std::fs::{self, File};
-use std::hash::{Hash, Hasher};
+use std::collections::BTreeMap;
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const INTERVAL_VAR: &str = "PLAYBOOK_AUTO_COST_INTERVAL_MS";
 const DEFAULT_INTERVAL_MS: u64 = 2000;
+const STATE_FILE: &str = "auto-cost.json";
 const TELEMETRY_TAIL_BYTES: u64 = 16 * 1024;
 
 #[derive(Default, Serialize, Deserialize)]
@@ -36,6 +44,17 @@ struct State {
     transcript: Transcript,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     telemetry: Option<Telemetry>,
+}
+
+impl State {
+    /// Whether the spend can be trusted: a transcript with every message
+    /// priced, or the statusline telemetry. A model missing from the price
+    /// table counts as free, so without telemetry that cost is a guess.
+    fn is_readable(&self) -> bool {
+        let files = &self.transcript.files;
+        let priced = !files.is_empty() && files.values().all(|file| !file.unpriced);
+        priced || self.telemetry.is_some()
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -77,10 +96,172 @@ struct Telemetry {
     cents: i64,
 }
 
+const DEFAULT_BUDGET_CENTS: i64 = 500;
+const DEFAULT_WARN_PCT: u64 = 70;
+const SAFE_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
+const SAFE_COMMANDS: [&str; 4] = [
+    "git status",
+    "git diff",
+    "playbook mode status",
+    "playbook mode status --json",
+];
+const MODE_ESCAPE: &str = "playbook mode ask";
+
 pub fn run(payload: &Payload) {
-    if auto_mode() {
-        refresh(payload);
+    let env = std::env::var("PLAYBOOK_MODE").ok();
+    let from_env = resolve(None, env.as_deref(), None);
+    if from_env.source == Source::Env && from_env.mode == Mode::Ask {
+        return;
     }
+    let home = home_dir();
+    let slug = repo_slug();
+    let slug = (!slug.is_empty()).then_some(slug.as_str());
+    let root = playbook_root_from(&home);
+    let is_auto = resolve_for_hook_at(env.as_deref(), &home, slug).mode == Mode::Auto;
+    if is_auto || config_broke_mid_session(payload, &root, &home, slug) {
+        enforce(payload, &Limits::read(&home, slug));
+    }
+}
+
+/// An unreadable config resolves to `ask`, which would switch the cap off for
+/// a session it already tracks, so such a session stays guarded.
+fn config_broke_mid_session(
+    payload: &Payload,
+    root: &Path,
+    home: &Path,
+    slug: Option<&str>,
+) -> bool {
+    let sid = session_id(payload);
+    !sid.is_empty()
+        && config::resolve("mode", home, slug).is_err()
+        && root.join("runtime").join(sid).join(STATE_FILE).is_file()
+}
+
+/// The cap and the warn tier in integer cents.
+struct Limits {
+    cap: i64,
+    warn: i64,
+    pct: u64,
+    budget_is_valid: bool,
+}
+
+impl Limits {
+    fn read(home: &Path, slug: Option<&str>) -> Self {
+        let value = |key: &str| {
+            config::resolve(key, home, slug)
+                .ok()
+                .map(|(value, _)| value)
+        };
+        let budget = value("auto.budgetUsd")
+            .and_then(|value| value.as_f64())
+            .map(to_cents)
+            .filter(|cents| *cents > 0);
+        let pct = value("auto.warnPct")
+            .and_then(|value| value.as_u64())
+            .filter(|pct| (1..=100).contains(pct))
+            .unwrap_or(DEFAULT_WARN_PCT);
+        let cap = budget.unwrap_or(DEFAULT_BUDGET_CENTS);
+        Limits {
+            cap,
+            warn: (cap as f64 * pct as f64 / 100.0).round() as i64,
+            pct,
+            budget_is_valid: budget.is_some(),
+        }
+    }
+}
+
+fn enforce(payload: &Payload, limits: &Limits) {
+    let state = refresh(payload).filter(State::is_readable);
+    let dir = PathBuf::from(session_dir(payload));
+    let park_note = dir.join("park-note.md");
+    let call = ToolCall::of(payload);
+    let Some(state) = state else {
+        if !call.is_safe(None) && !call.is_mode_escape() {
+            emit_pre_deny(UNREADABLE_REASON);
+        }
+        return;
+    };
+    if state.effective_cents >= limits.cap {
+        if !call.is_safe(Some(&park_note)) {
+            emit_pre_deny(&budget_reached_reason(&park_note));
+        }
+        return;
+    }
+    let mut notes = Vec::new();
+    if !limits.budget_is_valid && claim(&dir.join("budget-note")) {
+        notes.push(INVALID_BUDGET_NOTE.to_string());
+    }
+    if state.effective_cents >= limits.warn && claim(&dir.join("warned")) {
+        notes.push(warn_note(limits));
+    }
+    if !notes.is_empty() {
+        emit_pre_context("PreToolUse", &notes.join(" "));
+    }
+}
+
+const UNREADABLE_REASON: &str = "cost unreadable: the session spend can't be checked. Stop here and report to the user. Reading files still works, and `playbook mode ask` is allowed.";
+const INVALID_BUDGET_NOTE: &str = "auto.budgetUsd must be a number of at least 0.01, so the default cap of $5 applies. Fix it with `playbook config set auto.budgetUsd <usd>`.";
+
+fn budget_reached_reason(park_note: &Path) -> String {
+    format!(
+        "budget reached: write a park note to {} describing where you stopped, then report to the user. Only the user can raise the cap or start a new session.",
+        park_note.display()
+    )
+}
+
+fn warn_note(limits: &Limits) -> String {
+    format!(
+        "AUTO MODE budget: {}% of the ${:.2} cap is spent. Finish the current step, then report to the user before the cap parks the session.",
+        limits.pct,
+        limits.cap as f64 / 100.0
+    )
+}
+
+/// Creates `marker` exclusively, so of concurrent hook processes only one wins.
+fn claim(marker: &Path) -> bool {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(marker)
+        .is_ok()
+}
+
+struct ToolCall {
+    tool: String,
+    command: String,
+    file_path: String,
+}
+
+impl ToolCall {
+    fn of(payload: &Payload) -> Self {
+        ToolCall {
+            tool: payload.field(".tool_name"),
+            command: payload.field(".tool_input.command"),
+            file_path: payload.field(".tool_input.file_path"),
+        }
+    }
+
+    /// Reading, the exact read-only commands, and the model's own park note
+    /// when the caller has one to allow.
+    fn is_safe(&self, park_note: Option<&Path>) -> bool {
+        match self.tool.as_str() {
+            tool if SAFE_TOOLS.contains(&tool) => true,
+            "Bash" => SAFE_COMMANDS.contains(&self.command.as_str()),
+            "Write" => park_note.is_some_and(|note| is_same_path(Path::new(&self.file_path), note)),
+            _ => false,
+        }
+    }
+
+    fn is_mode_escape(&self) -> bool {
+        self.tool == "Bash" && self.command == MODE_ESCAPE
+    }
+}
+
+/// Compares paths lexically, ignoring `.` segments. A `..` never matches, and
+/// the path is not resolved on disk, so a symlinked home still compares equal.
+fn is_same_path(path: &Path, expected: &Path) -> bool {
+    !path.components().any(|part| part == Component::ParentDir)
+        && path.components().eq(expected.components())
 }
 
 fn refresh(payload: &Payload) -> Option<State> {
@@ -88,7 +269,7 @@ fn refresh(payload: &Payload) -> Option<State> {
     if dir.as_os_str().is_empty() {
         return None;
     }
-    let state_path = dir.join("auto-cost.json");
+    let state_path = dir.join(STATE_FILE);
     let now = now_ms();
     if let Some(state) = load::<State>(&state_path) {
         if now.saturating_sub(state.computed_at_ms) < interval_ms() {
@@ -331,79 +512,6 @@ fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64)
-}
-
-fn auto_mode() -> bool {
-    let env = std::env::var("PLAYBOOK_MODE").ok();
-    let from_env = resolve(None, env.as_deref(), None);
-    if from_env.source == Source::Env {
-        return from_env.mode == Mode::Auto;
-    }
-    config_mode_is_auto()
-}
-
-#[derive(Serialize, Deserialize)]
-struct ModeCache {
-    cwd: String,
-    slug: String,
-    stamps: Vec<Option<(u64, u64)>>,
-    auto: bool,
-}
-
-/// The configured mode, cached across hook processes. An entry is reused
-/// while the cwd and the mtime and length of every config tier are unchanged,
-/// which saves the `git` call that finds the repo slug. It lives in the temp
-/// dir so ask mode never writes under the runtime root.
-fn config_mode_is_auto() -> bool {
-    let home = home_dir();
-    let cwd = std::env::current_dir()
-        .map(|dir| dir.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let cache_path = mode_cache_path(&home);
-    if let Some(cache) = load::<ModeCache>(&cache_path) {
-        if cache.cwd == cwd && cache.stamps == config_stamps(&home, &cache.slug) {
-            return cache.auto;
-        }
-    }
-    let slug = repo_slug();
-    let resolved = resolve_for_hook_at(None, &home, (!slug.is_empty()).then_some(slug.as_str()));
-    let auto = resolved.mode == Mode::Auto;
-    let stamps = config_stamps(&home, &slug);
-    write_atomic(
-        &cache_path,
-        &ModeCache {
-            cwd,
-            slug,
-            stamps,
-            auto,
-        },
-    );
-    auto
-}
-
-fn mode_cache_path(home: &Path) -> PathBuf {
-    let mut hasher = DefaultHasher::new();
-    home.hash(&mut hasher);
-    std::env::temp_dir().join(format!(
-        "playbook-auto-cost-mode-{:x}.json",
-        hasher.finish()
-    ))
-}
-
-fn config_stamps(home: &Path, slug: &str) -> Vec<Option<(u64, u64)>> {
-    let root = playbook_root_from(home);
-    let mut paths = vec![config::global_config_path(&root)];
-    if let Some((owner, repo)) = slug.split_once('/') {
-        paths.push(config::org_config_path(&root, owner));
-        paths.push(config::repo_config_path(&root, owner, repo));
-    }
-    paths.iter().map(|path| stamp(path)).collect()
-}
-
-fn stamp(path: &Path) -> Option<(u64, u64)> {
-    let meta = fs::metadata(path).ok()?;
-    let nanos = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some((nanos.as_nanos() as u64, meta.len()))
 }
 
 fn load<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {

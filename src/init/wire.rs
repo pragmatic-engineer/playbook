@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Wires the 16 hooks Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command: 12 functional hooks plus 4 guards.
+//! Wires the 17 hooks Claude Code can invoke into `settings.json` as a bare
+//! `playbook hook <name>` command: 13 functional hooks plus 4 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
 //! two mirror different sources: `PORTED_HOOK_SPECS` is the 11 hooks
@@ -56,8 +56,9 @@ struct HookSpec {
 /// The functional hooks, already ported to Rust, rewired here to the bare
 /// `playbook hook <name>` form. Eleven come from `hooks/hooks.json`, ported
 /// line for line (`session-clean-exit` fires on both `Stop` and
-/// `SessionEnd`), and `auto-guard` is new. Together with `GUARD_SPECS` below
-/// these are exactly the 16 `HookName` variants `src/lib.rs` declares.
+/// `SessionEnd`), while `auto-guard` and `auto-cost` have no `hooks/hooks.json`
+/// entry. Together with `GUARD_SPECS` below these are exactly the 17
+/// `HookName` variants `src/lib.rs` declares.
 ///
 /// Divergence from `hooks/hooks.json`'s literal shape: that file ships
 /// `Stop`'s two hooks (`session-clean-exit`, `memory-capture`) as two
@@ -156,7 +157,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: Some("AskUserQuestion"),
         name: "auto-guard",
         if_cond: None,
-        timeout: None,
+        timeout: Some(10),
         ported: true,
         also_replaces: None,
     },
@@ -165,7 +166,16 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: None,
         name: "auto-guard",
         if_cond: None,
-        timeout: None,
+        timeout: Some(10),
+        ported: true,
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "PreToolUse",
+        matcher: None,
+        name: "auto-cost",
+        if_cond: None,
+        timeout: Some(10),
         ported: true,
         also_replaces: None,
     },
