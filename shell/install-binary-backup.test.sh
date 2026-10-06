@@ -74,7 +74,7 @@ cat > "$FAILCP_BIN/cp" <<'STUB'
 for a in "$@"; do
   case "$a" in *.playbook.bak.*) exit 1 ;; esac
 done
-exec command -p cp "$@"
+exec /bin/cp "$@"
 STUB
 chmod +x "$FAILCP_BIN/cp"
 

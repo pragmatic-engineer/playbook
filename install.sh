@@ -312,7 +312,9 @@ backup_previous_binary() {
     # Newest first by modification time; drop everything past the third.
     # shellcheck disable=SC2012 # names are ours: version tokens are validated above
     ls -t "$PLAYBOOK_BIN_DIR"/playbook.*.bak 2>/dev/null | tail -n +4 \
-        | while IFS= read -r _old; do [ -n "$_old" ] && rm -f "$_old"; done \
+        | while IFS= read -r _old; do
+            [ -n "$_old" ] && rm -f "$_old" && log "Removed old backup $_old"
+        done \
         || true
 }
 
