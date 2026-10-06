@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Wires the 15 hooks Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command: 11 functional hooks plus 4 guards.
+//! Wires the 16 hooks Claude Code can invoke into `settings.json` as a bare
+//! `playbook hook <name>` command: 12 functional hooks plus 4 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
 //! two mirror different sources: `PORTED_HOOK_SPECS` is the 11 hooks
@@ -53,12 +53,11 @@ struct HookSpec {
     ported: bool,
 }
 
-/// The 11 functional hooks `hooks/hooks.json` used to register, already
-/// ported to Rust, rewired here to the bare `playbook hook <name>` form
-/// (one event/matcher shape each, ported line for line from that file, 12
-/// entries since `session-clean-exit` fires on both `Stop` and
-/// `SessionEnd`). Together with `GUARD_SPECS` below these are exactly the
-/// 15 `HookName` variants `src/lib.rs` declares.
+/// The functional hooks, already ported to Rust, rewired here to the bare
+/// `playbook hook <name>` form. Eleven come from `hooks/hooks.json`, ported
+/// line for line (`session-clean-exit` fires on both `Stop` and
+/// `SessionEnd`), and `auto-guard` is new. Together with `GUARD_SPECS` below
+/// these are exactly the 16 `HookName` variants `src/lib.rs` declares.
 ///
 /// Divergence from `hooks/hooks.json`'s literal shape: that file ships
 /// `Stop`'s two hooks (`session-clean-exit`, `memory-capture`) as two
@@ -147,6 +146,24 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "UserPromptSubmit",
         matcher: None,
         name: "auto-model-detect",
+        if_cond: None,
+        timeout: None,
+        ported: true,
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "PreToolUse",
+        matcher: Some("AskUserQuestion"),
+        name: "auto-guard",
+        if_cond: None,
+        timeout: None,
+        ported: true,
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "UserPromptSubmit",
+        matcher: None,
+        name: "auto-guard",
         if_cond: None,
         timeout: None,
         ported: true,

@@ -689,6 +689,7 @@ pub enum HookName {
     BgAwaitGuard,
     NoSlopGuard,
     PrecommitCheck,
+    AutoGuard,
 }
 
 /// `cc` launcher subcommands, matching `shell/shared/dispatch.sh:59-100`. No
