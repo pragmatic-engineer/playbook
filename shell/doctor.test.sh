@@ -124,7 +124,7 @@ STUB
 
 # ── Layer 2: safety guards wired ────────────────────────────────────────────
 
-GUARDS=(rm-workspace-guard bg-await-guard no-slop-guard precommit-check)
+GUARDS=(rm-workspace-guard bg-await-guard no-slop-guard precommit-check commit-message-sanitizer)
 
 # Args: home dir, then one "name:command" pair per hooks.PreToolUse entry to
 # write. Lets a scenario wire a guard to an arbitrary command string (its
@@ -158,13 +158,13 @@ run_layer2() {
   HOME="$home" PATH="$path" bash -c "$LAYER2" 2>&1
 }
 
-# A: all four guards wired in their bare binary form.
+# A: all five guards wired in their bare binary form.
 scenario_layer2_all_wired() {
   local home="$WORK/l2-a" bin="$WORK/l2-a-bin" out
   write_wired_settings "$home" "${GUARDS[@]}"
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
-  [[ "$out" == "wired=4/4" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == "wired=5/5" ]] || { echo "  got: $out"; return 1; }
 }
 
 # B: precommit-check is still on its legacy `.sh` command from before this
@@ -177,11 +177,12 @@ scenario_layer2_legacy_command_not_wired() {
     "rm-workspace-guard:playbook hook rm-workspace-guard" \
     "bg-await-guard:playbook hook bg-await-guard" \
     "no-slop-guard:playbook hook no-slop-guard" \
-    "precommit-check:~/.claude/hooks/precommit-check.sh"
+    "precommit-check:~/.claude/hooks/precommit-check.sh" \
+    "commit-message-sanitizer:playbook hook commit-message-sanitizer"
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
-  [[ "$out" == "wired=3/4"* ]] || { echo "  wired count wrong: $out"; return 1; }
+  [[ "$out" == "wired=4/5"* ]] || { echo "  wired count wrong: $out"; return 1; }
 }
 
 # C: a near-miss command that merely contains a guard's name as a substring
@@ -193,7 +194,8 @@ scenario_layer2_near_miss_command_not_wired() {
     "rm-workspace-guard:playbook hook rm-workspace-guard-legacy" \
     "bg-await-guard:playbook hook bg-await-guard" \
     "no-slop-guard:playbook hook no-slop-guard" \
-    "precommit-check:playbook hook precommit-check"
+    "precommit-check:playbook hook precommit-check" \
+    "commit-message-sanitizer:playbook hook commit-message-sanitizer"
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == *"rm-workspace-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
@@ -202,7 +204,7 @@ scenario_layer2_near_miss_command_not_wired() {
 # D: bg-await-guard is not wired into settings.json at all.
 scenario_layer2_not_wired() {
   local home="$WORK/l2-d" bin="$WORK/l2-d-bin" out
-  write_wired_settings "$home" rm-workspace-guard no-slop-guard precommit-check
+  write_wired_settings "$home" rm-workspace-guard no-slop-guard precommit-check commit-message-sanitizer
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == *"bg-await-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
@@ -210,24 +212,36 @@ scenario_layer2_not_wired() {
 
 # E: the fourth-guard regression, specifically. The previous version of this
 # layer matched only three guard names and passed on "3 or more wired", so a
-# missing precommit-check read as healthy. Wire only the other three and
-# require the count to say 3/4, not 4/4, and to name precommit-check as
+# missing precommit-check read as healthy. Wire only the other four and
+# require the count to say 4/5, not 5/5, and to name precommit-check as
 # NOT_WIRED. A test that only checked the other three guards would let this
 # exact regression back in.
 scenario_layer2_precommit_check_counted() {
   local home="$WORK/l2-e" bin="$WORK/l2-e-bin" out
-  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard
+  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard commit-message-sanitizer
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
-  [[ "$out" == "wired=3/4"* ]] || { echo "  wired count did not drop: $out"; return 1; }
+  [[ "$out" == "wired=4/5"* ]] || { echo "  wired count did not drop: $out"; return 1; }
   [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
 
-run_scenario "A: all four guards wired in bare form -> wired=4/4"                   scenario_layer2_all_wired
+# F: the commit-message-sanitizer is part of the count too. Wire only the other
+# four and require 4/5 and a NOT_WIRED naming it.
+scenario_layer2_commit_message_guard_counted() {
+  local home="$WORK/l2-f" bin="$WORK/l2-f-bin" out
+  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard precommit-check
+  write_stub_binary "$bin" ""
+  out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "wired=4/5"* ]] || { echo "  wired count did not drop: $out"; return 1; }
+  [[ "$out" == *"commit-message-sanitizer:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
+}
+
+run_scenario "A: all five guards wired in bare form -> wired=5/5"                   scenario_layer2_all_wired
 run_scenario "B: guard still on its legacy .sh command -> NOT_WIRED"                scenario_layer2_legacy_command_not_wired
 run_scenario "C: a near-miss command must not count as wired (exact-match pin)"     scenario_layer2_near_miss_command_not_wired
 run_scenario "D: guard not wired at all -> NOT_WIRED"                               scenario_layer2_not_wired
 run_scenario "E: precommit-check is counted, not silently dropped to '3 or more'"   scenario_layer2_precommit_check_counted
+run_scenario "F: commit-message-sanitizer is counted -> NOT_WIRED when missing"         scenario_layer2_commit_message_guard_counted
 
 # ── Layer 5: status line matches the shipped copy ───────────────────────────
 

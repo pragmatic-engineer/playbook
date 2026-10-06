@@ -98,3 +98,7 @@ again to add what auto mode ships: the `auto-guard` hook on `AskUserQuestion`
 and on `UserPromptSubmit`, the `auto-cost` hook on every `PreToolUse`, and the
 `Bash(playbook mode status:*)` and `Bash(playbook mode ask)` allowlist
 entries. These are intentional additions, not a drift to hide.
+
+**Note (2026-10-07):** the two `setup-local.*.json` fixtures were regenerated
+again to add the `commit-message-sanitizer` hook to the `Bash` `PreToolUse` group
+and a `Bash` `PostToolUse` group. Intentional additions, not a drift to hide.

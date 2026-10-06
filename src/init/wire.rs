@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Wires the 17 hooks Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command: 13 functional hooks plus 4 guards.
+//! Wires the 18 hooks Claude Code can invoke into `settings.json` as a bare
+//! `playbook hook <name>` command: 13 functional hooks plus 5 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
 //! two mirror different sources: `PORTED_HOOK_SPECS` is the 11 hooks
@@ -57,7 +57,7 @@ struct HookSpec {
 /// `playbook hook <name>` form. Eleven come from `hooks/hooks.json`, ported
 /// line for line (`session-clean-exit` fires on both `Stop` and
 /// `SessionEnd`), while `auto-guard` and `auto-cost` have no `hooks/hooks.json`
-/// entry. Together with `GUARD_SPECS` below these are exactly the 17
+/// entry. Together with `GUARD_SPECS` below these are exactly the 18
 /// `HookName` variants `src/lib.rs` declares.
 ///
 /// Divergence from `hooks/hooks.json`'s literal shape: that file ships
@@ -259,6 +259,26 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "precommit-check",
         if_cond: Some("Bash(git commit:*)"),
         timeout: Some(10),
+        ported: true,
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "PreToolUse",
+        matcher: Some("Bash"),
+        name: "commit-message-sanitizer",
+        if_cond: None,
+        timeout: Some(10),
+        ported: true,
+        also_replaces: None,
+    },
+    HookSpec {
+        // The backstop for what the PreToolUse rewrite did not see. It can
+        // amend a signed commit and edit a PR, so it gets a longer timeout.
+        event: "PostToolUse",
+        matcher: Some("Bash"),
+        name: "commit-message-sanitizer",
+        if_cond: None,
+        timeout: Some(60),
         ported: true,
         also_replaces: None,
     },

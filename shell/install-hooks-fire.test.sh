@@ -5,7 +5,7 @@
 # install-hooks-fire.test.sh: WU-11's headline acceptance criterion. Installs
 # into a scratch HOME via install.sh (the PLAYBOOK_SRC local-source seam, no
 # network), reads the command strings the resulting settings.json carries,
-# asserts exactly 17 distinct hook names (13 functional hooks and 4 safety
+# asserts exactly 18 distinct hook names (13 functional hooks and 5 safety
 # guards, all wired as `playbook hook <name>`), then
 # EXECUTES every one of them with a hook-specific payload and asserts a
 # hook-specific observable effect. The name list is derived from settings.json
@@ -60,7 +60,7 @@ fi
 SETTINGS="$CH/settings.json"
 [ -f "$SETTINGS" ] || { fail "settings.json not written by install"; cat "$WORK/install.log"; }
 
-# --- 1. exactly 17 distinct hook names -------------------------------------
+# --- 1. exactly 18 distinct hook names -------------------------------------
 # Ported hooks: bare `playbook hook <name>`. Guards: `~/.claude/hooks/<name>.sh`.
 # Needs the raw command strings themselves (to strip down to bare names below),
 # not a count, so this uses the raw hook-commands listing rather than a
@@ -73,10 +73,10 @@ NAMES_FILE="$WORK/names.txt"
   | sort -u > "$NAMES_FILE"
 
 n_names="$(wc -l < "$NAMES_FILE" | tr -d ' ')"
-if [ "${n_names:-0}" -eq 17 ]; then
-  pass "settings.json wires exactly 17 distinct hook names"
+if [ "${n_names:-0}" -eq 18 ]; then
+  pass "settings.json wires exactly 18 distinct hook names"
 else
-  fail "expected 17 distinct hook names, got ${n_names:-0}: $(tr '\n' ' ' < "$NAMES_FILE")"
+  fail "expected 18 distinct hook names, got ${n_names:-0}: $(tr '\n' ' ' < "$NAMES_FILE")"
 fi
 
 # --- 2. execute every one and assert its observable -------------------------
@@ -247,6 +247,18 @@ test_no_slop_guard() {
   [[ "$out" == *'"permissionDecision":"deny"'* ]]
 }
 
+test_commit_message_sanitizer() {
+  local bad ok payload out
+  bad="git commit -m 'feat: x' -m 'Claude-Session: https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQr'"
+  payload="$(printf '{"tool_input":{"command":%s}}' "$(json_str "$bad")")"
+  out="$(run_guard commit-message-sanitizer "$payload")"
+  [[ "$out" == *'"updatedInput"'* && "$out" != *"permissionDecision"* && "$out" != *"Claude-Session: https"* ]] || return 1
+  ok="git commit -m 'feat: x' -m 'Refs: PLAT-1'"
+  payload="$(printf '{"tool_input":{"command":%s}}' "$(json_str "$ok")")"
+  out="$(run_guard commit-message-sanitizer "$payload")"
+  [ -z "$out" ]
+}
+
 test_precommit_check() {
   local repo cmd payload out
   repo="$(mktemp -d)"
@@ -321,6 +333,7 @@ run_case_for() {  # <name>: dispatches to the matching test_*, or returns 9
     rm-workspace-guard)   test_rm_workspace_guard ;;
     bg-await-guard)       test_bg_await_guard ;;
     no-slop-guard)        test_no_slop_guard ;;
+    commit-message-sanitizer) test_commit_message_sanitizer ;;
     precommit-check)      test_precommit_check ;;
     auto-guard)           test_auto_guard ;;
     auto-cost)            test_auto_cost ;;
