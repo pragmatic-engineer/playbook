@@ -6,10 +6,10 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, pr,
+    agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, mode, pr,
     settings, trust, usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand,
     DashboardCommand, DoctorCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
-    MemoryCommand, PrCommand, SettingsCommand, UsageCommand, WorktreeCommand,
+    MemoryCommand, ModeArg, ModeCommand, PrCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -570,6 +570,29 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+        }
+        Command::Mode { sub } => {
+            let to_mode = |arg: ModeArg| match arg {
+                ModeArg::Ask => common::mode::Mode::Ask,
+                ModeArg::Auto => common::mode::Mode::Auto,
+            };
+            match sub {
+                ModeCommand::Auto => exit_on_mode_error(mode::run_set(common::mode::Mode::Auto)),
+                ModeCommand::Ask => exit_on_mode_error(mode::run_set(common::mode::Mode::Ask)),
+                ModeCommand::Status { json, flag } => {
+                    println!("{}", mode::run_status(flag.map(to_mode), json));
+                }
+            }
+        }
+    }
+}
+
+fn exit_on_mode_error(result: Result<String, String>) {
+    match result {
+        Ok(output) => println!("{output}"),
+        Err(err) => {
+            eprintln!("mode: {err}");
+            std::process::exit(1);
         }
     }
 }
