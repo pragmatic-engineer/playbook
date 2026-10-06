@@ -145,6 +145,42 @@ pub fn resolve(
     ))
 }
 
+/// A value `resolve_valid` dropped: the tier that held it and why it was
+/// refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IgnoredValue {
+    pub tier: Source,
+    pub warning: String,
+}
+
+/// `resolve`, except a string outside the key's allowed enum values (a file
+/// edited by hand, since `write::set` refuses it) is dropped in favour of the
+/// built-in default, with lower tiers not consulted. The third element
+/// describes the dropped value.
+pub fn resolve_valid(
+    key: &str,
+    home: &Path,
+    repo_slug: Option<&str>,
+) -> Result<(Value, Source, Option<IgnoredValue>), ConfigError> {
+    let (value, source) = resolve(key, home, repo_slug)?;
+    let Some(allowed) = keys::allowed_enum_values(key) else {
+        return Ok((value, source, None));
+    };
+    if value.as_str().is_some_and(|s| allowed.contains(&s)) {
+        return Ok((value, source, None));
+    }
+    let warning = format!(
+        "ignoring invalid value {value} for config key {key}, valid values are: {}",
+        allowed.join(", ")
+    );
+    let default = keys::default_value(key).expect("key was already validated as known");
+    let ignored = IgnoredValue {
+        tier: source,
+        warning,
+    };
+    Ok((default, Source::Default, Some(ignored)))
+}
+
 /// The global tier's config file, directly under `root`. Shared by `resolve`
 /// and `write::tier_path` so the two never drift on where this file lives.
 pub(crate) fn global_config_path(root: &Path) -> PathBuf {

@@ -398,3 +398,38 @@ fn set_outside_any_git_repo_with_default_repo_tier_fails_clearly_not_a_crash() {
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.is_empty());
 }
+
+/// Plants `contents` as the config file at `path`, creating its directory.
+fn plant_config(path: &Path, contents: &str) {
+    fs::create_dir_all(path.parent().expect("config path has a parent")).expect("config dir");
+    fs::write(path, contents).expect("config file should be writable");
+}
+
+#[test]
+fn get_and_list_name_the_tier_of_an_invalid_value_they_ignore() {
+    // Arrange: an invalid repo value over a valid global one. The invalid
+    // value is dropped for the default, and the lower tier is not consulted.
+    let repo = seeded_repo("ignored-tier");
+    let home = scratch_dir("ignored-tier-home");
+    plant_config(&repo_config_path(&home), r#"{"mode":"banana"}"#);
+    plant_config(&global_config_path(&home), r#"{"mode":"auto"}"#);
+    let expected = "mode: ask (source: default, repo value ignored)";
+
+    for (command, args) in [
+        ("config get", vec!["config", "get", "mode"]),
+        ("config list", vec!["config", "list"]),
+    ] {
+        // Act
+        let out = run_playbook(&repo, &home, &args);
+
+        // Assert
+        assert!(out.status.success(), "{command}: {}", stderr_of(&out));
+        let stdout = stdout_of(&out);
+        assert!(stdout.contains(expected), "{command}: {stdout}");
+        let stderr = stderr_of(&out);
+        assert!(
+            stderr.contains(&format!("{command}: warning")) && stderr.contains("banana"),
+            "{command}: {stderr}"
+        );
+    }
+}

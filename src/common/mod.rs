@@ -10,6 +10,7 @@ pub mod config_hash;
 pub mod counter;
 pub mod emit;
 pub mod headless;
+pub mod mode;
 pub mod paths;
 pub mod payload;
 pub mod proc;

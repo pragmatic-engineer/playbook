@@ -14,6 +14,11 @@ pub const KNOWN_KEYS: &[&str] = &[
     "worktreeCleanup.enabled",
     "worktreeCleanup.staleAfterDays",
     "worktreeCleanup.conflictGracePeriodDays",
+    "mode",
+    "auto.budgetUsd",
+    "auto.warnPct",
+    "fix.maxFiles",
+    "fix.maxLines",
 ];
 
 /// The default value for a known key, or `None` if `key` is not in
@@ -25,6 +30,11 @@ pub fn default_value(key: &str) -> Option<Value> {
         "worktreeCleanup.enabled" => Some(Value::Bool(true)),
         "worktreeCleanup.staleAfterDays" => Some(Value::Number(30.into())),
         "worktreeCleanup.conflictGracePeriodDays" => Some(Value::Number(90.into())),
+        "mode" => Some(Value::String("ask".to_string())),
+        "auto.budgetUsd" => Some(Value::Number(5.into())),
+        "auto.warnPct" => Some(Value::Number(70.into())),
+        "fix.maxFiles" => Some(Value::Number(3.into())),
+        "fix.maxLines" => Some(Value::Number(500.into())),
         _ => None,
     }
 }
@@ -34,6 +44,7 @@ pub fn default_value(key: &str) -> Option<Value> {
 pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
     match key {
         "autoReview.type" => Some(&["quick", "deep"]),
+        "mode" => Some(&["ask", "auto"]),
         _ => None,
     }
 }
