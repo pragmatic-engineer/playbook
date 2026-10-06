@@ -1,7 +1,7 @@
 ---
 description: Use for substantial, risky, or cross-cutting PRs. A swarm of specialist reviewer subagents (logic, test, security, data, types, perf, plus conditional) run in parallel, consolidated and fact-checked, then posted as a pending GitHub review. Heavier than /playbook:quick-review.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--help]"
+argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--auto] [--ask] [--help]"
 model: opus
 effort: high
 ---
@@ -30,6 +30,8 @@ OPTIONS:
   --preset <name>   Named reviewer set: security | architecture | data | docs
   --self            Local self-review, never posts to GitHub (default when no
                     PR number is given, or when the PR is yours)
+  --auto            Run unattended; implies --self
+  --ask             Force the interactive mode
 
 EXAMPLES:
   /playbook:deep-review               Review the current branch's PR, report only, never posts
@@ -39,6 +41,23 @@ EXAMPLES:
 ```
 
 No PR number given means no posting: with nothing to disambiguate which PR you meant to publish to, the safe default is a local report, same as passing `--self` explicitly. A PR authored by you never posts either, even with a PR number given: GitHub blocks approve/request-changes from the author, and a comment-only review of your own PR has no independent reviewer behind it, so it gets the same report-only treatment as `--self`. Pass a PR number for someone else's PR to post.
+
+## Step 0: Read the run mode
+
+Do this first, before Step 1. Read the mode from the CLI:
+
+```bash
+playbook mode status --json
+```
+
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+- **`ask` mode:** behave exactly as this file describes.
+- **`auto` mode:** follow the Auto path below.
+
+### Auto path
+
+Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set `RUN_MODE=auto` at the top of the Step 1 block (use `ask` otherwise), so `SELF_MODE` is true. The review runs and reports locally, and nothing is posted to GitHub, because a posted review speaks as you.
 
 ## Reviewer Swarm
 
@@ -53,7 +72,7 @@ No PR number given means no posting: with nothing to disambiguate which PR you m
 | types | `any`, unsafe casts (`as`) instead of runtime parsing at a boundary, non-null assertions (`!`), weak typing (language-appropriate) |
 | perf | N+1, unbounded data, connection leaks, work inside loops |
 
-**Conditional reviewers** (added in `auto` mode when the diff shows the trigger):
+**Conditional reviewers** (added by default when the diff shows the trigger):
 
 | Reviewer | Trigger |
 | --- | --- |
@@ -87,6 +106,8 @@ Invoke the `playbook:grounding-review` and `playbook:writing-style` skills befor
 
 ```bash
 ARGS="$ARGUMENTS"
+# Set RUN_MODE=auto here when Step 0 read auto mode; auto implies --self.
+RUN_MODE=ask
 PR_ARG=$(echo "$ARGS" | tr ' ' '\n' | grep -E '^#?[0-9]+$' | head -1 | tr -d '#')
 
 IMPLICIT_SELF=false
@@ -112,12 +133,13 @@ PR_AUTHOR=$(gh pr view "$PR_NUMBER" --json author -q .author.login)
 ME=$(gh api /user -q .login)
 SELF_REVIEW=$([ "$PR_AUTHOR" = "$ME" ] && echo true || echo false)
 # SELF_MODE: never posts, report only. True when --self is explicit, when no
-# PR number/branch was given at all (nothing to post to on purpose), or when
+# PR number/branch was given at all (nothing to post to on purpose), when the
+# run mode is auto, or when
 # the resolved PR is authored by the caller: GitHub blocks APPROVE and
 # REQUEST_CHANGES from a PR's own author, and posting COMMENT-only findings
 # on your own PR has no independent reviewer behind them, so self-authorship
 # is treated the same as an explicit --self rather than a restricted post.
-SELF_MODE=$([[ "$ARGS" == *"--self"* || "$IMPLICIT_SELF" == "true" || "$SELF_REVIEW" == "true" ]] && echo true || echo false)
+SELF_MODE=$([[ "$ARGS" == *"--self"* || "$RUN_MODE" == "auto" || "$IMPLICIT_SELF" == "true" || "$SELF_REVIEW" == "true" ]] && echo true || echo false)
 
 REVIEW_JSON="/tmp/$REPO/deep-review-$PR_NUMBER.json"
 mkdir -p "$(dirname "$REVIEW_JSON")"
@@ -153,7 +175,7 @@ else
 fi
 ```
 
-Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, when `--self` is passed explicitly, when no PR number/branch was given in `$ARGUMENTS` at all (nothing named to post to), or when `SELF_REVIEW` is true (the resolved PR is authored by the caller). `SELF_REVIEW` stays a separate fact purely for logging (the status line prints it independently), but it never leaves posting partially enabled on its own: once it is true, `SELF_MODE` is true too, so Step 6 never reaches the submit-verb question in the first place.
+Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, when `--self` is passed explicitly, when no PR number/branch was given in `$ARGUMENTS` at all (nothing named to post to), when the run mode is auto, or when `SELF_REVIEW` is true (the resolved PR is authored by the caller). `SELF_REVIEW` stays a separate fact purely for logging (the status line prints it independently), but it never leaves posting partially enabled on its own: once it is true, `SELF_MODE` is true too, so Step 6 never reaches the submit-verb question in the first place.
 
 In worktree mode, `WT` holds the absolute path to the isolated checkout and `WT_CREATED=true`. In in-place mode, both are empty/false. Subagents use `$WT` for all reads; if empty, they read from the local working tree.
 
@@ -161,7 +183,7 @@ In worktree mode, `WT` holds the absolute path to the isolated checkout and `WT_
 
 - `--all` → every core + conditional reviewer.
 - `--preset <name>` → that preset's set.
-- otherwise (`auto`, default) → all core reviewers, plus each conditional reviewer whose trigger appears in the diff from Step 1 (grep the diff for migration dirs, schema files, feature flags, new modules, ADR files, >300 changed lines, etc.). Report which reviewers you selected and why.
+- otherwise (default) → all core reviewers, plus each conditional reviewer whose trigger appears in the diff from Step 1 (grep the diff for migration dirs, schema files, feature flags, new modules, ADR files, >300 changed lines, etc.). Report which reviewers you selected and why.
 
 ## Step 2b: Run checks in the worktree (best-effort, worktree mode only)
 
@@ -304,7 +326,7 @@ Present ALL surviving findings (rule 7). Render the `playbook:grounding-review` 
 
 ## Step 6: Orchestrate posting
 
-If `SELF_MODE` (`--self` passed explicitly, no PR number/branch was given so `PR_NUMBER` came from the current-branch fallback, or the resolved PR is authored by the caller), or nothing postable, stop here: the report IS the deliverable, no GitHub posting.
+If `SELF_MODE` (`--self` passed explicitly, no PR number/branch was given so `PR_NUMBER` came from the current-branch fallback, the run mode is auto, or the resolved PR is authored by the caller), or nothing postable, stop here: the report IS the deliverable, no GitHub posting.
 
 Otherwise ask **one question at a time**:
 

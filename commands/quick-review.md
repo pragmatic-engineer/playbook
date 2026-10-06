@@ -1,7 +1,7 @@
 ---
-description: Quick single-pass PR review using grounding-review discipline + Conventional Comments. Report-only with no PR number given, --self, or when the resolved PR is yours; otherwise posts findings as a pending GitHub review for human submit.
+description: Quick single-pass PR review using grounding-review discipline + Conventional Comments. Report-only with no PR number given, --self, when the run mode is auto, or when the resolved PR is yours; otherwise posts findings as a pending GitHub review for human submit.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[PR number] [--self]"
+argument-hint: "[PR number] [--self] [--auto] [--ask]"
 model: sonnet
 effort: high
 ---
@@ -12,7 +12,7 @@ Review a pull request with grounding-review discipline. Output a structured repo
 
 ## Argument parsing
 
-Parse `$ARGUMENTS` (strip `--self` before reading the rest, same as `--help`):
+Parse `$ARGUMENTS` (strip `--self`, `--auto` and `--ask` before reading the rest, same as `--help`):
 
 - **Integer or `#N`** (e.g. `4265`, `#4265`) → explicit PR number; resolve `HEAD_SHA` via `gh pr view <PR_NUMBER> --json headRefOid -q .headRefOid`.
 - **Branch name** (anything that isn't an integer and isn't empty, and passes `git check-ref-format --branch <arg>`) → resolve to its open PR number via:
@@ -24,9 +24,26 @@ Parse `$ARGUMENTS` (strip `--self` before reading the rest, same as `--help`):
 
 `--self` forces `SELF_MODE=true` regardless of whether a PR number was also given: review and report, skip Step 4's posting orchestration entirely. `SELF_MODE` also becomes true whenever the resolved PR turns out to be authored by you, even with an explicit PR number: GitHub rejects `APPROVE` and `REQUEST_CHANGES` from a PR's own author, and a comment-only review of your own PR has no independent reviewer behind it, so self-authorship gets the same report-only treatment as `--self` rather than a narrower posting path.
 
+## Step 0: Read the run mode
+
+Do this first, before Step 1. Read the mode from the CLI:
+
+```bash
+playbook mode status --json
+```
+
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+
+- **`ask` mode:** behave exactly as this file describes.
+- **`auto` mode:** follow the Auto path below.
+
+### Auto path
+
+Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set `RUN_MODE=auto` at the top of the Step 1 block (use `ask` otherwise), so `SELF_MODE` is true. The review runs and reports locally, and nothing is posted to GitHub, because a posted review speaks as you.
+
 ## Self-review awareness
 
-`SELF_REVIEW` (the resolved PR is authored by you, detected by comparing `gh pr view --json author -q .author.login` against `gh api /user -q .login`) is computed for every run and is one of the three conditions that sets `SELF_MODE=true` (the others: an empty argument list, or explicit `--self`). It stays a distinct variable purely so the status line can log it independently, but it never posts a restricted review on its own: once `SELF_REVIEW` is true, `SELF_MODE` is true too, and Step 4 never runs.
+`SELF_REVIEW` (the resolved PR is authored by you, detected by comparing `gh pr view --json author -q .author.login` against `gh api /user -q .login`) is computed for every run and is one of the four conditions that sets `SELF_MODE=true` (the others: an empty argument list, explicit `--self`, or the run mode being auto). It stays a distinct variable purely so the status line can log it independently, but it never posts a restricted review on its own: once `SELF_REVIEW` is true, `SELF_MODE` is true too, and Step 4 never runs.
 
 ## Worktree vs in-place mode
 
@@ -89,9 +106,13 @@ Comment bodies are read by another engineer, so they use the humane `playbook:wr
 
 ```bash
 ARGS="$ARGUMENTS"
+# Set RUN_MODE=auto here when Step 0 read auto mode; auto implies --self.
+RUN_MODE=ask
 SELF_MODE=false
-[[ "$ARGS" == *"--self"* ]] && SELF_MODE=true
+[[ "$ARGS" == *"--self"* || "$RUN_MODE" == "auto" ]] && SELF_MODE=true
 ARGS="${ARGS//--self/}"
+ARGS="${ARGS//--auto/}"
+ARGS="${ARGS//--ask/}"
 ARGS="${ARGS// /}"
 
 if [ -z "$ARGS" ]; then
@@ -195,7 +216,7 @@ Relay the report to the user unchanged, then proceed to posting. Post findings v
 
 ## Step 4: Orchestrate posting
 
-If `SELF_MODE` is true (explicit `--self`, no PR number/branch was given, or the resolved PR is authored by you), stop here: the report IS the deliverable, no GitHub posting.
+If `SELF_MODE` is true (explicit `--self`, no PR number/branch was given, the run mode is auto, or the resolved PR is authored by you), stop here: the report IS the deliverable, no GitHub posting.
 
 Otherwise, **ask the user, one question at a time** (memory rule):
 

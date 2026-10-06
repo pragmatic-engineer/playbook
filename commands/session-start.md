@@ -10,6 +10,10 @@ effort: low
 
 Pick up where the last session in this directory stopped. `/playbook:session-handoff` saves a handoff with `playbook handoff save`, and the SessionStart hook loads it on its own after `/clear`. Run this command when that automatic load did not appear, or to read the handoff again.
 
+## Step 0: Read the run mode
+
+Run `playbook mode status --json` and note the mode. This command behaves the same in either mode, so carry on if it fails.
+
 ## Run this now
 
 Run every step immediately and do not ask for confirmation.

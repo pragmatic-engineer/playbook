@@ -11,6 +11,10 @@ effort: low
 Run all seven checks below. Do not stop early if one fails. Then print a
 status table with one row per layer.
 
+## Step 0: Read the run mode
+
+Run `playbook mode status --json` and note the mode. This command behaves the same in either mode, so carry on if it fails.
+
 ## Layer 1: Plugin enabled
 
 ```bash
@@ -375,7 +379,9 @@ fi
 `playbook config get <key>` prints `<key>: <value> (source: <tier>)` on
 success, where tier is `repo`, `org`, `global`, or `default`; `default` means
 no file at any tier set the key, so the value shown is the built-in default,
-not one read off disk. On a malformed tier file it instead prints an error
+not one read off disk. It also prints `(source: default, <tier> value ignored)`
+when a tier set an invalid value for the key: the built-in default is shown
+and a warning goes to stderr. On a malformed tier file it instead prints an error
 naming the file to stderr and exits non-zero; the `||` after each assignment
 above exists so that failure is captured into `enabled_status`/`type_status`
 rather than aborting this block (and, if this file's shell blocks share a
