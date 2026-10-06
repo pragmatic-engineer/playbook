@@ -7,6 +7,9 @@
 //! a subprocess, exactly as Claude Code would, against a scratch `$HOME`
 //! and a scratch git repo, never the real `~/.claude`.
 
+#[path = "support/auto_env.rs"]
+mod auto_env;
+
 use playbook::hooks::session_init::worktree_sweep_marker_path;
 use std::env;
 use std::fs;
@@ -2240,5 +2243,121 @@ fn worktree_sweep_due_covers_absent_and_aged_markers() {
     assert!(
         playbook::hooks::session_init::worktree_sweep_due(Some(NOW - INTERVAL - 1), NOW),
         "past the interval should be due"
+    );
+}
+
+// ---------------------------------------------------------------------
+// session-init: auto-mode block
+// ---------------------------------------------------------------------
+
+const SESSION_START: &str =
+    r#"{"hook_event_name":"SessionStart","source":"startup","session_id":"auto-session"}"#;
+const OFF_SWITCH: &str = "playbook mode ask";
+const ENV_OFF_SWITCH: &str = "unset `PLAYBOOK_MODE`";
+const AUTO_RULE: &str = "wherever the command allows it, take the recommended answer and log it as an assumption instead of asking";
+const ASYNC_NOTE: &str = "Async and deferred-tool discipline";
+
+/// SessionStart `additionalContext` from the real binary under the isolated
+/// auto env, with the scratch config and the extra variables applied.
+fn auto_session_context(tag: &str, config_mode: Option<&str>, env: &[(&str, &str)]) -> String {
+    let s = auto_env::scratch(tag);
+    if let Some(mode) = config_mode {
+        s.seed_mode_config(mode);
+    }
+    let (out, code) = auto_env::run_hook(&s, "session-init", SESSION_START, env);
+    assert_eq!(code, 0, "session-init should exit 0");
+    additional_context(&out)
+}
+
+#[test]
+fn session_init_in_auto_from_config_names_the_source_and_the_off_switch() {
+    // Arrange / Act
+    let context = auto_session_context("auto-config", Some("auto"), &[]);
+
+    // Assert
+    assert!(
+        context.contains("AUTO MODE"),
+        "an auto block should be injected: {context}"
+    );
+    assert!(
+        context.contains("source: config, set for this repo"),
+        "the block should name the config source: {context}"
+    );
+    assert!(
+        context.contains(&format!("To turn it off, run `{OFF_SWITCH}`.")),
+        "the block should name the off switch: {context}"
+    );
+    assert!(
+        context.contains(AUTO_RULE),
+        "the block should carry the standing rule: {context}"
+    );
+    assert!(
+        !context.contains("never ask"),
+        "plain --auto still lets a command ask: {context}"
+    );
+}
+
+#[test]
+fn session_init_in_auto_from_env_names_the_env_source() {
+    // Arrange / Act
+    let context = auto_session_context("auto-env", None, &[("PLAYBOOK_MODE", "auto")]);
+
+    // Assert
+    assert!(
+        context.contains("source: env"),
+        "the block should name the env source: {context}"
+    );
+    assert!(
+        context.contains(&format!("To turn it off, {ENV_OFF_SWITCH}.")),
+        "the env off switch is unsetting the variable: {context}"
+    );
+    assert!(
+        !context.contains(OFF_SWITCH),
+        "`playbook mode ask` cannot undo an env source: {context}"
+    );
+}
+
+#[test]
+fn session_init_in_ask_emits_no_auto_block() {
+    // Arrange / Act
+    let context = auto_session_context("ask", None, &[]);
+
+    // Assert
+    assert!(
+        !context.contains("AUTO MODE") && !context.contains(OFF_SWITCH),
+        "ask mode must add no auto block: {context}"
+    );
+}
+
+#[test]
+fn session_init_in_auto_with_headless_keeps_the_auto_block_and_the_other_skips() {
+    // Arrange / Act
+    let context =
+        auto_session_context("auto-headless", Some("auto"), &[("PLAYBOOK_HEADLESS", "1")]);
+
+    // Assert
+    assert!(
+        context.contains("source: config") && context.contains(OFF_SWITCH),
+        "headless must not drop the auto block: {context}"
+    );
+    assert!(
+        !context.contains(ASYNC_NOTE),
+        "headless must still skip the async note: {context}"
+    );
+}
+
+#[test]
+fn session_init_in_auto_without_headless_keeps_the_async_note() {
+    // Arrange / Act
+    let context = auto_session_context("auto-interactive", Some("auto"), &[]);
+
+    // Assert
+    assert!(
+        context.contains("source: config") && context.contains(OFF_SWITCH),
+        "the auto block should be injected: {context}"
+    );
+    assert!(
+        context.contains(ASYNC_NOTE),
+        "an interactive auto session still gets the async note: {context}"
     );
 }
