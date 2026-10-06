@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Walks a shell command, finds the `git` calls that write a message and
-//! rewrites the command so those messages carry no AI attribution.
+//! Walks a shell command, finds the `git` and `gh` calls that write a message
+//! and rewrites the command so those messages carry no AI attribution.
 //!
 //! The command is rewritten as text: each message, heredoc body or option that
 //! needs to change becomes one edit on the original characters, so everything
@@ -10,12 +10,15 @@
 //! file is never rewritten on disk: the command reads the cleaned text from a
 //! heredoc instead, and the file stays as it is.
 
-use super::{git, sources};
+use super::{gh, git, sources};
+use crate::common::proc::run_with_timeout;
 use crate::common::shell::{
     apply_edits, commands, program_index, program_name, quote, Command, Heredoc, Span,
 };
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::process::Command as Process;
+use std::time::Duration;
 
 /// How deep `bash -c "..."` strings and substitutions are followed.
 const MAX_NESTING: usize = 3;
@@ -28,6 +31,7 @@ const CARRIERS: [&str; 12] = [
 /// Carriers that run the program they are given more than once or with an
 /// input of their own, so a heredoc given to them is not the program's.
 const STDIN_CARRIERS: [&str; 4] = ["xargs", "parallel", "find", "watch"];
+const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// What the walk found, in words that never carry a message's text.
 #[derive(Default)]
@@ -89,6 +93,11 @@ impl Call<'_> {
         self.chars[range].iter().collect()
     }
 
+    /// The position just after the last word of the command.
+    pub fn end(&self) -> usize {
+        self.cmd().spans.last().map_or(0, |s| s.end)
+    }
+
     /// Whether a carrier such as `xargs` runs the program, so a heredoc given
     /// to the command would reach the carrier instead.
     pub fn under_stdin_carrier(&self) -> bool {
@@ -136,6 +145,7 @@ fn walk(script: &str, dir: &Path, depth: usize, inline: Inline, findings: &mut F
             };
             match name.as_str() {
                 "git" => git::handle(&call, &mut plan, findings),
+                "gh" => gh::handle(&call, &mut plan, findings),
                 shell if SHELLS.contains(&shell) && depth < MAX_NESTING => {
                     shell_script(&call, &mut plan, findings);
                 }
@@ -161,8 +171,8 @@ fn follow_cd(words: &[String], dir: &mut PathBuf) {
 }
 
 /// The programs a command runs and the index of each word: past wrappers such
-/// as `env`, and through the carriers that run a `git` or a shell given among
-/// their own words.
+/// as `env`, and through the carriers that run a `git`, `gh` or a shell given
+/// among their own words.
 fn locate(words: &[String]) -> Vec<(usize, String)> {
     let Some(at) = program_index(words) else {
         return Vec::new();
@@ -173,7 +183,9 @@ fn locate(words: &[String]) -> Vec<(usize, String)> {
     }
     let carried: Vec<(usize, String)> = (at + 1..words.len())
         .map(|i| (i, program_name(&words[i])))
-        .filter(|(_, n)| n == "git" || n == "eval" || SHELLS.contains(&n.as_str()))
+        .filter(|(_, n)| {
+            matches!(n.as_str(), "git" | "gh" | "eval") || SHELLS.contains(&n.as_str())
+        })
         .collect();
     if carried.is_empty() {
         vec![(at, name)]
@@ -248,4 +260,14 @@ pub fn nested_word(
     if rewritten != text {
         plan.edits.push((range, quote(&rewritten)));
     }
+}
+
+/// The result of `git <args>` in `dir`, trimmed of its final newline.
+pub fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+    let mut command = Process::new("git");
+    command.arg("-C").arg(dir).args(args);
+    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }

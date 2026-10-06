@@ -184,6 +184,20 @@ const NAME_QUALIFIERS: [&str; 24] = [
     "reasoning",
 ];
 
+/// Whole names an AI tool uses as a git identity.
+const AI_IDENTITY_NAMES: [&str; 10] = [
+    "claude",
+    "claude code",
+    "chatgpt",
+    "github copilot",
+    "copilot",
+    "gemini",
+    "cursor agent",
+    "codex",
+    "aider",
+    "windsurf",
+];
+
 /// Removes every attribution line from a commit-style message, applying git's
 /// trailer-block rule to the final paragraph.
 pub fn sanitize(message: &str) -> Sanitized {
@@ -354,6 +368,25 @@ fn split_template(raw: &str) -> (&str, &str) {
         Some(at) if !raw[at..].lines().any(|l| classify(l, false).is_some()) => raw.split_at(at),
         _ => (raw, ""),
     }
+}
+
+/// The shape of attribution a trailer line carries, as if it sat in the final
+/// trailer block. For the value of a `--trailer` option.
+pub fn trailer_shape(line: &str) -> Option<Shape> {
+    classify(line, true)
+}
+
+/// Whether a git author or committer name and email identify an AI tool. The
+/// name must be the tool's own name, not a person who shares it, and the email
+/// a vendor address or a bot handle.
+pub fn is_ai_identity(name: &str, email: &str) -> bool {
+    let name = name.trim().to_lowercase();
+    let email = email.trim().to_lowercase();
+    let vendor = AI_EMAIL_DOMAINS
+        .iter()
+        .any(|d| email.ends_with(&format!("@{d}")) || email.ends_with(&format!(".{d}")));
+    let bot = email.contains("[bot]") && names_ai(&email);
+    vendor || bot || AI_IDENTITY_NAMES.contains(&name.as_str()) || names_devin(&name)
 }
 
 fn classify(line: &str, in_trailer_block: bool) -> Option<Shape> {
@@ -1184,6 +1217,41 @@ mod tests {
                 "message: {message:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_identity_is_an_ai_by_vendor_address_or_exact_tool_name() {
+        let table = [
+            ("Claude", "noreply@anthropic.com", true),
+            ("Claude Code", "x@example.com", true),
+            ("Anyone", "bot@mail.anthropic.com", true),
+            (
+                "copilot-swe-agent[bot]",
+                "198982749+copilot[bot]@users.noreply.github.com",
+                true,
+            ),
+            (
+                "Devin AI",
+                "devin-ai-integration[bot]@users.noreply.github.com",
+                true,
+            ),
+            ("Claude Dupont", "claude@example.fr", false),
+            ("Devin Smith", "devin@example.com", false),
+            ("Sam Lee", "sam@example.com", false),
+        ];
+        for (name, email, expected) in table {
+            assert_eq!(is_ai_identity(name, email), expected, "{name} <{email}>");
+        }
+    }
+
+    #[test]
+    fn a_trailer_value_is_judged_as_part_of_the_final_block() {
+        assert_eq!(
+            trailer_shape("Co-authored-by: Claude <noreply@anthropic.com>"),
+            Some(Shape::CreditTrailer)
+        );
+        assert_eq!(trailer_shape("Claude-Model: opus"), Some(Shape::AiTrailer));
+        assert_eq!(trailer_shape("Refs: PLAT-1"), None);
     }
 
     #[test]
