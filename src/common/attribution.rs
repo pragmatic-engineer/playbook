@@ -224,9 +224,8 @@ pub fn prose_problems(text: &str) -> Vec<(usize, Shape)> {
 }
 
 fn scan(text: &str, trailer_rule: bool) -> Sanitized {
-    let raw_lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let lines: Vec<&str> = raw_lines
-        .iter()
+    let lines: Vec<&str> = text
+        .split_inclusive('\n')
         .map(|line| line.trim_end_matches(['\n', '\r']))
         .collect();
     let block = if trailer_rule {
@@ -235,9 +234,22 @@ fn scan(text: &str, trailer_rule: bool) -> Sanitized {
         None
     };
     let removed = removed_lines(&lines, block.as_ref());
+    Sanitized {
+        text: drop_lines(text, &removed),
+        removed,
+    }
+}
+
+/// `text` without the lines `removed` names, and without the blank lines the
+/// removal would leave stacked or at either end. Text with nothing removed
+/// comes back unchanged.
+pub fn drop_lines(text: &str, removed: &[(usize, Shape)]) -> String {
+    if removed.is_empty() {
+        return text.to_string();
+    }
     let mut kept: Vec<&str> = Vec::new();
     let mut dropped_since_kept = false;
-    for (i, line) in lines.iter().enumerate() {
+    for (i, line) in text.split_inclusive('\n').enumerate() {
         if removed.iter().any(|(n, _)| *n == i + 1) {
             dropped_since_kept = true;
             continue;
@@ -248,18 +260,9 @@ fn scan(text: &str, trailer_rule: bool) -> Sanitized {
             continue;
         }
         dropped_since_kept = dropped_since_kept && blank;
-        kept.push(raw_lines[i]);
+        kept.push(line);
     }
-    if removed.is_empty() {
-        return Sanitized {
-            text: text.to_string(),
-            removed,
-        };
-    }
-    Sanitized {
-        text: tidy(kept, text.ends_with('\n')),
-        removed,
-    }
+    tidy(kept, text.ends_with('\n'))
 }
 
 /// The attribution lines of `lines`. A trailer folded over indented
@@ -1181,5 +1184,15 @@ mod tests {
                 "message: {message:?}"
             );
         }
+    }
+
+    #[test]
+    fn drop_lines_removes_exactly_the_named_lines() {
+        let text = "feat: x\n\nbody\nmid\nRefs: 1\n";
+
+        let got = drop_lines(text, &[(4, Shape::Footer)]);
+
+        assert_eq!(got, "feat: x\n\nbody\nRefs: 1\n");
+        assert_eq!(drop_lines(text, &[]), text);
     }
 }

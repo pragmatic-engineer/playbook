@@ -15,6 +15,7 @@ pub mod auto_cost;
 pub mod auto_guard;
 pub mod auto_model_detect;
 pub mod bg_await_guard;
+pub mod commit_message_sanitizer;
 pub mod memory_anchors;
 pub mod memory_capture;
 pub mod memory_signals;
@@ -50,6 +51,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::RmWorkspaceGuard => rm_workspace_guard::run(payload),
         HookName::BgAwaitGuard => bg_await_guard::run(payload),
         HookName::NoSlopGuard => no_slop_guard::run(payload),
+        HookName::CommitMessageSanitizer => commit_message_sanitizer::run(payload),
         HookName::PrecommitCheck => precommit_check::run(payload),
         HookName::AutoGuard => auto_guard::run(payload),
         HookName::AutoCost => auto_cost::run(payload),

@@ -77,6 +77,35 @@ pub fn emit_prompt_context(msg: &str) {
 }
 
 #[derive(Serialize)]
+struct UpdatedInputOutput<'a> {
+    #[serde(rename = "hookSpecificOutput")]
+    hook_specific_output: UpdatedInputInner<'a>,
+}
+
+#[derive(Serialize)]
+struct UpdatedInputInner<'a> {
+    #[serde(rename = "hookEventName")]
+    hook_event_name: &'static str,
+    #[serde(rename = "updatedInput")]
+    updated_input: &'a serde_json::Value,
+    #[serde(rename = "additionalContext", skip_serializing_if = "Option::is_none")]
+    additional_context: Option<&'a str>,
+}
+
+/// Print a PreToolUse output that replaces the tool input, with no
+/// `permissionDecision`, so the normal permission flow still applies to the
+/// rewritten call. `updated_input` is the whole tool input, not a patch.
+pub fn emit_pre_updated_input(updated_input: &serde_json::Value, context: Option<&str>) {
+    print_json(&UpdatedInputOutput {
+        hook_specific_output: UpdatedInputInner {
+            hook_event_name: "PreToolUse",
+            updated_input,
+            additional_context: context,
+        },
+    });
+}
+
+#[derive(Serialize)]
 struct SystemMessageOutput<'a> {
     #[serde(rename = "systemMessage")]
     system_message: &'a str,
