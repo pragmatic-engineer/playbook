@@ -10,16 +10,21 @@
 //! beginning.
 //!
 //! No extra crate: the deadline is enforced by spawning the child, then
-//! polling `try_wait()` against `std::time::Instant` on a short sleep,
-//! killing the child if the deadline passes before it exits on its own.
+//! polling `try_wait()` against `std::time::Instant` on a short sleep. A child
+//! still running at the deadline is asked to stop with SIGTERM, so a program
+//! such as `git` can remove its own lock files, and is killed only if it is
+//! still there a moment later.
 
 use std::io::{Read, Write};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// How often to poll the child for exit while waiting on the deadline.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// How long a child gets to exit after SIGTERM before it is killed.
+const TERM_GRACE: Duration = Duration::from_secs(1);
 
 /// Reads a pipe to the end on its own thread, so a child that writes more
 /// than the pipe buffer holds never blocks waiting for us to read.
@@ -39,7 +44,7 @@ fn collect_by(rx: &mpsc::Receiver<Vec<u8>>, deadline: Instant) -> Option<Vec<u8>
 }
 
 /// Run `command` to completion, capturing stdout and stderr, but give up and
-/// kill the child if it has not exited within `timeout`. Returns `None` on
+/// stop the child if it has not exited within `timeout`. Returns `None` on
 /// spawn failure or timeout, mirroring python's "an exception becomes an
 /// empty value" contract; callers still inspect `Output::status` themselves
 /// for a non-zero exit, exactly as they did with `Command::output()`. Output
@@ -54,6 +59,27 @@ pub fn run_with_timeout(command: &mut Command, timeout: Duration) -> Option<Outp
 /// does not read it cannot stall the deadline.
 pub fn run_with_input(command: &mut Command, input: &[u8], timeout: Duration) -> Option<Output> {
     run_bounded(command, Some(input.to_vec()), timeout)
+}
+
+/// Asks `child` to stop with SIGTERM and waits for it to go, then kills it if
+/// it is still running after [`TERM_GRACE`].
+fn stop(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        // SAFETY: `kill` only reads its two integer arguments.
+        unsafe {
+            libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+        }
+        let until = Instant::now() + TERM_GRACE;
+        while Instant::now() < until {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration) -> Option<Output> {
@@ -87,14 +113,12 @@ fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration)
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop(&mut child);
                 return None;
             }
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop(&mut child);
             return None;
         }
         std::thread::sleep(POLL_INTERVAL);
@@ -127,6 +151,49 @@ mod tests {
         let output = got.expect("echo should finish well within the deadline");
         assert!(output.status.success());
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_past_the_deadline_gets_sigterm_before_it_is_killed() {
+        let marker = std::env::temp_dir().join(format!("proc-term-{}", std::process::id()));
+        let script = format!(
+            "trap 'echo stopped > {}; exit 0' TERM; while :; do sleep 0.05; done",
+            marker.display()
+        );
+        let mut command = Command::new("sh");
+        command.args(["-c", &script]);
+
+        let got = run_with_timeout(&mut command, Duration::from_millis(300));
+
+        assert!(got.is_none(), "a timeout reports no output");
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap_or_default().trim(),
+            "stopped",
+            "the child ran its SIGTERM handler"
+        );
+        let _ = std::fs::remove_file(&marker);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_ignores_sigterm_is_killed_after_the_grace_period() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "trap '' TERM; while :; do sleep 0.05; done"]);
+        let started = Instant::now();
+
+        let got = run_with_timeout(&mut command, Duration::from_millis(200));
+
+        assert!(got.is_none());
+        let waited = started.elapsed();
+        assert!(
+            waited >= TERM_GRACE,
+            "it was given the grace period: {waited:?}"
+        );
+        assert!(
+            waited < Duration::from_secs(10),
+            "and then killed: {waited:?}"
+        );
     }
 
     #[test]

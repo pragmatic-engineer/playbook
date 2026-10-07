@@ -107,10 +107,17 @@ elif [ "\$1" = "doctor" ] && [ "\$2" = "hook-commands" ]; then
   exit 0
 elif [ "\$1" = "doctor" ] && [ "\$2" = "hook-commands-for-event" ]; then
   settings_file="\$3"
+  event="\$4"
   shift 4
+  # The settings the scenarios write list PreToolUse, then PostToolUse, on one
+  # line, so each event's entries are what comes before or after that key.
+  case "\$event" in
+    PostToolUse) segment=\$(sed 's/.*"PostToolUse"//' "\$settings_file" 2>/dev/null) ;;
+    *) segment=\$(sed 's/"PostToolUse".*//' "\$settings_file" 2>/dev/null) ;;
+  esac
   for guard in "\$@"; do
     wanted="playbook hook \$guard"
-    count=\$(grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' "\$settings_file" 2>/dev/null | sed 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/' | grep -Fxc -- "\$wanted")
+    count=\$(printf '%s' "\$segment" | grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/' | grep -Fxc -- "\$wanted")
     echo "\$guard=\$count"
   done
   exit 0
@@ -124,31 +131,35 @@ STUB
 
 # ── Layer 2: safety guards wired ────────────────────────────────────────────
 
-GUARDS=(rm-workspace-guard bg-await-guard no-slop-guard precommit-check commit-message-sanitizer)
+GUARDS=(rm-workspace-guard bg-await-guard no-slop-guard precommit-check commit-message-sanitizer post/commit-message-sanitizer)
 
-# Args: home dir, then one "name:command" pair per hooks.PreToolUse entry to
-# write. Lets a scenario wire a guard to an arbitrary command string (its
+# Args: home dir, then one "name:command" pair per hook entry to write: under
+# hooks.PreToolUse, or under hooks.PostToolUse for a name that starts with
+# "post/". Lets a scenario wire a guard to an arbitrary command string (its
 # bare binary form, its legacy .sh form, or a near-miss), not just its name.
 write_wired_settings_raw() {
   local home="$1"; shift
   mkdir -p "$home/.claude"
-  local entries="" pair name cmd
+  local pre="" post="" pair name cmd entry
   for pair in "$@"; do
     name="${pair%%:*}"; cmd="${pair#*:}"
-    entries="${entries}{\"hooks\":[{\"command\":\"$cmd\"}]},"
+    entry="{\"hooks\":[{\"command\":\"$cmd\"}]},"
+    case "$name" in
+      post/*) post="${post}${entry}" ;;
+      *) pre="${pre}${entry}" ;;
+    esac
   done
-  entries="${entries%,}"
-  printf '{"hooks":{"PreToolUse":[%s]}}' "$entries" > "$home/.claude/settings.json"
+  printf '{"hooks":{"PreToolUse":[%s],"PostToolUse":[%s]}}' "${pre%,}" "${post%,}" > "$home/.claude/settings.json"
 }
 
-# Args: home dir, then the guard names to wire into settings.json's
-# PreToolUse hooks in their bare `playbook hook <name>` form. A guard
+# Args: home dir, then the guard names to wire into settings.json in their
+# bare `playbook hook <name>` form, a "post/" name on PostToolUse. A guard
 # omitted here is not wired at all.
 write_wired_settings() {
   local home="$1"; shift
   local pairs=() name
   for name in "$@"; do
-    pairs+=("$name:playbook hook $name")
+    pairs+=("$name:playbook hook ${name#post/}")
   done
   write_wired_settings_raw "$home" "${pairs[@]}"
 }
@@ -158,13 +169,13 @@ run_layer2() {
   HOME="$home" PATH="$path" bash -c "$LAYER2" 2>&1
 }
 
-# A: all five guards wired in their bare binary form.
+# A: all five guards and the sanitizer's backstop wired in their bare binary form.
 scenario_layer2_all_wired() {
   local home="$WORK/l2-a" bin="$WORK/l2-a-bin" out
   write_wired_settings "$home" "${GUARDS[@]}"
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
-  [[ "$out" == "wired=5/5" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == "wired=6/6" ]] || { echo "  got: $out"; return 1; }
 }
 
 # B: precommit-check is still on its legacy `.sh` command from before this
@@ -178,11 +189,12 @@ scenario_layer2_legacy_command_not_wired() {
     "bg-await-guard:playbook hook bg-await-guard" \
     "no-slop-guard:playbook hook no-slop-guard" \
     "precommit-check:~/.claude/hooks/precommit-check.sh" \
-    "commit-message-sanitizer:playbook hook commit-message-sanitizer"
+    "commit-message-sanitizer:playbook hook commit-message-sanitizer" \
+    "post/commit-message-sanitizer:playbook hook commit-message-sanitizer"
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
-  [[ "$out" == "wired=4/5"* ]] || { echo "  wired count wrong: $out"; return 1; }
+  [[ "$out" == "wired=5/6"* ]] || { echo "  wired count wrong: $out"; return 1; }
 }
 
 # C: a near-miss command that merely contains a guard's name as a substring
@@ -195,7 +207,8 @@ scenario_layer2_near_miss_command_not_wired() {
     "bg-await-guard:playbook hook bg-await-guard" \
     "no-slop-guard:playbook hook no-slop-guard" \
     "precommit-check:playbook hook precommit-check" \
-    "commit-message-sanitizer:playbook hook commit-message-sanitizer"
+    "commit-message-sanitizer:playbook hook commit-message-sanitizer" \
+    "post/commit-message-sanitizer:playbook hook commit-message-sanitizer"
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == *"rm-workspace-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
@@ -204,7 +217,7 @@ scenario_layer2_near_miss_command_not_wired() {
 # D: bg-await-guard is not wired into settings.json at all.
 scenario_layer2_not_wired() {
   local home="$WORK/l2-d" bin="$WORK/l2-d-bin" out
-  write_wired_settings "$home" rm-workspace-guard no-slop-guard precommit-check commit-message-sanitizer
+  write_wired_settings "$home" rm-workspace-guard no-slop-guard precommit-check commit-message-sanitizer post/commit-message-sanitizer
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
   [[ "$out" == *"bg-await-guard:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
@@ -212,36 +225,50 @@ scenario_layer2_not_wired() {
 
 # E: the fourth-guard regression, specifically. The previous version of this
 # layer matched only three guard names and passed on "3 or more wired", so a
-# missing precommit-check read as healthy. Wire only the other four and
-# require the count to say 4/5, not 5/5, and to name precommit-check as
+# missing precommit-check read as healthy. Wire everything but that one and
+# require the count to say 5/6, not 6/6, and to name precommit-check as
 # NOT_WIRED. A test that only checked the other three guards would let this
 # exact regression back in.
 scenario_layer2_precommit_check_counted() {
   local home="$WORK/l2-e" bin="$WORK/l2-e-bin" out
-  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard commit-message-sanitizer
+  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard commit-message-sanitizer post/commit-message-sanitizer
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
-  [[ "$out" == "wired=4/5"* ]] || { echo "  wired count did not drop: $out"; return 1; }
+  [[ "$out" == "wired=5/6"* ]] || { echo "  wired count did not drop: $out"; return 1; }
   [[ "$out" == *"precommit-check:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
 
-# F: the commit-message-sanitizer is part of the count too. Wire only the other
-# four and require 4/5 and a NOT_WIRED naming it.
+# F: the commit-message-sanitizer is part of the count too. Leave only its
+# PreToolUse entry out and require 5/6 and a NOT_WIRED naming it.
 scenario_layer2_commit_message_guard_counted() {
   local home="$WORK/l2-f" bin="$WORK/l2-f-bin" out
-  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard precommit-check
+  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard precommit-check post/commit-message-sanitizer
   write_stub_binary "$bin" ""
   out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
-  [[ "$out" == "wired=4/5"* ]] || { echo "  wired count did not drop: $out"; return 1; }
-  [[ "$out" == *"commit-message-sanitizer:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == "wired=5/6"* ]] || { echo "  wired count did not drop: $out"; return 1; }
+  [[ "$out" == *" commit-message-sanitizer:NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
 }
 
-run_scenario "A: all five guards wired in bare form -> wired=5/5"                   scenario_layer2_all_wired
+# G: the backstop is checked on PostToolUse. Wire the five PreToolUse guards
+# and not the backstop: 5/6 and a NOT_WIRED that names the event, never a
+# pass because the same command is wired on PreToolUse.
+scenario_layer2_backstop_counted() {
+  local home="$WORK/l2-g" bin="$WORK/l2-g-bin" out
+  write_wired_settings "$home" rm-workspace-guard bg-await-guard no-slop-guard precommit-check commit-message-sanitizer
+  write_stub_binary "$bin" ""
+  out="$(run_layer2 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "wired=5/6"* ]] || { echo "  wired count did not drop: $out"; return 1; }
+  [[ "$out" == *"commit-message-sanitizer(PostToolUse):NOT_WIRED"* ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" != *" commit-message-sanitizer:NOT_WIRED"* ]] || { echo "  the PreToolUse entry is wired: $out"; return 1; }
+}
+
+run_scenario "A: all guards and the backstop wired in bare form -> wired=6/6"       scenario_layer2_all_wired
 run_scenario "B: guard still on its legacy .sh command -> NOT_WIRED"                scenario_layer2_legacy_command_not_wired
 run_scenario "C: a near-miss command must not count as wired (exact-match pin)"     scenario_layer2_near_miss_command_not_wired
 run_scenario "D: guard not wired at all -> NOT_WIRED"                               scenario_layer2_not_wired
-run_scenario "E: precommit-check is counted, not silently dropped to '3 or more'"   scenario_layer2_precommit_check_counted
-run_scenario "F: commit-message-sanitizer is counted -> NOT_WIRED when missing"         scenario_layer2_commit_message_guard_counted
+run_scenario "E: precommit-check is counted, not silently dropped to '5 or more'"   scenario_layer2_precommit_check_counted
+run_scenario "F: commit-message-sanitizer is counted -> NOT_WIRED when missing"     scenario_layer2_commit_message_guard_counted
+run_scenario "G: the PostToolUse backstop is counted -> NOT_WIRED(PostToolUse)"     scenario_layer2_backstop_counted
 
 # ── Layer 5: status line matches the shipped copy ───────────────────────────
 

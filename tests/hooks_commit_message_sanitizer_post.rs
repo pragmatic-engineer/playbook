@@ -78,7 +78,7 @@ fn a_head_on_a_remote_branch_is_reported_and_left_alone() {
     lab.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
     let before = sha(&lab);
 
-    let out = lab.post("git push origin main", "");
+    let out = lab.post("git commit --amend --no-edit", "");
 
     assert_eq!(sha(&lab), before, "a pushed commit is never amended");
     assert!(lab.head().contains("Claude"), "message untouched");
@@ -131,8 +131,8 @@ fn an_older_unpushed_commit_is_reported_once_per_session() {
     lab.git(&["commit", "--allow-empty", "-q", "-m", "feat: y"]);
     let head = sha(&lab);
 
-    let first = lab.post("git log --oneline", "");
-    let second = lab.post("git log --oneline", "");
+    let first = lab.post("git commit --allow-empty -m y", "");
+    let second = lab.post("git commit --allow-empty -m y", "");
 
     let note = context(&first);
     assert!(
@@ -149,6 +149,7 @@ fn an_annotated_tag_at_head_with_attribution_is_reported() {
     lab.git(&["tag", "-a", "v1", "-m", &format!("release\n\n{COAUTHOR}")]);
 
     let note = context(&lab.post("git tag -a v1 -m release", ""));
+    let again = lab.post("git tag -a v1 -m release", "");
 
     assert!(
         note.contains("tag v1") && note.contains("credit trailer"),
@@ -159,6 +160,23 @@ fn an_annotated_tag_at_head_with_attribution_is_reported() {
             .contains("Claude"),
         "tags are not rewritten"
     );
+    assert_eq!(again, "", "a tag is reported once per session");
+}
+
+#[test]
+fn a_lightweight_tag_is_not_judged_by_the_commit_message_it_points_at() {
+    let lab = Lab::new("post-light-tag");
+    lab.git(&[
+        "commit",
+        "--allow-empty",
+        "-q",
+        "-m",
+        &format!("feat: x\n\nRefs: 1\n{COAUTHOR}"),
+    ]);
+    lab.git(&["tag", "light"]);
+    lab.git(&["tag", "-a", "v2", "-m", "release"]);
+
+    assert_eq!(lab.post("git tag light", ""), "");
 }
 
 #[test]
@@ -303,4 +321,286 @@ fn unrelated_commands_print_nothing_and_do_no_git_work() {
         lab.head().contains("Claude"),
         "unrelated commands do no git work"
     );
+}
+
+/// The real `git`, found on the path the tests started with.
+fn real_git() -> String {
+    std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .map(|dir| std::path::Path::new(dir).join("git"))
+        .find(|candidate| candidate.is_file())
+        .expect("git is installed")
+        .display()
+        .to_string()
+}
+
+/// A `git` ahead of the real one that logs each call, then runs it, with
+/// `before` run first for a call whose arguments contain `when`.
+fn git_spy(lab: &Lab, when: &str, before: &str) {
+    let log = lab.bin.join("git.calls");
+    let script = format!(
+        "#!/bin/sh\necho \"$*\" >> {log}\ncase \"$*\" in *'{when}'*) {before};; esac\nexec {real} \"$@\"\n",
+        log = log.display(),
+        real = real_git(),
+    );
+    lab.write_stub("git", &script);
+}
+
+fn git_calls(lab: &Lab) -> String {
+    fs::read_to_string(lab.bin.join("git.calls")).unwrap_or_default()
+}
+
+#[test]
+fn a_call_that_runs_no_git_commit_or_tag_spawns_no_git() {
+    let lab = Lab::new("post-cheap");
+    commit_dirty(&lab);
+    git_spy(&lab, "never matches", "true");
+    let commands = [
+        "git status",
+        "git log --oneline -3",
+        "git diff HEAD",
+        "git push origin main",
+        "git commit-tree HEAD^{tree}",
+        "echo git commit -m x",
+        "grep -r 'git tag' .",
+        "gh pr view 3",
+        "gh pr list",
+        "gh pr comment 3 --body git",
+    ];
+    for command in commands {
+        assert_eq!(lab.post(command, ""), "", "{command}");
+    }
+    assert_eq!(git_calls(&lab), "", "no git process was started");
+    assert!(!lab.post("git commit --allow-empty -m x", "").is_empty());
+    assert!(!git_calls(&lab).is_empty(), "a git commit does start git");
+}
+
+#[test]
+fn a_commit_made_without_a_message_option_or_by_an_earlier_call_is_only_reported() {
+    let lab = Lab::new("post-editor");
+    commit_dirty(&lab);
+    let before = sha(&lab);
+
+    let out = lab.post("git commit --allow-empty", "");
+    let again = lab.post("git commit --allow-empty", "");
+
+    assert_eq!(sha(&lab), before, "an editor-written commit is not amended");
+    let note = context(&out);
+    assert!(note.contains("written in an editor"), "{note}");
+    assert!(note.contains("Amend it with a clean message"), "{note}");
+    assert_eq!(again, "", "reported once per session");
+}
+
+#[test]
+fn a_commit_pushed_by_the_same_call_is_never_amended() {
+    let lab = Lab::new("post-push-call");
+    commit_dirty(&lab);
+    let before = sha(&lab);
+
+    let out = lab.post("git commit --allow-empty -m x && git push origin main", "");
+
+    assert_eq!(sha(&lab), before);
+    assert!(context(&out).contains("pushed by this call"), "{out}");
+}
+
+#[test]
+fn no_amend_happens_while_a_rebase_merge_cherry_pick_or_bisect_is_under_way() {
+    for state in [
+        "rebase-merge",
+        "rebase-apply",
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "BISECT_LOG",
+    ] {
+        let lab = Lab::new("post-in-progress");
+        commit_dirty(&lab);
+        let before = sha(&lab);
+        let path = lab.repo.join(".git").join(state);
+        if state.starts_with("rebase") {
+            fs::create_dir_all(&path).unwrap();
+        } else {
+            fs::write(&path, "x\n").unwrap();
+        }
+
+        let out = lab.post("git commit --allow-empty -m x", "");
+
+        assert_eq!(sha(&lab), before, "{state}");
+        assert!(context(&out).contains("under way"), "{state}: {out}");
+    }
+}
+
+#[test]
+fn the_amend_changes_the_message_alone_and_leaves_the_index_and_author_as_they_are() {
+    let lab = Lab::new("post-message-only");
+    lab.git(&[
+        "commit",
+        "--allow-empty",
+        "-q",
+        "--author",
+        "Sam Lee <sam@example.com>",
+        "--date",
+        "2020-01-02T03:04:05+00:00",
+        "-m",
+        DIRTY,
+    ]);
+    fs::write(lab.repo.join("staged.txt"), "staged\n").unwrap();
+    fs::write(lab.repo.join("tracked.txt"), "one\n").unwrap();
+    lab.git(&["add", "staged.txt", "tracked.txt"]);
+    let tree = lab.git(&["rev-parse", "HEAD^{tree}"]);
+    let author = lab.git(&["log", "-1", "--format=%an <%ae> %aI"]);
+    let staged = lab.git(&["diff", "--cached", "--name-status"]);
+    fs::write(lab.repo.join("unstaged.txt"), "x\n").unwrap();
+
+    lab.post("git commit --allow-empty -m x", "");
+
+    assert_no_attribution(&lab.head());
+    assert_eq!(
+        lab.git(&["rev-parse", "HEAD^{tree}"]),
+        tree,
+        "the tree is the old one"
+    );
+    assert_eq!(
+        lab.git(&["log", "-1", "--format=%an <%ae> %aI"]),
+        author,
+        "author and date"
+    );
+    assert_eq!(
+        lab.git(&["diff", "--cached", "--name-status"]),
+        staged,
+        "still staged"
+    );
+    assert!(lab.repo.join("unstaged.txt").exists());
+}
+
+#[test]
+fn the_sign_off_is_added_when_missing_and_never_duplicated() {
+    let lab = Lab::new("post-sign-off");
+    let signed = format!("{DIRTY}\nSigned-off-by: Test <test@example.com>");
+    lab.git(&["commit", "--allow-empty", "-q", "-m", &signed]);
+
+    lab.post("git commit --allow-empty -m x", "");
+
+    let head = lab.head();
+    assert_no_attribution(&head);
+    assert_eq!(
+        head.matches("Signed-off-by: Test <test@example.com>")
+            .count(),
+        1,
+        "{head}"
+    );
+
+    let unsigned = Lab::new("post-sign-off-missing");
+    unsigned.git(&["commit", "--allow-empty", "-q", "-m", DIRTY]);
+    unsigned.post("git commit --allow-empty -m x", "");
+    assert_eq!(
+        unsigned
+            .head()
+            .matches("Signed-off-by: Test <test@example.com>")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn signing_follows_the_repository_config_and_the_amend_never_forces_it() {
+    if std::process::Command::new("ssh-keygen")
+        .arg("-?")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    let lab = Lab::new("post-sign-config");
+    let key = lab.scratch.home.join("key");
+    let made = std::process::Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", ""])
+        .arg("-f")
+        .arg(&key)
+        .status()
+        .expect("ssh-keygen runs");
+    assert!(made.success());
+    lab.git(&["config", "gpg.format", "ssh"]);
+    lab.git(&[
+        "config",
+        "user.signingkey",
+        &format!("{}.pub", key.display()),
+    ]);
+    lab.git(&["config", "commit.gpgsign", "true"]);
+    commit_dirty(&lab);
+    lab.git(&["config", "commit.gpgsign", "false"]);
+
+    lab.post("git commit --allow-empty -m x", "");
+
+    assert_no_attribution(&lab.head());
+    assert!(
+        !lab.git(&["cat-file", "commit", "HEAD"]).contains("gpgsig"),
+        "the repo no longer signs, so the amend does not either"
+    );
+}
+
+#[test]
+fn a_stopped_git_that_leaves_index_lock_behind_is_reported_not_cleaned_up() {
+    let lab = Lab::new("post-lock");
+    commit_dirty(&lab);
+    git_spy(
+        &lab,
+        "--amend --only",
+        &format!("touch {}/.git/index.lock; exit 1", lab.repo.display()),
+    );
+    let before = sha(&lab);
+
+    let out = lab.post("git commit --allow-empty -m x", "");
+
+    assert_eq!(sha(&lab), before);
+    let note = context(&out);
+    assert!(note.contains("could not amend"), "{note}");
+    assert!(
+        note.contains("index.lock") && note.contains("remove it"),
+        "{note}"
+    );
+    assert!(
+        lab.repo.join(".git/index.lock").exists(),
+        "the lock is left for the person to remove"
+    );
+}
+
+#[test]
+fn an_edit_with_a_repo_flag_reads_and_edits_that_repo_and_the_push_hint_is_not_a_pr() {
+    let lab = Lab::new("post-pr-repo");
+    let dirty = serde_json::json!({ "title": "feat: x", "body": format!("body\n\n{COAUTHOR}") });
+    gh_stub(&lab, &dirty.to_string());
+    lab.write_stub(
+        "gh",
+        "#!/bin/sh\nd=\"$(dirname \"$0\")\"\nprintf '%s\\n' \"$@\" >> \"$d/gh.calls\"\nif [ \"$1 $2\" = \"pr view\" ]; then cat \"$d/pr.json\"; exit 0; fi\nif [ \"$1 $2\" = \"pr edit\" ]; then cat > \"$d/edit.body\"; exit 0; fi\nexit 1\n",
+    );
+
+    for command in [
+        "gh pr edit 7 --repo o/r --body x",
+        "gh pr edit 7 -R o/r --body x",
+        "gh pr edit 7 -Ro/r --body x",
+    ] {
+        let _ = fs::remove_file(lab.bin.join("gh.calls"));
+
+        lab.post(command, "");
+
+        let calls = fs::read_to_string(lab.bin.join("gh.calls")).expect("gh ran");
+        assert_eq!(
+            calls.matches("--repo\no/r\n").count(),
+            2,
+            "view and edit: {command}: {calls}"
+        );
+    }
+    let hint = "remote: Create a pull request for 'feat' on GitHub by visiting:\nremote:      https://github.com/o/r/pull/new/feat\n";
+    let _ = fs::remove_file(lab.bin.join("gh.calls"));
+    assert_eq!(lab.post("gh pr create --fill", hint), "");
+    assert!(!lab.bin.join("gh.calls").exists(), "the hint is not a PR");
+    lab.post(
+        "gh pr create --fill",
+        &format!("{hint}https://github.com/o/r/pull/12\n"),
+    );
+    assert!(fs::read_to_string(lab.bin.join("gh.calls"))
+        .unwrap()
+        .contains("pull/12"));
 }

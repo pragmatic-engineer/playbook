@@ -6,7 +6,7 @@
 //! message a commit reuses, drops an `--author` or `--trailer` that names an
 //! AI, and follows the script a `git rebase --exec` runs.
 
-use super::engine::{git_output, nested_word, Call, Findings, Plan};
+use super::engine::{git_output, locate, nested_word, Call, Findings, Plan};
 use super::sources::{
     apply, feed, from_path, from_stdin, from_word, joined, read_message, resolve, value_span,
     Named, Rule, Source, Target,
@@ -253,6 +253,63 @@ const GLOBAL_WITH_VALUE: [&str; 6] = [
 const MESSAGE_FILES: [&str; 2] = ["MERGE_MSG", "SQUASH_MSG"];
 /// Longest hook script read when looking for a sign-off.
 const MAX_SCRIPT_BYTES: u64 = 1 << 20;
+
+/// What a script does with git that the backstop cares about.
+#[derive(Default)]
+pub struct GitUse {
+    /// It runs `git commit`.
+    pub commit: bool,
+    /// A commit takes its message from the command (`-m`, `-F`, `-C`,
+    /// `--no-edit`), not from an editor.
+    pub explicit_message: bool,
+    pub tag: bool,
+    pub push: bool,
+}
+
+/// The `git commit`, `tag` and `push` calls in `command`, as far as they can be
+/// recognised: through wrappers such as `env` and `rtk`, not through a
+/// shell's `-c` string.
+pub fn git_use(command: &str) -> GitUse {
+    let mut used = GitUse::default();
+    for cmd in commands(command) {
+        let Some((at, _)) = locate(&cmd.words)
+            .into_iter()
+            .find(|(_, name)| name == "git")
+        else {
+            continue;
+        };
+        let Some(sub) = subcommand(&cmd.words, at) else {
+            continue;
+        };
+        match cmd.words[sub].as_str() {
+            "commit" => {
+                used.commit = true;
+                let opts = COMMIT.scan(&cmd.words[sub + 1..]);
+                let own = ["m", "message", "F", "file", "C", "reuse-message", "no-edit"];
+                used.explicit_message |= has(&opts, &own);
+            }
+            "tag" => used.tag = true,
+            "push" => used.push = true,
+            _ => {}
+        }
+    }
+    used
+}
+
+/// The index of the subcommand word of the `git` at `program`, past the
+/// global options.
+fn subcommand(words: &[String], program: usize) -> Option<usize> {
+    let mut at = program + 1;
+    while let Some(word) = words.get(at) {
+        match word.as_str() {
+            "-C" | "-c" => at += 2,
+            w if GLOBAL_WITH_VALUE.contains(&w) => at += 2,
+            w if w.starts_with('-') => at += 1,
+            _ => return Some(at),
+        }
+    }
+    None
+}
 
 /// What every subcommand handler needs.
 struct Run<'a> {
@@ -876,6 +933,44 @@ mod tests {
                     eprintln!("note: the installed git {sub} has no --{name}, so it is skipped");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn git_use_finds_commit_tag_and_push_through_wrappers_and_global_options() {
+        let used = git_use("env A=1 rtk git -C repo -c user.name=x commit -m 'x' && git push");
+        assert!(used.commit && used.explicit_message && used.push && !used.tag);
+
+        let used = git_use("git commit --allow-empty\ngit tag -a v1 -m x");
+        assert!(used.commit && !used.explicit_message && used.tag && !used.push);
+
+        for message in [
+            "-m x",
+            "-F f",
+            "-C HEAD",
+            "--amend --no-edit",
+            "--message=x",
+            "-am x",
+        ] {
+            let used = git_use(&format!("git commit {message}"));
+            assert!(used.explicit_message, "{message}");
+        }
+    }
+
+    #[test]
+    fn git_use_ignores_text_that_only_mentions_git() {
+        for command in [
+            "git status",
+            "git log --oneline",
+            "git commit-tree HEAD",
+            "echo git commit -m x",
+            "grep -r 'git tag' .",
+            "gh pr create",
+            "git config alias.ci commit",
+            "",
+        ] {
+            let used = git_use(command);
+            assert!(!used.commit && !used.tag && !used.push, "{command}");
         }
     }
 
