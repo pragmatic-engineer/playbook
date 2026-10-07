@@ -182,9 +182,9 @@ cc raw [id]            # resume verbatim, no fork or cleanup
 
 `cc` loads the system prompt (when installed), picks a model, and prunes old transcripts (keeps the newest 5; set `CCD_KEEP` to change, `CCD_KEEP=0` disables).
 
-**One launcher, both shells.** `shell/zsh/cc.zsh` and `shell/bash/cc.sh` are thin entry points that both source the same modules under `shell/shared/`. So bash and zsh behave identically: every subcommand above, the config-drift auto-fork on the default resume, and retention all work the same in either shell. Source the entry for your shell (`cc.zsh` from `~/.zshrc`, `cc.sh` from `~/.bashrc`); `/playbook:setup --install-aliases` wires the right one.
+**One launcher, both shells.** `cc` and `ccd` are two small shell functions printed by `playbook shell-init`, and the work happens in the binary (`playbook cc launch`). So bash and zsh behave identically: every subcommand above, the config-drift auto-fork on the default resume, and retention all work the same in either shell. The rc file holds one line, `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`; `/playbook:setup --install-aliases` (or `playbook init --aliases`) writes it, and also rewrites an older `source .../cc.sh` line to it.
 
-`cc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine (`shell/shared/worktree.sh`) is shared by both shells. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
+`cc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine lives in the binary (`playbook cc worktree`), and the shell function `cd`s into the new worktree afterward. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
 
 ## Commands
 

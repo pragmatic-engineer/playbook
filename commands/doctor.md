@@ -97,12 +97,15 @@ basename "${SHELL:-}"
 ```
 
 For zsh: pass if BOTH conditions hold:
-1. `grep -qF 'shell/zsh/cc.zsh' ~/.zshrc 2>/dev/null`
-2. `test -f ~/.config/playbook/shell/zsh/cc.zsh`
+1. `grep -qF 'playbook shell-init' ~/.zshrc 2>/dev/null`
+2. `command -v playbook`
 
 For bash: pass if BOTH conditions hold:
-1. `grep -qF 'shell/bash/cc.sh' ~/.bashrc 2>/dev/null`
-2. `test -f ~/.config/playbook/shell/bash/cc.sh`
+1. `grep -qF 'playbook shell-init' ~/.bashrc 2>/dev/null`
+2. `command -v playbook`
+
+If the rc file still has a `source .../shell/zsh/cc.zsh` or `.../shell/bash/cc.sh` line, report
+"outdated launcher line (run `playbook init`)" instead of a pass.
 
 For any other shell: report "shell not detected" and skip this check.
 

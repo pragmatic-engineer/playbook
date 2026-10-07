@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Installs the `cc`/`ccd` launcher runtime under
-//! `$HOME/.config/playbook/shell/` and wires the rc file to source it.
+//! Wires the rc file to load the `cc`/`ccd` launcher with
+//! `eval "$(playbook shell-init)"`, and upgrades the legacy `source` lines.
 
 use crate::common::paths::playbook_root_from;
 use std::fs;
@@ -36,24 +36,36 @@ impl ShellKind {
         }
     }
 
-    /// The line a new or migrated install sources.
-    fn source_line(self) -> &'static str {
+    /// The launcher paths earlier installs sourced, relative to `$HOME`:
+    /// the pre-ADR-0012 `.claude/shell` paths, then the `.config/playbook`
+    /// ones, each with and without the bash/zsh/shared split.
+    fn legacy_launcher_paths(self) -> [&'static str; 4] {
         match self {
-            ShellKind::Bash => "source \"$HOME/.config/playbook/shell/bash/cc.sh\"",
-            ShellKind::Zsh => "source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"",
+            ShellKind::Bash => [
+                ".claude/shell/bash/cc.sh",
+                ".claude/shell/cc.sh",
+                ".config/playbook/shell/bash/cc.sh",
+                ".config/playbook/shell/cc.sh",
+            ],
+            ShellKind::Zsh => [
+                ".claude/shell/zsh/cc.zsh",
+                ".claude/shell/cc.zsh",
+                ".config/playbook/shell/zsh/cc.zsh",
+                ".config/playbook/shell/cc.zsh",
+            ],
         }
     }
 
-    /// The launcher paths earlier installs sourced, relative to `$HOME`:
-    /// the pre-ADR-0012 `.claude/shell` path, then the path from before the
-    /// bash/zsh/shared split.
-    fn legacy_launcher_paths(self) -> [&'static str; 2] {
-        match self {
-            ShellKind::Bash => [".claude/shell/bash/cc.sh", ".claude/shell/cc.sh"],
-            ShellKind::Zsh => [".claude/shell/zsh/cc.zsh", ".claude/shell/cc.zsh"],
-        }
-    }
+    const ALL: [ShellKind; 2] = [ShellKind::Bash, ShellKind::Zsh];
 }
+
+/// The line a new or migrated install runs, guarded so a shell started
+/// without `playbook` on PATH still comes up.
+pub const SOURCE_LINE: &str =
+    "command -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"";
+
+/// Comment line that opens the managed block; uninstall keys on it too.
+const BLOCK_COMMENT: &str = "# playbook launchers (cc/ccd)";
 
 /// What `rewire_rc_file` did, for a caller to report to the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,58 +79,20 @@ pub struct ShimOutcome {
     pub unwritable: bool,
 }
 
-/// Copy the launcher entry points and shared modules into
-/// `playbook_root_from(home)/shell`, skipping `*.test.sh`, plus the
-/// `config-hash.sh` helper the launcher sources.
-pub fn copy_launcher_runtime(self_root: &Path, home: &Path) -> io::Result<bool> {
-    let dst_shell = playbook_root_from(home).join("shell");
-    let mut changed = false;
-    changed |= copy_file_into(
-        &self_root.join("shell/bash/cc.sh"),
-        &dst_shell.join("bash/cc.sh"),
-    )?;
-    changed |= copy_file_into(
-        &self_root.join("shell/zsh/cc.zsh"),
-        &dst_shell.join("zsh/cc.zsh"),
-    )?;
-
-    let shared_src = self_root.join("shell/shared");
-    let shared_dst = dst_shell.join("shared");
-    fs::create_dir_all(&shared_dst)?;
-    for entry in fs::read_dir(&shared_src)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let name = entry.file_name();
-        if name.to_string_lossy().ends_with(".test.sh") {
-            continue;
-        }
-        changed |= copy_file_into(&entry.path(), &shared_dst.join(&name))?;
+/// Place `hooks/lib/config-hash.sh`, which `cc::config_drift` runs from the
+/// config dir outside any plugin context. A partial checkout without it is skipped.
+pub fn place_config_hash(self_root: &Path, home: &Path) -> io::Result<bool> {
+    let src = self_root.join("hooks/lib/config-hash.sh");
+    if !src.is_file() {
+        return Ok(false);
     }
-
-    // The launcher's config-drift module sources this from the config dir,
-    // outside any plugin context. A partial checkout without it is skipped,
-    // as install.sh does.
-    let config_hash_src = self_root.join("hooks/lib/config-hash.sh");
-    if config_hash_src.is_file() {
-        changed |= copy_file_into(
-            &config_hash_src,
-            &playbook_root_from(home).join("hooks/lib/config-hash.sh"),
-        )?;
-    }
-    Ok(changed)
-}
-
-/// Copy one file. Returns whether the destination's bytes changed.
-fn copy_file_into(src: &Path, dst: &Path) -> io::Result<bool> {
+    let dst = playbook_root_from(home).join("hooks/lib/config-hash.sh");
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
-    let before = fs::read(dst).ok();
-    fs::copy(src, dst)?;
-    let after = fs::read(dst)?;
-    Ok(before.as_deref() != Some(after.as_slice()))
+    let before = fs::read(&dst).ok();
+    fs::copy(&src, &dst)?;
+    Ok(before.as_deref() != Some(fs::read(&dst)?.as_slice()))
 }
 
 /// Make sure `home`'s rc file for `shell_kind` sources the current launcher
@@ -140,7 +114,7 @@ pub fn rewire_rc_file(home: &Path, shell_kind: ShellKind) -> io::Result<ShimOutc
     };
 
     let Some(existing) = existing else {
-        append_source_line(&rc_file, shell_kind)?;
+        append_source_line(&rc_file)?;
         return Ok(ShimOutcome {
             appended: true,
             ..unchanged
@@ -148,7 +122,7 @@ pub fn rewire_rc_file(home: &Path, shell_kind: ShellKind) -> io::Result<ShimOutc
     };
 
     let rewritten = rewrite_legacy_lines(&existing, shell_kind);
-    if rewritten.is_none() && has_line(&existing, shell_kind.source_line()) {
+    if rewritten.is_none() && has_current_line(&existing) {
         return Ok(unchanged);
     }
     if !owner_can_write(&rc_file) {
@@ -159,12 +133,34 @@ pub fn rewire_rc_file(home: &Path, shell_kind: ShellKind) -> io::Result<ShimOutc
     }
     match rewritten {
         Some(content) => atomic_write_rc_file(&rc_file, &content)?,
-        None => append_source_line(&rc_file, shell_kind)?,
+        None => append_source_line(&rc_file)?,
     }
     Ok(ShimOutcome {
         appended: true,
         ..unchanged
     })
+}
+
+/// Rewrite the legacy `source` launcher lines in every shell's rc file under
+/// `home` to the `shell-init` line. Files without a legacy line are not
+/// touched. Returns the rc files changed.
+pub fn upgrade_legacy_rc_files(home: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut changed = Vec::new();
+    for kind in ShellKind::ALL {
+        let rc_file = home.join(kind.rc_file_name());
+        let Ok(existing) = fs::read(&rc_file) else {
+            continue;
+        };
+        let Some(content) = rewrite_legacy_lines(&existing, kind) else {
+            continue;
+        };
+        if !owner_can_write(&rc_file) {
+            continue;
+        }
+        atomic_write_rc_file(&rc_file, &content)?;
+        changed.push(rc_file);
+    }
+    Ok(changed)
 }
 
 /// Whether some line of `content` trims to exactly `wanted`.
@@ -174,26 +170,49 @@ fn has_line(content: &[u8], wanted: &str) -> bool {
         .any(|line| line.trim_ascii() == wanted.as_bytes())
 }
 
-/// Drop every legacy source line from `content`. The first one becomes the
-/// current line when no current line exists yet. `None` if there was no
+/// Drop every legacy source line (and the managed comment right above it)
+/// from `content`, then append the current block at the end unless it is
+/// already there. At the end, so the line runs after any `PATH` export the
+/// installer appended below the old `source` line. `None` if there was no
 /// legacy line to touch.
 fn rewrite_legacy_lines(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
-    let mut current_present = has_line(content, shell_kind.source_line());
-    let mut out = Vec::with_capacity(content.len());
+    let mut lines: Vec<&[u8]> = Vec::new();
     let mut touched = false;
     for line in content.split_inclusive(|&b| b == b'\n') {
         if !is_legacy_source_line(line, shell_kind) {
-            out.extend_from_slice(line);
+            lines.push(line);
             continue;
         }
         touched = true;
-        if !current_present {
-            out.extend_from_slice(shell_kind.source_line().as_bytes());
-            out.push(b'\n');
-            current_present = true;
+        if lines
+            .last()
+            .is_some_and(|prev| prev.trim_ascii() == BLOCK_COMMENT.as_bytes())
+        {
+            lines.pop();
         }
     }
-    touched.then_some(out)
+    if !touched {
+        return None;
+    }
+    let mut out: Vec<u8> = lines.concat();
+    if !has_current_line(&out) {
+        while out.ends_with(b"\n\n") {
+            out.pop();
+        }
+        if !out.is_empty() && !out.ends_with(b"\n") {
+            out.push(b'\n');
+        }
+        if !out.is_empty() {
+            out.push(b'\n');
+        }
+        out.extend_from_slice(format!("{BLOCK_COMMENT}\n{SOURCE_LINE}\n").as_bytes());
+    }
+    Some(out)
+}
+
+/// The guarded line, or the bare `eval` a user may have written by hand.
+fn has_current_line(content: &[u8]) -> bool {
+    has_line(content, SOURCE_LINE) || has_line(content, "eval \"$(playbook shell-init)\"")
 }
 
 /// A non-comment line that sources (`source` or `.`) a legacy launcher path,
@@ -270,8 +289,8 @@ fn atomic_write_rc_file(rc_file: &Path, content: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-/// Append `shell_kind`'s source line to `rc_file`, creating it if needed.
-fn append_source_line(rc_file: &Path, shell_kind: ShellKind) -> io::Result<()> {
+/// Append the `shell-init` line to `rc_file`, creating it if needed.
+fn append_source_line(rc_file: &Path) -> io::Result<()> {
     if let Some(parent) = rc_file.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
@@ -281,9 +300,5 @@ fn append_source_line(rc_file: &Path, shell_kind: ShellKind) -> io::Result<()> {
         .create(true)
         .append(true)
         .open(rc_file)?;
-    write!(
-        file,
-        "\n# playbook launchers (cc/ccd)\n{}\n",
-        shell_kind.source_line()
-    )
+    write!(file, "\n{BLOCK_COMMENT}\n{SOURCE_LINE}\n")
 }

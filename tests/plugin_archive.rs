@@ -168,8 +168,6 @@ fn archive_contains_every_file_the_installed_plugin_reads_at_runtime() {
         "hooks/hooks.json",
         "hooks/migration-check.sh",
         "hooks/lib/config-hash.sh",
-        "shell/bash/cc.sh",
-        "shell/zsh/cc.zsh",
         "shell/setup-local.sh",
         "Brewfile",
         "LICENSE",
@@ -178,12 +176,6 @@ fn archive_contains_every_file_the_installed_plugin_reads_at_runtime() {
     .iter()
     .map(|s| s.to_string())
     .collect();
-    // shim.rs copies every non-test file under shell/shared.
-    needed.extend(
-        tracked(&["shell/shared"])
-            .into_iter()
-            .filter(|f| !f.ends_with(".test.sh")),
-    );
     // Every literal ${CLAUDE_PLUGIN_ROOT}/<file> a command, skill, agent or hook names.
     let re = Regex::new(r"CLAUDE_PLUGIN_ROOT(?::-)?\}?/([A-Za-z0-9_./-]+)").expect("regex");
     for f in tracked(&["commands", "skills", "agents", "hooks/hooks.json"]) {
@@ -317,13 +309,6 @@ fn init_from_the_unpacked_archive_places_statusline_prompt_and_settings() {
             "settings.json lacks the template key {key}\n{stdout}"
         );
     }
-    for name in ["bust-cache.sh", "dispatch.sh", "worktree.sh"] {
-        same(
-            cfg.join("shell/shared").join(name),
-            &format!("shell/shared/{name}"),
-        );
-    }
-    same(cfg.join("shell/bash/cc.sh"), "shell/bash/cc.sh");
     same(
         cfg.join("hooks/lib/config-hash.sh"),
         "hooks/lib/config-hash.sh",

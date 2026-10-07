@@ -53,7 +53,7 @@ Two env vars control this behavior:
 | `WORKTREE_AI_RESOLVE_SILENT=1` | Skip the prompt and resolve immediately (previous behavior). |
 | `WORKTREE_AI_RESOLVE=0` | Disable AI resolution entirely, even when `--ai-resolve` is passed. |
 
-`cc worktree` always passes `--ai-resolve` internally. Set `WORKTREE_AI_RESOLVE=0` in your shell environment to turn it off for the `cc` path.
+The binary launcher does not run AI resolution yet (#446 tracks the port): a rebase conflict aborts the rebase and the worktree is left on the branch as created.
 
 ### Migration note
 
@@ -71,5 +71,5 @@ If anything fails, the hook says why on stderr and falls back to `<repo>/.claude
 
 ## See also
 
-- [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `cc` launcher that calls `_cc_worktree`.
+- [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `cc` launcher that sets up the worktree.
 - [Docs index](../index.md)

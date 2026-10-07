@@ -21,10 +21,6 @@ settings.shared.json
 statusline.sh
 prompts/SYSTEM_PROMPT.md
 hooks/lib/config-hash.sh
-shell/bash/cc.sh
-shell/zsh/cc.zsh
-shell/shared
-:(exclude)shell/shared/*.test.sh
 
 # Run by slash commands through CLAUDE_PLUGIN_ROOT
 # (/playbook:setup, quick-review, deep-review, plan, adr, implement, learn-project)

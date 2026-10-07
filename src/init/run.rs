@@ -468,7 +468,7 @@ fn wire_hooks(settings_path: &Path, epoch: u64) -> StepReport {
     }
 }
 
-/// Copy the launcher runtime, skipped when `aliases` is false or
+/// Place `config-hash.sh` for the launcher, skipped when `aliases` is false or
 /// `CLAUDE_PLUGIN_ROOT` is unset.
 fn install_shell_runtime_step(self_root: Option<&Path>, home: &Path, aliases: bool) -> StepReport {
     if !aliases {
@@ -477,11 +477,11 @@ fn install_shell_runtime_step(self_root: Option<&Path>, home: &Path, aliases: bo
     let Some(self_root) = self_root else {
         return StepReport::skipped(
             "shell-runtime",
-            "CLAUDE_PLUGIN_ROOT is not set, no launcher runtime to install",
+            "CLAUDE_PLUGIN_ROOT is not set, no config-hash.sh to place",
         );
     };
-    match shim::copy_launcher_runtime(self_root, home) {
-        Ok(true) => StepReport::wired("shell-runtime", "copied the launcher runtime"),
+    match shim::place_config_hash(self_root, home) {
+        Ok(true) => StepReport::wired("shell-runtime", "placed config-hash.sh"),
         Ok(false) => StepReport::already_correct("shell-runtime", "already up to date"),
         Err(err) => StepReport::failed("shell-runtime", err.to_string()),
     }
@@ -500,11 +500,11 @@ fn rewire_rc_file_step(
     let Some(shell_kind) = shell_kind else {
         return StepReport::skipped(
             "shim",
-            "$SHELL is neither bash nor zsh; source shell/bash/cc.sh or shell/zsh/cc.zsh manually",
+            "$SHELL is neither bash nor zsh; add `eval \"$(playbook shell-init)\"` to your rc file by hand",
         );
     };
     if !shell_runtime_confirmed {
-        return StepReport::skipped("shim", "launcher runtime copy not confirmed complete");
+        return StepReport::skipped("shim", "config-hash.sh copy not confirmed complete");
     }
     match shim::rewire_rc_file(home, shell_kind) {
         Ok(outcome) if outcome.unwritable => StepReport::skipped(
@@ -517,13 +517,13 @@ fn rewire_rc_file_step(
         Ok(outcome) if outcome.appended => StepReport::wired(
             "shim",
             format!(
-                "updated the launcher source line in {}",
+                "wired `playbook shell-init` in {}",
                 outcome.rc_file.display()
             ),
         ),
         Ok(outcome) => StepReport::already_correct(
             "shim",
-            format!("{} already sources the launcher", outcome.rc_file.display()),
+            format!("{} already loads the launcher", outcome.rc_file.display()),
         ),
         Err(err) => StepReport::failed("shim", err.to_string()),
     }

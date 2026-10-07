@@ -6,7 +6,7 @@
 
 #![allow(dead_code)]
 
-use playbook::init::shim::{copy_launcher_runtime, rewire_rc_file, ShellKind};
+use playbook::init::shim::{rewire_rc_file, upgrade_legacy_rc_files, ShellKind, SOURCE_LINE};
 use playbook::init::statusline::{
     place_statusline, playbook_statusline_path, resolve_statusline_path,
 };
@@ -55,13 +55,13 @@ fn rc_file_gains_exactly_one_source_line_across_repeated_runs() {
             name: "zsh",
             shell_kind: ShellKind::Zsh,
             rc_file_name: ".zshrc",
-            grep_pattern: ".config/playbook/shell/zsh/cc.zsh",
+            grep_pattern: "playbook shell-init",
         },
         Case {
             name: "bash",
             shell_kind: ShellKind::Bash,
             rc_file_name: ".bashrc",
-            grep_pattern: ".config/playbook/shell/bash/cc.sh",
+            grep_pattern: "playbook shell-init",
         },
     ];
 
@@ -110,7 +110,7 @@ fn rewire_rc_file_creates_a_missing_rc_file() {
     );
     assert_eq!(outcome.rc_file, rc_file);
     let contents = fs::read_to_string(&rc_file).expect("rc file should now exist");
-    assert!(contents.contains(".config/playbook/shell/zsh/cc.zsh"));
+    assert!(contents.contains("eval \"$(playbook shell-init)\""));
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -133,7 +133,7 @@ fn rewire_rc_file_preserves_unrelated_rc_content() {
         contents.starts_with(unrelated),
         "unrelated existing content should survive untouched, got:\n{contents}"
     );
-    assert!(contents.contains(".config/playbook/shell/bash/cc.sh"));
+    assert!(contents.contains("eval \"$(playbook shell-init)\""));
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -163,10 +163,7 @@ fn rewire_rc_file_replaces_legacy_line_in_place_without_duplicating() {
         .lines()
         .filter(|l| l.trim() == "source \"$HOME/.claude/shell/zsh/cc.zsh\"")
         .count();
-    let current_count = contents
-        .lines()
-        .filter(|l| l.trim() == "source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"")
-        .count();
+    let current_count = contents.lines().filter(|l| l.trim() == SOURCE_LINE).count();
     assert_eq!(
         legacy_count, 0,
         "the legacy line should be gone: {contents}"
@@ -198,13 +195,13 @@ fn rewire_rc_file_replaces_pre_layout_split_line_in_place_without_duplicating() 
             shell_kind: ShellKind::Zsh,
             rc_file_name: ".zshrc",
             old_line: "source \"$HOME/.claude/shell/cc.zsh\"",
-            current_line: "source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"",
+            current_line: SOURCE_LINE,
         },
         Case {
             shell_kind: ShellKind::Bash,
             rc_file_name: ".bashrc",
             old_line: "source \"$HOME/.claude/shell/cc.sh\"",
-            current_line: "source \"$HOME/.config/playbook/shell/bash/cc.sh\"",
+            current_line: SOURCE_LINE,
         },
     ];
 
@@ -244,7 +241,7 @@ fn rewire_rc_file_replaces_pre_layout_split_line_in_place_without_duplicating() 
     }
 }
 
-const ZSH_CURRENT: &str = "source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"";
+const ZSH_CURRENT: &str = SOURCE_LINE;
 
 fn count_lines_sourcing(contents: &str, needle: &str) -> usize {
     contents.lines().filter(|l| l.contains(needle)).count()
@@ -272,7 +269,12 @@ fn rewire_rc_file_removes_legacy_lines_even_when_the_current_line_exists() {
     assert!(first.appended, "removing a legacy line is a change");
     assert!(!second.appended, "the second run should be a no-op");
     let contents = fs::read_to_string(&rc_file).unwrap();
-    assert_eq!(count_lines_sourcing(&contents, "cc.zsh"), 1, "{contents}");
+    assert_eq!(count_lines_sourcing(&contents, "cc.zsh"), 0, "{contents}");
+    assert_eq!(
+        count_lines_sourcing(&contents, "shell-init"),
+        1,
+        "{contents}"
+    );
     assert_eq!(count_lines_sourcing(&contents, ".claude/shell"), 0);
     assert_eq!(contents.matches("launchers (cc/ccd)").count(), 1);
     assert!(contents.contains("alias ll='ls -la'"));
@@ -309,7 +311,7 @@ fn rewire_rc_file_matches_legacy_lines_loosely() {
         let contents = fs::read_to_string(&rc_file).unwrap();
         assert_eq!(
             contents,
-            format!("{comment}\n{ZSH_CURRENT}\nexport A=1\n"),
+            format!("{comment}\nexport A=1\n\n# playbook launchers (cc/ccd)\n{ZSH_CURRENT}\n"),
             "form {form:?}"
         );
 
@@ -364,7 +366,7 @@ fn rewire_rc_file_keeps_a_symlinked_rc_and_updates_its_target() {
     );
     assert_eq!(
         fs::read_to_string(&target).unwrap(),
-        format!("{ZSH_CURRENT}\n")
+        format!("# playbook launchers (cc/ccd)\n{ZSH_CURRENT}\n")
     );
 
     let _ = fs::remove_dir_all(&home);
@@ -396,8 +398,10 @@ fn rewire_rc_file_preserves_a_non_utf8_rc_file() {
     // Act
     rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed");
 
-    // Assert: the legacy line is replaced, the Latin-1 bytes are intact.
-    assert_eq!(fs::read(&rc_file).unwrap(), original);
+    // Assert: the legacy line is replaced by a block at the end, the Latin-1 bytes are intact.
+    let mut migrated = b"# configura\xe7\xe3o\n\n# playbook launchers (cc/ccd)\n".to_vec();
+    migrated.extend_from_slice(format!("{ZSH_CURRENT}\n").as_bytes());
+    assert_eq!(fs::read(&rc_file).unwrap(), migrated);
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -431,43 +435,35 @@ fn rewire_rc_file_leaves_a_read_only_rc_untouched() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// The migration path: both rc files lose their `source` line for the
+/// `shell-init` line, and a file without a legacy line is not touched.
 #[test]
-fn copy_launcher_runtime_places_config_hash_where_config_drift_sources_it() {
+fn upgrade_legacy_rc_files_rewrites_every_legacy_form_and_skips_clean_files() {
     // Arrange
-    let home = temp_home("copies-config-hash");
-    let dst = home.join(".config/playbook/hooks/lib/config-hash.sh");
-
-    // Act
-    let first = copy_launcher_runtime(&self_root(), &home).expect("first copy should succeed");
-    let second = copy_launcher_runtime(&self_root(), &home).expect("second copy should succeed");
-
-    // Assert
-    assert!(first);
-    assert!(!second, "a second copy should find everything up to date");
-    assert_eq!(
-        fs::read(&dst).expect("config-hash.sh should be placed"),
-        fs::read(self_root().join("hooks/lib/config-hash.sh")).unwrap()
+    let home = temp_home("upgrade-legacy");
+    write_file(
+        &home.join(".zshrc"),
+        "# playbook launchers (cc/ccd)\nsource \"$HOME/.config/playbook/shell/zsh/cc.zsh\"\n",
+    );
+    write_file(
+        &home.join(".bashrc"),
+        "source ~/.config/playbook/shell/cc.sh\nexport A=1\n",
     );
 
-    let _ = fs::remove_dir_all(&home);
-}
-
-#[test]
-fn copy_launcher_runtime_copies_the_launcher_runtime_files() {
-    // Arrange
-    let home = temp_home("copies-runtime");
-
     // Act
-    copy_launcher_runtime(&self_root(), &home).expect("copy_launcher_runtime should succeed");
+    let first = upgrade_legacy_rc_files(&home).expect("upgrade should succeed");
+    let second = upgrade_legacy_rc_files(&home).expect("upgrade should be repeatable");
 
-    // Assert: files land under `$HOME/.config/playbook/shell`.
-    let dst_shell = home.join(".config/playbook/shell");
-    assert!(dst_shell.join("zsh/cc.zsh").is_file());
-    assert!(dst_shell.join("bash/cc.sh").is_file());
-    assert!(dst_shell.join("shared/dispatch.sh").is_file());
-    assert!(
-        !dst_shell.join("shared/launcher.test.sh").exists(),
-        "*.test.sh files should not be copied"
+    // Assert
+    assert_eq!(first.len(), 2);
+    assert!(second.is_empty(), "a second run changes nothing");
+    assert_eq!(
+        fs::read_to_string(home.join(".zshrc")).unwrap(),
+        format!("# playbook launchers (cc/ccd)\n{SOURCE_LINE}\n")
+    );
+    assert_eq!(
+        fs::read_to_string(home.join(".bashrc")).unwrap(),
+        format!("export A=1\n\n# playbook launchers (cc/ccd)\n{SOURCE_LINE}\n")
     );
 
     let _ = fs::remove_dir_all(&home);

@@ -8,14 +8,13 @@
 # GIT_AUTHOR_NAME/EMAIL and GIT_COMMITTER_NAME/EMAIL sit ABOVE per-repo config
 # in git's precedence, so setting them as step-level env vars silently
 # overrides every test fixture that sets its own identity via `git config`.
-# That broke shell/worktree.test.sh scenario M: it passed locally, where
+# That once broke a worktree suite: it passed locally, where
 # those vars are unset, and failed only in CI. The fix scopes the CI identity
 # through GIT_CONFIG_GLOBAL pointed at a throwaway file instead, which a
 # fixture's own `git config user.email` still beats, exactly as before.
 #
-# Scoped to the workflow file only: shell/worktree.test.sh legitimately sets
-# GIT_AUTHOR_*/GIT_COMMITTER_* inline for one scenario of its own, and that is
-# not this defect.
+# Scoped to the workflow file only: a suite that sets GIT_AUTHOR_* inline for
+# one scenario of its own is not this defect.
 #
 # Run:  bash shell/ci-git-identity.test.sh
 # Exit: 0 if all scenarios pass, non-zero otherwise.
@@ -81,8 +80,7 @@ fi
 
 # C: the check itself actually catches the regression, not just the absence
 # of one today. A fixture copy with the defect reinstated (a step-level
-# GIT_AUTHOR_NAME env var, the exact shape that broke worktree.test.sh
-# scenario M) must fail scenario A's check.
+# GIT_AUTHOR_NAME env var, the exact shape that once broke a worktree suite) must fail scenario A's check.
 FIXTURE_REGRESSED="${WORK}/shell-ci-regressed.yml"
 {
   cat "$WORKFLOW"
@@ -95,17 +93,6 @@ if sets_author_or_committer_env "$FIXTURE_REGRESSED"; then
 else
   fail "a reinstated GIT_AUTHOR_NAME step env var is caught" \
     "sets_author_or_committer_env did not flag the regressed fixture"
-fi
-
-# D: worktree.test.sh's own legitimate inline use of GIT_AUTHOR_*/
-# GIT_COMMITTER_* (scenario M's fixture) is out of scope for this check,
-# since it is scoped to the workflow file argument only, never to the repo.
-WORKTREE_TEST="${SCRIPT_DIR}/worktree.test.sh"
-if [ -f "$WORKTREE_TEST" ] && grep -q 'GIT_AUTHOR_NAME=' "$WORKTREE_TEST"; then
-  pass "worktree.test.sh's own inline identity is untouched by this check"
-else
-  fail "worktree.test.sh's own inline identity is untouched by this check" \
-    "expected shell/worktree.test.sh to still set GIT_AUTHOR_NAME= inline"
 fi
 
 TOTAL=$(( PASS + FAIL ))

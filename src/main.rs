@@ -41,10 +41,38 @@ fn main() {
                 let code = cc::worktree_run::run(&cwd, &branch, env_base.as_deref());
                 std::process::exit(code);
             }
-            // The rest of the launcher lands in later Work Units; until then
-            // they are no-ops so the shell dispatcher stays authoritative.
-            _ => {}
+            Some(CcCommand::Launch {
+                skip_permissions,
+                args,
+            }) => std::process::exit(cc::launch::run(skip_permissions, &args)),
+            Some(CcCommand::Housekeep {
+                repo_root,
+                worktree,
+                branch,
+                no_push,
+            }) => cc::worktree_run::Housekeep::new(
+                std::path::Path::new(&repo_root),
+                std::path::Path::new(&worktree),
+                &branch,
+                no_push,
+            )
+            .run(),
+            Some(CcCommand::Clean) => std::process::exit(cc::launch::run(false, &["clean".into()])),
+            Some(CcCommand::Fresh) => std::process::exit(cc::launch::run(false, &["fresh".into()])),
+            Some(CcCommand::Raw { sid }) => {
+                let mut args = vec!["raw".to_string()];
+                args.extend(sid);
+                std::process::exit(cc::launch::run(false, &args));
+            }
+            None => std::process::exit(cc::launch::run(false, &[])),
         },
+        Command::ShellInit { shell } => {
+            let kind = shell
+                .or_else(|| std::env::var("SHELL").ok())
+                .and_then(|s| ShellKind::detect(&s))
+                .unwrap_or(ShellKind::Bash);
+            print!("{}", init::shell_init::script(kind));
+        }
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
         // Retiring `hooks/hooks.json` and regenerating the seed into

@@ -58,9 +58,6 @@ chmod 0755 "$BIN_DIR/playbook"
 seed_shipped_extras() {
   local src="$1"
   printf '#!/bin/sh\necho ok\n' > "$src/statusline.sh"
-  mkdir -p "$src/shell/bash" "$src/shell/zsh" "$src/shell/shared"
-  printf '#!/bin/sh\n' > "$src/shell/bash/cc.sh"
-  printf '#!/bin/sh\n' > "$src/shell/zsh/cc.zsh"
 }
 
 # run_install <src> <home> <log>: runs the real installer against a local

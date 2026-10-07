@@ -67,6 +67,14 @@ pub enum Command {
         #[arg(long)]
         aliases: bool,
     },
+    /// Print the shell functions `cc` and `ccd`
+    ///
+    /// Load them from your rc file with `eval "$(playbook shell-init)"`.
+    ShellInit {
+        /// Target shell (default: the one named by `$SHELL`)
+        #[arg(long, value_parser = ["bash", "zsh"])]
+        shell: Option<String>,
+    },
     /// Update playbook to a published release
     ///
     /// Downloads the release, checks its SHA256 sum and, when `gh` is
@@ -889,6 +897,27 @@ pub enum CcCommand {
     /// Clear caches that would freeze old settings into a session
     #[command(name = "bust-cache")]
     BustCache,
+    /// Run the launcher the `cc` and `ccd` shell functions call
+    Launch {
+        /// Pass `--dangerously-skip-permissions` to claude (the `ccd` form)
+        #[arg(long)]
+        skip_permissions: bool,
+        /// Subcommand and arguments, passed through to claude
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Background half of `cc worktree`, spawned by the launcher
+    #[command(hide = true)]
+    Housekeep {
+        #[arg(long)]
+        repo_root: String,
+        #[arg(long)]
+        worktree: String,
+        #[arg(long)]
+        branch: String,
+        #[arg(long)]
+        no_push: bool,
+    },
     /// Create a git worktree for a branch and print its path
     ///
     /// Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"`.

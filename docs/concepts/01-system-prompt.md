@@ -4,14 +4,13 @@
 
 ## How it loads
 
-The `cc` launcher (`shell/zsh/cc.zsh`) passes the file to `claude` via `--system-prompt-file`:
+The `cc` launcher (`playbook cc launch`, run by the functions `playbook shell-init` prints) passes the file to `claude` via `--system-prompt-file`:
 
-```zsh
-cc()  { _claude --system-prompt-file "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md" "$@"; ... }
-ccd() { _claude --dangerously-skip-permissions --system-prompt-file "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md" "$@"; ... }
+```sh
+claude --system-prompt-file "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md" ...
 ```
 
-Both wrappers carry the flag. `ccd` adds `--dangerously-skip-permissions` for unattended work; otherwise they're identical. If you invoke `claude` directly (bypassing `cc`), the system prompt won't load.
+Both `cc` and `ccd` carry the flag. `ccd` adds `--dangerously-skip-permissions` for unattended work; otherwise they're identical. If you invoke `claude` directly (bypassing `cc`), the system prompt won't load.
 
 The prompt locks in once, at the start of a fresh session. Resumed sessions inherit whatever was loaded when they started. That's the main tradeoff: changes to `SYSTEM_PROMPT.md` don't take effect until you start fresh. Use `cc fresh` to open a new session, or `cc clean` to fork the current conversation history into a new one with config reloaded.
 

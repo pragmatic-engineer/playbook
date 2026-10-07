@@ -5,7 +5,7 @@
 # setup-local.sh: idempotent local wiring for pragmatic-engineer/playbook.
 # Bootstraps the `playbook` binary, then seeds or merges settings.json and
 # wires every guard/functional hook via `playbook init`, and optionally
-# installs deps (brew). The shell launchers (cc.sh/cc.zsh) and the system
+# installs deps (brew). The shell launcher (`playbook shell-init`) and the system
 # prompt are installed by `playbook init`, which this script hands
 # --aliases and --system-prompt to.
 #
