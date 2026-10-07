@@ -81,6 +81,18 @@ ADR 0003 works the same rule through a second example. A `critic` takes a focus 
 
 The trade-off in one line each: parametrizing keeps behaviour consistent and the file count low. Splitting keeps each checklist honest, at the cost of another file to maintain.
 
+## Effort tiers and generated variants
+
+Effort is fixed per agent file because the `Agent` tool takes no per-call effort. When an orchestrator spawns one role at different difficulty (a one-line docs diff and a 200 KB security diff), keep one base agent and let `playbook agents gen` write variants named `<base>-<tier>`, such as `reviewer-low` and `reviewer-xhigh`.
+
+- The base file is the single source. A variant differs only in `name`, a `Low-effort variant of reviewer.` style prefix on the `description`, and `effort`. A generated comment sits right after the frontmatter.
+- The set lives in the `VARIANTS` table in `src/agents/variants.rs`. To add a tier or an agent, edit the table, run `playbook agents gen`, and commit the generated files. Never edit a variant: change the base and rerun.
+- `gen` is idempotent and deterministic. `playbook agents check`, and so `playbook ci`, fails when a variant is missing, stale, hand-edited, or left behind after its table entry was removed. Variants still go through every normal check, including the read-only tool rules.
+- Spawn a variant with its `playbook:` prefix, for example `playbook:reviewer-xhigh`. The roster in `skills/delegating-subagents/SKILL.md` lists them, and its "Pick the tier" section says when to use each.
+- Variants ship in the plugin because the archive includes all of `agents/`.
+
+Current set: `reviewer`, `critic`, `implementer`, and `analyst` get `-low` and `-xhigh`. `fact-checker` gets `-xhigh` only, because a verifier that misses a wrong claim defeats its purpose. `test-reviewer` gets none: it runs once per quality gate, so nothing varies. The policy for base efforts is in [Model routing and memory](../internals/02-model-routing-and-memory.md#effort-policy).
+
 ## The check
 
 `playbook agents check` validates every `agents/*.md` and runs as part of `rust-ci` (`.github/workflows/rust-ci.yml`), which builds the binary the check now lives in. The template lives under `docs/authoring/`, so it isn't scanned at all. The validator still skips a file named `_TEMPLATE.md` inside `agents/`, which keeps a stray copy from failing the lint.
@@ -102,7 +114,7 @@ Run it before committing a new or edited agent:
 playbook agents check
 ```
 
-It reports every offending file at once rather than stopping at the first one.
+It also compares every generated variant with what `playbook agents gen` would write. It reports every offending file at once rather than stopping at the first one.
 
 ## See also
 

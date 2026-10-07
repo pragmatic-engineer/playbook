@@ -254,3 +254,109 @@ fn nonexistent_agents_dir_argument_errors() {
     assert!(err.contains("check-agents: agents directory not found"));
     assert!(err.contains(&missing.display().to_string()));
 }
+
+// --- Effort-tier variants: `agents gen` writes them, `agents check` pins them ---
+
+fn run_sub(sub: &str, agents_dir: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["agents", sub])
+        .arg(agents_dir)
+        .output()
+        .expect("playbook binary should spawn")
+}
+
+/// A scratch dir holding just a valid `reviewer.md`, the base of two variants.
+fn reviewer_fixture(tag: &str) -> PathBuf {
+    let dir = scratch(tag);
+    let content = agent(
+        "reviewer",
+        STRICT_DESC,
+        "Read, Grep, Glob",
+        "sonnet",
+        "high",
+        GUARDRAILS_FULL,
+    );
+    fs::write(dir.join("reviewer.md"), content).expect("fixture");
+    dir
+}
+
+#[test]
+fn check_fails_when_a_variant_is_missing_and_gen_fixes_it() {
+    let dir = reviewer_fixture("variant-missing");
+
+    let out = run_sub("check", &dir);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr_of(&out).contains("reviewer-low.md: missing variant"));
+
+    let generated = run_sub("gen", &dir);
+    assert!(generated.status.success(), "{}", stderr_of(&generated));
+    assert!(dir.join("reviewer-xhigh.md").is_file());
+    assert!(run_sub("check", &dir).status.success());
+}
+
+#[test]
+fn gen_is_idempotent() {
+    let dir = reviewer_fixture("variant-idempotent");
+    run_sub("gen", &dir);
+    let before = fs::read_to_string(dir.join("reviewer-low.md")).expect("variant");
+
+    let again = run_sub("gen", &dir);
+
+    assert!(stdout_of(&again).contains("0 variant(s) written"));
+    assert_eq!(
+        before,
+        fs::read_to_string(dir.join("reviewer-low.md")).expect("variant")
+    );
+}
+
+#[test]
+fn check_fails_on_a_hand_edited_or_stale_variant() {
+    let dir = reviewer_fixture("variant-edited");
+    run_sub("gen", &dir);
+    let path = dir.join("reviewer-low.md");
+    let text = fs::read_to_string(&path).expect("variant");
+    fs::write(&path, text.replace("effort: low", "effort: medium")).expect("edit");
+
+    let edited = run_sub("check", &dir);
+    assert_eq!(edited.status.code(), Some(1));
+    assert!(stderr_of(&edited).contains("reviewer-low.md: stale or hand-edited"));
+
+    run_sub("gen", &dir);
+    let base = dir.join("reviewer.md");
+    let body = fs::read_to_string(&base).expect("base");
+    fs::write(&base, format!("{body}\nA new base line.\n")).expect("edit base");
+    let stale = run_sub("check", &dir);
+    assert!(stderr_of(&stale).contains("reviewer-xhigh.md: stale or hand-edited"));
+}
+
+#[test]
+fn check_fails_on_an_orphaned_generated_file() {
+    let dir = reviewer_fixture("variant-orphan");
+    run_sub("gen", &dir);
+    let low = fs::read_to_string(dir.join("reviewer-low.md")).expect("variant");
+    let orphan = low.replace("reviewer-low", "reviewer-max");
+    fs::write(dir.join("reviewer-max.md"), orphan).expect("orphan");
+
+    let out = run_sub("check", &dir);
+
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr_of(&out).contains("reviewer-max.md: generated file with no entry"));
+}
+
+#[test]
+fn variants_still_obey_the_read_only_contract() {
+    let dir = reviewer_fixture("variant-contract");
+    let base = dir.join("reviewer.md");
+    let body = fs::read_to_string(&base).expect("base");
+    fs::write(
+        &base,
+        body.replace("Read, Grep, Glob", "Read, Grep, Glob, Bash"),
+    )
+    .expect("edit");
+    run_sub("gen", &dir);
+
+    let out = run_sub("check", &dir);
+
+    let err = stderr_of(&out);
+    assert!(err.contains("reviewer-low.md: description declares the agent structurally read-only"));
+}

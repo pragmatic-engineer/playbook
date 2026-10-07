@@ -17,6 +17,7 @@
 //! `frontmatter_value` does with `grep`/`sed`. Bending that heavier parser's
 //! semantics to fit a script this narrow would cost more than it saves.
 
+use super::variants;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -375,6 +376,8 @@ pub fn check(agents_dir: &Path) -> Result<String, String> {
         violations.extend(check_agent(&label, name, &content));
     }
 
+    violations.extend(check_variants(agents_dir, &entries_names(agents_dir)));
+
     if !violations.is_empty() {
         let mut message = format!(
             "{} violation(s) across agent definitions:",
@@ -389,6 +392,62 @@ pub fn check(agents_dir: &Path) -> Result<String, String> {
     Ok(format!(
         "check-agents: OK ({count} agent definitions, all valid)"
     ))
+}
+
+/// Every `*.md` file name in `dir`, sorted.
+fn entries_names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.ends_with(".md"))
+        .collect();
+    names.sort();
+    names
+}
+
+/// A variant must exist and equal what the generator renders from its
+/// base: missing, stale, hand-edited, and orphaned generated files all fail.
+/// A base absent from `dir` is skipped, so partial fixture dirs stay valid.
+fn check_variants(dir: &Path, files: &[String]) -> Vec<String> {
+    let mut violations = Vec::new();
+    let mut expected: Vec<String> = Vec::new();
+    for (base, tiers) in variants::VARIANTS {
+        let Ok(content) = fs::read_to_string(dir.join(format!("{base}.md"))) else {
+            continue;
+        };
+        for tier in tiers {
+            let file = format!("{}.md", variants::variant_name(base, tier));
+            expected.push(file.clone());
+            let rendered = match variants::render_variant(base, &content, tier) {
+                Ok(text) => text,
+                Err(err) => {
+                    violations.push(format!("{file}: cannot generate: {err}"));
+                    continue;
+                }
+            };
+            match fs::read_to_string(dir.join(&file)) {
+                Err(_) => violations.push(format!(
+                    "{file}: missing variant of {base}.md, run `playbook agents gen`"
+                )),
+                Ok(actual) if actual != rendered => violations.push(format!(
+                    "{file}: stale or hand-edited, run `playbook agents gen`"
+                )),
+                Ok(_) => {}
+            }
+        }
+    }
+    for file in files {
+        let generated = fs::read_to_string(dir.join(file))
+            .is_ok_and(|text| text.lines().any(|l| l.starts_with(variants::MARKER)));
+        if generated && !expected.contains(file) {
+            violations.push(format!(
+                "{file}: generated file with no entry in VARIANTS, delete it"
+            ));
+        }
+    }
+    violations
 }
 
 #[cfg(test)]

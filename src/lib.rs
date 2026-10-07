@@ -389,6 +389,12 @@ pub enum AgentsCommand {
         /// Folder of agent definitions (default: `agents` at the repo root)
         agents_dir: Option<PathBuf>,
     },
+    /// Write the effort-tier variants (`reviewer-low`, `reviewer-xhigh`, and
+    /// so on) from their base agent files. Idempotent and deterministic.
+    Gen {
+        /// Directory holding the agent definitions, default `<repo root>/agents`.
+        agents_dir: Option<PathBuf>,
+    },
 }
 
 /// `playbook usage` subcommands.
