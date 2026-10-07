@@ -16,6 +16,7 @@ pub enum Dimension {
     Branch,
     Effort,
     Account,
+    Agent,
 }
 
 impl Dimension {
@@ -28,6 +29,7 @@ impl Dimension {
             Dimension::Branch => "branch",
             Dimension::Effort => "effort",
             Dimension::Account => "account",
+            Dimension::Agent => "agent",
         }
     }
 }
@@ -87,6 +89,7 @@ fn key_for(event: &UsageEvent, dim: Dimension) -> String {
         Dimension::Branch => &event.branch,
         Dimension::Effort => &event.effort,
         Dimension::Account => &event.account,
+        Dimension::Agent => &event.agent,
     };
     if raw.is_empty() {
         UNSET.to_string()

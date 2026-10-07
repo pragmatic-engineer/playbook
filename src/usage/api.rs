@@ -12,6 +12,7 @@ use super::aggregate::{
 use super::svg::bar_chart;
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 /// Days drawn in the per-day chart when the range is all time.
 const CHART_DAYS: usize = 90;
@@ -162,6 +163,7 @@ pub fn data_json(
         ("branch", Dimension::Branch),
         ("effort", Dimension::Effort),
         ("account", Dimension::Account),
+        ("agent", Dimension::Agent),
     ];
     let mut groups = serde_json::Map::new();
     for (name, dim) in dims {
@@ -190,6 +192,126 @@ pub fn data_json(
             "cost_by_model": bar_chart("Cost per model", "USD", &cost_bars(&models)),
         },
     })
+}
+
+/// Sessions listed at most; the response says how many more there were.
+const SESSION_LIMIT: usize = 500;
+/// Messages returned for one session (the newest), and drawn in its chart.
+const TIMELINE_LIMIT: usize = 2000;
+const TIMELINE_CHART_BARS: usize = 120;
+const SESSION_ID_MAX: usize = 128;
+
+/// A session id is a transcript's own id (a UUID in practice). Anything else is
+/// refused before it reaches a lookup.
+pub fn valid_session_id(id: &str) -> bool {
+    id.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
+        && id.len() <= SESSION_ID_MAX
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+}
+
+fn in_window(window: Option<(i64, i64)>, timestamp: i64) -> bool {
+    window.is_none_or(|(first, past)| (first..past).contains(&day_of(timestamp)))
+}
+
+fn total_tokens(e: &UsageEvent) -> u64 {
+    e.input_tokens + e.output_tokens + e.cache_creation_tokens + e.cache_read_tokens
+}
+
+/// One row per session with at least one message in `range`, newest first.
+/// Stats cover the messages inside the range. `usage` is ordered by time.
+pub fn sessions_json(usage: &[UsageEvent], now: i64, range: Range) -> Value {
+    let window = range.days(now);
+    let mut by_session: BTreeMap<&str, Vec<&UsageEvent>> = BTreeMap::new();
+    for e in usage.iter().filter(|e| in_window(window, e.timestamp)) {
+        by_session.entry(e.session_id.as_str()).or_default().push(e);
+    }
+    let mut rows: Vec<(i64, &str, Value)> = by_session
+        .into_iter()
+        .map(|(id, events)| {
+            let start = events.iter().map(|e| e.timestamp).min().unwrap_or(0);
+            let end = events.iter().map(|e| e.timestamp).max().unwrap_or(0);
+            let mut per_model: BTreeMap<&str, u64> = BTreeMap::new();
+            for e in &events {
+                *per_model.entry(e.model.as_str()).or_insert(0) += 1;
+            }
+            let mut models: Vec<(&str, u64)> = per_model.into_iter().collect();
+            models.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+            let latest = events.iter().max_by_key(|e| e.timestamp).copied();
+            let latest = latest.expect("a session has at least one event");
+            let row = json!({
+                "id": id,
+                "start": start,
+                "end": end,
+                "duration": end - start,
+                "repo": latest.repo,
+                "branch": latest.branch,
+                "agent": latest.agent,
+                "model": models.first().map_or("", |m| m.0),
+                "models": models.iter().map(|m| m.0).collect::<Vec<_>>(),
+                "messages": events.len(),
+                "tokens": events.iter().map(|e| total_tokens(e)).sum::<u64>(),
+                "cost_usd": events.iter().map(|e| e.cost_usd).sum::<f64>(),
+            });
+            (end, id, row)
+        })
+        .collect();
+    rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+    let total = rows.len();
+    let shown: Vec<Value> = rows
+        .into_iter()
+        .take(SESSION_LIMIT)
+        .map(|(_, _, row)| row)
+        .collect();
+    json!({
+        "generated_at": now,
+        "range": range_json(range, now, usage),
+        "total": total,
+        "more": total - shown.len(),
+        "sessions": shown,
+    })
+}
+
+/// One session's messages in time order (the newest `TIMELINE_LIMIT`), with a
+/// small cost-per-message chart. `None` when no event has that id.
+pub fn session_json(usage: &[UsageEvent], id: &str) -> Option<Value> {
+    let events: Vec<&UsageEvent> = usage.iter().filter(|e| e.session_id == id).collect();
+    let latest = events.iter().max_by_key(|e| e.timestamp).copied()?;
+    let omitted = events.len().saturating_sub(TIMELINE_LIMIT);
+    let shown = &events[omitted..];
+    let messages: Vec<Value> = shown
+        .iter()
+        .map(|e| {
+            json!({
+                "time": e.timestamp,
+                "model": e.model,
+                "tokens": total_tokens(e),
+                "cost_usd": e.cost_usd,
+            })
+        })
+        .collect();
+    let tail = &shown[shown.len().saturating_sub(TIMELINE_CHART_BARS)..];
+    let bars: Vec<(String, f64)> = tail
+        .iter()
+        .map(|e| (clock(e.timestamp), e.cost_usd))
+        .collect();
+    Some(json!({
+        "id": id,
+        "repo": latest.repo,
+        "branch": latest.branch,
+        "agent": latest.agent,
+        "total": events.len(),
+        "omitted": omitted,
+        "messages": messages,
+        "chart": bar_chart("Cost per message", "USD, UTC", &bars),
+    }))
+}
+
+/// `HH:MM:SS` of a UTC timestamp.
+fn clock(timestamp: i64) -> String {
+    let s = timestamp.rem_euclid(SECONDS_PER_DAY);
+    format!("{:02}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60)
 }
 
 #[cfg(test)]
@@ -457,5 +579,149 @@ mod tests {
         assert_eq!(data["range"]["key"], "all");
         assert_eq!(data["range"]["start"], "2026-08-05");
         assert_eq!(data["range"]["end"], "2026-09-01");
+    }
+
+    fn in_session(id: &str, ts: i64, model: &str, cost: f64) -> UsageEvent {
+        UsageEvent {
+            session_id: id.into(),
+            agent: "codex".into(),
+            ..event(ts, model, cost)
+        }
+    }
+
+    #[test]
+    fn the_by_agent_group_splits_claude_code_from_codex() {
+        let mut usage = vec![event(1788252682, "sonnet", 0.25)];
+        usage[0].agent = "claude-code".into();
+        usage.push(in_session("c", 1788252700, "gpt", 0.0));
+
+        let data = data_json(&usage, &[], 1788400000, Range::All);
+
+        let keys: Vec<&str> = data["groups"]["agent"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| g["key"].as_str().unwrap())
+            .collect();
+        assert_eq!(keys, ["claude-code", "codex"]);
+    }
+
+    #[test]
+    fn session_ids_are_a_short_safe_charset() {
+        for ok in ["s1", "0199aaaa-0000-7000-8000-000000000002", "a_b.c-D9"] {
+            assert!(valid_session_id(ok), "{ok}");
+        }
+        let long = "a".repeat(129);
+        for bad in [
+            "", "..", ".x", "-x", "a b", "a/b", "../x", "a%2Fb", "a:b", "<s>", "é", &long,
+        ] {
+            assert!(!valid_session_id(bad), "{bad}");
+        }
+        assert!(valid_session_id(&"a".repeat(128)));
+    }
+
+    #[test]
+    fn sessions_are_one_row_each_newest_first_with_hand_computed_sums() {
+        let usage = vec![
+            in_session("old", 1788252000, "sonnet", 0.5),
+            in_session("new", 1788300000, "opus", 1.0),
+            in_session("new", 1788300060, "opus", 2.0),
+            in_session("new", 1788300090, "sonnet", 0.25),
+        ];
+
+        let data = sessions_json(&usage, 1788400000, Range::All);
+
+        let rows = data["sessions"].as_array().unwrap();
+        assert_eq!(
+            (data["total"].as_u64(), data["more"].as_u64()),
+            (Some(2), Some(0))
+        );
+        assert_eq!(rows[0]["id"], "new");
+        assert_eq!(rows[1]["id"], "old");
+        assert_eq!(rows[0]["start"], 1788300000);
+        assert_eq!(rows[0]["end"], 1788300090);
+        assert_eq!(rows[0]["duration"], 90);
+        assert_eq!(rows[0]["messages"], 3);
+        assert_eq!(rows[0]["tokens"], 3 * 33);
+        assert_eq!(rows[0]["model"], "opus");
+        assert_eq!(rows[0]["models"], json!(["opus", "sonnet"]));
+        assert_eq!(rows[0]["agent"], "codex");
+        assert!((rows[0]["cost_usd"].as_f64().unwrap() - 3.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sessions_respect_the_range_and_cap_with_a_count_of_the_rest() {
+        let now = 1788400000;
+        let mut usage = vec![in_session("ancient", now - 200 * 86_400, "m", 1.0)];
+        for i in 0..(SESSION_LIMIT + 7) {
+            usage.push(in_session(
+                &format!("s{i:04}"),
+                now - 1000 + i as i64,
+                "m",
+                1.0,
+            ));
+        }
+
+        let recent = sessions_json(&usage, now, Range::LastDays(30));
+        let all = sessions_json(&usage, now, Range::All);
+
+        assert_eq!(recent["total"], SESSION_LIMIT + 7);
+        assert_eq!(recent["sessions"].as_array().unwrap().len(), SESSION_LIMIT);
+        assert_eq!(recent["more"], 7);
+        assert_eq!(
+            recent["sessions"][0]["id"],
+            format!("s{:04}", SESSION_LIMIT + 6)
+        );
+        assert_eq!(all["total"], SESSION_LIMIT + 8);
+    }
+
+    #[test]
+    fn a_session_timeline_lists_its_messages_in_order_with_a_chart() {
+        let usage = vec![
+            in_session("a", 1788300000, "sonnet", 0.5),
+            in_session("b", 1788300030, "other", 9.0),
+            in_session("a", 1788300065, "opus", 1.0),
+        ];
+
+        let data = session_json(&usage, "a").expect("known session");
+
+        let messages = data["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["model"], "sonnet");
+        assert_eq!(messages[1]["time"], 1788300065);
+        assert_eq!(messages[1]["tokens"], 33);
+        assert_eq!(data["omitted"], 0);
+        let chart = data["chart"].as_str().unwrap();
+        assert_eq!(chart.matches("<rect").count(), 2);
+        assert!(chart.contains("Cost per message"));
+        assert!(session_json(&usage, "missing").is_none());
+    }
+
+    #[test]
+    fn a_long_session_keeps_only_the_newest_messages_and_says_so() {
+        let usage: Vec<UsageEvent> = (0..(TIMELINE_LIMIT + 5) as i64)
+            .map(|i| in_session("big", 1788300000 + i, "m", 0.0))
+            .collect();
+
+        let data = session_json(&usage, "big").unwrap();
+
+        assert_eq!(data["messages"].as_array().unwrap().len(), TIMELINE_LIMIT);
+        assert_eq!(data["omitted"], 5);
+        assert_eq!(data["total"], TIMELINE_LIMIT + 5);
+        assert_eq!(data["messages"][0]["time"], 1788300005);
+        assert_eq!(
+            data["chart"].as_str().unwrap().matches("<rect").count(),
+            TIMELINE_CHART_BARS
+        );
+    }
+
+    #[test]
+    fn a_hostile_repo_or_session_name_reaches_the_chart_only_escaped() {
+        let mut usage = vec![in_session("ok", 1788300000, "<script>x</script>", 1.0)];
+        usage[0].repo = "<img onerror=x>".into();
+
+        let data = session_json(&usage, "ok").unwrap();
+
+        assert!(!data["chart"].as_str().unwrap().contains("<script"));
     }
 }
