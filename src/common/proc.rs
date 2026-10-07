@@ -110,8 +110,8 @@ fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration)
     let out_rx = drain(out_pipe);
     let err_rx = drain(err_pipe);
 
-    let deadline = Instant::now() + timeout;
     let started = Instant::now();
+    let deadline = started + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -172,8 +172,8 @@ mod tests {
 
         // Assert
         assert!(
-            started.elapsed() < Duration::from_millis(300),
-            "20 quick children took {:?}, a 20ms poll would need 400ms",
+            started.elapsed() < POLL_INTERVAL * 20 - Duration::from_millis(10),
+            "20 quick children took {:?}, a 20ms poll needs at least 400ms",
             started.elapsed()
         );
     }
