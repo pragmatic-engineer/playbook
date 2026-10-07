@@ -105,6 +105,12 @@ you have not read.
    real mismatch always aborts. Set `PLAYBOOK_REQUIRE_ATTESTATION=1` to make a missing or failed
    check abort the install.
 
+   Once installed, `playbook update` applies the same checks (SHA256SUMS, then the attestation,
+   with the same `PLAYBOOK_REQUIRE_ATTESTATION=1` rule) to fetch a newer release. It keeps the
+   old binary as `playbook.<version>.bak`, refuses a Homebrew install, and warns when another
+   `playbook` earlier on `PATH` hides the new one. Use `--check` to look without installing and
+   `--list` to see releases.
+
 4. Put it on `PATH` as `playbook`:
 
    ```bash

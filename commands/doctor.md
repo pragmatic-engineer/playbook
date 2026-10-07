@@ -225,6 +225,25 @@ else
   else
     echo "GATE_SOURCE=MISSING"
   fi
+  # Every distinct playbook on PATH, in order. An old first entry may predate
+  # any subcommand, so this reads `--version` from each instead of asking it.
+  first_ver=""; stale=0; n=0; entries=""
+  seen="|"
+  while IFS= read -r bin_path; do
+    case "$seen" in *"|$bin_path|"*) continue ;; esac
+    seen="$seen$bin_path|"
+    v=$("$bin_path" --version 2>/dev/null | awk '{print $NF}')
+    entries="$entries\nPATH_SHADOW_ENTRY $bin_path ${v:-?}"
+    if [ "$n" -eq 0 ]; then first_ver="$v"
+    elif [ -n "$first_ver" ] && [ -n "$v" ] && [ "$v" != "$first_ver" ] \
+      && [ "$(printf '%s\n%s\n' "$first_ver" "$v" | sort -V | head -1)" = "$first_ver" ]; then stale=1
+    fi
+    n=$((n + 1))
+  done < <(which -a playbook 2>/dev/null | grep '^/')
+  if [ "$n" -gt 1 ]; then
+    printf '%b\n' "${entries#\\n}"
+    if [ "$stale" -eq 1 ]; then echo "PATH_SHADOW STALE_FIRST"; else echo "PATH_SHADOW MULTIPLE"; fi
+  fi
 fi
 ```
 
@@ -262,6 +281,13 @@ Report:
   for this purpose regardless of whether it is otherwise ahead of or behind
   the plugin manifest. Remediation: update `playbook` to a version that
   supports gate staleness enforcement.
+- `PATH_SHADOW STALE_FIRST` → **WARN.** More than one `playbook` is on PATH and
+  the first one, the one every hook runs, is older than a later one. The
+  `PATH_SHADOW_ENTRY <path> <version>` lines name each binary in PATH order.
+  Remediation: remove the stale one (for Homebrew, `brew uninstall
+  playbook`) or put the newer one's directory first on PATH. `MULTIPLE` is
+  INFO (several binaries, the first is not older). A single entry prints no
+  `PATH_SHADOW` verdict and needs no report line.
 - `GATE_SOURCE=OK` → no separate report line; folded into the `MATCH`/`SKEW`/
   etc. verdict above, since the installed binary already supports the flag
   every current caller passes.

@@ -22,6 +22,7 @@ pub mod pr;
 pub mod sanitize;
 pub mod settings;
 pub mod trust;
+pub mod update;
 pub mod usage;
 pub mod worktree;
 
@@ -164,6 +165,25 @@ pub enum Command {
     Handoff {
         #[command(subcommand)]
         sub: HandoffCommand,
+    },
+    /// Update this binary to a published release, verified by SHA256SUMS and
+    /// the build attestation, keeping the old one as a backup.
+    #[command(alias = "upgrade")]
+    Update {
+        /// Version to install (default: the latest stable release).
+        version: Option<String>,
+        /// Only report whether an update is available.
+        #[arg(long)]
+        check: bool,
+        /// List published releases.
+        #[arg(long)]
+        list: bool,
+        /// Consider pre-releases when picking the latest.
+        #[arg(long)]
+        pre: bool,
+        /// Proceed in auto mode without refusing.
+        #[arg(long)]
+        yes: bool,
     },
     /// Set or show whether playbook asks questions (`ask`) or decides on its
     /// own (`auto`).
