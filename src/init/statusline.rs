@@ -81,7 +81,13 @@ fn is_legacy_command(command: &str, home: &Path) -> bool {
 
 /// Point a `statusLine.command` that runs the playbook `statusline.sh` at the
 /// Rust renderer, leaving every other value alone. `Ok(true)` when it changed.
-pub fn migrate_legacy_command(settings_path: &Path, home: &Path) -> io::Result<bool> {
+/// With `script_edited` the user owns the script, so the command stays and the
+/// merge baseline drops its `statusLine` so the template cannot repoint it.
+pub fn migrate_legacy_command(
+    settings_path: &Path,
+    home: &Path,
+    script_edited: bool,
+) -> io::Result<bool> {
     let Ok(text) = fs::read_to_string(settings_path) else {
         return Ok(false);
     };
@@ -94,12 +100,31 @@ pub fn migrate_legacy_command(settings_path: &Path, home: &Path) -> io::Result<b
     else {
         return Ok(false);
     };
+    if script_edited {
+        unpin_base_status_line(&settings_path.with_file_name(".settings.base.json"))?;
+        return Ok(false);
+    }
     *command = serde_json::Value::String(RUST_COMMAND.to_string());
     let body = serde_json::to_string_pretty(&value).map_err(io::Error::other)?;
     // A symlinked settings.json (stow, chezmoi) stays a symlink.
     let target = fs::canonicalize(settings_path)?;
     crate::common::atomic::write_atomic(&target, &format!("{body}\n"))?;
     Ok(true)
+}
+
+/// Drop `statusLine` from the merge baseline so the user's value counts as a customisation.
+fn unpin_base_status_line(base_path: &Path) -> io::Result<()> {
+    let Ok(text) = fs::read_to_string(base_path) else {
+        return Ok(());
+    };
+    let Ok(serde_json::Value::Object(mut base)) = serde_json::from_str(&text) else {
+        return Ok(());
+    };
+    if base.remove("statusLine").is_none() {
+        return Ok(());
+    }
+    let body = serde_json::to_string_pretty(&base).map_err(io::Error::other)?;
+    crate::common::atomic::write_atomic(base_path, &format!("{body}\n"))
 }
 
 /// Place `statusline.sh` at `playbook_statusline_path(home)`, then read it

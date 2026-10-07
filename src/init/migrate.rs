@@ -121,7 +121,14 @@ fn gate_repo_local_move(ctx: &Ctx) -> Outcome {
 
 fn statusline_rust_command(ctx: &Ctx) -> Outcome {
     let settings = ctx.claude_home.join("settings.json");
-    match crate::init::statusline::migrate_legacy_command(&settings, &ctx.home) {
+    let script = crate::init::statusline::playbook_statusline_path(&ctx.home);
+    let shipped = ctx
+        .self_root
+        .as_ref()
+        .and_then(|r| fs::read(r.join("statusline.sh")).ok());
+    let edited =
+        user_edited(&ctx.home, STATUSLINE_KEY, &script) && fs::read(&script).ok() != shipped;
+    match crate::init::statusline::migrate_legacy_command(&settings, &ctx.home, edited) {
         Ok(true) => Outcome::Repeat(StepReport::wired(
             "statusline-command",
             "statusLine.command now runs `playbook statusline`",

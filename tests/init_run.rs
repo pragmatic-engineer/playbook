@@ -331,6 +331,35 @@ fn init_leaves_a_custom_statusline_command_alone() {
 }
 
 #[test]
+fn init_keeps_the_old_command_when_the_user_edited_statusline_sh() {
+    // Arrange: a first init records the shipped script, then the user edits it.
+    let home = scratch_home("sl-edited");
+    let claude_home = claude_home_of(&home);
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+    run(&paths);
+    let old = json!({"statusLine": {"type": "command", "command": OLD_STATUSLINE}});
+    write_json(&claude_home.join("settings.json"), &old);
+    write_json(&claude_home.join(".settings.base.json"), &old);
+    write_text(
+        &home.join(".config/playbook/statusline.sh"),
+        "#!/bin/sh\necho mine\n",
+    );
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert: the edited script and the command that runs it both survive.
+    assert!(outcome.ok());
+    assert_eq!(status_line_command(&claude_home), OLD_STATUSLINE);
+    assert_eq!(
+        fs::read_to_string(home.join(".config/playbook/statusline.sh")).unwrap(),
+        "#!/bin/sh\necho mine\n"
+    );
+    run(&paths);
+    assert_eq!(status_line_command(&claude_home), OLD_STATUSLINE);
+}
+
+#[test]
 fn statusline_command_migration_is_idempotent_across_inits() {
     // Arrange
     let home = scratch_home("sl-idem");
