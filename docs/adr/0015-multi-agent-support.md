@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date created:** 2026-10-07
-- **Date modified:** 2026-10-07
+- **Date modified:** 2026-10-08
 
 ## Context
 
@@ -87,6 +87,8 @@ Alternative B. Playbook gets a thin agent-neutral core in the `playbook` binary 
 3. Commands and skills: install skills to the per-agent paths, and render commands as skills where the agent has no command concept.
 
 Each slice is its own issue and PR. Slice 1 is the only one this ADR authorizes to start immediately, and slices 2 and 3 each get a short design note before work.
+
+**Status of slices.** Slice 1 (Codex usage source) shipped in #519 (`src/usage/codex.rs`). Slices 2 and 3 are not started. The Context above stays as the record of the state when this ADR was written.
 
 ## Out of Scope
 

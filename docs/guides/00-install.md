@@ -6,7 +6,7 @@ This page covers requirements, the full local install path with the curl one-lin
 
 | Tool | Status | Why |
 |---|---|---|
-| `claude` on PATH, v2.1.121+ | recommended | Claude Code itself. Below the minimum, or missing entirely, `install.sh` skips the plugin step with an upgrade hint rather than failing; the rest of the install (binary, hooks, guards, settings) still completes |
+| `claude` on PATH, v2.1.224+ | recommended | Claude Code itself. The marketplace serves a trimmed plugin archive that needs 2.1.224 or later. Below that, or missing entirely, `install.sh` skips the plugin step with an upgrade hint rather than failing; the rest of the install (binary, hooks, guards, settings) still completes |
 | `bash` | required | hooks and the setup script run in bash |
 | zsh | required for `cc worktree` | the worktree subcommand is zsh-only; all other `cc` subcommands and `ccd` work in bash |
 | `git`, `shasum` | required | used by hooks and the install script |
@@ -37,7 +37,7 @@ Pass `--yes` to accept every default without prompting. Pin a version:
 PLAYBOOK_REF=v0.17.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
 
-Install files only (no plugin, no local wiring):
+Skip the plugin (the binary, guards, settings and shell wiring still run). Same as `--skip-plugin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash -s -- --no-setup
@@ -72,6 +72,12 @@ git checkout -f main
 ```
 
 After cloning or adopting, run `/playbook:setup` inside a Claude Code session to wire the local layers.
+
+## Other ways to install and upgrade
+
+- macOS or Linux with Homebrew: `brew install pragmatic-engineer/tap/playbook`. Upgrade with `brew upgrade playbook`.
+- Any other install: `playbook update`. Use `--check` to look without installing, `--list` for releases, `--pre` for pre-releases and `--yes` in auto mode. It keeps the three newest backups and refuses a Homebrew install.
+- The plugin from the marketplace is a trimmed archive (plugin files only) and needs Claude Code 2.1.224 or later. See [release channels](../internals/06-release-channels.md).
 
 ## Settings merge
 
