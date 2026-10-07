@@ -46,7 +46,6 @@
 
 use playbook::init::run::{run, InitOutcome, InitPaths, StepReport, StepStatus};
 use playbook::init::shim::ShellKind;
-use playbook::init::statusline::resolve_statusline_path;
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
@@ -268,13 +267,92 @@ fn fresh_config_gets_fully_wired() {
     let rc = fs::read_to_string(home.join(".bashrc")).expect(".bashrc should exist");
     assert!(rc.contains(".config/playbook/shell/bash/cc.sh"));
     assert!(home.join(".config/playbook/shell/bash/cc.sh").is_file());
-    let statusline_dest =
-        resolve_statusline_path(&settings_path, &home).expect("statusLine.command should resolve");
+    assert_eq!(
+        read_json(&settings_path)["statusLine"]["command"],
+        "playbook statusline"
+    );
+    let statusline_dest = home.join(".config/playbook/statusline.sh");
     assert_eq!(
         fs::read(&statusline_dest).expect("placed statusline should be readable"),
         fs::read(self_root().join("statusline.sh"))
             .expect("shipped statusline.sh should be readable")
     );
+}
+
+const OLD_STATUSLINE: &str = "bash $HOME/.config/playbook/statusline.sh";
+
+fn status_line_command(claude_home: &Path) -> Value {
+    read_json(&claude_home.join("settings.json"))["statusLine"]["command"].clone()
+}
+
+#[test]
+fn init_rewrites_the_old_statusline_command_even_when_base_is_missing() {
+    // Arrange: a user file holding the old command and no merge baseline, the
+    // case the three-way merge would otherwise treat as a customisation.
+    let home = scratch_home("sl-rewrite");
+    let claude_home = claude_home_of(&home);
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({"statusLine": {"type": "command", "command": OLD_STATUSLINE, "refreshInterval": 30}}),
+    );
+
+    // Act
+    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+
+    // Assert
+    assert!(outcome.ok());
+    assert_eq!(status_line_command(&claude_home), "playbook statusline");
+    assert!(home.join(".config/playbook/statusline.sh").is_file());
+}
+
+#[test]
+fn init_leaves_a_custom_statusline_command_alone() {
+    // Arrange
+    let home = scratch_home("sl-custom");
+    let claude_home = claude_home_of(&home);
+    write_json(
+        &claude_home.join(".settings.base.json"),
+        &json!({"statusLine": {"type": "command", "command": OLD_STATUSLINE}}),
+    );
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({"statusLine": {"type": "command", "command": "bash $HOME/my-statusline.sh"}}),
+    );
+
+    // Act
+    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+
+    // Assert
+    assert!(outcome.ok());
+    assert_eq!(
+        status_line_command(&claude_home),
+        "bash $HOME/my-statusline.sh"
+    );
+}
+
+#[test]
+fn statusline_command_migration_is_idempotent_across_inits() {
+    // Arrange
+    let home = scratch_home("sl-idem");
+    let claude_home = claude_home_of(&home);
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({"statusLine": {"type": "command", "command": OLD_STATUSLINE}}),
+    );
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    run(&paths);
+    let first = fs::read_to_string(claude_home.join("settings.json")).unwrap();
+    let second_outcome = run(&paths);
+
+    // Assert
+    assert!(second_outcome.ok());
+    assert_eq!(
+        fs::read_to_string(claude_home.join("settings.json")).unwrap(),
+        first
+    );
+    assert_eq!(status_line_command(&claude_home), "playbook statusline");
 }
 
 /// D6 regression pin: `wire`'s guard loop once gated a guard's bare
@@ -1045,15 +1123,11 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
     assert!(!rc.contains("$HOME/.claude/shell/bash/cc.sh"));
     assert!(home.join(".config/playbook/shell/bash/cc.sh").is_file());
 
-    // Doctor Layer 5 shape: statusLine.command resolves and MATCHes.
+    // Doctor Layer 5 shape: the Rust command, with the fallback script still placed.
     let settings_path = claude_home.join("settings.json");
     let settings = read_json(&settings_path);
-    assert_eq!(
-        settings["statusLine"]["command"],
-        "bash $HOME/.config/playbook/statusline.sh"
-    );
-    let statusline_dest =
-        resolve_statusline_path(&settings_path, &home).expect("statusLine.command should resolve");
+    assert_eq!(settings["statusLine"]["command"], "playbook statusline");
+    let statusline_dest = home.join(".config/playbook/statusline.sh");
     assert_eq!(
         fs::read(&statusline_dest).unwrap(),
         fs::read(self_root().join("statusline.sh")).unwrap(),

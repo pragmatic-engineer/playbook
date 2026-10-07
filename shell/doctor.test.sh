@@ -326,17 +326,27 @@ scenario_layer5_match() {
   [[ "$out" == "MATCH" ]] || { echo "  got: $out"; return 1; }
 }
 
-# G2: the ADR 0012 destination, $HOME/.config/playbook/statusline.sh,
-# byte-identical to the shipped copy.
+# G2: the old bash command at $HOME/.config/playbook/statusline.sh is flagged
+# OUTDATED even when the script is byte-identical to the shipped copy.
 scenario_layer5_match_config_playbook_path() {
   local home="$WORK/l5-g2" plugin="$WORK/l5-g2-plugin" bin="$WORK/l5-g2-bin" out
   mkdir -p "$home/.claude" "$home/.config/playbook" "$plugin"
   printf '#!/usr/bin/env bash\necho hi\n' > "$home/.config/playbook/statusline.sh"
   cp "$home/.config/playbook/statusline.sh" "$plugin/statusline.sh"
-  write_statusline_settings "$home" '$HOME/.config/playbook/statusline.sh'
+  write_statusline_settings "$home" 'bash $HOME/.config/playbook/statusline.sh'
   write_stub_binary "$bin" ""
   out="$(run_layer5 "$home" "$bin:/usr/bin:/bin" "$plugin")"
-  [[ "$out" == "MATCH" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == 'OUTDATED bash $HOME/.config/playbook/statusline.sh' ]] || { echo "  got: $out"; return 1; }
+}
+
+# G3: the Rust command is the healthy value.
+scenario_layer5_rust() {
+  local home="$WORK/l5-g3" bin="$WORK/l5-g3-bin" out
+  mkdir -p "$home/.claude"
+  write_statusline_settings "$home" 'playbook statusline'
+  write_stub_binary "$bin" ""
+  out="$(run_layer5 "$home" "$bin:/usr/bin:/bin")"
+  [[ "$out" == "RUST" ]] || { echo "  got: $out"; return 1; }
 }
 
 # H: the installed copy exists but its bytes differ from the shipped copy.
@@ -383,7 +393,8 @@ scenario_layer5_playbook_too_old() {
 
 run_scenario "F: statusLine.command path does not exist -> MISSING <path>" scenario_layer5_missing
 run_scenario "G: installed copy byte-identical to shipped -> MATCH"        scenario_layer5_match
-run_scenario "G2: .config/playbook destination, byte-identical -> MATCH"   scenario_layer5_match_config_playbook_path
+run_scenario "G2: old bash command on .config/playbook path -> OUTDATED"   scenario_layer5_match_config_playbook_path
+run_scenario "G3: playbook statusline -> RUST"                             scenario_layer5_rust
 run_scenario "H: installed copy differs from shipped -> DIFFERS"           scenario_layer5_differs
 run_scenario "I: no statusLine.command at all -> NOT_CONFIGURED"           scenario_layer5_not_configured
 run_scenario "U: playbook absent from PATH -> UNKNOWN"                     scenario_layer5_playbook_missing

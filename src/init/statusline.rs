@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Places `statusline.sh` at `$HOME/.config/playbook/statusline.sh`, a fixed
-//! path shared with `settings.shared.json`'s committed `statusLine.command`.
+//! path. The committed `statusLine.command` is now `playbook statusline`;
+//! the script stays as a fallback for one release, then init stops placing it.
 
 use crate::common::paths::playbook_root_from;
 use std::fs;
@@ -58,6 +59,43 @@ pub fn resolve_statusline_path(
 /// module and `settings.shared.json`'s `statusLine.command` derive from.
 pub fn playbook_statusline_path(home: &Path) -> PathBuf {
     playbook_root_from(home).join("statusline.sh")
+}
+
+/// The command that renders the status line with the Rust binary.
+pub const RUST_COMMAND: &str = "playbook statusline";
+
+/// Whether `command` runs the playbook-installed `statusline.sh` through an
+/// interpreter. A custom script elsewhere, or any extra argument, is not it.
+fn is_legacy_command(command: &str, home: &Path) -> bool {
+    let mut tokens = command.split_whitespace();
+    let (Some(interp), Some(path), None) = (tokens.next(), tokens.next(), tokens.next()) else {
+        return false;
+    };
+    let expanded =
+        path.replace("$HOME", &home.to_string_lossy())
+            .replacen('~', &home.to_string_lossy(), 1);
+    interp == "bash" && Path::new(&expanded) == playbook_statusline_path(home)
+}
+
+/// Point a `statusLine.command` that runs the playbook `statusline.sh` at the
+/// Rust renderer, leaving every other value alone. `Ok(true)` when it changed.
+pub fn migrate_legacy_command(settings_path: &Path, home: &Path) -> io::Result<bool> {
+    let Ok(text) = fs::read_to_string(settings_path) else {
+        return Ok(false);
+    };
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(false);
+    };
+    let Some(command) = value
+        .pointer_mut("/statusLine/command")
+        .filter(|c| c.as_str().is_some_and(|c| is_legacy_command(c, home)))
+    else {
+        return Ok(false);
+    };
+    *command = serde_json::Value::String(RUST_COMMAND.to_string());
+    let body = serde_json::to_string_pretty(&value).map_err(io::Error::other)?;
+    crate::common::atomic::write_atomic(settings_path, &format!("{body}\n"))?;
+    Ok(true)
 }
 
 /// Place `statusline.sh` at `playbook_statusline_path(home)`, then read it

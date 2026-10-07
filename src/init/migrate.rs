@@ -92,6 +92,11 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Manual,
             run: statusline_edited,
         },
+        Migration {
+            id: "0006-statusline-rust-command",
+            kind: Kind::Idempotent,
+            run: statusline_rust_command,
+        },
     ]
 }
 
@@ -111,6 +116,18 @@ fn gate_repo_local_move(ctx: &Ctx) -> Outcome {
     match crate::gate::db::migrate_legacy_repo_local(repo_root, dest_base) {
         Ok(()) => Outcome::Quiet,
         Err(err) => Outcome::Failed(StepReport::failed("gate-repo-local", err)),
+    }
+}
+
+fn statusline_rust_command(ctx: &Ctx) -> Outcome {
+    let settings = ctx.claude_home.join("settings.json");
+    match crate::init::statusline::migrate_legacy_command(&settings, &ctx.home) {
+        Ok(true) => Outcome::Repeat(StepReport::wired(
+            "statusline-command",
+            "statusLine.command now runs `playbook statusline`",
+        )),
+        Ok(false) => Outcome::Quiet,
+        Err(err) => Outcome::Failed(StepReport::failed("statusline-command", err.to_string())),
     }
 }
 
@@ -481,6 +498,81 @@ mod tests {
         assert_eq!(*CALLS.lock().unwrap(), vec!["a", "b"]);
         assert_eq!(first.steps.len(), 2);
         assert!(second.steps.is_empty());
+    }
+
+    fn settings_with(h: &Path, command: &str) -> PathBuf {
+        let path = h.join(".claude").join("settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let body = format!(
+            r#"{{"model":"x","statusLine":{{"type":"command","command":{command:?},"refreshInterval":30}}}}"#
+        );
+        fs::write(&path, body).unwrap();
+        path
+    }
+
+    fn command_of(path: &Path) -> String {
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        v["statusLine"]["command"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn statusline_migration_rewrites_the_playbook_script_command() {
+        let h = home("sl-old");
+        let path = settings_with(&h, "bash $HOME/.config/playbook/statusline.sh");
+        let out = statusline_rust_command(&ctx(&h));
+        assert!(matches!(out, Outcome::Repeat(_)));
+        assert_eq!(command_of(&path), "playbook statusline");
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["statusLine"]["refreshInterval"], 30);
+        assert_eq!(v["model"], "x");
+    }
+
+    #[test]
+    fn statusline_migration_rewrites_an_absolute_home_path_too() {
+        let h = home("sl-abs");
+        let cmd = format!("bash {}/.config/playbook/statusline.sh", h.display());
+        let path = settings_with(&h, &cmd);
+        statusline_rust_command(&ctx(&h));
+        assert_eq!(command_of(&path), "playbook statusline");
+    }
+
+    #[test]
+    fn statusline_migration_leaves_a_custom_command_alone() {
+        let h = home("sl-custom");
+        for cmd in [
+            "bash $HOME/my-statusline.sh",
+            "bash $HOME/.config/playbook/statusline.sh --extra",
+            "my-tool render",
+        ] {
+            let path = settings_with(&h, cmd);
+            let out = statusline_rust_command(&ctx(&h));
+            assert!(matches!(out, Outcome::Quiet));
+            assert_eq!(command_of(&path), cmd);
+        }
+    }
+
+    #[test]
+    fn statusline_migration_is_idempotent() {
+        let h = home("sl-idem");
+        let path = settings_with(&h, "bash $HOME/.config/playbook/statusline.sh");
+        statusline_rust_command(&ctx(&h));
+        let first = fs::read_to_string(&path).unwrap();
+        let out = statusline_rust_command(&ctx(&h));
+        assert!(matches!(out, Outcome::Quiet));
+        assert_eq!(fs::read_to_string(&path).unwrap(), first);
+    }
+
+    #[test]
+    fn statusline_migration_ignores_missing_or_invalid_settings() {
+        let h = home("sl-none");
+        assert!(matches!(statusline_rust_command(&ctx(&h)), Outcome::Quiet));
+        let path = h.join(".claude").join("settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "not json").unwrap();
+        assert!(matches!(statusline_rust_command(&ctx(&h)), Outcome::Quiet));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "not json");
     }
 
     fn fails(_: &Ctx) -> Outcome {
