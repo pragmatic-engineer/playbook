@@ -318,6 +318,22 @@ backup_previous_binary() {
         || true
 }
 
+# Checks the GitHub build attestation for a downloaded asset. Needs a gh that
+# has `attestation`; without one it says so and goes on, unless
+# PLAYBOOK_REQUIRE_ATTESTATION=1, which makes a missing or failed check fatal.
+verify_attestation() {
+    local file="$1" strict="${PLAYBOOK_REQUIRE_ATTESTATION:-0}" err
+    if command -v gh >/dev/null 2>&1 && gh attestation --help >/dev/null 2>&1; then
+        if err="$(gh attestation verify "$file" --repo "$PLUGIN_REPO" 2>&1)"; then
+            log "Verified the build attestation for $ASSET"
+            return 0
+        fi
+        die "attestation verification failed for $ASSET: $err"
+    fi
+    [ "$strict" = "1" ] && die "PLAYBOOK_REQUIRE_ATTESTATION=1 but gh with 'attestation' support is not available"
+    warn "checksum only, provenance not verified: install gh to check the build attestation"
+}
+
 # Fetches, verifies, and installs the release binary matching $RESOLVED_TAG.
 # Refuses when the tag is not a confirmed release (a PLAYBOOK_REF pin, or the
 # no-release-published fallback in resolve_tarball_url): a branch or a commit
@@ -341,9 +357,8 @@ install_release_binary() {
     log "Fetching release binary $ASSET"
     _fetch "https://github.com/$PLUGIN_REPO/releases/download/$RESOLVED_TAG/$ASSET" "$STAGE/$ASSET" \
         || die "could not download $ASSET from the $RESOLVED_TAG release"
-    # SHA256SUMS is not signed. Its integrity rests on TLS and on trusting
-    # github.com, not on any cryptographic signature; do not imply more
-    # assurance than that.
+    # SHA256SUMS itself is unsigned (TLS and github.com only); provenance comes
+    # from the build attestation checked by verify_attestation below.
     _fetch "https://github.com/$PLUGIN_REPO/releases/download/$RESOLVED_TAG/SHA256SUMS" "$STAGE/SHA256SUMS" \
         || die "could not download SHA256SUMS from the $RESOLVED_TAG release"
 
@@ -355,6 +370,8 @@ install_release_binary() {
         || die "no checksum line for $ASSET in SHA256SUMS; the release may be incomplete or corrupt"
     (cd "$STAGE" && "${CKSUM_CMD[@]}" "$ASSET.sha256") >/dev/null 2>&1 \
         || die "checksum mismatch for $ASSET; the download is corrupt"
+
+    verify_attestation "$STAGE/$ASSET"
 
     chmod 0755 "$STAGE/$ASSET"
     mv "$STAGE/$ASSET" "$STAGE/playbook"

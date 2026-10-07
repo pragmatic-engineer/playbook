@@ -94,6 +94,16 @@ you have not read.
    `SHA256SUMS` is not signed: its integrity rests on TLS and on trusting
    github.com, not on a cryptographic signature. Treat it as a corruption check.
 
+   To verify where a release binary was built, use the GitHub CLI:
+
+   ```bash
+   gh attestation verify <asset> --repo pragmatic-engineer/playbook
+   ```
+
+   `install.sh` runs this check when `gh` is available and only warns when it
+   is not. Set `PLAYBOOK_REQUIRE_ATTESTATION=1` to make a missing or failed
+   check abort the install.
+
 4. Put it on `PATH` as `playbook`:
 
    ```bash
