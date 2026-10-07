@@ -185,6 +185,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         shell_kind,
         system_prompt: false,
         aliases: true,
+        repo: None,
     }
 }
 
@@ -698,6 +699,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         shell_kind: Some(ShellKind::Bash),
         system_prompt: false,
         aliases: true,
+        repo: None,
     };
 
     // Act
@@ -751,6 +753,7 @@ fn aliases_false_skips_shim_entirely() {
         shell_kind: Some(ShellKind::Bash),
         system_prompt: false,
         aliases: false,
+        repo: None,
     };
 
     // Act

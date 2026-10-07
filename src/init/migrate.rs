@@ -16,11 +16,15 @@ use std::time::Duration;
 const STATE_FILE: &str = "migrations.state";
 const LOCK_DIR: &str = "migrations.lock";
 const SYSTEM_PROMPT_KEY: &str = "system-prompt";
+const STATUSLINE_KEY: &str = "statusline";
+const SKILL_KEY_PREFIX: &str = "skill:";
 
 /// What a migration needs to find the state it moves.
 pub struct Ctx {
     pub home: PathBuf,
     pub claude_home: PathBuf,
+    /// The shipped plugin tree, when init could resolve it.
+    pub self_root: Option<PathBuf>,
     /// `(repo_root, dest_base)` when the caller is inside a repo.
     pub repo: Option<(PathBuf, PathBuf)>,
 }
@@ -78,6 +82,16 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Manual,
             run: system_prompt_edited,
         },
+        Migration {
+            id: "0004-skills-edited",
+            kind: Kind::Manual,
+            run: skills_edited,
+        },
+        Migration {
+            id: "0005-statusline-edited",
+            kind: Kind::Manual,
+            run: statusline_edited,
+        },
     ]
 }
 
@@ -110,11 +124,69 @@ fn system_prompt_edited(ctx: &Ctx) -> Outcome {
     let path = system_prompt_path(&ctx.home);
     if user_edited(&ctx.home, SYSTEM_PROMPT_KEY, &path) {
         Outcome::Warn(format!(
-            "{} was edited after playbook installed it; a refresh from the shipped copy overwrites it, so keep a copy of your edits",
+            "{} was edited after playbook installed it, so init leaves it in place; to take the shipped copy, delete it and run `playbook init --system-prompt`",
             path.display()
         ))
     } else {
         Outcome::Quiet
+    }
+}
+
+fn statusline_edited(ctx: &Ctx) -> Outcome {
+    let path = crate::init::statusline::playbook_statusline_path(&ctx.home);
+    if user_edited(&ctx.home, STATUSLINE_KEY, &path) {
+        Outcome::Warn(format!(
+            "{} was edited after playbook installed it, so init leaves it in place; to take the shipped copy, delete it and run `playbook init`",
+            path.display()
+        ))
+    } else {
+        Outcome::Quiet
+    }
+}
+
+/// `(key, path)` for every shipped skill file, keyed by plugin version dir.
+fn skill_files(self_root: &Path) -> Vec<(String, PathBuf)> {
+    // A dev checkout is edited on purpose; only cached plugin copies are tracked.
+    if self_root.join(".git").exists() {
+        return Vec::new();
+    }
+    let version = self_root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let Ok(entries) = fs::read_dir(self_root.join("skills")) else {
+        return Vec::new();
+    };
+    let mut files: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path().join("SKILL.md");
+            let name = e.file_name().to_string_lossy().into_owned();
+            path.is_file()
+                .then(|| (format!("{SKILL_KEY_PREFIX}{version}:{name}"), path))
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+fn skills_edited(ctx: &Ctx) -> Outcome {
+    let Some(self_root) = &ctx.self_root else {
+        return Outcome::Quiet;
+    };
+    let lines = read_state(&ctx.home);
+    let edited: Vec<String> = skill_files(self_root)
+        .into_iter()
+        .filter(|(key, path)| edited_in(&lines, key, path))
+        .map(|(key, _)| key.rsplit(':').next().unwrap_or_default().to_string())
+        .collect();
+    if edited.is_empty() {
+        Outcome::Quiet
+    } else {
+        Outcome::Warn(format!(
+            "skills edited after install: {}; a plugin update replaces them, so move your edits into your own skill",
+            edited.join(", ")
+        ))
     }
 }
 
@@ -155,8 +227,12 @@ fn write_state(home: &Path, lines: &[String]) -> std::io::Result<()> {
 /// Whether `path` differs from the hash recorded when playbook placed it.
 /// No record means nothing was placed by us, so never "edited".
 pub fn user_edited(home: &Path, key: &str, path: &Path) -> bool {
+    edited_in(&read_state(home), key, path)
+}
+
+fn edited_in(lines: &[String], key: &str, path: &Path) -> bool {
     let prefix = format!("shipped {key} ");
-    let Some(recorded) = read_state(home)
+    let Some(recorded) = lines
         .iter()
         .find_map(|l| l.strip_prefix(&prefix).map(str::to_string))
     else {
@@ -167,16 +243,78 @@ pub fn user_edited(home: &Path, key: &str, path: &Path) -> bool {
 
 /// Records the hash of the file playbook just placed at `path`.
 pub fn record_shipped(home: &Path, key: &str, path: &Path) {
-    let Ok(bytes) = fs::read(path) else { return };
-    let prefix = format!("shipped {key} ");
+    record_many(home, &[(key.to_string(), path.to_path_buf())], None);
+}
+
+/// Records several files in one locked write; `drop` clears matching stale keys first.
+fn record_many(home: &Path, files: &[(String, PathBuf)], drop: Option<&dyn Fn(&str) -> bool>) {
+    let hashed: Vec<(String, String)> = files
+        .iter()
+        .filter_map(|(key, path)| {
+            let bytes = fs::read(path).ok()?;
+            Some((format!("shipped {key} "), content_hash(&bytes)))
+        })
+        .collect();
     with_lock(home, || {
         let Some(mut lines) = load_state(home) else {
             return;
         };
-        lines.retain(|l| !l.starts_with(&prefix));
-        lines.push(format!("{prefix}{}", content_hash(&bytes)));
-        let _ = write_state(home, &lines);
+        let before = lines.clone();
+        if let Some(drop) = drop {
+            lines.retain(|l| !l.strip_prefix("shipped ").is_some_and(drop));
+        }
+        for (prefix, hash) in &hashed {
+            lines.retain(|l| !l.starts_with(prefix));
+            lines.push(format!("{prefix}{hash}"));
+        }
+        let mut before_sorted = before;
+        before_sorted.sort();
+        lines.sort();
+        if lines != before_sorted {
+            let _ = write_state(home, &lines);
+        }
     });
+}
+
+/// Records the statusline placed by init so later edits are detectable.
+pub fn record_statusline(home: &Path) {
+    record_shipped(
+        home,
+        STATUSLINE_KEY,
+        &crate::init::statusline::playbook_statusline_path(home),
+    );
+}
+
+/// Records shipped skill files, never an edited one, and drops other versions' records.
+pub fn record_skills(home: &Path, self_root: &Path) {
+    let files = skill_files(self_root);
+    let Some(version_prefix) = files
+        .first()
+        .and_then(|(key, _)| key.rsplit_once(':'))
+        .map(|(v, _)| format!("{v}:"))
+    else {
+        return;
+    };
+    // An edited skill keeps its old record so it stays reported until resolved.
+    let lines = read_state(home);
+    let fresh: Vec<_> = files
+        .into_iter()
+        .filter(|(key, path)| !edited_in(&lines, key, path))
+        .collect();
+    let stale = |key: &str| key.starts_with(SKILL_KEY_PREFIX) && !key.starts_with(&version_prefix);
+    record_many(home, &fresh, Some(&stale));
+}
+
+/// Manual findings only, for `playbook doctor`; runs nothing else.
+pub fn pending_manual(ctx: &Ctx) -> Vec<String> {
+    registry()
+        .iter()
+        .filter(|m| matches!(m.kind, Kind::Manual))
+        .filter_map(|m| match (m.run)(ctx) {
+            Outcome::Warn(msg) => Some(format!("{}: {msg}", m.id)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Records the system prompt placed by init so later edits are detectable.
@@ -307,6 +445,7 @@ mod tests {
         Ctx {
             home: home.to_path_buf(),
             claude_home: home.join(".claude"),
+            self_root: None,
             repo: None,
         }
     }
@@ -410,13 +549,18 @@ mod tests {
         assert!(!user_edited(&h, SYSTEM_PROMPT_KEY, &prompt));
     }
 
+    static HELD_RUNS: AtomicUsize = AtomicUsize::new(0);
+    fn held_probe(_: &Ctx) -> Outcome {
+        HELD_RUNS.fetch_add(1, Ordering::SeqCst);
+        done("held")
+    }
+
     #[test]
     fn a_held_lock_skips_auto_migrations_with_a_warning() {
         let h = home("held");
         fs::create_dir_all(playbook_root_from(&h).join(LOCK_DIR)).unwrap();
-        CALLS.lock().unwrap().clear();
-        let report = run_with_retries(&[auto("held-a", order_a)], &ctx(&h), 2);
-        assert!(CALLS.lock().unwrap().is_empty());
+        let report = run_with_retries(&[auto("held-a", held_probe)], &ctx(&h), 2);
+        assert_eq!(HELD_RUNS.load(Ordering::SeqCst), 0);
         assert!(report.steps[0].detail.contains("lock"));
     }
 
