@@ -161,7 +161,13 @@ pub trait GhClient {
     fn pr_view(&self, branch: &str) -> Result<Option<ExistingPr>, String>;
     fn repo_default_branch(&self) -> Result<Option<String>, String>;
     /// Returns the new PR's URL.
-    fn pr_create(&self, title: &str, body_file: &str, base: &str) -> Result<String, String>;
+    fn pr_create(
+        &self,
+        title: &str,
+        body_file: &str,
+        base: &str,
+        draft: bool,
+    ) -> Result<String, String>;
     /// Returns the PR's `baseRefName`.
     fn pr_view_base(&self, branch: &str) -> Result<String, String>;
     fn pr_edit_base(&self, branch: &str, base: &str) -> Result<(), String>;
@@ -200,6 +206,27 @@ fn gh(args: &[&str]) -> Result<String, String> {
         .to_string())
 }
 
+/// The `gh pr create` arguments, with `--draft` present only when `draft`.
+pub fn pr_create_args(title: &str, body_file: &str, base: &str, draft: bool) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "pr",
+        "create",
+        "--title",
+        title,
+        "--body-file",
+        body_file,
+        "--base",
+        base,
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    if draft {
+        args.push("--draft".to_string());
+    }
+    args
+}
+
 impl GhClient for RealGhClient {
     fn pr_view(&self, branch: &str) -> Result<Option<ExistingPr>, String> {
         // A branch with no PR makes `gh pr view` exit non-zero, which is the
@@ -222,19 +249,16 @@ impl GhClient for RealGhClient {
         Ok(out.ok().filter(|name| !name.is_empty()))
     }
 
-    fn pr_create(&self, title: &str, body_file: &str, base: &str) -> Result<String, String> {
-        gh(&[
-            "pr",
-            "create",
-            "--title",
-            title,
-            "--body-file",
-            body_file,
-            "--base",
-            base,
-            "--draft",
-        ])
-        .map_err(|e| format!("gh pr create failed: {e}"))
+    fn pr_create(
+        &self,
+        title: &str,
+        body_file: &str,
+        base: &str,
+        draft: bool,
+    ) -> Result<String, String> {
+        let args = pr_create_args(title, body_file, base, draft);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        gh(&args).map_err(|e| format!("gh pr create failed: {e}"))
     }
 
     fn pr_view_base(&self, branch: &str) -> Result<String, String> {
@@ -265,6 +289,19 @@ mod tests {
     // Output shapes of `gh pr view --json url,state`, as gh prints them.
     const OPEN_PR: &str = r#"{"state":"OPEN","url":"https://github.com/o/r/pull/9"}"#;
     const MERGED_PR: &str = r#"{"state":"MERGED","url":"https://github.com/o/r/pull/3"}"#;
+
+    #[test]
+    fn pr_create_args_include_draft_only_when_true() {
+        // Arrange
+        let draft = pr_create_args("t", "b.md", "main", true);
+        let ready = pr_create_args("t", "b.md", "main", false);
+
+        // Assert
+        assert!(draft.contains(&"--draft".to_string()));
+        assert!(!ready.contains(&"--draft".to_string()));
+        assert_eq!(&ready[..2], ["pr", "create"]);
+        assert_eq!(draft.len(), ready.len() + 1);
+    }
 
     #[test]
     fn an_open_pr_parses_to_its_url_and_state() {
@@ -313,7 +350,7 @@ mod tests {
         fn repo_default_branch(&self) -> Result<Option<String>, String> {
             Ok(Some(self.0.to_string()))
         }
-        fn pr_create(&self, _t: &str, _b: &str, _base: &str) -> Result<String, String> {
+        fn pr_create(&self, _t: &str, _b: &str, _base: &str, _d: bool) -> Result<String, String> {
             Err("not used".to_string())
         }
         fn pr_view_base(&self, _branch: &str) -> Result<String, String> {

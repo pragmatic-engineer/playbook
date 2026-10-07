@@ -349,7 +349,7 @@ Report:
 ## Effective review, merge and sign-off config
 
 This is informational, not one of the seven layers above: a non-default but
-validly-configured `autoReview.*`, `autoMerge.enabled` or `commit.signOff`
+validly-configured `autoReview.*`, `autoMerge.enabled`, `commit.signOff` or `pr.draft`
 value is nothing to "fix", so it carries no remediation hint and never fails
 the check on its own.
 
@@ -358,7 +358,7 @@ if ! command -v playbook >/dev/null 2>&1; then
   echo "UNKNOWN"
 else
   # One line per key, so a key that fails does not hide the ones that resolve.
-  for key in autoReview.enabled autoReview.type autoReview.fix autoMerge.enabled commit.signOff; do
+  for key in autoReview.enabled autoReview.type autoReview.fix autoMerge.enabled commit.signOff pr.draft; do
     key_status=0
     key_out=$(playbook config get "$key" 2>&1) || key_status=$?
     if [ $key_status -eq 0 ]; then
@@ -476,6 +476,7 @@ INFO  autoReview.type: deep (source: default)
 INFO  autoReview.fix: false (source: default)
 INFO  autoMerge.enabled: false (source: default)
 INFO  commit.signOff: true (source: default)
+INFO  pr.draft: true (source: default)
 INFO  no stale worktrees found
 ```
 

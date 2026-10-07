@@ -95,7 +95,7 @@ These commands read the run mode first. In `ask` mode, which is the default, not
 
 ## PR and commit settings
 
-Five config keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`, and set it with `playbook config set [--global|--org] <key> <value>`. Without a flag it writes the repo tier; `--org` writes the org tier and `--global` writes your own, for every repo. The repo tier wins over org, and org over global.
+Six config keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`, and set it with `playbook config set [--global|--org] <key> <value>`. Without a flag it writes the repo tier; `--org` writes the org tier and `--global` writes your own, for every repo. The repo tier wins over org, and org over global.
 
 | Key | Default | What it does |
 |---|---|---|
@@ -104,10 +104,12 @@ Five config keys shape the PR flow and the commit trailer. Read one with `playbo
 | `autoReview.fix` | `false` | After the self-review, fixes every finding that survived the review's verification, pushes the fixes to the PR branch, and re-runs the scoped checks. |
 | `autoMerge.enabled` | `false` | After the review and fixes, marks the PR ready, waits until every check on the PR head is green, runs `gh pr merge <n> --auto`, then re-reads the PR and reports whether it merged, is queued, was rejected, or was closed. |
 | `commit.signOff` | `true` | Commits made through `/playbook:commit-and-push` carry a `Signed-off-by` trailer. |
+| `pr.draft` | `true` | `/playbook:create-pull-request` opens the PR as a draft. Set it to `false` to open PRs ready for review. |
 
 ```bash
 playbook config set --global autoReview.fix true
 playbook config set --global autoMerge.enabled true
+playbook config set --global pr.draft false
 ```
 
 The merge step is cautious on purpose. It waits two minutes after marking the PR ready, so checks have registered and a run skipped while the PR was a draft can't read as green. It then polls every check on the PR (not only the required ones, since a repo may require none and a merge queue would merge at once) every 30 seconds, for up to 45 minutes. `pass` and `skipping` are fine, `fail` and `cancel` stop it, and a check still pending at the deadline stops it without merging. A PR with no checks at all merges once that two-minute look finds none.

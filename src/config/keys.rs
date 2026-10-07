@@ -14,6 +14,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "autoReview.fix",
     "autoMerge.enabled",
     "commit.signOff",
+    "pr.draft",
     "worktreeCleanup.enabled",
     "worktreeCleanup.staleAfterDays",
     "worktreeCleanup.conflictGracePeriodDays",
@@ -33,6 +34,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "autoReview.fix" => Some(Value::Bool(false)),
         "autoMerge.enabled" => Some(Value::Bool(false)),
         "commit.signOff" => Some(Value::Bool(true)),
+        "pr.draft" => Some(Value::Bool(true)),
         "worktreeCleanup.enabled" => Some(Value::Bool(true)),
         "worktreeCleanup.staleAfterDays" => Some(Value::Number(30.into())),
         "worktreeCleanup.conflictGracePeriodDays" => Some(Value::Number(90.into())),
@@ -132,12 +134,27 @@ mod tests {
     }
 
     #[test]
+    fn pr_draft_defaults_to_true_with_no_enum_constraint() {
+        // Arrange
+        let key = "pr.draft";
+
+        // Act
+        let default = default_value(key);
+        let allowed = allowed_enum_values(key);
+
+        // Assert
+        assert_eq!(default, Some(Value::Bool(true)));
+        assert_eq!(allowed, None);
+    }
+
+    #[test]
     fn default_values_for_the_pr_and_commit_settings() {
         // Arrange
         let cases = [
             ("autoReview.fix", false),
             ("autoMerge.enabled", false),
             ("commit.signOff", true),
+            ("pr.draft", true),
         ];
 
         for (key, expected) in cases {
@@ -152,7 +169,12 @@ mod tests {
     #[test]
     fn the_pr_and_commit_settings_are_known_keys_with_no_enum_constraint() {
         // Arrange
-        let keys = ["autoReview.fix", "autoMerge.enabled", "commit.signOff"];
+        let keys = [
+            "autoReview.fix",
+            "autoMerge.enabled",
+            "commit.signOff",
+            "pr.draft",
+        ];
 
         for key in keys {
             // Act

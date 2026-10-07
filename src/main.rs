@@ -277,7 +277,10 @@ fn main() {
                     // A relative body path is relative to where the caller ran.
                     let body_file = absolute_from_cwd(&body_file);
                     enter_dir("pr create", dir.as_deref());
-                    match pr::create::run(&gh, &title, &body_file, base.as_deref()) {
+                    let slug = common::repo_slug();
+                    let repo_slug = (!slug.is_empty()).then_some(slug.as_str());
+                    let draft = pr::create::draft_setting(&common::home_dir(), repo_slug);
+                    match pr::create::run(&gh, &title, &body_file, base.as_deref(), draft) {
                         Ok(output) => println!("{output}"),
                         Err(err) => {
                             eprintln!("pr create: {err}");
