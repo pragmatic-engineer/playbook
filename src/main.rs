@@ -7,10 +7,11 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     agents, cc, ci, common, config, deps, doctor, gate, handoff, hooks, init, json, manifest, mode,
-    pr, sanitize, settings, statusline, trust, update, usage, worktree, AgentsCommand, CcCommand,
-    Cli, Command, ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand, GateCommand,
-    HandoffCommand, JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand,
-    ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, UsageCommand, WorktreeCommand,
+    pr, release, sanitize, settings, statusline, trust, update, usage, worktree, AgentsCommand,
+    CcCommand, Cli, Command, ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand,
+    GateCommand, HandoffCommand, JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand,
+    PrCommand, ReleaseCommand, ReviewWorktreeCommand, SanitizeCommand, SettingsCommand,
+    UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -311,6 +312,27 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        Command::Release { sub } => {
+            let result = match sub {
+                ReleaseCommand::RenderFormula { version, sums } => std::fs::read_to_string(&sums)
+                    .map_err(|e| format!("cannot read {}: {e}", sums.display()))
+                    .and_then(|text| release::render_formula(&version, &text)),
+                ReleaseCommand::PinMarketplace {
+                    version,
+                    marketplace,
+                    sha256,
+                } => std::fs::read_to_string(&marketplace)
+                    .map_err(|e| format!("cannot read {}: {e}", marketplace.display()))
+                    .and_then(|text| release::pin_marketplace(&version, &text, &sha256)),
+            };
+            match result {
+                Ok(text) => print!("{text}"),
+                Err(err) => {
+                    eprintln!("release: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Command::Pr { sub } => {
             let gh = pr::shared::RealGhClient;
             match sub {

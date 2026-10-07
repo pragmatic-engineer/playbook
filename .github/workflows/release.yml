@@ -212,6 +212,8 @@ jobs:
   checksums:
     needs: [verify-version, build]
     runs-on: ubuntu-latest
+    outputs:
+      linux_sha256: ${{ steps.sums.outputs.linux_sha256 }}
     permissions:
       contents: write
       id-token: write
@@ -234,6 +236,7 @@ jobs:
             uploads.github.com:443
 
       - name: Build SHA256SUMS from the uploaded assets
+        id: sums
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.verify-version.outputs.version }}
@@ -255,6 +258,9 @@ jobs:
           shasum -a 256 playbook-* > SHA256SUMS
           shasum -a 256 -c SHA256SUMS
           cat SHA256SUMS
+          # publish-channels runs this binary, so it checks the hash from this job.
+          linux="$(grep -F " playbook-${VERSION}-x86_64-unknown-linux-musl" SHA256SUMS | cut -d' ' -f1)"
+          echo "linux_sha256=${linux}" >> "$GITHUB_OUTPUT"
           gh release upload "${GITHUB_REF_NAME}" SHA256SUMS --clobber
 
       - name: Attest build provenance
@@ -373,6 +379,7 @@ jobs:
       MARKETPLACE_REPO: pragmatic-engineer/marketplace
       VERSION: ${{ needs.verify-version.outputs.version }}
       ARCHIVE_SHA256: ${{ needs.plugin-archive.outputs.sha256 }}
+      LINUX_SHA256: ${{ needs.checksums.outputs.linux_sha256 }}
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -421,8 +428,20 @@ jobs:
             echo "::error::the release asset playbook-plugin-${VERSION}.zip does not match the sha256 the plugin-archive job built (${ARCHIVE_SHA256})." >&2
             exit 1
           }
-          bash shell/render-formula.sh "${VERSION}" out/SHA256SUMS > out/playbook.rb
+          # Run the binary this release built, checked against the hash the checksums job computed.
+          bin="out/playbook-${VERSION}-x86_64-unknown-linux-musl"
+          gh release download "${GITHUB_REF_NAME}" --pattern "$(basename "$bin")" --dir out --clobber
+          [ -n "${LINUX_SHA256}" ] && [ "$(shasum -a 256 "$bin" | cut -d' ' -f1)" = "${LINUX_SHA256}" ] || {
+            echo "::error::the release binary $(basename "$bin") does not match the sha256 the checksums job computed (${LINUX_SHA256:-none})." >&2
+            exit 1
+          }
+          chmod +x "$bin"
+          "$bin" release render-formula "${VERSION}" out/SHA256SUMS > out/playbook.rb
           cat out/playbook.rb
+          # The marketplace repo is public, so the workflow token can read it: no downloaded code runs next to the push token.
+          gh api "repos/${MARKETPLACE_REPO}/contents/.claude-plugin/marketplace.json" > out/market.meta
+          jq -r .content out/market.meta | base64 -d > out/marketplace.json
+          "$bin" release pin-marketplace "${VERSION}" out/marketplace.json "${ARCHIVE_SHA256}" > out/marketplace.new.json
 
       - name: Push the tap formula
         if: steps.gate.outputs.enabled == 'true'
@@ -444,9 +463,6 @@ jobs:
         run: |
           set -euo pipefail
           path=".claude-plugin/marketplace.json"
-          gh api "repos/${MARKETPLACE_REPO}/contents/${path}" > out/market.meta
-          jq -r .content out/market.meta | base64 -d > out/marketplace.json
-          bash shell/pin-marketplace.sh "${VERSION}" out/marketplace.json "${ARCHIVE_SHA256}" > out/marketplace.new.json
           gh api -X PUT "repos/${MARKETPLACE_REPO}/contents/${path}" \
             -f message="playbook ${VERSION}" \
             -f content="$(base64 < out/marketplace.new.json | tr -d '\n')" \
