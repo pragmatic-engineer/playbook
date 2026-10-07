@@ -190,7 +190,7 @@ function render(data) {
   if (data.agents.length) tables.appendChild(table("Agents", "agent", [["count","Dispatches"]], data.agents));
 }
 let timer = null;
-let latest = 0;
+let inFlight = 0;
 function stopPolling(status, message) {
   if (timer !== null) clearInterval(timer);
   timer = null;
@@ -199,24 +199,31 @@ function stopPolling(status, message) {
 async function refresh() {
   const status = document.getElementById("status");
   if (!TOKEN) { stopPolling(status, "No session token. " + NEED_LINK); return; }
-  // A slow answer for a range the user has since left must not overwrite the newer one.
-  const mine = ++latest;
+  // Drop an answer only when the user switched ranges after asking for it.
+  const asked = range;
+  inFlight++;
   try {
-    const response = await fetch('/api/data?range=' + encodeURIComponent(range), { headers: { 'X-Playbook-Token': TOKEN } });
-    if (mine !== latest) return;
+    const response = await fetch('/api/data?range=' + encodeURIComponent(asked), { headers: { 'X-Playbook-Token': TOKEN } });
+    if (asked !== range) return;
     if (response.status === 401) { stopPolling(status, "The session token was rejected. " + NEED_LINK); return; }
     if (!response.ok) throw new Error("HTTP " + response.status);
     const data = await response.json();
-    if (mine !== latest) return;
+    if (asked !== range) return;
     render(data);
     status.textContent = "Updated " + new Date().toLocaleTimeString() + ". Refreshes every " + (REFRESH_MS / 1000) + " seconds.";
   } catch (error) {
-    if (mine === latest) status.textContent = "Could not refresh: " + error.message;
+    if (asked === range) status.textContent = "Could not refresh: " + error.message;
+  } finally {
+    inFlight--;
   }
+}
+// A slow server must not have its answers dropped by the next poll.
+function poll() {
+  if (inFlight === 0) refresh();
 }
 renderRanges();
 refresh();
-timer = setInterval(refresh, REFRESH_MS);
+timer = setInterval(poll, REFRESH_MS);
 "##;
 
 #[cfg(test)]
@@ -225,9 +232,42 @@ mod tests {
 
     #[test]
     fn the_script_polls_the_data_endpoint_with_the_token_at_the_declared_interval() {
-        assert!(JS.contains("fetch('/api/data?range=' + encodeURIComponent(range), { headers: { 'X-Playbook-Token': TOKEN } })"));
+        assert!(JS.contains("fetch('/api/data?range=' + encodeURIComponent(asked), { headers: { 'X-Playbook-Token': TOKEN } })"));
         assert!(JS.contains(&format!("const REFRESH_MS = {REFRESH_MS};")));
-        assert!(JS.contains("setInterval(refresh, REFRESH_MS)"));
+        assert!(JS.contains("setInterval(poll, REFRESH_MS)"));
+    }
+
+    #[test]
+    fn a_poll_never_drops_a_slow_answer_and_a_range_switch_drops_the_old_one() {
+        assert!(JS.contains("if (inFlight === 0) refresh();"));
+        assert!(JS.contains("const asked = range;"));
+        assert_eq!(
+            JS.matches("if (asked !== range) return;").count(),
+            2,
+            "after fetch and after json()"
+        );
+        assert!(JS.contains("if (asked === range) status.textContent"));
+        assert!(!JS.contains("latest"), "polls must not invalidate answers");
+    }
+
+    #[test]
+    fn a_bad_or_unreadable_saved_range_falls_back_to_30d() {
+        assert!(
+            JS.contains("try { saved = localStorage.getItem(RANGE_KEY) || \"\"; } catch (e) {}")
+        );
+        assert!(JS.contains("try { localStorage.setItem(RANGE_KEY, range); } catch (e) {}"));
+        assert!(JS.contains("? saved : \"30d\";"));
+    }
+
+    #[test]
+    fn every_element_the_script_looks_up_exists_in_the_page() {
+        for chunk in JS.split("getElementById(\"").skip(1) {
+            let id = chunk.split('"').next().unwrap();
+            assert!(
+                HTML.contains(&format!("id=\"{id}\"")),
+                "#{id} is missing from the HTML"
+            );
+        }
     }
 
     #[test]

@@ -347,12 +347,20 @@ fn api_data_honours_the_range_parameter_and_refuses_an_unknown_one() {
     let port = start(&home);
 
     let (all_status, all_body) = http_get(&home, port, "/api/data?range=all");
+    let (sixty_status, sixty_body) = http_get(&home, port, "/api/data?range=60d");
     let (bad_status, _) = http_get(&home, port, "/api/data?range=7d");
 
     assert_eq!(all_status, 200);
     let data: serde_json::Value = serde_json::from_str(&all_body).unwrap();
     assert_eq!(data["totals"]["messages"], 3);
     assert_eq!(data["range"]["key"], "all");
+    assert_eq!(sixty_status, 200);
+    let sixty: serde_json::Value = serde_json::from_str(&sixty_body).unwrap();
+    assert_eq!(
+        sixty["range"]["key"], "60d",
+        "the range must reach data_json"
+    );
+    assert!(sixty["range"]["start"].is_string() && sixty["range"]["end"].is_string());
     assert_eq!(bad_status, 400);
 }
 

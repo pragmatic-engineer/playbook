@@ -366,7 +366,83 @@ mod tests {
             3,
             "Sep 1 to Sep 3, not the whole month"
         );
+        assert!(day.contains("<title>2026-09-01: 0.5000</title>"), "{day}");
+        assert!(day.contains("<title>2026-09-02: 0.0000</title>"), "{day}");
+        assert!(day.contains("<title>2026-09-03: 0.0000</title>"), "{day}");
+        assert!(
+            !day.contains("2026-08-31") && !day.contains("2026-09-04"),
+            "{day}"
+        );
         assert_eq!(data["range"]["end"], "2026-09-30");
+
+        let last30 = data_json(&usage, &[], SEP_3_NOON, Range::LastDays(30));
+        let chart = last30["charts"]["cost_by_day"].as_str().unwrap();
+        assert_eq!(chart.matches("<rect").count(), 30);
+        assert!(
+            chart.contains("<title>2026-08-05: 0.0000</title>"),
+            "{chart}"
+        );
+        assert!(
+            chart.contains("<title>2026-09-03: 0.0000</title>"),
+            "{chart}"
+        );
+    }
+
+    #[test]
+    fn all_time_draws_only_the_latest_90_days_with_data() {
+        let usage: Vec<UsageEvent> = (0..100)
+            .map(|i| event(1785888000 + i * 86_400, "opus", 1.0))
+            .collect();
+
+        let data = data_json(&usage, &[], SEP_3_NOON, Range::All);
+
+        let day = data["charts"]["cost_by_day"].as_str().unwrap();
+        assert_eq!(day.matches("<rect").count(), 90);
+        assert!(
+            day.contains("<title>2026-08-15: 1.0000</title>"),
+            "oldest kept day"
+        );
+        assert!(
+            day.contains("<title>2026-11-12: 1.0000</title>"),
+            "newest day"
+        );
+        assert!(!day.contains("2026-08-14"), "older days dropped");
+    }
+
+    #[test]
+    fn ranges_hold_at_midnight_across_the_year_and_in_a_short_february() {
+        const JAN_1_2027: i64 = 1798761600;
+        const FEB_15_2027: i64 = 1802649600;
+
+        assert_eq!(
+            span(Range::CurrentMonth, JAN_1_2027),
+            ("2027-01-01".into(), "2027-01-31".into())
+        );
+        assert_eq!(
+            span(Range::LastDays(30), JAN_1_2027),
+            ("2026-12-03".into(), "2027-01-01".into())
+        );
+        assert_eq!(
+            span(Range::LastDays(30), JAN_1_2027 - 1),
+            ("2026-12-02".into(), "2026-12-31".into())
+        );
+        assert_eq!(
+            span(Range::CurrentMonth, FEB_15_2027),
+            ("2027-02-01".into(), "2027-02-28".into())
+        );
+
+        let usage = vec![
+            event(JAN_1_2027 - 1, "opus", 1.0),
+            event(JAN_1_2027, "opus", 2.0),
+        ];
+        let data = data_json(&usage, &[], JAN_1_2027 - 1, Range::LastDays(30));
+        assert_eq!(
+            data["totals"]["messages"], 1,
+            "tomorrow is outside the window"
+        );
+        let month = data_json(&[], &[], JAN_1_2027, Range::CurrentMonth);
+        let chart = month["charts"]["cost_by_day"].as_str().unwrap();
+        assert_eq!(chart.matches("<rect").count(), 1);
     }
 
     #[test]

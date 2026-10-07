@@ -397,6 +397,28 @@ mod tests {
     }
 
     #[test]
+    fn every_range_button_is_accepted_by_the_server_and_echoed_back() {
+        let list = page::JS
+            .split("const RANGES = [")
+            .nth(1)
+            .and_then(|rest| rest.split("];").next())
+            .expect("the page declares RANGES");
+        let keys: Vec<&str> = list
+            .split("],[")
+            .map(|pair| pair.split('"').nth(1).expect("a quoted key"))
+            .collect();
+
+        assert_eq!(keys, ["30d", "60d", "90d", "month", "all"]);
+        for key in keys {
+            let range = Range::parse(Some(key)).unwrap_or_else(|| panic!("{key} is refused"));
+            assert_eq!(
+                super::super::api::data_json(&[], &[], 0, range)["range"]["key"],
+                key
+            );
+        }
+    }
+
+    #[test]
     fn the_data_route_passes_the_range_and_refuses_an_unknown_one() {
         let seen = |query: &str| {
             let mut got = None;
