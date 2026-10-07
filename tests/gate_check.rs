@@ -565,8 +565,15 @@ fn json_fail_and_missing_report_ok_false_and_exit_one() {
     assert_eq!(out.status.code(), Some(1));
     let v = json_of(&out);
     assert_eq!(v["ok"], false);
-    assert_eq!(v["phases"][0]["status"], "FAIL");
-    assert_eq!(v["phases"][1]["status"], "MISSING");
+    assert_eq!(v["slug"], "plan-a");
+    assert_eq!(
+        v["phases"],
+        serde_json::json!([
+            {"phase": "broken", "status": "FAIL"},
+            {"phase": "unrecorded", "status": "MISSING"}
+        ])
+    );
+    assert!(stderr_of(&out).is_empty());
 }
 
 #[test]
@@ -579,7 +586,11 @@ fn json_stale_source_reports_stale_and_exit_one() {
     assert_eq!(out.status.code(), Some(1));
     let v = json_of(&out);
     assert_eq!(v["ok"], false);
-    assert_eq!(v["phases"][0]["status"], "STALE");
+    assert_eq!(
+        v["phases"],
+        serde_json::json!([{"phase": "spec", "status": "STALE"}])
+    );
+    assert!(stderr_of(&out).is_empty());
 }
 
 #[test]
@@ -606,4 +617,37 @@ fn text_output_without_json_flag_is_byte_identical() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(stdout_of(&out), "spec: PASS\nimpl: WARN\n");
     assert!(stderr_of(&out).is_empty());
+}
+
+#[test]
+fn json_with_an_unreadable_source_prints_nothing_on_stdout_and_exits_one() {
+    let f = Fixture::new("json-bad-source");
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "gate", "check", "plan-a", "gate-run", "spec", "--json", "--source",
+        ])
+        .arg(f.repo.join("missing.txt"))
+        .current_dir(&f.repo)
+        .env("HOME", &f.home)
+        .output()
+        .expect("playbook binary should spawn");
+
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stdout_of(&out).is_empty());
+    assert!(stderr_of(&out).starts_with("gate check: "));
+}
+
+#[test]
+fn text_failure_output_is_exact_on_stderr_with_empty_stdout() {
+    let f = Fixture::new("text-fail-exact");
+    f.seed("plan-a", "broken", "FAIL");
+
+    let out = f.run("plan-a", "gate-run", &["broken", "unrecorded"]);
+
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stdout_of(&out).is_empty());
+    assert_eq!(
+        stderr_of(&out),
+        "gate check: broken: FAIL\nunrecorded: MISSING\n"
+    );
 }

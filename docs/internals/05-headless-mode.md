@@ -158,7 +158,7 @@ jobs:
 
 ## Next steps for unattended runs
 
-1. Shipped for `gate check`: `playbook gate check --json` prints one object, `{"version":1,"slug":...,"ok":...,"phases":[{"phase":...,"status":...}]}`, with the same exit codes as the text output. Still open for `doctor`.
+1. Shipped for `gate check`: `playbook gate check --json` prints one object, `{"version":1,"slug":...,"ok":...,"phases":[{"phase":...,"status":...}]}`, with the same exit codes as the text output. If the check itself errors (unreadable source, no database), stdout stays empty and the message goes to stderr. Still open for `doctor`.
 2. Only then run commands under `claude -p`, with a wrapper that fails on `permission_denials`, sets `--max-turns` and `--max-budget-usd`, and never passes `bypassPermissions`.
 
 ## Open items
