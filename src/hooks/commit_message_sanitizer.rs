@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 //! PreToolUse hook that removes AI attribution from the messages a Bash call
-//! writes: a commit, tag, merge or PR title and body. It never blocks. When a
+//! writes with `git commit`, `git tag` or `git merge`. It never blocks. When a
 //! message changes, the hook hands Claude Code the same call with the message
 //! cleaned and no permission decision, so the normal permission flow still
-//! applies. A message kept in a file is rewritten on disk instead.
+//! applies. A message kept in a file is read from a heredoc instead, and the
+//! file itself is never rewritten.
 //!
 //! Best effort against an agent drifting, not a security boundary: it does
 //! not expand variables in a message, an alias or a script that builds one.

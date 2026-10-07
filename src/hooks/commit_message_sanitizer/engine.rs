@@ -1,19 +1,19 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Walks a shell command, finds the `git` and `gh` calls that write a message
-//! and rewrites the command so those messages carry no AI attribution.
+//! Walks a shell command, finds the `git` calls that write a message and
+//! rewrites the command so those messages carry no AI attribution.
 //!
 //! The command is rewritten as text: each message, heredoc body or option that
 //! needs to change becomes one edit on the original characters, so everything
 //! else in the command stays exactly as written. A message that lives in a
-//! file is rewritten on disk instead.
+//! file is never rewritten on disk: the command reads the cleaned text from a
+//! heredoc instead, and the file stays as it is.
 
 use super::{git, sources};
 use crate::common::shell::{
     apply_edits, commands, program_index, program_name, quote, Command, Span,
 };
-use std::collections::HashSet;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -56,6 +56,8 @@ pub struct Call<'a> {
     /// Index of the program word in the command.
     pub at: usize,
     pub dir: &'a Path,
+    /// How many scripts deep this one is, as `bash -c "..."` strings nest.
+    pub depth: usize,
 }
 
 impl Call<'_> {
@@ -71,6 +73,11 @@ impl Call<'_> {
     pub fn raw(&self, range: Range<usize>) -> String {
         self.chars[range].iter().collect()
     }
+
+    /// The position just after the last word of the command.
+    pub fn end(&self) -> usize {
+        self.cmd().spans.last().map_or(0, |s| s.end)
+    }
 }
 
 /// The edits the handlers make to the script, in characters of its text.
@@ -83,9 +90,15 @@ fn walk(script: &str, dir: &Path, depth: usize, findings: &mut Findings) -> Stri
     let cmds = commands(script);
     let chars: Vec<char> = script.chars().collect();
     let mut plan = Plan::default();
-    let mut dir = dir.to_path_buf();
+    // The directory at each parenthesis depth: a `cd` in `( ... )` ends there.
+    let mut dirs = vec![dir.to_path_buf()];
     for index in 0..cmds.len() {
-        follow_cd(&cmds[index].words, &mut dir);
+        let depth_in_script = cmds[index].depth;
+        while dirs.len() <= depth_in_script {
+            dirs.push(dirs.last().cloned().unwrap_or_default());
+        }
+        dirs.truncate(depth_in_script + 1);
+        follow_cd(&cmds[index].words, &mut dirs[depth_in_script]);
         let Some((at, name)) = locate(&cmds[index].words) else {
             continue;
         };
@@ -94,21 +107,21 @@ fn walk(script: &str, dir: &Path, depth: usize, findings: &mut Findings) -> Stri
             cmds: &cmds,
             index,
             at,
-            dir: &dir,
+            dir: &dirs[depth_in_script],
+            depth,
         };
-        let mut used = HashSet::new();
         match name.as_str() {
-            "git" => git::handle(&call, &mut plan, &mut used, findings),
+            "git" => git::handle(&call, &mut plan, findings),
             shell if SHELLS.contains(&shell) && depth < MAX_NESTING => {
-                shell_script(&call, depth, &mut plan, &mut used, findings);
+                shell_script(&call, &mut plan, findings);
             }
+            "eval" => eval_scripts(&call, &mut plan, findings),
             _ if depth < MAX_NESTING && cmds[index].words[at].contains(char::is_whitespace) => {
                 // A whole script in the program position, as `env -S '...'` leaves it.
-                nested_word(&call, at, depth, &mut plan, findings);
+                nested_word(&call, at, None, &mut plan, findings);
             }
             _ => {}
         }
-        scan_words(&call, &used, depth, &mut plan, findings);
     }
     apply_edits(script, &mut plan.edits)
 }
@@ -123,8 +136,8 @@ fn follow_cd(words: &[String], dir: &mut PathBuf) {
 }
 
 /// The program a command runs and the index of its word: past wrappers such as
-/// `env`, and through the carriers that run a `git` or `gh` given among their
-/// own words.
+/// `env`, and through the carriers that run a `git` given among their own
+/// words.
 fn locate(words: &[String]) -> Option<(usize, String)> {
     let at = program_index(words)?;
     let name = program_name(&words[at]);
@@ -133,27 +146,20 @@ fn locate(words: &[String]) -> Option<(usize, String)> {
     }
     let found = words[at + 1..]
         .iter()
-        .position(|w| matches!(program_name(w).as_str(), "git" | "gh"));
+        .position(|w| program_name(w) == "git");
     found.map_or(Some((at, name)), |i| {
         Some((at + 1 + i, program_name(&words[at + 1 + i])))
     })
 }
 
 /// The script a shell runs: the word after `-c`, or a heredoc fed to it.
-fn shell_script(
-    call: &Call,
-    depth: usize,
-    plan: &mut Plan,
-    used: &mut HashSet<usize>,
-    findings: &mut Findings,
-) {
+fn shell_script(call: &Call, plan: &mut Plan, findings: &mut Findings) {
     let words = &call.cmd().words;
     let flag = (call.at + 1..words.len()).find(|&i| {
         words[i].starts_with('-') && !words[i].starts_with("--") && words[i].contains('c')
     });
     if let Some(at) = flag.filter(|at| at + 1 < words.len()) {
-        used.insert(at + 1);
-        nested_word(call, at + 1, depth, plan, findings);
+        nested_word(call, at + 1, None, plan, findings);
         return;
     }
     let producer = call
@@ -167,46 +173,45 @@ fn shell_script(
         .iter()
         .chain(producer.into_iter().flat_map(|c| c.heredocs.iter()))
     {
-        let rewritten = walk(&heredoc.text, call.dir, depth + 1, findings);
+        let rewritten = walk(&heredoc.text, call.dir, call.depth + 1, findings);
         if rewritten != heredoc.text {
             plan.edits.push((heredoc.body.clone(), rewritten));
         }
     }
 }
 
-/// Words that hold a script of their own, as in `git rebase -x '...'` or
-/// `env -S '...'`, are rewritten as scripts.
-fn scan_words(
-    call: &Call,
-    used: &HashSet<usize>,
-    depth: usize,
-    plan: &mut Plan,
-    findings: &mut Findings,
-) {
-    if depth >= MAX_NESTING {
-        return;
-    }
-    for (at, word) in call.cmd().words.iter().enumerate().skip(call.at + 1) {
-        let mentions_a_call = {
-            let lower = word.to_lowercase();
-            lower.contains("git") || lower.contains("gh ")
-        };
-        if !used.contains(&at) && mentions_a_call && word.contains(char::is_whitespace) {
-            nested_word(call, at, depth, plan, findings);
+/// `eval` joins its words into one script, so a word that holds a whole
+/// command line is rewritten as one.
+fn eval_scripts(call: &Call, plan: &mut Plan, findings: &mut Findings) {
+    for at in call.at + 1..call.cmd().words.len() {
+        if call.cmd().words[at].contains(char::is_whitespace) {
+            nested_word(call, at, None, plan, findings);
         }
     }
 }
 
-/// Rewrites the word at `at` as a script. A word the shell expands first is
-/// left alone, since requoting it would change what it expands to.
-fn nested_word(call: &Call, at: usize, depth: usize, plan: &mut Plan, findings: &mut Findings) {
-    let span = call.span(at);
-    if span.dynamic {
+/// Rewrites the word at `at`, past its first `skip` characters, as a script.
+/// A word the shell expands first is left alone, since requoting it would
+/// change what it expands to.
+pub fn nested_word(
+    call: &Call,
+    at: usize,
+    skip: Option<usize>,
+    plan: &mut Plan,
+    findings: &mut Findings,
+) {
+    if call.span(at).dynamic || call.depth >= MAX_NESTING {
         return;
     }
-    let text = &call.cmd().words[at];
-    let rewritten = walk(text, call.dir, depth + 1, findings);
-    if &rewritten != text {
-        plan.edits.push((span.start..span.end, quote(&rewritten)));
+    let Some(range) = sources::value_span(call, at, skip) else {
+        return;
+    };
+    let text: String = call.cmd().words[at]
+        .chars()
+        .skip(skip.unwrap_or(0))
+        .collect();
+    let rewritten = walk(&text, call.dir, call.depth + 1, findings);
+    if rewritten != text {
+        plan.edits.push((range, quote(&rewritten)));
     }
 }
