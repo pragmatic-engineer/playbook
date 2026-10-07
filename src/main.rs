@@ -314,6 +314,14 @@ fn main() {
                         }
                     }
                 }
+                PrCommand::ReviewTriage { pr, base, dir } => {
+                    enter_dir("pr review-triage", dir.as_deref());
+                    let outcome = match pr::triage::collect(pr, base.as_deref()) {
+                        Ok(facts) => pr::triage::triage(&pr::triage::ClaudeRunner, &facts),
+                        Err(err) => pr::triage::failed(format!("could not collect the PR: {err}")),
+                    };
+                    println!("{}", pr::triage::render(&outcome));
+                }
             }
         }
         Command::Config { sub } => {

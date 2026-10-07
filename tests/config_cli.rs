@@ -180,8 +180,8 @@ fn set_with_global_flag_writes_the_global_tier_file() {
 #[test]
 fn get_prints_a_string_value_unquoted_not_as_raw_json() {
     // Arrange: prose consumers (create-pull-request.md's Step 5, doctor.md's
-    // effective-config line) match this output as a bare `deep`/`quick`
-    // token, not a JSON-quoted `"deep"`.
+    // effective-config line) match this output as a bare `auto`/`quick`
+    // token, not a JSON-quoted `"auto"`.
     let repo = seeded_repo("get-string-unquoted");
     let home = scratch_dir("get-string-unquoted-home");
 
@@ -192,10 +192,10 @@ fn get_prints_a_string_value_unquoted_not_as_raw_json() {
     let stdout = stdout_of(&out);
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
     assert!(
-        stdout.contains("autoReview.type: deep (source: default)"),
+        stdout.contains("autoReview.type: auto (source: default)"),
         "{stdout}"
     );
-    assert!(!stdout.contains("\"deep\""), "{stdout}");
+    assert!(!stdout.contains("\"auto\""), "{stdout}");
 }
 
 #[test]
@@ -530,4 +530,17 @@ fn get_and_list_name_the_tier_of_an_invalid_value_they_ignore() {
             "{command}: {stderr}"
         );
     }
+}
+
+#[test]
+fn set_accepts_auto_for_the_review_type() {
+    // Arrange
+    let repo = seeded_repo("set-review-auto");
+    let home = scratch_dir("set-review-auto-home");
+
+    // Act
+    let out = run_playbook(&repo, &home, &["config", "set", "autoReview.type", "auto"]);
+
+    // Assert
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
 }

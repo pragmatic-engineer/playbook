@@ -387,6 +387,19 @@ pub enum PrCommand {
         #[arg(long)]
         dir: Option<String>,
     },
+    /// Pick `quick` or `deep` for the PR's self-review by asking a small
+    /// model three times; anything but a unanimous `quick` is `deep`.
+    ReviewTriage {
+        /// PR number; defaults to the current branch against its base.
+        #[arg(long)]
+        pr: Option<u64>,
+        /// Base branch when no PR number is given; defaults to the repo's default.
+        #[arg(long)]
+        base: Option<String>,
+        /// Work in this directory (inside the repo or worktree) instead of the cwd.
+        #[arg(long)]
+        dir: Option<String>,
+    },
 }
 
 /// `playbook gate` subcommands, backing `src/gate/`.

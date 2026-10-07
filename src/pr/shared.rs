@@ -189,7 +189,7 @@ fn parse_pr_view(out: &str) -> Result<Option<ExistingPr>, String> {
 pub struct RealGhClient;
 
 /// Runs `gh` with `args`; `Ok` is trimmed stdout, `Err` the trimmed stderr.
-fn gh(args: &[&str]) -> Result<String, String> {
+pub(crate) fn gh(args: &[&str]) -> Result<String, String> {
     let mut command = Command::new("gh");
     command.args(args);
     let output = run_with_timeout(&mut command, GH_TIMEOUT).ok_or_else(|| {

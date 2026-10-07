@@ -180,3 +180,17 @@ fn pr_help_and_pr_prepare_help_exit_0_so_a_caller_can_detect_support() {
         assert!(out.status.success(), "{args:?} must exit 0");
     }
 }
+
+#[test]
+fn pr_review_triage_help_lists_its_flags() {
+    // Arrange / Act
+    let out = playbook(&["pr", "review-triage", "--help"]);
+
+    // Assert
+    assert!(out.status.success());
+    let text = stdout(&out);
+    assert!(
+        text.contains("--pr") && text.contains("--base"),
+        "got {text}"
+    );
+}
