@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 
 const FACTS: usize = 240;
 const EXPECTED_EDGES: usize = 623;
-const EXPECTED_HASH: u64 = 15118094020544539416;
+const EXPECTED_HASH: u64 = 15851353612978597720;
 
 struct Lcg(u64);
 
@@ -113,7 +113,11 @@ fn rebuild_of_a_generated_corpus_pins_the_similarity_edges() {
         .unwrap()
         .iter()
         .filter(|e| e["relation"] == "possible_relates_to")
-        .map(|e| format!("{}>{}:{}", e["from"], e["to"], e["signals"]))
+        .map(|e| {
+            // Direction follows read_dir order, which differs by filesystem.
+            let (a, b) = (e["from"].as_str().unwrap(), e["to"].as_str().unwrap());
+            format!("{}|{}:{}", a.min(b), a.max(b), e["signals"])
+        })
         .collect();
     let mut sorted = lines.clone();
     sorted.sort();
