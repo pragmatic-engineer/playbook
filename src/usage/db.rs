@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS usage_events (
     cache_creation_tokens INTEGER NOT NULL,
     cache_read_tokens INTEGER NOT NULL,
     cost_usd REAL NOT NULL CHECK(cost_usd >= 0),
-    cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0
+    cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,
+    agent TEXT NOT NULL DEFAULT 'claude-code'
 );
 CREATE TABLE IF NOT EXISTS tool_invocation_events (
     event_id TEXT PRIMARY KEY,
@@ -62,6 +63,7 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
     conn.execute_batch(SCHEMA_SQL)
         .map_err(|e| format!("failed to create usage schema: {e}"))?;
     ensure_cache_1h_column(&conn)?;
+    ensure_agent_column(&conn)?;
     Ok(conn)
 }
 
@@ -108,6 +110,28 @@ fn ensure_cache_1h_column(conn: &Connection) -> Result<(), String> {
         Ok(_) => Ok(()),
         Err(e) if e.to_string().contains("duplicate column") => Ok(()),
         Err(e) => Err(format!("failed to add cache_creation_1h_tokens: {e}")),
+    }
+}
+
+/// Adds `agent` to a database created before it existed; old rows are Claude Code.
+fn ensure_agent_column(conn: &Connection) -> Result<(), String> {
+    let has: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('usage_events') WHERE name = 'agent')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("failed to inspect usage_events: {e}"))?;
+    if has {
+        return Ok(());
+    }
+    match conn.execute(
+        "ALTER TABLE usage_events ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude-code'",
+        [],
+    ) {
+        Ok(_) => Ok(()),
+        Err(e) if e.to_string().contains("duplicate column") => Ok(()),
+        Err(e) => Err(format!("failed to add agent: {e}")),
     }
 }
 
@@ -170,8 +194,8 @@ pub fn insert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<(), Strin
     conn.execute(
         "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
             repo, branch, input_tokens, output_tokens, cache_creation_tokens,
-            cache_read_tokens, cost_usd, cache_creation_1h_tokens)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            cache_read_tokens, cost_usd, cache_creation_1h_tokens, agent)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             e.event_id,
             e.timestamp,
@@ -186,7 +210,8 @@ pub fn insert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<(), Strin
             to_i64(e.cache_creation_tokens),
             to_i64(e.cache_read_tokens),
             e.cost_usd,
-            to_i64(e.cache_creation_1h_tokens)
+            to_i64(e.cache_creation_1h_tokens),
+            e.agent
         ],
     )
     .map(|_| ())
@@ -201,8 +226,8 @@ pub fn upsert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<usize, St
     conn.execute(
         "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
             repo, branch, input_tokens, output_tokens, cache_creation_tokens,
-            cache_read_tokens, cost_usd, cache_creation_1h_tokens)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            cache_read_tokens, cost_usd, cache_creation_1h_tokens, agent)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(event_id) DO UPDATE SET
             input_tokens = excluded.input_tokens,
             output_tokens = excluded.output_tokens,
@@ -225,7 +250,8 @@ pub fn upsert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<usize, St
             to_i64(e.cache_creation_tokens),
             to_i64(e.cache_read_tokens),
             e.cost_usd,
-            to_i64(e.cache_creation_1h_tokens)
+            to_i64(e.cache_creation_1h_tokens),
+            e.agent
         ],
     )
     .map_err(|e2| format!("failed to upsert usage event {}: {e2}", e.event_id))
@@ -275,7 +301,7 @@ pub fn load_usage_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
         .prepare(
             "SELECT event_id, timestamp, session_id, account, model, effort, repo, branch,
                     input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-                    cache_creation_1h_tokens
+                    cache_creation_1h_tokens, agent
              FROM usage_events ORDER BY timestamp, event_id",
         )
         .map_err(|e| format!("failed to prepare usage query: {e}"))?;
@@ -295,6 +321,7 @@ pub fn load_usage_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
                 cache_creation_tokens: r.get::<_, i64>(10)?.max(0) as u64,
                 cache_read_tokens: r.get::<_, i64>(11)?.max(0) as u64,
                 cache_creation_1h_tokens: r.get::<_, i64>(12)?.max(0) as u64,
+                agent: r.get(13)?,
                 ..UsageEvent::default()
             };
             event.apply_pricing();
@@ -446,6 +473,10 @@ mod tests {
         let loaded = load_usage_events(&conn).unwrap();
         assert_eq!(loaded[0].cache_creation_1h_tokens, 0);
         assert_eq!(loaded[0].cache_creation_tokens, 3);
+        assert_eq!(
+            loaded[0].agent, "claude-code",
+            "old rows default to Claude Code"
+        );
         assert_eq!(count_usage_events(&again).unwrap(), 1);
         let _ = fs::remove_dir_all(dir);
     }

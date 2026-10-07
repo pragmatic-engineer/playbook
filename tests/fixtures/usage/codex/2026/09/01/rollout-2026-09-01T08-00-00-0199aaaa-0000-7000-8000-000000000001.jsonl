@@ -1,0 +1,9 @@
+{"timestamp":"2026-09-01T08:00:00.100Z","type":"session_meta","payload":{"id":"0199aaaa-0000-7000-8000-000000000001","timestamp":"2026-09-01T08:00:00.000Z","cwd":"/work/proj-codex","originator":"codex_cli_rs","cli_version":"0.99.0","git":{"branch":"feat/x","commit_hash":"abc123"}}}
+{"timestamp":"2026-09-01T08:00:01.000Z","type":"turn_context","payload":{"cwd":"/work/proj-codex","model":"gpt-5-codex","effort":"high"}}
+{"timestamp":"2026-09-01T08:00:02.000Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}
+{"timestamp":"2026-09-01T08:00:03.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":null}}
+{"timestamp":"2026-09-01T08:00:10.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":50,"reasoning_output_tokens":20,"total_tokens":1050},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":50,"reasoning_output_tokens":20,"total_tokens":1050},"model_context_window":272000}}}
+{"timestamp":"2026-09-01T08:00:11.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":50,"reasoning_output_tokens":20,"total_tokens":1050},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":50,"reasoning_output_tokens":20,"total_tokens":1050},"model_context_window":272000}}}
+this line is not json
+{"timestamp":"2026-09-01T08:00:12.000Z","type":"mystery_record","payload":{"x":1}}
+{"timestamp":"2026-09-01T08:01:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":3000,"cached_input_tokens":1500,"output_tokens":150,"reasoning_output_tokens":40,"total_tokens":3150},"last_token_usage":{"input_tokens":2000,"cached_input_tokens":1300,"output_tokens":100,"reasoning_output_tokens":20,"total_tokens":2100},"model_context_window":272000}}}

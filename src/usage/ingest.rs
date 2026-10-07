@@ -65,6 +65,9 @@ fn ingest_at(
         let existed = db::has_usage_event(&tx, &event.event_id)?;
         let mut event = event;
         event.account = account.to_string();
+        if event.agent.is_empty() {
+            event.agent = name.to_string();
+        }
         let written = db::upsert_usage_event(&tx, &event)?;
         match (existed, written) {
             (false, _) => stats.usage_inserted += 1,
