@@ -264,13 +264,104 @@ jobs:
             dist/playbook-*
             dist/SHA256SUMS
 
+  # Builds the trimmed plugin archive the marketplace points at (the `archive`
+  # source, Claude Code 2.1.224+), so a marketplace install holds plugin files
+  # only, not src/, tests/ or docs/. The file list is the explicit allowlist
+  # .claude-plugin/archive-files.txt, which tests/plugin_archive.rs guards.
+  # The name playbook-plugin-<version>.zip cannot match the checksums job's
+  # `playbook-<version>-*` pattern, so that job still sees exactly five files.
+  plugin-archive:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            fulcio.githubapp.com:443
+            fulcio.sigstore.dev:443
+            tuf-repo.github.com:443
+            tuf-repo-cdn.sigstore.dev:443
+            rekor.sigstore.dev:443
+            timestamp.githubapp.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            uploads.github.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Build the archive from the allowlist
+        id: build
+        env:
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          asset="dist/playbook-plugin-${VERSION}.zip"
+          # git archive only sees tracked files and stamps every entry with the
+          # commit time, so the same commit always yields the same bytes.
+          specs="$(sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' .claude-plugin/archive-files.txt | grep -v '^\(#\|$\)' || true)"
+          if [ -z "$specs" ]; then
+            echo "::error::.claude-plugin/archive-files.txt lists no paths." >&2
+            exit 1
+          fi
+          printf '%s\n' "$specs" | tr '\n' '\0' \
+            | xargs -0 git archive --format=zip --output="$asset" HEAD --
+          unzip -Z1 "$asset" | grep -v '/$' | sort > dist/files.txt
+          count="$(wc -l < dist/files.txt | tr -d ' ')"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::the plugin archive is empty. Check .claude-plugin/archive-files.txt." >&2
+            exit 1
+          fi
+          if grep -qE '^(src|tests|docs|\.github)/|^Cargo\.|\.test\.sh$' dist/files.txt; then
+            echo "::error::the plugin archive holds source, tests, docs, CI or Cargo files:" >&2
+            grep -E '^(src|tests|docs|\.github)/|^Cargo\.|\.test\.sh$' dist/files.txt >&2
+            exit 1
+          fi
+          if ! grep -qx '.claude-plugin/plugin.json' dist/files.txt; then
+            echo "::error::the plugin archive has no .claude-plugin/plugin.json." >&2
+            exit 1
+          fi
+          sha="$(shasum -a 256 "$asset" | cut -d' ' -f1)"
+          echo "files: $count"
+          echo "bytes: $(wc -c < "$asset" | tr -d ' ')"
+          echo "sha256: $sha"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the archive to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || {
+            echo "::error::release ${GITHUB_REF_NAME} does not exist. Create it first with: gh release create ${GITHUB_REF_NAME} --target main" >&2
+            exit 1
+          }
+          gh release upload "${GITHUB_REF_NAME}" "dist/playbook-plugin-${VERSION}.zip" --clobber
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/playbook-plugin-*.zip
+
   # Pushes the release to the Homebrew tap and the plugin marketplace. Org
   # policy blocks the workflow token from opening PRs elsewhere, so this uses
   # a fine-grained PAT (RELEASE_PUSH_TOKEN, contents: write on both repos) and
   # writes through the contents API, which GitHub signs. Without the secret
   # the job warns and passes, so releases keep working.
   publish-channels:
-    needs: [verify-version, checksums]
+    needs: [verify-version, checksums, plugin-archive]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     # RELEASE_PUSH_TOKEN lives on this environment, which only v* tags can use.
@@ -281,6 +372,7 @@ jobs:
       TAP_REPO: pragmatic-engineer/homebrew-tap
       MARKETPLACE_REPO: pragmatic-engineer/marketplace
       VERSION: ${{ needs.verify-version.outputs.version }}
+      ARCHIVE_SHA256: ${{ needs.plugin-archive.outputs.sha256 }}
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -323,6 +415,12 @@ jobs:
           set -euo pipefail
           mkdir -p out
           gh release download "${GITHUB_REF_NAME}" --pattern SHA256SUMS --dir out --clobber
+          # The pinned hash must be the bytes users will download.
+          gh release download "${GITHUB_REF_NAME}" --pattern "playbook-plugin-${VERSION}.zip" --dir out --clobber
+          [ "$(shasum -a 256 "out/playbook-plugin-${VERSION}.zip" | cut -d' ' -f1)" = "${ARCHIVE_SHA256}" ] || {
+            echo "::error::the release asset playbook-plugin-${VERSION}.zip does not match the sha256 the plugin-archive job built (${ARCHIVE_SHA256})." >&2
+            exit 1
+          }
           bash shell/render-formula.sh "${VERSION}" out/SHA256SUMS > out/playbook.rb
           cat out/playbook.rb
 
@@ -348,7 +446,7 @@ jobs:
           path=".claude-plugin/marketplace.json"
           gh api "repos/${MARKETPLACE_REPO}/contents/${path}" > out/market.meta
           jq -r .content out/market.meta | base64 -d > out/marketplace.json
-          bash shell/pin-marketplace.sh "${VERSION}" out/marketplace.json > out/marketplace.new.json
+          bash shell/pin-marketplace.sh "${VERSION}" out/marketplace.json "${ARCHIVE_SHA256}" > out/marketplace.new.json
           gh api -X PUT "repos/${MARKETPLACE_REPO}/contents/${path}" \
             -f message="playbook ${VERSION}" \
             -f content="$(base64 < out/marketplace.new.json | tr -d '\n')" \
@@ -366,9 +464,14 @@ jobs:
             echo "::error::Homebrew tap ${TAP_REPO} does not show v${VERSION} on all four urls." >&2
             bad=1
           fi
-          ref="$(gh api "repos/${MARKETPLACE_REPO}/contents/.claude-plugin/marketplace.json" --jq .content | base64 -d | jq -r '.plugins[] | select(.name == "playbook") | .source.ref')"
-          if [ "$ref" != "v${VERSION}" ]; then
-            echo "::error::Marketplace ${MARKETPLACE_REPO} pins playbook to '${ref}', expected v${VERSION}." >&2
+          source="$(gh api "repos/${MARKETPLACE_REPO}/contents/.claude-plugin/marketplace.json" --jq .content | base64 -d | jq -c '.plugins[] | select(.name == "playbook") | .source')"
+          want_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/playbook-plugin-${VERSION}.zip"
+          if [ "$(jq -r .url <<<"$source")" != "$want_url" ]; then
+            echo "::error::Marketplace ${MARKETPLACE_REPO} points playbook at '$(jq -r .url <<<"$source")', expected ${want_url}." >&2
+            bad=1
+          fi
+          if [ "$(jq -r .sha256 <<<"$source")" != "${ARCHIVE_SHA256}" ]; then
+            echo "::error::Marketplace ${MARKETPLACE_REPO} pins playbook sha256 '$(jq -r .sha256 <<<"$source")', expected ${ARCHIVE_SHA256}." >&2
             bad=1
           fi
           exit "$bad"

@@ -522,6 +522,10 @@ The two real gaps to settle are `statusline.sh` and `gh-remote.sh`. Either add a
 
 The third amendment left `Command::Statusline` reserved. Issue #446 (move all shell to Rust) reverses that: `src/statusline/` ports `statusline.sh` and `shell/gh-remote.sh`, byte for byte, and `tests/statusline.rs` runs every fixture through both. The first slice changes no user behaviour; `settings.json` still points at the script. Switching `statusLine.command` via `init` and `doctor` is the next slice.
 
+### Amendment 2026-10-07 (second): the release also attaches a plugin archive, issue #523
+
+WU-10 says a tag publishes five binaries plus `SHA256SUMS`. It now also publishes a sixth asset, `playbook-plugin-<version>.zip`, built by the `plugin-archive` job from the allowlist `.claude-plugin/archive-files.txt` and attested like the binaries. It is deliberately not part of `SHA256SUMS`: the marketplace pins its own `sha256`, and the `checksums` job still requires exactly five `playbook-<version>-*` binaries. The marketplace entry's source moves from `url` plus `ref` to `archive` with `url` and `sha256`, so a marketplace install no longer clones `src/`, `tests/` or `docs/`. See `docs/internals/06-release-channels.md`.
+
 ### Amendment 2026-08-17 (fourth): findings from the Segment G gate reviews, which arrived late
 
 The adversarial and test-plan reviews recorded as INCONCLUSIVE on 2026-08-16 **did eventually deliver**, hours after being written off. They found six things the inline gate missed. Recorded here with what was verified and what was not, because two of them turned out to be conditional and one turned out to be already-correct in shipped code.

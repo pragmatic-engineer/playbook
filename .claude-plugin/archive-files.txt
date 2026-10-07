@@ -1,0 +1,38 @@
+# Files shipped in playbook-plugin-<version>.zip, one git pathspec per line.
+# An explicit allowlist: a file that is not listed here is NOT in the
+# marketplace install. tests/plugin_archive.rs keeps this list honest.
+
+# Plugin content Claude Code loads itself
+.claude-plugin/plugin.json
+agents
+commands
+skills
+output-styles
+hooks/hooks.json
+LICENSE
+README.md
+
+# SessionStart hook script (hooks/hooks.json runs it through CLAUDE_PLUGIN_ROOT)
+hooks/migration-check.sh
+
+# Read by `playbook init` and the hooks through CLAUDE_PLUGIN_ROOT
+# (src/init/run.rs, statusline.rs, system_prompt.rs, shim.rs, hooks/session_init.rs)
+settings.shared.json
+statusline.sh
+prompts/SYSTEM_PROMPT.md
+hooks/lib/config-hash.sh
+shell/bash/cc.sh
+shell/zsh/cc.zsh
+shell/shared
+:(exclude)shell/shared/*.test.sh
+
+# Run by slash commands through CLAUDE_PLUGIN_ROOT
+# (/playbook:setup, quick-review, deep-review, plan, adr, implement, learn-project)
+shell/setup-local.sh
+shell/ensure-deps.sh
+Brewfile
+shell/review-worktree.sh
+shell/memory-context.sh
+
+# Sourced by statusline.sh when present next to it
+shell/gh-remote.sh

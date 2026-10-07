@@ -41,6 +41,10 @@ claude plugin install playbook@pragmatic-engineer
 Expect `/playbook:doctor` to report the binary, the guards and the status line
 as missing. That is correct for this path, not a broken install.
 
+The marketplace serves a trimmed plugin archive (plugin files only, no Rust
+source, tests or docs), which needs Claude Code 2.1.224 or later. Older
+versions cannot install the plugin from the marketplace.
+
 This route (and `/playbook:setup`) has no equivalent of `install.sh`'s
 minimum-claude-CLI-version check: Claude Code's plugin system has no hook for
 it. See [docs/guides/00-install.md](docs/guides/00-install.md#requirements)
