@@ -7,9 +7,10 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, mode, pr,
-    settings, trust, usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand,
-    DashboardCommand, DoctorCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
-    MemoryCommand, ModeArg, ModeCommand, PrCommand, SettingsCommand, UsageCommand, WorktreeCommand,
+    sanitize, settings, trust, usage, worktree, AgentsCommand, CcCommand, Cli, Command,
+    ConfigCommand, DashboardCommand, DoctorCommand, GateCommand, HandoffCommand, JsonCommand,
+    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand, SanitizeCommand,
+    SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -223,6 +224,26 @@ fn main() {
                 }
             },
         },
+        Command::Sanitize { sub } => {
+            let (kind, file, check) = match sub {
+                SanitizeCommand::CommitMsg { file, check } => {
+                    (sanitize::Kind::CommitMsg, file, check)
+                }
+                SanitizeCommand::PrText { file, check } => (sanitize::Kind::PrText, file, check),
+            };
+            match sanitize::run(kind, &file, check) {
+                Ok(lines) => {
+                    lines.iter().for_each(|line| eprintln!("{line}"));
+                    if check && !lines.is_empty() {
+                        std::process::exit(1);
+                    }
+                }
+                Err(err) => {
+                    eprintln!("sanitize: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Command::Ci { json, strict, dir } => match ci::run(dir.as_deref(), json, strict) {
             Ok((text, code)) => {
                 println!("{text}");
