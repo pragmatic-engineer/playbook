@@ -20,8 +20,11 @@ use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-/// How often to poll the child for exit while waiting on the deadline.
+/// Pause between polls of the child: fine-grained while it is young, so a
+/// quick `git` call is caught within half a millisecond, coarse once it runs long.
+const POLL_FAST: Duration = Duration::from_micros(500);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+const FAST_WINDOW: Duration = Duration::from_millis(200);
 
 /// How long a child gets to exit after SIGTERM before it is killed.
 const TERM_GRACE: Duration = Duration::from_secs(1);
@@ -108,6 +111,7 @@ fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration)
     let err_rx = drain(err_pipe);
 
     let deadline = Instant::now() + timeout;
+    let started = Instant::now();
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -121,7 +125,8 @@ fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration)
             stop(&mut child);
             return None;
         }
-        std::thread::sleep(POLL_INTERVAL);
+        let young = started.elapsed() < FAST_WINDOW;
+        std::thread::sleep(if young { POLL_FAST } else { POLL_INTERVAL });
     };
     // A grandchild that keeps a pipe open past the child's exit must not hang
     // us either: the same deadline bounds the final read.
@@ -151,6 +156,26 @@ mod tests {
         let output = got.expect("echo should finish well within the deadline");
         assert!(output.status.success());
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn quick_children_are_not_held_back_by_the_poll_interval() {
+        // Arrange
+        let started = Instant::now();
+
+        // Act
+        for _ in 0..20 {
+            let mut command = Command::new("true");
+            run_with_timeout(&mut command, Duration::from_secs(5)).expect("true should run");
+        }
+
+        // Assert
+        assert!(
+            started.elapsed() < Duration::from_millis(300),
+            "20 quick children took {:?}, a 20ms poll would need 400ms",
+            started.elapsed()
+        );
     }
 
     #[cfg(unix)]
