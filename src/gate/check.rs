@@ -82,8 +82,61 @@ pub fn run(
     source: &str,
 ) -> Result<String, String> {
     if phases.is_empty() {
-        return Err("no phases specified; provide at least one phase name to check".to_string());
+        return Err(NO_PHASES.to_string());
     }
+    let states = evaluate(plan_slug, phases, source)?;
+    let output = states
+        .iter()
+        .map(|(phase, state)| format!("{phase}: {}", state.label()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if states.iter().all(|(_, state)| state.satisfied()) {
+        Ok(output)
+    } else {
+        Err(output)
+    }
+}
+
+/// Machine-readable twin of `run`: returns the JSON document and whether the
+/// gate is satisfied. An empty phase list yields `ok: false` with an empty
+/// `phases` array; a database or source-read failure is still an `Err`.
+pub fn run_json(
+    plan_slug: &str,
+    _command: &str,
+    phases: &[String],
+    source: &str,
+) -> Result<(String, bool), String> {
+    let states = if phases.is_empty() {
+        Vec::new()
+    } else {
+        evaluate(plan_slug, phases, source)?
+    };
+    let ok = !states.is_empty() && states.iter().all(|(_, state)| state.satisfied());
+    let rows: Vec<serde_json::Value> = states
+        .iter()
+        .map(|(phase, state)| serde_json::json!({ "phase": phase, "status": state.label() }))
+        .collect();
+    let doc = serde_json::json!({
+        "version": JSON_VERSION,
+        "slug": plan_slug,
+        "ok": ok,
+        "phases": rows,
+    });
+    Ok((doc.to_string(), ok))
+}
+
+/// The stderr message for a check with no phase names.
+pub const NO_PHASES: &str = "no phases specified; provide at least one phase name to check";
+
+/// Schema version of the `--json` document.
+const JSON_VERSION: u32 = 1;
+
+/// Resolve each phase's state against the recorded rows and `source`.
+fn evaluate(
+    plan_slug: &str,
+    phases: &[String],
+    source: &str,
+) -> Result<Vec<(String, PhaseState)>, String> {
     let current_hash = hash::read_and_hash(source)?;
 
     let repo_root =
@@ -98,8 +151,7 @@ pub fn run(
     let db_path = dest_base.join("state.db");
     let conn = db::open_db(&db_path)?;
 
-    let mut lines = Vec::with_capacity(phases.len());
-    let mut all_satisfied = true;
+    let mut states = Vec::with_capacity(phases.len());
     for phase in phases {
         let state = match db::query_phase(&conn, plan_slug, phase)? {
             None => PhaseState::Missing,
@@ -112,18 +164,9 @@ pub fn run(
                 }
             }
         };
-        if !state.satisfied() {
-            all_satisfied = false;
-        }
-        lines.push(format!("{phase}: {}", state.label()));
+        states.push((phase.clone(), state));
     }
-    let output = lines.join("\n");
-
-    if all_satisfied {
-        Ok(output)
-    } else {
-        Err(output)
-    }
+    Ok(states)
 }
 
 #[cfg(test)]
