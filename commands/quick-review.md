@@ -186,7 +186,7 @@ Capture: `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JS
 
 Reading and analysing the changed files is where main-context rot accumulates, so it runs in an isolated `reviewer` subagent, not the main session. The orchestrator keeps only the returned report, never the file contents.
 
-Before spawning, `SELF_MODE` is already settled (Step 1), so decide here whether anything can be posted. The orchestrator invokes `playbook:grounding-review` now, for the sweep and the report format, and loads no other skill at this point.
+Before spawning, `SELF_MODE` is already settled (Step 1), so decide here whether anything can be posted. The orchestrator invokes `playbook:grounding-review` now, for the sweep and the report format, and loads no `playbook:writing-style` here.
 
 Spawn ONE `reviewer` subagent (`subagent_type: playbook:reviewer`); it pins its own model tier, so the orchestrator doesn't set `model` on this call. Because the review is single-pass, its focus is the ENTIRE diff (logic, tests, security, data, types, perf, docs), not one lens.
 
@@ -224,13 +224,13 @@ Run this before the report is shown to the user and before anything is posted. Y
 
 Drop findings that do not hold, relabel the mislabelled, and move the misplaced. To keep main context small, read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list. See the Verification Sweep section of `playbook:grounding-review`.
 
-Only now continue. In `SELF_MODE`, relay the swept report as it is and go to Step 5: nothing will be posted, so no comment is drafted. Otherwise go to Step 4, which relays the swept report together with the drafted comments.
+Only now continue. In `SELF_MODE`, or when nothing is postable (zero findings, or only `Report-only` ones), relay the swept report as it is and go to Step 5: nothing will be posted, so no comment is drafted. Otherwise go to Step 4, which relays the swept report together with the drafted comments.
 
 ## Step 4: Orchestrate posting
 
-If `SELF_MODE` is true (explicit `--self`, no PR number/branch was given, the run mode is auto, or the resolved PR is authored by you), stop here: the report IS the deliverable, no GitHub posting.
+If `SELF_MODE` is true (explicit `--self`, no PR number/branch was given, the run mode is auto, or the resolved PR is authored by you), or nothing is postable (zero findings, or only `Report-only` ones), stop here: the report IS the deliverable, no `playbook:writing-style` load, no question, no GitHub posting.
 
-### Draft the comments (not in `SELF_MODE`)
+### Draft the comments (not in `SELF_MODE`, and only when something is postable)
 
 Now that the sweep is done and something can be posted, load `playbook:writing-style`. Draft one comment body for every swept finding that is not `Report-only`, from its label, problem, consequence and fix, applying that skill's GitHub rules. Comment bodies are read by another engineer, so they use the humane register (warm, contractions, constructive), NOT the terse operator voice from the "Concise & Direct" output style or system prompt `## Output`. Where those would conflict, `playbook:writing-style` wins for anything posted to GitHub. A body starts with the bare plain-text label, never bold, and carries no `file:line` prefix: GitHub anchors it. It MAY hold a ```suggestion``` block when the fix is mechanical.
 

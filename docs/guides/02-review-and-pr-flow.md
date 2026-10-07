@@ -30,7 +30,7 @@ A single-pass PR review under the grounding-review discipline, posted as a pendi
 
 Reviewers return plain findings. When something can be posted, it loads `playbook:writing-style` after the verification sweep and shows the report with a drafted comment under each finding. Then it asks two questions: which findings to post, then which submit verb to use (`approve`, `comment`, `request-changes`, or `skip`). The drafts you saw are posted as they are, and it never auto-submits. A self-review or report-only run never loads `playbook:writing-style`.
 
-In self-review mode it detects you're the PR author and only offers `comment` or `skip`. GitHub rejects `approve` and `request-changes` from the author, so those aren't offered.
+A PR you authored gets a local report only; nothing is posted.
 
 ## `/playbook:deep-review`
 

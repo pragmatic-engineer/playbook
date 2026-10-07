@@ -235,7 +235,7 @@ Report which lenses resolved to which tier, a one-line summary, e.g. "Triage: se
 
 ## Step 2e: Load skills and reference files
 
-Only now, with the lenses and tiers settled, load what the run needs. The orchestrator invokes `playbook:grounding-review` (for the sweep and the report format) and loads no other skill here. Each dispatched reviewer loads `playbook:grounding-review` plus only the one reference file mapped to its lens (Step 3). A skipped lens loads nothing.
+Only now, with the lenses and tiers settled, load what the run needs. The orchestrator invokes `playbook:grounding-review` (for the sweep and the report format) and loads no `playbook:writing-style` here. Each dispatched `reviewer` loads `playbook:grounding-review` plus the one reference file mapped to its lens (Step 3). A `cheap-checker` reads only that resolved file. A skipped lens loads nothing.
 
 ## Step 3: Spawn the reviewer swarm (parallel reviewer subagents)
 
@@ -336,7 +336,7 @@ Drop findings that do not hold, relabel the mislabelled, and move the misplaced.
 
 ## Step 5: Present the consolidated report
 
-Present ALL findings that survived the Step 4b sweep (rule 7), with its `Sweep:` line under the Overview. Render the `playbook:grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line. List every lens Step 2 selected, including any Step 2d resolved to `skip`, so a reader can see what was deliberately not looked at, not just what fired. Show each lens's Step 2d tier alongside its finding count: a `full-lens` or `cheap-check` lens renders `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check`); a `skip` lens renders `<lens>: skip` with NO count, since it never ran and a count of 0 would misleadingly read the same as "ran and found nothing". For example: "security: full (2) · docs: cheap-check (0) · perf: skip". Each finding is plain: label, `file:line`, evidence, the failure, and one fix. A finding whose evidence is not on a changed diff line ends with `Report-only: not on a changed line, no inline comment.`
+Show this plain report only in `SELF_MODE` or when nothing is postable. Otherwise it is shown once, with the drafts below. Present ALL findings that survived the Step 4b sweep (rule 7), with its `Sweep:` line under the Overview. Render the `playbook:grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line. List every lens Step 2 selected, including any Step 2d resolved to `skip`, so a reader can see what was deliberately not looked at, not just what fired. Show each lens's Step 2d tier alongside its finding count: a `full-lens` or `cheap-check` lens renders `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check`); a `skip` lens renders `<lens>: skip` with NO count, since it never ran and a count of 0 would misleadingly read the same as "ran and found nothing". For example: "security: full (2) · docs: cheap-check (0) · perf: skip". Each finding is plain: label, `file:line`, evidence, the failure, and one fix. A finding whose evidence is not on a changed diff line ends with `Report-only: not on a changed line, no inline comment.`
 
 ### Draft the comments (non-self runs only)
 
@@ -359,7 +359,7 @@ Otherwise ask **one question at a time**:
   - `none` (stop, nothing posted)
 
   If `none`, stop.
-- Build the payload at `$REVIEW_JSON` (`{"commit_id": "<HEAD_SHA>", "comments": [{"path","line","side","body"}, ...]}`, body starting with the plain-text bare Conventional Comment label, `blocking:` for a merge-blocking finding, `issue:` otherwise, no review `body`). Build each inline comment's `body` from that finding's previewed `Draft:` block verbatim, anchored to the finding's `file:line`. Post the previewed bodies as they are, never a rewording. Skip any finding marked `Report-only`. Then create the pending review:
+- Build the payload at `$REVIEW_JSON` (`{"commit_id": "<HEAD_SHA>", "comments": [{"path","line","side","body"}, ...]}`, no review `body`). Build each inline comment's `body` from that finding's previewed `Draft:` block verbatim, anchored to the finding's `file:line`. Post the previewed bodies as they are, never a rewording. Skip any finding marked `Report-only`. Then create the pending review:
 
 ```bash
 gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews --input "$REVIEW_JSON" --jq '{id, state, html_url}'

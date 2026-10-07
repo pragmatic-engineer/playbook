@@ -30,6 +30,9 @@ const SWEEP_FILES: &[&str] = &[
 /// Reviewer agents that tell their output will be swept.
 const SWEPT_AGENTS: &[&str] = &["agents/reviewer.md", "agents/cheap-checker.md"];
 
+/// The phrase a load instruction for the writing skill uses, lowercase.
+const WRITING_STYLE_LOAD: &str = "load `playbook:writing-style`";
+
 /// The three checks, as the numbered lead of each item.
 const CHECKS: &[&str] = &["1. **True.**", "2. **Label.**", "3. **Anchor.**"];
 
@@ -111,18 +114,18 @@ impl Doc {
         self.lines[s.start..s.end].join("\n")
     }
 
-    /// Lines in `start..end` that mention the skill without negating it
-    /// ("never", "do not"), which is how a load instruction reads.
-    fn writing_style_loads(&self, start: usize, end: usize) -> Vec<String> {
-        self.lines[start..end]
-            .iter()
-            .filter(|l| l.contains("writing-style"))
-            .filter(|l| {
-                !["never", "do not", "not loaded"]
-                    .iter()
-                    .any(|n| l.contains(n))
+    /// Indexes of lines in `start..end` that tell the reader to load the
+    /// skill. A mention that is negated ("never load", "do not load") or that
+    /// merely names the skill does not count.
+    fn writing_style_loads(&self, start: usize, end: usize) -> Vec<usize> {
+        (start..end)
+            .filter(|&i| {
+                let line = self.lines[i].to_lowercase();
+                line.match_indices(WRITING_STYLE_LOAD).any(|(at, _)| {
+                    let before = line[..at].trim_end();
+                    !before.ends_with("never") && !before.ends_with("not")
+                })
             })
-            .cloned()
             .collect()
     }
 
@@ -393,7 +396,7 @@ fn reviewer_prompt_sections_never_load_writing_style() {
 }
 
 #[test]
-fn quick_review_loads_writing_style_only_at_posting_after_the_sweep_outside_self_mode() {
+fn quick_review_loads_writing_style_once_after_the_sweep_outside_self_mode() {
     // Arrange
     let doc = load("commands/quick-review.md");
 
@@ -401,38 +404,40 @@ fn quick_review_loads_writing_style_only_at_posting_after_the_sweep_outside_self
     let sweep = doc.sweep().expect("quick-review has a sweep section");
     let posting = doc.step("Step 4:");
     let draft = draft_section(&doc);
+    let loads = doc.writing_style_loads(0, doc.lines.len());
     let self_stop = doc
         .find_line(posting.start, "If `SELF_MODE` is true")
         .expect("Step 4 stops in self mode");
+    let show = doc
+        .find_line(draft.start, "Relay the swept report with each draft")
+        .expect("quick-review shows the drafts");
     let ask = doc
         .find_line(draft.end, "Post which findings")
         .expect("quick-review asks which findings to post");
 
     // Assert
-    assert!(
-        doc.writing_style_loads(0, draft.start).is_empty(),
-        "quick-review loads writing-style before the posting step"
+    assert_eq!(
+        loads.len(),
+        1,
+        "quick-review must load writing-style once: {loads:?}"
     );
+    let load = loads[0];
     assert!(
-        !doc.writing_style_loads(draft.start, draft.end).is_empty(),
-        "quick-review's draft section does not load writing-style"
-    );
-    assert!(
-        sweep.end <= draft.start,
+        sweep.end <= load,
         "quick-review: the load must sit after the sweep"
     );
     assert!(
-        posting.start < self_stop && self_stop < draft.start && draft.end <= posting.end,
+        posting.start < self_stop && self_stop < load && load < posting.end,
         "quick-review: the load must sit inside Step 4, after the self mode stop"
     );
     assert!(
-        draft.end <= ask,
-        "quick-review: drafts must be shown before asking what to post"
+        draft.start <= load && load < show && show < ask,
+        "quick-review: the load must come before the drafts are shown and the post question"
     );
 }
 
 #[test]
-fn deep_review_loads_writing_style_only_at_posting_after_the_sweep_outside_self_mode() {
+fn deep_review_loads_writing_style_once_after_the_sweep_outside_self_mode() {
     // Arrange
     let doc = load("commands/deep-review.md");
 
@@ -441,35 +446,77 @@ fn deep_review_loads_writing_style_only_at_posting_after_the_sweep_outside_self_
     let present = doc.step("Step 5:");
     let posting = doc.step("Step 6:");
     let draft = draft_section(&doc);
-    let draft_text = doc.text_of(&draft);
+    let loads = doc.writing_style_loads(0, doc.lines.len());
+    let show = doc
+        .find_line(draft.start, "Present the report with each draft")
+        .expect("deep-review shows the drafts");
     let ask = doc
         .find_line(posting.start, "Post which findings")
         .expect("deep-review asks which findings to post");
 
     // Assert
-    assert!(
-        doc.writing_style_loads(0, draft.start).is_empty(),
-        "deep-review loads writing-style before the posting step"
+    assert_eq!(
+        loads.len(),
+        1,
+        "deep-review must load writing-style once: {loads:?}"
     );
+    let load = loads[0];
+    let line = doc.lines[load].to_lowercase();
     assert!(
-        !doc.writing_style_loads(draft.start, draft.end).is_empty(),
-        "deep-review's draft section does not load writing-style"
-    );
-    assert!(
-        sweep.end <= draft.start,
+        sweep.end <= load,
         "deep-review: the load must sit after the sweep"
     );
     assert!(
-        present.start < draft.start && draft.end <= present.end,
-        "deep-review: the load must sit in the presenting step"
+        present.start < draft.start && draft.start <= load && load < draft.end,
+        "deep-review: the load must sit in the draft section of the presenting step"
     );
     assert!(
-        draft_text.contains("Skip this in `SELF_MODE`"),
-        "deep-review: the draft section does not skip itself in self mode"
+        line.find("skip this in `self_mode`")
+            .is_some_and(|skip| skip < line.find(WRITING_STYLE_LOAD).unwrap_or(0)),
+        "deep-review: the load must come after the self mode skip"
     );
     assert!(
-        draft.end <= posting.start && posting.start < ask,
-        "deep-review: drafts must be shown before asking what to post"
+        load < show && show < posting.start && posting.start < ask,
+        "deep-review: the load must come before the drafts are shown and the post question"
+    );
+}
+
+#[test]
+fn deep_review_loads_skills_only_after_triage_settles_the_lenses() {
+    // Arrange
+    let doc = load("commands/deep-review.md");
+
+    // Act
+    let triage = doc.step("Step 2d:");
+    let load_step = doc.step("Step 2e:");
+
+    // Assert
+    assert!(
+        triage.start < load_step.start,
+        "deep-review: Step 2e must start after the Step 2d triage"
+    );
+}
+
+#[test]
+fn quick_review_invokes_grounding_review_after_self_mode_is_settled() {
+    // Arrange
+    let doc = load("commands/quick-review.md");
+
+    // Act
+    let resolve = doc.step("Step 1:");
+    let delegate = doc.step("Step 2:");
+    let invoke = doc
+        .find_line(delegate.start, "invokes `playbook:grounding-review`")
+        .expect("Step 2 invokes grounding-review");
+
+    // Assert
+    assert!(
+        doc.text_of(&resolve).contains("`SELF_MODE`"),
+        "quick-review: Step 1 does not settle SELF_MODE"
+    );
+    assert!(
+        resolve.end <= invoke,
+        "quick-review: grounding-review is invoked before Step 1 settles SELF_MODE"
     );
 }
 
