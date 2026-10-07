@@ -181,6 +181,69 @@ fn rewire_rc_file_replaces_legacy_line_in_place_without_duplicating() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// An rc file written before the bash/zsh/shared layout split sources
+/// `~/.claude/shell/cc.<ext>`, a transitional shim that itself sources the
+/// current entry point. Appending beside it would load the launcher twice.
+#[test]
+fn rewire_rc_file_replaces_pre_layout_split_line_in_place_without_duplicating() {
+    // Arrange
+    struct Case {
+        shell_kind: ShellKind,
+        rc_file_name: &'static str,
+        old_line: &'static str,
+        current_line: &'static str,
+    }
+    let cases = [
+        Case {
+            shell_kind: ShellKind::Zsh,
+            rc_file_name: ".zshrc",
+            old_line: "source \"$HOME/.claude/shell/cc.zsh\"",
+            current_line: "source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"",
+        },
+        Case {
+            shell_kind: ShellKind::Bash,
+            rc_file_name: ".bashrc",
+            old_line: "source \"$HOME/.claude/shell/cc.sh\"",
+            current_line: "source \"$HOME/.config/playbook/shell/bash/cc.sh\"",
+        },
+    ];
+
+    for case in cases {
+        let home = temp_home(&format!("rc-pre-split-{}", case.rc_file_name));
+        let rc_file = home.join(case.rc_file_name);
+        write_file(
+            &rc_file,
+            &format!(
+                "export EDITOR=vim\n\n# playbook launchers (cc/ccd)\n{}\n",
+                case.old_line
+            ),
+        );
+
+        // Act: twice, to prove the second call is a true no-op.
+        let first = rewire_rc_file(&home, case.shell_kind).expect("first rewire should succeed");
+        let second = rewire_rc_file(&home, case.shell_kind).expect("second rewire should succeed");
+
+        // Assert
+        assert!(first.appended, "the old line should have been replaced");
+        assert!(!second.appended, "a second call should be a no-op");
+        let contents = fs::read_to_string(&rc_file).expect("rc file should still exist");
+        let count_of = |wanted: &str| contents.lines().filter(|l| l.trim() == wanted).count();
+        assert_eq!(count_of(case.old_line), 0, "old line remains: {contents}");
+        assert_eq!(
+            count_of(case.current_line),
+            1,
+            "current line should appear exactly once: {contents}"
+        );
+        assert_eq!(
+            contents.matches("launchers (cc/ccd)").count(),
+            1,
+            "the launchers comment should not be duplicated: {contents}"
+        );
+
+        let _ = fs::remove_dir_all(&home);
+    }
+}
+
 #[test]
 fn copy_launcher_runtime_copies_the_launcher_runtime_files() {
     // Arrange

@@ -44,11 +44,19 @@ impl ShellKind {
         }
     }
 
-    /// The exact line a pre-ADR-0012 install sourced.
-    fn legacy_source_line(self) -> &'static str {
+    /// The exact lines earlier installs sourced, newest first: the
+    /// pre-ADR-0012 `~/.claude/shell` path, then the path from before the
+    /// bash/zsh/shared split.
+    fn legacy_source_lines(self) -> [&'static str; 2] {
         match self {
-            ShellKind::Bash => "source \"$HOME/.claude/shell/bash/cc.sh\"",
-            ShellKind::Zsh => "source \"$HOME/.claude/shell/zsh/cc.zsh\"",
+            ShellKind::Bash => [
+                "source \"$HOME/.claude/shell/bash/cc.sh\"",
+                "source \"$HOME/.claude/shell/cc.sh\"",
+            ],
+            ShellKind::Zsh => [
+                "source \"$HOME/.claude/shell/zsh/cc.zsh\"",
+                "source \"$HOME/.claude/shell/cc.zsh\"",
+            ],
         }
     }
 }
@@ -120,8 +128,10 @@ pub fn rewire_rc_file(home: &Path, shell_kind: ShellKind) -> io::Result<ShimOutc
         });
     }
 
-    if let Some(replaced) =
-        replace_exact_line(&existing, shell_kind.legacy_source_line(), shell_kind)
+    if let Some(replaced) = shell_kind
+        .legacy_source_lines()
+        .into_iter()
+        .find_map(|legacy| replace_exact_line(&existing, legacy, shell_kind))
     {
         atomic_write_rc_file(&rc_file, &replaced)?;
         return Ok(ShimOutcome {

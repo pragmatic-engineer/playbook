@@ -736,9 +736,8 @@ fn unrecognised_shell_skips_shim_only() {
 }
 
 /// `aliases: false` (the default, absent `--aliases`) must skip the `shim`
-/// step entirely, the same all-or-nothing gate `setup-local.sh`'s own Step 4
-/// uses, so a caller like `setup-local.sh` can call `playbook init` for
-/// guards and settings without silently installing a shell launcher the
+/// step entirely, so a caller like `setup-local.sh` can call `playbook init`
+/// for guards and settings without silently installing a shell launcher the
 /// user did not opt into this run.
 #[test]
 fn aliases_false_skips_shim_entirely() {

@@ -115,121 +115,118 @@ scenario_a_default() {
     [ ! -f "$home/.bashrc" ] \
         || { echo "  .bashrc was written by default run"; return 1; }
 
-    # No cc.zsh or cc.sh in CLAUDE_HOME/shell/.
-    [ ! -f "$claude_home/shell/cc.zsh" ] \
-        || { echo "  cc.zsh was copied by default run"; return 1; }
-    [ ! -f "$claude_home/shell/cc.sh" ] \
-        || { echo "  cc.sh was copied by default run"; return 1; }
+    # No launcher runtime anywhere without --aliases.
+    [ ! -e "$claude_home/shell" ] \
+        || { echo "  launcher copied into CLAUDE_HOME/shell by default run"; return 1; }
+    [ ! -e "$home/.config/playbook/shell" ] \
+        || { echo "  launcher copied by default run"; return 1; }
 }
 
 # ---------------------------------------------------------------------------
-# (b) --aliases with SHELL=/bin/bash: copies launcher files and adds the
-#     cc.sh source line to the throwaway .bashrc.
+# The launcher is installed by `playbook init --aliases`, not by this script:
+# the runtime lands under $HOME/.config/playbook/shell and the rc file sources
+# it from there. These scenarios run the real binary, so claude_home is nested
+# under home (the default $HOME/.claude `init` targets).
 # ---------------------------------------------------------------------------
+
+# (b) --aliases with SHELL=/bin/bash: init's shell-runtime and shim steps run
+#     (not skipped), copy the runtime and add the cc.sh source line to the
+#     throwaway .bashrc.
 scenario_b_aliases_bash() {
-    local d home claude_home rc
+    local d home claude_home out
     d="$(mktemp -d "$WORK/aliases_bash.XXXXXX")"
     home="$d/home"
-    claude_home="$d/claude"
-    mkdir -p "$home" "$claude_home"
+    claude_home="$home/.claude"
+    mkdir -p "$claude_home"
 
-    SHELL=/bin/bash run_setup "$home" "$claude_home" --aliases; rc=$?
-    [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
+    out="$(SHELL=/bin/bash PATH="$REAL_BIN_PATH" run_setup_out "$home" "$claude_home" --aliases)" \
+        || { echo "  setup failed: $out"; return 1; }
 
-    # cc.sh must be in CLAUDE_HOME/shell/bash/.
-    [ -f "$claude_home/shell/bash/cc.sh" ] \
-        || { echo "  cc.sh not copied to CLAUDE_HOME/shell/bash"; return 1; }
+    case "$out" in
+        *"shell-runtime: skipped"*|*"shim: skipped"*)
+            echo "  init skipped the launcher steps: $out"; return 1 ;;
+    esac
+    case "$out" in
+        *"shell-runtime: wired"*) ;;
+        *) echo "  init did not report shell-runtime wired: $out"; return 1 ;;
+    esac
 
-    # .bashrc must contain the cc.sh source line.
+    [ -f "$home/.config/playbook/shell/bash/cc.sh" ] \
+        || { echo "  cc.sh not copied under .config/playbook/shell/bash"; return 1; }
+    [ -f "$home/.config/playbook/shell/shared/dispatch.sh" ] \
+        || { echo "  shared modules not copied"; return 1; }
+    [ ! -e "$claude_home/shell" ] \
+        || { echo "  runtime copied to the legacy CLAUDE_HOME/shell"; return 1; }
+
     [ -f "$home/.bashrc" ] \
         || { echo "  .bashrc not created"; return 1; }
-    grep -qF 'shell/bash/cc.sh' "$home/.bashrc" \
+    grep -qxF 'source "$HOME/.config/playbook/shell/bash/cc.sh"' "$home/.bashrc" \
         || { echo "  cc.sh source line not in .bashrc"; return 1; }
 
-    # .zshrc must NOT have been written.
     [ ! -f "$home/.zshrc" ] \
         || { echo "  .zshrc was written for bash shell"; return 1; }
 }
 
-# ---------------------------------------------------------------------------
-# (c) --aliases with SHELL=/bin/zsh: copies launcher files and adds the
-#     cc.zsh source line to the throwaway .zshrc.
-# ---------------------------------------------------------------------------
+# (c) --aliases with SHELL=/bin/zsh: same, for the zsh entry point.
 scenario_c_aliases_zsh() {
-    local d home claude_home rc
+    local d home claude_home out
     d="$(mktemp -d "$WORK/aliases_zsh.XXXXXX")"
     home="$d/home"
-    claude_home="$d/claude"
-    mkdir -p "$home" "$claude_home"
+    claude_home="$home/.claude"
+    mkdir -p "$claude_home"
 
-    SHELL=/bin/zsh run_setup "$home" "$claude_home" --aliases; rc=$?
-    [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
+    out="$(SHELL=/bin/zsh PATH="$REAL_BIN_PATH" run_setup_out "$home" "$claude_home" --aliases)" \
+        || { echo "  setup failed: $out"; return 1; }
 
-    # cc.zsh must be in CLAUDE_HOME/shell/zsh/.
-    [ -f "$claude_home/shell/zsh/cc.zsh" ] \
-        || { echo "  cc.zsh not copied to CLAUDE_HOME/shell/zsh"; return 1; }
-
-    # .zshrc must contain the cc.zsh source line.
+    [ -f "$home/.config/playbook/shell/zsh/cc.zsh" ] \
+        || { echo "  cc.zsh not copied under .config/playbook/shell/zsh"; return 1; }
     [ -f "$home/.zshrc" ] \
         || { echo "  .zshrc not created"; return 1; }
-    grep -qF 'shell/zsh/cc.zsh' "$home/.zshrc" \
+    grep -qxF 'source "$HOME/.config/playbook/shell/zsh/cc.zsh"' "$home/.zshrc" \
         || { echo "  cc.zsh source line not in .zshrc"; return 1; }
 
-    # .bashrc must NOT have been written.
     [ ! -f "$home/.bashrc" ] \
         || { echo "  .bashrc was written for zsh shell"; return 1; }
 }
 
-# ---------------------------------------------------------------------------
-# (d) --system-prompt: implies --aliases AND copies SYSTEM_PROMPT.md to
-#     CLAUDE_HOME/prompts/.
-# ---------------------------------------------------------------------------
+# (d) --system-prompt: implies --aliases AND places SYSTEM_PROMPT.md where the
+#     launcher reads it, $HOME/.config/playbook/prompts/.
 scenario_d_system_prompt() {
-    local d home claude_home rc
+    local d home claude_home out
     d="$(mktemp -d "$WORK/sysprompt.XXXXXX")"
     home="$d/home"
-    claude_home="$d/claude"
-    mkdir -p "$home" "$claude_home"
+    claude_home="$home/.claude"
+    mkdir -p "$claude_home"
 
-    SHELL=/bin/bash run_setup "$home" "$claude_home" --system-prompt; rc=$?
-    [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
+    out="$(SHELL=/bin/bash PATH="$REAL_BIN_PATH" run_setup_out "$home" "$claude_home" --system-prompt)" \
+        || { echo "  setup failed: $out"; return 1; }
 
-    # Implies --aliases: launcher files must be present.
-    [ -f "$claude_home/shell/bash/cc.sh" ] \
+    [ -f "$home/.config/playbook/shell/bash/cc.sh" ] \
         || { echo "  cc.sh not copied (--system-prompt implies --aliases)"; return 1; }
-
-    # SYSTEM_PROMPT.md must be in CLAUDE_HOME/prompts/.
-    [ -f "$claude_home/prompts/SYSTEM_PROMPT.md" ] \
-        || { echo "  SYSTEM_PROMPT.md not copied to prompts/"; return 1; }
+    cmp -s "$home/.config/playbook/prompts/SYSTEM_PROMPT.md" "$REPO_ROOT/prompts/SYSTEM_PROMPT.md" \
+        || { echo "  SYSTEM_PROMPT.md not placed under .config/playbook/prompts"; return 1; }
+    [ ! -e "$claude_home/prompts" ] \
+        || { echo "  prompt copied to the legacy CLAUDE_HOME/prompts"; return 1; }
 }
 
-# ---------------------------------------------------------------------------
 # (e) Idempotency: re-run --aliases makes no changes (rc file source line
 #     appears exactly once; no duplicate appended).
-# ---------------------------------------------------------------------------
 scenario_e_idempotent_aliases() {
-    local d home claude_home rc count
+    local d home claude_home count
     d="$(mktemp -d "$WORK/idem_aliases.XXXXXX")"
     home="$d/home"
-    claude_home="$d/claude"
-    mkdir -p "$home" "$claude_home"
+    claude_home="$home/.claude"
+    mkdir -p "$claude_home"
 
-    # First run.
-    SHELL=/bin/bash run_setup "$home" "$claude_home" --aliases; rc=$?
-    [ "$rc" -eq 0 ] || { echo "  first run rc=$rc"; return 1; }
-
-    # Capture state after first run.
+    SHELL=/bin/bash PATH="$REAL_BIN_PATH" run_setup "$home" "$claude_home" --aliases \
+        || { echo "  first run failed"; return 1; }
     cp "$home/.bashrc" "$d/bashrc_after1"
 
-    # Second run.
-    SHELL=/bin/bash run_setup "$home" "$claude_home" --aliases; rc=$?
-    [ "$rc" -eq 0 ] || { echo "  second run rc=$rc"; return 1; }
+    SHELL=/bin/bash PATH="$REAL_BIN_PATH" run_setup "$home" "$claude_home" --aliases \
+        || { echo "  second run failed"; return 1; }
 
-    # .bashrc must be byte-identical (source line appended only once).
     cmp -s "$home/.bashrc" "$d/bashrc_after1" \
         || { echo "  .bashrc changed on idempotent re-run"; return 1; }
-
-    # Double-check: source line appears exactly once.
     count="$(grep -cF 'shell/bash/cc.sh' "$home/.bashrc" 2>/dev/null || echo 0)"
     [ "$count" -eq 1 ] \
         || { echo "  cc.sh source line count=$count (expected 1)"; return 1; }
@@ -309,70 +306,56 @@ scenario_g_default_idempotent() {
 }
 
 # ---------------------------------------------------------------------------
-# (h) MIGRATION: an rc file holding the old-form source line (with its
-#     comment) is migrated to the new-form line on --aliases. Unrelated user
-#     content, including the blank line that separates it, survives. A
-#     second run makes no further changes.
+# (h) MIGRATION: an rc file already wired by an earlier install (the bare
+#     pre-layout-split line, or the ~/.claude/shell line this script used to
+#     write) is migrated in place to the current line on --aliases. Unrelated
+#     user content, including the blank line that separates it, survives, and
+#     a second run makes no further changes.
 # ---------------------------------------------------------------------------
 scenario_h_migration() {
-    local d home claude_home rc
-    d="$(mktemp -d "$WORK/migration.XXXXXX")"
-    home="$d/home"
-    claude_home="$d/claude"
-    mkdir -p "$home" "$claude_home"
+    local d home claude_home old_line
+    local -a old_lines=(
+        'source "$HOME/.claude/shell/cc.zsh"'
+        'source "$HOME/.claude/shell/zsh/cc.zsh"'
+    )
 
-    # Old-form .zshrc. FOO and BAR are unrelated user lines with their own
-    # separating blank line, well away from the launcher block, so the test
-    # can tell "the block was migrated" apart from "a user blank survived".
-    printf 'export FOO=1\n\nexport BAR=2\n\n# playbook launchers (cc/ccd)\nsource "$HOME/.claude/shell/cc.zsh"\n' \
-        > "$home/.zshrc"
+    for old_line in "${old_lines[@]}"; do
+        d="$(mktemp -d "$WORK/migration.XXXXXX")"
+        home="$d/home"
+        claude_home="$home/.claude"
+        mkdir -p "$claude_home"
 
-    SHELL=/bin/zsh run_setup "$home" "$claude_home" --aliases; rc=$?
-    [ "$rc" -eq 0 ] || { echo "  rc=$rc"; return 1; }
+        # FOO and BAR are unrelated user lines with their own separating blank
+        # line, well away from the launcher block, so the test can tell "the
+        # block was migrated" apart from "a user blank survived".
+        printf 'export FOO=1\n\nexport BAR=2\n\n# playbook launchers (cc/ccd)\n%s\n' "$old_line" \
+            > "$home/.zshrc"
 
-    # Zero old-form lines remain.
-    grep -qxF 'source "$HOME/.claude/shell/cc.zsh"' "$home/.zshrc" \
-        && { echo "  old-form source line still present"; return 1; }
+        SHELL=/bin/zsh PATH="$REAL_BIN_PATH" run_setup "$home" "$claude_home" --aliases \
+            || { echo "  setup failed for: $old_line"; return 1; }
 
-    # Exactly one new-form line.
-    local new_count
-    new_count="$(grep -cF 'shell/zsh/cc.zsh' "$home/.zshrc" 2>/dev/null || echo 0)"
-    [ "$new_count" -eq 1 ] || { echo "  new-form line count=$new_count (expected 1)"; return 1; }
+        grep -qxF "$old_line" "$home/.zshrc" \
+            && { echo "  old source line still present: $old_line"; return 1; }
+        [ "$(grep -cF 'shell/zsh/cc.zsh' "$home/.zshrc")" -eq 1 ] \
+            || { echo "  expected exactly one current source line for: $old_line"; return 1; }
+        grep -qxF 'source "$HOME/.config/playbook/shell/zsh/cc.zsh"' "$home/.zshrc" \
+            || { echo "  current source line missing for: $old_line"; return 1; }
+        [ "$(grep -cF 'launchers (cc/ccd)' "$home/.zshrc")" -eq 1 ] \
+            || { echo "  launchers comment duplicated for: $old_line"; return 1; }
+        grep -qxF 'export FOO=1' "$home/.zshrc" || { echo "  export FOO=1 missing"; return 1; }
+        grep -qxF 'export BAR=2' "$home/.zshrc" || { echo "  export BAR=2 missing"; return 1; }
 
-    # Exactly one launchers comment (the old one was absorbed, not doubled).
-    local comment_count
-    comment_count="$(grep -cF 'launchers (cc/ccd)' "$home/.zshrc" 2>/dev/null || echo 0)"
-    [ "$comment_count" -eq 1 ] || { echo "  launchers comment count=$comment_count (expected 1)"; return 1; }
+        # One blank line still separates FOO from BAR.
+        [ "$(grep -n '^export BAR=2$' "$home/.zshrc" | cut -d: -f1)" \
+            -eq "$(( $(grep -n '^export FOO=1$' "$home/.zshrc" | cut -d: -f1) + 2 ))" ] \
+            || { echo "  blank line between FOO and BAR was lost"; return 1; }
 
-    # A .bak- backup exists.
-    local bak_count
-    bak_count=$(find "$home" -maxdepth 1 -name '.zshrc.bak-*' 2>/dev/null | wc -l | tr -d ' ')
-    [ "$bak_count" -ge 1 ] || { echo "  no .zshrc backup found"; return 1; }
-
-    # Unrelated user lines survive.
-    grep -qxF 'export FOO=1' "$home/.zshrc" || { echo "  export FOO=1 missing"; return 1; }
-    grep -qxF 'export BAR=2' "$home/.zshrc" || { echo "  export BAR=2 missing"; return 1; }
-
-    # The blank line separating FOO and BAR survives: assert the gap between
-    # the two markers, not just their presence.
-    local foo_line bar_line gap
-    foo_line="$(grep -n '^export FOO=1$' "$home/.zshrc" | head -1 | cut -d: -f1)"
-    bar_line="$(grep -n '^export BAR=2$' "$home/.zshrc" | head -1 | cut -d: -f1)"
-    [ -n "$foo_line" ] || { echo "  export FOO=1 marker missing"; return 1; }
-    [ -n "$bar_line" ] || { echo "  export BAR=2 marker missing"; return 1; }
-    gap=$(( bar_line - foo_line ))
-    [ "$gap" -eq 2 ] || {
-        echo "  gap between FOO and BAR markers = $gap, expected 2 (one blank line between them)"
-        return 1
-    }
-
-    # Re-run: the file must be byte identical (already migrated, already
-    # up to date).
-    cp "$home/.zshrc" "$d/zshrc_after1"
-    SHELL=/bin/zsh run_setup "$home" "$claude_home" --aliases; rc=$?
-    [ "$rc" -eq 0 ] || { echo "  second run rc=$rc"; return 1; }
-    cmp -s "$home/.zshrc" "$d/zshrc_after1" \
-        || { echo "  .zshrc changed on second run"; return 1; }
+        cp "$home/.zshrc" "$d/zshrc_after1"
+        SHELL=/bin/zsh PATH="$REAL_BIN_PATH" run_setup "$home" "$claude_home" --aliases \
+            || { echo "  second run failed for: $old_line"; return 1; }
+        cmp -s "$home/.zshrc" "$d/zshrc_after1" \
+            || { echo "  .zshrc changed on second run for: $old_line"; return 1; }
+    done
 }
 
 # Binary detection. Both cases are deliberately no-download: the fetch path
@@ -447,6 +430,46 @@ EOF
     grep -q "^CLAUDE_PLUGIN_ROOT=$SCRIPT_DIR/\.\.$" "$record" \
         || grep -q "^CLAUDE_PLUGIN_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)$" "$record" \
         || { echo "CLAUDE_PLUGIN_ROOT not passed: $(cat "$record")" >&2; return 1; }
+}
+
+# --aliases and --system-prompt must reach `playbook init` as its own flags:
+# init is what installs the launcher and the prompt, so dropping them here
+# leaves both steps skipped. A binary whose `init --help` lacks a flag (an
+# older release) is invoked without it rather than failing on an unknown arg.
+scenario_k2_init_receives_option_flags() {
+    local home="$WORK/k2-home" ch="$WORK/k2-home/.claude" bin="$WORK/k2-bin" record out
+    mkdir -p "$home" "$ch" "$bin"
+    record="$WORK/k2-record"
+    cat > "$bin/playbook" <<EOF
+#!/bin/sh
+case "\$*" in
+    "init --help") printf '%s\n' "--system-prompt" "\${STUB_INIT_HELP_ALIASES---aliases}" ;;
+    *) printf '%s\n' "\$*" > "$record" ;;
+esac
+EOF
+    chmod 0755 "$bin/playbook"
+
+    out="$(CLAUDE_HOME="$ch" HOME="$home" PATH="$bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+           bash "$SCRIPT" --skip-deps --aliases --system-prompt 2>&1)"
+    [ "$(cat "$record" 2>/dev/null)" = "init --aliases --system-prompt" ] \
+        || { echo "unexpected invocation: $(cat "$record" 2>/dev/null): $out" >&2; return 1; }
+
+    # Plain run: no option flags forwarded.
+    out="$(CLAUDE_HOME="$ch" HOME="$home" PATH="$bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+           bash "$SCRIPT" --skip-deps 2>&1)"
+    [ "$(cat "$record")" = "init" ] \
+        || { echo "plain run forwarded flags: $(cat "$record"): $out" >&2; return 1; }
+
+    # A binary that predates --aliases is invoked without it, with a warning.
+    out="$(STUB_INIT_HELP_ALIASES="" CLAUDE_HOME="$ch" HOME="$home" \
+           PATH="$bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+           bash "$SCRIPT" --skip-deps --aliases --system-prompt 2>&1)"
+    [ "$(cat "$record")" = "init --system-prompt" ] \
+        || { echo "old binary got: $(cat "$record"): $out" >&2; return 1; }
+    case "$out" in
+        *"does not support --aliases"*) ;;
+        *) echo "expected an unsupported-flag warning, got: $out" >&2; return 1 ;;
+    esac
 }
 
 # `playbook init` must NOT fire when CLAUDE_HOME is not the default
@@ -611,10 +634,8 @@ scenario_o_golden_skip_triggering() {
 # ---------------------------------------------------------------------------
 # (p) WRAPPER RESILIENCE: `playbook init` failing must not abort the rest of
 #     the script. Stubs the binary to always exit 1, simulating one of its
-#     six internal steps failing, and confirms the `|| warn` wrapper is
-#     actually in place: Steps 3 (deps, a no-op here under --skip-deps but
-#     still reached, not aborted before), 4 (aliases), and 5 (system prompt)
-#     all still run afterward, and the script itself exits 0.
+#     internal steps failing, and confirms the `|| warn` wrapper is in place:
+#     the script warns and still exits 0.
 # ---------------------------------------------------------------------------
 scenario_p_init_failure_does_not_abort_later_steps() {
     local home="$WORK/p-home" ch="$WORK/p-home/.claude" bin="$WORK/p-bin" out rc
@@ -631,21 +652,16 @@ scenario_p_init_failure_does_not_abort_later_steps() {
         *"playbook init reported errors"*) ;;
         *) echo "  expected the || warn wrapper's message, got: $out" >&2; return 1 ;;
     esac
-
-    # Step 4 (aliases) still ran.
-    [ -f "$home/.bashrc" ] || { echo "  Step 4 did not run: .bashrc not written"; return 1; }
-    grep -qF 'shell/bash/cc.sh' "$home/.bashrc" \
-        || { echo "  Step 4 did not run: cc.sh source line missing"; return 1; }
-
-    # Step 5 (system prompt) still ran.
-    [ -f "$ch/prompts/SYSTEM_PROMPT.md" ] \
-        || { echo "  Step 5 did not run: SYSTEM_PROMPT.md not installed"; return 1; }
+    case "$out" in
+        *"Setup complete."*) ;;
+        *) echo "  script did not reach its summary: $out" >&2; return 1 ;;
+    esac
 }
 
-run_scenario "A: default run wires guards+settings; no rc file; no shell files in CLAUDE_HOME" scenario_a_default
-run_scenario "B: --aliases bash copies launcher files and adds cc.sh source line to .bashrc"   scenario_b_aliases_bash
-run_scenario "C: --aliases zsh copies launcher files and adds cc.zsh source line to .zshrc"    scenario_c_aliases_zsh
-run_scenario "D: --system-prompt implies --aliases and copies SYSTEM_PROMPT.md"                scenario_d_system_prompt
+run_scenario "A: default run wires guards+settings; no rc file; no launcher runtime copied"     scenario_a_default
+run_scenario "B: --aliases bash installs the runtime via init and sources it from .bashrc"     scenario_b_aliases_bash
+run_scenario "C: --aliases zsh installs the runtime via init and sources it from .zshrc"      scenario_c_aliases_zsh
+run_scenario "D: --system-prompt implies --aliases and places SYSTEM_PROMPT.md under .config/playbook" scenario_d_system_prompt
 run_scenario "E: idempotent --aliases re-run does not duplicate source line in rc file"        scenario_e_idempotent_aliases
 run_scenario "F: merge preserves a custom key from pre-existing settings.json"                 scenario_f_merge_preserves
 run_scenario "G: default idempotent -- third run byte-identical to second"                     scenario_g_default_idempotent
@@ -653,11 +669,12 @@ run_scenario "H: migration of an old-form rc line preserves unrelated content an
 run_scenario "I: an existing binary in PLAYBOOK_BIN_DIR is detected, not re-downloaded"        scenario_i_binary_present
 run_scenario "J: a binary already on PATH is detected without touching PLAYBOOK_BIN_DIR"       scenario_j_binary_on_path
 run_scenario "K: playbook init is invoked with CLAUDE_PLUGIN_ROOT set"                          scenario_k_init_invoked
+run_scenario "K2: --aliases and --system-prompt are forwarded to playbook init (when it supports them)" scenario_k2_init_receives_option_flags
 run_scenario "L: playbook init is skipped for a non-default CLAUDE_HOME"                        scenario_l_init_skipped_for_non_default_claude_home
 run_scenario "M: a plain run refreshes an installed SYSTEM_PROMPT.md, leaves a never-installed one absent" scenario_m_system_prompt_refresh_without_flag
 run_scenario "N: golden differential, clean install (semantic diff)"                            scenario_n_golden_clean_install
 run_scenario "O: golden differential, skip-triggering (byte diff) + skip-report exists"         scenario_o_golden_skip_triggering
-run_scenario "P: playbook init failing does not abort Steps 3/4/5 (|| warn wrapper)"             scenario_p_init_failure_does_not_abort_later_steps
+run_scenario "P: playbook init failing does not abort the script (|| warn wrapper)"            scenario_p_init_failure_does_not_abort_later_steps
 
 TOTAL=$(( PASS + FAIL ))
 echo ""
