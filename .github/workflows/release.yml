@@ -278,7 +278,7 @@ jobs:
     permissions:
       contents: read
     env:
-      TAP_REPO: pragmatic-engineer/homebrew-playbook
+      TAP_REPO: pragmatic-engineer/homebrew-tap
       MARKETPLACE_REPO: pragmatic-engineer/marketplace
       VERSION: ${{ needs.verify-version.outputs.version }}
     steps:

@@ -121,7 +121,7 @@ you have not read.
 
    Add `~/.local/bin` to `PATH` in your shell rc if it is not already there.
 
-   On macOS or Linux, `brew install pragmatic-engineer/playbook/playbook`
+   On macOS or Linux, `brew install pragmatic-engineer/tap/playbook`
    does steps 2-4 for you: it fetches the same checksummed release binary
    and puts it on `PATH`. No separate build, no separate release pipeline.
 
