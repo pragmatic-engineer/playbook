@@ -158,8 +158,8 @@ pub enum Command {
     },
     /// Render the files the release job pushes to the Homebrew tap and marketplace
     ///
-    /// Run by the release workflow. Hidden from the command list, still works.
-    #[command(hide = true)]
+    /// Run by the release workflow after a tag. Prints the file to stdout and
+    /// never touches the network.
     Release {
         #[command(subcommand)]
         sub: ReleaseCommand,
