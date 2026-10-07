@@ -460,7 +460,7 @@ fn ingest_running_beside_the_server_never_breaks_its_reads_or_loses_events() {
     // runs `usage ingest` as a separate process against the same database
     // the server is reading and ingesting into.
     let writer_home = home.0.clone();
-    let writer_project = project.clone();
+    let writer_project = project;
     let writer = std::thread::spawn(move || {
         for i in 0..FILES {
             let line = format!(

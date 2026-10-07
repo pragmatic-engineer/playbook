@@ -932,7 +932,7 @@ mod memory_capture {
         }
         fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o000)).unwrap();
         let _guard = RestorePerms {
-            path: locked_dir.clone(),
+            path: locked_dir,
             mode: 0o755,
         };
 
@@ -1358,7 +1358,7 @@ mod memory_capture {
         let original_mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
         let _guard = RestorePerms {
-            path: dir.clone(),
+            path: dir,
             mode: original_mode,
         };
 

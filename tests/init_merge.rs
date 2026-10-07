@@ -42,8 +42,6 @@
 //!   writes reuse it instead of going through `merge`'s `skip_out`
 //!   parameter: `render_skip_report_matches_the_bytes_merge_writes_to_skip_out`
 
-#![allow(dead_code)]
-
 use playbook::init::merge::{merge, render_skip_report, MergeError};
 use serde_json::Value;
 use std::env;

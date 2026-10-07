@@ -172,17 +172,7 @@ pub fn get_watermark(conn: &Connection, source: &str) -> Result<i64, String> {
     .map_err(|e| format!("failed to read watermark for {source}: {e}"))
 }
 
-pub fn advance_watermark(conn: &Connection, source: &str, watermark: i64) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO usage_watermarks (source, watermark) VALUES (?1, ?2)
-         ON CONFLICT(source) DO UPDATE SET watermark = excluded.watermark",
-        params![source, watermark],
-    )
-    .map(|_| ())
-    .map_err(|e| format!("failed to advance watermark for {source}: {e}"))
-}
-
-/// Like `advance_watermark`, but never moves it backwards: a slower ingest
+/// Raises the watermark but never moves it backwards: a slower ingest
 /// that read an older watermark must not undo a newer one.
 pub fn raise_watermark(conn: &Connection, source: &str, watermark: i64) -> Result<(), String> {
     conn.execute(
@@ -213,34 +203,6 @@ pub fn has_tool_event(conn: &Connection, event_id: &str) -> Result<bool, String>
 
 fn to_i64(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
-}
-
-pub fn insert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
-            repo, branch, input_tokens, output_tokens, cache_creation_tokens,
-            cache_read_tokens, cost_usd, cache_creation_1h_tokens, agent)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-        params![
-            e.event_id,
-            e.timestamp,
-            e.session_id,
-            e.account,
-            e.model,
-            e.effort,
-            e.repo,
-            e.branch,
-            to_i64(e.input_tokens),
-            to_i64(e.output_tokens),
-            to_i64(e.cache_creation_tokens),
-            to_i64(e.cache_read_tokens),
-            e.cost_usd,
-            to_i64(e.cache_creation_1h_tokens),
-            e.agent
-        ],
-    )
-    .map(|_| ())
-    .map_err(|e2| format!("failed to insert usage event {}: {e2}", e.event_id))
 }
 
 /// Inserts the event, or when its id is already stored raises the token
@@ -554,8 +516,8 @@ mod tests {
     fn load_prices_from_tokens_and_ignores_the_stored_cost() {
         let dir = scratch_dir("usage-read-pricing");
         let conn = open_db(&dir.join("usage.db")).unwrap();
-        insert_usage_event(&conn, &event("a", "claude-sonnet-5", 99.0)).unwrap();
-        insert_usage_event(&conn, &event("b", "mystery-model", 99.0)).unwrap();
+        upsert_usage_event(&conn, &event("a", "claude-sonnet-5", 99.0)).unwrap();
+        upsert_usage_event(&conn, &event("b", "mystery-model", 99.0)).unwrap();
 
         let loaded = load_usage_events(&conn).unwrap();
 
@@ -605,7 +567,7 @@ mod tests {
         let conn = open_db(&dir.join("usage.db")).unwrap();
 
         assert_eq!(get_watermark(&conn, "claude-code").unwrap(), 0);
-        advance_watermark(&conn, "claude-code", 500).unwrap();
+        raise_watermark(&conn, "claude-code", 500).unwrap();
         assert_eq!(get_watermark(&conn, "claude-code").unwrap(), 500);
         assert_eq!(get_watermark(&conn, "other").unwrap(), 0);
         let _ = fs::remove_dir_all(dir);
@@ -628,7 +590,7 @@ mod tests {
                 model: "m".into(),
                 ..UsageEvent::default()
             };
-            insert_usage_event(&conn, &event).unwrap();
+            upsert_usage_event(&conn, &event).unwrap();
         }
         let ids = |events: Vec<UsageEvent>| -> Vec<String> {
             events.into_iter().map(|e| e.event_id).collect()

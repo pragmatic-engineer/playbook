@@ -98,8 +98,8 @@ mod tests {
     fn it_corrects_matching_rows_once_and_leaves_missing_transcripts_alone() {
         let dir = scratch_dir("usage-backfill");
         let conn = db::open_db(&dir.join("usage.db")).unwrap();
-        db::insert_usage_event(&conn, &row("kept", "agent-folder", 0)).unwrap();
-        db::insert_usage_event(&conn, &row("orphan", "old-name", 0)).unwrap();
+        db::upsert_usage_event(&conn, &row("kept", "agent-folder", 0)).unwrap();
+        db::upsert_usage_event(&conn, &row("orphan", "old-name", 0)).unwrap();
         let source = fake(vec![row("kept", "real-repo", 60)]);
 
         let first = run_once(&source, &conn).unwrap();

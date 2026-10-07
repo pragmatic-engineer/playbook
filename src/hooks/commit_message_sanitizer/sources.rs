@@ -630,7 +630,7 @@ pub fn joined(sources: &[Source]) -> String {
 /// Sanitises `sources` and queues the rewrite of each one that changes. With
 /// `joined`, the sources are one message, the way git joins repeated `-m`.
 pub fn apply(
-    sources: Vec<Source>,
+    sources: &[Source],
     rule: Rule,
     joined: bool,
     plan: &mut Plan,

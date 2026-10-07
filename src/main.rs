@@ -682,14 +682,6 @@ fn main() {
                 JsonCommand::RawStringField { key } => {
                     print!("{}", json::fields::string_field(&input, &key));
                 }
-                JsonCommand::CanonicalJson { del } => {
-                    println!("{}", json::canon::canonical_json(&input, del.as_deref()));
-                }
-                JsonCommand::HookCommandsForEvent { event } => {
-                    for command in json::hookevents::hook_commands_for_event(&input, &event) {
-                        println!("{command}");
-                    }
-                }
                 JsonCommand::ProjectField {
                     project_path,
                     field,

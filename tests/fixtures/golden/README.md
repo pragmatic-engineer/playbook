@@ -60,9 +60,7 @@ substring "warning", so the normalisation changes nothing the tests verify.
 | `init-merge.n4-missing-base.json` | `shell/merge-settings.py` | `n4_missing_base_becomes_empty_object_with_warning_not_hard_fail`'s template/user pair over an absent BASE path (s5) | 2026-08-21, at v0.11.0 |
 | `init-merge.n4-invalid-base.json` | `shell/merge-settings.py` | `n4_invalid_base_becomes_empty_object_with_warning_not_hard_fail`'s base/template/user triple, BASE not valid JSON (s13) | 2026-08-21, at v0.11.0 |
 | `init-merge.c2-coincidence.json` | `shell/merge-settings.py` | `c2_coincidence_keeps_user_value_frozen_through_a_matching_template_cycle`'s two-cycle base/template/user sequence (s16) | 2026-08-21, at v0.11.0 |
-| `gen-shared-settings.src-full.json` | `shell/gen-shared-settings.py` | `SRC_FULL` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
 | `gen-shared-settings.non-ascii.json` | `shell/gen-shared-settings.py` | `{"customUnknownKey":"café ☃"}` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
-| `gen-shared-settings.model-absent.json` | `shell/gen-shared-settings.py` | `SRC_NOMODEL` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
 | `gen-shared-settings.model-present.json` | `shell/gen-shared-settings.py` | `SRC_OPUS` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
 | `gen-shared-settings.hooks-filter.json` | `shell/gen-shared-settings.py` | `SRC_HOOKS` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
 | `setup-local.clean-install.json` | today's `shell/setup-local.sh` (its Step 2 python merge, before the `playbook init` cutover) | a fresh install: empty `CLAUDE_HOME`, no pre-existing `settings.json` | 2026-09-07, at v0.14.0 (regenerated, see note below) |

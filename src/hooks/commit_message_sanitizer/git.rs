@@ -441,7 +441,7 @@ fn commit(run: &Run, plan: &mut Plan, findings: &mut Findings) {
     let opts = COMMIT.scan(&run.call.cmd().words[run.rest..]);
     let (sources, written) = message_sources(run, &opts, "the commit message", findings);
     let mut known = (!sources.is_empty()).then(|| joined(&sources));
-    apply(sources, Rule::Commit, true, plan, findings);
+    apply(&sources, Rule::Commit, true, plan, findings);
     drop_ai_options(run, &opts, plan, findings);
     if !written {
         known = reused_message(run, &opts, plan, findings);
@@ -606,7 +606,7 @@ fn runnable_script(path: &Path) -> Option<String> {
 fn tag(run: &Run, plan: &mut Plan, findings: &mut Findings) {
     let opts = TAG.scan(&run.call.cmd().words[run.rest..]);
     let (sources, _) = message_sources(run, &opts, "the tag message", findings);
-    apply(sources, Rule::Commit, true, plan, findings);
+    apply(&sources, Rule::Commit, true, plan, findings);
     drop_ai_options(run, &opts, plan, findings);
 }
 
@@ -628,13 +628,13 @@ fn commit_tree(run: &Run, plan: &mut Plan, findings: &mut Findings) {
     if !written {
         sources = from_stdin(&run.call, label, findings);
     }
-    apply(sources, Rule::Commit, true, plan, findings);
+    apply(&sources, Rule::Commit, true, plan, findings);
 }
 
 fn message_command(run: &Run, spec: &Spec, label: &str, plan: &mut Plan, findings: &mut Findings) {
     let opts = spec.scan(&run.call.cmd().words[run.rest..]);
     let (sources, _) = message_sources(run, &opts, label, findings);
-    apply(sources, Rule::Commit, true, plan, findings);
+    apply(&sources, Rule::Commit, true, plan, findings);
 }
 
 /// The text of every `-m` and `-F` option, and whether there was one.
@@ -752,7 +752,7 @@ fn reuse(
         };
         let label = format!("the message reused from {rev}");
         let source = feed(call, label, message.clone(), replace, opener);
-        apply(vec![source], Rule::Commit, false, plan, findings);
+        apply(&[source], Rule::Commit, false, plan, findings);
     }
     Some(message)
 }
@@ -807,7 +807,7 @@ fn stored_message(run: &Run, plan: &mut Plan, findings: &mut Findings) -> Option
         at..at,
         " -F - ".to_string(),
     );
-    apply(vec![source], Rule::Commit, false, plan, findings);
+    apply(&[source], Rule::Commit, false, plan, findings);
     Some(text)
 }
 

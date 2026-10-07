@@ -85,7 +85,7 @@ impl Session {
 
     /// Rewrites the global config with the given `auto.budgetUsd` and
     /// `auto.warnPct`, keeping the mode the session was built with.
-    fn seed_budget(&self, budget_usd: Value, warn_pct: impl Into<Value>) {
+    fn seed_budget(&self, budget_usd: &Value, warn_pct: impl Into<Value>) {
         let mode = if self.env.is_empty() { "auto" } else { "ask" };
         let config =
             json!({"mode": mode, "auto": {"budgetUsd": budget_usd, "warnPct": warn_pct.into()}});
@@ -145,7 +145,7 @@ impl Session {
     /// A session whose spend has reached the cap of 5.
     fn at_budget(tag: &str, from: AutoFrom) -> Self {
         let session = Self::auto_from(tag, from);
-        session.seed_budget(json!(5), 70);
+        session.seed_budget(&json!(5), 70);
         session.baseline_then_report("5.00");
         session
     }
@@ -1156,7 +1156,7 @@ fn concurrent_first_calls_leave_exactly_one_baseline_file() {
 fn the_warn_tier_fires_once_at_the_warn_percentage_of_the_cap() {
     // Arrange: cap 5, warnPct 70, so the tier starts at 350 cents
     let session = Session::auto("warn-edges");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     session.append_telemetry("0.00");
     assert_eq!(session.bash("npm test"), Outcome::Silent, "baseline call");
 
@@ -1187,7 +1187,7 @@ fn the_warn_tier_fires_once_at_the_warn_percentage_of_the_cap() {
 fn the_hard_cap_denies_non_safe_tools_at_exactly_the_cap_and_keeps_the_safe_list() {
     // Arrange
     let session = Session::auto("cap-edge");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     session.baseline_then_report("4.99");
     assert!(!session.bash("npm test").is_denied(), "4.99 denies nothing");
 
@@ -1424,7 +1424,7 @@ fn the_escape_table_holds_for_every_state_and_auto_source() {
                 State::BudgetReached => Session::at_budget(&tag, from),
                 State::CostUnreadable | State::MissingSessionId => {
                     let session = Session::auto_from(&tag, from);
-                    session.seed_budget(json!(5), 70);
+                    session.seed_budget(&json!(5), 70);
                     session
                 }
             };
@@ -1463,7 +1463,7 @@ fn the_escape_table_holds_for_every_state_and_auto_source() {
 fn auto_cost_alone_allows_ask_user_question_under_the_cap() {
     // Arrange: the real AskUserQuestion capture on this session, 1.00 spent
     let session = Session::auto("ask-user-question");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     session.baseline_then_report("1.00");
     let mut value: Value =
         serde_json::from_str(include_str!("fixtures/hooks/pre-askuserquestion.json"))
@@ -1485,7 +1485,7 @@ fn an_invalid_budget_in_the_config_falls_back_to_five_with_a_one_time_note() {
     let rows = [json!(0), json!("banana"), json!(-3), json!(0.004)];
     for (n, invalid) in rows.into_iter().enumerate() {
         let session = Session::auto(&format!("bad-budget-{n}"));
-        session.seed_budget(invalid.clone(), 70);
+        session.seed_budget(&invalid, 70);
         session.append_telemetry("0.00");
 
         // Act
@@ -1520,7 +1520,7 @@ fn a_warn_percentage_that_is_not_a_whole_number_from_one_to_a_hundred_falls_back
     ];
     for (n, (pct, tier_cents)) in rows.into_iter().enumerate() {
         let session = Session::auto(&format!("bad-warn-pct-{n}"));
-        session.seed_budget(json!(5), pct.clone());
+        session.seed_budget(&json!(5), pct.clone());
         session.append_telemetry("0.00");
         assert_eq!(
             session.bash("git status"),
@@ -1548,7 +1548,7 @@ fn pre_existing_and_falling_cost_never_deny() {
     // Arrange: rows are how call 1 meets a cost of 4.0 against a cap of 5
     for (n, via_transcript) in [false, true].into_iter().enumerate() {
         let session = Session::auto(&format!("no-deny-{n}"));
-        session.seed_budget(json!(5), 70);
+        session.seed_budget(&json!(5), 70);
         if via_transcript {
             write_cost(&session.transcript(), 4.0);
         } else {
@@ -1570,7 +1570,7 @@ fn pre_existing_and_falling_cost_never_deny() {
 
     // Arrange: a telemetry cost that drops below the baseline
     let session = Session::auto("no-deny-negative");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     session.append_telemetry("4.0");
     assert_eq!(session.bash("git status"), Outcome::Silent, "baseline call");
 
@@ -1590,7 +1590,7 @@ fn eight_processes_crossing_the_warn_tier_together_leave_one_marker() {
     // Smoke check: it can catch a gross failure, not prove the race is absent.
     // Arrange: baseline 0.00 settled, then the tier is crossed before any call
     let session = Session::auto("concurrent-warn");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     session.baseline_then_report("3.50");
     let payload = session.tool_payload("Bash", json!({"command": "npm test"}));
 
@@ -1663,7 +1663,7 @@ fn a_baseline_that_cannot_be_stored_fails_closed() {
     // Arrange: the session dir exists but cannot be written, so every call
     // would otherwise take a fresh baseline and never see the spend grow
     let session = Session::auto("unwritable-baseline");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     write_cost(&session.transcript(), 1.0);
     fs::create_dir_all(session.dir()).expect("session dir");
     let Some(_locked) = ReadOnly::lock(&session.dir()) else {
@@ -1687,7 +1687,7 @@ fn a_baseline_that_cannot_be_stored_fails_closed() {
 fn a_stored_baseline_keeps_enforcing_when_a_later_write_fails() {
     // Arrange: call 1 stores the baseline, then the session dir turns read-only
     let session = Session::auto("unwritable-later");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     session.baseline_then_report("0.00");
     let Some(_locked) = ReadOnly::lock(&session.dir()) else {
         return;
@@ -1708,7 +1708,7 @@ fn a_stored_baseline_keeps_enforcing_when_a_later_write_fails() {
 fn a_model_missing_from_the_price_table_without_telemetry_fails_closed() {
     // Arrange: a transcript whose only spend is on an unpriced model
     let session = Session::auto("unpriced-no-telemetry");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     append(
         &session.transcript(),
         &message_line("msg_unpriced", "claude-model-not-in-the-table", 9_000_000),
@@ -1730,7 +1730,7 @@ fn a_model_missing_from_the_price_table_without_telemetry_fails_closed() {
 fn an_unpriced_model_is_tolerated_when_telemetry_reports_the_cost() {
     // Arrange
     let session = Session::auto("unpriced-with-telemetry");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     session.append_telemetry("0.00");
     append(
         &session.transcript(),
@@ -1799,7 +1799,7 @@ impl Session {
     /// and under the warn tier.
     fn under_budget(tag: &str, from: AutoFrom) -> Self {
         let session = Self::auto_from(tag, from);
-        session.seed_budget(json!(5), 70);
+        session.seed_budget(&json!(5), 70);
         session.baseline_then_report("1.00");
         session
     }
@@ -2084,7 +2084,7 @@ fn write_and_edit_of_other_files_are_not_denied_in_auto_under_the_cap() {
 fn a_self_protection_deny_does_not_use_up_the_warn_note() {
     // Arrange: 3.50 of a 5.00 cap, which is exactly the warn tier
     let session = Session::auto("guard-then-warn");
-    session.seed_budget(json!(5), 70);
+    session.seed_budget(&json!(5), 70);
     session.baseline_then_report("3.50");
 
     // Act

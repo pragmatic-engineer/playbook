@@ -39,8 +39,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// event it fires on, the matcher grouping it belongs to (`None` for events
 /// hooks.json never gave a matcher, such as `SessionStart`), the hook name
 /// to invoke, any `if` guard or `timeout` carried over unchanged from the
-/// entry it replaces, and whether its Rust port is real (`ported`), which
-/// decides whether `wire` may target the compiled binary for it at all.
+/// entry it replaces.
 struct HookSpec {
     event: &'static str,
     matcher: Option<&'static str>,
@@ -50,7 +49,6 @@ struct HookSpec {
     /// A prior hook name this spec's install also replaces in place, so a
     /// rename never leaves an orphaned entry behind.
     also_replaces: Option<&'static str>,
-    ported: bool,
 }
 
 /// The functional hooks, already ported to Rust, rewired here to the bare
@@ -76,7 +74,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "session-init",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -85,7 +82,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "preread-edit-check",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -94,7 +90,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "preread-size-check",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -103,7 +98,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "search-counter",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -112,7 +106,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "memory-anchors",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -123,7 +116,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "memory-anchors",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -132,7 +124,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "post-edit-track",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -141,7 +132,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "rebuild-memory-graph",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -150,7 +140,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "auto-model-detect",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -159,7 +148,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "auto-guard",
         if_cond: None,
         timeout: Some(10),
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -168,7 +156,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "auto-guard",
         if_cond: None,
         timeout: Some(10),
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -177,7 +164,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "auto-cost",
         if_cond: None,
         timeout: Some(10),
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -186,7 +172,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "precompact-warn",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -195,7 +180,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "session-clean-exit",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -204,7 +188,6 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "memory-capture",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -213,13 +196,12 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         name: "session-clean-exit",
         if_cond: None,
         timeout: None,
-        ported: true,
         also_replaces: None,
     },
 ];
 
 /// The always-on safety guards, wired identically to `PORTED_HOOK_SPECS`:
-/// every entry here is `ported: true`, so `wire` upserts each one
+/// every entry here is upserted
 /// unconditionally in bare `playbook hook <name>` form. A pre-existing
 /// legacy `~/.claude/hooks/<name>.sh` command is replaced, not left to
 /// coexist. Kept as a list separate from `PORTED_HOOK_SPECS`, rather than
@@ -233,7 +215,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "rm-workspace-guard",
         if_cond: Some("Bash(rm:*)"),
         timeout: Some(10),
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -242,7 +223,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "bg-await-guard",
         if_cond: None,
         timeout: Some(10),
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -251,7 +231,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "no-slop-guard",
         if_cond: None,
         timeout: Some(10),
-        ported: true,
         also_replaces: Some("no-dash-guard"),
     },
     HookSpec {
@@ -260,7 +239,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "precommit-check",
         if_cond: Some("Bash(git commit:*)"),
         timeout: Some(10),
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -269,7 +247,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "commit-message-sanitizer",
         if_cond: None,
         timeout: Some(10),
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -280,7 +257,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "commit-message-sanitizer",
         if_cond: None,
         timeout: Some(60),
-        ported: true,
         also_replaces: None,
     },
     HookSpec {
@@ -289,7 +265,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "no-slop-guard",
         if_cond: None,
         timeout: Some(10),
-        ported: true,
         also_replaces: None,
     },
 ];
@@ -446,7 +421,7 @@ fn load_settings(path: &Path) -> Result<(Map<String, Value>, String), WireError>
 
 /// Ensures `hooks[spec.event]` contains one group whose matcher equals
 /// `spec.matcher`, and that group's `hooks` array contains exactly one entry
-/// for `spec.name`, rewritten to its canonical form (see `target_command`).
+/// for `spec.name`, rewritten to its canonical form (see `bare_command`).
 /// Every other entry already in that group, and every other group on the
 /// same event, is left exactly as found: this upserts into the existing
 /// structure, it never replaces it wholesale.
@@ -553,45 +528,24 @@ fn is_legacy_command(cmd: &str, name: &str) -> bool {
     file_name == format!("{name}.py") || file_name == format!("{name}.sh")
 }
 
-/// The bare command `wire` writes for an already-ported hook named `name`:
-/// no path, resolved on `PATH` the same way a hand-written `rtk hook claude`
-/// entry already is. Callers building a `HookSpec`'s entry should go through
-/// `target_command`, which also handles the still-unported guards; this is
-/// exposed separately only because `entry_targets` needs to recognise the
-/// bare form on its own.
+/// The bare command `wire` writes for the hook named `name`: no path,
+/// resolved on `PATH` the same way a hand-written `rtk hook claude` entry is.
 fn bare_command(name: &str) -> String {
     format!("playbook hook {name}")
-}
-
-/// The pre-Rust shell command `wire` keeps an unported hook pointed at:
-/// `~/.claude/hooks/<name>.sh`, the path `settings.json` wired a guard to
-/// directly before its Rust port existed.
-fn legacy_shell_command(name: &str) -> String {
-    format!("~/.claude/hooks/{name}.sh")
-}
-
-/// The command `wire` writes for `spec`: the bare `playbook hook <name>`
-/// binary form when its Rust port is real (`spec.ported`), or the legacy
-/// `~/.claude/hooks/<name>.sh` script when it is not, so an unported hook
-/// never gets pointed at a stub.
-fn target_command(spec: &HookSpec) -> String {
-    if spec.ported {
-        bare_command(spec.name)
-    } else {
-        legacy_shell_command(spec.name)
-    }
 }
 
 /// The exact JSON object `wire` writes for one `HookSpec`: `type` and
 /// `command` always, `if` and `timeout` only when the spec carries them, in
 /// that fixed key order every time, so re-running `wire` against its own
 /// prior output reproduces the identical object rather than merely an
-/// equivalent one. `command` comes from `target_command`, so it is only the
-/// bare binary form when the spec is actually ported.
+/// equivalent one. `command` is always the bare binary form.
 fn canonical_entry(spec: &HookSpec) -> Value {
     let mut entry = Map::new();
     entry.insert("type".to_string(), Value::String("command".to_string()));
-    entry.insert("command".to_string(), Value::String(target_command(spec)));
+    entry.insert(
+        "command".to_string(),
+        Value::String(bare_command(spec.name)),
+    );
     if let Some(if_cond) = spec.if_cond {
         entry.insert("if".to_string(), Value::String(if_cond.to_string()));
     }

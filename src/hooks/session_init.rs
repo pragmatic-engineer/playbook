@@ -344,9 +344,7 @@ fn append_memory_slice(extra_context: &mut String, repo_root: &str) {
 
     let graph = crate::common::paths::memory_dir().join("memory.graph.json");
     let mem_body = cap_memory_body(
-        crate::json::memorycontext::render_for_graph_file(&graph, &mem_slug)
-            .trim_matches('\n')
-            .to_string(),
+        crate::json::memorycontext::render_for_graph_file(&graph, &mem_slug).trim_matches('\n'),
     );
     if mem_body.is_empty() {
         return;
@@ -393,7 +391,7 @@ fn append_handoff_slice(extra_context: &mut String) -> usize {
 /// that preceded it, so it grew without bound as the memory store grew (8.8 KB
 /// when ADR 0004 measured it, 29.3 KB two weeks later). Same cap, same
 /// constant, so the two paths cannot drift apart again.
-fn cap_memory_body(body: String) -> String {
+fn cap_memory_body(body: &str) -> String {
     body.chars().take(MEMORY_BODY_CAP_CHARS).collect()
 }
 
@@ -539,7 +537,7 @@ fn catalog_skills(root: &Path) -> String {
         let description = one_line(&frontmatter_field(&skill_file, "description"));
         lines.push(format!("- {name}: {description}"));
     }
-    finalize_catalog_lines(lines)
+    finalize_catalog_lines(&lines)
 }
 
 /// `- /name: one-line description` for every `<root>/*.md`, sorted by file
@@ -570,10 +568,10 @@ fn catalog_commands(root: &Path) -> String {
         let description = one_line(&frontmatter_field(&command_file, "description"));
         lines.push(format!("- /{base}: {description}"));
     }
-    finalize_catalog_lines(lines)
+    finalize_catalog_lines(&lines)
 }
 
-fn finalize_catalog_lines(lines: Vec<String>) -> String {
+fn finalize_catalog_lines(lines: &[String]) -> String {
     if lines.is_empty() {
         String::new()
     } else {

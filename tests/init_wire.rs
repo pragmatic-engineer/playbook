@@ -36,8 +36,6 @@
 //!   REPLACED by the bare form, not left to coexist as a duplicate entry:
 //!   `legacy_guard_entry_is_replaced_by_bare_form_not_duplicated`
 
-#![allow(dead_code)]
-
 use clap::ValueEnum;
 use playbook::init::wire::{wire, wire_at};
 use playbook::HookName;

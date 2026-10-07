@@ -39,8 +39,6 @@
 //!   `auto_mode_and_enabled_plugins_are_dropped`,
 //!   `shape_valid_but_nonexistent_hook_name_is_dropped`
 
-#![allow(dead_code)]
-
 use clap::Parser;
 use playbook::settings::gen::generate;
 use playbook::Cli;
@@ -141,10 +139,8 @@ fn happy_path_canned_perms_model_stripped_only_shippable_keys_survive() {
 
     // Assert
     //
-    // No byte-for-byte oracle comparison here: the frozen python golden
-    // (tests/fixtures/golden/gen-shared-settings.src-full.json) predates the
-    // allowlist and keeps `customUnknownKey` and `env.IS_DEMO`, which this
-    // change deliberately now drops. See src/settings/keys.rs for why.
+    // No byte-for-byte oracle comparison: the stale python golden was deleted, as it
+    // kept `customUnknownKey` and `env.IS_DEMO`, which are now dropped (src/settings/keys.rs).
     let result: Value = serde_json::from_str(&rust_output).unwrap();
     let canned_perms: Value = serde_json::from_str(CANNED_PERMS).unwrap();
     assert_eq!(

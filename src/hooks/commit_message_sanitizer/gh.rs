@@ -74,8 +74,8 @@ pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
                 "the PR body",
                 findings,
             );
-            apply(title, Rule::Prose, false, plan, findings);
-            apply(body, Rule::Prose, false, plan, findings);
+            apply(&title, Rule::Prose, false, plan, findings);
+            apply(&body, Rule::Prose, false, plan, findings);
         }
         "merge" => {
             let opts = PR_MERGE.scan(&words[rest..]);
@@ -88,7 +88,7 @@ pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
                 "the merge commit message",
                 findings,
             );
-            apply(parts, Rule::Commit, true, plan, findings);
+            apply(&parts, Rule::Commit, true, plan, findings);
         }
         _ => {}
     }

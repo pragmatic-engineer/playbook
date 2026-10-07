@@ -24,8 +24,6 @@
 //! Every test uses a scratch directory standing in for `$HOME`; none read or
 //! write the developer's real `~/.claude`.
 
-#![allow(dead_code)]
-
 use playbook::init::run::{run, InitOutcome, InitPaths, StepReport, StepStatus};
 use playbook::init::shim::ShellKind;
 use std::env;
