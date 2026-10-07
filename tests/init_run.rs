@@ -42,8 +42,6 @@
 //! Every test uses a scratch directory standing in for `$HOME`; none read or
 //! write the developer's real `~/.claude`.
 
-#![allow(dead_code)]
-
 use playbook::init::run::{run, InitOutcome, InitPaths, StepReport, StepStatus};
 use playbook::init::shim::ShellKind;
 use serde_json::{json, Value};
@@ -1121,7 +1119,7 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
     });
     write_json(
         &claude_home.join("settings.json"),
-        &json!({ "statusLine": old_status_line.clone() }),
+        &json!({ "statusLine": old_status_line }),
     );
     // BASE agrees with settings.json, as a real pre-existing install would.
     write_json(

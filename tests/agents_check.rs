@@ -14,8 +14,6 @@
 //! `_TEMPLATE.md` skipping and the CLI-wiring cases need different
 //! postconditions so they stay as their own tests.
 
-#![allow(dead_code)] // cargo test compiles each tests/*.rs separately.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

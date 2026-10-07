@@ -53,10 +53,6 @@ impl Live {
         taken.then(|| Slot(Arc::clone(self)))
     }
 
-    pub fn open_streams(&self) -> usize {
-        self.open.load(Ordering::SeqCst)
-    }
-
     /// The latest summary (or failure), computed at most once per `CACHE_TTL`
     /// however many streams ask, so a busy database is not retried by each. The lock is held while computing, so a second stream waits
     /// for the first instead of ingesting again.
@@ -137,10 +133,10 @@ mod tests {
             .map(|_| live.try_acquire(MAX_STREAMS).expect("room"))
             .collect();
         assert!(live.try_acquire(MAX_STREAMS).is_none());
-        assert_eq!(live.open_streams(), MAX_STREAMS);
+        assert_eq!(live.open.load(Ordering::SeqCst), MAX_STREAMS);
         drop(held);
 
-        assert_eq!(live.open_streams(), 0);
+        assert_eq!(live.open.load(Ordering::SeqCst), 0);
         assert!(live.try_acquire(MAX_STREAMS).is_some());
     }
 
