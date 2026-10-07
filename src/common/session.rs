@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Session identity and per-session state paths. Ports `session_id`
-//! (hooks/lib/common.py:81), `session_dir` (:86), and `abspath` (:110).
+//! (the retired shell original), `session_dir` (:86), and `abspath` (:110).
 
 use crate::common::payload::Payload;
 use std::fs;
@@ -16,7 +16,7 @@ pub fn session_id(payload: &Payload) -> String {
 /// Resolve the current user's home directory, falling back to the system
 /// passwd database when `$HOME` is unset (`std::env::home_dir`'s Unix
 /// behaviour), matching python's `os.path.expanduser("~")`
-/// (hooks/lib/common.py:22). `std::env::var("HOME").unwrap_or_default()`
+/// (the retired shell original). `std::env::var("HOME").unwrap_or_default()`
 /// silently yields an empty string when `HOME` is unset, and joining a path
 /// onto that produces a path relative to the process's current directory
 /// instead of the real home. Empty only when even the passwd lookup fails.

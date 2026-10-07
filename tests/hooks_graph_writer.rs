@@ -4,7 +4,7 @@
 //! Behavioural tests for the `rebuild-memory-graph` hook, the sole writer
 //! of `~/.config/playbook/memory/memory.graph.json`. Exercised black-box, through the
 //! compiled `playbook` binary, the same way
-//! `hooks/rebuild-memory-graph.test.sh` exercises the python original.
+//! the retired shell test exercises the python original.
 //! Every assertion in that shell script has a corresponding case below,
 //! plus a comparison against the python implementation itself.
 //!
@@ -273,7 +273,7 @@ fn pinned_non_literal_true_value_omits_the_node_field() {
 }
 
 /// Shape (3): a dict sub-key (`links.relates_to`) holding a bare scalar.
-/// hooks/rebuild-memory-graph.test.sh scenario 1.
+/// the retired shell test scenario 1.
 #[test]
 fn scalar_link_produces_one_edge() {
     // Arrange
@@ -298,7 +298,7 @@ fn scalar_link_produces_one_edge() {
 }
 
 /// Shape (4): an inline flow sequence `[a, b, c]` under a dict sub-key.
-/// hooks/rebuild-memory-graph.test.sh scenario 2.
+/// the retired shell test scenario 2.
 #[test]
 fn inline_list_produces_one_edge_per_target() {
     // Arrange
@@ -330,7 +330,7 @@ fn inline_list_produces_one_edge_per_target() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 3: a single-element inline
+/// the retired shell test scenario 3: a single-element inline
 /// list produces one edge whose target id carries no bracket characters.
 #[test]
 fn single_element_inline_list_has_no_brackets_in_target_id() {
@@ -353,7 +353,7 @@ fn single_element_inline_list_has_no_brackets_in_target_id() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 4: quoted inline items parse
+/// the retired shell test scenario 4: quoted inline items parse
 /// to clean, unquoted names.
 #[test]
 fn quoted_inline_items_parse_to_clean_names() {
@@ -387,7 +387,7 @@ fn quoted_inline_items_parse_to_clean_names() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 5: an empty inline list
+/// the retired shell test scenario 5: an empty inline list
 /// produces no edges and does not crash the hook.
 #[test]
 fn empty_inline_list_produces_no_edges() {
@@ -411,7 +411,7 @@ fn empty_inline_list_produces_no_edges() {
 }
 
 /// Shape (2)/(3): a block list nested under a dict sub-key.
-/// hooks/rebuild-memory-graph.test.sh scenario 6.
+/// the retired shell test scenario 6.
 #[test]
 fn nested_block_list_produces_one_edge_per_item() {
     // Arrange
@@ -445,7 +445,7 @@ fn nested_block_list_produces_one_edge_per_item() {
 }
 
 /// Shape (2): a top-level block list (`anchors`), unrelated to the `links`
-/// dict machinery. hooks/rebuild-memory-graph.test.sh scenario 7.
+/// dict machinery. the retired shell test scenario 7.
 #[test]
 fn anchors_produce_code_nodes_and_anchors_edges() {
     // Arrange
@@ -585,7 +585,7 @@ fn inline_and_block_style_anchors_produce_the_same_code_nodes_and_edges() {
 }
 
 /// Shape (5): a dangling target is surfaced as an edge, not dropped.
-/// hooks/rebuild-memory-graph.test.sh scenario 8.
+/// the retired shell test scenario 8.
 #[test]
 fn dangling_target_still_emits_its_edge() {
     // Arrange
@@ -611,7 +611,7 @@ fn dangling_target_still_emits_its_edge() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 9: a project-scoped fact
+/// the retired shell test scenario 9: a project-scoped fact
 /// gets an `owner/repo/name` id, a global fact gets `global/name`, and a
 /// project-scoped edge target keeps the owner/repo prefix.
 #[test]
@@ -730,7 +730,7 @@ fn org_source_resolves_a_link_in_its_own_scope_before_global() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 10 and the brief's "non-memory
+/// the retired shell test scenario 10 and the brief's "non-memory
 /// file edits are a no-op" done-when criterion: writing a file outside the
 /// memory dir leaves memory.graph.json completely untouched, even when a second
 /// in-scope fact was added to disk (but not via a hook-triggering write)
@@ -772,7 +772,7 @@ fn outside_memory_dir_write_is_a_no_op() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 11: malformed or absent
+/// the retired shell test scenario 11: malformed or absent
 /// frontmatter does not crash the hook; the fact still gets a node built
 /// from filename-derived defaults.
 #[test]
@@ -808,7 +808,7 @@ fn malformed_or_absent_frontmatter_falls_back_to_defaults() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 12: a project-scoped fact
+/// the retired shell test scenario 12: a project-scoped fact
 /// linking to a global fact resolves cross-scope.
 #[test]
 fn project_fact_resolves_a_link_to_a_global_target() {
@@ -841,7 +841,7 @@ fn project_fact_resolves_a_link_to_a_global_target() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 13: same-scope-then-global
+/// the retired shell test scenario 13: same-scope-then-global
 /// fallback prefers a same-named fact in the source's own project scope
 /// over a same-named global fact.
 #[test]
@@ -885,7 +885,7 @@ fn own_scope_wins_over_a_same_named_global_fact() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// Shape (5) in project scope: hooks/rebuild-memory-graph.test.sh scenario
+/// Shape (5) in project scope: the retired shell test scenario
 /// 14, a project link to a target that exists nowhere still dangles using
 /// the same-scope id.
 #[test]
@@ -910,7 +910,7 @@ fn project_scoped_dangling_target_uses_same_scope_id() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 15: a global source resolves
+/// the retired shell test scenario 15: a global source resolves
 /// in the global scope, unaffected by the two-pass project resolution.
 ///
 /// The two facts' bodies are deliberately distinct (not the usual "Body
@@ -946,7 +946,7 @@ fn global_source_is_unaffected_by_project_scope_resolution() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/rebuild-memory-graph.test.sh scenario 16: `anchors` and `links` on
+/// the retired shell test scenario 16: `anchors` and `links` on
 /// the same fact do not interfere with each other.
 ///
 /// `combo-target`'s body is deliberately distinct from `combo-fact`'s (not
@@ -1626,7 +1626,7 @@ fn rust_writer_matches_the_frozen_python_golden() {
 /// `playbook memory rebuild` rebuilds with NO payload at all.
 ///
 /// This is the `--graph-only` path of `/playbook:learn-project`. It used to
-/// run `python3 hooks/rebuild-memory-graph.py < /dev/null`, because that
+/// run `python3 the retired shell original < /dev/null`, because that
 /// script treated empty stdin as "rebuild everything". The Rust port dropped
 /// that branch deliberately (`should_skip` in
 /// `src/hooks/rebuild_memory_graph.rs`), reasoning it was unexercised by the

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Deadline-bounded subprocess execution, standing in for python's
-//! `subprocess.run(..., timeout=N)` (hooks/session-init.py:27-32,
-//! hooks/lib/common.py:250-253, hooks/session-clean-exit.py:88-96).
+//! `subprocess.run(..., timeout=N)` (the retired shell original,
+//! the retired shell originals).
 //! `std::process::Command` has no built-in timeout, so an unbounded `git` or
 //! `bash` call can hang a hook forever; `session-init` in particular runs on
 //! every session start, so a hang there blocks the session from ever

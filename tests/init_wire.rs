@@ -412,8 +412,7 @@ fn settings_json_is_backed_up_before_a_real_change_and_not_on_a_no_op() {
 }
 
 /// The literal body every stub hook module in `src/hooks/` starts life
-/// with, per `src/hooks/mod.rs`'s own description of the pre-port shape
-/// ("takes the parsed payload and does nothing"). A module whose source
+/// with (it takes the parsed payload and does nothing). A module whose source
 /// still contains this exact line has not been ported yet, regardless of
 /// what `wire()` claims to route it to.
 const STUB_HOOK_BODY: &str = "pub fn run(_payload: &Payload) {}";

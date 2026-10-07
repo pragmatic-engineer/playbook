@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Settings seed generator, ported from `shell/gen-shared-settings.py`. That
+//! Settings seed generator, ported from the retired shell original. That
 //! file's header comment was the original specification: replace
 //! `.permissions` with a canned permissions object, force
 //! `skipAutoPermissionPrompt: false`, and filter `.hooks` down to entries
@@ -41,7 +41,7 @@ use std::fs;
 use std::path::Path;
 
 /// Everything that can stop generation before it produces output, one
-/// variant per `die()` call site in `shell/gen-shared-settings.py`. Every
+/// variant per `die()` call site in the retired shell original. Every
 /// python `die()` call there exits with code 2; `generate` below returns
 /// `Err` instead and leaves picking an exit code to the caller (`playbook
 /// settings gen`, wired in `src/main.rs`), the same split
@@ -56,7 +56,7 @@ impl std::fmt::Display for GenError {
 }
 
 /// Read `path` as JSON, failing with the same two-way split
-/// `shell/gen-shared-settings.py`'s `load_json` uses: unreadable file versus
+/// the retired shell original's `load_json` uses: unreadable file versus
 /// readable-but-invalid JSON. Unlike that helper, the result is not yet
 /// required to be a JSON object; SRC and PERMS validate that separately,
 /// matching where python's own type checks happen.
@@ -67,7 +67,7 @@ fn load_json(path: &Path, label: &str) -> Result<Value, GenError> {
         .map_err(|_| GenError(format!("{label} is not valid JSON: {}", path.display())))
 }
 
-/// Ports `SAFETY_REGEXP.fullmatch` from `shell/gen-shared-settings.py` as
+/// Ports `SAFETY_REGEXP.fullmatch` from the retired shell original as
 /// explicit string matching: a bare `playbook hook <name>` invocation,
 /// where `<name>` starts with an ASCII lowercase letter and continues with
 /// ASCII lowercase letters, digits or hyphens. Before WU-13 this also
@@ -92,7 +92,7 @@ fn is_valid_hook_name(name: &str) -> bool {
     shape_ok && HookName::from_str(name, true).is_ok()
 }
 
-/// Ports `filter_hooks` from `shell/gen-shared-settings.py`: within each
+/// Ports `filter_hooks` from the retired shell original: within each
 /// event, keep only the hook groups that have at least one entry whose
 /// command passes `is_safe_hook_command`, and within a kept group, only its
 /// safe entries; drop an event entirely once none of its groups have any
@@ -162,7 +162,7 @@ fn keep_only(map: &mut Map<String, Value>, allowed: &[&str]) -> Vec<String> {
     dropped
 }
 
-/// The transform itself, ported from `shell/gen-shared-settings.py`'s
+/// The transform itself, ported from the retired shell original's
 /// `main`: replace `.permissions`, force `skipAutoPermissionPrompt: false`,
 /// keep only shippable top-level and `env` keys, and filter `.hooks` if
 /// present. `serde_json`'s `Map::insert` updates a key already present in
@@ -233,7 +233,7 @@ fn validate_hooks_shape(src: &Map<String, Value>, src_path: &Path) -> Result<(),
 }
 
 /// Load `src_path` and `perms_path`, validate PERMS the way
-/// `shell/gen-shared-settings.py`'s guard does (a JSON object with a
+/// the retired shell original's guard does (a JSON object with a
 /// non-empty `allow` array), then run `build` and serialise the result as
 /// `json.dumps(result, indent=2)` plus the trailing newline `print` adds.
 ///

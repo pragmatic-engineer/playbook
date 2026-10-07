@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/rm-workspace-guard.sh: denies an `rm` whose target sits outside
+//! Ports the retired shell original: denies an `rm` whose target sits outside
 //! the safe roots, `~/.claude/**`, and the scratch trees `/tmp` and
 //! `~/.cache` (contents only, not those roots themselves).
 //!

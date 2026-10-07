@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Integration tests for `playbook worktree review setup` and the setup then
-//! teardown round trip, ported from `shell/review-worktree.test.sh`.
+//! teardown round trip, ported from the retired shell test.
 
 use std::fs;
 use std::path::{Path, PathBuf};

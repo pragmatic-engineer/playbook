@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! One module per hook name, matching hooks.json's `HookName` set exactly.
-//! Every module is a stub for now: `run` takes the parsed payload and does
-//! nothing, so this Work Unit's binary never panics and always exits 0. A
-//! later Work Unit fills in one module's body with real behaviour, touching
-//! only that file; `dispatch` below is already exhaustive over `HookName`
-//! and does not need to change when a stub becomes real.
+//! Each module owns its hook's behaviour, and `dispatch` below is exhaustive
+//! over `HookName`.
 
 use crate::common::payload::Payload;
 use crate::HookName;
