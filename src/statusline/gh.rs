@@ -4,7 +4,6 @@
 //! GitHub-facing helpers: remote parsing (`shell/gh-remote.sh`), ISO-8601
 //! parsing, `PATH` lookup and the detached cache refreshes.
 
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
@@ -90,12 +89,22 @@ pub fn iso_to_epoch(s: &str) -> Option<i64> {
 
 /// First executable named `name` on `path`.
 pub fn find_in_path(name: &str, path: &str) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
     path.split(':').filter(|d| !d.is_empty()).find_map(|dir| {
         let cand = Path::new(dir).join(name);
         let meta = std::fs::metadata(&cand).ok()?;
-        (meta.is_file() && meta.permissions().mode() & 0o111 != 0).then_some(cand)
+        (meta.is_file() && is_executable(&meta)).then_some(cand)
     })
+}
+
+#[cfg(unix)]
+fn is_executable(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_: &std::fs::Metadata) -> bool {
+    true
 }
 
 /// File mtime in epoch seconds, 0 when it cannot be read.
@@ -133,8 +142,8 @@ fn fire(gh: &Path, cache: &Path, now: i64, args: &[String]) {
     {
         return;
     }
-    let spawned = Command::new("sh")
-        .arg("-c")
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c")
         .arg(REFRESH_SCRIPT)
         .arg("_")
         .arg(&lock)
@@ -144,9 +153,10 @@ fn fire(gh: &Path, cache: &Path, now: i64, args: &[String]) {
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .spawn();
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let spawned = cmd.spawn();
     if spawned.is_err() {
         let _ = std::fs::remove_file(&lock);
     }

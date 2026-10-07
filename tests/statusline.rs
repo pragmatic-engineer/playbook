@@ -430,15 +430,14 @@ fn the_jira_ticket_links_only_when_a_base_url_is_configured() {
     let plain = jira_out(None);
     assert!(
         plain.contains("\x1b[38;2;148;226;213mPROJ-123\x1b[0m")
-            && !plain.contains("atlassian")
+            && !plain.contains("jira.example")
             && !plain.contains("/browse/")
     );
-    let linked = jira_out(Some("https://example.atlassian.net"));
-    assert!(linked.contains("https://example.atlassian.net/browse/PROJ-123"));
-    let slash = jira_out(Some("https://example.atlassian.net/"));
+    let linked = jira_out(Some("https://jira.example.test"));
+    assert!(linked.contains("https://jira.example.test/browse/PROJ-123"));
+    let slash = jira_out(Some("https://jira.example.test/"));
     assert!(
-        slash.contains("https://example.atlassian.net/browse/PROJ-123")
-            && !slash.contains("//browse")
+        slash.contains("https://jira.example.test/browse/PROJ-123") && !slash.contains("//browse")
     );
 }
 

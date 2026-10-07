@@ -61,6 +61,7 @@ pub fn record(home: &str, sid: &str, cost: &str, used: &str, capture_at: i64, no
 }
 
 /// `[[ -w dir ]]`: true when the effective user may write into `dir`.
+#[cfg(unix)]
 fn is_writable(dir: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
     let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
@@ -68,4 +69,9 @@ fn is_writable(dir: &Path) -> bool {
     };
     // SAFETY: `c` is a valid NUL-terminated path for the duration of the call.
     unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
+}
+
+#[cfg(not(unix))]
+fn is_writable(dir: &Path) -> bool {
+    std::fs::metadata(dir).is_ok_and(|m| !m.permissions().readonly())
 }

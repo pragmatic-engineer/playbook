@@ -325,9 +325,12 @@ fn ci_badge(ci: &Ci) -> Option<String> {
 }
 
 fn ensure_cache_dir(dir: &Path) {
-    use std::os::unix::fs::PermissionsExt;
     if !dir.is_dir() && std::fs::create_dir_all(dir).is_ok() {
-        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        }
     }
 }
 
