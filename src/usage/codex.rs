@@ -161,7 +161,7 @@ impl Session {
         let input = token(last, "input_tokens");
         let cached = token(last, "cached_input_tokens").min(input);
         let mut event = UsageEvent {
-            event_id: format!("codex:{}:{total}", self.id),
+            event_id: format!("codex:{}:{timestamp}:{total}", self.id),
             timestamp,
             session_id: self.id.clone(),
             agent: "codex".to_string(),
@@ -206,14 +206,14 @@ mod tests {
         assert!(events.tools.is_empty());
         assert_eq!(
             events.usage.len(),
-            3,
-            "null info, repeat and junk are skipped"
+            4,
+            "null info, repeat, zero usage, junk and a non-rollout file are skipped"
         );
 
         let first = &events.usage[0];
         assert_eq!(
             first.event_id,
-            "codex:0199aaaa-0000-7000-8000-000000000001:1050"
+            "codex:0199aaaa-0000-7000-8000-000000000001:1788249610:1050"
         );
         assert_eq!(first.timestamp, 1788249610);
         assert_eq!(first.agent, "codex");
@@ -235,7 +235,7 @@ mod tests {
         let second = &events.usage[1];
         assert_eq!(
             second.event_id,
-            "codex:0199aaaa-0000-7000-8000-000000000001:3150"
+            "codex:0199aaaa-0000-7000-8000-000000000001:1788249660:3150"
         );
         assert_eq!(
             (
@@ -258,10 +258,24 @@ mod tests {
     }
 
     #[test]
+    fn cached_tokens_above_input_are_clamped_not_wrapped() {
+        let events = CodexSource::new(root()).events_since(0).unwrap();
+        let clamped = &events.usage[3];
+        assert_eq!(
+            (
+                clamped.input_tokens,
+                clamped.cache_read_tokens,
+                clamped.output_tokens
+            ),
+            (0, 50, 0)
+        );
+    }
+
+    #[test]
     fn the_watermark_drops_older_events() {
         let events = CodexSource::new(root()).events_since(1788249660).unwrap();
         let ids: Vec<_> = events.usage.iter().map(|e| e.timestamp).collect();
-        assert_eq!(ids, vec![1788249660, 1788339605]);
+        assert_eq!(ids, vec![1788249660, 1788339605, 1788340200]);
     }
 
     #[test]
@@ -278,10 +292,13 @@ mod tests {
         let conn = db::open_db(&dir.join("usage.db")).unwrap();
         let source = CodexSource::new(root());
         let first = ingest(&source, "unknown", &conn).unwrap();
+        db::advance_watermark(&conn, "codex", 0).unwrap();
         let again = ingest(&source, "unknown", &conn).unwrap();
-        assert_eq!(first.usage_inserted, 3);
+        assert_eq!(first.usage_inserted, 4);
         assert_eq!(again.usage_inserted, 0);
-        assert_eq!(db::count_usage_events(&conn).unwrap(), 3);
+        assert_eq!(again.duplicates_skipped, 4);
+        assert_eq!(again.usage_updated, 0);
+        assert_eq!(db::count_usage_events(&conn).unwrap(), 4);
         let stored = db::load_usage_events(&conn).unwrap();
         assert!(stored.iter().all(|e| e.agent == "codex"));
     }

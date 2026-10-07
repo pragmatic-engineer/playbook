@@ -141,10 +141,10 @@ fn usage_ingest_reads_codex_rollouts_when_the_sessions_dir_exists() {
     assert!(first.status.success() && second.status.success());
     assert_eq!(
         stdout(&first).trim(),
-        "usage ingest: added 6 usage events and 0 tool events (0 already stored)"
+        "usage ingest: added 7 usage events and 0 tool events (0 already stored)"
     );
     assert!(
-        stdout(&second).contains("added 0 usage events"),
+        stdout(&second).starts_with("usage ingest: added 0 usage events and 0 tool events"),
         "{}",
         stdout(&second)
     );

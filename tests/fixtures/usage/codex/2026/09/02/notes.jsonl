@@ -1,1 +1,1 @@
-not a rollout
+{"timestamp":"2026-09-02T09:30:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":9000,"cached_input_tokens":0,"output_tokens":9,"reasoning_output_tokens":0,"total_tokens":9009},"last_token_usage":{"input_tokens":9000,"cached_input_tokens":0,"output_tokens":9,"reasoning_output_tokens":0,"total_tokens":9009}}}}

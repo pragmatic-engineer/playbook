@@ -154,6 +154,7 @@ mod tests {
         assert_eq!(stats.usage_inserted, 3);
         let rows = db::load_usage_events(&conn).unwrap();
         assert!(rows.iter().all(|r| r.account == "dev@example.com"));
+        assert!(rows.iter().all(|r| r.agent == "claude-code"));
         assert_eq!(db::get_watermark(&conn, "claude-code").unwrap(), 1788307201);
         let _ = fs::remove_dir_all(dir);
     }
