@@ -18,10 +18,15 @@ release (so a backport tag cannot roll users back):
 
 ## The secret
 
-The workflow token cannot write to other repos, so the job needs the repository
-secret `RELEASE_PUSH_TOKEN`: a fine-grained personal access token with
+The workflow token cannot write to other repos, so the job needs the secret
+`RELEASE_PUSH_TOKEN`: a fine-grained personal access token with
 `contents: write` on both `homebrew-playbook` and `marketplace`. Writes go
 through the contents API, so GitHub signs the commits.
+
+Store it as an environment secret on the `release` environment (Settings,
+Environments, `release`), not as a repository secret. The job runs in that
+environment, and the environment only accepts deployments from `v*` tags, so a
+workflow on any other branch or tag cannot read the token.
 
 Without the secret the job prints a warning and passes. The release is still
 valid, but the tap and marketplace stay on the previous version until updated
