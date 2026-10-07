@@ -117,3 +117,35 @@ fn a_home_with_no_claude_data_prints_the_empty_message_and_exits_zero() {
     assert!(stdout(&out).contains("No usage recorded yet"));
     let _ = fs::remove_dir_all(dir);
 }
+
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap().flatten() {
+        let target = to.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn usage_ingest_reads_codex_rollouts_when_the_sessions_dir_exists() {
+    let home = Home::new("codex");
+    copy_dir(&fixtures().join("codex"), &home.0.join(".codex/sessions"));
+
+    let first = home.run(&["usage", "ingest"]);
+    let second = home.run(&["usage", "ingest"]);
+
+    assert!(first.status.success() && second.status.success());
+    assert_eq!(
+        stdout(&first).trim(),
+        "usage ingest: added 7 usage events and 0 tool events (0 already stored)"
+    );
+    assert!(
+        stdout(&second).starts_with("usage ingest: added 0 usage events and 0 tool events"),
+        "{}",
+        stdout(&second)
+    );
+}

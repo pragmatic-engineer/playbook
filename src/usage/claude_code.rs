@@ -99,7 +99,7 @@ const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
 /// with invalid UTF-8 is decoded lossily and an oversized line is skipped, so
 /// a bad byte costs at most that one line, never the whole transcript. A read
 /// error ends the file.
-fn read_lines(path: &Path, f: &mut dyn FnMut(&str)) {
+pub(crate) fn read_lines(path: &Path, f: &mut dyn FnMut(&str)) {
     let Ok(file) = fs::File::open(path) else {
         return;
     };
@@ -143,7 +143,7 @@ fn skip_to_newline(reader: &mut impl BufRead) -> std::io::Result<()> {
     }
 }
 
-fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(crate) fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -157,7 +157,7 @@ fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn modified_before(path: &Path, watermark: i64) -> bool {
+pub(crate) fn modified_before(path: &Path, watermark: i64) -> bool {
     let Ok(modified) = fs::metadata(path).and_then(|m| m.modified()) else {
         return false;
     };
@@ -167,7 +167,7 @@ fn modified_before(path: &Path, watermark: i64) -> bool {
     i64::try_from(since_epoch.as_secs()).is_ok_and(|secs| secs < watermark)
 }
 
-fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
+pub(crate) fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
@@ -250,7 +250,7 @@ fn tool_events(line: &Value, timestamp: i64) -> Vec<ToolInvocationEvent> {
 /// `2026-09-01T08:51:22.982Z` to epoch seconds (UTC). Fractional seconds are
 /// dropped. No date crate exists in this binary, so this uses the standard
 /// days-from-civil conversion.
-fn parse_iso8601_utc(s: &str) -> Option<i64> {
+pub(crate) fn parse_iso8601_utc(s: &str) -> Option<i64> {
     let (date, time) = s.split_once('T')?;
     let mut d = date.split('-');
     let year: i64 = d.next()?.parse().ok()?;

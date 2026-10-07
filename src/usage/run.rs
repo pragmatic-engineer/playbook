@@ -4,9 +4,10 @@
 //! The `playbook usage` commands' shared steps: resolve where the local data
 //! lives, ingest incrementally, render.
 
-use super::account::account_label;
+use super::account::{account_label, UNKNOWN_ACCOUNT};
 use super::backfill;
 use super::claude_code::ClaudeCodeSource;
+use super::codex::CodexSource;
 use super::db::{load_tool_events, load_usage_events, open_db};
 use super::ingest::{ingest, IngestStats};
 use super::summary;
@@ -14,10 +15,11 @@ use crate::common::paths::{playbook_root_from, usage_db_dir};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
-/// Where Claude Code's data and playbook's usage store live for one home.
+/// Where Claude Code's and Codex's data and playbook's usage store live for one home.
 pub struct Paths {
     pub claude_projects: PathBuf,
     pub claude_json: PathBuf,
+    pub codex_sessions: PathBuf,
     pub db: PathBuf,
     pub lock: PathBuf,
 }
@@ -27,6 +29,7 @@ impl Paths {
         Self {
             claude_projects: home.join(".claude").join("projects"),
             claude_json: home.join(".claude.json"),
+            codex_sessions: home.join(".codex").join("sessions"),
             db: playbook_root_from(home).join("usage").join("usage.db"),
             lock: playbook_root_from(home)
                 .join("usage")
@@ -48,7 +51,15 @@ pub fn ingest_new(paths: &Paths) -> Result<(Connection, IngestStats), String> {
     let source = ClaudeCodeSource::new(paths.claude_projects.clone());
     backfill::run_once(&source, &conn)?;
     let account = account_label(&paths.claude_json);
-    let stats = ingest(&source, &account, &conn)?;
+    let mut stats = ingest(&source, &account, &conn)?;
+    if paths.codex_sessions.is_dir() {
+        let codex = CodexSource::new(paths.codex_sessions.clone());
+        let more = ingest(&codex, UNKNOWN_ACCOUNT, &conn)?;
+        stats.usage_inserted += more.usage_inserted;
+        stats.usage_updated += more.usage_updated;
+        stats.tools_inserted += more.tools_inserted;
+        stats.duplicates_skipped += more.duplicates_skipped;
+    }
     Ok((conn, stats))
 }
 

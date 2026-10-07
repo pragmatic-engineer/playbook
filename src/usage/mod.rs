@@ -10,6 +10,7 @@ pub mod aggregate;
 pub mod api;
 pub mod backfill;
 pub mod claude_code;
+pub mod codex;
 pub mod dashboard;
 pub mod db;
 pub mod ingest;
@@ -25,7 +26,8 @@ pub mod svg;
 /// source's own unique message id, the dedup key (a message can span several
 /// transcript lines carrying identical usage). `cache_creation_1h_tokens` is
 /// the part of `cache_creation_tokens` written to the one hour cache; the rest
-/// is the five minute cache. `cost_usd` and `unpriced` are derived from the
+/// is the five minute cache. `agent` names the source (empty is filled with
+/// the source name at ingest). `cost_usd` and `unpriced` are derived from the
 /// token counts by `apply_pricing`, never read back from storage.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UsageEvent {
@@ -33,6 +35,7 @@ pub struct UsageEvent {
     pub timestamp: i64,
     pub session_id: String,
     pub account: String,
+    pub agent: String,
     pub model: String,
     pub effort: String,
     pub repo: String,

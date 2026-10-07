@@ -65,6 +65,9 @@ fn ingest_at(
         let existed = db::has_usage_event(&tx, &event.event_id)?;
         let mut event = event;
         event.account = account.to_string();
+        if event.agent.is_empty() {
+            event.agent = name.to_string();
+        }
         let written = db::upsert_usage_event(&tx, &event)?;
         match (existed, written) {
             (false, _) => stats.usage_inserted += 1,
@@ -151,6 +154,7 @@ mod tests {
         assert_eq!(stats.usage_inserted, 3);
         let rows = db::load_usage_events(&conn).unwrap();
         assert!(rows.iter().all(|r| r.account == "dev@example.com"));
+        assert!(rows.iter().all(|r| r.agent == "claude-code"));
         assert_eq!(db::get_watermark(&conn, "claude-code").unwrap(), 1788307201);
         let _ = fs::remove_dir_all(dir);
     }
