@@ -4,7 +4,7 @@
 # Dependencies for this ~/.claude config (hooks, shell/, statusline).
 #
 # The canonical dependency list. `/playbook:setup` reads the `brew "X"` formula names
-# from here and runs a per-dependency check-then-install (shell/ensure-deps.sh):
+# from here and runs a per-dependency check-then-install (`playbook deps ensure`):
 # for each one it uses the version already on PATH (brew, nvm, pyenv, system, a
 # manual install) and installs via brew only when the tool is missing, so an
 # existing tool is never shadowed by a duplicate brew install. You can still run
