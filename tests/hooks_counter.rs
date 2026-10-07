@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Behavioural tests for the `search-counter` and `post-edit-track` hooks,
-//! ported from `hooks/search-counter.test.sh` and
-//! `hooks/post-edit-track.test.sh`. Each test spawns the compiled
+//! ported from the retired shell test and
+//! the retired shell test. Each test spawns the compiled
 //! `playbook` binary exactly like the shell tests spawned `python3`: HOME
 //! points at a scratch directory (never the real `$HOME`) and the hook
 //! payload is piped on stdin, so the full CLI path (stdin read, JSON parse,

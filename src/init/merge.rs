@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Three-way merge for Claude Code's settings.json, ported from
-//! shell/merge-settings.py. That file's header comment is the merge
+//! the retired shell original. That file's header comment is the merge
 //! specification: the per-key policy, the NEWBASE_OUT partial base refresh
 //! rule (a contested key freezes the OLD base value, never the template's),
 //! and validation rules N2 (TEMPLATE and USER must be JSON objects), N3
@@ -38,7 +38,7 @@ use std::path::Path;
 /// python's `dict.get(k)` returns `None` both when `k` is absent and when
 /// `base[k]` is itself JSON `null`, since `json.load` maps `null` to `None`
 /// with no way to tell the two apart from the return value alone. Every
-/// comparison against BASE in `shell/merge-settings.py` goes through that
+/// comparison against BASE in the retired shell original goes through that
 /// same `.get(k)`, so a key missing from BASE and a key explicitly `null` in
 /// BASE behave identically there. `JSON_NULL` lets `base_lookup` mirror that
 /// conflation exactly: a key absent from `base` compares as `Value::Null`,
@@ -50,7 +50,7 @@ fn base_lookup<'a>(base: &'a Map<String, Value>, key: &str) -> &'a Value {
 }
 
 /// N2: TEMPLATE or USER failed to load as a JSON object. Carries the same
-/// wording shell/merge-settings.py's `die()` would have printed to stderr,
+/// wording the retired shell original's `die()` would have printed to stderr,
 /// so a caller that surfaces this to a user sees the same words the shell
 /// tooling always has.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +87,7 @@ impl From<std::io::Error> for MergeError {
 /// One entry in the skip report: a top-level key where the template shipped
 /// an update but the user had already customised it away from base, so the
 /// update was withheld. Field order matches the `{key, template_had, yours}`
-/// object shell/merge-settings.py:108 appends to `skipped`, since `Serialize`
+/// object the retired shell original appends to `skipped`, since `Serialize`
 /// on a struct writes fields in declaration order, the same way
 /// `src/common/emit.rs` relies on struct field order to pin JSON key order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -167,7 +167,7 @@ fn load_base(path: &Path) -> (Map<String, Value>, Option<String>) {
 }
 
 /// The merge policy this implements is specified in full in
-/// shell/merge-settings.py's header comment; this is a line-for-line port of
+/// the retired shell original's header comment; this is a line-for-line port of
 /// its `three_way_merge`, over the sorted union of TEMPLATE's and USER's
 /// top-level keys (`sorted(set(...))` there, matching jq's `unique()`).
 fn three_way_merge(
@@ -245,7 +245,7 @@ fn three_way_merge(
 
 /// Write `content` to `path` atomically: write to a sibling temp file in the
 /// same directory, then rename it into place, mirroring
-/// `tempfile.mkstemp` plus `os.replace` in shell/merge-settings.py's own
+/// `tempfile.mkstemp` plus `os.replace` in the retired shell original's own
 /// `atomic_write`. Renaming onto an existing path is atomic on the same
 /// filesystem, so a reader of `path`, or a crash between the temp write and
 /// the rename, never observes a partially written file; on failure the temp
@@ -282,7 +282,7 @@ fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
 }
 
 /// What a caller (eventually `playbook init`, wired in WU-8) does with a
-/// successful merge: print `stdout` where `shell/merge-settings.py` would
+/// successful merge: print `stdout` where the retired shell original would
 /// have printed it (its own trailing newline not included here, matching
 /// how `src/common/emit.rs`'s emitters hand back an unterminated string for
 /// `println!` to terminate); warn with `base_warning` if it is `Some`; act
@@ -297,7 +297,7 @@ pub struct MergeOutcome {
 }
 
 /// Three-way merge BASE, TEMPLATE and USER into MERGED, refresh NEWBASE_OUT,
-/// and optionally write SKIP_OUT. Ports shell/merge-settings.py's `main`;
+/// and optionally write SKIP_OUT. Ports the retired shell original's `main`;
 /// see this module's header comment for the merge policy and validation
 /// rules, and for why this returns `Result` where python calls
 /// `sys.exit(1)` or lets an exception crash the process.
@@ -309,7 +309,7 @@ pub fn merge(
     skip_out: Option<&Path>,
 ) -> Result<MergeOutcome, MergeError> {
     // N2: TEMPLATE and USER are validated before BASE is even read, matching
-    // shell/merge-settings.py's main() order; nothing is written on failure.
+    // the retired shell original's main() order; nothing is written on failure.
     let template = load_required(template_path, "TEMPLATE")?;
     let user = load_required(user_path, "USER")?;
     // N4: BASE degrades to {} with a warning rather than failing the merge.

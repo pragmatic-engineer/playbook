@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! SessionStart hook (ports hooks/session-init.py). Prepares the per-session
+//! SessionStart hook (ports the retired shell original). Prepares the per-session
 //! runtime directory and zeroes its counters, warns on a resumed session
 //! whose config has drifted since it was created, and injects SessionStart
 //! additionalContext: the project memory slice, an auto-learn nudge, a
@@ -22,7 +22,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// How long to wait for a shelled-out `bash` or `git` call before giving up.
-/// Matches hooks/session-init.py:29's `timeout=15`.
+/// Matches the retired shell original's `timeout=15`.
 const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Shared cap for the injected memory slice, graph-backed or native
@@ -30,7 +30,7 @@ const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 const MEMORY_BODY_CAP_CHARS: usize = 16000;
 
 /// The per-session counter/state files zeroed at the start of every session.
-/// `capture-crossings` has no python counterpart, so this no longer matches hooks/session-init.py:88 one-for-one.
+/// `capture-crossings` has no python counterpart, so this no longer matches the retired shell original one-for-one.
 const SESSION_COUNTER_FILES: [&str; 6] = [
     "search-count",
     "tool-count",
@@ -175,7 +175,7 @@ fn zero_session_state(dir: &str) {
 
 /// Clear the statusline PR/CI cache entries for the current repo+branch, so
 /// the first render of a new session fetches fresh data. Matches
-/// hooks/session-init.py:100-113.
+/// the retired shell original.
 fn clear_statusline_cache() {
     let home = home_dir().to_string_lossy().into_owned();
     let sl_cache = std::env::var("STATUSLINE_CACHE_DIR").unwrap_or_else(|_| {
@@ -200,7 +200,7 @@ fn clear_statusline_cache() {
 /// stored at session creation, and returns the `(system_message,
 /// extra_context)` warning pair to emit if they differ. Always refreshes
 /// the stored hash on a `startup` source, which becomes the new baseline.
-/// Matches hooks/session-init.py:120-152.
+/// Matches the retired shell original.
 fn check_config_drift(payload: &Payload, dir: &str, plugin_root: &str) -> (String, String) {
     let current_hash = config_hash(Path::new(plugin_root), SUBPROCESS_TIMEOUT);
     if current_hash.is_empty() || dir.is_empty() {
@@ -399,7 +399,7 @@ fn cap_memory_body(body: String) -> String {
 
 /// Nudge the user to refresh project memory if a previous session queued an
 /// auto-learn flag for this repo. Prunes stale flags first. Matches
-/// hooks/session-init.py:190-211.
+/// the retired shell original.
 fn append_auto_learn_nudge(extra_context: &mut String, repo_root: &str) {
     if std::env::var("AUTO_LEARN_NUDGE").unwrap_or_else(|_| "1".to_string()) == "0" {
         return;
@@ -411,7 +411,7 @@ fn append_auto_learn_nudge(extra_context: &mut String, repo_root: &str) {
     // Trim before parsing: python's `int(...)` strips surrounding
     // whitespace, so a padded value must parse the same way here rather
     // than silently falling back to the default. Matches
-    // hooks/session-init.py:193.
+    // the retired shell original.
     let max_age_days = std::env::var("AUTO_LEARN_MAX_AGE_DAYS")
         .ok()
         .and_then(|v| v.trim().parse().ok())
@@ -464,7 +464,7 @@ fn prune_old(qdir: &Path, max_age_days: i64) {
 /// The `edits` count to report in the auto-learn nudge: the flag file's
 /// `edits` field if it parses as a JSON object, `"0"` if the field is
 /// absent, `"some"` on any read or parse failure. Matches
-/// hooks/session-init.py:196-201.
+/// the retired shell original.
 fn learn_flag_edits(path: &Path) -> String {
     let Ok(contents) = fs::read_to_string(path) else {
         return "some".to_string();
@@ -487,7 +487,7 @@ fn learn_flag_edits(path: &Path) -> String {
 }
 
 /// Build the "Your toolkit" primer from the installed skills and commands,
-/// as `- name: description` lines. Matches hooks/session-init.py:213-231.
+/// as `- name: description` lines. Matches the retired shell original.
 fn append_skills_primer(extra_context: &mut String, home: &str) {
     if std::env::var("SKILLS_PRIMER").unwrap_or_else(|_| "1".to_string()) == "0" {
         return;
@@ -514,7 +514,7 @@ fn append_skills_primer(extra_context: &mut String, home: &str) {
 /// `- name: one-line description` for every `<root>/<skill>/SKILL.md`,
 /// sorted the same way the bash glob `*/SKILL.md` would be: by the entry
 /// name with `/SKILL.md` appended, so the `/` participates in the sort key.
-/// Matches hooks/session-init.py:282-310 (the `kind == "skill"` branch).
+/// Matches the retired shell original (the `kind == "skill"` branch).
 fn catalog_skills(root: &Path) -> String {
     if !root.is_dir() {
         return String::new();
@@ -543,7 +543,7 @@ fn catalog_skills(root: &Path) -> String {
 }
 
 /// `- /name: one-line description` for every `<root>/*.md`, sorted by file
-/// name. Matches hooks/session-init.py:282-310 (the `kind == "command"`
+/// name. Matches the retired shell original (the `kind == "command"`
 /// branch).
 fn catalog_commands(root: &Path) -> String {
     if !root.is_dir() {
@@ -585,7 +585,7 @@ fn finalize_catalog_lines(lines: Vec<String>) -> String {
 /// first line `---` and the next `---`), with leading whitespace and one
 /// pair of enclosing quotes stripped. Empty when the file is unreadable,
 /// has no frontmatter, or lacks the field. Matches
-/// hooks/session-init.py:55-75.
+/// the retired shell original.
 fn frontmatter_field(path: &Path, field: &str) -> String {
     let Ok(contents) = fs::read_to_string(path) else {
         return String::new();
@@ -612,7 +612,7 @@ fn frontmatter_field(path: &Path, field: &str) -> String {
 
 /// Collapse newlines and tabs to spaces, then truncate to 150 characters
 /// (147 plus an ellipsis) so a runaway description cannot blow up the
-/// primer. Matches hooks/session-init.py:78-82.
+/// primer. Matches the retired shell original.
 fn one_line(text: &str) -> String {
     let collapsed: String = text
         .chars()
@@ -630,7 +630,7 @@ fn one_line(text: &str) -> String {
 }
 
 /// Append the async and deferred-tool discipline reminder, unless disabled.
-/// Matches hooks/session-init.py:234-247.
+/// Matches the retired shell original.
 fn append_async_discipline(extra_context: &mut String) {
     if std::env::var("ASYNC_DISCIPLINE").unwrap_or_else(|_| "1".to_string()) == "0" {
         return;
@@ -640,7 +640,7 @@ fn append_async_discipline(extra_context: &mut String) {
 
 /// Append `addition` to `ctx`, separated by a blank line if `ctx` already
 /// has content. Matches the `extra_context = extra_context + "\n\n" + x if
-/// extra_context else x` pattern repeated through hooks/session-init.py.
+/// extra_context else x` pattern repeated through the retired shell original.
 fn push_context(ctx: &mut String, addition: &str) {
     if ctx.is_empty() {
         ctx.push_str(addition);
@@ -651,7 +651,7 @@ fn push_context(ctx: &mut String, addition: &str) {
 }
 
 /// Replace every character outside `[A-Za-z0-9_.-]` with `_`. Matches
-/// hooks/session-init.py:51-52's `slugify`.
+/// the retired shell original's `slugify`.
 fn slugify(s: &str) -> String {
     s.chars()
         .map(|c| {
@@ -793,7 +793,7 @@ struct SessionStartContext<'a> {
 }
 
 /// Print the single SessionStart payload, or nothing at all if there is
-/// nothing to say. Matches hooks/session-init.py:249-259.
+/// nothing to say. Matches the retired shell original.
 fn emit(system_message: &str, extra_context: &str) {
     if system_message.is_empty() && extra_context.is_empty() {
         return;

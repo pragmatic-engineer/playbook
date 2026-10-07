@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Integration tests for `playbook::settings::gen`, ported from
-//! `shell/gen-shared-settings.test.sh`'s 10 scenarios (A through J). The real
-//! `shell/gen-shared-settings.py` WAS the oracle. Every test that compares
+//! the retired shell test's 10 scenarios (A through J). The real
+//! the retired shell original WAS the oracle. Every test that compares
 //! generated JSON now asserts against a frozen copy of its stdout under
 //! `tests/fixtures/golden/`; see that directory's README. The python is
 //! deleted by ADR 0007 WU-14, so freezing its output is what keeps those
@@ -71,7 +71,7 @@ fn write_file(path: &Path, content: &str) {
 }
 
 /// Canned permissions fixture, reused read-only across scenarios, matching
-/// `shell/gen-shared-settings.test.sh`'s `PERMS`.
+/// the retired shell test's `PERMS`.
 const CANNED_PERMS: &str = r#"{
   "allow": ["Read", "Bash(git:*)"],
   "deny": ["Read(**/.env)"],

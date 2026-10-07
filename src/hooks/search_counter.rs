@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/search-counter.py: a PreToolUse hook on Grep/Glob/Read that
+//! Ports the retired shell original: a PreToolUse hook on Grep/Glob/Read that
 //! tracks exploration breadth and nudges Claude toward the Explore subagent
 //! once the main session fans out across many files.
 //!
@@ -42,7 +42,7 @@ pub fn run(payload: &Payload) {
         if !path.is_empty() {
             let abs_path = abspath(&path);
             if !seen(&seen_file, &abs_path) {
-                // hooks/search-counter.py appends to seen_file with a plain
+                // the retired shell original appends to seen_file with a plain
                 // unlocked `open(..., "a")`. The bytes written here are
                 // identical; only the synchronisation differs, a deliberate
                 // difference rather than a divergence in behaviour.

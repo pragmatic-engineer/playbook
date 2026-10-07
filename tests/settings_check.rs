@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Every scenario in `shell/check-shared-settings.test.sh`, ported.
+//! Every scenario in the retired shell test, ported.
 //!
 //! Each rejection case is asserted individually rather than as "some error":
 //! a validator whose failure paths are untested is worse than none, because it

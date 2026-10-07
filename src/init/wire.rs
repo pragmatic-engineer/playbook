@@ -5,8 +5,8 @@
 //! `playbook hook <name>` command: 13 functional hooks plus 5 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
-//! two mirror different sources: `PORTED_HOOK_SPECS` is the 11 hooks
-//! `hooks/hooks.json` used to register, while `GUARD_SPECS` is the guards
+//! two mirror different sources: `PORTED_HOOK_SPECS` is the 13 functional
+//! hooks, while `GUARD_SPECS` is the guards
 //! `settings.json` wires directly, carrying their own `if` and `timeout`
 //! fields hooks.json never had. `wire` treats both lists identically: every
 //! entry in either is upserted unconditionally through `upsert_hook`. A

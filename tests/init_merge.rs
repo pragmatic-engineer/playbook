@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Integration tests for `playbook::init::merge`, ported from
-//! `shell/merge-settings.test.sh`'s 19 scenarios (s1 through s19). The real
-//! `shell/merge-settings.py` is the oracle throughout: every comparison test
+//! the retired shell test's 19 scenarios (s1 through s19). The real
+//! the retired shell original is the oracle throughout: every comparison test
 //! runs it as a subprocess and diffs its actual stdout and output files
 //! against the Rust port's, rather than hand-typing an expected JSON blob.
 //!
@@ -86,7 +86,7 @@ struct Fixture {
     frozen_newbase: Option<(&'static str, &'static str)>,
     /// The frozen python oracle for this fixture: a JSON object with
     /// `stdout`, `newbase` and `skip` string fields, captured from
-    /// `shell/merge-settings.py`. See tests/fixtures/golden/README.md.
+    /// the retired shell original. See tests/fixtures/golden/README.md.
     golden: &'static str,
 }
 
@@ -286,7 +286,7 @@ fn mandatory_and_ported_fixtures_rust_and_python_mergers_agree() {
 
 const VALID_OBJECT: &str = r#"{"k":"v"}"#;
 
-/// N2 (`shell/merge-settings.py`'s TEMPLATE/USER validation): a case where
+/// N2 (the retired shell original's TEMPLATE/USER validation): a case where
 /// exactly one of TEMPLATE or USER is missing, unparsable, or not a JSON
 /// object. `None` means the file is never written at all (the "missing"
 /// case); `Some(content)` means it is written with that (invalid) content.
@@ -399,7 +399,7 @@ fn n4_missing_base_becomes_empty_object_with_warning_not_hard_fail() {
     let rs_newbase = dir.join("rs-newbase.json");
 
     // The frozen python oracle for this fixture: `exit_code`, `stdout` and
-    // `stderr`, captured from shell/merge-settings.py before its deletion.
+    // `stderr`, captured from the retired shell original before its deletion.
     // `stderr`'s BASE path is normalised to `<base-path>`, since python's
     // warning text embeds the absolute path of the (never written)
     // `no-such-base.json`, which varies with the capture machine's temp
@@ -461,7 +461,7 @@ fn n4_invalid_base_becomes_empty_object_with_warning_not_hard_fail() {
     let rs_newbase = dir.join("rs-newbase.json");
 
     // The frozen python oracle for this fixture: `exit_code` and `stderr`,
-    // captured from shell/merge-settings.py before its deletion. `stderr`'s
+    // captured from the retired shell original before its deletion. `stderr`'s
     // BASE path is normalised to `<base-path>` for the same reason as
     // init-merge.n4-missing-base.json. See tests/fixtures/golden/README.md.
     let golden: Value = serde_json::from_str(include_str!(
@@ -511,7 +511,7 @@ fn n3_zero_withheld_keys_writes_empty_skip_array() {
     let rs_skip = dir.join("rs-skip.json");
 
     // The frozen python oracle for this fixture: `exit_code` and `skip`
-    // (SKIP_OUT's content), captured from shell/merge-settings.py before its
+    // (SKIP_OUT's content), captured from the retired shell original before its
     // deletion. See tests/fixtures/golden/README.md.
     let golden: Value = serde_json::from_str(include_str!(
         "fixtures/golden/init-merge.n3-zero-withheld-keys.json"
@@ -634,7 +634,7 @@ fn c2_coincidence_keeps_user_value_frozen_through_a_matching_template_cycle() {
 
     // The frozen python oracle for both cycles: `cycle1_exit_code`,
     // `cycle1_newbase` (cycle 1's NEWBASE_OUT content) and
-    // `cycle2_exit_code`, captured from shell/merge-settings.py before its
+    // `cycle2_exit_code`, captured from the retired shell original before its
     // deletion. Cycle 2's python run used cycle 1's NEWBASE_OUT as its BASE
     // input, same as the rust run below does with `nb1`, so freezing only
     // what each cycle actually asserts on keeps the capture faithful. See
