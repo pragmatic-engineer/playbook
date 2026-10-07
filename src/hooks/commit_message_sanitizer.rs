@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! PreToolUse hook that removes AI attribution from the messages a Bash call
-//! writes with `git commit`, `git tag` or `git merge`. It never blocks. When a
-//! message changes, the hook hands Claude Code the same call with the message
-//! cleaned and no permission decision, so the normal permission flow still
-//! applies. A message kept in a file is read from a heredoc instead, and the
-//! file itself is never rewritten.
+//! Removes AI attribution from the messages a Bash call writes: a commit, tag,
+//! merge or PR title and body. It never blocks.
+//!
+//! On PreToolUse, when a message changes, the hook hands Claude Code the same
+//! call with the message cleaned and no permission decision, so the normal
+//! permission flow still applies. A message kept in a file is read from a
+//! heredoc instead, and the file itself is never rewritten. On PostToolUse it
+//! is a backstop that cleans what the rewrite could not see, such as a call
+//! another hook rewrote too (see `post`).
 //!
 //! Every `git commit` that would carry no `Signed-off-by` line gets `-s`, so
 //! the DCO check passes. The hook stands down when the command has `-s`,
@@ -22,19 +25,29 @@
 mod engine;
 mod gh;
 mod git;
+mod post;
 mod sources;
 
 use crate::common::payload::Payload;
 use crate::common::{emit_pre_context, emit_pre_updated_input};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn run(payload: &Payload) {
     let command = payload.field(".tool_input.command");
     if !may_run_git_or_gh(&command) {
         return;
     }
-    let rewritten = engine::rewrite(&command, &start_dir(payload));
+    let dir = start_dir(payload);
+    if payload.field(".hook_event_name") == "PostToolUse" {
+        post::run(payload, &command, &dir);
+    } else {
+        pre(payload, &command, &dir);
+    }
+}
+
+fn pre(payload: &Payload, command: &str, dir: &Path) {
+    let rewritten = engine::rewrite(command, dir);
     let note = context(&rewritten.findings);
     if rewritten.command != command {
         if let Some(mut input) = payload.value(".tool_input").cloned() {

@@ -17,7 +17,7 @@
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
-//!   and all 17 ported hooks (the 13 functional hooks plus the 4 safety
+//!   and all 18 ported hooks (the 13 functional hooks plus the 5 safety
 //!   guards) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
@@ -238,6 +238,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "bg-await-guard",
         "no-slop-guard",
         "precommit-check",
+        "commit-message-sanitizer",
     ]
     .into_iter()
     .collect();
@@ -245,7 +246,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly all 17 ported HookName variants in binary form"
+        "wiring should register exactly all 18 ported HookName variants in binary form"
     );
 }
 
@@ -318,6 +319,7 @@ fn no_hook_command_points_under_claude_hooks_dir_after_wiring() {
         "bg-await-guard",
         "no-slop-guard",
         "precommit-check",
+        "commit-message-sanitizer",
     ] {
         assert!(
             commands.contains(&format!("playbook hook {name}")),
@@ -575,6 +577,31 @@ fn auto_guard_is_wired_on_ask_user_question_and_on_every_prompt() {
         prompt.contains(&(None, command.to_string())),
         "auto-guard must sit under UserPromptSubmit with no matcher: {prompt:?}"
     );
+}
+
+#[test]
+fn commit_message_sanitizer_is_wired_on_bash_before_and_after_the_call() {
+    // Arrange
+    let path = scratch_settings_path("commit-message-sanitizer");
+    let command = "playbook hook commit-message-sanitizer";
+
+    // Act
+    wire(&path).expect("wire should succeed on a fresh install");
+    let settings = read_json(&path);
+
+    // Assert: the rewrite before the call, the backstop after it, both on Bash
+    for event in ["PreToolUse", "PostToolUse"] {
+        let registrations = event_registrations(&settings, event);
+        let wired: Vec<_> = registrations
+            .iter()
+            .filter(|(_, cmd)| cmd == command)
+            .collect();
+        assert_eq!(
+            wired,
+            vec![&(Some("Bash".to_string()), command.to_string())],
+            "the sanitizer must sit under {event} matcher Bash exactly once: {registrations:?}"
+        );
+    }
 }
 
 #[test]

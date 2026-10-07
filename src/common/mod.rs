@@ -31,7 +31,7 @@ pub use paths::{
     cc_state_dir, memory_dir, playbook_root, repo_scoped_dir, runtime_root, usage_db_dir, RepoScope,
 };
 pub use payload::Payload;
-pub use proc::run_with_timeout;
+pub use proc::{run_with_input, run_with_timeout};
 pub use repo::repo_slug;
 pub use session::{abspath, home_dir, session_dir, session_id};
 

@@ -42,7 +42,8 @@ if ! command -v playbook >/dev/null 2>&1; then
   hc_out=""
 else
   hc_out=$(playbook doctor hook-commands-for-event ~/.claude/settings.json PreToolUse \
-    rm-workspace-guard bg-await-guard no-slop-guard precommit-check 2>/dev/null) || wired_status="UNKNOWN"
+    rm-workspace-guard bg-await-guard no-slop-guard precommit-check \
+    commit-message-sanitizer 2>/dev/null) || wired_status="UNKNOWN"
 fi
 if [ "$wired_status" = "UNKNOWN" ]; then
   echo "UNKNOWN"
@@ -58,13 +59,13 @@ else
       problems="$problems $guard:NOT_WIRED"
     fi
   done <<< "$hc_out"
-  echo "wired=$wired/4$problems"
+  echo "wired=$wired/5$problems"
 fi
 ```
 
 Report:
 
-- `wired=4/4` → PASS.
+- `wired=5/5` → PASS.
 - Any `NOT_WIRED` → **FAIL.** The guard is either still on its legacy
   `~/.claude/hooks/<name>.sh` command from before this change shipped, or
   missing from `settings.json` entirely; either way it is not running from
@@ -465,7 +466,7 @@ one-line remediation hint. Example shape:
 
 ```
 PASS  plugin enabled
-PASS  safety guards wired (4 of 4)
+PASS  safety guards wired (5 of 5)
 INFO  launcher not installed (opt-in; run /playbook:setup)    -- run /playbook:setup and choose Yes for the launcher question
 INFO  system prompt not installed (opt-in, recommended) -- run /playbook:setup and choose Yes for the system prompt question
 INFO  status line differs from the shipped copy -- stale, or a local fix ahead of the release; a plugin install will overwrite it either way

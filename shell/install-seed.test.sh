@@ -81,7 +81,7 @@ run_scenario() {
 }
 
 # (A) Fresh install: settings.json is valid JSON, matches the template on
-# every non-hooks key, and wires 17 distinct hooks as 21 entries (4 fire on two matchers each).
+# every non-hooks key, and wires 18 distinct hooks as 23 entries (5 fire on two events or matchers each).
 scenario_fresh() {
   local d src home log rc
   d="$(mktemp -d "$WORK/fresh.XXXXXX")"
@@ -101,7 +101,7 @@ scenario_fresh() {
     || { echo "  non-hooks keys differ from the template: $err"; return 1; }
   local n_ported
   n_ported="$("$BIN_SRC" doctor hook-commands-matching "$settings" '^playbook hook ')"
-  [ "$n_ported" = "21" ] || { echo "  expected 21 ported hook commands (17 distinct), got $n_ported"; return 1; }
+  [ "$n_ported" = "23" ] || { echo "  expected 23 ported hook commands (18 distinct), got $n_ported"; return 1; }
 }
 
 # (B) A user-authored hook entry in a pre-existing settings.json survives a
@@ -136,7 +136,7 @@ EOF
     || { echo "  user-authored hook entry lost: $(cat "$settings" 2>/dev/null)"; return 1; }
   local n_ported
   n_ported="$("$BIN_SRC" doctor hook-commands-matching "$settings" '^playbook hook ')"
-  [ "$n_ported" = "21" ] || { echo "  ported hooks not wired alongside the user entry (got $n_ported)"; return 1; }
+  [ "$n_ported" = "23" ] || { echo "  ported hooks not wired alongside the user entry (got $n_ported)"; return 1; }
 }
 
 # (C) install.sh's own file-copy loop still skips a settings.json shipped in

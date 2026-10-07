@@ -13,7 +13,7 @@
 //! polling `try_wait()` against `std::time::Instant` on a short sleep,
 //! killing the child if the deadline passes before it exits on its own.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -46,12 +46,33 @@ fn collect_by(rx: &mpsc::Receiver<Vec<u8>>, deadline: Instant) -> Option<Vec<u8>
 /// is drained while the child runs, so a chatty child (a git hook, a push)
 /// cannot stall on a full pipe. Never panics.
 pub fn run_with_timeout(command: &mut Command, timeout: Duration) -> Option<Output> {
+    run_bounded(command, None, timeout)
+}
+
+/// Like [`run_with_timeout`], with `input` written to the child's standard
+/// input, then closed. The write happens on its own thread, so a child that
+/// does not read it cannot stall the deadline.
+pub fn run_with_input(command: &mut Command, input: &[u8], timeout: Duration) -> Option<Output> {
+    run_bounded(command, Some(input.to_vec()), timeout)
+}
+
+fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration) -> Option<Output> {
+    let stdin = if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    };
     let mut child = command
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
+    if let (Some(bytes), Some(mut pipe)) = (input, child.stdin.take()) {
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(&bytes);
+        });
+    }
     let (Some(out_pipe), Some(err_pipe)) = (child.stdout.take(), child.stderr.take()) else {
         let _ = child.kill();
         let _ = child.wait();
@@ -106,6 +127,16 @@ mod tests {
         let output = got.expect("echo should finish well within the deadline");
         assert!(output.status.success());
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
+    }
+
+    #[test]
+    fn run_with_input_feeds_standard_input_to_the_child() {
+        let mut command = Command::new("cat");
+
+        let got = run_with_input(&mut command, b"from stdin", Duration::from_secs(5));
+
+        let output = got.expect("cat should finish well within the deadline");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "from stdin");
     }
 
     #[test]

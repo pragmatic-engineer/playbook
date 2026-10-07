@@ -37,7 +37,7 @@ Combined flags are fine: `-Au`, `-a -u`, etc. No flags means every variable stay
 3. Do not assume file contents or git state; check them.
 4. Combine independent bash operations into single tool calls.
 5. Never run destructive git commands (`reset --hard`, `push --force`, `clean -f`) unless the user explicitly asks.
-6. Never skip hooks (`--no-verify`, `--no-gpg-sign`).
+6. Never skip hooks (`--no-verify`, `--no-gpg-sign`). The `commit-message-sanitizer` hook also removes any AI attribution from a commit, tag, merge or PR message before it runs; it never blocks.
 7. Never amend automatically: only when `AMEND_COMMIT=true`.
 8. Pass commit messages via heredoc to preserve formatting, never `-m "..."` for multi-line.
 

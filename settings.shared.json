@@ -119,6 +119,11 @@
             "command": "playbook hook precommit-check",
             "if": "Bash(git commit:*)",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "playbook hook commit-message-sanitizer",
+            "timeout": 10
           }
         ]
       },
