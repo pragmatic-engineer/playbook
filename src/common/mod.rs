@@ -16,6 +16,7 @@ pub mod payload;
 pub mod proc;
 pub mod repo;
 pub mod session;
+pub mod shell;
 
 pub use atomic::atomic_append;
 pub use config_hash::config_hash;
