@@ -433,11 +433,11 @@ A `cheap-check` lens dispatches a `cheap-checker` agent (`subagent_type: playboo
 | scope | scope-control.md |
 | tests | (none, no matching category) |
 
-This mapping was derived the same way `/playbook:deep-review`'s Step 3 mapping was: matching each lens's stated concern against the bullet content of `skills/grounding-review/SKILL.md`'s Evaluation Categories, now split into `skills/grounding-review/references/*.md`. `scope` maps to `scope-control.md` directly since the category names match exactly. `principles` (SOLID/DRY/KISS/YAGNI violations, leftover speculative code, needless abstraction) has no matching category: `maintainability.md` covers mixed concerns, magic numbers, and naming, but never speculative code or unnecessary abstraction, the YAGNI half of this lens's own stated focus, so `principles` falls back to the full `SKILL.md` like `tests` does rather than pointing at a reference file that only partially covers its concern.
+`scope` maps to `scope-control.md` directly since the category names match exactly. `principles` (SOLID/DRY/KISS/YAGNI violations, leftover speculative code, needless abstraction) has no matching category: `maintainability.md` covers mixed concerns, magic numbers, and naming, but never speculative code or unnecessary abstraction, the YAGNI half of this lens's own stated focus, so `principles` falls back to the full `SKILL.md` like `tests` does rather than pointing at a reference file that only partially covers its concern.
 
 `behaviour-drift` (did a refactor change observable behaviour) also has no matching category: none of the 7 reference files ask whether a simplification changed behaviour, that is a distinct concern from the bug-pattern checks `correctness.md` covers, so it falls back to the full `SKILL.md` too rather than reusing a file that only partially fits.
 
-Path resolution and fallback follow the same single rule as `/playbook:deep-review`'s Step 3 mapping: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real bash step before building the string, the same way `commands/doctor.md:123` does, for example:
+Path resolution and fallback follow the same single rule as `/playbook:deep-review`'s Step 3 mapping: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real bash step before building the string, inside an executed bash block, for example:
 
 ```bash
 REF_FILE="${CLAUDE_PLUGIN_ROOT}/skills/grounding-review/references/<file>.md"

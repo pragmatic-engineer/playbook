@@ -118,7 +118,7 @@ It then runs `gh pr merge <n> --auto --match-head-commit <sha>` with the head co
 
 A stacked PR whose base is another open PR is not merged before its base: the command says so and stops. In auto mode, a PR that no review covered (any caller other than `/playbook:implement`) is marked ready but never merged, even with `autoMerge.enabled` on. The settings work the same in `ask` and `auto` mode, and neither asks a question, because setting the key is your opt-in.
 
-`commit.signOff` stands down when the message already has the trailer, when you pass `--no-signoff` on purpose, or when the repo's `prepare-commit-msg` or `commit-msg` hook writes the trailer itself (through `git interpret-trailers`, `--signoff`, or an appended `Signed-off-by:` line). A hook that only checks for the trailer does not count, so the command still adds it. It does not control cryptographic signing: commits are always signed (`--gpg-sign`), using the key and format from your git config.
+`commit.signOff` stands down when the message already has the trailer, when you pass `--no-signoff` on purpose, or when the repo's `prepare-commit-msg` or `commit-msg` hook writes the trailer itself (through `git interpret-trailers`, `--signoff`, or an appended `Signed-off-by:` line). A hook that only checks for the trailer does not count, so the command still adds it. It does not control cryptographic signing: commits are signed whenever your git config has a `user.signingkey` (`--gpg-sign`), using the key and format from that config.
 
 ## A typical review cycle
 

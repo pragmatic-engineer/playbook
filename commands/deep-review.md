@@ -259,9 +259,9 @@ For each lens in a wave, read its Step 2d tier from the captured tier map before
   | docs | (none, no matching category) |
   | adr | architecture.md |
 
-  This mapping was derived by matching each lens's stated focus (the Reviewer Swarm table near the top of this file) against the bullet content of `skills/grounding-review/SKILL.md`'s 7 Evaluation Categories, now split into `skills/grounding-review/references/*.md` by an earlier Work Unit in this plan; it is not an arbitrary guess. `types` maps to `reliability.md`, not `correctness.md`: that file's "cast with `as` instead of parsed with a runtime schema validator" bullet is the one that actually matches the `types` lens's stated focus (unsafe casts, non-null assertions), and `correctness.md` has no bullet about either.
+  `types` maps to `reliability.md`, not `correctness.md`: that file's "cast with `as` instead of parsed with a runtime schema validator" bullet is the one that actually matches the `types` lens's stated focus (unsafe casts, non-null assertions), and `correctness.md` has no bullet about either.
 
-  Path resolution: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real bash step before building the string, the same way `commands/doctor.md:123` does (`shipped="${CLAUDE_PLUGIN_ROOT:-}/statusline.sh"` inside an executed bash block, not just prose asserting the variable), for example:
+  Path resolution: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real bash step before building the string, inside an executed bash block, not prose that merely names the variable, for example:
 
   ```bash
   REF_FILE="${CLAUDE_PLUGIN_ROOT}/skills/grounding-review/references/<file>.md"

@@ -7,7 +7,7 @@
 # script fetches, verifies (SHA256, then a --version smoke test), and installs
 # the playbook binary into PLAYBOOK_BIN_DIR (default $HOME/.local/bin), puts
 # that directory on PATH, then hands off to `playbook init`, which wires the
-# 11 functional hooks and the 4 always-on safety guards into settings.json,
+# 13 functional hooks and the 5 always-on safety guards into settings.json,
 # places the guard scripts, and seeds or merges the other local configs
 # (settings.json, statusline, shell integration). Interactive by default;
 # every optional step asks before it runs.

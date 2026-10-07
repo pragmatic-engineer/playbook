@@ -10,11 +10,11 @@ The policy lives in `prompts/SYSTEM_PROMPT.md`. Three tiers:
 
 **Haiku** is the default for spawned subagents on mechanical, formatting, or search tasks. It's 3x cheaper. Escalate to Sonnet when the subagent does real coding, and to Opus when it needs architecture.
 
-**Opus** handles deep architectural planning only, and only when Sonnet wasn't enough. Keep Opus under 20% of total usage.
+**Opus** handles design work (`/playbook:plan`, `/playbook:adr`), every reviewer spawn (`/playbook:quick-review`, `/playbook:deep-review`, `/playbook:implement` Step 9), the auditor behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`. Sonnet stays on `/playbook:implement`, `/playbook:fix`, the implementer, critic, fact-checker and test-reviewer.
 
-### Plan-mode routing
+### Design work
 
-The system prompt directs: enter plan mode first for design work (new features, non-trivial refactors, architecture decisions). `settings.json` sets `"useAutoModeDuringPlan": true`, which puts auto mode in effect during plan mode. The system prompt states this combination routes plan mode to Opus and execution to Sonnet.
+Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode. Each runs on Opus at high effort by its own frontmatter.
 
 ### auto-model-detect
 
@@ -34,22 +34,23 @@ Effort is a second dial next to the model tier. Agent files, commands, and skill
 
 The rule: lower effort where the work is mechanical or already decided, and never where a missed finding is costly. A model that is wrong costs a rerun; a reviewer that stops looking costs a bug in production.
 
-| File | Effort | Reasoning |
-| --- | --- | --- |
-| `agents/git` | `low` (was medium) | Runs fixed git and `gh` steps from a command that already decided what to do. |
-| `agents/patch-applier` | `low` (was medium) | Applies a diff someone else approved, verbatim, with no judgment. |
-| `agents/collector` | `low` (was medium) | Gathers and compacts raw history; the analyst does the thinking later. |
-| `agents/cheap-checker` | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
-| `agents/review-triage` | `low` (was medium) | A three-way classifier; any bad or missing answer already falls back to `full-lens`, so a wrong call fails safe. |
-| `commands/quick-review` | `medium` (was high) | One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. |
-| `agents/reviewer`, `critic`, `fact-checker`, `test-reviewer` | `high` (kept) | A missed finding is the cost. This includes the security lens, so nothing here is lowered; the `-low` variants exist only for small diffs and are an orchestrator choice. |
-| `agents/implementer`, `analyst`, `auditor` | `high` (kept) | They write code or distill facts that later steps trust. |
-| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | `high` (kept) | Judgment and orchestration; mistakes propagate to every spawned agent. |
-| `commands/commit-and-push`, `create-pull-request`, `repo-audit` | none | They fork into `git` (`low`) and `auditor` (`high`), which set the effort. |
-| `commands/doctor`, `session-start`, `setup` | `low` (kept) | Run a script and print the result. |
-| `skills/*` | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
+| File | Model | Effort | Reasoning |
+| --- | --- | --- | --- |
+| `agents/git` | haiku | `low` (was medium) | Runs fixed git and `gh` steps from a command that already decided what to do. |
+| `agents/patch-applier` | haiku | `low` (was medium) | Applies a diff someone else approved, verbatim, with no judgment. |
+| `agents/collector` | haiku | `low` (was medium) | Gathers and compacts raw history; the analyst does the thinking later. |
+| `agents/cheap-checker` | haiku | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
+| `agents/review-triage` | haiku | `low` (was medium) | A three-way classifier; any bad or missing answer already falls back to `full-lens`, so a wrong call fails safe. |
+| `commands/quick-review` | sonnet (orchestrator) | `medium` (was high) | One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. |
+| `agents/reviewer`, `critic`, `fact-checker`, `test-reviewer` | reviewer opus; critic, fact-checker, test-reviewer sonnet | `high` (kept) | A missed finding is the cost. This includes the security lens, so nothing here is lowered; the `-low` variants exist only for small diffs and are an orchestrator choice. |
+| `agents/implementer`, `analyst`, `auditor` | implementer, analyst sonnet; auditor opus | `high` (kept) | They write code or distill facts that later steps trust. |
+| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `high` (kept) | Judgment and orchestration; mistakes propagate to every spawned agent. |
+| `commands/commit-and-push`, `create-pull-request`, `repo-audit` | fork into git (haiku) and auditor (opus) | none | They fork into `git` (`low`) and `auditor` (`high`), which set the effort. |
+| `commands/doctor`, `session-start`, `setup` | sonnet | `low` (kept) | Run a script and print the result. |
+| `agents/*-low`, `agents/*-xhigh` | same as base | `low` or `xhigh` | Generated by `playbook agents gen`. The orchestrator picks by diff size and risk; see `playbook:delegating-subagents`. |
+| `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
 
-No model changed. Every row already matches the three tiers above.
+Effort is fixed per agent file: base agents run high, and an orchestrator picks the `-low` or `-xhigh` variant by diff size and risk. Do not request xhigh or max on your own for anything else; if a deployment rejects it, use the base agent.
 
 ## Memory Protocol
 
