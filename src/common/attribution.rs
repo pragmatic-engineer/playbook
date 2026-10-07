@@ -12,8 +12,10 @@
 //! Only the shapes of attribution are matched, not every mention of a
 //! product: prose such as "the Claude Code plugin" stays, while a
 //! `Claude-Session:` line, a claude.ai link, a session id, a "Generated with"
-//! footer or a credit trailer that names an AI goes. Other trailers, such as
-//! `Fixes` or `Reviewed-by` from a person, are never touched.
+//! footer or a credit trailer for an AI goes. A credit is an AI's when its
+//! display name is an AI product or its address is a vendor or bot no-reply
+//! address, so `Claude Dupont` or `jane@anthropic.com` stay. Other trailers,
+//! such as `Fixes` or `Reviewed-by` from a person, are never touched.
 
 use std::ops::Range;
 
@@ -28,9 +30,9 @@ pub enum Shape {
     SessionId,
     /// A tool footer such as "Generated with Claude Code".
     Footer,
-    /// A `Co-authored-by`, `*-by` or `*-with` trailer naming an AI.
+    /// A `Co-authored-by`, `*-by` or `*-with` trailer crediting an AI.
     CreditTrailer,
-    /// A trailer in the final trailer block whose token names an AI.
+    /// A trailer in the final trailer block whose token or value names an AI.
     AiTrailer,
     /// A line carrying the robot emoji.
     RobotEmoji,
@@ -111,6 +113,62 @@ const FOOTER_PHRASES: [&str; 9] = [
 
 const SESSION_ID_MIN_LEN: usize = 16;
 
+/// Mail domains of the AI vendors.
+const AI_EMAIL_DOMAINS: [&str; 9] = [
+    "anthropic.com",
+    "claude.ai",
+    "openai.com",
+    "cursor.com",
+    "codeium.com",
+    "windsurf.com",
+    "devin.ai",
+    "cognition.ai",
+    "aider.chat",
+];
+
+/// Local parts of the addresses a vendor's tools send from.
+const VENDOR_LOCAL_PARTS: [&str; 5] = [
+    "noreply",
+    "no-reply",
+    "donotreply",
+    "do-not-reply",
+    "cursoragent",
+];
+
+/// Words a display name opens with when it is an AI product: `Claude Code`,
+/// `GitHub Copilot`, `gpt-4o`. `devin` is a common first name, so it counts
+/// only as `Devin AI`.
+const PRODUCT_WORDS: [&str; 12] = [
+    "claude",
+    "anthropic",
+    "openai",
+    "chatgpt",
+    "gpt",
+    "copilot",
+    "gemini",
+    "cursor",
+    "codeium",
+    "windsurf",
+    "aider",
+    "codex",
+];
+
+/// Words that may follow a product word in a display name, besides version
+/// numbers: `Claude Opus 4.5`, `copilot-swe-agent[bot]`.
+const NAME_QUALIFIERS: [&str; 11] = [
+    "code",
+    "opus",
+    "sonnet",
+    "haiku",
+    "ai",
+    "agent",
+    "cli",
+    "bot",
+    "assistant",
+    "swe",
+    "integration",
+];
+
 /// Removes every attribution line from a commit-style message, applying git's
 /// trailer-block rule to the final paragraph.
 pub fn sanitize(message: &str) -> Sanitized {
@@ -134,6 +192,12 @@ pub fn sanitize_editor(raw: &str) -> Sanitized {
     sanitized
 }
 
+/// Whether `message` has a `Signed-off-by:` line, which this repo's DCO check
+/// requires on every commit.
+pub fn has_sign_off(message: &str) -> bool {
+    message.lines().any(|l| l.starts_with("Signed-off-by:"))
+}
+
 /// The lines [`sanitize`] would remove from `message`.
 pub fn problems(message: &str) -> Vec<(usize, Shape)> {
     sanitize(message).removed
@@ -155,13 +219,11 @@ fn scan(text: &str, trailer_rule: bool) -> Sanitized {
     } else {
         None
     };
-    let mut removed = Vec::new();
+    let removed = removed_lines(&lines, block.as_ref());
     let mut kept: Vec<&str> = Vec::new();
     let mut dropped_since_kept = false;
     for (i, line) in lines.iter().enumerate() {
-        let in_block = block.as_ref().is_some_and(|b| b.contains(&i));
-        if let Some(shape) = classify(line, in_block) {
-            removed.push((i + 1, shape));
+        if removed.iter().any(|(n, _)| *n == i + 1) {
             dropped_since_kept = true;
             continue;
         }
@@ -183,6 +245,38 @@ fn scan(text: &str, trailer_rule: bool) -> Sanitized {
         text: tidy(kept, text.ends_with('\n')),
         removed,
     }
+}
+
+/// The attribution lines of `lines`. A trailer folded over indented
+/// continuation lines is judged as one unit, and removed as one.
+fn removed_lines(lines: &[&str], block: Option<&Range<usize>>) -> Vec<(usize, Shape)> {
+    let mut removed = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let in_block = block.is_some_and(|b| b.contains(&i));
+        let end = folded_end(lines, i);
+        if end == i + 1 {
+            removed.extend(classify(line, in_block).map(|shape| (i + 1, shape)));
+        } else {
+            let unit = lines[i..end].iter().map(|l| l.trim()).collect::<Vec<_>>();
+            if let Some(shape) = classify(&unit.join(" "), in_block) {
+                removed.extend((i..end).map(|n| (n + 1, shape)));
+            }
+        }
+    }
+    removed
+}
+
+/// The line after the last continuation of the trailer that starts at
+/// `start`, or `start + 1` when it has none or is not a trailer.
+fn folded_end(lines: &[&str], start: usize) -> usize {
+    if strict_trailer(lines[start]).is_none() {
+        return start + 1;
+    }
+    let continuations = lines[start + 1..]
+        .iter()
+        .take_while(|l| l.starts_with(char::is_whitespace) && !l.trim().is_empty())
+        .count();
+    start + 1 + continuations
 }
 
 /// Joins the kept lines without the blank lines a removal leaves at either
@@ -250,10 +344,11 @@ fn classify(line: &str, in_trailer_block: bool) -> Option<Shape> {
         Some(Shape::SessionId)
     } else if is_footer(&lower) && names_ai(&lower) {
         Some(Shape::Footer)
-    } else if loose.is_some_and(|(token, _)| is_credit_token(token)) && names_ai(&lower) {
+    } else if loose.is_some_and(|(token, value)| is_credit_token(token) && credits_ai(value)) {
         Some(Shape::CreditTrailer)
     } else if in_trailer_block
-        && strict_trailer(line).is_some_and(|(token, _)| names_ai(&token.to_lowercase()))
+        && strict_trailer(line)
+            .is_some_and(|(token, value)| names_ai(&token.to_lowercase()) || credits_ai(value))
     {
         Some(Shape::AiTrailer)
     } else if line.contains('\u{1F916}') {
@@ -291,6 +386,88 @@ fn is_footer(lower: &str) -> bool {
 fn is_credit_token(token: &str) -> bool {
     let token = token.to_lowercase();
     token.ends_with("-by") || token.ends_with("-with")
+}
+
+/// Whether a trailer value is an AI product or a vendor address: the display
+/// name must be the product's own name, so `Claude Dupont` is a person. A URL
+/// is never a credit.
+fn credits_ai(value: &str) -> bool {
+    if value.contains("://") {
+        return false;
+    }
+    let (name, address) = name_and_address(value);
+    is_product_name(name) || is_vendor_address(address)
+}
+
+/// Splits `Name <address>`. A value with no brackets is an address when it has
+/// an `@` and no blanks, and a name otherwise.
+fn name_and_address(value: &str) -> (&str, &str) {
+    let value = value.trim();
+    if let Some((name, rest)) = value.rsplit_once('<') {
+        if let Some(address) = rest.strip_suffix('>') {
+            return (name, address);
+        }
+    }
+    if value.contains('@') && !value.contains(char::is_whitespace) {
+        ("", value)
+    } else {
+        (value, "")
+    }
+}
+
+/// Whether `name` is an AI product's own name, optionally led by its vendor
+/// and followed by a model, version or role, and nothing else.
+fn is_product_name(name: &str) -> bool {
+    let mut depth = 0;
+    let outside: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            '(' => {
+                depth += 1;
+                ' '
+            }
+            ')' => {
+                depth -= 1;
+                ' '
+            }
+            _ if depth > 0 => ' ',
+            _ => c,
+        })
+        .collect();
+    let mut words: Vec<&str> = outside
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    if words.len() > 1 && matches!(words[0], "github" | "google") {
+        words.remove(0);
+    }
+    let known = |word: &&str| {
+        PRODUCT_WORDS.contains(word)
+            || NAME_QUALIFIERS.contains(word)
+            || word.chars().any(|c| c.is_ascii_digit())
+    };
+    match words.split_first() {
+        Some((&"devin", rest)) => rest.first() == Some(&"ai") && rest.iter().all(known),
+        Some((first, rest)) => PRODUCT_WORDS.contains(first) && rest.iter().all(known),
+        None => false,
+    }
+}
+
+/// Whether `address` is a vendor's no-reply address or any bot's GitHub
+/// no-reply address. A person's mailbox at a vendor is not.
+fn is_vendor_address(address: &str) -> bool {
+    let address = address.trim().to_lowercase();
+    let Some((local, domain)) = address.rsplit_once('@') else {
+        return false;
+    };
+    if domain == "users.noreply.github.com" {
+        return local.ends_with("[bot]");
+    }
+    VENDOR_LOCAL_PARTS.contains(&local)
+        && AI_EMAIL_DOMAINS
+            .iter()
+            .any(|d| domain == *d || domain.ends_with(&format!(".{d}")))
 }
 
 fn names_ai(lower: &str) -> bool {
@@ -453,10 +630,6 @@ mod tests {
             ("Co-authored-by: Windsurf", Shape::CreditTrailer),
             (
                 "Co-authored-by: Devin AI <devin-ai-integration[bot]@users.noreply.github.com>",
-                Shape::CreditTrailer,
-            ),
-            (
-                "Co-authored-by: Devin <devin@devin.ai>",
                 Shape::CreditTrailer,
             ),
             ("Co-authored-by: aider (gpt-4)", Shape::CreditTrailer),
@@ -730,12 +903,148 @@ mod tests {
         let Some(block) = trailer_block(&lines) else {
             return Vec::new();
         };
-        lines[block]
-            .iter()
-            .filter(|l| !l.starts_with('#'))
-            .filter_map(|l| strict_trailer(l))
-            .map(|(token, value)| format!("{token}: {value}").trim_end().to_string())
-            .collect()
+        let mut trailers: Vec<String> = Vec::new();
+        for line in lines[block].iter().filter(|l| !l.starts_with('#')) {
+            if let Some((token, value)) = strict_trailer(line) {
+                trailers.push(format!("{token}: {value}").trim_end().to_string());
+            } else if let Some(last) = trailers
+                .last_mut()
+                .filter(|_| line.starts_with(char::is_whitespace))
+            {
+                last.push(' ');
+                last.push_str(line.trim());
+            }
+        }
+        trailers
+    }
+
+    #[test]
+    fn a_credit_is_ai_attribution_by_its_display_name_or_a_vendor_address() {
+        let ai = [
+            "Co-authored-by: Claude",
+            "Co-authored-by: Claude Code <x@example.com>",
+            "Co-authored-by: Claude Opus 4.5 <noreply@anthropic.com>",
+            "Co-authored-by: Claude Sonnet 4",
+            "Co-authored-by: Claude 3.5 Sonnet",
+            "Co-authored-by: Claude Haiku",
+            "Co-authored-by: Anthropic",
+            "Co-authored-by: ChatGPT",
+            "Co-authored-by: OpenAI Codex",
+            "Co-authored-by: GitHub Copilot <c@github.com>",
+            "Co-authored-by: Copilot",
+            "Co-authored-by: Gemini",
+            "Co-authored-by: Cursor Agent",
+            "Co-authored-by: aider (gpt-4)",
+            "Co-authored-by: Devin AI",
+            "Signed-off-by: Jane Doe <noreply@anthropic.com>",
+            "Signed-off-by: Jane Doe <no-reply@openai.com>",
+            "Co-authored-by: Jane Doe <cursoragent@cursor.com>",
+            "Co-authored-by: Jane Doe <devin-ai-integration[bot]@users.noreply.github.com>",
+            "Co-authored-by: Bot <49699333+dependabot[bot]@users.noreply.github.com>",
+            "Reviewed-by: noreply@anthropic.com",
+        ];
+        let kept = [
+            "Co-authored-by: Claude Dupont <claude@example.fr>",
+            "Co-authored-by: Jane Doe <jane@anthropic.com>",
+            "Signed-off-by: Jane Doe <jane@anthropic.com>",
+            "Signed-off-by: Claude Dupont <claude.dupont@example.com>",
+            "Signed-off-by: Jane Doe <jane@users.noreply.github.com>",
+            "Co-authored-by: Gemini Rodriguez <g@example.com>",
+            "Co-authored-by: Devin Smith <devin@example.com>",
+            "Co-authored-by: Devin <devin@example.com>",
+            "Co-authored-by: Jane Doe <jane@cursor.com>",
+        ];
+        for line in ai {
+            assert_eq!(only_shape(line), Some(Shape::CreditTrailer), "{line}");
+        }
+        for line in kept {
+            assert_eq!(only_shape(line), None, "{line}");
+        }
+    }
+
+    #[test]
+    fn has_sign_off_looks_for_the_trailer_at_the_start_of_a_line() {
+        assert!(has_sign_off("feat: x\n\nSigned-off-by: A <a@b.c>\n"));
+        assert!(!has_sign_off(
+            "feat: x\n\nbody mentions Signed-off-by: here\n"
+        ));
+        assert!(!has_sign_off("feat: x\n"));
+    }
+
+    #[test]
+    fn a_human_sign_off_survives_so_the_dco_check_still_passes() {
+        let message = "feat: x\n\nbody\n\nCo-authored-by: Claude <noreply@anthropic.com>\nSigned-off-by: Claude Dupont <claude@example.fr>\nSigned-off-by: Jane Doe <jane@anthropic.com>\n";
+
+        let got = sanitize(message);
+
+        assert_eq!(got.removed, vec![(5, Shape::CreditTrailer)]);
+        assert!(
+            got.text.contains("Signed-off-by:"),
+            "the DCO check looks for this text: {}",
+            got.text
+        );
+        assert_eq!(
+            got.text,
+            "feat: x\n\nbody\n\nSigned-off-by: Claude Dupont <claude@example.fr>\nSigned-off-by: Jane Doe <jane@anthropic.com>\n"
+        );
+    }
+
+    #[test]
+    fn a_trailer_value_that_is_an_ai_product_is_removed_from_the_final_block() {
+        let text = "feat: x\n\nbody\n\nRefs: 1\nAssistant: Claude Opus 4.5\nAI-Tool: GitHub Copilot\nSee-Also: https://github.com/anthropics/claude-code/issues/1\nReported-by: Claude Dupont\nNote: the claude code plugin\n";
+
+        let got = sanitize(text);
+
+        assert_eq!(
+            got.removed,
+            vec![(6, Shape::AiTrailer), (7, Shape::AiTrailer)]
+        );
+        assert_eq!(
+            got.text,
+            "feat: x\n\nbody\n\nRefs: 1\nSee-Also: https://github.com/anthropics/claude-code/issues/1\nReported-by: Claude Dupont\nNote: the claude code plugin\n"
+        );
+    }
+
+    #[test]
+    fn a_trailer_value_outside_the_final_block_is_left_alone() {
+        let text = "feat: x\n\nAssistant: Claude Opus 4.5\n\nprose closing paragraph\n";
+
+        assert_eq!(shapes(text), Vec::new());
+    }
+
+    #[test]
+    fn a_folded_trailer_is_removed_whole_and_the_rest_still_parses() {
+        let messages = [
+            "feat: x\n\nbody\n\nRefs: 1\nCo-authored-by: Claude\n <noreply@anthropic.com>\nSigned-off-by: Sam <s@x.y>\n",
+            "feat: x\n\nbody\n\nRefs: 1\nCo-authored-by: Sam\n  Claude <noreply@anthropic.com>\nSigned-off-by: Sam <s@x.y>\n",
+            "feat: x\n\nbody\n\nRefs: 1\nAssistant:\n\tClaude Opus\n\t4.5\nSigned-off-by: Sam <s@x.y>\n",
+        ];
+        for message in messages {
+            let got = sanitize(message);
+
+            assert_eq!(
+                git_trailers(&got.text),
+                vec![
+                    "Refs: 1".to_string(),
+                    "Signed-off-by: Sam <s@x.y>".to_string()
+                ],
+                "message: {message:?}"
+            );
+            assert!(git_trailers(message).len() == 3, "{message:?}");
+            assert_eq!(
+                got.text, "feat: x\n\nbody\n\nRefs: 1\nSigned-off-by: Sam <s@x.y>\n",
+                "message: {message:?}"
+            );
+            assert!(got.removed.len() >= 2, "every line of the unit is removed");
+        }
+    }
+
+    #[test]
+    fn a_folded_trailer_from_a_person_is_kept_whole() {
+        let text =
+            "feat: x\n\nbody\n\nRefs: 1\nCo-authored-by: Claude\n  Dupont <claude@example.fr>\n";
+
+        assert_eq!(sanitize(text).text, text);
     }
 
     #[test]
@@ -763,6 +1072,8 @@ mod tests {
             "feat: x\n\nbody\n\nFixes: 1\nCo-Authored-By: Claude\n# comment\n",
             "feat: x\n\nbody\n\nFixes: 1\nCo-Authored-By: Claude\n\n# Please enter\n# more\n",
             "feat: x\n\nbody\n\nFixes: 1\nCo-Authored-By:Claude\nCo-Authored-By :Claude\n",
+            "feat: x\n\nbody\n\nRefs: 1\nCo-Authored-By: Claude\n <noreply@anthropic.com>\nFixes: 2\n",
+            "feat: x\n\nbody\n\nAssistant:\n\tClaude Opus\n\t4.5\n",
             "feat: x\n\nbody\n\n(cherry picked from commit abc)\nnot a trailer\n",
             "feat: x\n\nbody\n\nGenerated with [Claude Code](https://claude.com)\n",
             "Signed-off-by: a\n",
