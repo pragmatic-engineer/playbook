@@ -368,14 +368,8 @@ fn finish_merge(settings_path: &Path, outcome: &merge::MergeOutcome, epoch: u64)
 /// idempotent re-run never prunes either family, matching the same "nothing
 /// changed, nothing happens" rule the write itself already follows.
 ///
-/// Known limitation, accepted rather than guarded against: the epoch has
-/// one-second granularity, so two real writes landing in the same wall-clock
-/// second collide on the same filename and the second silently overwrites
-/// the first's backup (and skip-report, if any). This only loses a stale
-/// backup generation, never the live `settings.json`, and is unlikely for a
-/// single `playbook init` invocation. `tests/init_run.rs`'s fixture-seeding
-/// scenarios work around the same granularity with fabricated epochs rather
-/// than a real write loop, for the identical reason.
+/// A backup already present under `epoch` is kept, so the first write of a
+/// run (or of a second) leaves the pre-change copy and the later ones add none.
 fn backup_then_write(
     path: &Path,
     content: &str,
@@ -563,5 +557,26 @@ fn place_statusline_step(self_root: Option<&Path>, home: &Path, edited: bool) ->
         ),
         Ok(dest) => StepReport::wired("statusline", format!("placed at {}", dest.display())),
         Err(err) => StepReport::failed("statusline", err.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::test_support::scratch_dir;
+
+    #[test]
+    fn a_backup_under_the_same_stamp_is_kept_and_the_write_still_lands() {
+        let dir = scratch_dir("init-backup-kept");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        fs::write(&path, "current").unwrap();
+        let backup = dir.join("settings.json.bak.1700000000");
+        fs::write(&backup, "pre-run original").unwrap();
+
+        backup_then_write(&path, "new", &[], 1_700_000_000).unwrap();
+
+        assert_eq!(fs::read_to_string(&backup).unwrap(), "pre-run original");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
     }
 }

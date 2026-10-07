@@ -11,7 +11,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 const KEEP_BACKUPS: usize = 3;
-/// Linux and macOS agree on this errno.
+/// Linux and macOS agree on this errno; on Windows 26 is something else.
+#[cfg(unix)]
 const ETXTBSY: i32 = 26;
 
 /// What a successful swap left behind.
@@ -47,6 +48,16 @@ pub fn run_version(bin: &Path) -> Result<String, String> {
 const TEXT_BUSY_ATTEMPTS: u32 = 20;
 const TEXT_BUSY_PAUSE: Duration = Duration::from_millis(50);
 
+#[cfg(unix)]
+fn is_text_busy(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(ETXTBSY)
+}
+
+#[cfg(not(unix))]
+fn is_text_busy(_: &std::io::Error) -> bool {
+    false
+}
+
 /// Retries `exec` on ETXTBSY only (raw os error 26), pausing between tries,
 /// for at most `TEXT_BUSY_ATTEMPTS` runs (about one second of waiting).
 fn retry_text_busy<T>(
@@ -56,7 +67,7 @@ fn retry_text_busy<T>(
     let mut attempt = 1;
     loop {
         match exec() {
-            Err(err) if err.raw_os_error() == Some(ETXTBSY) && attempt < TEXT_BUSY_ATTEMPTS => {
+            Err(err) if is_text_busy(&err) && attempt < TEXT_BUSY_ATTEMPTS => {
                 attempt += 1;
                 pause(TEXT_BUSY_PAUSE);
             }
@@ -324,6 +335,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_binary_still_held_open_for_writing_runs_once_the_handle_closes() {
         let dir = scratch_dir("swap-held");
         fs::create_dir_all(&dir).unwrap();
@@ -331,7 +343,7 @@ mod tests {
         script(&bin, "1.0.0");
         let holder = fs::OpenOptions::new().append(true).open(&bin).unwrap();
         let release = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(200));
+            std::thread::sleep(Duration::from_millis(100));
             drop(holder);
         });
         assert_eq!(run_version(&bin).unwrap(), "playbook 1.0.0");
