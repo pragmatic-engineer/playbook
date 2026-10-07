@@ -16,6 +16,7 @@
 # Run:  bash shell/install-resolve.test.sh
 # Exit: 0 if all scenarios pass, non-zero otherwise.
 set -u
+unset PLAYBOOK_REQUIRE_ATTESTATION STUB_GH GH_LOG
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL="$SCRIPT_DIR/../install.sh"
@@ -98,6 +99,21 @@ case "$1" in
 esac
 STUB
 chmod +x "$STUB_BIN/uname"
+
+# Stub gh. STUB_GH: pass | fail | missing | (unset = no attestation support, as if absent).
+cat > "$STUB_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+case "${STUB_GH:-absent}" in
+  absent) exit 127 ;;
+  *) [ "$1 $2" = "attestation --help" ] && exit 0
+     [ "$1 $2" = "attestation verify" ] || exit 1
+     echo "gh $*" >> "${GH_LOG:-/dev/null}"
+     [ "$STUB_GH" = pass ] && exit 0
+     [ "$STUB_GH" = missing ] && { echo "no attestations found for subject" >&2; exit 1; }
+     echo "no matching attestation" >&2; exit 1 ;;
+esac
+STUB
+chmod +x "$STUB_BIN/gh"
 
 # sha256 of a string, matching exactly what the curl stub writes to disk
 # (printf '%s', no trailing newline), so fixtures can produce a checksum line
@@ -343,6 +359,61 @@ s_successful_install() {
     && [[ "$out1" == *"Installed playbook 1.2.3"* ]]
 }
 
+# Runs an install with extra env; sets $out and $rc (the later tarball step fails by design).
+_run_attest() {
+  local home hash
+  home="$(mktemp -d "$WORK/h.XXXXXX")"
+  hash="$(_sha256 "$GOOD_ASSET_BODY")"
+  out="$(env "$@" PATH="$STUB_BIN:$PATH" CLAUDE_HOME="$home/.claude" HOME="$home" \
+        PLAYBOOK_BIN_DIR="$home/bin" SHELL=/bin/bash GH_LOG="$home/gh.log" \
+        STUB_CODE=200 STUB_BODY="$RELEASE_BODY" \
+        STUB_ASSET_BODY="$GOOD_ASSET_BODY" \
+        STUB_SUMS_BODY="$hash  $ASSET_1_2_3" \
+        bash "$INSTALL" --no-setup 2>&1)"
+  rc=$?
+  ATT_HOME="$home"
+  GH_LOGTXT="$(cat "$home/gh.log" 2>/dev/null)"
+}
+
+s_attest_pass() {
+  local out rc; _run_attest STUB_GH=pass
+  [[ "$out" == *"Verified the build attestation"* \
+     && "$GH_LOGTXT" == *"verify "*"/$ASSET_1_2_3 --repo pragmatic-engineer/playbook"* \
+     && "$GH_LOGTXT" == *"--signer-workflow pragmatic-engineer/playbook/.github/workflows/release.yml"* ]]
+}
+
+s_attest_fail() {
+  local out rc; _run_attest STUB_GH=fail
+  [[ $rc -ne 0 && "$out" == *"attestation verification failed"* \
+     && "$out" == *"no matching attestation"* && "$out" != *"Installed playbook"* ]] \
+    && [ ! -e "$ATT_HOME/bin/playbook" ]
+}
+
+s_attest_missing_warns() {
+  local out rc; _run_attest STUB_GH=missing
+  [[ "$out" == *"provenance not verified: no attestations found"* && "$out" == *"Installed playbook 1.2.3"* ]]
+}
+
+s_attest_missing_strict() {
+  local out rc; _run_attest STUB_GH=missing PLAYBOOK_REQUIRE_ATTESTATION=1
+  [[ $rc -ne 0 && "$out" == *"attestation verification failed"* && "$out" != *"Installed playbook"* ]]
+}
+
+s_attest_absent() {
+  local out rc; _run_attest STUB_GH=absent
+  [[ "$out" == *"provenance not verified"* && "$out" == *"Installed playbook 1.2.3"* ]]
+}
+
+s_attest_strict_absent() {
+  local out rc; _run_attest STUB_GH=absent PLAYBOOK_REQUIRE_ATTESTATION=1
+  [[ $rc -ne 0 && "$out" == *"PLAYBOOK_REQUIRE_ATTESTATION=1"* && "$out" != *"Installed playbook"* ]]
+}
+
+s_attest_strict_pass() {
+  local out rc; _run_attest STUB_GH=pass PLAYBOOK_REQUIRE_ATTESTATION=1
+  [[ "$out" == *"Installed playbook 1.2.3"* ]]
+}
+
 for s in \
   "published release resolves to its tag:s_release" \
   "no release (404) falls back to main:s_no_release" \
@@ -358,6 +429,13 @@ for s in \
   "unsupported platform names itself:s_unsupported_platform" \
   "neither shasum nor sha256sum on PATH:s_no_checksum_tool" \
   "successful install places the binary and wires PATH once:s_successful_install" \
+  "attestation passes and names the repo:s_attest_pass" \
+  "attestation failure is fatal:s_attest_fail" \
+  "release without attestations warns, not fatal:s_attest_missing_warns" \
+  "release without attestations is fatal when strict:s_attest_missing_strict" \
+  "no gh: checksum-only note, install continues:s_attest_absent" \
+  "strict mode without gh is fatal:s_attest_strict_absent" \
+  "strict mode with a passing attestation installs:s_attest_strict_pass" \
 ; do
   name="${s%%:*}"; fn="${s##*:}"
   if "$fn"; then pass "$name"; else fail "$name"; fi
