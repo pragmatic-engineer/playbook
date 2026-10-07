@@ -206,16 +206,12 @@ fi
 #    when the tool is already installed from somewhere else.
 # ---------------------------------------------------------------------------
 if [ "$SKIP_DEPS" -eq 0 ]; then
-    if command -v playbook >/dev/null 2>&1; then
+    if command -v playbook >/dev/null 2>&1 && playbook deps --help >/dev/null 2>&1; then
         log "Checking dependencies (install only what is missing)"
         playbook deps ensure "$SELF_ROOT/Brewfile" || warn "one or more dependency installs reported errors"
-    elif command -v brew >/dev/null 2>&1 && [ -f "$SELF_ROOT/Brewfile" ]; then
-        # Fallback when the playbook binary is not installed yet.
-        log "Installing dependencies (brew bundle)"
-        brew bundle --file "$SELF_ROOT/Brewfile" </dev/null \
-            || warn "brew bundle reported errors"
     else
-        warn "Cannot resolve dependencies (no playbook binary and no brew). See https://brew.sh"
+        # No blanket brew bundle: it would shadow tools installed from nvm, pyenv, etc.
+        warn "playbook binary missing or too old for 'deps ensure'; update it, then re-run with: playbook deps ensure Brewfile"
     fi
 fi
 
