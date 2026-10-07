@@ -180,7 +180,10 @@ add_init_flag() {
     if init_supports "$1"; then
         init_flags+=("$1")
     else
-        warn "the installed playbook does not support $1; skipping it. Update playbook and re-run this script."
+        # On stdout as well as stderr: /playbook:setup reports stdout, and
+        # this script cannot update the binary itself.
+        printf '%swarning:%s the installed playbook does not support %s; skipping it. Upgrade it with: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash, then re-run this script.\n' \
+            "$C_Y" "$C_0" "$1"
     fi
 }
 if [ "$CLAUDE_HOME" != "$HOME/.claude" ]; then

@@ -470,6 +470,15 @@ EOF
         *"does not support --aliases"*) ;;
         *) echo "expected an unsupported-flag warning, got: $out" >&2; return 1 ;;
     esac
+
+    # The upgrade step reaches stdout, which /playbook:setup reports.
+    out="$(STUB_INIT_HELP_ALIASES="" CLAUDE_HOME="$ch" HOME="$home" \
+           PATH="$bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+           bash "$SCRIPT" --skip-deps --aliases 2>/dev/null)"
+    case "$out" in
+        *"does not support --aliases"*"install.sh | bash"*) ;;
+        *) echo "expected the upgrade one-liner on stdout, got: $out" >&2; return 1 ;;
+    esac
 }
 
 # `playbook init` must NOT fire when CLAUDE_HOME is not the default

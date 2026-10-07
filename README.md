@@ -122,8 +122,9 @@ you have not read.
 
 6. Verify with `/playbook:doctor` in a Claude Code session.
 
-Route 2 does not install the `cc`/`ccd` shell launchers; `init` has no
-`--aliases`. Run `/playbook:setup` if you want them, or add the rc line by hand.
+Route 2 does not install the `cc`/`ccd` shell launchers unless you ask:
+`playbook init --aliases` installs them and wires your rc file. You can also
+run `/playbook:setup`.
 
 For requirements, pinning a version, and uninstall, see
 [docs/guides/00-install.md](docs/guides/00-install.md).

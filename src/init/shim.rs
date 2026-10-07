@@ -44,19 +44,13 @@ impl ShellKind {
         }
     }
 
-    /// The exact lines earlier installs sourced, newest first: the
-    /// pre-ADR-0012 `~/.claude/shell` path, then the path from before the
+    /// The launcher paths earlier installs sourced, relative to `$HOME`:
+    /// the pre-ADR-0012 `.claude/shell` path, then the path from before the
     /// bash/zsh/shared split.
-    fn legacy_source_lines(self) -> [&'static str; 2] {
+    fn legacy_launcher_paths(self) -> [&'static str; 2] {
         match self {
-            ShellKind::Bash => [
-                "source \"$HOME/.claude/shell/bash/cc.sh\"",
-                "source \"$HOME/.claude/shell/cc.sh\"",
-            ],
-            ShellKind::Zsh => [
-                "source \"$HOME/.claude/shell/zsh/cc.zsh\"",
-                "source \"$HOME/.claude/shell/cc.zsh\"",
-            ],
+            ShellKind::Bash => [".claude/shell/bash/cc.sh", ".claude/shell/cc.sh"],
+            ShellKind::Zsh => [".claude/shell/zsh/cc.zsh", ".claude/shell/cc.zsh"],
         }
     }
 }
@@ -68,10 +62,14 @@ pub struct ShimOutcome {
     pub rc_file: PathBuf,
     /// Whether this call changed the rc file, appended or replaced in place.
     pub appended: bool,
+    /// The rc file needed a change but lacks the owner write bit, so it was
+    /// left untouched.
+    pub unwritable: bool,
 }
 
 /// Copy the launcher entry points and shared modules into
-/// `playbook_root_from(home)/shell`, skipping `*.test.sh`.
+/// `playbook_root_from(home)/shell`, skipping `*.test.sh`, plus the
+/// `config-hash.sh` helper the launcher sources.
 pub fn copy_launcher_runtime(self_root: &Path, home: &Path) -> io::Result<bool> {
     let dst_shell = playbook_root_from(home).join("shell");
     let mut changed = false;
@@ -98,6 +96,17 @@ pub fn copy_launcher_runtime(self_root: &Path, home: &Path) -> io::Result<bool> 
         }
         changed |= copy_file_into(&entry.path(), &shared_dst.join(&name))?;
     }
+
+    // The launcher's config-drift module sources this from the config dir,
+    // outside any plugin context. A partial checkout without it is skipped,
+    // as install.sh does.
+    let config_hash_src = self_root.join("hooks/lib/config-hash.sh");
+    if config_hash_src.is_file() {
+        changed |= copy_file_into(
+            &config_hash_src,
+            &playbook_root_from(home).join("hooks/lib/config-hash.sh"),
+        )?;
+    }
     Ok(changed)
 }
 
@@ -113,58 +122,136 @@ fn copy_file_into(src: &Path, dst: &Path) -> io::Result<bool> {
 }
 
 /// Make sure `home`'s rc file for `shell_kind` sources the current launcher
-/// location, replacing an exact legacy line in place rather than appending.
+/// location exactly once: every legacy source line is removed, the first one
+/// replaced in place when the current line is missing, else the current line
+/// is appended. Works on bytes so a non-UTF-8 rc file is never mistaken for
+/// an empty one.
 pub fn rewire_rc_file(home: &Path, shell_kind: ShellKind) -> io::Result<ShimOutcome> {
     let rc_file = home.join(shell_kind.rc_file_name());
-    let existing = fs::read_to_string(&rc_file).unwrap_or_default();
+    let existing = match fs::read(&rc_file) {
+        Ok(bytes) => Some(bytes),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err),
+    };
+    let unchanged = ShimOutcome {
+        rc_file: rc_file.clone(),
+        appended: false,
+        unwritable: false,
+    };
 
-    if existing
-        .lines()
-        .any(|l| l.trim() == shell_kind.source_line())
-    {
+    let Some(existing) = existing else {
+        append_source_line(&rc_file, shell_kind)?;
         return Ok(ShimOutcome {
-            rc_file,
-            appended: false,
-        });
-    }
-
-    if let Some(replaced) = shell_kind
-        .legacy_source_lines()
-        .into_iter()
-        .find_map(|legacy| replace_exact_line(&existing, legacy, shell_kind))
-    {
-        atomic_write_rc_file(&rc_file, &replaced)?;
-        return Ok(ShimOutcome {
-            rc_file,
             appended: true,
+            ..unchanged
+        });
+    };
+
+    let rewritten = rewrite_legacy_lines(&existing, shell_kind);
+    if rewritten.is_none() && has_line(&existing, shell_kind.source_line()) {
+        return Ok(unchanged);
+    }
+    if !owner_can_write(&rc_file) {
+        return Ok(ShimOutcome {
+            unwritable: true,
+            ..unchanged
         });
     }
-
-    append_source_line(&rc_file, shell_kind)?;
+    match rewritten {
+        Some(content) => atomic_write_rc_file(&rc_file, &content)?,
+        None => append_source_line(&rc_file, shell_kind)?,
+    }
     Ok(ShimOutcome {
-        rc_file,
         appended: true,
+        ..unchanged
     })
 }
 
-/// Replace the one line trimming exactly to `legacy`. `None` if absent.
-fn replace_exact_line(content: &str, legacy: &str, shell_kind: ShellKind) -> Option<String> {
-    let mut lines: Vec<&str> = content.lines().collect();
-    let idx = lines.iter().position(|l| l.trim() == legacy)?;
-    lines[idx] = shell_kind.source_line();
-    let mut out = lines.join("\n");
-    out.push('\n');
-    Some(out)
+/// Whether some line of `content` trims to exactly `wanted`.
+fn has_line(content: &[u8], wanted: &str) -> bool {
+    content
+        .split(|&b| b == b'\n')
+        .any(|line| line.trim_ascii() == wanted.as_bytes())
 }
 
-/// Overwrite `rc_file` via a sibling temp file plus rename, preserving the original file's permission bits.
-fn atomic_write_rc_file(rc_file: &Path, content: &str) -> io::Result<()> {
-    let dir = rc_file
+/// Drop every legacy source line from `content`. The first one becomes the
+/// current line when no current line exists yet. `None` if there was no
+/// legacy line to touch.
+fn rewrite_legacy_lines(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
+    let mut current_present = has_line(content, shell_kind.source_line());
+    let mut out = Vec::with_capacity(content.len());
+    let mut touched = false;
+    for line in content.split_inclusive(|&b| b == b'\n') {
+        if !is_legacy_source_line(line, shell_kind) {
+            out.extend_from_slice(line);
+            continue;
+        }
+        touched = true;
+        if !current_present {
+            out.extend_from_slice(shell_kind.source_line().as_bytes());
+            out.push(b'\n');
+            current_present = true;
+        }
+    }
+    touched.then_some(out)
+}
+
+/// A non-comment line that sources (`source` or `.`) a legacy launcher path,
+/// written with `$HOME`, `${HOME}` or `~`, quoted or not.
+fn is_legacy_source_line(line: &[u8], shell_kind: ShellKind) -> bool {
+    let line = line.trim_ascii();
+    let Some(args) = line
+        .strip_prefix(b"source")
+        .or_else(|| line.strip_prefix(b"."))
+    else {
+        return false;
+    };
+    if !args.first().is_some_and(u8::is_ascii_whitespace) {
+        return false;
+    }
+    shell_kind.legacy_launcher_paths().iter().any(|path| {
+        ["$HOME", "${HOME}", "~"].iter().any(|home| {
+            let wanted = format!("{home}/{path}");
+            names_path(args, wanted.as_bytes())
+        })
+    })
+}
+
+/// Whether `args` holds `path` as a whole argument: the byte before is
+/// whitespace or a quote, the byte after is whitespace, a quote or the end.
+fn names_path(args: &[u8], path: &[u8]) -> bool {
+    args.windows(path.len())
+        .enumerate()
+        .filter(|(_, window)| *window == path)
+        .any(|(at, _)| {
+            let before = args[at - 1];
+            let after = args.get(at + path.len()).copied();
+            (before.is_ascii_whitespace() || before == b'"' || before == b'\'')
+                && after.is_none_or(|b| b.is_ascii_whitespace() || b == b'"' || b == b'\'')
+        })
+}
+
+#[cfg(unix)]
+fn owner_can_write(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o200 != 0)
+}
+
+#[cfg(not(unix))]
+fn owner_can_write(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|m| !m.permissions().readonly())
+}
+
+/// Overwrite `rc_file` via a temp file beside its real target plus rename,
+/// preserving permission bits. A symlinked rc (stow, chezmoi) stays a
+/// symlink: only the file it points at is replaced.
+fn atomic_write_rc_file(rc_file: &Path, content: &[u8]) -> io::Result<()> {
+    let target = fs::canonicalize(rc_file)?;
+    let dir = target
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(dir)?;
-    let original_permissions = fs::metadata(rc_file).ok().map(|m| m.permissions());
+    let original_permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     let tmp_path = dir.join(format!(".rc-rewire-{}.tmp", std::process::id()));
     if let Err(err) = fs::write(&tmp_path, content) {
         let _ = fs::remove_file(&tmp_path);
@@ -176,7 +263,7 @@ fn atomic_write_rc_file(rc_file: &Path, content: &str) -> io::Result<()> {
             return Err(err);
         }
     }
-    if let Err(err) = fs::rename(&tmp_path, rc_file) {
+    if let Err(err) = fs::rename(&tmp_path, &target) {
         let _ = fs::remove_file(&tmp_path);
         return Err(err);
     }

@@ -481,6 +481,13 @@ fn rewire_rc_file_step(
         return StepReport::skipped("shim", "launcher runtime copy not confirmed complete");
     }
     match shim::rewire_rc_file(home, shell_kind) {
+        Ok(outcome) if outcome.unwritable => StepReport::skipped(
+            "shim",
+            format!(
+                "{} is not writable; left unchanged, source the launcher there by hand",
+                outcome.rc_file.display()
+            ),
+        ),
         Ok(outcome) if outcome.appended => StepReport::wired(
             "shim",
             format!(

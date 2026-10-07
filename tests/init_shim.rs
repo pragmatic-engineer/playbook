@@ -244,6 +244,214 @@ fn rewire_rc_file_replaces_pre_layout_split_line_in_place_without_duplicating() 
     }
 }
 
+const ZSH_CURRENT: &str = "source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"";
+
+fn count_lines_sourcing(contents: &str, needle: &str) -> usize {
+    contents.lines().filter(|l| l.contains(needle)).count()
+}
+
+/// A re-run after a partial migration: the current line is already there and
+/// a legacy line lingers. The legacy line must go, not stay beside it.
+#[test]
+fn rewire_rc_file_removes_legacy_lines_even_when_the_current_line_exists() {
+    // Arrange
+    let home = temp_home("rc-both-lines");
+    let rc_file = home.join(".zshrc");
+    write_file(
+        &rc_file,
+        &format!(
+            "# playbook launchers (cc/ccd)\n{ZSH_CURRENT}\nsource \"$HOME/.claude/shell/cc.zsh\"\nalias ll='ls -la'\n"
+        ),
+    );
+
+    // Act
+    let first = rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed");
+    let second = rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed again");
+
+    // Assert
+    assert!(first.appended, "removing a legacy line is a change");
+    assert!(!second.appended, "the second run should be a no-op");
+    let contents = fs::read_to_string(&rc_file).unwrap();
+    assert_eq!(count_lines_sourcing(&contents, "cc.zsh"), 1, "{contents}");
+    assert_eq!(count_lines_sourcing(&contents, ".claude/shell"), 0);
+    assert_eq!(contents.matches("launchers (cc/ccd)").count(), 1);
+    assert!(contents.contains("alias ll='ls -la'"));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Every spelling of a legacy source line is migrated, and a comment that
+/// merely mentions the path is left alone.
+#[test]
+fn rewire_rc_file_matches_legacy_lines_loosely() {
+    // Arrange
+    let forms = [
+        "source \"$HOME/.claude/shell/zsh/cc.zsh\"",
+        "source \"${HOME}/.claude/shell/zsh/cc.zsh\"",
+        "source ~/.claude/shell/zsh/cc.zsh",
+        "source '$HOME/.claude/shell/cc.zsh'",
+        "source $HOME/.claude/shell/cc.zsh",
+        "  source    \"$HOME/.claude/shell/zsh/cc.zsh\"   # launchers",
+        ". \"$HOME/.claude/shell/zsh/cc.zsh\"",
+        "\tsource ~/.claude/shell/cc.zsh",
+    ];
+    for (i, form) in forms.iter().enumerate() {
+        let home = temp_home(&format!("rc-loose-{i}"));
+        let rc_file = home.join(".zshrc");
+        let comment = "# old: source ~/.claude/shell/zsh/cc.zsh";
+        write_file(&rc_file, &format!("{comment}\n{form}\nexport A=1\n"));
+
+        // Act
+        let outcome = rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed");
+
+        // Assert
+        assert!(outcome.appended, "form {form:?} should be migrated");
+        let contents = fs::read_to_string(&rc_file).unwrap();
+        assert_eq!(
+            contents,
+            format!("{comment}\n{ZSH_CURRENT}\nexport A=1\n"),
+            "form {form:?}"
+        );
+
+        let _ = fs::remove_dir_all(&home);
+    }
+}
+
+/// A lookalike that is not the legacy launcher must not be rewritten.
+#[test]
+fn rewire_rc_file_leaves_unrelated_cc_zsh_paths_alone() {
+    // Arrange
+    let home = temp_home("rc-lookalike");
+    let rc_file = home.join(".zshrc");
+    let unrelated =
+        "source \"$HOME/.claude/shell/zsh/cc.zsh.bak\"\nsource ~/other/.claude/shell/cc.zsh\n";
+    write_file(&rc_file, unrelated);
+
+    // Act
+    rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed");
+
+    // Assert: appended after, originals untouched.
+    let contents = fs::read_to_string(&rc_file).unwrap();
+    assert!(contents.starts_with(unrelated), "{contents}");
+    assert_eq!(contents.matches(ZSH_CURRENT).count(), 1);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A dotfile manager (stow, chezmoi) leaves `.zshrc` as a symlink; the
+/// rewrite must update the real file, not replace the link.
+#[cfg(unix)]
+#[test]
+fn rewire_rc_file_keeps_a_symlinked_rc_and_updates_its_target() {
+    // Arrange
+    let home = temp_home("rc-symlink");
+    let target = home.join("dotfiles/zshrc");
+    write_file(&target, "source \"$HOME/.claude/shell/zsh/cc.zsh\"\n");
+    let rc_file = home.join(".zshrc");
+    std::os::unix::fs::symlink(&target, &rc_file).unwrap();
+
+    // Act
+    let outcome = rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed");
+
+    // Assert
+    assert!(outcome.appended);
+    assert!(
+        fs::symlink_metadata(&rc_file)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the rc file should still be a symlink"
+    );
+    assert_eq!(
+        fs::read_to_string(&target).unwrap(),
+        format!("{ZSH_CURRENT}\n")
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// An rc file with a non-UTF-8 byte is existing content, not an empty file:
+/// it must survive byte for byte and gain exactly one source line.
+#[test]
+fn rewire_rc_file_preserves_a_non_utf8_rc_file() {
+    // Arrange: a Latin-1 comment ahead of the current line.
+    let home = temp_home("rc-latin1");
+    let rc_file = home.join(".zshrc");
+    let mut original = b"# configura\xe7\xe3o\n".to_vec();
+    original.extend_from_slice(format!("{ZSH_CURRENT}\n").as_bytes());
+    fs::write(&rc_file, &original).unwrap();
+
+    // Act
+    let unchanged = rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed");
+
+    // Assert: nothing appended, bytes intact.
+    assert!(!unchanged.appended);
+    assert_eq!(fs::read(&rc_file).unwrap(), original);
+
+    // Arrange: same rc, but with a legacy line instead.
+    let mut legacy = b"# configura\xe7\xe3o\n".to_vec();
+    legacy.extend_from_slice(b"source \"$HOME/.claude/shell/cc.zsh\"\n");
+    fs::write(&rc_file, &legacy).unwrap();
+
+    // Act
+    rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed");
+
+    // Assert: the legacy line is replaced, the Latin-1 bytes are intact.
+    assert_eq!(fs::read(&rc_file).unwrap(), original);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Without the owner write bit the rc file is left alone and the outcome
+/// says so, rather than renaming over it.
+#[cfg(unix)]
+#[test]
+fn rewire_rc_file_leaves_a_read_only_rc_untouched() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Arrange
+    let home = temp_home("rc-readonly");
+    let rc_file = home.join(".zshrc");
+    let before = "source \"$HOME/.claude/shell/cc.zsh\"\n";
+    write_file(&rc_file, before);
+    fs::set_permissions(&rc_file, fs::Permissions::from_mode(0o444)).unwrap();
+
+    // Act
+    let outcome = rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should not error");
+
+    // Assert
+    assert!(outcome.unwritable);
+    assert!(!outcome.appended);
+    assert_eq!(fs::read_to_string(&rc_file).unwrap(), before);
+    assert_eq!(
+        fs::metadata(&rc_file).unwrap().permissions().mode() & 0o777,
+        0o444
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn copy_launcher_runtime_places_config_hash_where_config_drift_sources_it() {
+    // Arrange
+    let home = temp_home("copies-config-hash");
+    let dst = home.join(".config/playbook/hooks/lib/config-hash.sh");
+
+    // Act
+    let first = copy_launcher_runtime(&self_root(), &home).expect("first copy should succeed");
+    let second = copy_launcher_runtime(&self_root(), &home).expect("second copy should succeed");
+
+    // Assert
+    assert!(first);
+    assert!(!second, "a second copy should find everything up to date");
+    assert_eq!(
+        fs::read(&dst).expect("config-hash.sh should be placed"),
+        fs::read(self_root().join("hooks/lib/config-hash.sh")).unwrap()
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 #[test]
 fn copy_launcher_runtime_copies_the_launcher_runtime_files() {
     // Arrange
