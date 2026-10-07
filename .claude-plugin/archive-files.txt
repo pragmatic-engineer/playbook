@@ -29,5 +29,4 @@ shell/shared
 # Run by slash commands through CLAUDE_PLUGIN_ROOT
 # (/playbook:setup, quick-review, deep-review, plan, adr, implement, learn-project)
 shell/setup-local.sh
-shell/ensure-deps.sh
 Brewfile

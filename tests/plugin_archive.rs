@@ -171,7 +171,6 @@ fn archive_contains_every_file_the_installed_plugin_reads_at_runtime() {
         "shell/bash/cc.sh",
         "shell/zsh/cc.zsh",
         "shell/setup-local.sh",
-        "shell/ensure-deps.sh",
         "Brewfile",
         "LICENSE",
         "README.md",
