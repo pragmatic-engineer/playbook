@@ -43,6 +43,8 @@ pub enum Placement {
     AlreadyCurrent(PathBuf),
     /// The shipped tree has no `prompts/SYSTEM_PROMPT.md` at this path.
     NotShipped(PathBuf),
+    /// The user edited the installed copy, so it was left untouched.
+    UserEdited(PathBuf),
     /// Not requested, and not already installed, so nothing to do.
     NotOptedIn,
 }
@@ -67,6 +69,10 @@ pub fn place_system_prompt(
     }
     if already_current(&source, &dest) {
         return Ok(Placement::AlreadyCurrent(dest));
+    }
+
+    if crate::init::migrate::user_edited(home, "system-prompt", &dest) {
+        return Ok(Placement::UserEdited(dest));
     }
 
     copy_atomically(&source, &dest)?;

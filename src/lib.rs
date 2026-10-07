@@ -498,6 +498,9 @@ pub enum ConfigCommand {
 /// `playbook doctor` subcommands, backing `src/doctor/`.
 #[derive(Subcommand, Debug)]
 pub enum DoctorCommand {
+    /// Print one line per Manual migration finding (a file edited after
+    /// playbook placed it), or nothing when none is pending.
+    PendingMigrations,
     /// Print `.version` from a `plugin.json`-shaped file, or an empty line
     /// if it is missing, unreadable, or not a string. Backs Layer 6.
     PluginVersion {

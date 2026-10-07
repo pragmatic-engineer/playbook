@@ -41,6 +41,8 @@ pub struct InitPaths {
     /// "refresh an existing copy" case here, since a launcher a user never
     /// asked for should not be touched at all.
     pub aliases: bool,
+    /// `(repo_root, dest_base)` when init runs inside a repo with a resolvable slug.
+    pub repo: Option<(PathBuf, PathBuf)>,
 }
 
 /// How one step of `run` landed.
@@ -133,15 +135,27 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let ctx = migrate::Ctx {
         home: paths.home.clone(),
         claude_home: paths.claude_home.clone(),
-        repo: None,
+        self_root: paths.self_root.clone(),
+        repo: paths.repo.clone(),
     };
     let migrated = migrate::run_pending(&ctx);
 
     let shell_runtime_step = install_shell_runtime_step(self_root, &paths.home, paths.aliases);
-    let statusline_step = place_statusline_step(self_root, &paths.home);
+    let statusline_edited = migrate::user_edited(
+        &paths.home,
+        "statusline",
+        &statusline::playbook_statusline_path(&paths.home),
+    );
+    let statusline_step = place_statusline_step(self_root, &paths.home, statusline_edited);
+    if !statusline_edited && step_confirmed(&statusline_step) {
+        migrate::record_statusline(&paths.home);
+    }
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
     if step_confirmed(&system_prompt_step) {
         migrate::record_system_prompt(&paths.home);
+    }
+    if let Some(root) = self_root {
+        migrate::record_skills(&paths.home, root);
     }
 
     let statusline_confirmed = step_confirmed(&statusline_step);
@@ -220,6 +234,10 @@ fn place_system_prompt_step(self_root: Option<&Path>, home: &Path, opt_in: bool)
         Ok(system_prompt::Placement::AlreadyCurrent(dest)) => StepReport::already_correct(
             "system-prompt",
             format!("already up to date at {}", dest.display()),
+        ),
+        Ok(system_prompt::Placement::UserEdited(dest)) => StepReport::skipped(
+            "system-prompt",
+            format!("left your edited copy at {}", dest.display()),
         ),
         Ok(system_prompt::Placement::NotShipped(source)) => StepReport::skipped(
             "system-prompt",
@@ -515,7 +533,7 @@ fn rewire_rc_file_step(
 }
 
 /// Place `statusline.sh` at its fixed destination under `home`.
-fn place_statusline_step(self_root: Option<&Path>, home: &Path) -> StepReport {
+fn place_statusline_step(self_root: Option<&Path>, home: &Path, edited: bool) -> StepReport {
     let Some(self_root) = self_root else {
         return StepReport::skipped(
             "statusline",
@@ -524,6 +542,12 @@ fn place_statusline_step(self_root: Option<&Path>, home: &Path) -> StepReport {
     };
     let source = self_root.join("statusline.sh");
     let dest = statusline::playbook_statusline_path(home);
+    if edited {
+        return StepReport::already_correct(
+            "statusline",
+            format!("left your edited copy at {}", dest.display()),
+        );
+    }
     let already_current = fs::read(&source)
         .ok()
         .zip(fs::read(&dest).ok())

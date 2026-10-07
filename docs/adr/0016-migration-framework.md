@@ -27,6 +27,7 @@ Issue #266 asks for a general way to carry users across breaking changes. The on
 ## Consequences
 
 - A new breaking change adds one registry entry instead of a new ad-hoc call site.
-- The system prompt placement still replaces the file on init; the first Manual entry warns before that happens. Making placement skip an edited file is a follow-up.
-- Per-repo migrations (the gate move) need a repo context, which `init` does not supply yet, so that entry is a no-op there and its call sites stay as they are.
-- A `playbook doctor` row for pending Manual items is not included.
+- Placement skips an edited system prompt or statusline: init warns, leaves the file, and the user takes the shipped copy by deleting it and running `playbook init` again. A file with no record is still replaced and then recorded.
+- `init` now supplies a repo context when run inside a repo (`manifest::check::toplevel` plus `repo_scoped_dir`), so the gate move runs there; outside a repo it stays a no-op, and the gate call sites stay as they are.
+- `playbook doctor pending-migrations` prints the Manual findings, and `commands/doctor.md` shows a row only when there is output.
+- Manual entries also cover the statusline and the shipped skills. Init places no skills; the plugin cache holds them, so their hashes are recorded per plugin version directory and a dev checkout (a `.git` entry) is skipped. `settings.json` is already three-way merged, so it needs no entry.

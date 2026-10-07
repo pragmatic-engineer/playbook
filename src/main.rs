@@ -64,7 +64,11 @@ fn main() {
                 .ok()
                 .and_then(|shell| ShellKind::detect(&shell));
 
+            let repo = manifest::check::toplevel().zip(common::paths::repo_scoped_dir(
+                common::paths::RepoScope::Worktree,
+            ));
             let paths = InitPaths {
+                repo,
                 self_root,
                 claude_home,
                 home,
@@ -472,6 +476,23 @@ fn main() {
                     doctor::field::hook_commands_for_event(&path, &event, &guard_refs)
                 {
                     println!("{guard}={count}");
+                }
+            }
+            DoctorCommand::PendingMigrations => {
+                let home = common::home_dir();
+                let claude_home = home.join(".claude");
+                let self_root = init::self_root::resolve(
+                    std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
+                    &claude_home,
+                );
+                let ctx = init::migrate::Ctx {
+                    home,
+                    claude_home,
+                    self_root,
+                    repo: None,
+                };
+                for line in init::migrate::pending_manual(&ctx) {
+                    println!("{line}");
                 }
             }
             DoctorCommand::HookCommandsMatching {

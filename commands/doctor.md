@@ -499,6 +499,22 @@ Report:
   the review, merge and sign-off config check already report as `MISSING`/`UNKNOWN` for their
   own checks.
 
+## Pending migration notices
+
+This is informational, not one of the seven layers above: a file you edited
+after playbook placed it is kept as is, so there is nothing to "fix". Print a
+row only when something is pending; print nothing when the output is empty.
+
+```bash
+if command -v playbook >/dev/null 2>&1; then
+  playbook doctor pending-migrations 2>/dev/null
+fi
+```
+
+Each output line is `<migration id>: <message>`. Report one `INFO  migration
+<id>: <message>` row per line. No output, a missing `playbook`, or a
+`playbook` too old to know the subcommand all mean no row.
+
 ## Output format
 
 Print a table with one row per layer. Use a clear status marker and a brief
@@ -521,6 +537,7 @@ INFO  autoMerge.enabled: false (source: default)
 INFO  commit.signOff: true (source: default)
 INFO  pr.draft: true (source: default)
 INFO  no stale worktrees found
+INFO  migration 0004-skills-edited: skills edited after install: demo; a plugin update replaces them, so move your edits into your own skill
 ```
 
 If all required layers pass and optional layers are installed, say so in one
