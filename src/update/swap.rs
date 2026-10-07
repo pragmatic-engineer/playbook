@@ -8,8 +8,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 const KEEP_BACKUPS: usize = 3;
+/// Linux and macOS agree on this errno.
+const ETXTBSY: i32 = 26;
 
 /// What a successful swap left behind.
 #[derive(Debug)]
@@ -18,13 +21,19 @@ pub struct Installed {
     pub warnings: Vec<String>,
 }
 
-/// Runs `<bin> --version` and returns its stdout.
+/// Runs `<bin> --version` and returns its stdout. A fresh binary can be
+/// refused with ETXTBSY while a forked sibling still holds its write fd.
 pub fn run_version(bin: &Path) -> Result<String, String> {
-    let output = Command::new(bin)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|err| format!("{} did not run: {err}", bin.display()))?;
+    let output = retry_text_busy(
+        || {
+            Command::new(bin)
+                .arg("--version")
+                .stdin(Stdio::null())
+                .output()
+        },
+        std::thread::sleep,
+    )
+    .map_err(|err| format!("{} did not run: {err}", bin.display()))?;
     if !output.status.success() {
         return Err(format!(
             "{} --version exited with {}",
@@ -33,6 +42,27 @@ pub fn run_version(bin: &Path) -> Result<String, String> {
         ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+const TEXT_BUSY_ATTEMPTS: u32 = 20;
+const TEXT_BUSY_PAUSE: Duration = Duration::from_millis(50);
+
+/// Retries `exec` on ETXTBSY only (raw os error 26), pausing between tries,
+/// for at most `TEXT_BUSY_ATTEMPTS` runs (about one second of waiting).
+fn retry_text_busy<T>(
+    mut exec: impl FnMut() -> std::io::Result<T>,
+    pause: impl Fn(Duration),
+) -> std::io::Result<T> {
+    let mut attempt = 1;
+    loop {
+        match exec() {
+            Err(err) if err.raw_os_error() == Some(ETXTBSY) && attempt < TEXT_BUSY_ATTEMPTS => {
+                attempt += 1;
+                pause(TEXT_BUSY_PAUSE);
+            }
+            other => return other,
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -151,7 +181,11 @@ pub fn write_stage(dir: &Path, bytes: &[u8]) -> std::io::Result<PathBuf> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o700);
     }
-    let result = options.open(&stage).and_then(|mut f| f.write_all(bytes));
+    // The handle is dropped inside the closure, before the caller can exec.
+    let result = options.open(&stage).and_then(|mut f| {
+        f.write_all(bytes)?;
+        f.sync_all()
+    });
     if let Err(err) = result {
         let _ = fs::remove_file(&stage);
         return Err(err);
@@ -236,6 +270,72 @@ mod tests {
         let stage = dir.join(".playbook.new");
         script(&stage, "0.17.0");
         (dir, target, stage)
+    }
+
+    fn busy() -> std::io::Error {
+        std::io::Error::from_raw_os_error(ETXTBSY)
+    }
+
+    #[test]
+    fn a_text_busy_exec_is_retried_until_it_runs() {
+        let tries = Cell::new(0);
+        let pauses = Cell::new(0);
+        let out = retry_text_busy(
+            || {
+                tries.set(tries.get() + 1);
+                if tries.get() <= 2 {
+                    Err(busy())
+                } else {
+                    Ok("ran")
+                }
+            },
+            |_| pauses.set(pauses.get() + 1),
+        );
+        assert_eq!(out.unwrap(), "ran");
+        assert_eq!((tries.get(), pauses.get()), (3, 2));
+    }
+
+    #[test]
+    fn another_exec_error_is_not_retried() {
+        let tries = Cell::new(0);
+        let out: std::io::Result<()> = retry_text_busy(
+            || {
+                tries.set(tries.get() + 1);
+                Err(std::io::Error::from_raw_os_error(2))
+            },
+            |_| panic!("must not pause"),
+        );
+        assert_eq!(out.unwrap_err().raw_os_error(), Some(2));
+        assert_eq!(tries.get(), 1);
+    }
+
+    #[test]
+    fn a_binary_that_stays_busy_gives_up_after_the_bound() {
+        let tries = Cell::new(0);
+        let out: std::io::Result<()> = retry_text_busy(
+            || {
+                tries.set(tries.get() + 1);
+                Err(busy())
+            },
+            |_| {},
+        );
+        assert_eq!(out.unwrap_err().raw_os_error(), Some(ETXTBSY));
+        assert_eq!(tries.get(), TEXT_BUSY_ATTEMPTS);
+    }
+
+    #[test]
+    fn a_binary_still_held_open_for_writing_runs_once_the_handle_closes() {
+        let dir = scratch_dir("swap-held");
+        fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("held");
+        script(&bin, "1.0.0");
+        let holder = fs::OpenOptions::new().append(true).open(&bin).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            drop(holder);
+        });
+        assert_eq!(run_version(&bin).unwrap(), "playbook 1.0.0");
+        release.join().unwrap();
     }
 
     #[test]

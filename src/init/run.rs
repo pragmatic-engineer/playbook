@@ -131,6 +131,8 @@ impl InitOutcome {
 pub fn run(paths: &InitPaths) -> InitOutcome {
     let settings_path = paths.claude_home.join("settings.json");
     let self_root = paths.self_root.as_deref();
+    // One stamp for every backup of this run, so a second boundary cannot split them.
+    let epoch = wire::now_epoch_secs();
 
     let ctx = migrate::Ctx {
         home: paths.home.clone(),
@@ -162,11 +164,11 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 
     let statusline_confirmed = step_confirmed(&statusline_step);
     let settings_step = if statusline_confirmed {
-        seed_or_merge_settings(self_root, &paths.claude_home, &settings_path)
+        seed_or_merge_settings(self_root, &paths.claude_home, &settings_path, epoch)
     } else {
         StepReport::skipped("settings", "statusline copy not confirmed complete")
     };
-    let hooks_step = wire_hooks(&settings_path);
+    let hooks_step = wire_hooks(&settings_path, epoch);
 
     let shell_runtime_confirmed = step_confirmed(&shell_runtime_step);
     let shim_step = rewire_rc_file_step(
@@ -273,6 +275,7 @@ fn seed_or_merge_settings(
     self_root: Option<&Path>,
     claude_home: &Path,
     settings_path: &Path,
+    epoch: u64,
 ) -> StepReport {
     let Some(self_root) = self_root else {
         return StepReport::skipped(
@@ -301,7 +304,7 @@ fn seed_or_merge_settings(
 
     let base_path = claude_home.join(".settings.base.json");
     match merge::merge(&base_path, &template_path, settings_path, &base_path, None) {
-        Ok(outcome) => finish_merge(settings_path, &outcome),
+        Ok(outcome) => finish_merge(settings_path, &outcome, epoch),
         Err(merge::MergeError::Validation(err)) => StepReport::failed("settings", err.to_string()),
         Err(merge::MergeError::Io(err)) => StepReport::failed("settings", err.to_string()),
     }
@@ -311,13 +314,13 @@ fn seed_or_merge_settings(
 /// against what is already on disk before writing anything: a no-op merge
 /// (the common case on a re-run) neither takes a backup nor rewrites the
 /// file, mirroring `wire::wire`'s own idempotence check.
-fn finish_merge(settings_path: &Path, outcome: &merge::MergeOutcome) -> StepReport {
+fn finish_merge(settings_path: &Path, outcome: &merge::MergeOutcome, epoch: u64) -> StepReport {
     let rendered = format!("{}\n", outcome.stdout);
     let existing = fs::read_to_string(settings_path).unwrap_or_default();
     if rendered == existing {
         return StepReport::already_correct("settings", "already matches the template");
     }
-    match backup_then_write(settings_path, &rendered, &outcome.skipped) {
+    match backup_then_write(settings_path, &rendered, &outcome.skipped, epoch) {
         Ok(()) => StepReport::wired(
             "settings",
             format!(
@@ -377,6 +380,7 @@ fn backup_then_write(
     path: &Path,
     content: &str,
     skipped: &[merge::SkippedEntry],
+    epoch: u64,
 ) -> std::io::Result<()> {
     let dir = path
         .parent()
@@ -384,18 +388,15 @@ fn backup_then_write(
         .unwrap_or_else(|| Path::new("."));
 
     if path.is_file() {
-        let epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "settings.json".to_string());
-        fs::copy(
-            path,
-            path.with_file_name(format!("{file_name}.bak.{epoch}")),
-        )?;
+        let backup = path.with_file_name(format!("{file_name}.bak.{epoch}"));
+        // The first backup of a run holds the pre-run state; keep it.
+        if !backup.exists() {
+            fs::copy(path, &backup)?;
+        }
 
         if !skipped.is_empty() {
             fs::write(
@@ -463,8 +464,8 @@ fn prune_family(dir: &Path, prefix: &str, suffix: &str) {
 /// and guard unconditionally; WU-14 dropped the `placed_guards` and
 /// `claude_home` parameters `wire::wire` used to take, since the gate they
 /// fed had become permanently unreachable.
-fn wire_hooks(settings_path: &Path) -> StepReport {
-    match wire::wire(settings_path) {
+fn wire_hooks(settings_path: &Path, epoch: u64) -> StepReport {
+    match wire::wire_at(settings_path, epoch) {
         Ok(outcome) if outcome.changed => {
             StepReport::wired("hooks", "wired the ported hooks into settings.json")
         }

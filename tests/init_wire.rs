@@ -39,7 +39,7 @@
 #![allow(dead_code)]
 
 use clap::ValueEnum;
-use playbook::init::wire::wire;
+use playbook::init::wire::{wire, wire_at};
 use playbook::HookName;
 use serde_json::{json, Value};
 use std::env;
@@ -167,6 +167,23 @@ fn running_wire_twice_writes_nothing_the_second_time() {
         bytes_after_first, bytes_after_second,
         "a second wire() call must not change settings.json at all"
     );
+}
+
+#[test]
+fn a_backup_already_taken_under_the_same_stamp_is_kept_not_overwritten() {
+    // Arrange: an earlier step of the same run already backed up the original.
+    let path = scratch_settings_path("backup-kept");
+    write_json(&path, &unwired_fixture());
+    let backup = path.with_file_name("settings.json.bak.1700000000");
+    fs::write(&backup, "pre-run original").unwrap();
+
+    // Act
+    let outcome = wire_at(&path, 1_700_000_000).expect("wire_at should succeed");
+
+    // Assert
+    assert!(outcome.changed);
+    assert_eq!(outcome.backup_path.as_deref(), Some(backup.as_path()));
+    assert_eq!(fs::read_to_string(&backup).unwrap(), "pre-run original");
 }
 
 #[test]
