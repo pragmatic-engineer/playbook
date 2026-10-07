@@ -220,6 +220,28 @@ fn main() {
                 command,
                 phases,
                 source,
+                json: true,
+            } => match gate::check::run_json(&plan_slug, &command, &phases, &source) {
+                Ok((doc, ok)) => {
+                    println!("{doc}");
+                    if !ok {
+                        if phases.is_empty() {
+                            eprintln!("gate check: {}", gate::check::NO_PHASES);
+                        }
+                        std::process::exit(1);
+                    }
+                }
+                Err(err) => {
+                    eprintln!("gate check: {err}");
+                    std::process::exit(1);
+                }
+            },
+            GateCommand::Check {
+                plan_slug,
+                command,
+                phases,
+                source,
+                json: false,
             } => match gate::check::run(&plan_slug, &command, &phases, &source) {
                 Ok(output) => println!("{output}"),
                 Err(err) => {
@@ -294,6 +316,14 @@ fn main() {
                             std::process::exit(1);
                         }
                     }
+                }
+                PrCommand::ReviewTriage { pr, base, dir } => {
+                    enter_dir("pr review-triage", dir.as_deref());
+                    let outcome = match pr::triage::collect(pr, base.as_deref()) {
+                        Ok(facts) => pr::triage::triage(&pr::triage::ClaudeRunner, &facts),
+                        Err(err) => pr::triage::failed(format!("could not collect the PR: {err}")),
+                    };
+                    println!("{}", pr::triage::render(&outcome));
                 }
             }
         }

@@ -1,0 +1,17 @@
+{
+  "name": "pragmatic-engineer",
+  "plugins": [
+    {
+      "name": "other",
+      "source": { "source": "url", "url": "https://example.com/other.git" }
+    },
+    {
+      "name": "playbook",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/pragmatic-engineer/playbook.git"
+      },
+      "category": "workflow"
+    }
+  ]
+}

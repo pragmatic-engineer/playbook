@@ -489,7 +489,7 @@ INFO  status line differs from the shipped copy -- stale, or a local fix ahead o
 FAIL  playbook binary not on PATH -- every ported hook is dead; install the release asset or cargo build --release, then ensure its directory is on PATH
 FAIL  hook command points at a missing file: python3 ~/.claude/hooks/memory_context.py -- this hook does nothing every time it fires; playbook init will not remove it, delete the entry from ~/.claude/settings.json by hand
 INFO  autoReview.enabled: true (source: default)
-INFO  autoReview.type: deep (source: default)
+INFO  autoReview.type: auto (source: default)
 INFO  autoReview.fix: false (source: default)
 INFO  autoMerge.enabled: false (source: default)
 INFO  commit.signOff: true (source: default)
