@@ -52,6 +52,8 @@ pub enum Command {
     },
     /// Print the Claude Code status line.
     Statusline,
+    /// Print the version, same as `--version`.
+    Version,
     /// Install or repair the local Claude Code configuration.
     Init {
         /// Also install `prompts/SYSTEM_PROMPT.md` into `~/.config/playbook/prompts/`.

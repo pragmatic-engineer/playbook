@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
@@ -46,6 +46,7 @@ fn main() {
         // points. Do not read this arm as work in flight; see the blueprint's
         // third 2026-08-17 amendment.
         Command::Statusline => {}
+        Command::Version => print!("{}", Cli::command().render_version()),
         // Retiring `hooks/hooks.json` and regenerating the seed into
         // binary-invoked form are the other two thirds of WU-11's atomic
         // switchover and stay untouched here; see `src/init/mod.rs`'s doc

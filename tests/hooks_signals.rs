@@ -10,7 +10,7 @@
 //! parallel-safe under `cargo test`'s default concurrent execution.
 
 use playbook::hooks::memory_signals::{
-    bump_hit, cached_stale, is_promoted, modify_locked, set_staleness,
+    bump_hit, bump_hits, cached_stale, is_promoted, modify_locked, set_staleness,
 };
 use serde_json::Value;
 use std::fs;
@@ -365,4 +365,59 @@ fn now_epoch_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs()
+}
+
+// --- Batched bumps and stale lock recovery ---------------------------------
+
+#[test]
+fn bump_hits_matches_sequential_bump_hit_calls() {
+    // Arrange
+    let batched = scratch_home("batch-eq-a");
+    let sequential = scratch_home("batch-eq-b");
+    let ids: Vec<String> = ["a", "b", "a", "c", "a"].map(String::from).to_vec();
+
+    // Act
+    bump_hits(&batched, &ids);
+    for id in &ids {
+        bump_hit(&sequential, id);
+    }
+
+    // Assert
+    let (b, s) = (read_store(&batched), read_store(&sequential));
+    for id in ["a", "b", "c"] {
+        assert_eq!(hits_for(&b, id), hits_for(&s, id), "hits differ for {id}");
+        assert_eq!(is_promoted(&batched, id), is_promoted(&sequential, id));
+    }
+    assert_eq!(hits_for(&b, "a"), 3);
+
+    let _ = fs::remove_dir_all(&batched);
+    let _ = fs::remove_dir_all(&sequential);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stale_lock_dir_does_not_block_bump_hits() {
+    // Arrange
+    let mem_dir = scratch_home("stale-lock");
+    let lock = mem_dir.join("memory.signals.json.lock");
+    fs::create_dir(&lock).unwrap();
+    let past = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    fs::File::open(&lock)
+        .and_then(|h| h.set_modified(past))
+        .unwrap();
+    let ids: Vec<String> = (0..50).map(|i| format!("fact-{i}")).collect();
+
+    // Act
+    let started = std::time::Instant::now();
+    bump_hits(&mem_dir, &ids);
+    let elapsed = started.elapsed();
+
+    // Assert
+    assert!(elapsed.as_secs() < 2, "stale lock blocked: {elapsed:?}");
+    let store = read_store(&mem_dir);
+    assert_eq!(hits_for(&store, "fact-0"), 1);
+    assert_eq!(hits_for(&store, "fact-49"), 1);
+    assert!(!lock.exists(), "stale lock should be cleared and released");
+
+    let _ = fs::remove_dir_all(&mem_dir);
 }
