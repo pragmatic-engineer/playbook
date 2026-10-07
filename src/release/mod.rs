@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! `playbook release`: the two file renderers the `publish-channels` release
-//! job runs, ported from `shell/render-formula.sh` and
-//! `shell/pin-marketplace.sh`. Both print to stdout and never touch the
+//! job runs, ported from the retired shell original and
+//! the retired shell original. Both print to stdout and never touch the
 //! network.
 
 use regex::Regex;

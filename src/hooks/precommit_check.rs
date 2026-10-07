@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/precommit-check.sh: a mechanical sanity pass over the staged
+//! Ports the retired shell original: a mechanical sanity pass over the staged
 //! diff before a commit.
 //!
 //! `/playbook:commit-and-push` forks the git agent, so nothing in that flow

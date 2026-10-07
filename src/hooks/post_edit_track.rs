@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/post-edit-track.py: a PostToolUse hook on Edit/Write/
+//! Ports the retired shell original: a PostToolUse hook on Edit/Write/
 //! NotebookEdit that records the edited absolute path plus a timestamp to
 //! the per-session edits.jsonl file. Consumed by preread-edit-check.rs and
 //! the statusline. Emits nothing on stdout; that silence is the contract.

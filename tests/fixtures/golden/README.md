@@ -1,5 +1,7 @@
 # Golden fixtures: frozen oracles
 
+Every `hooks/*.py`, `hooks/lib/common.*` and `shell/*.py` original named below is deleted from the repo; the paths are kept as provenance only.
+
 **Not only python.** `common-sh.emitters.json` freezes a SHELL oracle,
 `hooks/lib/common.sh`, for the same reason and by the same rule. WU-14d deletes
 that file, and five tests in `src/common/emit.rs` sourced it live to prove the
@@ -40,7 +42,7 @@ warning text embeds that path and it otherwise varies with the capturing
 machine's temp directory; the assertions against it only check for the
 substring "warning", so the normalisation changes nothing the tests verify.
 
-| Fixture | Produced by | Input | Captured |
+| Fixture | Produced by (deleted original) | Input | Captured |
 |---|---|---|---|
 | `rebuild-memory-graph.scalar-fact.json` | `hooks/rebuild-memory-graph.py` | `populate_fixture_tree()` then rebuild for `scalar-fact.md`, canonicalised by `canonical_graph()` | 2026-08-21, at v0.11.0 |
 | `preread-size-check.deny.txt` | `hooks/preread-size-check.py` | a 1500-line numbered fixture file, read through `preread-size-check`'s deny path | 2026-08-21, at v0.11.0 |

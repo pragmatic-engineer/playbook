@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/auto-model-detect.py: a UserPromptSubmit hook that nudges the
+//! Ports the retired shell original: a UserPromptSubmit hook that nudges the
 //! main session toward delegating design/architecture-shaped prompts to an
 //! Opus subagent, rather than reasoning inline on the default model.
 //!

@@ -5,8 +5,7 @@
 //! auto-model-detect, precompact-warn, and memory-capture. Each test spawns
 //! the compiled `playbook` binary exactly as Claude Code would (JSON on
 //! stdin, `HOME` pointed at a scratch directory), so a real process boundary
-//! sits between the test and the hook, the same way hooks/auto-model-detect.
-//! test.sh, hooks/precompact-warn.test.sh, and hooks/memory-capture.test.sh
+//! sits between the test and the hook, the same way the retired shell tests
 //! drive the python originals. Every assertion in those three shell scripts
 //! has a counterpart below.
 
@@ -97,7 +96,7 @@ fn session_dir_for(home: &Path, session_id: &str) -> PathBuf {
 }
 
 // ---------------------------------------------------------------------
-// auto-model-detect (hooks/auto-model-detect.test.sh)
+// auto-model-detect (the retired shell test)
 // ---------------------------------------------------------------------
 
 mod auto_model_detect {
@@ -583,7 +582,7 @@ mod auto_model_detect {
 }
 
 // ---------------------------------------------------------------------
-// precompact-warn (hooks/precompact-warn.test.sh)
+// precompact-warn (the retired shell test)
 // ---------------------------------------------------------------------
 
 mod precompact_warn {
@@ -743,7 +742,7 @@ mod precompact_warn {
 }
 
 // ---------------------------------------------------------------------
-// memory-capture (hooks/memory-capture.test.sh)
+// memory-capture (the retired shell test)
 // ---------------------------------------------------------------------
 
 mod memory_capture {

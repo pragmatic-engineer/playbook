@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Dotted-path field extraction over the hook input JSON payload. Replaces
-//! `field()` (hooks/lib/common.py:54) and `hi_field` (hooks/lib/common.sh:29).
+//! `field()` (the retired shell original) and `hi_field` (the retired shell original).
 //! A missing field, a non-object payload, or malformed JSON all resolve to
 //! an empty string rather than an error; hooks must never break Claude Code.
 

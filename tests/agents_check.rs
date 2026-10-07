@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Every scenario in `shell/check-agents.test.sh` (24 scenarios), ported,
+//! Every scenario in the retired shell test (24 scenarios), ported,
 //! plus CLI-wiring cases the shell suite never exercises as an automated
 //! test: the optional `AGENTS_DIR` argument's default resolution, the
 //! not-in-a-git-repo error, and the directory-not-found error.
@@ -83,7 +83,7 @@ fn fail(tag: &'static str, content: String, needle: &'static str) -> Case {
     (tag, content, false, needle)
 }
 
-/// Scenarios 1 to 8 and 10 to 24 of `shell/check-agents.test.sh`; scenario 9
+/// Scenarios 1 to 8 and 10 to 24 of the retired shell test; scenario 9
 /// (`_TEMPLATE.md` skipped) needs a second file in the fixture dir so it is
 /// its own test below. One case per line on purpose (`#[rustfmt::skip]`): a
 /// data table reads better dense than wrapped across rustfmt's default
