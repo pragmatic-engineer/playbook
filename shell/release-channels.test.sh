@@ -41,13 +41,26 @@ check "v-prefixed version rejected by the guard" bash -c \
   'bash "$1/render-formula.sh" v9.8.7 "$2" 2>&1 | grep -q "bad version"' _ "$DIR" "$FIX/SHA256SUMS"
 check "quote in version rejected" fails bash "$DIR/render-formula.sh" '9.8.7"x' "$FIX/SHA256SUMS"
 
-m="$(bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json")"
-check "playbook ref pinned" jq_is "$m" '.plugins[]|select(.name=="playbook")|.source.ref' v9.8.7
-check "playbook url kept" jq_is "$m" '.plugins[]|select(.name=="playbook")|.source.url' https://github.com/pragmatic-engineer/playbook.git
+SHA="$(printf 'a%.0s' {1..64})"
+SHA2="$(printf 'b%.0s' {1..64})"
+URL="https://github.com/pragmatic-engineer/playbook/releases/download/v9.8.7/playbook-plugin-9.8.7.zip"
+m="$(bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json" "$SHA")"
+pb='.plugins[]|select(.name=="playbook")'
+check "playbook source is the archive" jq_is "$m" "$pb|.source.source" archive
+check "playbook archive url names the version" jq_is "$m" "$pb|.source.url" "$URL"
+check "playbook archive sha256 set" jq_is "$m" "$pb|.source.sha256" "$SHA"
+check "playbook source has exactly three fields" jq_is "$m" "$pb|.source|keys|join(\",\")" "sha256,source,url"
+check "no git ref left behind" jq_is "$m" "$pb|.source|has(\"ref\")" false
+check "other playbook fields kept" jq_is "$m" "$pb|.category" workflow
 check "other plugin untouched" jq_is "$m" '.plugins[]|select(.name=="other")|.source|tojson' '{"source":"url","url":"https://example.com/other.git"}'
-m2="$(bash "$DIR/pin-marketplace.sh" 9.8.8 <(printf '%s' "$m"))"
-check "repin replaces ref" jq_is "$m2" '.plugins[]|select(.name=="playbook")|.source.ref' v9.8.8
-check "missing playbook entry fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace-empty.json"
+m2="$(bash "$DIR/pin-marketplace.sh" 9.8.8 <(printf '%s' "$m") "$SHA2")"
+check "repin replaces url" jq_is "$m2" "$pb|.source.url" "${URL//9.8.7/9.8.8}"
+check "repin replaces sha256" jq_is "$m2" "$pb|.source.sha256" "$SHA2"
+check "missing playbook entry fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace-empty.json" "$SHA"
+check "missing sha256 fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json"
+check "short sha256 fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json" abc123
+check "uppercase sha256 fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json" "${SHA^^}"
+check "v-prefixed version fails" fails bash "$DIR/pin-marketplace.sh" v9.8.7 "$FIX/marketplace.json" "$SHA"
 
 echo "passed=$PASS failed=$FAIL"
 [[ $FAIL -eq 0 ]]
