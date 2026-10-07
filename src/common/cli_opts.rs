@@ -9,9 +9,9 @@
 //! abbreviation of a long option, such as `--am` for `--amend`. Options
 //! outside the [`Spec`] are skipped, and positional words are ignored.
 //!
-//! An abbreviation is resolved among the options in the spec only. Git also
-//! counts options the spec leaves out, but when one of those makes the prefix
-//! ambiguous git refuses to run, so a wrong guess here changes nothing.
+//! An abbreviation is resolved among the spec's options and the subcommand's
+//! other long names, as git does: an exact name wins, and a prefix shared by
+//! two options is left unresolved, since git refuses to run on it.
 
 /// The options of one subcommand the caller cares about.
 pub struct Spec {
@@ -21,6 +21,9 @@ pub struct Spec {
     pub short_attached: &'static str,
     pub long_values: &'static [&'static str],
     pub long_flags: &'static [&'static str],
+    /// The subcommand's other long names, which no caller reads but which an
+    /// exact spelling or a shared prefix must not be mistaken for.
+    pub other_long: &'static [&'static str],
     /// Whether an unambiguous prefix of a long option names it, as in git. A
     /// program built on cobra, such as `gh`, accepts the exact name only.
     pub abbreviate: bool,
@@ -89,11 +92,7 @@ impl Spec {
                     opt.inline_at = Some(2 + name.chars().count() + 1);
                     opt.value = Some(value);
                 }
-                None => {
-                    opt.value = args.get(*next).cloned();
-                    opt.value_word = *next;
-                    *next += 1;
-                }
+                None => take_next(&mut opt, args, next),
             }
         }
         out.push(opt);
@@ -124,11 +123,7 @@ impl Spec {
                         opt.value = Some(value);
                         opt.inline_at = inline_at;
                     }
-                    None if self.short_values.contains(letter) => {
-                        opt.value = args.get(*next).cloned();
-                        opt.value_word = *next;
-                        *next += 1;
-                    }
+                    None if self.short_values.contains(letter) => take_next(&mut opt, args, next),
                     None => {}
                 }
                 out.push(opt);
@@ -144,14 +139,25 @@ impl Spec {
         if let Some(exact) = known().find(|k| *k == word) {
             return Some(exact);
         }
-        if word.is_empty() || !self.abbreviate {
+        if word.is_empty() || !self.abbreviate || self.other_long.contains(&word) {
             return None;
         }
-        let mut matches = known().filter(|k| k.starts_with(word));
+        let mut matches = known()
+            .chain(self.other_long.iter().copied())
+            .filter(|k| k.starts_with(word));
         match (matches.next(), matches.next()) {
-            (Some(only), None) => Some(only),
+            (Some(only), None) => known().find(|k| *k == only),
             _ => None,
         }
+    }
+}
+
+/// Reads the word after an option as its value, when there is one.
+fn take_next(opt: &mut Opt, args: &[String], next: &mut usize) {
+    if let Some(value) = args.get(*next) {
+        opt.value = Some(value.clone());
+        opt.value_word = *next;
+        *next += 1;
     }
 }
 
@@ -176,6 +182,7 @@ mod tests {
         short_attached: "S",
         long_values: &["message", "file", "fixup"],
         long_flags: &["no-verify", "no-edit", "amend"],
+        other_long: &[],
         abbreviate: true,
     };
 
@@ -261,9 +268,50 @@ mod tests {
     }
 
     #[test]
-    fn a_trailing_value_option_has_no_value() {
+    fn a_trailing_value_option_has_no_value_and_keeps_its_own_word() {
         assert_eq!(scan("-m"), vec![opt("m", None)]);
         assert_eq!(scan("--message"), vec![opt("message", None)]);
+
+        let args = words("-a -m");
+        let opts = SPEC.scan(&args);
+        assert_eq!(opts[1].word, 1);
+        assert_eq!(opts[1].value_word, 1);
+        assert_eq!(SPEC.scan(&words("--message"))[0].value_word, 0);
+    }
+
+    #[test]
+    fn an_exact_option_outside_the_spec_is_not_read_as_an_abbreviation() {
+        let spec = Spec {
+            other_long: &["no", "am", "fixup-all"],
+            ..SPEC
+        };
+
+        let names: Vec<_> = spec
+            .scan(&words("--no --am --fixup-all --no-v --amen --fixup"))
+            .into_iter()
+            .map(|o| o.name)
+            .collect();
+
+        assert_eq!(
+            names,
+            ["no", "am", "fixup-all", "no-verify", "amend", "fixup"]
+        );
+    }
+
+    #[test]
+    fn an_abbreviation_that_other_options_share_stays_unresolved() {
+        let spec = Spec {
+            other_long: &["amend-all"],
+            ..SPEC
+        };
+
+        let names: Vec<_> = spec
+            .scan(&words("--a --ame --amend"))
+            .into_iter()
+            .map(|o| o.name)
+            .collect();
+
+        assert_eq!(names, ["a", "ame", "amend"]);
     }
 
     #[test]

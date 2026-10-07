@@ -130,6 +130,9 @@ pub struct Command {
     pub heredocs: Vec<Heredoc>,
     /// The command reads the output of the one before it, as after `|`.
     pub piped: bool,
+    /// How many parentheses, as in `( ... )` or `$( ... )`, enclose the
+    /// command: what it changes, such as the directory, ends with them.
+    pub depth: usize,
 }
 
 /// The words of each simple command in `command`. Heredoc bodies and comments
@@ -159,19 +162,20 @@ pub fn commands(command: &str) -> Vec<Command> {
         opened: Vec::new(),
         opened_here: Vec::new(),
         piped_next: false,
+        depth: 0,
     }
     .run()
 }
 
 /// Replaces the character ranges of `text` named by `edits`. A range that
-/// overlaps an earlier one is skipped.
+/// overlaps an earlier one, runs backwards or leaves the text is skipped.
 pub fn apply_edits(text: &str, edits: &mut [(Range<usize>, String)]) -> String {
     edits.sort_by_key(|(range, _)| range.start);
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::new();
     let mut at = 0;
     for (range, replacement) in edits.iter() {
-        if range.start < at || range.end > chars.len() {
+        if range.start < at || range.start > range.end || range.end > chars.len() {
             continue;
         }
         out.extend(&chars[at..range.start]);
@@ -279,6 +283,8 @@ struct Lexer {
     opened_here: Vec<usize>,
     /// The next command reads the output of the one before it.
     piped_next: bool,
+    /// Parentheses open around the position being read.
+    depth: usize,
 }
 
 impl Lexer {
@@ -295,14 +301,22 @@ impl Lexer {
                     self.begin(start);
                     self.double_quoted();
                 }
-                '\\' => {
-                    self.begin(start);
-                    self.escaped();
-                }
+                '\\' => self.escaped(start),
                 '$' if self.looking_at("'") => {
                     self.begin(start);
                     self.at += 1;
                     self.ansi_quoted();
+                }
+                '$' if self.looking_at("\"") => {
+                    self.begin(start);
+                    self.at += 1;
+                    self.double_quoted();
+                }
+                '$' if self.looking_at("((") => {
+                    self.begin(start);
+                    self.word_dynamic = true;
+                    let text = self.substitution();
+                    self.push_str(&format!("${text}"));
                 }
                 '$' => {
                     self.begin(start);
@@ -311,20 +325,37 @@ impl Lexer {
                 }
                 '#' if self.word.is_none() => self.skip_comment(),
                 '<' if self.looking_at("<<") => {
+                    self.end_word();
                     self.begin(start);
                     self.at += 2;
                     self.push_str("<<<");
+                    self.word_end = self.at;
+                    self.end_word();
                 }
-                '<' if self.looking_at("<") => self.heredoc(),
+                '<' if self.looking_at("<") => {
+                    self.end_word();
+                    self.heredoc();
+                }
                 '|' => {
                     let or_list =
                         self.looking_at("|") || (self.at >= 2 && self.chars[self.at - 2] == '|');
+                    if self.looking_at("&") {
+                        self.at += 1;
+                    }
                     self.end_command();
                     self.piped_next = !or_list;
                 }
-                ';' | '&' | '(' | ')' | '`' => {
+                '`' | ';' | '&' | '(' | ')' => {
+                    if c == '`' && self.word.is_some() {
+                        self.word_dynamic = true;
+                    }
                     self.end_command();
                     self.piped_next = false;
+                    match c {
+                        '(' => self.depth += 1,
+                        ')' => self.depth = self.depth.saturating_sub(1),
+                        _ => {}
+                    }
                 }
                 '\n' | '\r' => {
                     self.end_command();
@@ -403,6 +434,7 @@ impl Lexer {
             spans: std::mem::take(&mut self.spans),
             heredocs: Vec::new(),
             piped: std::mem::take(&mut self.piped_next),
+            depth: self.depth,
         });
     }
 
@@ -428,6 +460,11 @@ impl Lexer {
                     Some('\n') => self.at += 1,
                     _ => text.push('\\'),
                 },
+                '$' if self.looking_at("(") => {
+                    self.word_dynamic = true;
+                    text.push('$');
+                    text.push_str(&self.substitution());
+                }
                 '$' | '`' => {
                     self.word_dynamic = true;
                     text.push(c);
@@ -436,6 +473,98 @@ impl Lexer {
             }
         }
         self.push_str(&text);
+    }
+
+    /// The text of a `$(...)` or `$((...))` from its opening parenthesis to the
+    /// matching one, which `at` stands on. Quotes, comments and heredoc bodies
+    /// inside it are skipped over, so a `"` or `)` there does not end it.
+    /// Inside `$((...))` only parentheses count, as `<<` there is a shift.
+    fn substitution(&mut self) -> String {
+        let arithmetic = self.looking_at("((");
+        let mut text = String::new();
+        let mut depth = 0;
+        let mut heredocs: Vec<(String, bool)> = Vec::new();
+        while let Some(c) = self.take() {
+            text.push(c);
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ if arithmetic => {}
+                '\\' => text.extend(self.take()),
+                '\'' => {
+                    while let Some(inner) = self.take() {
+                        text.push(inner);
+                        if inner == '\'' {
+                            break;
+                        }
+                    }
+                }
+                '"' => self.skip_double_quoted(&mut text),
+                '#' if self.at < 2 || self.chars[self.at - 2].is_whitespace() => {
+                    while self.peek().is_some_and(|c| c != '\n') {
+                        text.extend(self.take());
+                    }
+                }
+                '<' if self.looking_at("<") && !self.looking_at("<<") => {
+                    let strip_tabs = self.looking_at("<-");
+                    let from = self.at;
+                    self.at += 1 + usize::from(strip_tabs);
+                    while self.looking_at(" ") || self.looking_at("\t") {
+                        self.at += 1;
+                    }
+                    let (delimiter, _) = self.delimiter();
+                    text.extend(self.chars[from..self.at].iter());
+                    heredocs.push((delimiter, strip_tabs));
+                }
+                '\n' => {
+                    for (delimiter, strip_tabs) in heredocs.drain(..) {
+                        self.skip_heredoc_body(&delimiter, strip_tabs, &mut text);
+                    }
+                }
+                _ => {}
+            }
+        }
+        text
+    }
+
+    /// Copies the rest of a double-quoted string, nested substitutions
+    /// included, onto `text`.
+    fn skip_double_quoted(&mut self, text: &mut String) {
+        while let Some(c) = self.take() {
+            text.push(c);
+            match c {
+                '"' => return,
+                '\\' => text.extend(self.take()),
+                '$' if self.looking_at("(") => text.push_str(&self.substitution()),
+                _ => {}
+            }
+        }
+    }
+
+    /// Copies the lines up to and including the delimiter line onto `text`.
+    fn skip_heredoc_body(&mut self, delimiter: &str, strip_tabs: bool, text: &mut String) {
+        while self.at < self.chars.len() {
+            let stop = (self.at..self.chars.len())
+                .find(|&i| self.chars[i] == '\n')
+                .map_or(self.chars.len(), |i| i + 1);
+            let line: String = self.chars[self.at..stop].iter().collect();
+            self.at = stop;
+            text.push_str(&line);
+            let line = line.trim_end_matches(['\r', '\n']);
+            let line = if strip_tabs {
+                line.trim_start_matches('\t')
+            } else {
+                line
+            };
+            if line == delimiter {
+                return;
+            }
+        }
     }
 
     /// The body of `$'...'`, after the opening quote.
@@ -451,11 +580,14 @@ impl Lexer {
     }
 
     /// A backslash makes the next character part of the word, and joins a
-    /// line break to the next line.
-    fn escaped(&mut self) {
+    /// line break to the next line without starting a word of its own.
+    fn escaped(&mut self, start: usize) {
         match self.take() {
             Some('\n') | None => {}
-            Some(c) => self.push_str(c.encode_utf8(&mut [0; 4])),
+            Some(c) => {
+                self.begin(start);
+                self.push_str(c.encode_utf8(&mut [0; 4]));
+            }
         }
     }
 
@@ -638,6 +770,127 @@ mod tests {
     }
 
     #[test]
+    fn a_line_continuation_joins_lines_without_starting_a_word() {
+        let table = [
+            (
+                "playbook config set \\\nauto.budgetUsd 1000",
+                vec!["playbook", "config", "set", "auto.budgetUsd", "1000"],
+            ),
+            ("playbook \\\nmode auto", vec!["playbook", "mode", "auto"]),
+            ("playbook \\\n  mode auto", vec!["playbook", "mode", "auto"]),
+            ("playbook mode \\\n", vec!["playbook", "mode"]),
+            ("play\\\nbook mode", vec!["playbook", "mode"]),
+            ("echo \\\n\"\"", vec!["echo", ""]),
+        ];
+        for (script, expected) in table {
+            let got = commands(script);
+
+            assert_eq!(got.len(), 1, "{script:?}");
+            assert_eq!(got[0].words, expected, "{script:?}");
+        }
+    }
+
+    #[test]
+    fn a_heredoc_or_here_string_operator_ends_the_word_before_it() {
+        let script = "git commit -F -<<EOF\nbody\nEOF\ngit commit -F -<<<text";
+
+        let got = commands(script);
+
+        assert_eq!(got[0].words, ["git", "commit", "-F", "-"]);
+        let dash = &got[0].spans[3];
+        assert_eq!(slice(script, dash.start..dash.end), "-");
+        assert_eq!(got[1].words, ["git", "commit", "-F", "-", "<<<", "text"]);
+        let dash = &got[1].spans[3];
+        assert_eq!(slice(script, dash.start..dash.end), "-");
+    }
+
+    #[test]
+    fn a_word_followed_by_a_backtick_is_dynamic() {
+        let got = commands("echo foo`date`\necho bar `date`");
+
+        let dynamic = |c: &Command| c.spans.iter().map(|s| s.dynamic).collect::<Vec<_>>();
+        assert_eq!(got[0].words, ["echo", "foo"]);
+        assert_eq!(dynamic(&got[0]), [false, true]);
+        assert_eq!(got[2].words, ["echo", "bar"]);
+        assert_eq!(dynamic(&got[2]), [false, false]);
+    }
+
+    #[test]
+    fn a_dollar_double_quote_reads_like_a_plain_double_quote() {
+        let got = commands(r#"echo $"a b" $"$X" c"#);
+
+        let dynamic: Vec<bool> = got[0].spans.iter().map(|s| s.dynamic).collect();
+        assert_eq!(got[0].words, ["echo", "a b", "$X", "c"]);
+        assert_eq!(dynamic, [false, false, true, false]);
+    }
+
+    #[test]
+    fn a_pipe_with_stderr_marks_the_next_command_as_piped() {
+        let got = commands("a |& b && c");
+
+        assert_eq!(got.len(), 3);
+        assert_eq!(got[1].words, ["b"]);
+        let piped: Vec<bool> = got.iter().map(|c| c.piped).collect();
+        assert_eq!(piped, [false, true, false]);
+    }
+
+    #[test]
+    fn a_substitution_in_double_quotes_is_read_whole_with_its_quotes_and_parens() {
+        let script = "git commit -m \"$(cat <<'EOF'\nfix(hooks): say \"two words\" (twice)\n\nit's done\n\nCo-Authored-By: Claude\nEOF\n)\" --no-verify\ngit status";
+
+        let got = commands(script);
+
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].words.len(), 5);
+        assert!(got[0].words[3].starts_with("$(cat <<'EOF'\nfix(hooks): say \"two words\" (twice)"));
+        assert!(got[0].words[3].ends_with("EOF\n)"));
+        assert_eq!(got[0].words[4], "--no-verify");
+        assert!(got[0].spans[3].dynamic);
+        assert_eq!(
+            slice(script, got[0].spans[3].start..got[0].spans[3].start + 1),
+            "\""
+        );
+        assert_eq!(got[1].words, ["git", "status"]);
+    }
+
+    #[test]
+    fn nested_quotes_and_substitutions_inside_a_substitution_stay_in_one_word() {
+        let got = commands(r#"echo "a $(echo "b $(echo ")") c") d""#);
+
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].words.len(), 2);
+    }
+
+    #[test]
+    fn a_shift_inside_arithmetic_is_not_a_heredoc() {
+        let table = [
+            "echo $((1<<2))\ngit status",
+            "echo \"$((1<<2))\"\ngit status",
+            "echo $(( (1<<2) + 1 ))\ngit status",
+        ];
+        for script in table {
+            let got = commands(script);
+
+            assert_eq!(got.len(), 2, "{script:?}");
+            assert_eq!(got[1].words, ["git", "status"], "{script:?}");
+            assert!(got[0].heredocs.is_empty(), "{script:?}");
+            assert!(got[0].spans[1].dynamic, "{script:?}");
+        }
+    }
+
+    #[test]
+    fn each_command_knows_how_many_parentheses_enclose_it() {
+        let got = commands("a; (b; (c)); d $(e) | f");
+
+        let depth: Vec<(&str, usize)> =
+            got.iter().map(|c| (c.words[0].as_str(), c.depth)).collect();
+        assert_eq!(
+            depth,
+            [("a", 0), ("b", 1), ("c", 2), ("d", 0), ("e", 1), ("f", 0)]
+        );
+    }
+
+    #[test]
     fn ansi_c_quoting_is_decoded() {
         let got = commands(r"git commit -m $'a\nb\tc \'q\' \x41'");
 
@@ -675,6 +928,18 @@ mod tests {
         ];
 
         assert_eq!(apply_edits("a \u{e9} bcd e", &mut edits), "z \u{e9} XY e");
+    }
+
+    #[test]
+    fn apply_edits_skips_a_backwards_or_out_of_bounds_range() {
+        let mut edits = vec![
+            (Range { start: 3, end: 1 }, "x".to_string()),
+            (2..99, "y".to_string()),
+            (0..1, "z".to_string()),
+            (50..60, "w".to_string()),
+        ];
+
+        assert_eq!(apply_edits("abcd", &mut edits), "zbcd");
     }
 
     #[test]
