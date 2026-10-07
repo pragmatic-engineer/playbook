@@ -10,6 +10,7 @@ pub mod cc;
 pub mod ci;
 pub mod common;
 pub mod config;
+pub mod deps;
 pub mod doctor;
 pub mod gate;
 pub mod handoff;
@@ -94,6 +95,13 @@ pub enum Command {
     },
     /// Print the installed version, same as `--version`
     Version,
+    /// Install the tools a Brewfile lists, keeping any already on PATH
+    ///
+    /// Example: `playbook deps ensure Brewfile`
+    Deps {
+        #[command(subcommand)]
+        sub: DepsCommand,
+    },
     /// Read single facts that the health check uses
     ///
     /// The full health check is the `/playbook:doctor` command inside Claude
@@ -621,6 +629,17 @@ pub enum DoctorCommand {
         pattern: String,
         /// Only count this event (default: every event)
         event: Option<String>,
+    },
+}
+
+/// `playbook deps` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum DepsCommand {
+    /// Keep each tool on PATH and install only the missing ones with
+    /// Homebrew, from the `brew` and `tap` lines of a Brewfile.
+    Ensure {
+        /// Brewfile to read; defaults to `Brewfile` in the current directory.
+        brewfile: Option<PathBuf>,
     },
 }
 

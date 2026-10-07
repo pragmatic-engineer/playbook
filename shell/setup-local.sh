@@ -206,18 +206,16 @@ fi
 #    when the tool is already installed from somewhere else.
 # ---------------------------------------------------------------------------
 if [ "$SKIP_DEPS" -eq 0 ]; then
-    if [ -f "$SELF_ROOT/shell/ensure-deps.sh" ]; then
-        # shellcheck source=shell/ensure-deps.sh
-        . "$SELF_ROOT/shell/ensure-deps.sh"
+    if command -v playbook >/dev/null 2>&1; then
         log "Checking dependencies (install only what is missing)"
-        ensure_all_deps "$SELF_ROOT/Brewfile" || warn "one or more dependency installs reported errors"
+        playbook deps ensure "$SELF_ROOT/Brewfile" || warn "one or more dependency installs reported errors"
     elif command -v brew >/dev/null 2>&1 && [ -f "$SELF_ROOT/Brewfile" ]; then
-        # Fallback for a partial checkout without ensure-deps.sh.
+        # Fallback when the playbook binary is not installed yet.
         log "Installing dependencies (brew bundle)"
         brew bundle --file "$SELF_ROOT/Brewfile" </dev/null \
             || warn "brew bundle reported errors"
     else
-        warn "Cannot resolve dependencies (no ensure-deps.sh and no brew). See https://brew.sh"
+        warn "Cannot resolve dependencies (no playbook binary and no brew). See https://brew.sh"
     fi
 fi
 

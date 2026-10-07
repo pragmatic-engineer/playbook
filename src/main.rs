@@ -6,10 +6,10 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, mode, pr,
-    sanitize, settings, statusline, trust, update, usage, worktree, AgentsCommand, CcCommand, Cli,
-    Command, ConfigCommand, DashboardCommand, DoctorCommand, GateCommand, HandoffCommand,
-    JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand,
+    agents, cc, ci, common, config, deps, doctor, gate, handoff, hooks, init, json, manifest, mode,
+    pr, sanitize, settings, statusline, trust, update, usage, worktree, AgentsCommand, CcCommand,
+    Cli, Command, ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand, GateCommand,
+    HandoffCommand, JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand,
     ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
@@ -493,6 +493,14 @@ fn main() {
                 }
             }
         }
+        Command::Deps { sub } => match sub {
+            DepsCommand::Ensure { brewfile } => {
+                let file = brewfile.unwrap_or_else(|| std::path::PathBuf::from("Brewfile"));
+                if !deps::ensure_all(&file) {
+                    std::process::exit(1);
+                }
+            }
+        },
         Command::Doctor { sub } => match sub {
             DoctorCommand::PluginVersion { path } => {
                 println!("{}", doctor::field::plugin_version(&path));
