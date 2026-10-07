@@ -357,27 +357,20 @@ the check on its own.
 if ! command -v playbook >/dev/null 2>&1; then
   echo "UNKNOWN"
 else
-  failed=0
-  all_out=""
+  # One line per key, so a key that fails does not hide the ones that resolve.
   for key in autoReview.enabled autoReview.type autoReview.fix autoMerge.enabled commit.signOff; do
     key_status=0
     key_out=$(playbook config get "$key" 2>&1) || key_status=$?
-    [ $key_status -ne 0 ] && failed=1
-    all_out=$(printf '%s\n%s' "$all_out" "$key_out")
-  done
-  if [ $failed -ne 0 ]; then
-    errors=$(printf '%s\n' "$all_out" \
-      | grep 'config file is not a valid JSON object' | sort -u)
-    if [ -n "$errors" ]; then
-      echo "MALFORMED"
-      printf '%s\n' "$errors"
+    if [ $key_status -eq 0 ]; then
+      printf 'OK\t%s\n' "$key_out"
+    elif printf '%s\n' "$key_out" | grep -q 'unknown config key'; then
+      printf 'UPGRADE\t%s\n' "$key"
+    elif printf '%s\n' "$key_out" | grep -q 'config file is not a valid JSON object'; then
+      printf 'MALFORMED\t%s\n' "$(printf '%s\n' "$key_out" | grep -m1 'config file is not a valid JSON object')"
     else
-      echo "UNKNOWN"
+      printf 'ERROR\t%s\t%s\n' "$key" "$(printf '%s\n' "$key_out" | head -n 1)"
     fi
-  else
-    echo "OK"
-    printf '%s\n' "$all_out" | sed '/^$/d'
-  fi
+  done
 fi
 ```
 
@@ -393,16 +386,21 @@ rather than aborting this block (and, if this file's shell blocks share a
 `set -e` context, the rest of the script), the same guard style Layer 7 uses
 around `playbook doctor hook-commands`.
 
-Report:
+Output is `UNKNOWN`, or one tab-separated line per key. Report each line on
+its own, as INFO, so a failing key never hides the keys that resolve:
 
-- `OK` → INFO, one line per key, exactly as `playbook config get` printed it,
+- `OK<TAB><line>` → the line exactly as `playbook config get` printed it,
   for example `INFO  autoReview.enabled: true (source: default)`.
-- `MALFORMED` → INFO, print the captured error line(s) plainly; they already
-  name the file that failed to parse.
-- `UNKNOWN` → INFO, "could not check: playbook config unavailable". Covers
-  both `playbook` missing entirely and a `playbook` too old to have the
-  `config` subcommand, the same underlying condition Layer 6 and Layer 7
-  already report as `MISSING`/`UNKNOWN` for their own checks.
+- `UPGRADE<TAB><key>` → `config get` said "unknown config key", so the
+  installed playbook binary is older than this plugin and needs an upgrade
+  for that key. Say `INFO  <key>: playbook binary needs an upgrade for this
+  key`.
+- `MALFORMED<TAB><error>` → print the error plainly; it already names the
+  file that failed to parse.
+- `ERROR<TAB><key><TAB><message>` → `INFO  <key>: could not check: <message>`.
+- `UNKNOWN` (no `playbook` on `PATH`) → INFO, "could not check: playbook
+  config unavailable", the same condition Layer 6 and Layer 7 already report
+  as `MISSING`/`UNKNOWN` for their own checks.
 
 ## Stale worktrees
 

@@ -212,9 +212,26 @@ EOF
 # Sign-off trailer. The commit.signOff setting (default true) decides, and it
 # stands down wherever the trailer is already handled: --no-signoff was passed
 # on purpose, the message already carries a Signed-off-by line, or a repo
-# prepare-commit-msg or commit-msg hook adds one itself. A failed config read
-# keeps the default. Cryptographic signing (--gpg-sign) is separate: it follows
-# the repo's git config and commit.signOff never changes it.
+# prepare-commit-msg or commit-msg hook writes one itself. A failed config read
+# keeps the default. Cryptographic signing (--gpg-sign) is separate and always
+# on, using the key and format from git config; commit.signOff never changes it.
+
+# True only when the hook WRITES the trailer: git interpret-trailers with a
+# Signed-off-by --trailer, --signoff passed to git, or an append of a
+# Signed-off-by line. A DCO hook that only checks for the trailer (grep and
+# exit) does not count: dropping --signoff then would fail every commit.
+hook_writes_signoff() {
+  local src
+  src=$(sed -e :a -e '/\\$/N; s/\\\n//; ta' "$1" 2>/dev/null \
+    | grep -vE '^[[:space:]]*#') || return 1
+  printf '%s\n' "$src" \
+    | grep -qiE "interpret-trailers.*--trailer[ =]*[\"']?signed-off-by" && return 0
+  printf '%s\n' "$src" \
+    | grep -qE "(^|[;&|{(])[[:space:]]*(exec[[:space:]]+)?git[[:space:]][^\"']*--signoff" && return 0
+  printf '%s\n' "$src" | grep -qiE 'signed-off-by:.*>>|>>.*signed-off-by' && return 0
+  return 1
+}
+
 SIGNOFF_FLAG="--signoff"
 SIGNOFF_OUT=$(playbook config get commit.signOff 2>/dev/null) || SIGNOFF_OUT=""
 case "$SIGNOFF_OUT" in *"commit.signOff: false"*) SIGNOFF_FLAG="" ;; esac
@@ -222,7 +239,7 @@ case "$SIGNOFF_OUT" in *"commit.signOff: false"*) SIGNOFF_FLAG="" ;; esac
 grep -qiE '^Signed-off-by:' "$MSG_FILE" && SIGNOFF_FLAG=""
 for HOOK_NAME in prepare-commit-msg commit-msg; do
   HOOK_FILE=$(git rev-parse --git-path "hooks/$HOOK_NAME")
-  if [ -x "$HOOK_FILE" ] && grep -qiE 'signed-off-by|signoff' "$HOOK_FILE" 2>/dev/null; then
+  if [ -x "$HOOK_FILE" ] && hook_writes_signoff "$HOOK_FILE"; then
     SIGNOFF_FLAG=""
   fi
 done

@@ -4,7 +4,7 @@ Once a branch is ready, this config gives you three commands to get it reviewed 
 
 ## `/playbook:commit-and-push`
 
-Generates a commit message from the staged diff, commits signed (`--gpg-sign`) with a `Signed-off-by` trailer (see [PR and commit settings](#pr-and-commit-settings)), rebases onto the base branch if you're behind, then pushes. It runs in an isolated subagent (`context: fork`) on Haiku, so the diff and drafting stay out of your main context. There is no confirmation gate: it commits and pushes end to end.
+Generates a commit message from the staged diff, commits signed (always `--gpg-sign`, with the key and format from git config) with a `Signed-off-by` trailer (see [PR and commit settings](#pr-and-commit-settings)), rebases onto the base branch if you're behind, then pushes. It runs in an isolated subagent (`context: fork`) on Haiku, so the diff and drafting stay out of your main context. There is no confirmation gate: it commits and pushes end to end.
 
 ```bash
 /playbook:commit-and-push           # commit staged changes and push
@@ -102,7 +102,7 @@ Five config keys shape the PR flow and the commit trailer. Read one with `playbo
 | `autoReview.enabled` | `true` | `/playbook:create-pull-request` reviews its own PR before it goes ready. |
 | `autoReview.type` | `deep` | Which review it runs: `deep` or `quick`. |
 | `autoReview.fix` | `false` | After the self-review, fixes every finding that survived the review's verification, pushes the fixes to the PR branch, and re-runs the scoped checks. |
-| `autoMerge.enabled` | `false` | After the review and fixes, marks the PR ready, waits until every check on the PR head is green, runs `gh pr merge <n> --auto`, then re-reads the PR until it reads `MERGED`. |
+| `autoMerge.enabled` | `false` | After the review and fixes, marks the PR ready, waits until every check on the PR head is green, runs `gh pr merge <n> --auto`, then re-reads the PR and reports whether it merged, is queued, was rejected, or was closed. |
 | `commit.signOff` | `true` | Commits made through `/playbook:commit-and-push` carry a `Signed-off-by` trailer. |
 
 ```bash
@@ -110,9 +110,13 @@ playbook config set --global autoReview.fix true
 playbook config set --global autoMerge.enabled true
 ```
 
-The merge step is cautious on purpose. It waits on all checks, not only the required ones, since a repo may require none and a merge queue would merge at once. It never passes `--admin` or `--delete-branch`, and it never merges with a failing or unfinished check. It passes no strategy flag, so the repo's own merge settings choose how the PR lands. A stacked PR whose base is another open PR is not merged before its base: the command says so and stops. The settings work the same in `ask` and `auto` mode, and neither asks a question, because setting the key is your opt-in.
+The merge step is cautious on purpose. It waits two minutes after marking the PR ready, so checks have registered and a run skipped while the PR was a draft can't read as green. It then polls every check on the PR (not only the required ones, since a repo may require none and a merge queue would merge at once) every 30 seconds, for up to 45 minutes. `pass` and `skipping` are fine, `fail` and `cancel` stop it, and a check still pending at the deadline stops it without merging. A PR with no checks at all merges once that two-minute look finds none.
 
-`commit.signOff` stands down when the command already passes `-s` or `--signoff`, when the message already has the trailer, when you pass `--no-signoff` on purpose, or when the repo's `prepare-commit-msg` or `commit-msg` hook adds the trailer. It does not control cryptographic signing (`-S`), which always follows the repo's own git config.
+It then runs `gh pr merge <n> --auto --match-head-commit <sha>` with the head commit it recorded, so a commit pushed during the wait is never merged unseen. It passes no method flag first, so a merge queue picks how the PR lands. If `gh` says a method is required, it reads which methods the repo allows and retries with the one allowed, preferring squash. It never passes `--admin` or `--delete-branch`. Afterwards it reads the PR and reports one of: merged, queued or auto-merge armed, rejected or auto-merge cleared, or closed.
+
+A stacked PR whose base is another open PR is not merged before its base: the command says so and stops. In auto mode, a PR that no review covered (any caller other than `/playbook:implement`) is marked ready but never merged, even with `autoMerge.enabled` on. The settings work the same in `ask` and `auto` mode, and neither asks a question, because setting the key is your opt-in.
+
+`commit.signOff` stands down when the message already has the trailer, when you pass `--no-signoff` on purpose, or when the repo's `prepare-commit-msg` or `commit-msg` hook writes the trailer itself (through `git interpret-trailers`, `--signoff`, or an appended `Signed-off-by:` line). A hook that only checks for the trailer does not count, so the command still adds it. It does not control cryptographic signing: commits are always signed (`--gpg-sign`), using the key and format from your git config.
 
 ## A typical review cycle
 

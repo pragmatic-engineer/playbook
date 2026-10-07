@@ -195,7 +195,7 @@ playbook config set --global autoMerge.enabled true    # mark ready, wait for gr
 playbook config set --global commit.signOff false      # stop adding Signed-off-by (default: true)
 ```
 
-`autoReview.fix` and `autoMerge.enabled` default to `false`. Auto-merge never uses `--admin` or `--delete-branch`, and never merges with a failing or unfinished check. `commit.signOff` defaults to `true`. See [PR and commit settings](docs/guides/02-review-and-pr-flow.md#pr-and-commit-settings) for the full rules.
+`autoReview.fix` and `autoMerge.enabled` default to `false`. Auto-merge never uses `--admin` or `--delete-branch`, and never merges with a failing or unfinished check or, in auto mode, a PR no review covered. A PR with no checks at all merges once a two-minute look finds none. `commit.signOff` defaults to `true`. See [PR and commit settings](docs/guides/02-review-and-pr-flow.md#pr-and-commit-settings) for the full rules.
 
 ## Auto mode
 
