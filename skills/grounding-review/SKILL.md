@@ -86,7 +86,7 @@ N. <label>: <one-line subject naming the consequence>
    ```
 ```
 
-- Labels: `blocking`, `issue`, `suggestion`, `question`, `nitpick`. `blocking` replaces `issue` specifically for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. `suggestion`, `question`, and `nitpick` are non-blocking by definition, so they never take the `blocking` label. The label sets both the finding order (line 67) and the report subject (line 79); the posted comment uses the exact same bare label, no separate decoration needed.
+- Labels: `blocking`, `issue`, `suggestion`, `question`, `nitpick`. `blocking` replaces `issue` specifically for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. `suggestion`, `question`, and `nitpick` are non-blocking by definition, so they never take the `blocking` label. The label sets both the finding order (see Findings in the skeleton) and the report subject (see the finding block); the posted comment uses the exact same bare label, no separate decoration needed.
 - Subject names the consequence, not a rule: "user input runs as SQL", not "SQL injection".
 - Location line: `` `file:line` `` then category (security, logic, perf, tests, types, data, maintainability, and so on) then confidence, `·`-separated.
 - Body: 1 sentence when possible, 2 at most. State the problem plainly, skip restating what the code already shows (the reader can see the diff). The why is part of the sentence, not a separate paragraph. No bullet lists inside a finding.
@@ -95,17 +95,17 @@ N. <label>: <one-line subject naming the consequence>
 
 ## Verification Sweep (MUST)
 
-After the first review pass produces its findings, and before the list is shown to the user or posted anywhere, the orchestrator runs one more sweep over every finding, against the code at the reviewed head. The orchestrator does this itself: reviewer subagents are read-only and can be wrong, so the reviewer that wrote a finding never checks it.
+After the first review pass produces its findings, and before the list is shown, posted or acted on, the orchestrator runs one more sweep over every finding, against the code at the reviewed head. The orchestrator does this itself: reviewer subagents are read-only and can be wrong, so the reviewer that wrote a finding never checks it.
 
 Check three things for each finding:
 
-1. **True.** Re-read the cited lines. Trace or run the failure scenario where that is cheap. A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
+1. **True.** Re-read the cited lines. Trace the failure scenario where that is cheap; run it only in a flow that already runs the PR's code behind its own warning (deep-review). A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
 2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact, not the reviewer's first guess.
 3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
 
-Drop a finding that does not hold, relabel one with the wrong label, and move a misplaced one. Update its `Post:` block to match, so the label and anchor that post are the ones the sweep settled. Read only the cited lines, not whole files, to keep the main context small.
+Drop a finding that does not hold, relabel one with the wrong label, and move a misplaced one. Update its `Post:` block to match, so the label and anchor that post are the ones the sweep settled. Read the cited lines plus what the trace needs, never whole files, to keep the main context small.
 
-Then report what the sweep changed in the `Sweep:` line under the Overview: how many findings were kept, dropped, relabelled, and moved. A finding that survives counts as kept, even when it was also relabelled or moved. Nothing is shown or posted until the sweep has run.
+Then report what the sweep changed in the `Sweep:` line under the Overview: how many findings were kept, dropped, relabelled, and moved. A finding that survives counts as kept, even when it was also relabelled or moved. Then recompute the verdict, confidence and finding order from the swept list, since drops, relabels and moves can change all three. Nothing is shown, posted or acted on until the sweep has run.
 
 ## Severity
 

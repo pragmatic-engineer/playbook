@@ -207,6 +207,70 @@ fn implement_sweeps_inside_step_9_before_acting_on_findings() {
 }
 
 #[test]
+fn every_review_flow_recomputes_the_verdict_from_the_swept_list() {
+    for rel in SWEEP_FILES {
+        // Arrange
+        let doc = load(rel);
+
+        // Act
+        let text = doc.lines.join("\n");
+
+        // Assert
+        assert!(
+            text.contains(
+                "recompute the verdict, confidence and finding order from the swept list"
+            ),
+            "{rel}: does not recompute the verdict, confidence and order after the sweep"
+        );
+    }
+}
+
+#[test]
+fn quick_review_sweep_traces_but_never_runs_pr_code() {
+    // Arrange
+    let doc = load("commands/quick-review.md");
+
+    // Act
+    let sweep = doc.sweep().expect("quick-review has a sweep section");
+    let text = doc.text_of(&sweep);
+
+    // Assert
+    assert!(
+        text.contains("Trace the failure scenario"),
+        "quick-review: the sweep does not say to trace the failure scenario"
+    );
+    assert!(
+        !text.contains("or run"),
+        "quick-review: the sweep must not tell the orchestrator to run PR code"
+    );
+    assert!(
+        text.contains("never run PR code"),
+        "quick-review: the sweep does not forbid running PR code"
+    );
+}
+
+#[test]
+fn implement_step_8_sweeps_before_it_fixes() {
+    // Arrange
+    let doc = load("commands/implement.md");
+
+    // Act
+    let text = doc.text_of(&doc.step("Step 8:"));
+    let sweep_at = text.find("verification sweep");
+    let fix_at = text.find("Fix only");
+
+    // Assert
+    let (sweep_at, fix_at) = (
+        sweep_at.expect("implement Step 8 does not mention the verification sweep"),
+        fix_at.expect("implement Step 8 has no fix instruction"),
+    );
+    assert!(
+        sweep_at < fix_at,
+        "implement Step 8: the sweep must come before the fix instruction"
+    );
+}
+
+#[test]
 fn reviewer_agents_say_their_findings_are_swept() {
     for rel in SWEPT_AGENTS {
         // Arrange

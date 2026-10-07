@@ -328,7 +328,7 @@ Run this after Step 4 and before any finding is shown to the user or a pending r
 2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact.
 3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
 
-Drop findings that do not hold, relabel the mislabelled, move the misplaced, and update each changed finding's `Post:` block to match. Read only the cited lines, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved. See the Verification Sweep section of `playbook:grounding-review`.
+Drop findings that do not hold, relabel the mislabelled, move the misplaced, and update each changed finding's `Post:` block to match. Read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list (Step 4 set them before the sweep). See the Verification Sweep section of `playbook:grounding-review`.
 
 ## Step 5: Present the consolidated report
 

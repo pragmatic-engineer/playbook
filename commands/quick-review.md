@@ -96,7 +96,7 @@ Comment bodies are read by another engineer, so they use the humane `playbook:wr
 ## Execution rules
 
 1. Run every bash block for real. Don't simulate.
-2. The `reviewer` subagent reads every file it cites at the PR's head SHA (grounding-review evidence rule). It can still be wrong, so the orchestrator sweeps every finding in Step 3b before anything is shown or posted, reading only the cited lines.
+2. The `reviewer` subagent reads every file it cites at the PR's head SHA (grounding-review evidence rule). It can still be wrong, so the orchestrator sweeps every finding in Step 3b before anything is shown or posted, reading the cited lines plus what the trace needs.
 3. Combine independent bash calls into a single tool call.
 4. Anchor every inline comment to a real `file:line` in the diff. If the line isn't in the diff (e.g. a referenced helper), make it a report-level finding instead.
 5. Never auto-submit. Always create the review in `PENDING` state and ask the user how to submit.
@@ -218,11 +218,11 @@ Do not relay the report yet. It goes through Step 3b first.
 
 Run this before the report is shown to the user and before anything is posted. You do it yourself, not the reviewer: the reviewer is read-only and can be wrong. Check every finding against the code at `HEAD_SHA` (under `$WT` in worktree mode):
 
-1. **True.** Re-read the cited lines. Trace or run the failure scenario where that is cheap. A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
+1. **True.** Re-read the cited lines. Trace the failure scenario where that is cheap; never run PR code. A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
 2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact.
 3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
 
-Drop findings that do not hold, relabel the mislabelled, move the misplaced, and update each changed finding's `Post:` block to match. To keep main context small, read only the cited lines, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved. See the Verification Sweep section of `playbook:grounding-review`.
+Drop findings that do not hold, relabel the mislabelled, move the misplaced, and update each changed finding's `Post:` block to match. To keep main context small, read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list. See the Verification Sweep section of `playbook:grounding-review`.
 
 Only now relay the swept report to the user and go on to posting. Post findings verbatim from their `Post:` blocks as the sweep left them.
 
