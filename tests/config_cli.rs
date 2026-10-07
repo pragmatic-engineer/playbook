@@ -464,6 +464,38 @@ fn set_writes_valid_auto_and_fix_values_including_a_fractional_budget() {
     }
 }
 
+#[test]
+fn the_pr_and_commit_settings_default_then_follow_a_global_set() {
+    // Arrange
+    let repo = seeded_repo("pr-settings");
+    let home = scratch_dir("pr-settings-home");
+    let rows = [
+        ("autoReview.fix", "false", "true"),
+        ("autoMerge.enabled", "false", "true"),
+        ("commit.signOff", "true", "false"),
+    ];
+
+    for (key, default, flipped) in rows {
+        // Act
+        let before = run_playbook(&repo, &home, &["config", "get", key]);
+        let bad = run_playbook(&repo, &home, &["config", "set", "--global", key, "bad"]);
+        let write = run_playbook(&repo, &home, &["config", "set", "--global", key, flipped]);
+        let after = run_playbook(&repo, &home, &["config", "get", key]);
+
+        // Assert
+        assert_eq!(
+            stdout_of(&before).trim(),
+            format!("{key}: {default} (source: default)")
+        );
+        assert!(!bad.status.success(), "{key} = bad must be rejected");
+        assert!(write.status.success(), "stderr: {}", stderr_of(&write));
+        assert_eq!(
+            stdout_of(&after).trim(),
+            format!("{key}: {flipped} (source: global)")
+        );
+    }
+}
+
 /// Plants `contents` as the config file at `path`, creating its directory.
 fn plant_config(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().expect("config path has a parent")).expect("config dir");
