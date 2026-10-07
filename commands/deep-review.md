@@ -95,7 +95,7 @@ Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set 
 4. No assumptions: run the command and read the result.
 5. Follow the command's gates, not your own.
 6. Show real data: tables and reports come from actual output, never placeholders.
-7. **No selective filtering at presentation.** After consolidation (Step 4) you present EVERY surviving finding; the user decides what to post in Step 6. (Consolidation's dedup/drop rules are the only removals, and they happen in Step 4, not by hiding findings in Step 5.)
+7. **No selective filtering at presentation.** After consolidation (Step 4) and the verification sweep (Step 4b) you present EVERY surviving finding; the user decides what to post in Step 6. (Consolidation's dedup/drop rules and the sweep's drops are the only removals, and they happen in Steps 4 and 4b, not by hiding findings in Step 5.)
 8. **Never ask whether to run.** Invoking `/playbook:deep-review` IS the instruction to run; start immediately.
 
 ## Voice rules
@@ -316,13 +316,23 @@ Merge all findings, then (this is where removals happen):
 - **Merge same-line findings:** two+ findings within 3 lines → one comment at the highest severity, combining the points.
 - **Drop out-of-scope:** a finding on a file not in the PR diff is dropped UNLESS the PR's change breaks it (typecheck failure, runtime error, broken import). Preexisting-style nits outside the diff are dropped.
 - **Filter already-addressed:** fetch existing review comments (`gh api --paginate /repos/$REPO/pulls/$PR_NUMBER/comments`), drop findings that duplicate one, and attribute by name ("already raised by @user").
-- **Fact-check (orchestrator):** for each surviving finding, read the file at `HEAD_SHA` and confirm the evidence appears at the cited line; resolve or remove `[unverified]` tags; correct drifted line numbers; drop fabricated findings.
+- **Fact-check (orchestrator):** done in Step 4b, once the list is merged, so each finding is checked once.
 - **Drop non-actionable:** positive observations or asides with no concrete "do X" → always drop; `nitpick` → drop from an APPROVE review unless asked.
 - **Verdict + confidence:** APPROVE / REQUEST_CHANGES / COMMENT / INCONCLUSIVE. **INCONCLUSIVE (never APPROVE)** if the swarm failed to run; say why. Confidence HIGH/MEDIUM/LOW.
 
+## Step 4b: Verification sweep (MUST, before presenting or posting)
+
+Run this after Step 4 and before any finding is shown to the user or a pending review is created. You do it yourself, not a reviewer: reviewers are read-only and can be wrong. Check every surviving finding against the code at `HEAD_SHA` (under `$WT` in worktree mode):
+
+1. **True.** Re-read the cited lines. Trace or run the failure scenario where that is cheap. A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
+2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact.
+3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
+
+Drop findings that do not hold, relabel the mislabelled, move the misplaced, and update each changed finding's `Post:` block to match. Read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list (Step 4 set them before the sweep). See the Verification Sweep section of `playbook:grounding-review`.
+
 ## Step 5: Present the consolidated report
 
-Present ALL surviving findings (rule 7). Render the `playbook:grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line. List every lens Step 2 selected, including any Step 2d resolved to `skip`, so a reader can see what was deliberately not looked at, not just what fired. Show each lens's Step 2d tier alongside its finding count: a `full-lens` or `cheap-check` lens renders `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check`); a `skip` lens renders `<lens>: skip` with NO count, since it never ran and a count of 0 would misleadingly read the same as "ran and found nothing". For example: "security: full (2) · docs: cheap-check (0) · perf: skip". Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
+Present ALL findings that survived the Step 4b sweep (rule 7), with its `Sweep:` line under the Overview. Render the `playbook:grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line. List every lens Step 2 selected, including any Step 2d resolved to `skip`, so a reader can see what was deliberately not looked at, not just what fired. Show each lens's Step 2d tier alongside its finding count: a `full-lens` or `cheap-check` lens renders `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check`); a `skip` lens renders `<lens>: skip` with NO count, since it never ran and a count of 0 would misleadingly read the same as "ran and found nothing". For example: "security: full (2) · docs: cheap-check (0) · perf: skip". Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
 
 ## Step 6: Orchestrate posting
 
@@ -345,7 +355,7 @@ Otherwise ask **one question at a time**:
 gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews --input "$REVIEW_JSON" --jq '{id, state, html_url}'
 ```
 
-- **Pre-post verification (MUST):** before this call, re-read each selected finding's file at `HEAD_SHA`, confirm the evidence is at the cited line (correct silently if it drifted, drop if absent), and confirm the PR is still OPEN and not CONFLICTING (`gh pr view "$PR_NUMBER" --json state,mergeable`). Don't post on a merged/closed/conflicting PR.
+- **Pre-post verification (MUST):** the Step 4b sweep already settled each finding's truth, label and anchor. Before this call, only confirm the PR is still OPEN and not CONFLICTING (`gh pr view "$PR_NUMBER" --json state,mergeable`). Don't post on a merged/closed/conflicting PR.
 - **Q2:** "Submit verb? approve / comment / request-changes / skip." Reaching this question already means `SELF_MODE` was false, so the PR is never self-authored here and all four verbs are always valid; GitHub's author restriction is exactly why `SELF_REVIEW` forces `SELF_MODE` earlier instead of trying to offer a narrower menu here. On `skip`, leave it PENDING. Otherwise:
 - **Q3:** "Add a comment for the review?" (optional free text, blank to skip). Leave `BODY` empty on a blank answer, except: on `approve` with a blank answer, default `BODY` to `LGTM`.
 
