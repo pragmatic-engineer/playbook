@@ -220,9 +220,10 @@ EOF
 # Signed-off-by --trailer, --signoff passed to git, or an append of a
 # Signed-off-by line. A DCO hook that only checks for the trailer (grep and
 # exit) does not count: dropping --signoff then would fail every commit.
+# Reads $HOOK_FILE: Claude Code replaces positional $N with argument words.
 hook_writes_signoff() {
   local src
-  src=$(sed -e :a -e '/\\$/N; s/\\\n//; ta' "$1" 2>/dev/null \
+  src=$(sed -e :a -e '/\\$/N; s/\\\n//; ta' "$HOOK_FILE" 2>/dev/null \
     | grep -vE '^[[:space:]]*#') || return 1
   printf '%s\n' "$src" \
     | grep -qiE "interpret-trailers.*--trailer[ =]*[\"']?signed-off-by" && return 0
@@ -239,7 +240,7 @@ case "$SIGNOFF_OUT" in *"commit.signOff: false"*) SIGNOFF_FLAG="" ;; esac
 grep -qiE '^Signed-off-by:' "$MSG_FILE" && SIGNOFF_FLAG=""
 for HOOK_NAME in prepare-commit-msg commit-msg; do
   HOOK_FILE=$(git rev-parse --git-path "hooks/$HOOK_NAME")
-  if [ -x "$HOOK_FILE" ] && hook_writes_signoff "$HOOK_FILE"; then
+  if [ -x "$HOOK_FILE" ] && hook_writes_signoff; then
     SIGNOFF_FLAG=""
   fi
 done
