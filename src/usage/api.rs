@@ -219,12 +219,16 @@ fn total_tokens(e: &UsageEvent) -> u64 {
     e.input_tokens + e.output_tokens + e.cache_creation_tokens + e.cache_read_tokens
 }
 
-/// One row per session with at least one message in `range`, newest first.
+/// One row per openable session (a valid id) with a message in `range`, newest
+/// first.
 /// Stats cover the messages inside the range. `usage` is ordered by time.
 pub fn sessions_json(usage: &[UsageEvent], now: i64, range: Range) -> Value {
     let window = range.days(now);
     let mut by_session: BTreeMap<&str, Vec<&UsageEvent>> = BTreeMap::new();
-    for e in usage.iter().filter(|e| in_window(window, e.timestamp)) {
+    for e in usage
+        .iter()
+        .filter(|e| in_window(window, e.timestamp) && valid_session_id(&e.session_id))
+    {
         by_session.entry(e.session_id.as_str()).or_default().push(e);
     }
     let mut rows: Vec<(i64, &str, Value)> = by_session
@@ -709,19 +713,81 @@ mod tests {
         assert_eq!(data["omitted"], 5);
         assert_eq!(data["total"], TIMELINE_LIMIT + 5);
         assert_eq!(data["messages"][0]["time"], 1788300005);
-        assert_eq!(
-            data["chart"].as_str().unwrap().matches("<rect").count(),
-            TIMELINE_CHART_BARS
+        let chart = data["chart"].as_str().unwrap();
+        assert_eq!(chart.matches("<rect").count(), TIMELINE_CHART_BARS);
+        let newest = clock(1788300000 + (TIMELINE_LIMIT + 4) as i64);
+        assert!(
+            chart.contains(&newest),
+            "the chart ends at the newest message"
         );
+        assert!(!chart.contains(&format!("<title>{}:", clock(1788300005))));
     }
 
     #[test]
-    fn a_hostile_repo_or_session_name_reaches_the_chart_only_escaped() {
+    fn hostile_names_travel_as_json_text_and_the_chart_holds_only_clock_labels() {
         let mut usage = vec![in_session("ok", 1788300000, "<script>x</script>", 1.0)];
         usage[0].repo = "<img onerror=x>".into();
 
         let data = session_json(&usage, "ok").unwrap();
 
-        assert!(!data["chart"].as_str().unwrap().contains("<script"));
+        assert_eq!(data["messages"][0]["model"], "<script>x</script>");
+        assert_eq!(data["repo"], "<img onerror=x>");
+        let chart = data["chart"].as_str().unwrap();
+        assert!(!chart.contains("<script") && !chart.contains("<img"));
+        assert!(chart.contains(&clock(1788300000)));
+    }
+
+    #[test]
+    fn a_session_crossing_the_range_edge_counts_only_the_messages_inside() {
+        let now = 1788400000;
+        let usage = vec![
+            in_session("x", now - 40 * 86_400, "m", 5.0),
+            in_session("x", now - 60, "m", 1.0),
+        ];
+
+        let inside = sessions_json(&usage, now, Range::LastDays(30));
+        let all = sessions_json(&usage, now, Range::All);
+
+        let row = &inside["sessions"][0];
+        assert_eq!(
+            (row["messages"].as_u64(), row["duration"].as_i64()),
+            (Some(1), Some(0))
+        );
+        assert_eq!(row["start"], now - 60);
+        assert!((row["cost_usd"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+        assert_eq!(all["sessions"][0]["messages"], 2);
+        assert_eq!(inside["range"]["key"], "30d");
+        assert!(inside["range"]["start"].is_string());
+    }
+
+    #[test]
+    fn sessions_without_a_usable_id_are_not_listed() {
+        let usage = vec![
+            in_session("", 1788300000, "m", 1.0),
+            in_session("a/b", 1788300001, "m", 1.0),
+            in_session("fine", 1788300002, "m", 1.0),
+        ];
+
+        let list = sessions_json(&usage, 1788400000, Range::All);
+
+        assert_eq!(list["total"], 1);
+        assert_eq!(list["sessions"][0]["id"], "fine");
+    }
+
+    #[test]
+    fn repo_branch_and_agent_come_from_the_latest_message() {
+        let mut usage = vec![
+            in_session("n", 1788300000, "m", 0.0),
+            in_session("n", 1788300100, "m", 0.0),
+        ];
+        usage[1].branch = "feature".into();
+        usage[1].repo = "later".into();
+
+        let list = sessions_json(&usage, 1788400000, Range::All);
+        let one = session_json(&usage, "n").unwrap();
+
+        assert_eq!(list["sessions"][0]["branch"], "feature");
+        assert_eq!(list["sessions"][0]["repo"], "later");
+        assert_eq!(one["branch"], "feature");
     }
 }

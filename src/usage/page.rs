@@ -165,6 +165,7 @@ function table(id, title, columns, rows, onPick, selected) {
   const wrap = el("div");
   if (title) wrap.appendChild(el("h2", title));
   const scroll = el("div", undefined, "scroll");
+  scroll.dataset.scroll = id;
   wrap.appendChild(scroll);
   function draw(focusKey) {
     const sort = sorts[id];
@@ -179,6 +180,7 @@ function table(id, title, columns, rows, onPick, selected) {
       const button = el("button", c.label + (active ? (sort.dir > 0 ? " ▲" : " ▼") : ""));
       button.type = "button";
       button.dataset.key = c.key;
+      button.dataset.focus = id + ":" + c.key;
       button.addEventListener("click", () => {
         sorts[id] = active ? { key: c.key, dir: -sort.dir } : { key: c.key, dir: c.text ? 1 : -1 };
         draw(c.key);
@@ -195,6 +197,7 @@ function table(id, title, columns, rows, onPick, selected) {
         if (i === 0 && onPick) {
           const link = el("button", text, "link");
           link.type = "button";
+          link.dataset.focus = id + "#" + r.id;
           if (selected && selected() === r.id) link.setAttribute("aria-current", "true");
           td.appendChild(link);
         } else {
@@ -216,6 +219,19 @@ function table(id, title, columns, rows, onPick, selected) {
   }
   draw();
   return wrap;
+}
+// A rebuild must not cost a keyboard user their place or a phone user their
+// sideways scroll, so both are put back after it.
+function keepUi(rebuild) {
+  const focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.focus : undefined;
+  const scrolls = {};
+  document.querySelectorAll("[data-scroll]").forEach(box => { scrolls[box.dataset.scroll] = box.scrollLeft; });
+  rebuild();
+  document.querySelectorAll("[data-scroll]").forEach(box => { box.scrollLeft = scrolls[box.dataset.scroll] || 0; });
+  if (focused) {
+    const again = Array.from(document.querySelectorAll("[data-focus]")).find(b => b.dataset.focus === focused);
+    if (again) again.focus();
+  }
 }
 function breakdown(id, title, first, rows) {
   const columns = [{ key: "key", label: first, text: true }].concat(NUMBERS.map(n => ({ key: n[0], label: n[1] })));
@@ -347,7 +363,7 @@ function renderSessions(data) {
   list.appendChild(el("p", note, "muted hint"));
   list.appendChild(table("sessions", "", SESSION_COLUMNS, data.sessions, pick => {
     selectedId = pick.id;
-    renderSessions(data);
+    keepUi(() => renderSessions(data));
     loadDetail(pick.id);
   }, () => selectedId));
 }
@@ -409,7 +425,7 @@ async function refresh() {
   try {
     const data = await getJson(TAB_PATH[askedTab] + '?range=' + encodeURIComponent(asked));
     if (stale()) return;
-    RENDER[askedTab](data);
+    keepUi(() => RENDER[askedTab](data));
     status.textContent = "Updated " + new Date().toLocaleTimeString() + ". Refreshes every " + (REFRESH_MS / 1000) + " seconds.";
   } catch (error) {
     if (error.unauthorized) { stopPolling(status, "The session token was rejected. " + NEED_LINK); return; }
@@ -449,7 +465,12 @@ mod tests {
         ));
         assert!(JS.contains("const TABS = [[\"overview\",\"Overview\"],[\"breakdowns\",\"Breakdowns\"],[\"sessions\",\"Sessions\"]];"));
         assert!(JS.contains("\"/api/session?id=\" + encodeURIComponent(id)"));
-        assert_eq!(JS.matches("RENDER[askedTab](data)").count(), 1);
+        assert_eq!(
+            JS.matches("keepUi(() => RENDER[askedTab](data))").count(),
+            1
+        );
+        assert!(JS.contains("box.scrollLeft = scrolls[box.dataset.scroll] || 0;"));
+        assert!(JS.contains("again.focus();"));
     }
 
     #[test]
@@ -457,9 +478,8 @@ mod tests {
         for needle in [
             "setAttribute(\"role\", \"tab\")",
             "setAttribute(\"aria-selected\"",
-            "ArrowRight",
-            "ArrowLeft",
-            "Home: 0",
+            "{ ArrowRight: at === last ? 0 : at + 1, ArrowLeft: at === 0 ? last : at - 1, Home: 0, End: last }[event.key]",
+            "addEventListener(\"keydown\", onTabKey)",
             "button.tabIndex = t[0] === tab ? 0 : -1;",
             "try { localStorage.setItem(TAB_KEY, tab); } catch (e) {}",
             "try { saved = localStorage.getItem(TAB_KEY) || \"\"; } catch (e) {}",
@@ -485,6 +505,14 @@ mod tests {
         assert!(JS.contains("if (inFlight === 0) refresh();"));
         assert!(JS.contains("const stale = () => asked !== range || askedTab !== tab;"));
         assert!(JS.contains("if (stale()) return;"));
+        assert_eq!(
+            JS.matches(
+                "if (id !== selectedId || !sessionsView || sessionsView.detail !== detail) return;"
+            )
+            .count(),
+            2,
+            "after success and after error"
+        );
         assert!(JS.contains("if (!stale()) status.textContent"));
         assert!(!JS.contains("latest"), "polls must not invalidate answers");
     }
