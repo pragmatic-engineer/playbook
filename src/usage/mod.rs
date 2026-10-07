@@ -14,6 +14,7 @@ pub mod codex;
 pub mod dashboard;
 pub mod db;
 pub mod ingest;
+pub mod live;
 pub mod lock;
 pub mod page;
 pub mod pricing;

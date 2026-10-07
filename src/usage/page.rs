@@ -43,6 +43,7 @@ pub const CSS: &str = r##":root { --bg:#fafafa; --fg:#1b1b1f; --muted:#666; --ca
   :root { --bg:#16171a; --fg:#e8e8ea; --muted:#9a9aa2; --card:#1f2024; --line:#34353b; --bar:#6b9bf2; }
 }
 *, *::before, *::after { box-sizing:border-box; }
+[hidden] { display:none !important; }
 body { margin:0; padding:1rem 1rem 3rem; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; -webkit-text-size-adjust:100%; }
 main { max-width:72rem; margin:0 auto; }
 .top { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.75rem; }
@@ -89,8 +90,11 @@ th:first-child, td:first-child { text-align:left; }
 pub const JS: &str = r##"const REFRESH_MS = 5000;
 const TOKEN_KEY = "playbook-usage-token";
 const NEED_LINK = "Open a fresh link with: playbook usage dashboard";
-const TABS = [["overview","Overview"],["breakdowns","Breakdowns"],["sessions","Sessions"]];
+const TABS = [["overview","Overview"],["live","Live"],["breakdowns","Breakdowns"],["sessions","Sessions"]];
 const TAB_PATH = { overview: "/api/data", breakdowns: "/api/data", sessions: "/api/sessions" };
+const LIVE_PATH = "/api/live";
+const LIVE_RETRY_MS = 1000;
+const LIVE_RETRY_MAX_MS = 30000;
 const TAB_KEY = "playbook-usage-tab";
 const TABLES = [["day","By day (UTC)"],["week","By week (UTC, starting Monday)"],["model","By model"],["repo","By repo"],["branch","By branch"],["effort","By effort"],["account","By account"],["agent","By agent"]];
 const NUMBERS = [["messages","Messages"],["input_tokens","Input"],["output_tokens","Output"],["cache_creation_tokens","Cache write"],["cache_read_tokens","Cache read"],["cost_usd","Cost (USD)"]];
@@ -289,9 +293,19 @@ function selectTab(key, focus) {
     document.getElementById("panel").replaceChildren();
     document.getElementById("status").textContent = "Loading…";
     renderTabs();
-    refresh();
+    enterTab();
   }
   if (focus) document.getElementById("tabs").querySelector('[aria-selected="true"]').focus();
+}
+// Live streams instead of polling and has no date range; every other tab polls.
+function enterTab() {
+  stopLive();
+  const isLive = tab === "live";
+  document.getElementById("ranges").hidden = isLive;
+  document.getElementById("period").hidden = isLive;
+  if (!isLive) { refresh(); return; }
+  if (!TOKEN) { document.getElementById("status").textContent = "No session token. " + NEED_LINK; return; }
+  if (!document.hidden) startLive();
 }
 function onTabKey(event) {
   const at = TABS.findIndex(t => t[0] === tab);
@@ -395,6 +409,115 @@ async function loadDetail(id) {
   }
 }
 
+// The token must travel in a header, which the built-in SSE client cannot send, so the
+// stream is a fetch whose body is read and parsed as Server-Sent Events.
+let live = null;
+function parseSse(buffer, onEvent) {
+  const blocks = buffer.replace(/\r\n/g, "\n").split("\n\n");
+  const rest = blocks.pop();
+  blocks.forEach(block => {
+    let name = "message";
+    const data = [];
+    block.split("\n").forEach(line => {
+      if (line.startsWith(":")) return;
+      const at = line.indexOf(":");
+      const field = at < 0 ? line : line.slice(0, at);
+      const value = at < 0 ? "" : line.slice(at + 1).replace(/^ /, "");
+      if (field === "event") name = value;
+      if (field === "data") data.push(value);
+    });
+    if (data.length) onEvent(name, data.join("\n"));
+  });
+  return rest;
+}
+function stopLive() {
+  if (!live) return;
+  live.stopped = true;
+  live.controller.abort();
+  clearTimeout(live.timer);
+  live = null;
+}
+function startLive() {
+  stopLive();
+  live = { stopped: false, delay: LIVE_RETRY_MS, timer: null, controller: new AbortController() };
+  connectLive(live);
+}
+function liveStatus(state, message) {
+  if (!state.stopped) document.getElementById("status").textContent = message;
+}
+async function connectLive(state) {
+  if (state.stopped) return;
+  state.controller = new AbortController();
+  try {
+    const response = await fetch(LIVE_PATH, { headers: { 'X-Playbook-Token': TOKEN }, signal: state.controller.signal });
+    if (response.status === 401) { liveStatus(state, "The session token was rejected. " + NEED_LINK); stopLive(); return; }
+    if (response.status === 503) throw new Error("too many live streams are open");
+    if (!response.ok || !response.body) throw new Error("HTTP " + response.status);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer = parseSse(buffer + decoder.decode(chunk.value, { stream: true }), (name, data) => {
+        if (state.stopped) return;
+        if (name === "live") {
+          state.delay = LIVE_RETRY_MS;
+          keepUi(() => renderLive(JSON.parse(data)));
+          liveStatus(state, "Live. Updated " + new Date().toLocaleTimeString() + ".");
+        } else if (name === "problem") {
+          liveStatus(state, "Live data is not available right now: " + JSON.parse(data).error);
+        }
+      });
+    }
+  } catch (error) {
+    liveStatus(state, "Live stream interrupted (" + error.message + "). Reconnecting…");
+  }
+  if (state.stopped) return;
+  state.timer = setTimeout(() => connectLive(state), state.delay);
+  state.delay = Math.min(state.delay * 2, LIVE_RETRY_MAX_MS);
+}
+function tile(label, value) {
+  const box = el("div", undefined, "total");
+  box.appendChild(el("span", label, "muted"));
+  box.appendChild(el("b", value));
+  return box;
+}
+function renderLive(data) {
+  const totals = el("div", undefined, "totals");
+  totals.appendChild(tile("Active sessions (15 min)", fmt("n", data.active.length)));
+  totals.appendChild(tile("Spend, last hour (USD)", fmt("cost_usd", data.hour.cost_usd)));
+  totals.appendChild(tile("Tokens, last hour", fmt("n", data.hour.tokens)));
+  totals.appendChild(tile("Spend, today UTC (USD)", fmt("cost_usd", data.today.cost_usd)));
+  totals.appendChild(tile("Tokens, today UTC", fmt("n", data.today.tokens)));
+  const charts = el("div", undefined, "charts");
+  drawCharts(charts, data.burn_chart);
+  const box = el("div");
+  box.appendChild(totals);
+  box.appendChild(charts);
+  if (data.active.length) {
+    box.appendChild(table("active", "Active sessions", [
+      { key: "repo", label: "Repo", text: true },
+      { key: "agent", label: "Agent", text: true },
+      { key: "model", label: "Model", text: true },
+      { key: "last", label: "Last message (UTC)", show: v => fmtTime(v) },
+      { key: "messages", label: "Messages" },
+      { key: "cost_usd", label: "Spend so far (USD)" },
+    ], data.active));
+  } else {
+    box.appendChild(el("p", "No session has sent a message in the last 15 minutes.", "muted hint"));
+  }
+  box.appendChild(table("feed", "Latest messages", [
+    { key: "time", label: "Time (UTC)", show: v => fmtTime(v) },
+    { key: "repo", label: "Repo", text: true },
+    { key: "agent", label: "Agent", text: true },
+    { key: "model", label: "Model", text: true },
+    { key: "tokens", label: "Tokens" },
+    { key: "cost_usd", label: "Cost (USD)" },
+  ], data.feed));
+  document.getElementById("panel").replaceChildren(box);
+}
+
 const RENDER = { overview: renderOverview, breakdowns: renderBreakdowns, sessions: renderSessions };
 let timer = null;
 let inFlight = 0;
@@ -418,6 +541,7 @@ async function getJson(path) {
 async function refresh() {
   const status = document.getElementById("status");
   if (!TOKEN) { stopPolling(status, "No session token. " + NEED_LINK); return; }
+  if (tab === "live") return;
   const asked = range;
   const askedTab = tab;
   const stale = () => asked !== range || askedTab !== tab;
@@ -436,12 +560,17 @@ async function refresh() {
 }
 // A slow server must not have its answers dropped by the next poll.
 function poll() {
-  if (inFlight === 0) refresh();
+  if (tab !== "live" && !document.hidden && inFlight === 0) refresh();
 }
+// A hidden page closes its stream and stops polling; showing it again resumes.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { stopLive(); return; }
+  if (tab === "live") startLive(); else refresh();
+});
 renderRanges();
 renderTabs();
 document.getElementById("tabs").addEventListener("keydown", onTabKey);
-refresh();
+enterTab();
 timer = setInterval(poll, REFRESH_MS);
 "##;
 
@@ -455,7 +584,12 @@ mod tests {
         assert!(JS.contains("getJson(TAB_PATH[askedTab] + '?range=' + encodeURIComponent(asked))"));
         assert!(JS.contains(&format!("const REFRESH_MS = {REFRESH_MS};")));
         assert!(JS.contains("setInterval(poll, REFRESH_MS)"));
-        assert_eq!(JS.matches("fetch(").count(), 1, "one place sends the token");
+        assert_eq!(
+            JS.matches("fetch(").count(),
+            2,
+            "polling and the live stream"
+        );
+        assert_eq!(JS.matches("{ 'X-Playbook-Token': TOKEN }").count(), 2);
     }
 
     #[test]
@@ -463,7 +597,7 @@ mod tests {
         assert!(JS.contains(
             "{ overview: \"/api/data\", breakdowns: \"/api/data\", sessions: \"/api/sessions\" }"
         ));
-        assert!(JS.contains("const TABS = [[\"overview\",\"Overview\"],[\"breakdowns\",\"Breakdowns\"],[\"sessions\",\"Sessions\"]];"));
+        assert!(JS.contains("const TABS = [[\"overview\",\"Overview\"],[\"live\",\"Live\"],[\"breakdowns\",\"Breakdowns\"],[\"sessions\",\"Sessions\"]];"));
         assert!(JS.contains("\"/api/session?id=\" + encodeURIComponent(id)"));
         assert_eq!(
             JS.matches("keepUi(() => RENDER[askedTab](data))").count(),
@@ -492,6 +626,35 @@ mod tests {
     }
 
     #[test]
+    fn the_live_stream_reads_a_fetch_body_with_the_token_in_a_header_never_a_url() {
+        assert!(JS.contains("const LIVE_PATH = \"/api/live\";"));
+        assert!(JS.contains("fetch(LIVE_PATH, { headers: { 'X-Playbook-Token': TOKEN }, signal:"));
+        assert!(JS.contains("response.body.getReader()"));
+        assert!(
+            !JS.contains("EventSource"),
+            "it cannot send the token header"
+        );
+        assert!(!JS.contains("LIVE_PATH +") && !JS.contains("LIVE_PATH}"));
+        assert!(!JS.contains("?token") && !JS.contains("&token"));
+    }
+
+    #[test]
+    fn the_live_stream_backs_off_and_closes_when_the_tab_or_page_is_left() {
+        for needle in [
+            "state.delay = Math.min(state.delay * 2, LIVE_RETRY_MAX_MS);",
+            "state.delay = LIVE_RETRY_MS;",
+            "document.addEventListener(\"visibilitychange\"",
+            "if (document.hidden) { stopLive(); return; }",
+            "live.controller.abort();",
+            "function enterTab() {\n  stopLive();",
+            "if (tab !== \"live\" && !document.hidden && inFlight === 0) refresh();",
+            "if (tab === \"live\") return;",
+        ] {
+            assert!(JS.contains(needle), "{needle}");
+        }
+    }
+
+    #[test]
     fn tables_sort_on_header_clicks_with_numbers_compared_as_numbers() {
         assert!(JS.contains("th.setAttribute(\"aria-sort\""));
         assert!(
@@ -502,7 +665,7 @@ mod tests {
 
     #[test]
     fn a_poll_never_drops_a_slow_answer_and_a_switch_drops_the_old_one() {
-        assert!(JS.contains("if (inFlight === 0) refresh();"));
+        assert!(JS.contains("inFlight === 0) refresh();"));
         assert!(JS.contains("const stale = () => asked !== range || askedTab !== tab;"));
         assert!(JS.contains("if (stale()) return;"));
         assert_eq!(
