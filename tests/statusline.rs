@@ -105,8 +105,8 @@ fn shell(home: &Path, root: &Path, payload: &str, env: &[(&str, &str)]) -> Vec<u
     run(cmd, home, root, payload, env)
 }
 
-fn text(b: Vec<u8>) -> String {
-    String::from_utf8_lossy(&b).into_owned()
+fn text(b: &[u8]) -> String {
+    String::from_utf8_lossy(b).into_owned()
 }
 
 fn slug(s: &str) -> String {
@@ -172,14 +172,14 @@ const FULL: &str = r#""session_id":"sess-full","model":{"display_name":"Opus 4.8
 #[test]
 fn a_bare_cwd_prints_only_the_collapsed_path() {
     let s = Scratch::new();
-    let out = text(rust(&s.0, &s.0, &payload(&s.0, ""), &[]));
+    let out = text(&rust(&s.0, &s.0, &payload(&s.0, ""), &[]));
     assert_eq!(out, format!("{GREEN}~{RESET}\n"));
 }
 
 #[test]
 fn a_full_session_prints_model_context_and_economics_lines() {
     let s = Scratch::new();
-    let out = text(rust(&s.0, &s.0, &payload(&s.0, FULL), &[]));
+    let out = text(&rust(&s.0, &s.0, &payload(&s.0, FULL), &[]));
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.len(), 3);
     let sep = format!("{DIM} | {RESET}");
@@ -212,7 +212,7 @@ fn a_failing_pr_prints_the_branch_the_pr_and_the_ci_badge() {
             "",
         ),
     );
-    let out = text(rust(
+    let out = text(&rust(
         &s.0,
         &s.0,
         &payload(&r, ""),
@@ -241,16 +241,16 @@ fn context_rot_shows_at_250k_and_not_at_45k() {
             ),
         )
     };
-    let hot = text(rust(&s.0, &s.0, &body(250000, 300000), &[]));
+    let hot = text(&rust(&s.0, &s.0, &body(250000, 300000), &[]));
     assert!(hot.contains("context rot risk") && hot.contains("250k/300k"));
-    let cold = text(rust(&s.0, &s.0, &body(45000, 200000), &[]));
+    let cold = text(&rust(&s.0, &s.0, &body(45000, 200000), &[]));
     assert!(!cold.contains("context rot risk"));
 }
 
 #[test]
 fn the_five_hour_quota_lives_on_line_three_not_line_two() {
     let s = Scratch::new();
-    let out = text(rust(&s.0, &s.0, &payload(&s.0, FULL), &[]));
+    let out = text(&rust(&s.0, &s.0, &payload(&s.0, FULL), &[]));
     let lines: Vec<&str> = out.lines().collect();
     assert!(!lines[1].contains("5h"));
     assert!(lines[2].contains("5h"));
@@ -261,7 +261,7 @@ fn a_home_with_glob_metacharacters_still_collapses_to_a_tilde() {
     let s = Scratch::new();
     let home = s.0.join("a[b]c");
     std::fs::create_dir_all(&home).unwrap();
-    let out = text(rust(
+    let out = text(&rust(
         &home,
         &s.0,
         &payload(&home, r#""session_id":"sess-glob""#),
@@ -388,7 +388,7 @@ fn ci_out(roots: Option<&str>) -> String {
     if let Some(r) = roots.as_deref() {
         env.push(("STATUSLINE_CI_ROOTS", r));
     }
-    text(rust(&s.0, &s.0, &payload(&r, ""), &env))
+    text(&rust(&s.0, &s.0, &payload(&r, ""), &env))
 }
 
 #[test]
@@ -419,7 +419,7 @@ fn jira_out(base: Option<&str>) -> String {
     if let Some(b) = base {
         env.push(("STATUSLINE_JIRA_BASE_URL", b));
     }
-    text(rust(&s.0, &s.0, &payload(&r, ""), &env))
+    text(&rust(&s.0, &s.0, &payload(&r, ""), &env))
 }
 
 #[test]
@@ -461,13 +461,13 @@ fn session_age_and_the_five_hour_countdown_use_the_given_clock() {
         &s.0,
         r#""session_id":"age","rate_limits":{"five_hour":{"used_percentage":10,"resets_at":10000}}"#,
     );
-    let out = text(render(&body, &env_for(&s.0), 1000 + 3660));
+    let out = text(&render(&body, &env_for(&s.0), 1000 + 3660));
     assert!(
         out.contains("Up\x1b[0m \x1b[38;2;166;227;161m1h1m"),
         "{out:?}"
     );
     assert!(out.contains("(1h29m left)"), "{out:?}");
-    let young = text(render(&body, &env_for(&s.0), 1000 + 599));
+    let young = text(&render(&body, &env_for(&s.0), 1000 + 599));
     assert!(!young.contains("Up"));
 }
 
@@ -478,7 +478,7 @@ fn a_non_integer_reset_drops_the_whole_five_hour_segment() {
         &s.0,
         r#""rate_limits":{"five_hour":{"used_percentage":10,"resets_at":"2026-09-28T12:00:00Z"}}"#,
     );
-    assert!(!text(render(&body, &env_for(&s.0), 5)).contains("5h"));
+    assert!(!text(&render(&body, &env_for(&s.0), 5)).contains("5h"));
 }
 
 // ---- parity with statusline.sh ---------------------------------------------
@@ -796,7 +796,7 @@ fn every_fixture_renders_the_same_bytes_as_statusline_sh() {
         let (_, in_b) = build(&c, &b.0);
         // Homes differ per run and ages tick over midnight, so normalise both.
         let norm = |out: Vec<u8>, home: &Path| {
-            let t = text(out).replace(home.to_str().unwrap(), "<HOME>");
+            let t = text(&out).replace(home.to_str().unwrap(), "<HOME>");
             days.replace_all(&t, "Nd ago").into_owned()
         };
         let want = norm(shell(&a.0, &a.0, &in_a, &c.env), &a.0);

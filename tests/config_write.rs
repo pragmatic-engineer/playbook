@@ -293,7 +293,7 @@ fn global_config_path(home: &Path) -> PathBuf {
 
 /// Writes `value` to the global tier and asserts the write is refused with a
 /// message that names `key` and carries `constraint`, leaving no file behind.
-fn assert_rejected(key: &str, value: Value, constraint: &str) {
+fn assert_rejected(key: &str, value: &Value, constraint: &str) {
     // Arrange
     let home = scratch_home("range-rejected");
 
@@ -317,7 +317,7 @@ fn assert_rejected(key: &str, value: Value, constraint: &str) {
 }
 
 /// Writes `value` to the global tier and asserts it lands in the file.
-fn assert_written(key: &str, value: Value) {
+fn assert_written(key: &str, value: &Value) {
     // Arrange
     let home = scratch_home("range-accepted");
 
@@ -331,7 +331,7 @@ fn assert_written(key: &str, value: Value) {
         .split('.')
         .fold(&stored, |node, segment| &node[segment])
         .clone();
-    assert_eq!(leaf, value, "{key}");
+    assert_eq!(&leaf, value, "{key}");
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -346,28 +346,28 @@ fn a_budget_under_one_cent_is_rejected_with_a_clear_message() {
         json!(0.004),
         json!(0.009),
     ] {
-        assert_rejected("auto.budgetUsd", value, "at least 0.01");
+        assert_rejected("auto.budgetUsd", &value, "at least 0.01");
     }
 }
 
 #[test]
 fn a_budget_of_a_cent_or_more_including_a_fractional_one_is_written() {
     for value in [json!(5), json!(1000), json!(0.5), json!(2.5), json!(0.01)] {
-        assert_written("auto.budgetUsd", value);
+        assert_written("auto.budgetUsd", &value);
     }
 }
 
 #[test]
 fn a_warn_percentage_outside_one_to_a_hundred_or_fractional_is_rejected() {
     for value in [json!(0), json!(-1), json!(101), json!(1000), json!(70.5)] {
-        assert_rejected("auto.warnPct", value, "between 1 and 100");
+        assert_rejected("auto.warnPct", &value, "between 1 and 100");
     }
 }
 
 #[test]
 fn a_warn_percentage_from_one_to_a_hundred_is_written() {
     for value in [json!(1), json!(70), json!(100)] {
-        assert_written("auto.warnPct", value);
+        assert_written("auto.warnPct", &value);
     }
 }
 
@@ -375,7 +375,7 @@ fn a_warn_percentage_from_one_to_a_hundred_is_written() {
 fn a_fix_threshold_that_is_not_a_positive_integer_is_rejected() {
     for key in ["fix.maxFiles", "fix.maxLines"] {
         for value in [json!(0), json!(-1), json!(2.5)] {
-            assert_rejected(key, value, "positive integer");
+            assert_rejected(key, &value, "positive integer");
         }
     }
 }
@@ -384,7 +384,7 @@ fn a_fix_threshold_that_is_not_a_positive_integer_is_rejected() {
 fn a_positive_integer_fix_threshold_is_written() {
     for key in ["fix.maxFiles", "fix.maxLines"] {
         for value in [json!(1), json!(99)] {
-            assert_written(key, value);
+            assert_written(key, &value);
         }
     }
 }
@@ -414,7 +414,7 @@ fn a_non_number_for_a_numeric_auto_or_fix_key_is_rejected_and_writes_nothing() {
 
 #[test]
 fn zero_is_still_accepted_for_the_other_numeric_keys() {
-    assert_written("worktreeCleanup.staleAfterDays", json!(0));
+    assert_written("worktreeCleanup.staleAfterDays", &json!(0));
 }
 
 const BOOL_SETTINGS: [&str; 4] = [
@@ -448,7 +448,7 @@ fn a_non_bool_for_the_pr_and_commit_settings_is_rejected_and_writes_nothing() {
 #[test]
 fn a_bool_for_the_pr_and_commit_settings_is_written() {
     for key in BOOL_SETTINGS {
-        assert_written(key, json!(true));
-        assert_written(key, json!(false));
+        assert_written(key, &json!(true));
+        assert_written(key, &json!(false));
     }
 }

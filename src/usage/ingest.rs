@@ -168,7 +168,11 @@ mod tests {
 
         // Simulate a crash that lost the watermark: the source re-returns
         // every event, so only the event_id pre-filter prevents doubles.
-        db::advance_watermark(&conn, "claude-code", 0).unwrap();
+        conn.execute(
+            "UPDATE usage_watermarks SET watermark = 0 WHERE source = 'claude-code'",
+            [],
+        )
+        .unwrap();
         let again = ingest(&source, "a", &conn).unwrap();
 
         assert_eq!(count(&conn, "tool_invocation_events"), 4);
@@ -184,7 +188,7 @@ mod tests {
     fn a_slower_ingest_cannot_move_the_watermark_backwards() {
         let dir = scratch_dir("usage-raise");
         let conn = db::open_db(&dir.join("usage.db")).unwrap();
-        db::advance_watermark(&conn, "fake", 900).unwrap();
+        db::raise_watermark(&conn, "fake", 900).unwrap();
 
         db::raise_watermark(&conn, "fake", 100).unwrap();
         assert_eq!(db::get_watermark(&conn, "fake").unwrap(), 900);

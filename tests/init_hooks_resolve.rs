@@ -33,8 +33,6 @@
 //! commands would pass every assertion below trivially, which is the same
 //! class of bug as the two defects this module exists to catch.
 
-#![allow(dead_code)]
-
 use serde_json::Value;
 use std::env;
 use std::fs;

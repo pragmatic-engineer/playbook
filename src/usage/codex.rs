@@ -292,7 +292,11 @@ mod tests {
         let conn = db::open_db(&dir.join("usage.db")).unwrap();
         let source = CodexSource::new(root());
         let first = ingest(&source, "unknown", &conn).unwrap();
-        db::advance_watermark(&conn, "codex", 0).unwrap();
+        conn.execute(
+            "UPDATE usage_watermarks SET watermark = 0 WHERE source = 'codex'",
+            [],
+        )
+        .unwrap();
         let again = ingest(&source, "unknown", &conn).unwrap();
         assert_eq!(first.usage_inserted, 4);
         assert_eq!(again.usage_inserted, 0);

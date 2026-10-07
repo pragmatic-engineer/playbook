@@ -539,7 +539,7 @@ scenario_m_system_prompt_refresh_without_flag() {
 #     .settings.base.json against tests/fixtures/golden/setup-local.clean-install.json,
 #     captured from TODAY's unmodified script before this WU's rewrite.
 #
-#     Compared semantically (canonical-json, sorted keys), not byte-for-byte: a fresh
+#     Compared semantically (`json equal`, sorted keys), not byte-for-byte: a fresh
 #     install's settings.json now has alphabetically-sorted top-level keys
 #     instead of the template's own insertion order (disclosed side effect 3
 #     in setup-local.sh's own comment), because `playbook init` always routes
@@ -561,7 +561,7 @@ scenario_n_golden_clean_install() {
     expected_base="$d/expected-base.json"
     # string-field prints its field's raw bytes with no trailing newline
     # added, matching jq -j rather than -r: -r would double up the newline
-    # already embedded in the field, a spurious diff every canonical-json
+    # already embedded in the field, a spurious diff every `json equal`
     # semantic comparison here would swallow silently at the value level
     # anyway, but scenario O's byte diff below would not.
     "$REAL_BIN_SRC" json raw-string-field settings_json < "$fixture" > "$expected_settings"

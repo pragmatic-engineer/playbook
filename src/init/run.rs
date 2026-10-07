@@ -454,7 +454,7 @@ fn prune_family(dir: &Path, prefix: &str, suffix: &str) {
 }
 
 /// Step 2: upsert the ported hooks and guards into `settings.json`. Every
-/// `GUARD_SPECS` entry is `ported: true` (WU-13), so `wire` wires every hook
+/// `GUARD_SPECS` entry is wired (WU-13), so `wire` wires every hook
 /// and guard unconditionally; WU-14 dropped the `placed_guards` and
 /// `claude_home` parameters `wire::wire` used to take, since the gate they
 /// fed had become permanently unreachable.

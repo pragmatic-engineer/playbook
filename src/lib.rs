@@ -808,17 +808,6 @@ pub enum JsonCommand {
         /// Top-level field to read
         key: String,
     },
-    /// Print the input with every object's keys sorted
-    CanonicalJson {
-        /// Top-level key to drop before sorting
-        #[arg(long)]
-        del: Option<String>,
-    },
-    /// Print every hook command under `.hooks.<event>`, one per line
-    HookCommandsForEvent {
-        /// Event key under `.hooks`, such as `PreToolUse`
-        event: String,
-    },
     /// Print `.projects[project_path].field`
     ProjectField {
         /// Project path, used as the object key
