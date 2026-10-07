@@ -636,8 +636,7 @@ pub enum WorktreeCommand {
         path: PathBuf,
     },
     /// Create or remove the locked review worktrees `/playbook:quick-review`
-    /// and `/playbook:deep-review` run in, ported from
-    /// `shell/review-worktree.sh`.
+    /// and `/playbook:deep-review` run in
     Review {
         #[command(subcommand)]
         sub: ReviewWorktreeCommand,
