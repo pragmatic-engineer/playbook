@@ -12,6 +12,7 @@
 //! not expand variables in a message, an alias or a script that builds one.
 
 mod engine;
+mod gh;
 mod git;
 mod sources;
 

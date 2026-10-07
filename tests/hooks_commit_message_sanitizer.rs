@@ -20,6 +20,7 @@ use std::process::{Command, Stdio};
 const HOOK: &str = "commit-message-sanitizer";
 const COAUTHOR: &str = "Co-Authored-By: Claude <noreply@anthropic.com>";
 const SESSION: &str = "Claude-Session: https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQr";
+const FOOTER: &str = "Generated with [Claude Code](https://claude.com/claude-code)";
 
 struct Lab {
     scratch: Scratch,
@@ -36,6 +37,10 @@ impl Lab {
         fs::create_dir_all(&bin).expect("bin dir");
         let lab = Lab { scratch, repo, bin };
         lab.write_stub("rtk", "#!/bin/sh\nexec \"$@\"\n");
+        lab.write_stub(
+            "gh",
+            "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> \"$(dirname \"$0\")/gh.args\"\nwhile [ $# -gt 0 ]; do case \"$1\" in --body-file) cat \"$2\" >> \"$(dirname \"$0\")/gh.body\";; esac; shift; done\n",
+        );
         lab.git(&["init", "-q", "-b", "main"]);
         lab.git(&["config", "user.name", "Test"]);
         lab.git(&["config", "user.email", "test@example.com"]);
@@ -239,6 +244,22 @@ fn every_commit_message_form_is_stored_clean() {
             format!("git commit --allow-empty -m $'feat: x\\n\\nbody line\\n\\nRefs: 1\\n{COAUTHOR}\\n{SESSION}'"),
         ),
         (
+            "printf piped",
+            format!("printf 'feat: x\\n\\nbody line\\n\\nRefs: 1\\n{COAUTHOR}\\n{SESSION}\\n' | git commit --allow-empty -F -"),
+        ),
+        (
+            "printf substitution",
+            format!("git commit --allow-empty -m \"$(printf 'feat: x\\n\\nbody line\\n\\nRefs: 1\\n{COAUTHOR}\\n{SESSION}')\""),
+        ),
+        (
+            "echo piped",
+            format!("echo {} | git commit --allow-empty -F -", sh(&dirty)),
+        ),
+        (
+            "here string",
+            format!("git commit --allow-empty -F - <<< {}", sh(&dirty)),
+        ),
+        (
             "heredoc producer",
             format!("cat <<'EOF' | git commit --allow-empty -F -\n{dirty}\nEOF"),
         ),
@@ -284,6 +305,18 @@ fn every_commit_message_form_is_stored_clean() {
         (
             "chained after cd",
             format!("cd . && git commit --allow-empty -m {} && true", sh(&dirty)),
+        ),
+        (
+            "file written earlier in the command",
+            format!(
+                "cat > msg.txt <<'EOF'\n{dirty}\nEOF\ngit commit --allow-empty -F msg.txt"
+            ),
+        ),
+        (
+            "tee then -F",
+            format!(
+                "tee msg.txt <<'EOF' >/dev/null\n{dirty}\nEOF\ngit commit --allow-empty -F msg.txt"
+            ),
         ),
     ];
     for (name, command) in cases {
@@ -465,6 +498,79 @@ fn an_unreadable_message_file_is_reported_without_blocking() {
 }
 
 #[test]
+fn a_reused_message_is_passed_clean_through_a_heredoc() {
+    let lab = Lab::new("reuse");
+    lab.git(&[
+        "commit",
+        "--allow-empty",
+        "-q",
+        "-m",
+        &format!("feat: x\n\nbody line\n\nRefs: 1\n{COAUTHOR}"),
+    ]);
+
+    let command = "git commit --allow-empty --amend --no-edit";
+    let rewritten = lab.rewritten(command);
+    assert!(rewritten.contains("-F -"), "{rewritten}");
+    assert!(
+        rewritten.contains("<<'PLAYBOOK_MESSAGE_END'"),
+        "{rewritten}"
+    );
+    let (ok, text) = lab.run(&rewritten);
+
+    assert!(ok, "{text}");
+    let head = lab.head();
+    assert_no_attribution(&head);
+    assert!(
+        head.contains("Refs: 1") && head.contains("body line"),
+        "{head:?}"
+    );
+}
+
+#[test]
+fn a_reused_message_keeps_the_commit_s_author_for_dash_big_c() {
+    let lab = Lab::new("reuse-c");
+    lab.git(&[
+        "commit",
+        "--allow-empty",
+        "-q",
+        "--author",
+        "Pat <pat@example.com>",
+        "-m",
+        &format!("feat: x\n\n{COAUTHOR}"),
+    ]);
+
+    let head = lab.commit_through_hook("git commit --allow-empty -C HEAD");
+
+    assert_eq!(head.trim(), "feat: x");
+    assert_eq!(lab.git(&["log", "-1", "--format=%an"]).trim(), "Pat");
+}
+
+#[test]
+fn a_clean_reused_message_is_left_alone() {
+    let lab = Lab::new("reuse-clean");
+    lab.git(&["commit", "--allow-empty", "-q", "-m", "feat: x\n\nRefs: 1"]);
+
+    assert_eq!(lab.hook("git commit --allow-empty --amend --no-edit"), "");
+    assert_eq!(lab.hook("git commit --allow-empty -C HEAD"), "");
+}
+
+#[test]
+fn a_reuse_flag_abbreviation_is_resolved_like_git() {
+    let lab = Lab::new("reuse-abbrev");
+    lab.git(&[
+        "commit",
+        "--allow-empty",
+        "-q",
+        "-m",
+        &format!("feat: x\n\n{COAUTHOR}"),
+    ]);
+
+    let head = lab.commit_through_hook("git commit --allow-empty --am --no-ed");
+
+    assert_eq!(head.trim(), "feat: x");
+}
+
+#[test]
 fn tags_and_merges_are_cleaned() {
     let lab = Lab::new("tag-merge");
     let dirty = format!("feat: x\n\n{COAUTHOR}");
@@ -484,6 +590,52 @@ fn tags_and_merges_are_cleaned() {
     let (ok, text) = lab.run(&merge);
     assert!(ok, "{text}");
     assert_eq!(lab.head().trim(), "feat: x");
+}
+
+#[test]
+fn commit_tree_reads_its_message_from_an_option_or_stdin() {
+    let lab = Lab::new("commit-tree");
+    let dirty = format!("feat: x\n\n{COAUTHOR}");
+    let tree = lab.git(&["rev-parse", "HEAD^{tree}"]).trim().to_string();
+    for command in [
+        format!("git commit-tree {tree} -m {}", sh(&dirty)),
+        format!("git commit-tree {tree} <<'EOF'\n{dirty}\nEOF"),
+    ] {
+        let rewritten = lab.rewritten(&command);
+        let (ok, text) = lab.run(&rewritten);
+        assert!(ok, "{rewritten}\n{text}");
+        let sha = text.trim().to_string();
+        assert_eq!(
+            lab.git(&["cat-file", "commit", &sha])
+                .split("\n\n")
+                .nth(1)
+                .unwrap()
+                .trim(),
+            "feat: x"
+        );
+    }
+}
+
+#[test]
+fn a_squash_message_left_by_a_merge_is_cleaned_before_the_commit() {
+    let lab = Lab::new("squash");
+    lab.git(&["checkout", "-q", "-b", "side"]);
+    lab.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        &format!("side work\n\n{COAUTHOR}"),
+    ]);
+    lab.git(&["checkout", "-q", "main"]);
+    lab.git(&["merge", "--squash", "side"]);
+
+    let out = lab.hook("git commit --allow-empty --no-edit");
+
+    assert_eq!(updated_command(&out), None, "{out}");
+    let squash = fs::read_to_string(lab.repo.join(".git/SQUASH_MSG")).unwrap();
+    assert_no_attribution(&squash);
+    assert!(squash.contains("side work"), "{squash}");
 }
 
 #[test]
@@ -520,6 +672,20 @@ fn a_script_nested_in_a_word_is_rewritten() {
         assert_ne!(rewritten, command, "{command}");
         assert_no_attribution(&rewritten);
     }
+}
+
+#[test]
+fn a_file_read_by_cat_inside_a_message_is_rewritten_on_disk() {
+    let lab = Lab::new("cat-file");
+    let body = write(&lab.repo, "body.md", &format!("body\n\n{FOOTER}\n"));
+
+    let rewritten = lab.rewritten("gh pr create --title t --body \"$(cat body.md)\"");
+
+    assert_eq!(
+        rewritten,
+        "gh pr create --title t --body \"$(cat body.md)\""
+    );
+    assert_eq!(fs::read_to_string(body).unwrap(), "body\n");
 }
 
 #[test]
@@ -561,6 +727,132 @@ fn a_file_message_keeps_its_comment_lines_and_is_not_cut_at_a_scissors_line() {
 }
 
 #[test]
+fn a_pr_body_is_judged_as_prose_not_as_a_commit() {
+    let lab = Lab::new("prose");
+
+    let body = "## Summary\n\nbody\n\nClaude-Model: opus";
+    let out = lab.hook(&format!("gh pr create --title t --body {}", sh(body)));
+
+    assert_eq!(
+        out, "",
+        "a trailer-shaped last line of a PR body is prose: {out}"
+    );
+}
+
+#[test]
+fn an_ai_trailer_option_is_dropped_and_a_human_one_is_kept() {
+    let lab = Lab::new("trailer");
+    for dirty in [
+        "--trailer 'Co-authored-by=Claude <noreply@anthropic.com>'",
+        "--trailer 'Co-authored-by:Claude <noreply@anthropic.com>'",
+        "--trailer='Co-authored-by: Claude <noreply@anthropic.com>'",
+    ] {
+        let head = lab.commit_through_hook(&format!(
+            "git commit --allow-empty -m 'feat: x' {dirty} --trailer 'Refs=7'"
+        ));
+        assert_no_attribution(&head);
+        assert!(head.contains("Refs: 7"), "{head:?}");
+    }
+}
+
+#[test]
+fn an_ai_author_is_dropped_so_git_uses_the_configured_identity() {
+    let lab = Lab::new("author");
+    let cases = [
+        "git commit --allow-empty -m x --author 'Claude <noreply@anthropic.com>'",
+        "git commit --allow-empty -m x --author='Claude <noreply@anthropic.com>'",
+        "GIT_AUTHOR_NAME=Claude GIT_AUTHOR_EMAIL=noreply@anthropic.com git commit --allow-empty -m x",
+        "env GIT_COMMITTER_NAME=Claude git commit --allow-empty -m x",
+        "git -c user.name=Claude -c user.email=noreply@anthropic.com commit --allow-empty -m x",
+    ];
+    for command in cases {
+        lab.commit_through_hook(command);
+        let who = lab.git(&["log", "-1", "--format=%an <%ae> %cn <%ce>"]);
+        assert_eq!(
+            who.trim(),
+            "Test <test@example.com> Test <test@example.com>",
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn a_human_author_is_left_alone() {
+    let lab = Lab::new("author-human");
+
+    assert_eq!(
+        lab.hook("git commit --allow-empty -m x --author 'Claude Dupont <claude@example.fr>'"),
+        ""
+    );
+}
+
+#[test]
+fn gh_pr_text_is_cleaned_in_every_form() {
+    let lab = Lab::new("gh");
+    let body = format!("## Summary\n\nbody line\n\n{FOOTER}");
+    let body_file = write(&lab.repo, "body.md", &format!("{body}\n"));
+    let commands = vec![
+        format!("gh pr create --title 'feat: x' --body {}", sh(&body)),
+        format!("gh pr new --title 'feat: x' --body={}", sh(&body)),
+        format!("gh pr edit 7 --body {}", sh(&body)),
+        format!("gh pr create --title 'feat: x' -b {}", sh(&body)),
+        format!("gh pr create --title 'Generated with Claude Code' --body ok"),
+        format!("gh pr create --title t --body \"$(cat <<'EOF'\n{body}\nEOF\n)\""),
+        format!("gh pr create --title t --body-file {}", body_file.display()),
+        format!("gh pr create --title t --body-file - <<'EOF'\n{body}\nEOF"),
+        format!("gh pr create --title t --body-file /dev/stdin <<'EOF'\n{body}\nEOF"),
+    ];
+    for command in commands {
+        let _ = fs::remove_file(lab.bin.join("gh.args"));
+        let _ = fs::remove_file(lab.bin.join("gh.body"));
+        let rewritten = lab.rewritten(&command);
+        let (ok, text) = lab.run(&rewritten);
+        assert!(ok, "{rewritten}\n{text}");
+        let args = fs::read_to_string(lab.bin.join("gh.args")).unwrap_or_default();
+        assert_no_attribution(&args);
+        assert!(args.contains("pr"), "gh ran: {args}");
+    }
+}
+
+#[test]
+fn gh_pr_merge_subject_and_body_are_cleaned() {
+    let lab = Lab::new("gh-merge");
+    let command = format!(
+        "gh pr merge 7 --squash --subject 'feat: x' --body {}",
+        sh(&format!("body line\n\n{COAUTHOR}"))
+    );
+
+    let rewritten = lab.rewritten(&command);
+    let (ok, text) = lab.run(&rewritten);
+
+    assert!(ok, "{text}");
+    let args = fs::read_to_string(lab.bin.join("gh.args")).unwrap();
+    assert_no_attribution(&args);
+    assert!(args.contains("body line"), "{args}");
+}
+
+#[test]
+fn gh_pr_text_files_and_fill_are_handled() {
+    let lab = Lab::new("gh-file");
+    let file = write(&lab.repo, "body.md", &format!("body\n\n{FOOTER}\n"));
+
+    let out = lab.hook(&format!(
+        "gh pr create --title t --body-file {}",
+        file.display()
+    ));
+
+    assert_eq!(
+        updated_command(&out).as_deref(),
+        Some("gh pr create --title t --body-file - <<'PLAYBOOK_MESSAGE_END'\nbody\nPLAYBOOK_MESSAGE_END\n")
+    );
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        format!("body\n\n{FOOTER}\n")
+    );
+    assert_eq!(lab.hook("gh pr create --fill"), "");
+}
+
+#[test]
 fn a_rewrite_has_no_permission_decision_and_keeps_the_other_input_fields() {
     let lab = Lab::new("shape");
 
@@ -594,6 +886,8 @@ fn unrelated_and_clean_commands_print_nothing() {
         "git status",
         "git log --oneline -3",
         "git diff HEAD",
+        "gh pr view 3",
+        "gh pr list",
         "cargo test",
         "git commit --allow-empty -m 'feat: clean'",
         "git commit --allow-empty -m 'feat: x' -m 'Refs: 1' -m 'Signed-off-by: A <a@b.c>'",
@@ -603,6 +897,7 @@ fn unrelated_and_clean_commands_print_nothing() {
         "GIT_DIR=/tmp/x git commit -m 'feat: x'",
         "git commit --allow-empty -F - <<'EOF'\nfeat: x\n\nCo-authored-by: Sam Lee <sam@example.com>\nEOF",
         "git commit --allow-empty -m 'document the Claude Code plugin'",
+        "gh pr create --title 'feat: x' --body 'Fixes: #1'",
         "echo 'git commit -m x'",
         "",
     ];
@@ -852,12 +1147,22 @@ fn a_message_read_from_a_redirect_or_here_string_is_reported_as_unread() {
     write(&lab.repo, "msg.txt", &format!("feat: x\n\n{COAUTHOR}\n"));
     let commands = [
         "git commit --allow-empty -F - < msg.txt",
-        "git commit --allow-empty -F - <<< \"feat: x\"",
         "git commit --allow-empty -F /dev/stdin 0< msg.txt",
     ];
     for command in commands {
         assert_left_unread(&lab, command, "standard input");
     }
+}
+
+#[test]
+fn a_here_string_message_is_cleaned_like_a_message_word() {
+    let lab = Lab::new("here-string");
+    let dirty = format!("feat: x\n\n{COAUTHOR}");
+
+    let head =
+        lab.commit_through_hook(&format!("git commit --allow-empty -F - <<< {}", sh(&dirty)));
+
+    assert_eq!(head.trim(), "feat: x");
 }
 
 #[test]
@@ -893,6 +1198,22 @@ fn a_carrier_that_runs_a_shell_hands_the_script_to_the_nested_walk() {
         format!("printf 'a\\n' | xargs -I{{}} sh -c {}", sh(&inner)),
         format!("find . -maxdepth 0 -exec bash -c {} \\;", sh(&inner)),
         format!("rtk eval {}", sh(&inner)),
+    ];
+    for command in commands {
+        let rewritten = lab.rewritten(&command);
+
+        assert_ne!(rewritten, command, "{command}");
+        assert_no_attribution(&rewritten);
+    }
+}
+
+#[test]
+fn a_gh_call_through_a_carrier_is_cleaned_like_a_direct_one() {
+    let lab = Lab::new("carrier-gh");
+    let body = format!("## Summary\n\nbody\n\n{COAUTHOR}");
+    let commands = [
+        format!("rtk gh pr create --title t --body {}", sh(&body)),
+        format!("nohup gh pr edit 7 --body {}", sh(&body)),
     ];
     for command in commands {
         let rewritten = lab.rewritten(&command);

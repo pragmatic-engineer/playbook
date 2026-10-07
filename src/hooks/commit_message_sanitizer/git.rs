@@ -1,14 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! The `git` calls that write a message: `commit`, `tag` and `merge`. Reads
-//! the message from `-m`, from `-F` and from a heredoc fed to `-F -`, and
-//! follows the script a `git rebase --exec` runs.
+//! The `git` calls that write a message: `commit`, `tag`, `merge` and
+//! `commit-tree`. Reads the message from every form git accepts and from the
+//! message a commit reuses, drops an `--author` or `--trailer` that names an
+//! AI, and follows the script a `git rebase --exec` runs.
 
-use super::engine::{nested_word, Call, Findings, Plan};
-use super::sources::{apply, from_path, from_word, resolve, value_span, Source, Target};
-use crate::common::cli_opts::{named, Opt, Spec};
-use std::path::PathBuf;
+use super::engine::{git_output, nested_word, Call, Findings, Plan};
+use super::sources::{
+    apply, from_path, from_stdin, from_word, resolve, value_span, Rule, Source, Target,
+};
+use crate::common::attribution::{drop_lines, is_ai_identity, problems, trailer_shape};
+use crate::common::cli_opts::{has, named, Opt, Spec};
+use crate::common::shell::{is_assignment, quote};
+use std::ops::Range;
+use std::path::{Path, PathBuf};
 
 // The specs list the options whose value can be a message or hides one, and
 // the flags that change where a message comes from. `other_long` holds the
@@ -194,6 +200,28 @@ const TAG: Spec = Spec {
     ],
     abbreviate: true,
 };
+const COMMIT_TREE: Spec = Spec {
+    short_values: "mFp",
+    short_attached: "S",
+    long_values: &["message", "file"],
+    long_flags: &[],
+    other_long: &[],
+    abbreviate: true,
+};
+
+/// Environment variables and `-c` keys that set the author or committer.
+const IDENTITY_NAME_KEYS: [&str; 4] = [
+    "GIT_AUTHOR_NAME",
+    "GIT_COMMITTER_NAME",
+    "user.name",
+    "author.name",
+];
+const IDENTITY_EMAIL_KEYS: [&str; 4] = [
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_EMAIL",
+    "user.email",
+    "author.email",
+];
 const REBASE: Spec = Spec {
     short_values: "x",
     short_attached: "",
@@ -211,6 +239,7 @@ const GLOBAL_WITH_VALUE: [&str; 6] = [
     "--attr-source",
     "--config-env",
 ];
+const MESSAGE_FILES: [&str; 2] = ["MERGE_MSG", "SQUASH_MSG"];
 
 /// What every subcommand handler needs.
 struct Run<'a> {
@@ -220,7 +249,8 @@ struct Run<'a> {
 }
 
 pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
-    let Some((sub_at, dir)) = skip_globals(call) else {
+    drop_identity_env(call, plan, findings);
+    let Some((sub_at, dir)) = skip_globals(call, plan, findings) else {
         return;
     };
     let call = Call { dir: &dir, ..*call };
@@ -232,15 +262,40 @@ pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
         "commit" => commit(&run, plan, findings),
         "merge" => message_command(&run, &MERGE, "the merge message", plan, findings),
         "tag" => tag(&run, plan, findings),
+        "commit-tree" => commit_tree(&run, plan, findings),
         "rebase" => rebase(&run, plan, findings),
         _ => {}
     }
 }
 
+/// An assignment before the program that sets an AI as the author or
+/// committer is removed, so git uses the configured identity.
+fn drop_identity_env(call: &Call, plan: &mut Plan, findings: &mut Findings) {
+    let cmd = call.cmd();
+    for (at, word) in cmd.words[..call.at].iter().enumerate() {
+        let Some((name, value)) = word.split_once('=').filter(|_| is_assignment(word)) else {
+            continue;
+        };
+        if is_ai_value(name, value) {
+            let span = &cmd.spans[at];
+            plan.edits.push((span.start..span.end, String::new()));
+            findings
+                .notes
+                .push(format!("the {name} variable (an AI identity)"));
+        }
+    }
+}
+
+fn is_ai_value(key: &str, value: &str) -> bool {
+    (IDENTITY_NAME_KEYS.contains(&key) && is_ai_identity(value, ""))
+        || (IDENTITY_EMAIL_KEYS.contains(&key) && is_ai_identity("", value))
+}
+
 /// The index of the subcommand word and the directory git runs in, past the
-/// global options.
-fn skip_globals(call: &Call) -> Option<(usize, PathBuf)> {
-    let words = &call.cmd().words;
+/// global options. A `-c` that sets an AI identity is removed.
+fn skip_globals(call: &Call, plan: &mut Plan, findings: &mut Findings) -> Option<(usize, PathBuf)> {
+    let cmd = call.cmd();
+    let words = &cmd.words;
     let mut dir = call.dir.to_path_buf();
     let mut at = call.at + 1;
     while let Some(word) = words.get(at) {
@@ -251,7 +306,16 @@ fn skip_globals(call: &Call) -> Option<(usize, PathBuf)> {
                 }
                 at += 2;
             }
-            "-c" => at += 2,
+            "-c" => {
+                if let Some(setting) = words.get(at + 1) {
+                    drop_identity_config(call, at..at + 2, setting, plan, findings);
+                }
+                at += 2;
+            }
+            w if w.starts_with("-c") && !w.starts_with("--") => {
+                drop_identity_config(call, at..at + 1, &w[2..], plan, findings);
+                at += 1;
+            }
             w if GLOBAL_WITH_VALUE.contains(&w) => at += 2,
             w if w.starts_with('-') => at += 1,
             _ => return Some((at, dir)),
@@ -260,22 +324,61 @@ fn skip_globals(call: &Call) -> Option<(usize, PathBuf)> {
     None
 }
 
+fn drop_identity_config(
+    call: &Call,
+    words: Range<usize>,
+    setting: &str,
+    plan: &mut Plan,
+    findings: &mut Findings,
+) {
+    let Some((key, value)) = setting.split_once('=') else {
+        return;
+    };
+    let key = key.to_lowercase();
+    let known = IDENTITY_NAME_KEYS
+        .iter()
+        .chain(&IDENTITY_EMAIL_KEYS)
+        .find(|k| k.to_lowercase() == key);
+    if known.is_some_and(|k| is_ai_value(k, value)) {
+        let spans = &call.cmd().spans;
+        plan.edits.push((
+            spans[words.start].start..spans[words.end - 1].end,
+            String::new(),
+        ));
+        findings
+            .notes
+            .push(format!("the {key} setting (an AI identity)"));
+    }
+}
+
 fn commit(run: &Run, plan: &mut Plan, findings: &mut Findings) {
-    let opts = COMMIT.scan(&run.call.cmd().words[run.rest..]);
-    let (sources, _) = message_sources(run, &opts, "the commit message", findings);
-    apply(sources, plan, findings);
+    let call = &run.call;
+    let opts = COMMIT.scan(&call.cmd().words[run.rest..]);
+    let label = "the commit message";
+    let (sources, written) = message_sources(run, &opts, label, findings);
+    apply(sources, Rule::Commit, true, plan, findings);
+    drop_ai_options(run, &opts, plan, findings);
+
+    let reused = named(&opts, &["C", "c", "reuse-message", "reedit-message"]);
+    let amends_unchanged = has(&opts, &["amend"]) && has(&opts, &["no-edit"]);
+    if written {
+        return;
+    }
+    if let Some(opt) = reused.first() {
+        let rev = opt.value.clone().unwrap_or_default();
+        reuse(run, Some(opt), &rev, plan, findings);
+    } else if amends_unchanged {
+        reuse(run, None, "HEAD", plan, findings);
+    } else if !has(&opts, &["amend"]) {
+        sanitize_stored_messages(call, plan, findings);
+    }
 }
 
 fn tag(run: &Run, plan: &mut Plan, findings: &mut Findings) {
     let opts = TAG.scan(&run.call.cmd().words[run.rest..]);
     let (sources, _) = message_sources(run, &opts, "the tag message", findings);
-    apply(sources, plan, findings);
-}
-
-fn message_command(run: &Run, spec: &Spec, label: &str, plan: &mut Plan, findings: &mut Findings) {
-    let opts = spec.scan(&run.call.cmd().words[run.rest..]);
-    let (sources, _) = message_sources(run, &opts, label, findings);
-    apply(sources, plan, findings);
+    apply(sources, Rule::Commit, true, plan, findings);
+    drop_ai_options(run, &opts, plan, findings);
 }
 
 /// The commands `-x` and `--exec` run are scripts of their own.
@@ -287,6 +390,22 @@ fn rebase(run: &Run, plan: &mut Plan, findings: &mut Findings) {
             nested_word(&run.call, at, opt.inline_at, plan, findings);
         }
     }
+}
+
+fn commit_tree(run: &Run, plan: &mut Plan, findings: &mut Findings) {
+    let label = "the commit message";
+    let opts = COMMIT_TREE.scan(&run.call.cmd().words[run.rest..]);
+    let (mut sources, written) = message_sources(run, &opts, label, findings);
+    if !written {
+        sources = from_stdin(&run.call, label, findings);
+    }
+    apply(sources, Rule::Commit, true, plan, findings);
+}
+
+fn message_command(run: &Run, spec: &Spec, label: &str, plan: &mut Plan, findings: &mut Findings) {
+    let opts = spec.scan(&run.call.cmd().words[run.rest..]);
+    let (sources, _) = message_sources(run, &opts, label, findings);
+    apply(sources, Rule::Commit, true, plan, findings);
 }
 
 /// The text of every `-m` and `-F` option, and whether there was one.
@@ -332,6 +451,175 @@ fn message_sources(
         }
     }
     (sources, written)
+}
+
+/// Removes an `--author` that names an AI and a `--trailer` that credits one.
+fn drop_ai_options(run: &Run, opts: &[Opt], plan: &mut Plan, findings: &mut Findings) {
+    let cmd = run.call.cmd();
+    for opt in opts {
+        let Some(value) = opt.value.as_deref() else {
+            continue;
+        };
+        let value_at = opt.value_word + run.rest;
+        let ai = match opt.name.as_str() {
+            "author" => author_is_ai(value),
+            "trailer" => trailer_is_ai(value),
+            _ => false,
+        };
+        if ai && !cmd.spans[value_at].dynamic {
+            let range = cmd.spans[opt.word + run.rest].start..cmd.spans[value_at].end;
+            plan.edits.push((range, String::new()));
+            findings
+                .notes
+                .push(format!("the --{} option (an AI)", opt.name));
+        }
+    }
+}
+
+/// `Name <email>`, or a bare name or email.
+fn author_is_ai(value: &str) -> bool {
+    match value.split_once('<') {
+        Some((name, email)) => is_ai_identity(name, email.trim_end_matches('>')),
+        None => is_ai_identity(value, value),
+    }
+}
+
+/// `token:value` or `token=value`, as `--trailer` reads it.
+fn trailer_is_ai(value: &str) -> bool {
+    let Some((token, rest)) = value.split_once([':', '=']) else {
+        return false;
+    };
+    trailer_shape(&format!("{}: {}", token.trim(), rest.trim())).is_some()
+}
+
+/// Rewrites a commit that reuses a message, from `-C` or from `--amend
+/// --no-edit`, to pass the sanitised message on standard input instead. The
+/// message and the author are read now, so the rewritten call does not depend
+/// on what the repository looks like when it runs.
+fn reuse(run: &Run, option: Option<&Opt>, rev: &str, plan: &mut Plan, findings: &mut Findings) {
+    let call = &run.call;
+    let Some(message) = git_output(call.dir, &["log", "-1", "--format=%B", rev, "--"]) else {
+        return;
+    };
+    let removed = problems(&message);
+    if removed.is_empty() {
+        return;
+    }
+    let Some(position) = line_end(call) else {
+        findings
+            .unread
+            .push(format!("the message reused from {rev}"));
+        return;
+    };
+    let text = format!("{}\n", drop_lines(&message, &removed).trim_end());
+    let delimiter = unique_delimiter(&text);
+    let operator = format!("-F - <<'{delimiter}'");
+    let flags = match option {
+        Some(_) => author_flags(call.dir, rev),
+        None => String::new(),
+    };
+    let spans = &call.cmd().spans;
+    match option {
+        Some(opt) => {
+            let range = spans[opt.word + run.rest].start..spans[opt.value_word + run.rest].end;
+            plan.edits.push((range, format!("{flags}{operator}")));
+        }
+        None => plan
+            .edits
+            .push((call.end()..call.end(), format!(" {operator}"))),
+    }
+    // At the very end of a script the body needs a line break of its own.
+    let lead = if position.start == call.chars.len() && !call.chars.ends_with(&['\n']) {
+        "\n"
+    } else {
+        ""
+    };
+    plan.edits
+        .push((position, format!("{lead}{text}{delimiter}\n")));
+    for (n, shape) in removed {
+        findings.notes.push(format!(
+            "the message reused from {rev} line {n} ({})",
+            shape.name()
+        ));
+    }
+}
+
+/// `--author` and `--date` copied from `rev`, unless its author is an AI.
+fn author_flags(dir: &Path, rev: &str) -> String {
+    let Some(out) = git_output(dir, &["log", "-1", "--format=%an%n%ae%n%aI", rev, "--"]) else {
+        return String::new();
+    };
+    let mut lines = out.lines();
+    let (Some(name), Some(email), Some(date)) = (lines.next(), lines.next(), lines.next()) else {
+        return String::new();
+    };
+    if is_ai_identity(name, email) {
+        return String::new();
+    }
+    format!(
+        "--author={} --date={} ",
+        quote(&format!("{name} <{email}>")),
+        quote(date)
+    )
+}
+
+/// Where a heredoc body for this command starts, as an empty range: after the
+/// line break that ends its line, or at the end of the script. `None` when
+/// another heredoc is already open on the line.
+fn line_end(call: &Call) -> Option<Range<usize>> {
+    let from = call.end();
+    let start = call.chars[..from]
+        .iter()
+        .rposition(|&c| c == '\n')
+        .map_or(0, |at| at + 1);
+    let end = call.chars[from..]
+        .iter()
+        .position(|&c| c == '\n')
+        .map(|at| from + at);
+    let stop = end.unwrap_or(call.chars.len());
+    let busy = call.cmds.iter().any(|c| {
+        !c.heredocs.is_empty()
+            && c.spans
+                .first()
+                .is_some_and(|s| (start..=stop).contains(&s.start))
+    });
+    if busy {
+        return None;
+    }
+    Some(match end {
+        Some(at) => at + 1..at + 1,
+        None => stop..stop,
+    })
+}
+
+/// A heredoc terminator that no line of `text` equals.
+fn unique_delimiter(text: &str) -> String {
+    let mut delimiter = "PLAYBOOK_MESSAGE_END".to_string();
+    while text.lines().any(|line| line == delimiter) {
+        delimiter.push('_');
+    }
+    delimiter
+}
+
+/// A commit with no message option takes its message from the file a merge
+/// or a squash left behind. Those files are rewritten before git reads them.
+fn sanitize_stored_messages(call: &Call, plan: &mut Plan, findings: &mut Findings) {
+    let Some(git_dir) = git_output(call.dir, &["rev-parse", "--git-dir"]) else {
+        return;
+    };
+    let git_dir = resolve(git_dir.trim(), call.dir);
+    for name in MESSAGE_FILES {
+        let path = git_dir.join(name);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let source = Source {
+            label: name.to_string(),
+            text,
+            target: Target::File(path),
+        };
+        apply(vec![source], Rule::Commit, false, plan, findings);
+    }
 }
 
 /// What stays of the word of a short `-m` when the option goes: the other
