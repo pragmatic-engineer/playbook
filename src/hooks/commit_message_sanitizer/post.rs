@@ -7,17 +7,22 @@
 //! runs `git commit` or `git tag`, or `gh pr create`, `new` or `edit`: any
 //! other Bash call costs no git or gh process.
 //!
-//! HEAD is amended with the sanitised message, and an AI author replaced by
-//! the configured identity, only when this very call made the commit with a
-//! message of its own and did not push, and no rebase, merge, cherry-pick or
-//! bisect is under way. The amend keeps the index, the author and the date. A
-//! commit made any other way, an older unpushed commit, a pushed commit and an
-//! annotated tag are reported once per session, since fixing them rewrites
-//! history the agent should choose to rewrite. After `gh pr create` or `edit`
-//! the PR's title and body are read back and edited clean.
+//! HEAD is replaced by a commit with the sanitised message, and an AI author
+//! by the configured identity, only when this very call made it: the HEAD the
+//! PreToolUse hook recorded has changed and the reflog says a commit moved it.
+//! It needs a message of its own, no push in the call and no rebase, merge,
+//! cherry-pick or bisect under way. Git plumbing builds it, so no hook runs and
+//! the index, tree, parents, author and date stay. A commit made any other way,
+//! an older unpushed commit, a pushed commit and an annotated tag are reported
+//! once per session, since fixing them rewrites history the agent should
+//! choose to rewrite. After `gh pr create` or `edit` the PR's title and body
+//! are read back and edited clean; a title that is only attribution is left
+//! for a person to rename.
 
+use super::amend::{rewrite_head, Old};
 use super::engine::git_output;
-use super::git::{git_use, GitUse};
+use super::git::{git_use, sign_off_enabled, GitUse};
+use super::state::take_head;
 use crate::common::attribution::{drop_lines, is_ai_identity, problems, prose_problems, Shape};
 use crate::common::payload::Payload;
 use crate::common::proc::{run_with_input, run_with_timeout};
@@ -28,8 +33,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-/// A signed amend can wait on an agent or a hardware key.
-const AMEND_TIMEOUT: Duration = Duration::from_secs(30);
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
 /// How many unpushed commits are looked at, newest first.
 const MAX_COMMITS: &str = "20";
@@ -39,10 +42,10 @@ const FIELD: char = '\u{1f}';
 const RECORD: char = '\u{1e}';
 
 pub fn run(payload: &Payload, command: &str, dir: &Path) {
-    let used = git_use(command);
+    let used = git_use(command, dir);
     let mut notes = Vec::new();
-    if used.commit {
-        commits(payload, dir, &used, &mut notes);
+    for repo in &used.commit_dirs {
+        commits(payload, repo, &used, &mut notes);
     }
     if used.tag {
         tags(payload, dir, &mut notes);
@@ -117,6 +120,7 @@ fn commits(payload: &Payload, dir: &Path, used: &GitUse, notes: &mut Vec<String>
     let Some(head) = git_output(dir, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string()) else {
         return;
     };
+    let made_here = made_here(payload, dir, &head);
     let unpushed = git_output(
         dir,
         &[
@@ -144,8 +148,8 @@ fn commits(payload: &Payload, dir: &Path, used: &GitUse, notes: &mut Vec<String>
     }
     if head_is_unpushed {
         if let Some(commit) = dirty.iter().find(|c| c.sha == head) {
-            match refusal(dir, used) {
-                None => amend(dir, commit, notes),
+            match refusal(dir, used, made_here) {
+                None => amend(dir, used, commit, notes),
                 Some((what, advice)) => notify_commit(payload, commit, what, advice, notes),
             }
         }
@@ -157,10 +161,26 @@ fn commits(payload: &Payload, dir: &Path, used: &GitUse, notes: &mut Vec<String>
     }
 }
 
+/// Whether this call made `head`: the PreToolUse hook recorded another HEAD
+/// for the repository, and the reflog says a commit moved it. A failed commit,
+/// a dry run, a commit in another repository and a HEAD moved by a merge, a
+/// checkout or a reset are not this call's.
+fn made_here(payload: &Payload, dir: &Path, head: &str) -> bool {
+    let Some(before) = take_head(payload, dir) else {
+        return false;
+    };
+    before != head
+        && git_output(dir, &["reflog", "-1", "--format=%gs"])
+            .is_some_and(|subject| subject.starts_with("commit"))
+}
+
 /// Why HEAD is not amended, as the start of a note about it and what to do,
 /// or `None` when it is safe to.
-fn refusal(dir: &Path, used: &GitUse) -> Option<(&'static str, &'static str)> {
+fn refusal(dir: &Path, used: &GitUse, made_here: bool) -> Option<(&'static str, &'static str)> {
     const AMEND: &str = "Amend it with a clean message.";
+    if !made_here {
+        return Some(("was not made by this call and carries", AMEND));
+    }
     if used.push {
         return Some(("was pushed by this call and carries", AMEND));
     }
@@ -230,35 +250,21 @@ fn notify_commit(
     once(payload, &commit.sha, note, notes);
 }
 
-/// Amends HEAD with the sanitised message alone, and with the configured
-/// identity in place of an AI author. `--only` with no paths leaves the index
-/// as it is, so staged changes stay staged and out of the commit, and the
-/// author and date are kept. `-s` adds the sign-off only when it is missing,
-/// and signing follows the repository's own config.
-fn amend(dir: &Path, commit: &Commit, notes: &mut Vec<String>) {
+/// Replaces HEAD with a commit that has the sanitised message and the
+/// configured identity in place of an AI author, and nothing else changed.
+/// A sign-off is added only when missing, and not after `--no-signoff` or
+/// while `commit.signOff` is false. Signing follows the repository's config.
+fn amend(dir: &Path, used: &GitUse, commit: &Commit, notes: &mut Vec<String>) {
     let message = format!(
         "{}\n",
         drop_lines(&commit.message, &commit.removed()).trim_end()
     );
-    let mut args = vec![
-        "commit",
-        "--amend",
-        "--only",
-        "--allow-empty",
-        "-s",
-        "-F",
-        "-",
-    ];
-    if commit.has_ai_identity() {
-        args.push("--reset-author");
-    }
-    let lock = git_dir(dir).map(|d| d.join("index.lock"));
-    let had_lock = lock.as_ref().is_some_and(|l| l.exists());
-    let mut amend = Command::new("git");
-    amend.arg("-C").arg(dir).args(&args);
-    let done = run_with_input(&mut amend, message.as_bytes(), AMEND_TIMEOUT)
-        .is_some_and(|out| out.status.success());
-    if done {
+    let old = Old {
+        sha: &commit.sha,
+        author: (&commit.author.0, &commit.author.1),
+        author_is_ai: is_ai_identity(&commit.author.0, &commit.author.1),
+    };
+    if rewrite_head(dir, &old, &message, !used.no_signoff && sign_off_enabled()).is_some() {
         notes.push(format!(
             "commit-message-sanitizer amended the unpushed HEAD {} to remove AI attribution: {}.",
             commit.short(),
@@ -271,12 +277,6 @@ fn amend(dir: &Path, commit: &Commit, notes: &mut Vec<String>) {
         commit.short(),
         commit.describe()
     ));
-    if let Some(lock) = lock.filter(|l| !had_lock && l.exists()) {
-        notes.push(format!(
-            "The stopped git left {} behind. Check that no git process is running, then remove it.",
-            lock.display()
-        ));
-    }
 }
 
 /// An annotated tag at HEAD whose message carries attribution is reported once
@@ -402,20 +402,25 @@ fn pull_request(pr: &PrRef, dir: &Path, notes: &mut Vec<String>) {
     if title_removed.is_empty() && body_removed.is_empty() {
         return;
     }
+    let clean_title = drop_lines(&title, &title_removed).trim().to_string();
+    // An empty title is not a title: it is left for a person to rename.
+    let rename = !title_removed.is_empty() && clean_title.is_empty();
+    let edits_title = !title_removed.is_empty() && !rename;
     let mut edit = Command::new("gh");
     edit.current_dir(dir)
         .args(["pr", "edit", reference])
         .args(&repo_args);
-    if !title_removed.is_empty() {
-        edit.arg("--title")
-            .arg(drop_lines(&title, &title_removed).trim());
+    if edits_title {
+        edit.arg("--title").arg(&clean_title);
     }
     let clean_body = drop_lines(&body, &body_removed);
     if !body_removed.is_empty() {
         edit.args(["--body-file", "-"]);
     }
-    let done = run_with_input(&mut edit, clean_body.as_bytes(), GH_TIMEOUT)
-        .is_some_and(|out| out.status.success());
+    let edits = edits_title || !body_removed.is_empty();
+    let done = edits
+        && run_with_input(&mut edit, clean_body.as_bytes(), GH_TIMEOUT)
+            .is_some_and(|out| out.status.success());
     let places = |label: &str, removed: &[(usize, Shape)]| -> Option<String> {
         (!removed.is_empty()).then(|| {
             let lines: Vec<String> = removed
@@ -426,17 +431,22 @@ fn pull_request(pr: &PrRef, dir: &Path, notes: &mut Vec<String>) {
         })
     };
     let found: Vec<String> = [
-        places("title", &title_removed),
+        places("title", &title_removed).filter(|_| edits_title),
         places("body", &body_removed),
     ]
     .into_iter()
     .flatten()
     .collect();
-    notes.push(if done {
-        format!("commit-message-sanitizer edited the PR to remove AI attribution: {}.", found.join("; "))
-    } else {
-        format!("commit-message-sanitizer could not edit the PR, which carries AI attribution: {}. Edit it with `gh pr edit`.", found.join("; "))
-    });
+    if edits {
+        notes.push(if done {
+            format!("commit-message-sanitizer edited the PR to remove AI attribution: {}.", found.join("; "))
+        } else {
+            format!("commit-message-sanitizer could not edit the PR, which carries AI attribution: {}. Edit it with `gh pr edit`.", found.join("; "))
+        });
+    }
+    if rename {
+        notes.push("commit-message-sanitizer: the PR title is only AI attribution, so it was left as it is; rename it with `gh pr edit --title`.".to_string());
+    }
 }
 
 #[cfg(test)]

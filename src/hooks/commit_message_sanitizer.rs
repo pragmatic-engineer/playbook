@@ -22,11 +22,13 @@
 //! Best effort against an agent drifting, not a security boundary: it does
 //! not expand variables in a message, an alias or a script that builds one.
 
+mod amend;
 mod engine;
 mod gh;
 mod git;
 mod post;
 mod sources;
+mod state;
 
 use crate::common::payload::Payload;
 use crate::common::{emit_pre_context, emit_pre_updated_input};
@@ -47,6 +49,9 @@ pub fn run(payload: &Payload) {
 }
 
 fn pre(payload: &Payload, command: &str, dir: &Path) {
+    for repo in &git::git_use(command, dir).commit_dirs {
+        state::record_head(payload, repo);
+    }
     let rewritten = engine::rewrite(command, dir);
     let note = context(&rewritten.findings);
     if rewritten.command != command {
