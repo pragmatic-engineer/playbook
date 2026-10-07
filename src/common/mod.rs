@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Shared helpers ported from hooks/lib/common.py and hooks/lib/common.sh.
+//! Shared helpers ported from the retired shell originals.
 //! Every hook in `src/hooks` uses this module instead of re-deriving these
 //! primitives, so there is exactly one implementation to keep correct.
 

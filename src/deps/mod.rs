@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! `playbook deps ensure`: per-dependency check-then-install from a Brewfile.
-//! Ported from `shell/ensure-deps.sh`. A tool already on PATH (from any
+//! Ported from the retired shell original. A tool already on PATH (from any
 //! source) is kept; Homebrew installs only what is missing.
 
 use std::path::{Path, PathBuf};

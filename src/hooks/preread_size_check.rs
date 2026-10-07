@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/preread-size-check.py: a PreToolUse hook on Read that denies
+//! Ports the retired shell original: a PreToolUse hook on Read that denies
 //! a full-file Read of a large file when no offset/limit was given, pushing
 //! Claude toward Grep-first, then a targeted Read. Allowlists a small set of
 //! config/docs files that are usually needed whole.
 //!
 //! The only hook in the toolkit that returns a deny decision, so its output
-//! must match hooks/lib/common.py's `emit_pre_deny` byte for byte; see
+//! must match the retired shell original's `emit_pre_deny` byte for byte; see
 //! `crate::common::emit::emit_pre_deny`.
 
 use crate::common::emit_pre_deny;
@@ -15,12 +15,12 @@ use crate::common::payload::Payload;
 use std::fs;
 use std::path::Path;
 
-/// Matches LINE_LIMIT in hooks/preread-size-check.py:16.
+/// Matches LINE_LIMIT in the retired shell original.
 const LINE_LIMIT: u64 = 1000;
-/// Matches BYTE_LIMIT in hooks/preread-size-check.py:17 (200 KB).
+/// Matches BYTE_LIMIT in the retired shell original (200 KB).
 const BYTE_LIMIT: u64 = 204_800;
 
-/// Matches ALLOWLIST in hooks/preread-size-check.py:20-27.
+/// Matches ALLOWLIST in the retired shell original.
 const ALLOWLIST: [&str; 26] = [
     "package.json",
     "tsconfig.json",

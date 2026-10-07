@@ -4,7 +4,7 @@
 //! Behavioural tests for the `memory-anchors` hook, the sole reader of
 //! `~/.config/playbook/memory/memory.graph.json`. Exercised black-box, through the
 //! compiled `playbook` binary, the same way
-//! `hooks/memory-anchors.test.sh` exercises the python original. Every
+//! the retired shell test exercises the python original. Every
 //! assertion in that shell script has a corresponding case below.
 //!
 //! Each test gets its own scratch `HOME` (never the real `~/.claude`) and
@@ -136,7 +136,7 @@ fn anchors_hook_input(file_path: &str, session_id: &str) -> String {
     .to_string()
 }
 
-/// hooks/memory-anchors.test.sh scenarios 1 and 3: an exactly anchored file
+/// the retired shell test scenarios 1 and 3: an exactly anchored file
 /// names its fact, and that fact's `depends_on` neighbour is named too.
 #[test]
 fn anchored_file_names_matching_fact_and_depends_on_neighbour() {
@@ -159,7 +159,7 @@ fn anchored_file_names_matching_fact_and_depends_on_neighbour() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/memory-anchors.test.sh scenario 2: a directory anchor matches an
+/// the retired shell test scenario 2: a directory anchor matches an
 /// edit to a file underneath it.
 #[test]
 fn directory_anchor_names_the_containing_directory_fact() {
@@ -180,7 +180,7 @@ fn directory_anchor_names_the_containing_directory_fact() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/memory-anchors.test.sh scenario 4: an unanchored path emits nothing.
+/// the retired shell test scenario 4: an unanchored path emits nothing.
 #[test]
 fn unanchored_path_emits_nothing() {
     // Arrange
@@ -196,7 +196,7 @@ fn unanchored_path_emits_nothing() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/memory-anchors.test.sh scenario 5: the hook never blocks, on a
+/// the retired shell test scenario 5: the hook never blocks, on a
 /// malformed payload, a missing `file_path`, or a missing memory.graph.json.
 #[test]
 fn never_blocks_on_malformed_payload_missing_file_path_or_missing_graph() {
@@ -242,7 +242,7 @@ fn never_blocks_on_malformed_payload_missing_file_path_or_missing_graph() {
     let _ = fs::remove_dir_all(&home_c);
 }
 
-/// hooks/memory-anchors.test.sh scenario 6: the index is built once, on the
+/// the retired shell test scenario 6: the index is built once, on the
 /// first edit, and reused (not rebuilt) on the second.
 #[test]
 fn anchor_index_is_built_once_and_reused_on_second_edit() {
@@ -284,7 +284,7 @@ fn anchor_index_is_built_once_and_reused_on_second_edit() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/memory-anchors.test.sh scenario 7: staleness is pinned behaviour, a
+/// the retired shell test scenario 7: staleness is pinned behaviour, a
 /// fact added to the graph after the cache was built does not surface
 /// within the same session.
 #[test]
@@ -334,7 +334,7 @@ fn stale_cache_does_not_surface_a_fact_added_after_it_was_built() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// hooks/memory-anchors.test.sh scenario 8: whenever the hook emits
+/// the retired shell test scenario 8: whenever the hook emits
 /// anything, it is valid JSON with `hookEventName: PreToolUse`.
 #[test]
 fn additional_context_output_is_valid_json_with_pretooluse_event_name() {
@@ -906,7 +906,7 @@ fn prompt_match_bumps_the_matched_facts_hit_count() {
 /// hooks/graph_writer's tests compare against a frozen golden of that
 /// script's output, see tests/fixtures/golden/README.md);
 /// this is the equivalent cross-implementation comparison against
-/// hooks/memory-anchors.py, feeding both implementations the same
+/// the retired shell original, feeding both implementations the same
 /// memory.graph.json fixture and the same edit.
 #[test]
 fn python_and_rust_readers_agree_on_the_same_fixture() {

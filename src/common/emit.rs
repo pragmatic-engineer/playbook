@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 //! The emitters that write hook decisions to stdout for Claude Code to
-//! parse. Output shapes must match hooks/lib/common.sh:87-121 byte for byte;
+//! parse. Output shapes must match the retired shell original byte for byte;
 //! the tests below assert that directly against common.sh's own functions
 //! rather than a hand-copied expectation.
 //!
 //! `emit_block` is the exception: it has no shell equivalent. It ports the
-//! `{"decision":"block","reason":<r>}` shape from hooks/memory-capture.py:80,
+//! `{"decision":"block","reason":<r>}` shape from the retired shell original,
 //! the only hook that uses it.
 //!
 //! Each shape is a small `Serialize` struct rather than a `serde_json::json!`
@@ -125,7 +125,7 @@ struct BlockOutput<'a> {
 }
 
 /// Print a `{"decision":"block","reason":<r>}` JSON object to stdout, the
-/// shape hooks/memory-capture.py:80 uses to pause the turn.
+/// shape the retired shell original uses to pause the turn.
 pub fn emit_block(reason: &str) {
     print_json(&BlockOutput {
         decision: "block",
@@ -144,7 +144,7 @@ mod tests {
     use super::*;
     use std::process::Command;
 
-    /// The frozen output of `hooks/lib/common.sh`'s emitters, captured while
+    /// The frozen output of the retired shell original's emitters, captured while
     /// that file still existed. See tests/fixtures/golden/README.md.
     ///
     /// These five tests were differential: they sourced common.sh and asserted

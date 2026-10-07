@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/memory-capture.py: a Stop hook that pauses the turn once
+//! Ports the retired shell original: a Stop hook that pauses the turn once
 //! statusline.sh's `capture-due` marker fires.
 
 //! `{"decision":"block","reason":<text>}` asks the model to write down
@@ -339,7 +339,7 @@ from recent activity: {}. Worth a pass before it grows further.",
 }
 
 /// Unique edited paths from `edits.jsonl`, most recently edited first.
-/// Ports `_unique_paths_recent_first` (hooks/memory-capture.py:85): reverse
+/// Ports `_unique_paths_recent_first` (the retired shell original:85): reverse
 /// the append log, keep the first occurrence of each path. Never panics; a
 /// missing, empty, or unreadable file yields an empty list, and any line
 /// that fails to parse as JSON or lacks a string `"path"` is skipped.

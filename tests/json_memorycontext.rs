@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Differential test for `playbook::json::memorycontext::render_memory_context`
-//! against the real `jq` filter the former `shell/memory-context.sh` runs. Skipped when
+//! against the real `jq` filter the former the retired shell original runs. Skipped when
 //! `jq` is absent from PATH, matching `tests/doctor_field.rs`'s skip pattern.
 
 use playbook::json::memorycontext::render_memory_context;
@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// The exact filter the former `shell/memory-context.sh` runs through `jq -r`.
+/// The exact filter the former the retired shell original runs through `jq -r`.
 const JQ_FILTER: &str = r#"
   def in_scope: .scope == "global"
     or (.scope == "project" and .project == $repo)
@@ -71,7 +71,7 @@ impl Drop for Fixture {
 }
 
 /// Runs the real `JQ_FILTER` against `fixture` for `repo`, stripping the
-/// trailing newline `jq -r` always emits, the same way the former `shell/memory-context.sh`'s
+/// trailing newline `jq -r` always emits, the same way the former the retired shell original's
 /// `output="$(...)"` capture strips it.
 fn run_jq(fixture: &Fixture, repo: &str) -> String {
     let out = Command::new("jq")
