@@ -76,14 +76,39 @@ fn split(version: &str) -> (Vec<u64>, Option<String>) {
 
 /// Orders two version strings; a pre-release sorts below its release.
 pub fn compare(a: &str, b: &str) -> Ordering {
-    let (an, ap) = split(a);
-    let (bn, bp) = split(b);
+    let (mut an, ap) = split(a);
+    let (mut bn, bp) = split(b);
+    let width = an.len().max(bn.len());
+    an.resize(width, 0);
+    bn.resize(width, 0);
     an.cmp(&bn).then_with(|| match (ap, bp) {
         (None, None) => Ordering::Equal,
         (None, Some(_)) => Ordering::Greater,
         (Some(_), None) => Ordering::Less,
-        (Some(x), Some(y)) => x.cmp(&y),
+        (Some(x), Some(y)) => compare_pre(&x, &y),
     })
+}
+
+/// Dot-separated identifiers; numeric ones compare as numbers (rc.9 < rc.10).
+fn compare_pre(a: &str, b: &str) -> Ordering {
+    let mut left = a.split('.');
+    let mut right = b.split('.');
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => {
+                let order = match (x.parse::<u64>(), y.parse::<u64>()) {
+                    (Ok(m), Ok(n)) => m.cmp(&n),
+                    _ => x.cmp(y),
+                };
+                if order != Ordering::Equal {
+                    return order;
+                }
+            }
+        }
+    }
 }
 
 /// The asset a release publishes for this platform, matching install.sh.
@@ -147,6 +172,8 @@ mod tests {
         assert_eq!(compare("0.9.0", "0.10.0"), Ordering::Less);
         assert_eq!(compare("0.18.0-rc.1", "0.18.0"), Ordering::Less);
         assert_eq!(compare("v0.17.0", "0.17.0"), Ordering::Equal);
+        assert_eq!(compare("0.18.0-rc.10", "0.18.0-rc.9"), Ordering::Greater);
+        assert_eq!(compare("0.17", "0.17.0"), Ordering::Equal);
     }
 
     #[test]

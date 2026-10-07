@@ -125,11 +125,38 @@ fn backup(target: &Path, old_version: &str, new_bytes: &[u8]) -> Result<Option<P
 fn restore(bak: &Path, target: &Path) -> Result<(), String> {
     let tmp = target.with_extension(format!("restore.{}", std::process::id()));
     fs::copy(bak, &tmp).map_err(|e| e.to_string())?;
-    make_executable(&tmp).map_err(|e| e.to_string())?;
+    make_executable(&tmp).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        e.to_string()
+    })?;
     fs::rename(&tmp, target).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         e.to_string()
     })
+}
+
+/// Writes `bytes` to a fresh owner-only file beside the binary. `create_new`
+/// refuses an existing path, so a planted symlink is never followed.
+pub fn write_stage(dir: &Path, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let stage = dir.join(format!(".playbook.update.{}.{nanos}", std::process::id()));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o700);
+    }
+    let result = options.open(&stage).and_then(|mut f| f.write_all(bytes));
+    if let Err(err) = result {
+        let _ = fs::remove_file(&stage);
+        return Err(err);
+    }
+    Ok(stage)
 }
 
 /// Installs the already-written `stage` file (same directory as `target`).
@@ -142,9 +169,22 @@ pub fn install(
     new_version: &str,
     smoke: &dyn Fn(&Path) -> Result<String, String>,
 ) -> Result<Installed, String> {
+    let result = install_staged(stage, target, old_version, new_version, smoke);
+    if result.is_err() {
+        let _ = fs::remove_file(stage);
+    }
+    result
+}
+
+fn install_staged(
+    stage: &Path,
+    target: &Path,
+    old_version: &str,
+    new_version: &str,
+    smoke: &dyn Fn(&Path) -> Result<String, String>,
+) -> Result<Installed, String> {
     make_executable(stage).map_err(|e| e.to_string())?;
     if let Err(err) = smoke_ok(smoke, stage, new_version) {
-        let _ = fs::remove_file(stage);
         return Err(format!(
             "the downloaded binary failed its smoke test, nothing was changed: {err}"
         ));
@@ -160,10 +200,8 @@ pub fn install(
             None
         }
     };
-    fs::rename(stage, target).map_err(|e| {
-        let _ = fs::remove_file(stage);
-        format!("could not replace {}: {e}", target.display())
-    })?;
+    fs::rename(stage, target)
+        .map_err(|e| format!("could not replace {}: {e}", target.display()))?;
     if let Err(err) = smoke_ok(smoke, target, new_version) {
         return Err(match bak {
             Some(bak) => match restore(&bak, target) {

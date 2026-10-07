@@ -29,6 +29,10 @@ pub fn scan(path_var: &OsStr) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = Vec::new();
     let mut real: Vec<PathBuf> = Vec::new();
     for dir in std::env::split_paths(path_var) {
+        // A relative entry (`.`, empty) would run a repo-local file.
+        if !dir.is_absolute() {
+            continue;
+        }
         let candidate = dir.join("playbook");
         if !is_executable(&candidate) {
             continue;
@@ -92,36 +96,6 @@ pub fn plugin_hint(home: &Path, binary_version: &str) -> Option<String> {
             "the Claude Code plugin is at {plugin} but the binary is {binary_version}; run: claude plugin update playbook@pragmatic-engineer"
         )
     })
-}
-
-/// `playbook doctor path-shadow`: one `SINGLE`, `NONE`, `MULTIPLE` or
-/// `STALE_FIRST` verdict line, then one `path version` line per binary.
-pub fn doctor_report(path_var: &OsStr, version_of: &dyn Fn(&Path) -> Option<String>) -> String {
-    let found = scan(path_var);
-    let versions: Vec<String> = found
-        .iter()
-        .map(|p| version_of(p).unwrap_or_else(|| "?".into()))
-        .collect();
-    let verdict = match found.len() {
-        0 => "NONE",
-        1 => "SINGLE",
-        _ => {
-            let stale = versions
-                .iter()
-                .skip(1)
-                .any(|v| super::resolve::compare(&versions[0], v).is_lt());
-            if stale {
-                "STALE_FIRST"
-            } else {
-                "MULTIPLE"
-            }
-        }
-    };
-    let mut out = verdict.to_string();
-    for (path, version) in found.iter().zip(&versions) {
-        out.push_str(&format!("\n{} {version}", path.display()));
-    }
-    out
 }
 
 #[cfg(all(test, unix))]
@@ -199,14 +173,10 @@ mod tests {
     }
 
     #[test]
-    fn the_doctor_report_flags_a_stale_first_entry() {
-        let old = bin_in("doc-old");
-        let new = bin_in("doc-new");
-        let probe = |p: &Path| Some(if p == old { "0.14.0" } else { "0.17.0" }.to_string());
-        let report = doctor_report(&path_of(&[&old, &new]), &probe);
-        assert!(report.starts_with("STALE_FIRST\n"), "{report}");
-        let single = doctor_report(&path_of(&[&new]), &probe);
-        assert!(single.starts_with("SINGLE\n"), "{single}");
-        assert_eq!(doctor_report(OsStr::new(""), &probe), "NONE");
+    fn relative_path_entries_are_never_scanned() {
+        let bin = bin_in("relative");
+        let dir = bin.parent().unwrap();
+        let relative = std::env::join_paths([Path::new("."), Path::new(""), dir]).unwrap();
+        assert_eq!(scan(&relative), vec![bin]);
     }
 }

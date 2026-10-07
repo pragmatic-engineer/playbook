@@ -160,10 +160,6 @@ pub fn run(
         return Ok(o);
     }
 
-    refusals(env)?;
-    if env.auto_mode && !opts.yes {
-        return Err("auto mode is on and an update replaces the running binary; re-run with --yes to confirm".into());
-    }
     if order.is_eq() {
         o.out
             .push(format!("playbook {current} is already installed"));
@@ -174,6 +170,11 @@ pub fn run(
             "playbook {current} is newer than the latest release {version}; nothing to do"
         ));
         return Ok(o);
+    }
+
+    refusals(env)?;
+    if env.auto_mode && !opts.yes {
+        return Err("auto mode is on and an update replaces the running binary; re-run with --yes to confirm".into());
     }
 
     let asset = resolve::asset_name(&version, &env.os, &env.arch)?;
@@ -189,8 +190,7 @@ pub fn run(
         .exe
         .parent()
         .ok_or("the running binary has no parent directory")?;
-    let stage = dir.join(format!(".playbook.update.{}", std::process::id()));
-    std::fs::write(&stage, &bytes)
+    let stage = swap::write_stage(dir, &bytes)
         .map_err(|e| format!("cannot write to {}: {e}", dir.display()))?;
     match attest.verify(&stage, env.strict) {
         Ok(None) => o
@@ -275,12 +275,13 @@ mod tests {
     }
 
     fn ok_attest() -> FakeAttest {
-        FakeAttest(Ok(None))
+        FakeAttest::new(Ok(None))
     }
 
     #[test]
     fn list_shows_tags_with_markers_and_changes_nothing() {
-        let env = env_in("up-list");
+        let mut env = env_in("up-list");
+        env.current_version = "0.17.0".into();
         let opts = Options {
             list: true,
             ..Options::default()
@@ -293,7 +294,10 @@ mod tests {
             &swap::run_version,
         )
         .unwrap();
-        assert_eq!(out.out, vec!["v0.18.0-rc.1 (pre-release)", "v0.17.0"]);
+        assert_eq!(
+            out.out,
+            vec!["v0.18.0-rc.1 (pre-release)", "v0.17.0 (installed)"]
+        );
     }
 
     #[test]
@@ -390,7 +394,7 @@ mod tests {
     fn a_failed_attestation_aborts_and_a_lenient_gap_only_warns() {
         let env = env_in("up-attest");
         let bin = script_bytes("0.17.0");
-        let bad = FakeAttest(Err("attestation verification failed".into()));
+        let bad = FakeAttest::new(Err("attestation verification failed".into()));
         assert!(run(
             &Options::default(),
             &env,
@@ -400,7 +404,7 @@ mod tests {
         )
         .is_err());
         assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.16.0");
-        let gap = FakeAttest(Ok(Some("checksum only".into())));
+        let gap = FakeAttest::new(Ok(Some("checksum only".into())));
         let out = run(
             &Options::default(),
             &env,
@@ -431,7 +435,7 @@ mod tests {
     #[test]
     fn a_homebrew_binary_is_refused_with_the_brew_command() {
         let mut env = env_in("up-brew");
-        env.exe = PathBuf::from("/opt/homebrew/Cellar/playbook/0.14.0/bin/playbook");
+        env.exe = scratch_dir("up-brew-cellar").join("Cellar/playbook/0.14.0/bin/playbook");
         let err = run(
             &Options::default(),
             &env,
@@ -472,6 +476,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("--yes"), "{err}");
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.16.0");
         let opts = Options {
             yes: true,
             ..Options::default()
@@ -521,5 +526,92 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("claude plugin update playbook@pragmatic-engineer")));
+    }
+
+    #[test]
+    fn strict_mode_reaches_the_attestation_check() {
+        let mut env = env_in("up-strict");
+        env.strict = true;
+        let bin = script_bytes("0.17.0");
+        let attest = ok_attest();
+        run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &attest,
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(*attest.1.borrow(), vec![true]);
+    }
+
+    #[test]
+    fn the_same_version_is_a_no_op_even_in_auto_mode_without_yes() {
+        let mut env = env_in("up-same");
+        env.current_version = "0.17.0".into();
+        env.auto_mode = true;
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(b"", b""),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert!(out.out[0].contains("already installed"), "{:?}", out.out);
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.16.0");
+    }
+
+    #[test]
+    fn a_binary_newer_than_latest_is_not_downgraded_without_a_version() {
+        let mut env = env_in("up-newer");
+        env.current_version = "0.19.0".into();
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(b"", b""),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert!(out.out[0].contains("nothing to do"), "{:?}", out.out);
+    }
+
+    #[test]
+    fn an_explicit_older_version_is_installed_as_a_downgrade() {
+        let mut env = env_in("up-down");
+        env.current_version = "0.19.0".into();
+        let bin = script_bytes("0.17.0");
+        let opts = Options {
+            version: Some("0.17.0".into()),
+            ..Options::default()
+        };
+        run(
+            &opts,
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.17.0");
+    }
+
+    #[test]
+    fn check_works_in_auto_mode_without_yes() {
+        let mut env = env_in("up-check-auto");
+        env.auto_mode = true;
+        let opts = Options {
+            check: true,
+            ..Options::default()
+        };
+        assert!(run(
+            &opts,
+            &env,
+            &fixture(b"", b""),
+            &ok_attest(),
+            &swap::run_version
+        )
+        .is_ok());
     }
 }

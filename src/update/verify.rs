@@ -108,11 +108,20 @@ pub mod fake {
     use super::Attest;
     use std::path::Path;
 
-    /// An attestation result fixed by the test.
-    pub struct FakeAttest(pub Result<Option<String>, String>);
+    use std::cell::RefCell;
+
+    /// An attestation result fixed by the test, recording each `strict` it saw.
+    pub struct FakeAttest(pub Result<Option<String>, String>, pub RefCell<Vec<bool>>);
+
+    impl FakeAttest {
+        pub fn new(result: Result<Option<String>, String>) -> Self {
+            FakeAttest(result, RefCell::new(Vec::new()))
+        }
+    }
 
     impl Attest for FakeAttest {
-        fn verify(&self, _: &Path, _: bool) -> Result<Option<String>, String> {
+        fn verify(&self, _: &Path, strict: bool) -> Result<Option<String>, String> {
+            self.1.borrow_mut().push(strict);
             self.0.clone()
         }
     }

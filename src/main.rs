@@ -452,15 +452,6 @@ fn main() {
             }
         }
         Command::Doctor { sub } => match sub {
-            DoctorCommand::PathShadow => {
-                let path_var = std::env::var_os("PATH").unwrap_or_default();
-                let probe = |bin: &std::path::Path| {
-                    update::swap::run_version(bin)
-                        .ok()
-                        .and_then(|out| out.split_whitespace().last().map(str::to_string))
-                };
-                println!("{}", update::pathcheck::doctor_report(&path_var, &probe));
-            }
             DoctorCommand::PluginVersion { path } => {
                 println!("{}", doctor::field::plugin_version(&path));
             }
@@ -660,7 +651,7 @@ fn main() {
                 update::run(
                     &opts,
                     &env,
-                    &update::download::HttpFetcher,
+                    &update::download::HttpFetcher { local_http: false },
                     &update::verify::GhAttest,
                     &update::swap::run_version,
                 )

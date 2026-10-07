@@ -13,15 +13,21 @@ pub trait Fetcher {
 /// Release assets are a few MB; this bounds a hostile or broken response.
 const MAX_BODY_BYTES: u64 = 256 * 1024 * 1024;
 
-/// The real fetcher: HTTPS via rustls, no system OpenSSL.
-pub struct HttpFetcher;
+/// The real fetcher: HTTPS via rustls, no system OpenSSL. `local_http` is for
+/// tests: it allows plain http and ignores proxy environment variables.
+pub struct HttpFetcher {
+    pub local_http: bool,
+}
 
 impl Fetcher for HttpFetcher {
     fn get(&self, url: &str) -> Result<Vec<u8>, String> {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        let mut config = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(300)))
-            .build()
-            .into();
+            .https_only(!self.local_http);
+        if self.local_http {
+            config = config.proxy(None);
+        }
+        let agent: ureq::Agent = config.build().into();
         let mut response = agent
             .get(url)
             .header(
@@ -71,12 +77,15 @@ mod tests {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
         let handle = std::thread::spawn(move || {
-            let request = server.recv().unwrap();
+            let request = server
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap()
+                .expect("the fetcher never connected");
             request
                 .respond(tiny_http::Response::from_string("hello"))
                 .unwrap();
         });
-        let body = HttpFetcher
+        let body = HttpFetcher { local_http: true }
             .get(&format!("http://127.0.0.1:{port}/x"))
             .unwrap();
         handle.join().unwrap();
@@ -88,13 +97,24 @@ mod tests {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
         let handle = std::thread::spawn(move || {
-            let request = server.recv().unwrap();
+            let request = server
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap()
+                .expect("the fetcher never connected");
             request.respond(tiny_http::Response::empty(404)).unwrap();
         });
-        let err = HttpFetcher
+        let err = HttpFetcher { local_http: true }
             .get(&format!("http://127.0.0.1:{port}/x"))
             .unwrap_err();
         handle.join().unwrap();
         assert!(err.contains("404"), "{err}");
+    }
+
+    #[test]
+    fn the_production_fetcher_refuses_plain_http() {
+        let err = HttpFetcher { local_http: false }
+            .get("http://127.0.0.1:9/x")
+            .unwrap_err();
+        assert!(err.to_lowercase().contains("http"), "{err}");
     }
 }

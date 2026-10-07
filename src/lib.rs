@@ -497,9 +497,6 @@ pub enum ConfigCommand {
 /// `playbook doctor` subcommands, backing `src/doctor/`.
 #[derive(Subcommand, Debug)]
 pub enum DoctorCommand {
-    /// List every `playbook` on PATH with its version and print a verdict
-    /// line first: NONE, SINGLE, MULTIPLE or STALE_FIRST. Backs Layer 6.
-    PathShadow,
     /// Print `.version` from a `plugin.json`-shaped file, or an empty line
     /// if it is missing, unreadable, or not a string. Backs Layer 6.
     PluginVersion {
