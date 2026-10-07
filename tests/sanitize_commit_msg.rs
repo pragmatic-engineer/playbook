@@ -206,6 +206,7 @@ fn a_write_error_warns_and_exits_zero_leaving_the_file() {
     }
     assert_eq!(code, 0);
     assert!(stderr.contains("could not rewrite"), "{stderr}");
-    assert!(!stderr.contains("jane"), "{stderr}");
+    assert!(!stderr.contains("noreply@anthropic.com"), "{stderr}");
+    assert!(!stderr.contains("session_01"), "{stderr}");
     assert_eq!(fs::read_to_string(&file).unwrap(), DIRTY);
 }

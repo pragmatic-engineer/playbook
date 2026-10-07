@@ -14,7 +14,9 @@
 //! `Claude-Session:` line, a claude.ai link, a session id, a "Generated with"
 //! footer or a credit trailer for an AI goes. A credit is an AI's when its
 //! display name is an AI product or its address is a vendor or bot no-reply
-//! address, so `Claude Dupont` or `jane@anthropic.com` stay. Other trailers,
+//! address, so `Claude Dupont` or `jane@anthropic.com` stay. A `Signed-off-by`
+//! is a person's certification, so only such an address makes it an AI's, never
+//! the display name alone. Other trailers,
 //! such as `Fixes` or `Reviewed-by` from a person, are never touched.
 
 use std::ops::Range;
@@ -154,8 +156,8 @@ const PRODUCT_WORDS: [&str; 12] = [
 ];
 
 /// Words that may follow a product word in a display name, besides version
-/// numbers: `Claude Opus 4.5`, `copilot-swe-agent[bot]`.
-const NAME_QUALIFIERS: [&str; 11] = [
+/// numbers: `Claude Opus 4.5`, `Gemini 2.5 Pro`, `copilot-swe-agent[bot]`.
+const NAME_QUALIFIERS: [&str; 24] = [
     "code",
     "opus",
     "sonnet",
@@ -167,6 +169,19 @@ const NAME_QUALIFIERS: [&str; 11] = [
     "assistant",
     "swe",
     "integration",
+    "pro",
+    "flash",
+    "mini",
+    "nano",
+    "lite",
+    "ultra",
+    "max",
+    "plus",
+    "turbo",
+    "thinking",
+    "preview",
+    "instant",
+    "reasoning",
 ];
 
 /// Removes every attribution line from a commit-style message, applying git's
@@ -251,15 +266,20 @@ fn scan(text: &str, trailer_rule: bool) -> Sanitized {
 /// continuation lines is judged as one unit, and removed as one.
 fn removed_lines(lines: &[&str], block: Option<&Range<usize>>) -> Vec<(usize, Shape)> {
     let mut removed = Vec::new();
+    let mut covered_until = 0;
     for (i, line) in lines.iter().enumerate() {
+        if i < covered_until {
+            continue;
+        }
         let in_block = block.is_some_and(|b| b.contains(&i));
-        let end = folded_end(lines, i);
+        let end = folded_end(lines, i, in_block);
         if end == i + 1 {
             removed.extend(classify(line, in_block).map(|shape| (i + 1, shape)));
         } else {
             let unit = lines[i..end].iter().map(|l| l.trim()).collect::<Vec<_>>();
             if let Some(shape) = classify(&unit.join(" "), in_block) {
                 removed.extend((i..end).map(|n| (n + 1, shape)));
+                covered_until = end;
             }
         }
     }
@@ -267,9 +287,10 @@ fn removed_lines(lines: &[&str], block: Option<&Range<usize>>) -> Vec<(usize, Sh
 }
 
 /// The line after the last continuation of the trailer that starts at
-/// `start`, or `start + 1` when it has none or is not a trailer.
-fn folded_end(lines: &[&str], start: usize) -> usize {
-    if strict_trailer(lines[start]).is_none() {
+/// `start`, or `start + 1` when it has none or is not a trailer. Only a trailer
+/// in the final block folds: git reads an indented line anywhere else as text.
+fn folded_end(lines: &[&str], start: usize, in_block: bool) -> usize {
+    if !in_block || strict_trailer(lines[start]).is_none() {
         return start + 1;
     }
     let continuations = lines[start + 1..]
@@ -344,11 +365,13 @@ fn classify(line: &str, in_trailer_block: bool) -> Option<Shape> {
         Some(Shape::SessionId)
     } else if is_footer(&lower) && names_ai(&lower) {
         Some(Shape::Footer)
-    } else if loose.is_some_and(|(token, value)| is_credit_token(token) && credits_ai(value)) {
+    } else if loose.is_some_and(|(token, value)| is_credit_token(token) && credits_ai(token, value))
+    {
         Some(Shape::CreditTrailer)
     } else if in_trailer_block
-        && strict_trailer(line)
-            .is_some_and(|(token, value)| names_ai(&token.to_lowercase()) || credits_ai(value))
+        && strict_trailer(line).is_some_and(|(token, value)| {
+            names_ai(&token.to_lowercase()) || credits_ai(token, value)
+        })
     {
         Some(Shape::AiTrailer)
     } else if line.contains('\u{1F916}') {
@@ -389,13 +412,13 @@ fn is_credit_token(token: &str) -> bool {
 }
 
 /// Whether a trailer value is an AI product or a vendor address: the display
-/// name must be the product's own name, so `Claude Dupont` is a person. A URL
-/// is never a credit.
-fn credits_ai(value: &str) -> bool {
-    if value.contains("://") {
-        return false;
-    }
+/// name must be the product's own name, so `Claude Dupont` is a person. A
+/// `Signed-off-by` is a person's certification, so for it only an address counts.
+fn credits_ai(token: &str, value: &str) -> bool {
     let (name, address) = name_and_address(value);
+    if token.eq_ignore_ascii_case("signed-off-by") {
+        return is_vendor_address(address);
+    }
     is_product_name(name) || is_vendor_address(address)
 }
 
@@ -933,6 +956,11 @@ mod tests {
             "Co-authored-by: GitHub Copilot <c@github.com>",
             "Co-authored-by: Copilot",
             "Co-authored-by: Gemini",
+            "Co-authored-by: Gemini 2.5 Pro",
+            "Co-authored-by: Gemini Flash <g@google.com>",
+            "Co-authored-by: GPT-4 Turbo",
+            "Co-authored-by: Claude Sonnet 4 Thinking",
+            "Generated-by: Claude Code (https://claude.com/claude-code)",
             "Co-authored-by: Cursor Agent",
             "Co-authored-by: aider (gpt-4)",
             "Co-authored-by: Devin AI",
@@ -953,6 +981,10 @@ mod tests {
             "Co-authored-by: Devin Smith <devin@example.com>",
             "Co-authored-by: Devin <devin@example.com>",
             "Co-authored-by: Jane Doe <jane@cursor.com>",
+            "Signed-off-by: Claude <claude@example.fr>",
+            "Signed-off-by: Claude",
+            "Signed-off-by: Gemini Pro <g@example.com>",
+            "Reported-with: https://github.com/anthropics/claude-code/issues/1",
         ];
         for line in ai {
             assert_eq!(only_shape(line), Some(Shape::CreditTrailer), "{line}");
@@ -960,6 +992,19 @@ mod tests {
         for line in kept {
             assert_eq!(only_shape(line), None, "{line}");
         }
+    }
+
+    #[test]
+    fn a_sign_off_is_an_ais_only_through_a_vendor_address_even_in_the_final_block() {
+        let message = "feat: x\n\nbody\n\nSigned-off-by: Claude <claude@example.fr>\nSigned-off-by: Gemini Pro\nSigned-off-by: Claude <noreply@anthropic.com>\n";
+
+        let got = sanitize(message);
+
+        assert_eq!(got.removed, vec![(7, Shape::CreditTrailer)]);
+        assert_eq!(
+            got.text,
+            "feat: x\n\nbody\n\nSigned-off-by: Claude <claude@example.fr>\nSigned-off-by: Gemini Pro\n"
+        );
     }
 
     #[test]
@@ -1014,12 +1059,26 @@ mod tests {
 
     #[test]
     fn a_folded_trailer_is_removed_whole_and_the_rest_still_parses() {
+        let credit = Shape::CreditTrailer;
         let messages = [
-            "feat: x\n\nbody\n\nRefs: 1\nCo-authored-by: Claude\n <noreply@anthropic.com>\nSigned-off-by: Sam <s@x.y>\n",
-            "feat: x\n\nbody\n\nRefs: 1\nCo-authored-by: Sam\n  Claude <noreply@anthropic.com>\nSigned-off-by: Sam <s@x.y>\n",
-            "feat: x\n\nbody\n\nRefs: 1\nAssistant:\n\tClaude Opus\n\t4.5\nSigned-off-by: Sam <s@x.y>\n",
+            (
+                "feat: x\n\nbody\n\nRefs: 1\nCo-authored-by: Claude\n <noreply@anthropic.com>\nSigned-off-by: Sam <s@x.y>\n",
+                vec![(6, credit), (7, credit)],
+            ),
+            (
+                "feat: x\n\nbody\n\nRefs: 1\nCo-authored-by: Sam\n  Claude <noreply@anthropic.com>\nSigned-off-by: Sam <s@x.y>\n",
+                vec![(6, credit), (7, credit)],
+            ),
+            (
+                "feat: x\n\nbody\n\nRefs: 1\nAssistant:\n\tClaude Opus\n\t4.5\nSigned-off-by: Sam <s@x.y>\n",
+                vec![
+                    (6, Shape::AiTrailer),
+                    (7, Shape::AiTrailer),
+                    (8, Shape::AiTrailer),
+                ],
+            ),
         ];
-        for message in messages {
+        for (message, removed) in messages {
             let got = sanitize(message);
 
             assert_eq!(
@@ -1035,8 +1094,38 @@ mod tests {
                 got.text, "feat: x\n\nbody\n\nRefs: 1\nSigned-off-by: Sam <s@x.y>\n",
                 "message: {message:?}"
             );
-            assert!(got.removed.len() >= 2, "every line of the unit is removed");
+            assert_eq!(got.removed, removed, "message: {message:?}");
         }
+    }
+
+    #[test]
+    fn a_continuation_inside_a_removed_unit_is_reported_once() {
+        let message = "feat: x\n\nbody\n\nRefs: 1\nCo-authored-by: Claude\n  session_01AbCdEfGhIjKlMnOpQr\nSigned-off-by: Sam <s@x.y>\n";
+
+        let got = sanitize(message);
+
+        assert_eq!(
+            got.removed,
+            vec![(6, Shape::SessionId), (7, Shape::SessionId)]
+        );
+        assert_eq!(
+            got.text,
+            "feat: x\n\nbody\n\nRefs: 1\nSigned-off-by: Sam <s@x.y>\n"
+        );
+    }
+
+    #[test]
+    fn an_indented_line_outside_the_trailer_block_is_judged_by_itself() {
+        let commit = "feat: x\n\nCo-authored-by: Claude\n  Opus 4.5\n\nclosing prose\n";
+        let prose = "## Summary\n\nCo-authored-by: Claude\n  Opus 4.5\n";
+
+        let in_commit = sanitize(commit);
+        let in_prose = sanitize_prose(prose);
+
+        assert_eq!(in_commit.removed, vec![(3, Shape::CreditTrailer)]);
+        assert_eq!(in_commit.text, "feat: x\n\n  Opus 4.5\n\nclosing prose\n");
+        assert_eq!(in_prose.removed, vec![(3, Shape::CreditTrailer)]);
+        assert_eq!(in_prose.text, "## Summary\n\n  Opus 4.5\n");
     }
 
     #[test]

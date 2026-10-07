@@ -76,6 +76,7 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
     use std::fs;
+    use std::os::unix::fs::MetadataExt;
 
     fn file_with(text: &str) -> std::path::PathBuf {
         let dir = scratch_dir("sanitize");
@@ -120,12 +121,12 @@ mod tests {
     #[test]
     fn a_clean_file_is_not_rewritten_and_reports_nothing() {
         let file = file_with("feat: x\n\nRefs: PLAT-1\n");
-        let before = fs::metadata(&file).unwrap().modified().unwrap();
+        let before = fs::metadata(&file).unwrap().ino();
 
         let got = run(Kind::CommitMsg, &file, false);
 
         assert_eq!(got, Ok(Vec::new()));
-        assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), before);
+        assert_eq!(fs::metadata(&file).unwrap().ino(), before);
     }
 
     #[test]
