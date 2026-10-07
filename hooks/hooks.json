@@ -9,6 +9,28 @@
           }
         ]
       }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook worktree-create",
+            "timeout": 180
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "playbook hook worktree-remove",
+            "timeout": 120
+          }
+        ]
+      }
     ]
   }
 }

@@ -31,6 +31,8 @@ pub mod search_counter;
 pub mod session_clean_exit;
 pub mod session_init;
 pub mod staleness;
+pub mod worktree_create;
+pub mod worktree_remove;
 
 /// Dispatch a parsed hook payload to the named hook's entry point.
 /// Exhaustive over `HookName`, so adding a new variant fails the build here
@@ -55,6 +57,8 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::PrecommitCheck => precommit_check::run(payload),
         HookName::AutoGuard => auto_guard::run(payload),
         HookName::AutoCost => auto_cost::run(payload),
+        HookName::WorktreeCreate => worktree_create::run(payload),
+        HookName::WorktreeRemove => worktree_remove::run(payload),
     }
 }
 
