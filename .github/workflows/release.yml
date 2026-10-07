@@ -310,8 +310,12 @@ jobs:
           asset="dist/playbook-plugin-${VERSION}.zip"
           # git archive only sees tracked files and stamps every entry with the
           # commit time, so the same commit always yields the same bytes.
-          grep -v '^[[:space:]]*\(#\|$\)' .claude-plugin/archive-files.txt \
-            | tr '\n' '\0' \
+          specs="$(sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' .claude-plugin/archive-files.txt | grep -v '^\(#\|$\)' || true)"
+          if [ -z "$specs" ]; then
+            echo "::error::.claude-plugin/archive-files.txt lists no paths." >&2
+            exit 1
+          fi
+          printf '%s\n' "$specs" | tr '\n' '\0' \
             | xargs -0 git archive --format=zip --output="$asset" HEAD --
           unzip -Z1 "$asset" | grep -v '/$' | sort > dist/files.txt
           count="$(wc -l < dist/files.txt | tr -d ' ')"
@@ -411,6 +415,12 @@ jobs:
           set -euo pipefail
           mkdir -p out
           gh release download "${GITHUB_REF_NAME}" --pattern SHA256SUMS --dir out --clobber
+          # The pinned hash must be the bytes users will download.
+          gh release download "${GITHUB_REF_NAME}" --pattern "playbook-plugin-${VERSION}.zip" --dir out --clobber
+          [ "$(shasum -a 256 "out/playbook-plugin-${VERSION}.zip" | cut -d' ' -f1)" = "${ARCHIVE_SHA256}" ] || {
+            echo "::error::the release asset playbook-plugin-${VERSION}.zip does not match the sha256 the plugin-archive job built (${ARCHIVE_SHA256})." >&2
+            exit 1
+          }
           bash shell/render-formula.sh "${VERSION}" out/SHA256SUMS > out/playbook.rb
           cat out/playbook.rb
 
@@ -436,12 +446,6 @@ jobs:
           path=".claude-plugin/marketplace.json"
           gh api "repos/${MARKETPLACE_REPO}/contents/${path}" > out/market.meta
           jq -r .content out/market.meta | base64 -d > out/marketplace.json
-          # The pinned hash must be the bytes users will download.
-          gh release download "${GITHUB_REF_NAME}" --pattern "playbook-plugin-${VERSION}.zip" --dir out --clobber --repo "${GITHUB_REPOSITORY}"
-          [ "$(shasum -a 256 "out/playbook-plugin-${VERSION}.zip" | cut -d' ' -f1)" = "${ARCHIVE_SHA256}" ] || {
-            echo "::error::the release asset playbook-plugin-${VERSION}.zip does not match the sha256 the plugin-archive job built (${ARCHIVE_SHA256})." >&2
-            exit 1
-          }
           bash shell/pin-marketplace.sh "${VERSION}" out/marketplace.json "${ARCHIVE_SHA256}" > out/marketplace.new.json
           gh api -X PUT "repos/${MARKETPLACE_REPO}/contents/${path}" \
             -f message="playbook ${VERSION}" \

@@ -278,7 +278,7 @@ fn init_from_the_unpacked_archive_places_statusline_prompt_and_settings() {
 
     // Act
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(["init", "--system-prompt"])
+        .args(["init", "--system-prompt", "--aliases"])
         .current_dir(&home)
         .env("HOME", &home)
         .env("CLAUDE_PLUGIN_ROOT", &a.root)
@@ -311,7 +311,27 @@ fn init_from_the_unpacked_archive_places_statusline_prompt_and_settings() {
         &fs::read_to_string(home.join(".claude/settings.json")).expect("settings.json placed"),
     )
     .expect("settings.json parses");
-    assert!(settings.is_object() && !settings.as_object().expect("object").is_empty());
+    let template: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(a.root.join("settings.shared.json")).expect("template"),
+    )
+    .expect("template parses");
+    for key in template.as_object().expect("template object").keys() {
+        assert!(
+            settings.get(key).is_some(),
+            "settings.json lacks the template key {key}\n{stdout}"
+        );
+    }
+    for name in ["bust-cache.sh", "dispatch.sh", "worktree.sh"] {
+        same(
+            cfg.join("shell/shared").join(name),
+            &format!("shell/shared/{name}"),
+        );
+    }
+    same(cfg.join("shell/bash/cc.sh"), "shell/bash/cc.sh");
+    same(
+        cfg.join("hooks/lib/config-hash.sh"),
+        "hooks/lib/config-hash.sh",
+    );
 }
 
 #[test]

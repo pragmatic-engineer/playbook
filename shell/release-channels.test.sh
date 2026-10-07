@@ -59,7 +59,7 @@ check "repin replaces sha256" jq_is "$m2" "$pb|.source.sha256" "$SHA2"
 check "missing playbook entry fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace-empty.json" "$SHA"
 check "missing sha256 fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json"
 check "short sha256 fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json" abc123
-check "uppercase sha256 fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json" "${SHA^^}"
+check "uppercase sha256 fails" fails bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json" "$(printf %s "$SHA" | tr a-f A-F)"
 check "v-prefixed version fails" fails bash "$DIR/pin-marketplace.sh" v9.8.7 "$FIX/marketplace.json" "$SHA"
 
 echo "passed=$PASS failed=$FAIL"
