@@ -346,22 +346,27 @@ Report:
   manages the entries it recognises, so delete the entry from
   `~/.claude/settings.json` by hand, or fix the path if the file moved.
 
-## Effective auto-review config
+## Effective review, merge and sign-off config
 
 This is informational, not one of the seven layers above: a non-default but
-validly-configured `autoReview.*` value is nothing to "fix", so it carries no
-remediation hint and never fails the check on its own.
+validly-configured `autoReview.*`, `autoMerge.enabled` or `commit.signOff`
+value is nothing to "fix", so it carries no remediation hint and never fails
+the check on its own.
 
 ```bash
 if ! command -v playbook >/dev/null 2>&1; then
   echo "UNKNOWN"
 else
-  enabled_status=0
-  enabled_out=$(playbook config get autoReview.enabled 2>&1) || enabled_status=$?
-  type_status=0
-  type_out=$(playbook config get autoReview.type 2>&1) || type_status=$?
-  if [ $enabled_status -ne 0 ] || [ $type_status -ne 0 ]; then
-    errors=$(printf '%s\n%s\n' "$enabled_out" "$type_out" \
+  failed=0
+  all_out=""
+  for key in autoReview.enabled autoReview.type autoReview.fix autoMerge.enabled commit.signOff; do
+    key_status=0
+    key_out=$(playbook config get "$key" 2>&1) || key_status=$?
+    [ $key_status -ne 0 ] && failed=1
+    all_out=$(printf '%s\n%s' "$all_out" "$key_out")
+  done
+  if [ $failed -ne 0 ]; then
+    errors=$(printf '%s\n' "$all_out" \
       | grep 'config file is not a valid JSON object' | sort -u)
     if [ -n "$errors" ]; then
       echo "MALFORMED"
@@ -371,7 +376,7 @@ else
     fi
   else
     echo "OK"
-    printf '%s\n%s\n' "$enabled_out" "$type_out"
+    printf '%s\n' "$all_out" | sed '/^$/d'
   fi
 fi
 ```
@@ -382,8 +387,8 @@ no file at any tier set the key, so the value shown is the built-in default,
 not one read off disk. It also prints `(source: default, <tier> value ignored)`
 when a tier set an invalid value for the key: the built-in default is shown
 and a warning goes to stderr. On a malformed tier file it instead prints an error
-naming the file to stderr and exits non-zero; the `||` after each assignment
-above exists so that failure is captured into `enabled_status`/`type_status`
+naming the file to stderr and exits non-zero; the `||` after the assignment
+above exists so that failure is captured into `key_status`
 rather than aborting this block (and, if this file's shell blocks share a
 `set -e` context, the rest of the script), the same guard style Layer 7 uses
 around `playbook doctor hook-commands`.
@@ -450,7 +455,7 @@ Report:
 - `UNKNOWN` → INFO, "could not check: playbook worktree unavailable". Covers
   both `playbook` missing entirely and a `playbook` too old to have the
   `worktree` subcommand, the same underlying condition Layer 6, Layer 7, and
-  the auto-review config check already report as `MISSING`/`UNKNOWN` for their
+  the review, merge and sign-off config check already report as `MISSING`/`UNKNOWN` for their
   own checks.
 
 ## Output format
@@ -470,6 +475,9 @@ FAIL  playbook binary not on PATH -- every ported hook is dead; install the rele
 FAIL  hook command points at a missing file: python3 ~/.claude/hooks/memory_context.py -- this hook does nothing every time it fires; playbook init will not remove it, delete the entry from ~/.claude/settings.json by hand
 INFO  autoReview.enabled: true (source: default)
 INFO  autoReview.type: deep (source: default)
+INFO  autoReview.fix: false (source: default)
+INFO  autoMerge.enabled: false (source: default)
+INFO  commit.signOff: true (source: default)
 INFO  no stale worktrees found
 ```
 

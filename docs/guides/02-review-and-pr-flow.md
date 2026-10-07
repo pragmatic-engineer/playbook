@@ -4,13 +4,14 @@ Once a branch is ready, this config gives you three commands to get it reviewed 
 
 ## `/playbook:commit-and-push`
 
-Generates a commit message from the staged diff, commits signed (`--gpg-sign --signoff`), rebases onto the base branch if you're behind, then pushes. It runs in an isolated subagent (`context: fork`) on Haiku, so the diff and drafting stay out of your main context. There is no confirmation gate: it commits and pushes end to end.
+Generates a commit message from the staged diff, commits signed (`--gpg-sign`) with a `Signed-off-by` trailer (see [PR and commit settings](#pr-and-commit-settings)), rebases onto the base branch if you're behind, then pushes. It runs in an isolated subagent (`context: fork`) on Haiku, so the diff and drafting stay out of your main context. There is no confirmation gate: it commits and pushes end to end.
 
 ```bash
 /playbook:commit-and-push           # commit staged changes and push
 /playbook:commit-and-push -A        # stage all files (git add -A), then commit
 /playbook:commit-and-push -u        # stage tracked files only (git add -u), then commit
 /playbook:commit-and-push -a        # amend the previous commit instead of creating a new one
+/playbook:commit-and-push --no-signoff  # leave the Signed-off-by trailer off this commit
 ```
 
 Flags combine: `-Au`, `-a -u`, and so on.
@@ -91,6 +92,27 @@ These commands read the run mode first. In `ask` mode, which is the default, not
 - `/playbook:commit-and-push` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
 - `/playbook:quick-review` and `/playbook:deep-review` run as `--self`. They report locally and never post a review to GitHub, because a posted review speaks as you.
 - `/playbook:address-pr-comments` refuses to run. It replies on GitHub in your name, so each reply needs your approval.
+
+## PR and commit settings
+
+Five config keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`, and set it with `playbook config set [--global|--org] <key> <value>`. Without a flag it writes the repo tier; `--org` writes the org tier and `--global` writes your own, for every repo. The repo tier wins over org, and org over global.
+
+| Key | Default | What it does |
+|---|---|---|
+| `autoReview.enabled` | `true` | `/playbook:create-pull-request` reviews its own PR before it goes ready. |
+| `autoReview.type` | `deep` | Which review it runs: `deep` or `quick`. |
+| `autoReview.fix` | `false` | After the self-review, fixes every finding that survived the review's verification, pushes the fixes to the PR branch, and re-runs the scoped checks. |
+| `autoMerge.enabled` | `false` | After the review and fixes, marks the PR ready, waits until every check on the PR head is green, runs `gh pr merge <n> --auto`, then re-reads the PR until it reads `MERGED`. |
+| `commit.signOff` | `true` | Commits made through `/playbook:commit-and-push` carry a `Signed-off-by` trailer. |
+
+```bash
+playbook config set --global autoReview.fix true
+playbook config set --global autoMerge.enabled true
+```
+
+The merge step is cautious on purpose. It waits on all checks, not only the required ones, since a repo may require none and a merge queue would merge at once. It never passes `--admin` or `--delete-branch`, and it never merges with a failing or unfinished check. It passes no strategy flag, so the repo's own merge settings choose how the PR lands. A stacked PR whose base is another open PR is not merged before its base: the command says so and stops. The settings work the same in `ask` and `auto` mode, and neither asks a question, because setting the key is your opt-in.
+
+`commit.signOff` stands down when the command already passes `-s` or `--signoff`, when the message already has the trailer, when you pass `--no-signoff` on purpose, or when the repo's `prepare-commit-msg` or `commit-msg` hook adds the trailer. It does not control cryptographic signing (`-S`), which always follows the repo's own git config.
 
 ## A typical review cycle
 

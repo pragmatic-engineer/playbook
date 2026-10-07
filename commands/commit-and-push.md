@@ -1,7 +1,7 @@
 ---
 description: Use when committing staged changes with a generated message and pushing. Handles staging, formatting, a signed commit, optional rebase, and push.
 allowed-tools: Bash, Read, Skill
-argument-hint: "[--all|-A] [--update|-u] [--amend|-a] [--auto] [--ask]"
+argument-hint: "[--all|-A] [--update|-u] [--amend|-a] [--no-signoff] [--auto] [--ask]"
 context: fork
 agent: git
 ---
@@ -25,6 +25,8 @@ Parse these from `$ARGUMENTS`. Each bash block below runs in its **own shell**, 
 - `--all` or `-A` → `STAGE_ALL=true` (run `git add -A`). Set at the top of **Step 1**.
 - `--update` or `-u` → `STAGE_UPDATE=true` (run `git add -u`, tracked files only). Set at the top of **Step 1**.
 - `--amend` or `-a` → `AMEND_COMMIT=true` (amend the previous commit). Set at the top of **Step 1** AND again in **Step 4** (both blocks read it).
+
+- `--no-signoff` → `NO_SIGNOFF=true` (leave the `Signed-off-by` trailer off this commit, on purpose). Set at the top of **Step 4**.
 
 Combined flags are fine: `-Au`, `-a -u`, etc. No flags means every variable stays `false`: commit only what is already staged. There is no confirmation gate; the flow always runs to completion.
 
@@ -195,14 +197,37 @@ Run commit + rebase + push in a single bash block. Replace `<message>` with the 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 # Set AMEND_COMMIT=true here too when -a was passed (this block reads it for the
 # push decision below), matching Step 1; leave false otherwise. Set AUTO_MODE=true
-# when Step 0 read auto mode.
+# when Step 0 read auto mode. Set NO_SIGNOFF=true when --no-signoff was passed.
 AMEND_COMMIT=false
 AUTO_MODE=false
+NO_SIGNOFF=false
 
-# Commit (signed + signoff). Heredoc preserves formatting.
-git commit ${AMEND_FLAG} --signoff --gpg-sign --file - <<'EOF'
+# The heredoc preserves the message's formatting.
+MSG_FILE=$(mktemp)
+trap 'rm -f "$MSG_FILE"' EXIT
+cat > "$MSG_FILE" <<'EOF'
 <message>
 EOF
+
+# Sign-off trailer. The commit.signOff setting (default true) decides, and it
+# stands down wherever the trailer is already handled: --no-signoff was passed
+# on purpose, the message already carries a Signed-off-by line, or a repo
+# prepare-commit-msg or commit-msg hook adds one itself. A failed config read
+# keeps the default. Cryptographic signing (--gpg-sign) is separate: it follows
+# the repo's git config and commit.signOff never changes it.
+SIGNOFF_FLAG="--signoff"
+SIGNOFF_OUT=$(playbook config get commit.signOff 2>/dev/null) || SIGNOFF_OUT=""
+case "$SIGNOFF_OUT" in *"commit.signOff: false"*) SIGNOFF_FLAG="" ;; esac
+[ "$NO_SIGNOFF" = "true" ] && SIGNOFF_FLAG=""
+grep -qiE '^Signed-off-by:' "$MSG_FILE" && SIGNOFF_FLAG=""
+for HOOK_NAME in prepare-commit-msg commit-msg; do
+  HOOK_FILE=$(git rev-parse --git-path "hooks/$HOOK_NAME")
+  if [ -x "$HOOK_FILE" ] && grep -qiE 'signed-off-by|signoff' "$HOOK_FILE" 2>/dev/null; then
+    SIGNOFF_FLAG=""
+  fi
+done
+
+git commit ${AMEND_FLAG} ${SIGNOFF_FLAG} --gpg-sign --file "$MSG_FILE"
 
 # Identify base branch (main or master), then rebase if we are behind
 BASE=""
@@ -278,5 +303,6 @@ echo "Pushed: $(git log -1 --oneline) -> origin/$BRANCH"
 ## Notes
 
 - Hooks (pre-commit, commit-msg, pre-push) run normally; do not skip them.
+- The `Signed-off-by` trailer follows `commit.signOff` (default `true`). Turn it off for yourself with `playbook config set --global commit.signOff false`, or for one commit with `--no-signoff`.
 - If a hook fails: investigate, fix, re-stage, and create a NEW commit. Never amend to dodge the hook unless the user explicitly asks.
 - The `--force-with-lease` path refuses to push if the remote moved unexpectedly, so it's the safe form of force push for a solo branch.

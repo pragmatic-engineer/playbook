@@ -416,3 +416,34 @@ fn a_non_number_for_a_numeric_auto_or_fix_key_is_rejected_and_writes_nothing() {
 fn zero_is_still_accepted_for_the_other_numeric_keys() {
     assert_written("worktreeCleanup.staleAfterDays", json!(0));
 }
+
+const BOOL_SETTINGS: [&str; 3] = ["autoReview.fix", "autoMerge.enabled", "commit.signOff"];
+
+#[test]
+fn a_non_bool_for_the_pr_and_commit_settings_is_rejected_and_writes_nothing() {
+    for key in BOOL_SETTINGS {
+        for value in [json!("yes"), json!(1)] {
+            // Arrange
+            let home = scratch_home("non-bool");
+
+            // Act
+            let result = set(Tier::Global, key, value.clone(), &home, None);
+
+            // Assert
+            let err = result.expect_err(&format!("{key} = {value} must be rejected"));
+            assert!(matches!(err, ConfigError::WrongType { .. }), "{key}: {err}");
+            assert!(err.to_string().contains(key), "{err}");
+            assert!(!global_config_path(&home).exists(), "{key}");
+
+            let _ = fs::remove_dir_all(&home);
+        }
+    }
+}
+
+#[test]
+fn a_bool_for_the_pr_and_commit_settings_is_written() {
+    for key in BOOL_SETTINGS {
+        assert_written(key, json!(true));
+        assert_written(key, json!(false));
+    }
+}
