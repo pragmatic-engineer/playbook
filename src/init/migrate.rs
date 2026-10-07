@@ -549,13 +549,18 @@ mod tests {
         assert!(!user_edited(&h, SYSTEM_PROMPT_KEY, &prompt));
     }
 
+    static HELD_RUNS: AtomicUsize = AtomicUsize::new(0);
+    fn held_probe(_: &Ctx) -> Outcome {
+        HELD_RUNS.fetch_add(1, Ordering::SeqCst);
+        done("held")
+    }
+
     #[test]
     fn a_held_lock_skips_auto_migrations_with_a_warning() {
         let h = home("held");
         fs::create_dir_all(playbook_root_from(&h).join(LOCK_DIR)).unwrap();
-        CALLS.lock().unwrap().clear();
-        let report = run_with_retries(&[auto("held-a", order_a)], &ctx(&h), 2);
-        assert!(CALLS.lock().unwrap().is_empty());
+        let report = run_with_retries(&[auto("held-a", held_probe)], &ctx(&h), 2);
+        assert_eq!(HELD_RUNS.load(Ordering::SeqCst), 0);
         assert!(report.steps[0].detail.contains("lock"));
     }
 
