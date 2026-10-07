@@ -40,6 +40,8 @@ pub struct Findings {
     pub notes: Vec<String>,
     /// Message sources the walk could not read, so were not checked.
     pub unread: Vec<String>,
+    /// A `-s` was added to a commit that had no sign-off.
+    pub signed_off: bool,
 }
 
 /// Where text a handler writes into a script ends up.
@@ -91,11 +93,6 @@ impl Call<'_> {
     /// The source text of the characters `range` covers.
     pub fn raw(&self, range: Range<usize>) -> String {
         self.chars[range].iter().collect()
-    }
-
-    /// The position just after the last word of the command.
-    pub fn end(&self) -> usize {
-        self.cmd().spans.last().map_or(0, |s| s.end)
     }
 
     /// Whether a carrier such as `xargs` runs the program, so a heredoc given

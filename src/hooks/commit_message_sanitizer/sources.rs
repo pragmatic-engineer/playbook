@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 //! Finds where a command keeps a message and writes the sanitised text back
-//! to the same place: a shell word, a heredoc body, a file on disk, or the
-//! `printf` or `echo` that produces it.
-//! When there is no safe place for the heredoc that stands in for a message
-//! file, the file is reported as unread and left to the backstop.
+//! to the same place: a shell word, a heredoc body, or the `printf` or `echo`
+//! that produces it. A message in a file or in the repository is never
+//! rewritten there: the command is made to read the cleaned text from a
+//! heredoc instead. When there is no safe place for that heredoc, the message
+//! is reported as unread and left to the backstop.
 
 use super::engine::{Call, Findings, Inline, Plan};
-use crate::common::atomic::write_atomic;
 use crate::common::attribution::{drop_lines, problems, prose_problems, Shape};
 use crate::common::home_dir;
-use crate::common::shell::{commands, program_index, program_name, quote, unescape, Command};
+use crate::common::shell::{commands, program_index, program_name, quote, unescape, Command, Span};
 use std::fs::File;
 use std::io::Read;
 use std::ops::Range;
@@ -35,21 +35,30 @@ pub enum Target {
     },
     /// The lines of a heredoc body.
     Body(Range<usize>),
-    /// A file on disk, rewritten in place.
-    File(PathBuf),
-    /// The text of a file, read from a heredoc in its place. `replace` is the
-    /// file name, which becomes `-` and a `<<` operator, and the body goes at
-    /// `slot` after `lead`. The terminator is never `avoid`, the delimiter of
-    /// the heredoc this one sits inside.
+    /// Text that lives outside the command, in a file or the repository, read
+    /// from a heredoc in its place so the original is never touched.
+    /// `replace` is what stands for it now, which becomes `opener` and a `<<`
+    /// operator, and the body goes at `slot` after its lead. There is no slot
+    /// when a heredoc would not be safe there, and the error says why.
     Feed {
         replace: Range<usize>,
-        slot: Range<usize>,
-        lead: &'static str,
-        avoid: Option<String>,
+        opener: String,
+        slot: Result<Slot, &'static str>,
     },
     /// The format of a `printf`, or the text of `echo -e`, which read
     /// backslashes as escapes.
     Escaped { range: Range<usize>, percent: bool },
+}
+
+/// Where the body of a fed heredoc goes.
+pub struct Slot {
+    /// An empty range, after the line break that ends the command's line.
+    at: Range<usize>,
+    /// What goes before the body: a line break when the script ends there.
+    lead: &'static str,
+    /// The delimiter of the heredoc this one sits inside, which its own
+    /// terminator must differ from.
+    avoid: Option<String>,
 }
 
 pub struct Source {
@@ -137,7 +146,13 @@ pub fn from_word(
         findings.unread.push(label.to_string());
         return Vec::new();
     };
-    let sources = producers_in(&inner, span.start + start, label, call.dir);
+    let place = Place {
+        call,
+        base: span.start + start,
+        inside: true,
+        before: call.index,
+    };
+    let sources = producers_in(&inner, place, label);
     if sources.is_empty() {
         findings.unread.push(label.to_string());
     }
@@ -169,22 +184,41 @@ fn substitution(raw: &str) -> Option<(String, usize)> {
     (start <= end).then(|| (chars[start..end].iter().collect(), start))
 }
 
-/// The messages a script produces: `cat` with a heredoc, `printf`, `echo`.
-fn producers_in(script: &str, base: usize, label: &str, dir: &Path) -> Vec<Source> {
+/// Where the script that holds a producer sits in the script of the call that
+/// reads its output.
+#[derive(Clone, Copy)]
+struct Place<'a> {
+    call: &'a Call<'a>,
+    /// Characters of the call's script before it: 0 for the call's own.
+    base: usize,
+    /// It is the inside of a `$(...)` in a word of the call.
+    inside: bool,
+    /// How many commands of the call's script come before the producer.
+    before: usize,
+}
+
+/// The messages a script produces: `cat` with a heredoc or files, `printf`,
+/// `echo`.
+fn producers_in(script: &str, place: Place, label: &str) -> Vec<Source> {
     commands(script)
         .iter()
-        .flat_map(|cmd| producer(cmd, base, label, dir))
+        .flat_map(|cmd| {
+            let end = cmd.spans.last().map_or(0, |s| s.end);
+            let tail_blank = script.chars().skip(end).all(char::is_whitespace);
+            producer(cmd, place, tail_blank, label)
+        })
         .collect()
 }
 
-fn producer(cmd: &Command, base: usize, label: &str, dir: &Path) -> Vec<Source> {
+fn producer(cmd: &Command, place: Place, tail_blank: bool, label: &str) -> Vec<Source> {
     let Some(at) = program_index(&cmd.words) else {
         return Vec::new();
     };
     let args = &cmd.words[at + 1..];
     let spans = &cmd.spans[at + 1..];
+    let base = place.base;
     match program_name(&cmd.words[at]).as_str() {
-        "cat" if cmd.heredocs.is_empty() => files_named(args, spans, label, dir),
+        "cat" if cmd.heredocs.is_empty() => cat_files(args, spans, place, tail_blank, label),
         "cat" => cmd
             .heredocs
             .iter()
@@ -213,34 +247,60 @@ fn producer(cmd: &Command, base: usize, label: &str, dir: &Path) -> Vec<Source> 
     }
 }
 
-/// The readable files among the words of a `cat`.
-fn files_named(
+/// The text of the files a `cat` prints, read from a heredoc instead. Nothing
+/// when any of them cannot be fed safely, which leaves it to the backstop.
+fn cat_files(
     args: &[String],
-    spans: &[crate::common::shell::Span],
+    spans: &[Span],
+    place: Place,
+    tail_blank: bool,
     label: &str,
-    dir: &Path,
 ) -> Vec<Source> {
-    args.iter()
+    let (Some(first), Some(last)) = (spans.first(), spans.last()) else {
+        return Vec::new();
+    };
+    if args
+        .iter()
         .zip(spans)
-        .filter(|(arg, span)| !arg.starts_with('-') && !span.dynamic)
-        .filter_map(|(arg, _)| {
-            let path = resolve(arg, dir);
-            read_file(&path).map(|text| Source {
-                label: format!("{label} in {arg}"),
-                text,
-                target: Target::File(path),
-            })
+        .any(|(a, s)| a.starts_with('-') || s.dynamic)
+    {
+        return Vec::new();
+    }
+    let mut text = String::new();
+    for arg in args {
+        let file = resolve(arg, place.call.dir);
+        match read_message(&file) {
+            Ok(part) if !touched_before(place.call, &file, place.before) => text.push_str(&part),
+            _ => return Vec::new(),
+        }
+    }
+    let slot = if place.inside {
+        // Inside a substitution the body follows the command, before its `)`.
+        host_delimiter(place.call.inline, &text).and_then(|avoid| {
+            tail_blank
+                .then(|| Slot {
+                    at: shift(&(last.end..last.end), place.base),
+                    lead: "\n",
+                    avoid,
+                })
+                .ok_or("its command is not the last in its substitution")
         })
-        .collect()
+    } else {
+        slot_after_line(place.call, &text, false)
+    };
+    vec![Source {
+        label: format!("{label} in {}", args.join(" ")),
+        text,
+        target: Target::Feed {
+            replace: shift(&(first.start..last.end), place.base),
+            opener: String::new(),
+            slot,
+        },
+    }]
 }
 
 /// `echo` with one text word, and `-e` when the text reads escapes.
-fn echo(
-    args: &[String],
-    spans: &[crate::common::shell::Span],
-    base: usize,
-    label: &str,
-) -> Vec<Source> {
+fn echo(args: &[String], spans: &[Span], base: usize, label: &str) -> Vec<Source> {
     let is_flag =
         |a: &String| a.len() > 1 && a.starts_with('-') && a[1..].chars().all(|c| "neE".contains(c));
     let flags: Vec<&String> = args.iter().take_while(|a| is_flag(a)).collect();
@@ -249,6 +309,11 @@ fn echo(
         return Vec::new();
     }
     let reads_escapes = flags.iter().any(|f| f.contains('e'));
+    let literal = flags.iter().any(|f| f.contains('E'));
+    // Without a flag, whether a backslash is an escape depends on the shell.
+    if rest[0].contains('\\') && !reads_escapes && !literal {
+        return Vec::new();
+    }
     let span = &spans[flags.len()];
     let text = if reads_escapes {
         unescape(&rest[0])
@@ -275,8 +340,7 @@ fn shift(range: &Range<usize>, base: usize) -> Range<usize> {
 }
 
 /// A message read from standard input: the command's own heredoc, a here
-/// string, a file redirected in, or what the command before a pipe prints. A
-/// pipe from a command that is not read is reported as unread.
+/// string, a file redirected in, or what the command before a pipe prints.
 pub fn from_stdin(call: &Call, label: &str, findings: &mut Findings) -> Vec<Source> {
     let cmd = call.cmd();
     if !cmd.heredocs.is_empty() {
@@ -302,15 +366,22 @@ pub fn from_stdin(call: &Call, label: &str, findings: &mut Findings) -> Vec<Sour
         .iter()
         .enumerate()
         .find_map(|(i, w)| match w.as_str() {
-            "<" => cmd
-                .words
-                .get(i + 1)
-                .map(|p| (p.clone(), cmd.spans[i + 1].dynamic)),
-            w if w.starts_with('<') => Some((w[1..].to_string(), cmd.spans[i].dynamic)),
+            "<" => cmd.words.get(i + 1).map(|path| Named {
+                path,
+                dynamic: cmd.spans[i + 1].dynamic,
+                replace: Some(cmd.spans[i].start..cmd.spans[i + 1].end),
+                opener: "",
+            }),
+            w if w.starts_with('<') => Some(Named {
+                path: &w[1..],
+                dynamic: cmd.spans[i].dynamic,
+                replace: Some(cmd.spans[i].start..cmd.spans[i].end),
+                opener: "",
+            }),
             _ => None,
         });
-    if let Some((path, dynamic)) = redirected {
-        return from_path(call, &path, dynamic, None, label, findings);
+    if let Some(named) = redirected {
+        return from_path(call, &named, label, findings);
     }
     let Some(before) = call.index.checked_sub(1).filter(|_| cmd.piped) else {
         findings.unread.push(format!(
@@ -318,83 +389,128 @@ pub fn from_stdin(call: &Call, label: &str, findings: &mut Findings) -> Vec<Sour
         ));
         return Vec::new();
     };
-    let sources = producer_chain(call, before, label);
+    let place = Place {
+        call,
+        base: 0,
+        inside: false,
+        before,
+    };
+    let sources = producer(&call.cmds[before], place, true, label);
     if sources.is_empty() {
         findings.unread.push(format!("{label} (read from a pipe)"));
     }
     sources
 }
 
-fn producer_chain(call: &Call, before: usize, label: &str) -> Vec<Source> {
-    producer(&call.cmds[before], 0, label, call.dir)
+/// A file named in the command, and where its name sits so a heredoc can
+/// stand in for it.
+pub struct Named<'a> {
+    pub path: &'a str,
+    pub dynamic: bool,
+    /// What stands for the file now, which is replaced when the message is
+    /// fed from a heredoc. `None` when it is not written plainly.
+    pub replace: Option<Range<usize>>,
+    /// What the replacement starts with: `- ` for the value of `-F`, nothing
+    /// for a file read by a redirect or a `cat`.
+    pub opener: &'static str,
 }
 
-/// A message in a file: standard input for `-`, or the file on disk, whose
-/// text is read from a heredoc in its place. `value` is where the file name
-/// sits in the script.
-pub fn from_path(
-    call: &Call,
-    path: &str,
-    dynamic: bool,
-    value: Option<Range<usize>>,
-    label: &str,
-    findings: &mut Findings,
-) -> Vec<Source> {
+/// A message in a file: standard input for `-`, the heredoc that an earlier
+/// command in the script wrote the file from, or the file on disk, whose text
+/// is read from a heredoc in its place.
+pub fn from_path(call: &Call, named: &Named, label: &str, findings: &mut Findings) -> Vec<Source> {
+    let path = named.path;
     if is_stdin_path(path) {
         return from_stdin(call, label, findings);
     }
     if let Some(sources) = written_earlier(call, path, label) {
         return sources;
     }
-    let named = format!("{label} in {path}");
-    let expanded = if dynamic {
+    let described = format!("{label} in {path}");
+    let expanded = if named.dynamic {
         expand_vars(path)
     } else {
         Some(path.to_string())
     };
     let Some(file) = expanded.map(|p| resolve(&p, call.dir)) else {
-        findings.unread.push(named);
+        findings.unread.push(described);
         return Vec::new();
     };
-    match fed_from(call, &file, value) {
-        Ok(source) => vec![Source {
-            label: named,
-            ..source
-        }],
+    match fed_from(call, &file, named) {
+        Ok(text) => {
+            let replace = named.replace.clone().unwrap_or_default();
+            vec![feed(
+                call,
+                described,
+                text,
+                replace,
+                named.opener.to_string(),
+            )]
+        }
         Err(why) => {
-            findings.unread.push(format!("{named} ({why})"));
+            findings.unread.push(format!("{described} ({why})"));
             Vec::new()
         }
     }
 }
 
-/// The text of `file` with the heredoc that stands in for it, or why the file
-/// is left to the backstop: it must be a regular UTF-8 file under the size
-/// cap, and no earlier command in the script may touch it, since its text at
-/// the time the command runs is then not what is read here. A heredoc is the
-/// command's standard input, so one that already has another input, or a
-/// carrier that would take it, rules the swap out.
-fn fed_from(call: &Call, file: &Path, value: Option<Range<usize>>) -> Result<Source, &'static str> {
+/// The text of `file`, or why it is left to the backstop: it must be a
+/// regular UTF-8 file under the size cap, and no earlier command in the script
+/// may touch it, since its text when the command runs is then not what is read
+/// here.
+fn fed_from(call: &Call, file: &Path, named: &Named) -> Result<String, &'static str> {
     let text = read_message(file)?;
-    if touched_earlier(call, file) {
+    if touched_before(call, file, call.index) {
         return Err("it is changed earlier in the same command");
     }
-    if !call.cmd().heredocs.is_empty() || redirects_stdin(call) || call.under_stdin_carrier() {
-        return Err("standard input is already in use or taken by a carrier such as xargs");
-    }
-    let replace = value.ok_or("its name is partly quoted")?;
-    let avoid = host_delimiter(call.inline, &text)?;
-    let (slot, lead) = line_slot(call).ok_or("another heredoc is open on its line")?;
-    Ok(Source {
-        label: String::new(),
+    named.replace.as_ref().ok_or("its name is partly quoted")?;
+    Ok(text)
+}
+
+/// A source whose text is read from a heredoc placed after the command's line.
+/// A non-empty `opener` makes the heredoc the command's standard input.
+pub fn feed(
+    call: &Call,
+    label: String,
+    text: String,
+    replace: Range<usize>,
+    opener: String,
+) -> Source {
+    let slot = slot_after_line(call, &text, !opener.is_empty());
+    Source {
+        label,
         text,
         target: Target::Feed {
             replace,
+            opener,
             slot,
-            lead,
-            avoid,
         },
+    }
+}
+
+/// Whether any of the first `before` commands of the script names `file`.
+fn touched_before(call: &Call, file: &Path, before: usize) -> bool {
+    call.cmds[..before].iter().any(|cmd| {
+        cmd.words
+            .iter()
+            .map(|word| word.trim_start_matches(['<', '>']))
+            .any(|word| !word.is_empty() && resolve(word, call.dir) == file)
     })
+}
+
+/// Where the heredoc that stands in for `text` goes, or why none can: a
+/// heredoc that is the command's standard input needs the command to have no
+/// other input and no carrier such as `xargs` to take it, and the text must
+/// survive the heredoc it is written into, if any.
+fn slot_after_line(call: &Call, text: &str, takes_stdin: bool) -> Result<Slot, &'static str> {
+    if takes_stdin
+        && (!call.cmd().heredocs.is_empty() || redirects_stdin(call) || call.under_stdin_carrier())
+    {
+        return Err("standard input is already in use or taken by a carrier such as xargs");
+    }
+    let avoid = host_delimiter(call.inline, text)?;
+    let (at, lead) = line_slot(call).ok_or("another heredoc is open on its line")?;
+    Ok(Slot { at, lead, avoid })
 }
 
 /// The delimiter of the heredoc the fed text would sit in, when there is one
@@ -424,16 +540,6 @@ fn redirects_stdin(call: &Call) -> bool {
         call.raw(span.start..span.end)
             .trim_start_matches(|c: char| c.is_ascii_digit())
             .starts_with('<')
-    })
-}
-
-/// Whether a command before this one in the script names `file`.
-fn touched_earlier(call: &Call, file: &Path) -> bool {
-    call.cmds[..call.index].iter().any(|cmd| {
-        cmd.words
-            .iter()
-            .map(|word| word.trim_start_matches(['<', '>']))
-            .any(|word| !word.is_empty() && resolve(word, call.dir) == file)
     })
 }
 
@@ -497,7 +603,7 @@ fn writes_to(cmd: &Command, path: &str) -> bool {
 }
 
 /// The text of a regular, UTF-8 file within the size cap.
-fn read_message(path: &Path) -> Result<String, &'static str> {
+pub fn read_message(path: &Path) -> Result<String, &'static str> {
     let meta = std::fs::symlink_metadata(path).map_err(|_| "it cannot be read")?;
     if meta.file_type().is_symlink() {
         return Err("it is a symbolic link");
@@ -512,14 +618,13 @@ fn read_message(path: &Path) -> Result<String, &'static str> {
     String::from_utf8(bytes).map_err(|_| "it is not valid UTF-8")
 }
 
-fn read_file(path: &Path) -> Option<String> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .ok()?
-        .take(MAX_MESSAGE_BYTES)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+/// The text of `sources` as one message, the way git joins repeated `-m`.
+pub fn joined(sources: &[Source]) -> String {
+    sources
+        .iter()
+        .map(|s| s.text.trim_end_matches('\n'))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Sanitises `sources` and queues the rewrite of each one that changes. With
@@ -580,6 +685,10 @@ fn rewrite(
     plan: &mut Plan,
     findings: &mut Findings,
 ) {
+    if let Target::Feed { slot: Err(why), .. } = &source.target {
+        findings.unread.push(format!("{} ({why})", source.label));
+        return;
+    }
     let text = drop_lines(&source.text, removed);
     for (n, shape) in numbered {
         findings
@@ -601,30 +710,23 @@ fn rewrite(
             };
             plan.edits.push((range.clone(), body));
         }
-        Target::File(path) => {
-            if write_atomic(path, &text).is_err() {
-                findings
-                    .unread
-                    .push(format!("{} (could not rewrite)", source.label));
-            }
-        }
         Target::Feed {
             replace,
-            slot,
-            lead,
-            avoid,
+            opener,
+            slot: Ok(slot),
         } => {
             let body = if text.is_empty() || text.ends_with('\n') {
                 text
             } else {
                 format!("{text}\n")
             };
-            let delimiter = unique_delimiter(&body, avoid.as_deref());
+            let delimiter = unique_delimiter(&body, slot.avoid.as_deref());
             plan.edits
-                .push((replace.clone(), format!("- <<'{delimiter}'")));
+                .push((replace.clone(), format!("{opener}<<'{delimiter}'")));
             plan.edits
-                .push((slot.clone(), format!("{lead}{body}{delimiter}\n")));
+                .push((slot.at.clone(), format!("{}{body}{delimiter}\n", slot.lead)));
         }
+        Target::Feed { slot: Err(_), .. } => {}
         Target::Escaped { range, percent } => {
             let mut escaped = text.replace('\\', "\\\\");
             if *percent {
