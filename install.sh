@@ -154,6 +154,7 @@ Env:
   PLAYBOOK_REF=<tag|branch|sha>  source ref (default: latest release, else main)
   CLAUDE_HOME=<dir>              install target (default: $HOME/.claude)
   PLAYBOOK_BIN_DIR=<dir>         binary install dir (default: $HOME/.local/bin)
+  PLAYBOOK_REQUIRE_ATTESTATION=1 abort unless the build attestation verifies
 
 Flags:
   --yes              non-interactive: accept every step's default
@@ -324,8 +325,15 @@ backup_previous_binary() {
 verify_attestation() {
     local file="$1" strict="${PLAYBOOK_REQUIRE_ATTESTATION:-0}" err
     if command -v gh >/dev/null 2>&1 && gh attestation --help >/dev/null 2>&1; then
-        if err="$(gh attestation verify "$file" --repo "$PLUGIN_REPO" 2>&1)"; then
+        if err="$(gh attestation verify "$file" --repo "$PLUGIN_REPO" \
+            --signer-workflow "$PLUGIN_REPO/.github/workflows/release.yml" 2>&1)"; then
             log "Verified the build attestation for $ASSET"
+            return 0
+        fi
+        # Older releases and a gh that is not logged in cannot be verified; that
+        # is a gap, not a mismatch, so only strict mode treats it as fatal.
+        if [ "$strict" != "1" ] && printf '%s' "$err" | grep -qiE 'no attestations found|failed to fetch|gh auth login|GH_TOKEN|HTTP 401'; then
+            warn "checksum only, provenance not verified: $(printf '%s' "$err" | head -n 1)"
             return 0
         fi
         die "attestation verification failed for $ASSET: $err"

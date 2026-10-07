@@ -16,6 +16,7 @@
 # Run:  bash shell/install-resolve.test.sh
 # Exit: 0 if all scenarios pass, non-zero otherwise.
 set -u
+unset PLAYBOOK_REQUIRE_ATTESTATION STUB_GH GH_LOG
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL="$SCRIPT_DIR/../install.sh"
@@ -99,7 +100,7 @@ esac
 STUB
 chmod +x "$STUB_BIN/uname"
 
-# Stub gh. STUB_GH: pass | fail | (unset = no attestation support, as if absent).
+# Stub gh. STUB_GH: pass | fail | missing | (unset = no attestation support, as if absent).
 cat > "$STUB_BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 case "${STUB_GH:-absent}" in
@@ -108,6 +109,7 @@ case "${STUB_GH:-absent}" in
      [ "$1 $2" = "attestation verify" ] || exit 1
      echo "gh $*" >> "${GH_LOG:-/dev/null}"
      [ "$STUB_GH" = pass ] && exit 0
+     [ "$STUB_GH" = missing ] && { echo "no attestations found for subject" >&2; exit 1; }
      echo "no matching attestation" >&2; exit 1 ;;
 esac
 STUB
@@ -369,19 +371,32 @@ _run_attest() {
         STUB_SUMS_BODY="$hash  $ASSET_1_2_3" \
         bash "$INSTALL" --no-setup 2>&1)"
   rc=$?
+  ATT_HOME="$home"
   GH_LOGTXT="$(cat "$home/gh.log" 2>/dev/null)"
 }
 
 s_attest_pass() {
   local out rc; _run_attest STUB_GH=pass
   [[ "$out" == *"Verified the build attestation"* \
-     && "$GH_LOGTXT" == *"--repo pragmatic-engineer/playbook"* ]]
+     && "$GH_LOGTXT" == *"verify "*"/$ASSET_1_2_3 --repo pragmatic-engineer/playbook"* \
+     && "$GH_LOGTXT" == *"--signer-workflow pragmatic-engineer/playbook/.github/workflows/release.yml"* ]]
 }
 
 s_attest_fail() {
   local out rc; _run_attest STUB_GH=fail
   [[ $rc -ne 0 && "$out" == *"attestation verification failed"* \
-     && "$out" == *"no matching attestation"* && "$out" != *"Installed playbook"* ]]
+     && "$out" == *"no matching attestation"* && "$out" != *"Installed playbook"* ]] \
+    && [ ! -e "$ATT_HOME/bin/playbook" ]
+}
+
+s_attest_missing_warns() {
+  local out rc; _run_attest STUB_GH=missing
+  [[ "$out" == *"provenance not verified: no attestations found"* && "$out" == *"Installed playbook 1.2.3"* ]]
+}
+
+s_attest_missing_strict() {
+  local out rc; _run_attest STUB_GH=missing PLAYBOOK_REQUIRE_ATTESTATION=1
+  [[ $rc -ne 0 && "$out" == *"attestation verification failed"* && "$out" != *"Installed playbook"* ]]
 }
 
 s_attest_absent() {
@@ -416,6 +431,8 @@ for s in \
   "successful install places the binary and wires PATH once:s_successful_install" \
   "attestation passes and names the repo:s_attest_pass" \
   "attestation failure is fatal:s_attest_fail" \
+  "release without attestations warns, not fatal:s_attest_missing_warns" \
+  "release without attestations is fatal when strict:s_attest_missing_strict" \
   "no gh: checksum-only note, install continues:s_attest_absent" \
   "strict mode without gh is fatal:s_attest_strict_absent" \
   "strict mode with a passing attestation installs:s_attest_strict_pass" \

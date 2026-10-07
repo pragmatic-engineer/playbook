@@ -223,6 +223,7 @@ jobs:
           allowed-endpoints: >
             api.github.com:443
             fulcio.githubapp.com:443
+            fulcio.sigstore.dev:443
             tuf-repo.github.com:443
             tuf-repo-cdn.sigstore.dev:443
             rekor.sigstore.dev:443

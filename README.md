@@ -100,8 +100,9 @@ you have not read.
    gh attestation verify <asset> --repo pragmatic-engineer/playbook
    ```
 
-   `install.sh` runs this check when `gh` is available and only warns when it
-   is not. Set `PLAYBOOK_REQUIRE_ATTESTATION=1` to make a missing or failed
+   `install.sh` runs this check when `gh` is available. It only warns when
+   `gh` is missing, not logged in, or the release predates attestations; a
+   real mismatch always aborts. Set `PLAYBOOK_REQUIRE_ATTESTATION=1` to make a missing or failed
    check abort the install.
 
 4. Put it on `PATH` as `playbook`:
