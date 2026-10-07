@@ -26,14 +26,9 @@ set -euo pipefail
 PLUGIN_REPO="pragmatic-engineer/playbook"
 MARKETPLACE="pragmatic-engineer/marketplace"
 PLUGIN="playbook@pragmatic-engineer"
-# Lowest claude CLI version this toolkit targets going forward: v2.1.121
-# shipped PostToolUse's updatedToolOutput, which planned token-budget work
-# (tool-output compression) will build on. Nothing shipped today actually
-# requires it yet; this floor is set ahead of that work landing so a user
-# who upgrades the plugin doesn't also need to separately discover a CLI
-# upgrade at that point. Bump this only alongside a feature that genuinely
-# needs the newer floor, never speculatively.
-CLAUDE_MIN_VERSION="2.1.121"
+# Lowest claude CLI version that can install from the marketplace: the plugin
+# is served as a trimmed archive source, which older clients cannot fetch.
+CLAUDE_MIN_VERSION="2.1.224"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 # Root for every directory playbook itself writes (memory, runtime state,
 # the statusline script, config-hash.sh); mirrors playbook_root_from() in

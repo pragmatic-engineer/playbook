@@ -12,7 +12,7 @@ Frontmatter fields that appear in the existing commands:
 |---|---|
 | `description` | Both the picker summary and the trigger. Claude Code lists commands in the same available-skills listing it uses for `skills/`, matching this field against what the user asked for, so a command can load from a plain-English request with no slash typed. Write it as a "use when..." sentence, the same as a skill's. |
 | `allowed-tools` | Comma-separated tools the command is permitted to use. |
-| `effort` | Effort level: `low`, `medium`, `high`, `xhigh`. |
+| `effort` | Effort level: `low`, `medium`, `high`, `xhigh`, `max`. |
 | `model` | Optional. Pin to a model (e.g., `opus`). Omit to inherit the session default. |
 | `argument-hint` | Optional. Usage hint shown for `$ARGUMENTS`. |
 
@@ -79,11 +79,11 @@ The `description` field does all the targeting. Write it as a "use when..." sent
 
 Hooks are commands registered in `settings.json` under the `hooks` key. Each entry maps an event to one or more commands.
 
-Events wired in this config: `SessionStart`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `PreCompact`, `Stop`, `SessionEnd`. `PreToolUse` and `PostToolUse` accept an optional `matcher` to filter by tool name (e.g., `"Bash"`, `"Read|Grep|Glob|Edit|Write|NotebookEdit"`).
+Events wired in this config: `SessionStart`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `PreCompact`, `Stop`, `SessionEnd`, `WorktreeCreate`, `WorktreeRemove`. `PreToolUse` and `PostToolUse` accept an optional `matcher` to filter by tool name (e.g., `"Bash"`, `"Read|Grep|Glob|Edit|Write|NotebookEdit"`).
 
 ### One binary, one module per hook
 
-All fifteen hooks are Rust functions compiled into the single `playbook` binary, one module per hook under `src/hooks/<name>.rs`. `src/hooks/mod.rs` declares every module and an exhaustive `dispatch` match over the `HookName` enum in `src/lib.rs`, so adding a hook the CLI cannot invoke fails the build instead of silently doing nothing at runtime.
+All twenty hooks are Rust functions compiled into the single `playbook` binary, one module per hook under `src/hooks/<name>.rs`. `src/hooks/mod.rs` declares every module and an exhaustive `dispatch` match over the `HookName` enum in `src/lib.rs`, so adding a hook the CLI cannot invoke fails the build instead of silently doing nothing at runtime.
 
 There is no language split left to choose between. The data-shaping hooks (memory graph rebuild, anchor lookup, frontmatter parsing) and the fast safety guards (`rm-workspace-guard`, `no-slop-guard`, `bg-await-guard`, `precommit-check`) are all plain functions sharing the same `src/common/` helpers (payload field extraction, session dir, atomic append, the `emit_*` JSON shapes) and the same compiled binary, so there is no per-hook cold start to weigh a language choice against.
 

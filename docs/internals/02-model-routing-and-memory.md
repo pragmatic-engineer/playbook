@@ -61,6 +61,7 @@ Memory is a typed graph. Both scopes share the same file format.
 | Scope | Path | Coverage | Committed to git? |
 |---|---|---|---|
 | Global | `~/.config/playbook/memory/` | Cross-project | No, outside any repo |
+| Org | `~/.config/playbook/memory/<owner>/` | Every repo under one owner | No, outside any repo |
 | Project | `~/.config/playbook/memory/<owner>/<repo>/` | One repo only | No, outside any repo |
 
 The `<owner>/<repo>` project index is injected at session start. The global index is read on demand.

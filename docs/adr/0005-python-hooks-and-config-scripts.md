@@ -1,6 +1,6 @@
 # ADR 0005: Migrate the hooks and the config scripts from shell to Python
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR 0007 (the hook implementation moved from Python to Rust; the config-script part was also replaced)
 - **Date created:** 2026-08-11
 - **Date modified:** 2026-08-11
 
