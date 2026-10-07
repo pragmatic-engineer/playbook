@@ -24,8 +24,8 @@ The command rejects an unknown key, a value of the wrong type, and a number outs
 | `commit.signOff` | `true` | `true`, `false` | Commits made through `/playbook:commit-and-push` carry a `Signed-off-by` trailer. |
 | `pr.draft` | `true` | `true`, `false` | `/playbook:create-pull-request` opens the PR as a draft. |
 | `worktreeCleanup.enabled` | `true` | `true`, `false` | Lets the worktree sweep remove worktrees whose work has landed. Turn it off to keep every worktree. |
-| `worktreeCleanup.staleAfterDays` | `30` | whole number, 0 or more | Days since a branch's last commit after which the sweep treats it as landed, even when it was never merged. A branch with an open PR is kept. |
-| `worktreeCleanup.conflictGracePeriodDays` | `90` | whole number, 0 or more | Days a worktree stopped on a rebase conflict is kept, counted from the time of the stop marker, before the sweep treats it as landed. |
+| `worktreeCleanup.staleAfterDays` | `30` | whole number, 0 or more | Days since the last commit of an agent or `cc worktree` branch after which the sweep treats it as landed, even when it was never merged. |
+| `worktreeCleanup.conflictGracePeriodDays` | `90` | whole number, 0 or more | Days a `/playbook:implement` worktree stopped on a cherry-pick conflict is kept, counted from the timestamp in its stop marker, before the sweep treats it as landed. |
 | `mode` | `ask` | `ask`, `auto` | `ask` stops for every decision. `auto` takes the recommended answer, lists it under Assumptions, and keeps going. |
 | `auto.budgetUsd` | `5` | number, 0.01 or more | The session spend cap in US dollars while the mode is `auto`. |
 | `auto.warnPct` | `70` | whole number, 1 to 100 | The percent of `auto.budgetUsd` at which the spend hook warns once. |
