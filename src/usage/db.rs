@@ -293,20 +293,20 @@ pub fn insert_tool_event(conn: &Connection, e: &ToolInvocationEvent) -> Result<(
     .map_err(|e2| format!("failed to insert tool event {}: {e2}", e.event_id))
 }
 
-/// Loads every usage event, pricing each one now from its stored token counts
-/// and the current price table. The stored `cost_usd` column is ignored, so a
-/// price correction never needs a re-ingest.
-pub fn load_usage_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
+const USAGE_COLUMNS: &str = "event_id, timestamp, session_id, account, model, effort, repo, branch,
+    input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+    cache_creation_1h_tokens, agent";
+
+fn query_usage(
+    conn: &Connection,
+    tail: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> Result<Vec<UsageEvent>, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT event_id, timestamp, session_id, account, model, effort, repo, branch,
-                    input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-                    cache_creation_1h_tokens, agent
-             FROM usage_events ORDER BY timestamp, event_id",
-        )
+        .prepare(&format!("SELECT {USAGE_COLUMNS} FROM usage_events {tail}"))
         .map_err(|e| format!("failed to prepare usage query: {e}"))?;
     let rows = stmt
-        .query_map([], |r| {
+        .query_map(params, |r| {
             let mut event = UsageEvent {
                 event_id: r.get(0)?,
                 timestamp: r.get(1)?,
@@ -330,6 +330,49 @@ pub fn load_usage_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
         .map_err(|e| format!("failed to read usage events: {e}"))?;
     rows.collect::<Result<_, _>>()
         .map_err(|e| format!("failed to read a usage event row: {e}"))
+}
+
+/// Loads every usage event, pricing each one now from its stored token counts
+/// and the current price table. The stored `cost_usd` column is ignored, so a
+/// price correction never needs a re-ingest.
+pub fn load_usage_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
+    query_usage(conn, "ORDER BY timestamp, event_id", &[])
+}
+
+/// Events at or after `since` (epoch seconds), oldest first.
+pub fn load_usage_events_since(conn: &Connection, since: i64) -> Result<Vec<UsageEvent>, String> {
+    query_usage(
+        conn,
+        "WHERE timestamp >= ?1 ORDER BY timestamp, event_id",
+        &[&since],
+    )
+}
+
+/// The newest `limit` events, newest first.
+pub fn load_latest_usage_events(conn: &Connection, limit: i64) -> Result<Vec<UsageEvent>, String> {
+    query_usage(
+        conn,
+        "ORDER BY timestamp DESC, event_id DESC LIMIT ?1",
+        &[&limit],
+    )
+}
+
+/// Every event of the given sessions, oldest first.
+pub fn load_usage_events_of_sessions(
+    conn: &Connection,
+    sessions: &[String],
+) -> Result<Vec<UsageEvent>, String> {
+    if sessions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let marks = vec!["?"; sessions.len()].join(",");
+    let params: Vec<&dyn rusqlite::ToSql> =
+        sessions.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+    query_usage(
+        conn,
+        &format!("WHERE session_id IN ({marks}) ORDER BY timestamp, event_id"),
+        &params,
+    )
 }
 
 pub fn load_tool_events(conn: &Connection) -> Result<Vec<ToolInvocationEvent>, String> {
@@ -490,6 +533,49 @@ mod tests {
         advance_watermark(&conn, "claude-code", 500).unwrap();
         assert_eq!(get_watermark(&conn, "claude-code").unwrap(), 500);
         assert_eq!(get_watermark(&conn, "other").unwrap(), 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_live_queries_filter_order_and_limit_as_documented() {
+        let dir = scratch_dir("usage-live-queries");
+        let conn = open_db(&dir.join("usage.db")).unwrap();
+        for (id, ts, session) in [
+            ("a", 100, "s1"),
+            ("b", 200, "s2"),
+            ("c", 300, "s3"),
+            ("d", 400, "s1"),
+        ] {
+            let event = UsageEvent {
+                event_id: id.into(),
+                timestamp: ts,
+                session_id: session.into(),
+                model: "m".into(),
+                ..UsageEvent::default()
+            };
+            insert_usage_event(&conn, &event).unwrap();
+        }
+        let ids = |events: Vec<UsageEvent>| -> Vec<String> {
+            events.into_iter().map(|e| e.event_id).collect()
+        };
+
+        assert_eq!(
+            ids(load_usage_events_since(&conn, 200).unwrap()),
+            ["b", "c", "d"]
+        );
+        assert_eq!(
+            ids(load_usage_events_since(&conn, 401).unwrap()),
+            Vec::<String>::new()
+        );
+        assert_eq!(ids(load_latest_usage_events(&conn, 2).unwrap()), ["d", "c"]);
+        let wanted = vec!["s1".to_string(), "s3".to_string()];
+        assert_eq!(
+            ids(load_usage_events_of_sessions(&conn, &wanted).unwrap()),
+            ["a", "c", "d"]
+        );
+        assert!(load_usage_events_of_sessions(&conn, &[])
+            .unwrap()
+            .is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 }

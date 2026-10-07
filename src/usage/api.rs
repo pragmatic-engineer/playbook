@@ -318,6 +318,126 @@ fn clock(timestamp: i64) -> String {
     format!("{:02}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60)
 }
 
+/// A session counts as active when its last message is this recent.
+pub const ACTIVE_SECONDS: i64 = 15 * 60;
+const BURN_MINUTES: i64 = 60;
+const ACTIVE_LIMIT: usize = 20;
+/// Messages in the live feed.
+pub const FEED_LIMIT: usize = 20;
+
+/// Start of the first of the 60 minutes the burn chart and "last hour" cover:
+/// the current minute and the 59 before it.
+fn hour_start(now: i64) -> i64 {
+    (now.div_euclid(60) - (BURN_MINUTES - 1)) * 60
+}
+
+/// The oldest timestamp the live summary needs: the start of today (UTC) or
+/// of the last hour, whichever is earlier.
+pub fn live_window_start(now: i64) -> i64 {
+    hour_start(now).min(now.div_euclid(SECONDS_PER_DAY) * SECONDS_PER_DAY)
+}
+
+/// Ids of sessions with a message in the last 15 minutes, newest first.
+pub fn active_session_ids(window: &[UsageEvent], now: i64) -> Vec<String> {
+    let mut last: BTreeMap<&str, i64> = BTreeMap::new();
+    for e in window.iter().filter(|e| e.timestamp > now - ACTIVE_SECONDS) {
+        let at = last.entry(e.session_id.as_str()).or_insert(0);
+        *at = (*at).max(e.timestamp);
+    }
+    let mut ids: Vec<(&str, i64)> = last.into_iter().collect();
+    ids.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    ids.into_iter()
+        .take(ACTIVE_LIMIT)
+        .map(|(id, _)| id.to_string())
+        .collect()
+}
+
+fn spend_json(events: &[&UsageEvent]) -> Value {
+    json!({
+        "messages": events.len(),
+        "tokens": events.iter().map(|e| total_tokens(e)).sum::<u64>(),
+        "cost_usd": events.iter().map(|e| e.cost_usd).sum::<f64>(),
+    })
+}
+
+/// What the Live tab shows. `window` holds every event since
+/// `live_window_start`, `sessions` every event of the active sessions (so
+/// "spend so far" is the whole session), `latest` the newest messages, newest
+/// first.
+pub fn live_json(
+    window: &[UsageEvent],
+    sessions: &[UsageEvent],
+    latest: &[UsageEvent],
+    now: i64,
+) -> Value {
+    let today_start = now.div_euclid(SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    let hour: Vec<&UsageEvent> = window
+        .iter()
+        .filter(|e| e.timestamp >= hour_start(now))
+        .collect();
+    let today: Vec<&UsageEvent> = window
+        .iter()
+        .filter(|e| e.timestamp >= today_start)
+        .collect();
+
+    let first_minute = now.div_euclid(60) - (BURN_MINUTES - 1);
+    let mut per_minute = vec![0.0_f64; BURN_MINUTES as usize];
+    for e in &hour {
+        let slot = e.timestamp.div_euclid(60) - first_minute;
+        if (0..BURN_MINUTES).contains(&slot) {
+            per_minute[slot as usize] += e.cost_usd;
+        }
+    }
+    let bars: Vec<(String, f64)> = per_minute
+        .into_iter()
+        .enumerate()
+        .map(|(i, cost)| (clock((first_minute + i as i64) * 60)[..5].to_string(), cost))
+        .collect();
+
+    let active: Vec<Value> = active_session_ids(window, now)
+        .iter()
+        .filter_map(|id| {
+            let events: Vec<&UsageEvent> =
+                sessions.iter().filter(|e| &e.session_id == id).collect();
+            let latest = events.iter().max_by_key(|e| e.timestamp).copied()?;
+            Some(json!({
+                "id": id,
+                "repo": latest.repo,
+                "agent": latest.agent,
+                "model": latest.model,
+                "last": latest.timestamp,
+                "messages": events.len(),
+                "cost_usd": events.iter().map(|e| e.cost_usd).sum::<f64>(),
+            }))
+        })
+        .collect();
+
+    let feed: Vec<Value> = latest
+        .iter()
+        .take(FEED_LIMIT)
+        .map(|e| {
+            json!({
+                "time": e.timestamp,
+                "session": e.session_id,
+                "repo": e.repo,
+                "agent": e.agent,
+                "model": e.model,
+                "tokens": total_tokens(e),
+                "cost_usd": e.cost_usd,
+            })
+        })
+        .collect();
+
+    json!({
+        "generated_at": now,
+        "active": active,
+        "hour": spend_json(&hour),
+        "today": spend_json(&today),
+        "burn_chart": bar_chart("Spend per minute", "USD, UTC, last 60 minutes", &bars),
+        "feed": feed,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -789,5 +909,137 @@ mod tests {
         assert_eq!(list["sessions"][0]["branch"], "feature");
         assert_eq!(list["sessions"][0]["repo"], "later");
         assert_eq!(one["branch"], "feature");
+    }
+
+    #[test]
+    fn the_live_window_starts_at_midnight_or_an_hour_ago_whichever_is_earlier() {
+        let midnight = 1788393600;
+        assert_eq!(midnight % 86_400, 0);
+        assert_eq!(live_window_start(midnight + 1800), midnight + 1800 - 3540);
+        assert_eq!(live_window_start(midnight + 5 * 3600), midnight);
+    }
+
+    #[test]
+    fn live_sums_the_last_hour_and_today_and_lists_only_recent_sessions() {
+        let now = 1788393600 + 5 * 3600;
+        let window = vec![
+            in_session("early", now - 4 * 3600, "m", 4.0),
+            in_session("hour", now - 3000, "m", 2.0),
+            in_session("busy", now - 600, "m", 1.0),
+            in_session("busy", now - 30, "opus", 0.5),
+        ];
+        let sessions = vec![
+            in_session("busy", now - 7200, "m", 8.0),
+            window[2].clone(),
+            window[3].clone(),
+        ];
+        let latest: Vec<UsageEvent> = window.iter().rev().cloned().collect();
+
+        let live = live_json(&window, &sessions, &latest, now);
+
+        assert_eq!(live["hour"]["messages"], 3);
+        assert!((live["hour"]["cost_usd"].as_f64().unwrap() - 3.5).abs() < 1e-9);
+        assert_eq!(live["today"]["messages"], 4);
+        assert!((live["today"]["cost_usd"].as_f64().unwrap() - 7.5).abs() < 1e-9);
+        let active = live["active"].as_array().unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0]["id"], "busy");
+        assert_eq!(active[0]["model"], "opus");
+        assert_eq!(active[0]["last"], now - 30);
+        assert_eq!(active[0]["messages"], 3);
+        assert!((active[0]["cost_usd"].as_f64().unwrap() - 9.5).abs() < 1e-9);
+        assert_eq!(live["feed"][0]["time"], now - 30);
+        let chart = live["burn_chart"].as_str().unwrap();
+        assert_eq!(chart.matches("<rect").count(), 60);
+    }
+
+    #[test]
+    fn a_session_exactly_fifteen_minutes_quiet_is_no_longer_active() {
+        let now = 1788400000;
+        let window = vec![
+            in_session("edge", now - ACTIVE_SECONDS, "m", 1.0),
+            in_session("in", now - ACTIVE_SECONDS + 1, "m", 1.0),
+        ];
+
+        assert_eq!(active_session_ids(&window, now), ["in"]);
+    }
+
+    #[test]
+    fn the_feed_is_capped_and_the_burn_buckets_by_minute() {
+        let now = 1788400000;
+        let latest: Vec<UsageEvent> = (0..30)
+            .map(|i| in_session("f", now - i, "m", 0.0))
+            .collect();
+        let hot = vec![
+            in_session("a", now - 10, "m", 1.0),
+            in_session("a", now - 20, "m", 1.0),
+        ];
+
+        let live = live_json(&hot, &[], &latest, now);
+
+        assert_eq!(live["feed"].as_array().unwrap().len(), FEED_LIMIT);
+        let chart = live["burn_chart"].as_str().unwrap();
+        assert!(chart.contains("<title>"));
+        assert!(
+            chart.contains(">2.00</text>"),
+            "both messages land in one minute: {chart}"
+        );
+    }
+
+    #[test]
+    fn the_hour_crossing_midnight_is_not_the_same_as_today() {
+        let midnight = 1788393600;
+        let now = midnight + 1800;
+        let window = vec![
+            in_session("a", midnight - 600, "m", 3.0),
+            in_session("b", midnight + 600, "m", 1.0),
+        ];
+
+        let live = live_json(&window, &[], &[], now);
+
+        assert_eq!(live["hour"]["messages"], 2);
+        assert!((live["hour"]["cost_usd"].as_f64().unwrap() - 4.0).abs() < 1e-9);
+        assert_eq!(live["today"]["messages"], 1);
+        assert!((live["today"]["cost_usd"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_burn_chart_buckets_by_minute_and_adds_up_to_the_hour() {
+        let now = 1788400000;
+        let window = vec![
+            in_session("a", now - 10, "m", 1.0),
+            in_session("a", now - 3500, "m", 0.5),
+            in_session("a", hour_start(now), "m", 0.25),
+        ];
+
+        let live = live_json(&window, &[], &[], now);
+
+        let chart = live["burn_chart"].as_str().unwrap();
+        let titles: Vec<f64> = chart
+            .split("<title>")
+            .skip(1)
+            .map(|t| {
+                t.split(": ")
+                    .nth(1)
+                    .unwrap()
+                    .split('<')
+                    .next()
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(titles.len(), 60);
+        assert!(
+            (titles[59] - 1.0).abs() < 1e-9,
+            "the last bar is this minute"
+        );
+        assert!(
+            (titles[0] - 0.25).abs() < 1e-9,
+            "the first bar is 59 minutes ago"
+        );
+        let total: f64 = titles.iter().sum();
+        assert!((total - live["hour"]["cost_usd"].as_f64().unwrap()).abs() < 1e-9);
+        assert!(chart.contains(&format!("<title>{}: 1.0000", &clock(now)[..5])));
     }
 }

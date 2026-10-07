@@ -42,17 +42,18 @@ The server binds `127.0.0.1` on a port the OS picks, so there is never a port cl
 
 It uses `tiny_http`, which is synchronous. This binary has no async runtime on purpose (see the note at the top of `src/gate/db.rs`).
 
-The page has three tabs: Overview (totals, cost per day and per model charts), Breakdowns (every grouping as a table, plus skill and agent counts) and Sessions. The tabs are buttons with `role="tab"` in a `tablist`, with arrow, Home and End keys. The chosen tab is kept in `localStorage` (never in the URL hash, which belongs to the token). The page polls every 5 seconds and fetches only the active tab's endpoint, so a hidden tab costs nothing. Every breakdown table sorts when you click a header (numbers compare as numbers).
+The page has four tabs: Overview (totals, cost per day and per model charts), Live, Breakdowns (every grouping as a table, plus skill and agent counts) and Sessions. The tabs are buttons with `role="tab"` in a `tablist`, with arrow, Home and End keys. The chosen tab is kept in `localStorage` (never in the URL hash, which belongs to the token). The page polls every 5 seconds and fetches only the active tab's endpoint, so a hidden tab costs nothing. A hidden browser page stops polling and closes its live stream, and resumes when it is shown again. Every breakdown table sorts when you click a header (numbers compare as numbers).
 
-Three endpoints return usage data, all JSON, all behind the same guard (Host allowlist, `Sec-Fetch-Site`, token), which is one code path for any path under `/api/`:
+Four endpoints return usage data, all behind the same guard (Host allowlist, `Sec-Fetch-Site`, token), which is one code path for any path under `/api/`:
 
 | Endpoint | Returns |
 |---|---|
 | `/api/data?range=` | Totals, every grouping (day, week, model, repo, branch, effort, account, agent), skill and agent counts, two charts. |
 | `/api/sessions?range=` | One row per session with a message in the range, newest first: start, end, duration, repo, branch, agent, main model and all models, messages, tokens, cost. At most 500 rows; `more` counts the rest. |
 | `/api/session?id=` | One session's messages (time, model, tokens, cost), the newest 2000 at most, and a cost-per-message chart. |
+| `/api/live` | A Server-Sent Events stream (not JSON), see below. |
 
-Each endpoint ingests anything new first. The session `id` is checked before any lookup: 1 to 128 characters of letters, digits, `-`, `_` and `.`, starting with a letter or digit. Anything else is a 400, an unknown id is a 404. A session's row stats count only the messages inside the range, while its timeline shows all of them. The charts are inline SVG drawn on the server, with every label escaped.
+The first three return JSON. Each endpoint ingests anything new first. The session `id` is checked before any lookup: 1 to 128 characters of letters, digits, `-`, `_` and `.`, starting with a letter or digit. Anything else is a 400, an unknown id is a 404. A session's row stats count only the messages inside the range, while its timeline shows all of them. The charts are inline SVG drawn on the server, with every label escaped.
 
 The page has a date range toggle: last 30, 60 or 90 days, the current month, or all time. It sends the choice as `/api/data?range=30d|60d|90d|month|all`, and the server filters usage and skill and agent counts to that window before it groups anything. Days are UTC. "Last N days" includes today. "Current month" runs from the 1st to the last day of the month. A request with no `range` gets all time, and an unknown value gets a 400. The response names the window in `range` (`key`, `start`, `end`), and the page shows those dates above the totals. The page opens on the last 30 days and remembers your choice in `localStorage`. The layout works on a phone: wide tables and charts scroll sideways in their own box.
 
@@ -68,6 +69,20 @@ Because a browser can reach the server, it is locked down:
 - **Script policy.** The policy is `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, with `nosniff`. Nothing is inline, so neither scripts nor styles allow `'unsafe-inline'`, and the chart SVG uses classes, not `style=` attributes. The policy is sent with the page, the script and the stylesheet.
 - The page puts text into the DOM with `textContent`. The one `innerHTML` use is the escaped SVG.
 
+## Live updates
+
+The Live tab shows the sessions with a message in the last 15 minutes (repo, agent, model, last message, spend over the whole session so far), spend and tokens for the last hour and for today (UTC), a per-minute spend chart for the last 60 minutes (server-rendered SVG, classes only) and the latest 20 messages.
+
+It is fed by `/api/live`, a Server-Sent Events stream: `event: live` with a JSON summary (not the whole dataset) right away and then every 2 seconds. The browser's `EventSource` cannot send a header, so the page uses `fetch` with the `X-Playbook-Token` header, reads `response.body` with a stream reader and parses the events itself. The token is never put in a URL. On a dropped stream the page reconnects with a doubling delay (1 second up to 30), and a 401 stops it. Leaving the Live tab or hiding the page closes the stream. `connect-src 'self'` already allows this, so the policy did not change.
+
+The server answers one request at a time on its main thread, so a held-open stream would block everything. The stream request goes through the same guard as every other `/api/` path (Host, `Sec-Fetch-Site`, token) and is then handed to its own thread, which takes over the socket (`tiny_http`'s `into_writer`) and writes a chunked `text/event-stream` body, flushing after each event. Limits:
+
+- At most 4 streams at once; a fifth gets a 503. A stream's place is freed when its thread ends.
+- A stream ends when a write fails (the client left, seen within a tick or two) or after 30 minutes, with a clean end of the body, and the page reconnects.
+- "Last hour" and the burn chart cover the current minute and the 59 before it, so the chart adds up to the tile.
+- Each tick runs the incremental ingest (safe across processes, see above), then reads only the last hour and today, the active sessions and the newest messages from the database. The result is cached for 1.5 seconds and shared, with the cache lock held while it is computed, so several open streams or tabs cause one ingest per tick, not one each. A failure is shared the same way, so a busy database is not retried by every stream.
+- Known limits: a client that leaves is noticed on the second write after it goes (a tick or two), so a quick reopen can see a 503 and the page retries with backoff; and a client that keeps the connection open but never reads can hold a slot until the server restarts, because `tiny_http` exposes no write timeout on a taken-over socket.
+
 ## Adding another agent
 
 `UsageSource` (`src/usage/mod.rs`) is the extension point. A source returns normalized `UsageEvent` and `ToolInvocationEvent` values newer than a watermark. Aggregation, storage, the summary and the dashboard never see an agent's own file format, so a second source only has to implement the trait. Two sources exist today: Claude Code (`src/usage/claude_code.rs`) and Codex (`src/usage/codex.rs`). Every stored event carries an `agent` column (`claude-code` or `codex`, old rows default to `claude-code`).
@@ -82,5 +97,5 @@ Tests run against hand-written transcripts in `tests/fixtures/usage/` and a scra
 
 - Cost is an estimate (see above). It is the price at the published API rate, not what a subscription plan charges you.
 - It reads one machine's local history. It does not combine machines or users.
-- It does not track live agent sessions yet.
+- Live shows what the transcripts record, so a session that is thinking but has not written a message yet does not appear until it does.
 - No LLM call is built in. The output is plain text and JSON, so the agent already running your session can read it and suggest where to cut cost.

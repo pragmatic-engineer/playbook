@@ -16,6 +16,7 @@ use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
 /// Where Claude Code's and Codex's data and playbook's usage store live for one home.
+#[derive(Clone)]
 pub struct Paths {
     pub claude_projects: PathBuf,
     pub claude_json: PathBuf,

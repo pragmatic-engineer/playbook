@@ -8,6 +8,7 @@
 //! command ever waits on it.
 
 use super::api::Range;
+use super::live;
 use super::lock::{self, Lock, Token};
 use super::page;
 use super::run::Paths;
@@ -89,6 +90,7 @@ pub enum Api {
     Data(Range),
     Sessions(Range),
     Session(String),
+    Live,
 }
 
 /// Why a loader had nothing to return.
@@ -113,6 +115,7 @@ fn parse_api(path: &str, query: &str) -> Result<Api, (u16, &'static str, String)
     match path {
         "/api/data" => range().map(Api::Data),
         "/api/sessions" => range().map(Api::Sessions),
+        "/api/live" => Ok(Api::Live),
         "/api/session" => match query_param(query, "id") {
             Some(id) if super::api::valid_session_id(id) => Ok(Api::Session(id.to_string())),
             _ => Err((400, TEXT, "invalid session id".to_string())),
@@ -141,8 +144,13 @@ pub fn respond_to(
                 Err(refusal) => return refusal,
                 Ok(request) => request,
             };
+            let content_type = if request == Api::Live {
+                super::live::EVENT_STREAM
+            } else {
+                "application/json"
+            };
             match load(request) {
-                Ok(body) => (200, "application/json", body),
+                Ok(body) => (200, content_type, body),
                 Err(Failure::NotFound) => (
                     404,
                     "application/json",
@@ -167,6 +175,10 @@ fn now_secs() -> i64 {
 
 /// Ingest anything new, then build the JSON for one guarded request.
 fn load(paths: &Paths, request: Api) -> Result<String, Failure> {
+    if request == Api::Live {
+        // Only the guard runs here; the stream computes its own summaries.
+        return Ok(String::new());
+    }
     let internal = Failure::Internal;
     let (conn, _) = super::run::ingest_new(paths).map_err(internal)?;
     let usage = super::db::load_usage_events(&conn).map_err(Failure::Internal)?;
@@ -178,9 +190,24 @@ fn load(paths: &Paths, request: Api) -> Result<String, Failure> {
         }
         Api::Sessions(range) => super::api::sessions_json(&usage, now, range),
         Api::Session(id) => super::api::session_json(&usage, &id).ok_or(Failure::NotFound)?,
+        Api::Live => return Ok(String::new()),
     };
     serde_json::to_string(&value)
         .map_err(|e| Failure::Internal(format!("failed to encode usage data: {e}")))
+}
+
+/// Ingest anything new, then build only the live summary: the last hour and
+/// today, the active sessions and the newest messages, not the whole dataset.
+fn live_summary(paths: &Paths) -> Result<String, String> {
+    use super::{api, db};
+    let (conn, _) = super::run::ingest_new(paths)?;
+    let now = now_secs();
+    let window = db::load_usage_events_since(&conn, api::live_window_start(now))?;
+    let ids = api::active_session_ids(&window, now);
+    let sessions = db::load_usage_events_of_sessions(&conn, &ids)?;
+    let latest = db::load_latest_usage_events(&conn, api::FEED_LIMIT as i64)?;
+    serde_json::to_string(&api::live_json(&window, &sessions, &latest, now))
+        .map_err(|e| format!("failed to encode the live summary: {e}"))
 }
 
 #[cfg(unix)]
@@ -360,6 +387,7 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
     if !lock::try_claim(&paths.lock, me) {
         return Ok(());
     }
+    let live_state = live::Live::new();
     for request in server.incoming_requests() {
         let host = header_value(&request, "Host");
         let fetch_site = header_value(&request, "Sec-Fetch-Site");
@@ -368,7 +396,7 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
         let url = request.url().to_string();
         let (path, query) = url.split_once('?').unwrap_or((url.as_str(), ""));
         let path = path.to_string();
-        let (status, content_type, body) = if !host_allowed(host.as_deref(), port) {
+        let (mut status, mut content_type, mut body) = if !host_allowed(host.as_deref(), port) {
             (
                 403,
                 "text/plain; charset=utf-8",
@@ -383,6 +411,30 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
         } else {
             respond_to(&path, query, token_ok, |api| load(paths, api))
         };
+        if status == 200 && content_type == live::EVENT_STREAM {
+            match live_state.try_acquire(live::MAX_STREAMS) {
+                Some(slot) => {
+                    let (state, owned) = (std::sync::Arc::clone(&live_state), paths.clone());
+                    // If the thread cannot start, the request and slot drop with the closure.
+                    let _ = std::thread::Builder::new()
+                        .name("usage-live".to_string())
+                        .spawn(move || {
+                            let _slot = slot;
+                            let next = || state.summary(|| live_summary(&owned));
+                            let writer = request.into_writer();
+                            let _ = live::stream(writer, next, live::TICK, live::MAX_LIFETIME);
+                        });
+                    continue;
+                }
+                None => {
+                    (status, content_type, body) = (
+                        503,
+                        "text/plain; charset=utf-8",
+                        "too many live streams are open".to_string(),
+                    );
+                }
+            }
+        }
         let mut response = tiny_http::Response::from_string(body).with_status_code(status);
         let mut headers = vec![
             ("Content-Type", content_type),
@@ -524,6 +576,11 @@ mod tests {
         let long = format!("id={}", "a".repeat(129));
         assert_eq!(seen("/api/session", &long), (400, None));
         assert_eq!(seen("/api/nope", ""), (404, None));
+        let live = respond_to("/api/live", "", true, |api| {
+            assert_eq!(api, Api::Live);
+            Ok(String::new())
+        });
+        assert_eq!((live.0, live.1), (200, live::EVENT_STREAM));
         let missing = respond_to("/api/session", "id=zz", true, |_| Err(Failure::NotFound));
         assert_eq!(missing.0, 404);
         assert_eq!(missing.1, "application/json");
@@ -600,6 +657,7 @@ mod tests {
             ("/api/sessions", "range=30d"),
             ("/api/session", "id=abc"),
             ("/api/session", "id=../x"),
+            ("/api/live", ""),
             ("/api/data", "range=bogus"),
         ] {
             let (status, _, body) = respond_to(path, query, false, never);
