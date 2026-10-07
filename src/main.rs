@@ -179,6 +179,19 @@ fn main() {
                     }
                 }
             }
+            AgentsCommand::Gen { agents_dir } => {
+                let Some(dir) = agents_dir.or_else(agents::check::default_dir) else {
+                    eprintln!("gen-agents: not inside a git repository and no directory given");
+                    std::process::exit(1);
+                };
+                match agents::variants::generate(&dir) {
+                    Ok(msg) => println!("{msg}"),
+                    Err(err) => {
+                        eprintln!("gen-agents: {err}");
+                        std::process::exit(1);
+                    }
+                }
+            }
         },
         Command::Usage { sub } => {
             let paths = usage::run::Paths::real();

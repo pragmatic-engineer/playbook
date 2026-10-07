@@ -5,3 +5,4 @@
 //! `shell/check-agents.sh`.
 
 pub mod check;
+pub mod variants;

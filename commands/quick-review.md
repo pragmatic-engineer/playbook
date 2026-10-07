@@ -3,7 +3,7 @@ description: Quick single-pass PR review using grounding-review discipline + Con
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
 argument-hint: "[PR number] [--self] [--auto] [--ask]"
 model: sonnet
-effort: high
+effort: medium
 ---
 
 # Quick Review

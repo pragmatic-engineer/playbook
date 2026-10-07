@@ -254,3 +254,173 @@ fn nonexistent_agents_dir_argument_errors() {
     assert!(err.contains("check-agents: agents directory not found"));
     assert!(err.contains(&missing.display().to_string()));
 }
+
+// --- Effort-tier variants: `agents gen` writes them, `agents check` pins them ---
+
+fn run_sub(sub: &str, agents_dir: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["agents", sub])
+        .arg(agents_dir)
+        .output()
+        .expect("playbook binary should spawn")
+}
+
+/// A scratch dir holding just a valid `reviewer.md`, the base of two variants.
+fn reviewer_fixture(tag: &str) -> PathBuf {
+    let dir = scratch(tag);
+    let content = agent(
+        "reviewer",
+        STRICT_DESC,
+        "Read, Grep, Glob",
+        "sonnet",
+        "high",
+        GUARDRAILS_FULL,
+    );
+    fs::write(dir.join("reviewer.md"), content).expect("fixture");
+    dir
+}
+
+#[test]
+fn check_fails_when_a_variant_is_missing_and_gen_fixes_it() {
+    let dir = reviewer_fixture("variant-missing");
+
+    let out = run_sub("check", &dir);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr_of(&out).contains("reviewer-low.md: missing variant"));
+
+    let generated = run_sub("gen", &dir);
+    assert!(generated.status.success(), "{}", stderr_of(&generated));
+    assert!(dir.join("reviewer-xhigh.md").is_file());
+    assert!(run_sub("check", &dir).status.success());
+}
+
+#[test]
+fn gen_is_idempotent() {
+    let dir = reviewer_fixture("variant-idempotent");
+    run_sub("gen", &dir);
+    let before = fs::read_to_string(dir.join("reviewer-low.md")).expect("variant");
+
+    let again = run_sub("gen", &dir);
+
+    assert!(stdout_of(&again).contains("0 variant(s) written"));
+    assert_eq!(
+        before,
+        fs::read_to_string(dir.join("reviewer-low.md")).expect("variant")
+    );
+}
+
+#[test]
+fn check_fails_on_a_hand_edited_or_stale_variant() {
+    let dir = reviewer_fixture("variant-edited");
+    run_sub("gen", &dir);
+    let path = dir.join("reviewer-low.md");
+    let text = fs::read_to_string(&path).expect("variant");
+    fs::write(&path, text.replace("effort: low", "effort: medium")).expect("edit");
+
+    let edited = run_sub("check", &dir);
+    assert_eq!(edited.status.code(), Some(1));
+    assert!(stderr_of(&edited).contains("reviewer-low.md: stale or hand-edited"));
+
+    run_sub("gen", &dir);
+    let base = dir.join("reviewer.md");
+    let body = fs::read_to_string(&base).expect("base");
+    fs::write(&base, format!("{body}\nA new base line.\n")).expect("edit base");
+    let stale = run_sub("check", &dir);
+    assert!(stderr_of(&stale).contains("reviewer-xhigh.md: stale or hand-edited"));
+}
+
+#[test]
+fn check_fails_on_an_orphaned_generated_file() {
+    let dir = reviewer_fixture("variant-orphan");
+    run_sub("gen", &dir);
+    let low = fs::read_to_string(dir.join("reviewer-low.md")).expect("variant");
+    let orphan = low.replace("reviewer-low", "reviewer-max");
+    fs::write(dir.join("reviewer-max.md"), orphan).expect("orphan");
+
+    let out = run_sub("check", &dir);
+
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr_of(&out).contains("reviewer-max.md: generated file with no entry"));
+}
+
+#[test]
+fn variants_still_obey_the_read_only_contract() {
+    let dir = reviewer_fixture("variant-contract");
+    let base = dir.join("reviewer.md");
+    let body = fs::read_to_string(&base).expect("base");
+    fs::write(
+        &base,
+        body.replace("Read, Grep, Glob", "Read, Grep, Glob, Bash"),
+    )
+    .expect("edit");
+    run_sub("gen", &dir);
+
+    let out = run_sub("check", &dir);
+
+    let err = stderr_of(&out);
+    assert!(err.contains("reviewer-low.md: description declares the agent structurally read-only"));
+}
+
+#[test]
+fn a_base_already_at_the_variant_effort_fails_check_and_gen() {
+    let dir = reviewer_fixture("variant-same-effort");
+    let base = dir.join("reviewer.md");
+    let body = fs::read_to_string(&base).expect("base");
+    fs::write(&base, body.replace("effort: high", "effort: low")).expect("edit");
+
+    let checked = run_sub("check", &dir);
+    assert_eq!(checked.status.code(), Some(1));
+    assert!(stderr_of(&checked).contains("reviewer-low.md: cannot generate"));
+
+    let generated = run_sub("gen", &dir);
+    assert_eq!(generated.status.code(), Some(1));
+    assert!(stderr_of(&generated).contains("base effort is already 'low'"));
+}
+
+#[test]
+fn a_generated_file_whose_base_is_gone_says_so() {
+    let dir = reviewer_fixture("variant-baseless");
+    run_sub("gen", &dir);
+    fs::remove_file(dir.join("reviewer.md")).expect("remove base");
+
+    let out = run_sub("check", &dir);
+
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr_of(&out).contains("reviewer-low.md: its base agent file is missing"));
+}
+
+#[test]
+fn gen_without_a_directory_argument_resolves_the_repo_agents_dir() {
+    let repo = scratch("gen-default-resolution");
+    let init = Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["init", "-q"])
+        .output()
+        .expect("git init");
+    assert!(init.status.success());
+    fs::create_dir_all(repo.join("agents")).expect("agents dir");
+    let reviewer = reviewer_fixture("gen-default-source").join("reviewer.md");
+    fs::copy(&reviewer, repo.join("agents/reviewer.md")).expect("copy");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["agents", "gen"])
+        .current_dir(&repo)
+        .output()
+        .expect("playbook binary should spawn");
+
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(repo.join("agents/reviewer-low.md").is_file());
+}
+
+#[test]
+fn gen_outside_a_git_repo_without_a_directory_errors() {
+    let dir = scratch("gen-no-repo");
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["agents", "gen"])
+        .current_dir(&dir)
+        .output()
+        .expect("playbook binary should spawn");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr_of(&out).contains("gen-agents: not inside a git repository"));
+}

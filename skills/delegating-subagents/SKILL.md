@@ -69,6 +69,15 @@ reviews.
 | `analyst` | `playbook:analyst` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `cheap-checker` | `playbook:cheap-checker` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `review-triage` | `playbook:review-triage` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `reviewer-low` | `playbook:reviewer-low` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `reviewer-xhigh` | `playbook:reviewer-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `critic-low` | `playbook:critic-low` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `critic-xhigh` | `playbook:critic-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `fact-checker-xhigh` | `playbook:fact-checker-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `analyst-low` | `playbook:analyst-low` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `analyst-xhigh` | `playbook:analyst-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `implementer-low` | `playbook:implementer-low` | Read, Grep, Glob, Edit, Write, Bash, Skill | Yes, has `Write`/`Bash` |
+| `implementer-xhigh` | `playbook:implementer-xhigh` | Read, Grep, Glob, Edit, Write, Bash, Skill | Yes, has `Write`/`Bash` |
 
 **Always pass the `playbook:` prefix as the `subagent_type` value**, not the
 bare name in the first column: these are plugin-provided agents, and a bare
@@ -87,7 +96,14 @@ this table stays in sync with `agents/*.md` and that every row's `subagent_type`
 carries the `playbook:` prefix, so the next agent addition fails CI instead of
 quietly drifting again.)
 
-**For the seven read-only agents there is no reliable delivery channel at all.** Their
+The `-low` and `-xhigh` rows are effort-tier variants, generated from the base
+agent by `playbook agents gen` and identical to it except for `name`, the
+`description` prefix, and `effort`. They need the same `playbook:` prefix, for
+example `playbook:reviewer-xhigh`. Never edit one by hand: `playbook agents
+check` fails CI when a variant is missing, stale, or edited. The set lives in
+`src/agents/variants.rs`.
+
+**For the read-only agents, variants included, there is no reliable delivery channel at all.** Their
 only route is the return value, and that is the route that fails. So:
 
 - **Do the pass inline instead.** For mechanical work this is simply better, not
@@ -126,6 +142,24 @@ The reports that mattered most were written by agents whose commits were green,
 whose tests passed, and whose diffs looked correct. What they recorded was what
 they had chosen NOT to do, and why. That is exactly the information a passing
 test suite cannot give you.
+
+## Pick the tier
+
+The `Agent` tool has no per-call effort setting, so effort is chosen by which
+agent you name. Pick it from the size and risk of the diff, using the limits
+the repo already has rather than new ones:
+
+| Diff | Spawn | Why |
+|---|---|---|
+| At most 300 changed lines (the `dedup` trigger in `/playbook:deep-review`), and no security-sensitive path | the `-low` variant | Little to reason about, so extra effort is spend with no extra findings. |
+| Anything between, or when unsure | the base agent | The default, tuned for ordinary diffs. |
+| Over 60 KB (`MAX_DIFF_BYTES` in `src/pr/triage.rs`, the size past which `review-triage` never calls a PR quick), or the lens is `security`, or the diff touches auth, secrets, crypto, or untrusted input | the `-xhigh` variant | A missed finding here is expensive and the diff is big enough to hide one. |
+
+Narrow `cheap-check` lenses go to `cheap-checker`, which is already pinned to
+low effort, so they need no variant. `fact-checker` has an `-xhigh` variant
+only: a verifier that misses a wrong claim defeats its purpose, so there is no
+`-low` for it. Every tier keeps the base agent's `tools`, so the read-only
+guarantees and the file-delivery limits in the table above apply unchanged.
 
 ## Re-dispatching (a second pass is a new agent, not a continuation)
 

@@ -139,3 +139,53 @@ fn every_table_row_names_its_playbook_prefixed_subagent_type() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn pick_the_tier_names_the_real_limits_and_the_variants() {
+    let skill = fs::read_to_string(repo_root().join("skills/delegating-subagents/SKILL.md"))
+        .expect("SKILL.md should be readable");
+    let triage =
+        fs::read_to_string(repo_root().join("src/pr/triage.rs")).expect("triage.rs readable");
+    let deep = fs::read_to_string(repo_root().join("commands/deep-review.md"))
+        .expect("deep-review.md readable");
+
+    assert!(
+        triage.contains("const MAX_DIFF_BYTES: usize = 60_000;"),
+        "the 60 KB limit the skill cites moved: update `Pick the tier` in the skill"
+    );
+    assert!(
+        deep.contains(">300 changed lines"),
+        "the 300 line trigger the skill cites moved: update `Pick the tier` in the skill"
+    );
+
+    let start = skill.find("## Pick the tier").expect("section exists");
+    let rest = &skill[start + 3..];
+    let section = &rest[..rest.find("\n## ").unwrap_or(rest.len())];
+    for needle in [
+        "60 KB",
+        "MAX_DIFF_BYTES",
+        "300 changed lines",
+        "`-low`",
+        "`-xhigh`",
+    ] {
+        assert!(section.contains(needle), "'Pick the tier' lacks '{needle}'");
+    }
+}
+
+#[test]
+fn every_configured_variant_is_in_the_roster_table() {
+    use playbook::agents::variants::{variant_name, VARIANTS};
+    let tabled: BTreeSet<String> = table_rows().into_iter().map(|(name, _)| name).collect();
+    let mut count = 0;
+    for (base, tiers) in VARIANTS {
+        for tier in tiers {
+            let name = variant_name(base, tier);
+            assert!(
+                tabled.contains(&name),
+                "variant '{name}' is not in the roster table"
+            );
+            count += 1;
+        }
+    }
+    assert!(count > 0, "VARIANTS is empty");
+}

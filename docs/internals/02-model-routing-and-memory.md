@@ -28,6 +28,29 @@ The hook skips slash commands and prompts under 20 characters. For natural-prose
 
 On a match, the hook emits a prompt context message reminding Claude the session runs on Sonnet and recommending one of two delegation paths: the `Plan` agent (via `Agent` tool with `model: "opus"`) for implementation planning with codebase grounding, or `/playbook:plan` for design work before any code. For narrow prompts (a quick choice between two named options) staying inline on Sonnet is fine. No match: the hook exits silently.
 
+### Effort policy
+
+Effort is a second dial next to the model tier. Agent files, commands, and skills all accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort override, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, `playbook agents gen` writes tier variants (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name.
+
+The rule: lower effort where the work is mechanical or already decided, and never where a missed finding is costly. A model that is wrong costs a rerun; a reviewer that stops looking costs a bug in production.
+
+| File | Effort | Reasoning |
+| --- | --- | --- |
+| `agents/git` | `low` (was medium) | Runs fixed git and `gh` steps from a command that already decided what to do. |
+| `agents/patch-applier` | `low` (was medium) | Applies a diff someone else approved, verbatim, with no judgment. |
+| `agents/collector` | `low` (was medium) | Gathers and compacts raw history; the analyst does the thinking later. |
+| `agents/cheap-checker` | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
+| `agents/review-triage` | `low` (was medium) | A three-way classifier; any bad or missing answer already falls back to `full-lens`, so a wrong call fails safe. |
+| `commands/quick-review` | `medium` (was high) | One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. |
+| `agents/reviewer`, `critic`, `fact-checker`, `test-reviewer` | `high` (kept) | A missed finding is the cost. This includes the security lens, so nothing here is lowered; the `-low` variants exist only for small diffs and are an orchestrator choice. |
+| `agents/implementer`, `analyst`, `auditor` | `high` (kept) | They write code or distill facts that later steps trust. |
+| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | `high` (kept) | Judgment and orchestration; mistakes propagate to every spawned agent. |
+| `commands/commit-and-push`, `create-pull-request`, `repo-audit` | none | They fork into `git` (`low`) and `auditor` (`high`), which set the effort. |
+| `commands/doctor`, `session-start`, `setup` | `low` (kept) | Run a script and print the result. |
+| `skills/*` | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
+
+No model changed. Every row already matches the three tiers above.
+
 ## Memory Protocol
 
 Memory is a typed graph. Both scopes share the same file format.
