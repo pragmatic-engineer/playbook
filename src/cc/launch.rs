@@ -70,11 +70,13 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     rc
 }
 
+#[cfg(unix)]
 extern "C" fn noop(_: libc::c_int) {}
 
 /// Runs `f` with a no-op SIGINT handler: Ctrl-C reaches the whole foreground
 /// group, and the launcher must outlive the session to prune and report. A
 /// handler (not SIG_IGN) resets on exec, so claude keeps its own behaviour.
+#[cfg(unix)]
 fn with_sigint_held<T>(f: impl FnOnce() -> T) -> T {
     // SAFETY: installing an empty handler is async-signal-safe.
     let previous = unsafe { libc::signal(libc::SIGINT, noop as *const () as libc::sighandler_t) };
@@ -82,6 +84,11 @@ fn with_sigint_held<T>(f: impl FnOnce() -> T) -> T {
     // SAFETY: restores the handler captured above.
     unsafe { libc::signal(libc::SIGINT, previous) };
     out
+}
+
+#[cfg(not(unix))]
+fn with_sigint_held<T>(f: impl FnOnce() -> T) -> T {
+    f()
 }
 
 fn dispatch(cwd: &mut PathBuf, args: &[String]) -> i32 {
@@ -263,18 +270,16 @@ fn record_cd(path: &Path) {
 /// A fresh 0600 file that fails rather than follow a planted path, standing
 /// in for the `mktemp` the shell used.
 fn private_err_file() -> (PathBuf, Option<Stdio>) {
-    use std::os::unix::fs::OpenOptionsExt;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let path = std::env::temp_dir().join(format!("playbook-cc-err-{}-{nanos}", std::process::id()));
-    let file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)
-        .ok();
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let file = options.open(&path).ok();
     (path, file.map(Stdio::from))
 }
 
@@ -292,17 +297,25 @@ fn spawn(cwd: &Path, args: &[String], stderr: Option<Stdio>) -> i32 {
         cmd.stderr(stderr);
     }
     match with_sigint_held(|| cmd.status()) {
-        Ok(status) => {
-            use std::os::unix::process::ExitStatusExt;
-            status
-                .code()
-                .unwrap_or_else(|| 128 + status.signal().unwrap_or(0))
-        }
+        Ok(status) => exit_code(status),
         Err(err) => {
             eprintln!("-> cc: could not run claude: {err}");
             127
         }
     }
+}
+
+#[cfg(unix)]
+fn exit_code(status: std::process::ExitStatus) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    status
+        .code()
+        .unwrap_or_else(|| 128 + status.signal().unwrap_or(0))
+}
+
+#[cfg(not(unix))]
+fn exit_code(status: std::process::ExitStatus) -> i32 {
+    status.code().unwrap_or(1)
 }
 
 fn clear_screen() {

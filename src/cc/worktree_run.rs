@@ -82,7 +82,6 @@ impl Housekeep {
     /// Runs the housekeeping in its own silent process group, so it outlives
     /// the launcher and never writes into the session's terminal.
     pub fn spawn_detached(&self) {
-        use std::os::unix::process::CommandExt;
         let Ok(exe) = std::env::current_exe() else {
             return;
         };
@@ -94,8 +93,9 @@ impl Housekeep {
             .args(["--branch", &self.branch])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .process_group(0);
+            .stderr(std::process::Stdio::null());
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
         if self.no_push {
             cmd.arg("--no-push");
         }
