@@ -265,8 +265,7 @@ fn fresh_config_gets_fully_wired() {
     // Assert: the merge baseline, the shim, and the statusline all landed.
     assert!(claude_home.join(".settings.base.json").is_file());
     let rc = fs::read_to_string(home.join(".bashrc")).expect(".bashrc should exist");
-    assert!(rc.contains(".config/playbook/shell/bash/cc.sh"));
-    assert!(home.join(".config/playbook/shell/bash/cc.sh").is_file());
+    assert!(rc.contains("playbook shell-init"));
     assert_eq!(
         read_json(&settings_path)["statusLine"]["command"],
         "playbook statusline"
@@ -1148,9 +1147,8 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
 
     // Doctor Layer 3 shape: the rc file names the new location.
     let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
-    assert!(rc.contains(".config/playbook/shell/bash/cc.sh"));
+    assert!(rc.contains("playbook shell-init"));
     assert!(!rc.contains("$HOME/.claude/shell/bash/cc.sh"));
-    assert!(home.join(".config/playbook/shell/bash/cc.sh").is_file());
 
     // Doctor Layer 5 shape: the Rust command, with the fallback script still placed.
     let settings_path = claude_home.join("settings.json");
@@ -1248,9 +1246,9 @@ fn crash_between_file_copy_and_settings_rewrite_leaves_old_wiring_intact() {
     );
 
     let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
-    assert_eq!(
-        rc, old_rc_line,
-        "the rc file must still source only the old, working location"
+    assert!(
+        rc.contains("playbook shell-init") && !rc.contains("cc.sh"),
+        "the legacy line is migrated even when the copy step failed: {rc}"
     );
 
     let _ = fs::remove_dir_all(&home);

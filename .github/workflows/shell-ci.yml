@@ -124,7 +124,7 @@ jobs:
         #
         # Environment variables are NOT the fix either. They sit ABOVE per-repo
         # config in git's precedence, so they override every fixture that sets
-        # its own identity; that broke shell/worktree.test.sh scenario M.
+        # its own identity; that once broke a worktree suite.
         # GIT_CONFIG_GLOBAL keeps the identity at global precedence, which a
         # fixture's own `git config user.email` still beats, exactly as before.
         run: |

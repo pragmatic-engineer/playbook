@@ -4,11 +4,13 @@ The `cc` launcher is the entry point for every session. It wraps `claude` with a
 
 ## The `cc`/`ccd` Launcher
 
-The launcher has two thin entry points, `shell/zsh/cc.zsh` and `shell/bash/cc.sh`, one per shell. Each sources the same module files from `shell/shared/` (bust-cache, worktree, config-drift, retention, sessions, clean-resume, dispatch), which define the internal `_claude` dispatcher and the two public functions `cc` and `ccd`. The implementation is shared, so bash and zsh behave identically. `ccd` is `cc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
+The rc file holds one line, `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`. `playbook shell-init [--shell bash|zsh]` prints two functions, `cc` and `ccd`, that call `playbook cc launch` (`src/cc/launch.rs`). The same text works in both shells, so bash and zsh behave identically. `ccd` is `cc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
 
-On every launch, `cc` and `ccd` first run `playbook trust "$PWD"`, so Claude Code's trust dialog never blocks the directory you start in. It is best-effort: it never delays or fails the launch, and an older `playbook` binary without the subcommand is skipped silently.
+A child process cannot change its parent's directory, so the functions carry one protocol: they create a temp file and pass its path in `PLAYBOOK_CC_CD_FILE`. When the launcher enters a worktree it writes the path there, and the function `cd`s to it after the session ends. The session itself keeps the terminal, so stdout needs no parsing.
 
-On every invocation, `cc` passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` to `claude`. After `claude` exits, it runs `_cc_prune` to keep only the newest `CCD_KEEP` transcripts (default 5, floor 2) per project. Older transcripts plus their sidecars and runtime state are deleted.
+On every launch, `cc` and `ccd` first run the equivalent of `playbook trust "$PWD"`, so Claude Code's trust dialog never blocks the directory you start in. It is best-effort and never fails the launch.
+
+On every invocation, `cc` passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` to `claude`. After `claude` exits, it prunes to keep only the newest `CCD_KEEP` transcripts (default 5, floor 2) per project. Older transcripts plus their sidecars and runtime state are deleted.
 
 ### Subcommands
 
@@ -29,12 +31,12 @@ The `session-init` hook (`playbook hook session-init`) mirrors this: on `source=
 
 ## The Worktree Engine
 
-`cc worktree <branch>` delegates to `_cc_worktree` in `shell/shared/worktree.sh`. It's only accessible through `cc`/`ccd`, not as a standalone command.
+`cc worktree <branch>` runs `playbook cc worktree` (`src/cc/worktree_run.rs`) and then launches the session inside the new tree.
 
 What it does, in order:
 
 1. Detects the repo's base branch via `origin/HEAD`, falling back to `main`, `master`, `trunk`, or `develop`.
-2. Auto-stashes any dirty main worktree and restores it afterward via a `zsh always {}` block.
+2. Auto-stashes any dirty main worktree and restores it afterward, even when a later step fails.
 3. Derives the folder name from the JIRA key in the branch name (`PROJECT-1234-foo-bar` → `PROJECT-1234/`). Falls back to the branch leaf when there's no JIRA key.
 4. Creates the worktree at `<repo-parent>/<base>/<repo>/<folder>`, where `<base>` is `WORKTREE_BASE_DIR` (default `.worktrees`) and `<repo>` is the repo directory name, so worktrees from sibling repos that share a parent never collide. A relative `WORKTREE_BASE_DIR` sits under the repo's parent; an absolute one is used as-is. If the worktree already exists on the right branch, it fast-forward pulls instead.
 5. Copies `.env` from the base repo (no-clobber).

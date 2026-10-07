@@ -6,7 +6,7 @@
 # classifier (agents/review-triage.md). For each fixture PR in a curated
 # fixture set, fetches the PR's real diff, sends review-triage's classifier
 # prompt plus that diff to a live `claude -p --model haiku` call (the same
-# invocation shape shell/shared/worktree.sh already uses for its AI-resolve
+# invocation shape the old worktree launcher used for its AI-resolve
 # path), parses the returned per-lens tier map, and compares it against the
 # fixture's ground-truth per-lens `found` fact.
 #
@@ -150,7 +150,7 @@ for (( i = 0; i < FIXTURE_COUNT; i++ )); do
   rm -f /tmp/eval-review-triage-gh-err.$$
 
   # Step 3: the real, live classifier call. Same invocation shape as
-  # shell/shared/worktree.sh:455's `command claude -p --model haiku "$prompt"`.
+  # the old launcher's `command claude -p --model haiku "$prompt"`.
   prompt="$SYSTEM_PROMPT
 
 Candidate lenses to classify (return a tier for every one of these, and only these): $lens_list

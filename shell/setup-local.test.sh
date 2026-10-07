@@ -124,14 +124,12 @@ scenario_a_default() {
 
 # ---------------------------------------------------------------------------
 # The launcher is installed by `playbook init --aliases`, not by this script:
-# the runtime lands under $HOME/.config/playbook/shell and the rc file sources
-# it from there. These scenarios run the real binary, so claude_home is nested
+# the rc file gets one `eval "$(playbook shell-init)"` line. These scenarios run the real binary, so claude_home is nested
 # under home (the default $HOME/.claude `init` targets).
 # ---------------------------------------------------------------------------
 
-# (b) --aliases with SHELL=/bin/bash: init's shell-runtime and shim steps run
-#     (not skipped), copy the runtime and add the cc.sh source line to the
-#     throwaway .bashrc.
+# (b) --aliases with SHELL=/bin/bash: init's shim step runs (not skipped) and
+#     adds the shell-init line to the throwaway .bashrc.
 scenario_b_aliases_bash() {
     local d home claude_home out
     d="$(mktemp -d "$WORK/aliases_bash.XXXXXX")"
@@ -143,25 +141,16 @@ scenario_b_aliases_bash() {
         || { echo "  setup failed: $out"; return 1; }
 
     case "$out" in
-        *"shell-runtime: skipped"*|*"shim: skipped"*)
+        *"shim: skipped"*)
             echo "  init skipped the launcher steps: $out"; return 1 ;;
     esac
-    case "$out" in
-        *"shell-runtime: wired"*) ;;
-        *) echo "  init did not report shell-runtime wired: $out"; return 1 ;;
-    esac
-
-    [ -f "$home/.config/playbook/shell/bash/cc.sh" ] \
-        || { echo "  cc.sh not copied under .config/playbook/shell/bash"; return 1; }
-    [ -f "$home/.config/playbook/shell/shared/dispatch.sh" ] \
-        || { echo "  shared modules not copied"; return 1; }
-    [ ! -e "$claude_home/shell" ] \
-        || { echo "  runtime copied to the legacy CLAUDE_HOME/shell"; return 1; }
+    [ ! -e "$home/.config/playbook/shell" ] \
+        || { echo "  a shell runtime was copied; the launcher is generated now"; return 1; }
 
     [ -f "$home/.bashrc" ] \
         || { echo "  .bashrc not created"; return 1; }
-    grep -qxF 'source "$HOME/.config/playbook/shell/bash/cc.sh"' "$home/.bashrc" \
-        || { echo "  cc.sh source line not in .bashrc"; return 1; }
+    grep -qxF 'command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"' "$home/.bashrc" \
+        || { echo "  shell-init line not in .bashrc"; return 1; }
 
     [ ! -f "$home/.zshrc" ] \
         || { echo "  .zshrc was written for bash shell"; return 1; }
@@ -178,12 +167,10 @@ scenario_c_aliases_zsh() {
     out="$(SHELL=/bin/zsh PATH="$REAL_BIN_PATH" run_setup_out "$home" "$claude_home" --aliases)" \
         || { echo "  setup failed: $out"; return 1; }
 
-    [ -f "$home/.config/playbook/shell/zsh/cc.zsh" ] \
-        || { echo "  cc.zsh not copied under .config/playbook/shell/zsh"; return 1; }
     [ -f "$home/.zshrc" ] \
         || { echo "  .zshrc not created"; return 1; }
-    grep -qxF 'source "$HOME/.config/playbook/shell/zsh/cc.zsh"' "$home/.zshrc" \
-        || { echo "  cc.zsh source line not in .zshrc"; return 1; }
+    grep -qxF 'command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"' "$home/.zshrc" \
+        || { echo "  shell-init line not in .zshrc"; return 1; }
 
     [ ! -f "$home/.bashrc" ] \
         || { echo "  .bashrc was written for zsh shell"; return 1; }
@@ -201,8 +188,8 @@ scenario_d_system_prompt() {
     out="$(SHELL=/bin/bash PATH="$REAL_BIN_PATH" run_setup_out "$home" "$claude_home" --system-prompt)" \
         || { echo "  setup failed: $out"; return 1; }
 
-    [ -f "$home/.config/playbook/shell/bash/cc.sh" ] \
-        || { echo "  cc.sh not copied (--system-prompt implies --aliases)"; return 1; }
+    grep -qF 'playbook shell-init' "$home/.bashrc" \
+        || { echo "  shell-init line missing (--system-prompt implies --aliases)"; return 1; }
     cmp -s "$home/.config/playbook/prompts/SYSTEM_PROMPT.md" "$REPO_ROOT/prompts/SYSTEM_PROMPT.md" \
         || { echo "  SYSTEM_PROMPT.md not placed under .config/playbook/prompts"; return 1; }
     [ ! -e "$claude_home/prompts" ] \
@@ -227,9 +214,9 @@ scenario_e_idempotent_aliases() {
 
     cmp -s "$home/.bashrc" "$d/bashrc_after1" \
         || { echo "  .bashrc changed on idempotent re-run"; return 1; }
-    count="$(grep -cF 'shell/bash/cc.sh' "$home/.bashrc" 2>/dev/null || echo 0)"
+    count="$(grep -cF 'playbook shell-init' "$home/.bashrc" 2>/dev/null || echo 0)"
     [ "$count" -eq 1 ] \
-        || { echo "  cc.sh source line count=$count (expected 1)"; return 1; }
+        || { echo "  shell-init line count=$count (expected 1)"; return 1; }
 }
 
 # ---------------------------------------------------------------------------
@@ -336,9 +323,9 @@ scenario_h_migration() {
 
         grep -qxF "$old_line" "$home/.zshrc" \
             && { echo "  old source line still present: $old_line"; return 1; }
-        [ "$(grep -cF 'shell/zsh/cc.zsh' "$home/.zshrc")" -eq 1 ] \
+        [ "$(grep -cF 'playbook shell-init' "$home/.zshrc")" -eq 1 ] \
             || { echo "  expected exactly one current source line for: $old_line"; return 1; }
-        grep -qxF 'source "$HOME/.config/playbook/shell/zsh/cc.zsh"' "$home/.zshrc" \
+        grep -qxF 'command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"' "$home/.zshrc" \
             || { echo "  current source line missing for: $old_line"; return 1; }
         [ "$(grep -cF 'launchers (cc/ccd)' "$home/.zshrc")" -eq 1 ] \
             || { echo "  launchers comment duplicated for: $old_line"; return 1; }

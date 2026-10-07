@@ -97,6 +97,11 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Idempotent,
             run: statusline_rust_command,
         },
+        Migration {
+            id: "0007-shell-init-rc-line",
+            kind: Kind::Idempotent,
+            run: shell_init_rc_line,
+        },
     ]
 }
 
@@ -116,6 +121,24 @@ fn gate_repo_local_move(ctx: &Ctx) -> Outcome {
     match crate::gate::db::migrate_legacy_repo_local(repo_root, dest_base) {
         Ok(()) => Outcome::Quiet,
         Err(err) => Outcome::Failed(StepReport::failed("gate-repo-local", err)),
+    }
+}
+
+fn shell_init_rc_line(ctx: &Ctx) -> Outcome {
+    match crate::init::shim::upgrade_legacy_rc_files(&ctx.home) {
+        Ok(files) if files.is_empty() => Outcome::Quiet,
+        Ok(files) => Outcome::Repeat(StepReport::wired(
+            "shell-init",
+            format!(
+                "{} now loads the launcher with `playbook shell-init`",
+                files
+                    .iter()
+                    .map(|f| f.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )),
+        Err(err) => Outcome::Failed(StepReport::failed("shell-init", err.to_string())),
     }
 }
 

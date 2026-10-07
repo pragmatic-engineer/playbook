@@ -71,5 +71,5 @@ If anything fails, the hook says why on stderr and falls back to `<repo>/.claude
 
 ## See also
 
-- [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `cc` launcher that calls `_cc_worktree`.
+- [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `cc` launcher that sets up the worktree.
 - [Docs index](../index.md)

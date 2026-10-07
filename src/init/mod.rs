@@ -35,6 +35,7 @@ pub mod merge;
 pub mod migrate;
 pub mod run;
 pub mod self_root;
+pub mod shell_init;
 pub mod shim;
 pub mod statusline;
 pub mod system_prompt;

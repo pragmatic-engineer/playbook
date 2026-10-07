@@ -51,9 +51,6 @@ PLAYBOOK="$BIN_SRC"
 seed_shipped_extras() {
   local src="$1"
   printf '#!/bin/sh\necho ok\n' > "$src/statusline.sh"
-  mkdir -p "$src/shell/bash" "$src/shell/zsh" "$src/shell/shared"
-  printf '#!/bin/sh\n' > "$src/shell/bash/cc.sh"
-  printf '#!/bin/sh\n' > "$src/shell/zsh/cc.zsh"
 }
 
 # A stub `playbook` binary: install.sh execs it directly by absolute path

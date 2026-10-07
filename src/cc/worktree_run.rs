@@ -41,27 +41,43 @@ const EXIT_NOT_A_GIT_REPO: i32 = 10;
 /// read from `std::env::current_dir()` here so tests never have to touch
 /// process-global state to point this at a scratch repo.
 pub fn run(start_dir: &Path, branch_raw: &str, env_base_arg: Option<&str>) -> i32 {
+    match setup(start_dir, branch_raw, env_base_arg) {
+        Ok(path) => {
+            println!("{}", path.display());
+            0
+        }
+        Err(code) => code,
+    }
+}
+
+/// The same flow as [`run`], returning the worktree path instead of printing
+/// it, so the launcher can enter it. Messages still go to stderr.
+pub fn setup(
+    start_dir: &Path,
+    branch_raw: &str,
+    env_base_arg: Option<&str>,
+) -> Result<PathBuf, i32> {
     eprintln!("worktree: setting up '{branch_raw}'...");
 
     if !git_ok(start_dir, &["rev-parse", "--is-inside-work-tree"]) {
         eprintln!("worktree: not a git repository");
-        return EXIT_NOT_A_GIT_REPO;
+        return Err(EXIT_NOT_A_GIT_REPO);
     }
     let porcelain = git_stdout(start_dir, &["worktree", "list", "--porcelain"]).unwrap_or_default();
     let Some(main_wt) = worktree::main_worktree(&porcelain) else {
         eprintln!("worktree: couldn't cd to main worktree:");
-        return EXIT_NOT_A_GIT_REPO;
+        return Err(EXIT_NOT_A_GIT_REPO);
     };
     let repo_root = PathBuf::from(main_wt);
 
     let branch = worktree::sanitize_branch(branch_raw);
     if branch.is_empty() {
         eprintln!("worktree: usage: worktree <branch-name> [env-base-folder]");
-        return EXIT_USAGE_OR_INVALID_BRANCH;
+        return Err(EXIT_USAGE_OR_INVALID_BRANCH);
     }
     if !worktree::valid_branch_name(&repo_root, &branch) {
         eprintln!("worktree: invalid branch name: '{branch}'");
-        return EXIT_USAGE_OR_INVALID_BRANCH;
+        return Err(EXIT_USAGE_OR_INVALID_BRANCH);
     }
 
     let repo_parent = repo_root.parent().unwrap_or(&repo_root);
@@ -99,10 +115,9 @@ pub fn run(start_dir: &Path, branch_raw: &str, env_base_arg: Option<&str>) -> i3
                 );
             }
             eprintln!("Ready: {}", path.display());
-            println!("{}", path.display());
-            0
+            Ok(path)
         }
-        Err(code) => code,
+        Err(code) => Err(code),
     }
 }
 

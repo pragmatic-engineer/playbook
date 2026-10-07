@@ -291,65 +291,6 @@ mod config_drift_tests {
         });
         assert!(!quiet, "a fresh stamp is the current config by definition");
     }
-
-    /// Differential against the shell functions. The marker path and its
-    /// contents must match, or the two would track different files for the same
-    /// project and each would see the other's launch as drift.
-    #[test]
-    fn the_marker_matches_the_shell_implementation() {
-        if Command::new("bash").arg("--version").output().is_err() {
-            eprintln!("SKIP: bash not available");
-            return;
-        }
-        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let script = repo_root.join("shell/shared/config-drift.sh");
-
-        let sh = sandbox_with_hasher("diff-shell");
-        let rs = sandbox_with_hasher("diff-rust");
-
-        // Bash reports the cwd it actually used, and the Rust side is handed
-        // that exact string. Two traps otherwise: bash rebuilds `$PWD` from
-        // getcwd() at startup, so exporting a PWD it is not standing in is
-        // ignored; and getcwd() resolves symlinks while `temp_dir()` returns the
-        // logical path, so on macOS one side sees /var and the other
-        // /private/var and they slug differently.
-        let project = Sandbox::new("diff-project").home;
-
-        let out = Command::new("bash")
-            .arg("-c")
-            .arg(format!(
-                ". \"{}\" 2>/dev/null; printf '%s' \"$PWD\"; _cc_config_stamp",
-                script.display()
-            ))
-            .env("HOME", &sh.home)
-            .current_dir(&project)
-            .output()
-            .expect("bash should run");
-        assert!(out.status.success(), "the shell stamp should succeed");
-        let cwd = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        assert!(!cwd.is_empty(), "bash should report its cwd");
-
-        with_home(&rs.home, || config_drift::stamp(&cwd));
-
-        let shell_marker = sh
-            .home
-            .join(".config")
-            .join("playbook")
-            .join("cc-state")
-            .join(project_slug(&cwd));
-        let rust_marker = with_home(&rs.home, || config_drift::marker_path(&cwd));
-
-        assert_eq!(
-            shell_marker.strip_prefix(&sh.home).expect("prefix"),
-            rust_marker.strip_prefix(&rs.home).expect("prefix"),
-            "the marker path must be identical relative to HOME"
-        );
-        assert_eq!(
-            fs::read_to_string(&shell_marker).expect("shell marker"),
-            fs::read_to_string(&rust_marker).expect("rust marker"),
-            "both must write the same hash, with the same trailing newline"
-        );
-    }
 }
 
 mod clean_resume_tests {

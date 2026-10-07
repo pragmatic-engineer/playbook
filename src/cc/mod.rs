@@ -10,6 +10,7 @@
 pub mod bust_cache;
 pub mod clean_resume;
 pub mod config_drift;
+pub mod launch;
 pub mod retention;
 pub mod sessions;
 pub mod worktree;

@@ -486,6 +486,37 @@ scenario_blank_lines_survive() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario G: the shell-init line (current install) is stripped from .bashrc
+# and .zshrc, with its comment, leaving the user's lines intact.
+# ---------------------------------------------------------------------------
+scenario_shell_init_line() {
+    local d ch h rc
+    d="$(mktemp -d "$WORK/shell_init.XXXXXX")"
+    ch="$d/claude"
+    h="$d/home"
+    mkdir -p "$ch" "$h"
+
+    assert_hermetic "$d" "$ch" "$h"
+
+    create_shipped "$ch"
+    for rc in .zshrc .bashrc; do
+        printf '# BEFORE_SENTINEL\n\n# playbook launchers (cc/ccd)\ncommand -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"\n# AFTER_SENTINEL\n' \
+            > "$h/$rc"
+    done
+
+    CLAUDE_HOME="$ch" HOME="$h" bash "$UNINSTALL" --yes >/dev/null 2>&1 || {
+        echo "  uninstall.sh exited non-zero"; return 1
+    }
+
+    for rc in .zshrc .bashrc; do
+        grep -qF 'shell-init' "$h/$rc" && { echo "  shell-init line still in $rc"; return 1; }
+        grep -qF 'launchers (cc/ccd)' "$h/$rc" && { echo "  launchers comment still in $rc"; return 1; }
+        grep -qxF '# BEFORE_SENTINEL' "$h/$rc" || { echo "  BEFORE_SENTINEL missing in $rc"; return 1; }
+        grep -qxF '# AFTER_SENTINEL'  "$h/$rc" || { echo "  AFTER_SENTINEL missing in $rc"; return 1; }
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Run all scenarios
 # ---------------------------------------------------------------------------
 run_scenario "A: basic uninstall removes shipped entries, preserves runtime" scenario_basic
@@ -494,6 +525,7 @@ run_scenario "C: --purge also removes settings.json, .settings.base.json, backup
 run_scenario "D1: old comment variant (# claude-config launchers) removed" scenario_comment_old
 run_scenario "D2: new comment variant (# playbook launchers) removed" scenario_comment_new
 run_scenario "D3: no-comment case (bare source line) removed" scenario_comment_none
+run_scenario "H: shell-init line removed from both rc files" scenario_shell_init_line
 run_scenario "E: new-path variant (shell/zsh/cc.zsh) removed" scenario_new_path
 run_scenario "F: .bashrc stripped (old form, new form, and does not eat a neighbouring cc.zsh block)" scenario_bashrc_stripped
 run_scenario "G: blank lines either side of the launcher block survive uninstall" scenario_blank_lines_survive

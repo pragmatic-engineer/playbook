@@ -208,10 +208,10 @@ fi
 #
 # Uses a same-directory tempfile to avoid a cross-filesystem EXDEV rename
 # error that would silently leave the file unchanged.
-# path_pat matches both the pre-layout-move path (e.g. shell/cc.zsh) and the
-# current path (e.g. shell/zsh/cc.zsh) so an install made before the
-# shell/bash/zsh/shared reorganisation doesn't get left with a dead source
-# line.  Only removes a comment when it both matches launchers (cc/ccd) AND
+# path_pat is an ERE for the launcher line. It matches the legacy source lines
+# (shell/cc.zsh and shell/zsh/cc.zsh) and the current shell-init line, so an
+# install of any generation doesn't get left with a dead line.  Only removes
+# a comment when it both matches launchers (cc/ccd) AND
 # is immediately followed by the source line.  Handles multiple occurrences
 # and the no-comment case.  A second awk pass squeezes any resulting doubled
 # blank line.
@@ -227,7 +227,7 @@ strip_rc_launcher() {
         stamp="$(date +%Y%m%d-%H%M%S)"
         cp "$rc" "${rc}.bak-${stamp}"
         rc_tmp="$(mktemp "${rc}.tmp.XXXXXX")"
-        awk -v pat="source.*${path_pat}" '
+        awk -v pat="${path_pat}" '
           $0 ~ pat {
             if (has && prev ~ /launchers \(cc\/ccd\)/) has = 0
             if (has) print prev
@@ -246,8 +246,8 @@ strip_rc_launcher() {
     fi
 }
 
-strip_rc_launcher "$HOME/.zshrc"  'shell/(zsh/)?cc\.zsh'   'cc.zsh'
-strip_rc_launcher "$HOME/.bashrc" 'shell/(bash/)?cc\.sh'   'cc.sh'
+strip_rc_launcher "$HOME/.zshrc"  'source.*shell/(zsh/)?cc\.zsh|playbook shell-init'  'cc.zsh'
+strip_rc_launcher "$HOME/.bashrc" 'source.*shell/(bash/)?cc\.sh|playbook shell-init'  'cc.sh'
 
 # --- Remove the release binary and its PATH line ---
 # install.sh places the binary outside CLAUDE_HOME, so the SHIPPED sweep above
