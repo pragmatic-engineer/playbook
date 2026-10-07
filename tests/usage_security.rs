@@ -178,3 +178,25 @@ fn stop_ignores_a_lock_that_names_pid_one_or_zero() {
         assert!(said.contains("nothing is running"), "{said}");
     }
 }
+
+#[test]
+fn the_session_routes_refuse_another_sites_page_like_the_data_route() {
+    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new("fetch-site-sessions");
+    home.seed();
+    let port = start(&home);
+
+    for path in ["/api/sessions?range=all", "/api/session?id=s1"] {
+        for (site, expected) in [
+            (None, 200),
+            (Some("same-origin"), 200),
+            (Some("none"), 200),
+            (Some("cross-site"), 403),
+            (Some("same-site"), 403),
+        ] {
+            let (status, policy) = get(port, path, site, &token(&home));
+            assert_eq!(status, expected, "{path} {site:?}");
+            assert!(policy.is_none(), "JSON carries no page policy");
+        }
+    }
+}

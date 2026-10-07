@@ -353,3 +353,96 @@ fn a_hostile_branch_name_reaches_the_data_and_the_svg_only_as_escaped_text() {
         "dynamic text goes through textContent"
     );
 }
+
+const GUARDED: [&str; 3] = [
+    "/api/data?range=30d",
+    "/api/sessions?range=all",
+    "/api/session?id=s1",
+];
+
+#[test]
+fn every_data_route_answers_401_without_a_token_and_json_with_one() {
+    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new("guarded");
+    home.seed();
+    let (port, token) = start(&home);
+
+    for path in GUARDED {
+        assert_eq!(
+            get(port, path, None),
+            (401, "unauthorized".to_string()),
+            "{path}"
+        );
+        assert_eq!(get(port, path, Some(&"0".repeat(64))).0, 401, "{path}");
+        let (status, body) = get(port, path, Some(&token));
+        assert_eq!(status, 200, "{path}");
+        serde_json::from_str::<serde_json::Value>(&body).expect("JSON only");
+    }
+}
+
+#[test]
+fn the_sessions_route_lists_sessions_and_the_session_route_returns_the_timeline() {
+    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new("sessions");
+    home.seed();
+    let (port, token) = start(&home);
+
+    let (_, body) = get(port, "/api/sessions?range=all", Some(&token));
+    let list: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(list["total"], 1);
+    assert_eq!(list["sessions"][0]["id"], "s1");
+    assert_eq!(list["sessions"][0]["messages"], 3);
+
+    let (status, body) = get(port, "/api/session?id=s1", Some(&token));
+    let one: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(one["messages"].as_array().unwrap().len(), 3);
+    assert!(one["chart"].as_str().unwrap().starts_with("<svg"));
+
+    assert_eq!(get(port, "/api/session?id=nope", Some(&token)).0, 404);
+    for bad in [
+        "",
+        "?id=",
+        "?id=a%2Fb",
+        "?id=..",
+        "?id=a%20b",
+        &format!("?id={}", "a".repeat(129)),
+    ] {
+        let path = format!("/api/session{bad}");
+        assert_eq!(get(port, &path, Some(&token)).0, 400, "{path}");
+    }
+    assert_eq!(get(port, "/api/sessions?range=7d", Some(&token)).0, 400);
+}
+
+#[test]
+fn a_foreign_host_or_a_cross_site_label_is_refused_on_every_data_route() {
+    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new("guard-all");
+    home.seed();
+    let (port, token) = start(&home);
+
+    for path in GUARDED {
+        for headers in [
+            "Host: evil.example\r\n".to_string(),
+            format!("Host: 127.0.0.1:{port}\r\nSec-Fetch-Site: cross-site\r\n"),
+            format!("Host: 127.0.0.1:{port}\r\nSec-Fetch-Site: same-site\r\n"),
+        ] {
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream
+                .write_all(
+                    format!(
+                        "GET {path} HTTP/1.1\r\n{headers}X-Playbook-Token: {token}\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            let mut reply = String::new();
+            stream.read_to_string(&mut reply).unwrap();
+            assert!(
+                reply.starts_with("HTTP/1.1 403"),
+                "{path} {headers}: {reply}"
+            );
+            assert!(!reply.contains("messages"), "no data may leak: {reply}");
+        }
+    }
+}

@@ -83,51 +83,104 @@ fn query_param<'a>(query: &'a str, name: &str) -> Option<&'a str> {
         .map(|(_, value)| value)
 }
 
+/// A guarded data request, parsed and validated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Api {
+    Data(Range),
+    Sessions(Range),
+    Session(String),
+}
+
+/// Why a loader had nothing to return.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Failure {
+    NotFound,
+    Internal(String),
+}
+
+const TEXT: &str = "text/plain; charset=utf-8";
+
+/// Every path that returns usage data. They all share one guard: the Host
+/// allowlist, the `Sec-Fetch-Site` check and the session token.
+pub fn is_api(path: &str) -> bool {
+    path.starts_with("/api/")
+}
+
+fn parse_api(path: &str, query: &str) -> Result<Api, (u16, &'static str, String)> {
+    let range = || {
+        Range::parse(query_param(query, "range")).ok_or((400, TEXT, "unknown range".to_string()))
+    };
+    match path {
+        "/api/data" => range().map(Api::Data),
+        "/api/sessions" => range().map(Api::Sessions),
+        "/api/session" => match query_param(query, "id") {
+            Some(id) if super::api::valid_session_id(id) => Ok(Api::Session(id.to_string())),
+            _ => Err((400, TEXT, "invalid session id".to_string())),
+        },
+        _ => Err((404, TEXT, "not found".to_string())),
+    }
+}
+
 /// What the server answers for a path: (status, content type, body). The page
-/// assets carry no data and need no token. `load_data` runs only for
-/// `/api/data`, only when `token_ok`, and only with a known `range`.
+/// assets carry no data and need no token. `load` runs only for a known
+/// `/api/` path, only when `token_ok`, and only with a validated request.
 pub fn respond_to(
     path: &str,
     query: &str,
     token_ok: bool,
-    load_data: impl FnOnce(Range) -> Result<String, String>,
+    load: impl FnOnce(Api) -> Result<String, Failure>,
 ) -> (u16, &'static str, String) {
     match path {
         "/" => (200, "text/html; charset=utf-8", page::HTML.to_string()),
         "/app.js" => (200, "text/javascript; charset=utf-8", page::JS.to_string()),
         "/app.css" => (200, "text/css; charset=utf-8", page::CSS.to_string()),
-        "/api/data" if !token_ok => (401, "text/plain; charset=utf-8", "unauthorized".to_string()),
-        "/api/data" => {
-            let Some(range) = Range::parse(query_param(query, "range")) else {
-                return (
-                    400,
-                    "text/plain; charset=utf-8",
-                    "unknown range".to_string(),
-                );
+        _ if is_api(path) => {
+            let request = match parse_api(path, query) {
+                Err((404, ..)) => return (404, TEXT, "not found".to_string()),
+                _ if !token_ok => return (401, TEXT, "unauthorized".to_string()),
+                Err(refusal) => return refusal,
+                Ok(request) => request,
             };
-            match load_data(range) {
+            match load(request) {
                 Ok(body) => (200, "application/json", body),
-                Err(e) => (
+                Err(Failure::NotFound) => (
+                    404,
+                    "application/json",
+                    serde_json::json!({ "error": "unknown session" }).to_string(),
+                ),
+                Err(Failure::Internal(e)) => (
                     500,
                     "application/json",
                     serde_json::json!({ "error": e }).to_string(),
                 ),
             }
         }
-        _ => (404, "text/plain; charset=utf-8", "not found".to_string()),
+        _ => (404, TEXT, "not found".to_string()),
     }
 }
 
-/// Ingest anything new, then build the dashboard JSON for `range`.
-fn load_data(paths: &Paths, range: Range) -> Result<String, String> {
-    let (conn, _) = super::run::ingest_new(paths)?;
-    let usage = super::db::load_usage_events(&conn)?;
-    let tools = super::db::load_tool_events(&conn)?;
-    let now = std::time::SystemTime::now()
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
-    serde_json::to_string(&super::api::data_json(&usage, &tools, now, range))
-        .map_err(|e| format!("failed to encode usage data: {e}"))
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
+}
+
+/// Ingest anything new, then build the JSON for one guarded request.
+fn load(paths: &Paths, request: Api) -> Result<String, Failure> {
+    let internal = Failure::Internal;
+    let (conn, _) = super::run::ingest_new(paths).map_err(internal)?;
+    let usage = super::db::load_usage_events(&conn).map_err(Failure::Internal)?;
+    let now = now_secs();
+    let value = match request {
+        Api::Data(range) => {
+            let tools = super::db::load_tool_events(&conn).map_err(Failure::Internal)?;
+            super::api::data_json(&usage, &tools, now, range)
+        }
+        Api::Sessions(range) => super::api::sessions_json(&usage, now, range),
+        Api::Session(id) => super::api::session_json(&usage, &id).ok_or(Failure::NotFound)?,
+    };
+    serde_json::to_string(&value)
+        .map_err(|e| Failure::Internal(format!("failed to encode usage data: {e}")))
 }
 
 #[cfg(unix)]
@@ -321,14 +374,14 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
                 "text/plain; charset=utf-8",
                 "forbidden host".to_string(),
             )
-        } else if path == "/api/data" && !fetch_site_allowed(fetch_site.as_deref()) {
+        } else if is_api(&path) && !fetch_site_allowed(fetch_site.as_deref()) {
             (
                 403,
                 "text/plain; charset=utf-8",
                 "forbidden origin".to_string(),
             )
         } else {
-            respond_to(&path, query, token_ok, |range| load_data(paths, range))
+            respond_to(&path, query, token_ok, |api| load(paths, api))
         };
         let mut response = tiny_http::Response::from_string(body).with_status_code(status);
         let mut headers = vec![
@@ -336,7 +389,7 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
             ("Cache-Control", "no-store"),
             ("X-Content-Type-Options", "nosniff"),
         ];
-        if status == 200 && path != "/api/data" {
+        if status == 200 && !is_api(&path) {
             headers.push(("Content-Security-Policy", page::CONTENT_SECURITY_POLICY));
         }
         for (name, value) in headers {
@@ -386,7 +439,9 @@ mod tests {
             (200, "application/json", "{\"ok\":true}")
         );
 
-        let (status, _, body) = respond_to("/api/data", "", true, |_| Err("db locked".to_string()));
+        let (status, _, body) = respond_to("/api/data", "", true, |_| {
+            Err(Failure::Internal("db locked".to_string()))
+        });
         assert_eq!(status, 500);
         assert!(body.contains("db locked"));
 
@@ -422,8 +477,10 @@ mod tests {
     fn the_data_route_passes_the_range_and_refuses_an_unknown_one() {
         let seen = |query: &str| {
             let mut got = None;
-            let status = respond_to("/api/data", query, true, |range| {
-                got = Some(range);
+            let status = respond_to("/api/data", query, true, |api| {
+                if let Api::Data(range) = api {
+                    got = Some(range);
+                }
                 Ok(String::new())
             })
             .0;
@@ -435,6 +492,41 @@ mod tests {
         assert_eq!(seen("x=1&range=month"), (200, Some(Range::CurrentMonth)));
         assert_eq!(seen("range=7d"), (400, None));
         assert_eq!(seen("range=<script>"), (400, None));
+    }
+
+    #[test]
+    fn the_session_routes_pass_validated_requests_and_refuse_the_rest() {
+        let seen = |path: &str, query: &str| {
+            let mut got = None;
+            let status = respond_to(path, query, true, |api| {
+                got = Some(api);
+                Ok(String::new())
+            })
+            .0;
+            (status, got)
+        };
+
+        assert_eq!(
+            seen("/api/sessions", "range=90d"),
+            (200, Some(Api::Sessions(Range::LastDays(90))))
+        );
+        assert_eq!(seen("/api/sessions", "range=7d"), (400, None));
+        assert_eq!(
+            seen("/api/session", "id=0199aaaa-0000-7000.x_Y"),
+            (
+                200,
+                Some(Api::Session("0199aaaa-0000-7000.x_Y".to_string()))
+            )
+        );
+        for bad in ["", "id=", "id=a%2Fb", "id=a/b", "id=a b", "id=<s>", "x=1"] {
+            assert_eq!(seen("/api/session", bad), (400, None), "{bad}");
+        }
+        let long = format!("id={}", "a".repeat(129));
+        assert_eq!(seen("/api/session", &long), (400, None));
+        assert_eq!(seen("/api/nope", ""), (404, None));
+        let missing = respond_to("/api/session", "id=zz", true, |_| Err(Failure::NotFound));
+        assert_eq!(missing.0, 404);
+        assert_eq!(missing.1, "application/json");
     }
 
     #[test]
@@ -501,10 +593,18 @@ mod tests {
     #[test]
     fn the_data_route_needs_the_token_and_the_assets_do_not() {
         let never =
-            |_: Range| -> Result<String, String> { panic!("data must not load without the token") };
+            |_: Api| -> Result<String, Failure> { panic!("data must not load without the token") };
 
-        let (status, _, body) = respond_to("/api/data", "range=30d", false, never);
-        assert_eq!((status, body.as_str()), (401, "unauthorized"));
+        for (path, query) in [
+            ("/api/data", "range=30d"),
+            ("/api/sessions", "range=30d"),
+            ("/api/session", "id=abc"),
+            ("/api/session", "id=../x"),
+            ("/api/data", "range=bogus"),
+        ] {
+            let (status, _, body) = respond_to(path, query, false, never);
+            assert_eq!((status, body.as_str()), (401, "unauthorized"), "{path}");
+        }
 
         for (path, kind) in [
             ("/", "text/html"),
