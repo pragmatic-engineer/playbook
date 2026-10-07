@@ -4,7 +4,9 @@
 //! `playbook statusline` against `statusline.sh`: golden output for a few
 //! shapes, the shell suite's behavioural cases, and a byte-for-byte parity
 //! run of every fixture through both implementations. Parity skips cleanly
-//! where the shell path needs a tool the environment lacks.
+//! where the shell path needs a tool the environment lacks. The shell side
+//! parses JSON through the same `playbook json` helpers the renderer calls,
+//! so parity checks rendering, not the parsers.
 
 use playbook::statusline::{render, Env};
 use std::path::{Path, PathBuf};
@@ -27,6 +29,7 @@ impl Scratch {
     fn new() -> Self {
         let n = N.fetch_add(1, Ordering::Relaxed);
         let p = std::env::temp_dir().join(format!("statusline-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Scratch(p)
     }
@@ -44,13 +47,11 @@ fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_playbook")
 }
 
+/// Whether `tool` exists on the PATH the runs get, so a skip matches what would run.
 fn have(tool: &str) -> bool {
-    Command::new(tool)
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok()
+    ["/usr/bin", "/bin"]
+        .iter()
+        .any(|d| Path::new(d).join(tool).is_file())
 }
 
 /// A `gh` that always fails, first on PATH, so no run touches the network.
@@ -75,6 +76,8 @@ fn run(mut cmd: Command, home: &Path, root: &Path, payload: &str, env: &[(&str, 
         .env("HOME", home)
         .env("PWD", home)
         .env("PATH", path_for(root))
+        .env("STATUSLINE_PR_CACHE_TTL", "9999999")
+        .env("STATUSLINE_CI_CACHE_TTL", "9999999")
         .envs(env.iter().copied())
         .current_dir(home)
         .stdin(Stdio::piped())
@@ -426,7 +429,9 @@ fn the_jira_ticket_links_only_when_a_base_url_is_configured() {
     }
     let plain = jira_out(None);
     assert!(
-        plain.contains("PROJ-123") && !plain.contains("atlassian") && !plain.contains("/browse/")
+        plain.contains("\x1b[38;2;148;226;213mPROJ-123\x1b[0m")
+            && !plain.contains("atlassian")
+            && !plain.contains("/browse/")
     );
     let linked = jira_out(Some("https://example.atlassian.net"));
     assert!(linked.contains("https://example.atlassian.net/browse/PROJ-123"));
@@ -487,7 +492,7 @@ struct Case {
     rest: &'static str,
     env: Vec<(&'static str, &'static str)>,
     stdin: Option<&'static str>,
-    dirty: bool,
+    mode: &'static str,
 }
 
 fn case(name: &'static str) -> Case {
@@ -499,7 +504,7 @@ fn case(name: &'static str) -> Case {
         rest: "",
         env: vec![],
         stdin: None,
-        dirty: false,
+        mode: "",
     }
 }
 
@@ -577,7 +582,7 @@ fn cases() -> Vec<Case> {
         Case {
             branch: "main",
             remote: gh,
-            dirty: true,
+            mode: "dirty",
             ..case("dirty repo")
         },
         Case {
@@ -699,6 +704,26 @@ fn cases() -> Vec<Case> {
         },
     ];
     v.push(Case {
+        branch: "main",
+        remote: gh,
+        mode: "unstaged",
+        ..case("unstaged change")
+    });
+    v.push(Case {
+        branch: "main",
+        remote: gh,
+        mode: "detached",
+        ..case("detached head")
+    });
+    v.push(Case {
+        rest: r#""rate_limits":{"five_hour":{"used_percentage":10,"resets_at":"2026-09-28T12:00:00Z"}}"#,
+        ..case("non-integer reset")
+    });
+    v.push(Case {
+        stdin: Some(r#"{"cwd":"/tmp/a\\cb"}"#),
+        ..case("backslash c in cwd")
+    });
+    v.push(Case {
         stdin: Some(r#"{"cwd":"/tmp/x\\ny\\tz"}"#),
         ..case("backslashes in cwd")
     });
@@ -711,14 +736,40 @@ fn build(c: &Case, home: &Path) -> (PathBuf, String) {
     } else {
         repo(home, c.branch, c.remote)
     };
-    if c.dirty {
-        std::fs::write(cwd.join("f"), "x").unwrap();
+    let git = |args: &[&str]| {
         Command::new("git")
             .arg("-C")
             .arg(&cwd)
-            .args(["add", "f"])
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status()
             .unwrap();
+    };
+    match c.mode {
+        "dirty" => {
+            std::fs::write(cwd.join("f"), "x").unwrap();
+            git(&["add", "f"]);
+        }
+        "unstaged" => {
+            std::fs::write(cwd.join("f"), "x").unwrap();
+            git(&["add", "f"]);
+            git(&["commit", "-q", "-m", "x"]);
+            std::fs::write(cwd.join("f"), "y").unwrap();
+        }
+        "detached" => {
+            git(&["commit", "-q", "--allow-empty", "-m", "x"]);
+            git(&["checkout", "-q", "--detach"]);
+        }
+        _ => {}
     }
     if let Some((kind, body)) = &c.cache {
         cache_file(home, kind, &cwd, c.branch, body);
@@ -733,25 +784,48 @@ fn build(c: &Case, home: &Path) -> (PathBuf, String) {
 
 #[test]
 fn every_fixture_renders_the_same_bytes_as_statusline_sh() {
-    if !["bash", "git", "awk", "sed"]
-        .iter()
-        .all(|t| have(t) || *t == "awk" || *t == "sed")
-    {
-        eprintln!("skipping parity: bash or git missing");
+    if !["bash", "git", "awk", "sed"].iter().all(|t| have(t)) {
+        eprintln!("skipping parity: a tool the script needs is missing");
         return;
     }
+    let days = regex::Regex::new(r"\d+d ago").unwrap();
     let mut failures = vec![];
     for c in cases() {
         let a = Scratch::new();
         let b = Scratch::new();
         let (_, in_a) = build(&c, &a.0);
         let (_, in_b) = build(&c, &b.0);
-        // Homes differ per run, so compare with each home normalised away.
-        let norm = |out: Vec<u8>, home: &Path| text(out).replace(home.to_str().unwrap(), "<HOME>");
+        // Homes differ per run and ages tick over midnight, so normalise both.
+        let norm = |out: Vec<u8>, home: &Path| {
+            let t = text(out).replace(home.to_str().unwrap(), "<HOME>");
+            days.replace_all(&t, "Nd ago").into_owned()
+        };
         let want = norm(shell(&a.0, &a.0, &in_a, &c.env), &a.0);
         let got = norm(rust(&b.0, &b.0, &in_b, &c.env), &b.0);
+        let git_on = c.env.iter().all(|e| *e != ("STATUSLINE_SHOW_GIT", "false"));
+        // Equal blanks prove nothing: each case must reach the branch it names.
+        let reached = (c.branch.is_empty() || !git_on || want.contains('ϓ'))
+            && (c.mode != "dirty" || want.contains("[+]"))
+            && (c.mode != "unstaged" || want.contains("[+]"))
+            && (c.mode != "detached" || want.contains("detached"))
+            && (!matches!(&c.cache, Some(("pr", _)))
+                || c.env.iter().any(|e| e.0.starts_with("STATUSLINE_SHOW_P"))
+                || want.contains("PR #42"));
+        if !reached {
+            failures.push(format!(
+                "{}: fixture never reached its branch: {want:?}",
+                c.name
+            ));
+        }
         if want != got {
             failures.push(format!("{}\n  shell: {want:?}\n  rust:  {got:?}", c.name));
+        }
+        let (ts, tr) = (telemetry_state(&a.0), telemetry_state(&b.0));
+        if ts != tr {
+            failures.push(format!(
+                "{} telemetry\n  shell: {ts:?}\n  rust:  {tr:?}",
+                c.name
+            ));
         }
     }
     assert!(
@@ -759,4 +833,54 @@ fn every_fixture_renders_the_same_bytes_as_statusline_sh() {
         "parity mismatches:\n{}",
         failures.join("\n")
     );
+}
+
+/// Telemetry files under a home with the sample timestamps stripped.
+fn telemetry_state(home: &Path) -> Vec<String> {
+    let root = home.join(".config/playbook/runtime");
+    let ts = regex::Regex::new(r#""ts":\d+"#).unwrap();
+    let mut out = vec![];
+    let Ok(sessions) = std::fs::read_dir(&root) else {
+        return out;
+    };
+    for sess in sessions.flatten() {
+        let mut files: Vec<_> = std::fs::read_dir(sess.path()).unwrap().flatten().collect();
+        files.sort_by_key(|f| f.file_name());
+        for f in files {
+            let body = std::fs::read_to_string(f.path()).unwrap_or_default();
+            out.push(format!(
+                "{}: {}",
+                f.file_name().to_string_lossy(),
+                ts.replace_all(&body, r#""ts":N"#)
+            ));
+        }
+    }
+    out
+}
+
+#[test]
+fn a_refresh_removes_its_lock_and_leaves_gh_alone() {
+    if !have("sh") {
+        return;
+    }
+    let s = Scratch::new();
+    let r = repo(&s.0, "chore/x", "https://github.com/testowner/testrepo.git");
+    let lock = s.0.join(format!(
+        ".cache/statusline/pr-{}.json.lock",
+        slug(&format!("{}::chore/x", r.display()))
+    ));
+    rust(
+        &s.0,
+        &s.0,
+        &payload(&r, ""),
+        &[("STATUSLINE_PR_CACHE_TTL", "0")],
+    );
+    for _ in 0..100 {
+        if !lock.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(!lock.exists(), "lock left behind");
+    assert!(s.0.join("stub/gh").is_file(), "the refresh deleted gh");
 }

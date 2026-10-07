@@ -125,13 +125,9 @@ fn render_session_age(s: &Session, o: &Opts) -> Option<String> {
     if !o.show_session_age || s.session_id.is_empty() {
         return None;
     }
-    let file = std::path::Path::new(&o.home)
-        .join(".config/playbook/runtime")
-        .join(&s.session_id)
-        .join("start-ts");
+    let file = super::telemetry::runtime_dir(&o.home, &s.session_id).join("start-ts");
     let raw = std::fs::read_to_string(file).ok()?;
-    let start = raw.trim_end_matches('\n');
-    let start = int_part(start);
+    let start = strict_int(raw.trim_end_matches('\n'))?;
     if start <= 0 {
         return None;
     }

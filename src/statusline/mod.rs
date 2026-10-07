@@ -124,6 +124,9 @@ fn is_workspace_project(env: &Env, path: &str) -> bool {
         .any(|r| path.starts_with(&format!("{}/", r.strip_suffix('/').unwrap_or(r))))
 }
 
+/// Upper bound for terminal and bar widths, so a hostile value cannot balloon the output.
+const MAX_WIDTH: i64 = 1000;
+
 type Ci = (String, usize, usize, usize);
 
 /// Repo facts line 1 needs, resolved once.
@@ -210,7 +213,11 @@ fn pr_right(
         "https://{}/{}/{}/pull/{number}",
         repo.host, repo.owner, repo.name
     );
-    let mut right = osc8_link(env, &url, &label);
+    let mut right = if repo.owner.is_empty() || repo.name.is_empty() {
+        label
+    } else {
+        osc8_link(env, &url, &label)
+    };
 
     if let Some((st, failed, running, total)) = &ci {
         match st.as_str() {
@@ -341,11 +348,14 @@ fn logical_pwd(env: &Env) -> String {
 
 /// Renders the whole status line for `input`, as the bytes to print.
 pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
-    let home = env.get("HOME").unwrap_or("").to_string();
+    let home = env
+        .get("HOME")
+        .map(str::to_string)
+        .unwrap_or_else(|| crate::common::home_dir().to_string_lossy().into_owned());
     let cache_dir: PathBuf = match (env.get("STATUSLINE_CACHE_DIR"), env.get("XDG_CACHE_HOME")) {
         (Some(d), _) => PathBuf::from(d),
-        (None, Some(x)) => Path::new(x).join("statusline"),
-        (None, None) => Path::new(&home).join(".cache/statusline"),
+        (None, Some(x)) => PathBuf::from(format!("{x}/statusline")),
+        (None, None) => PathBuf::from(format!("{home}/.cache/statusline")),
     };
     ensure_cache_dir(&cache_dir);
 
@@ -433,14 +443,21 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         }
     }
 
-    let width = env.get("COLUMNS").map_or(120, int_part);
+    let width = env.get("COLUMNS").map_or(120, int_part).clamp(0, MAX_WIDTH);
     let pad = (width - visible_len(&left) as i64 - visible_len(&right) as i64).max(1);
-    let mut out = percent_b(&left);
-    if !right.is_empty() {
-        out.extend(std::iter::repeat_n(b' ', pad as usize));
-        out.extend(percent_b(&right));
+    let (mut out, stopped) = percent_b(&left);
+    if !stopped {
+        if right.is_empty() {
+            out.push(b'\n');
+        } else {
+            out.extend(std::iter::repeat_n(b' ', pad as usize));
+            let (r, stopped) = percent_b(&right);
+            out.extend(r);
+            if !stopped {
+                out.push(b'\n');
+            }
+        }
     }
-    out.push(b'\n');
 
     let opts = Opts {
         show_model: env.flag("STATUSLINE_SHOW_MODEL"),
@@ -448,7 +465,7 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         show_session_age: env.flag("STATUSLINE_SHOW_SESSION_AGE"),
         show_cache_ratio: env.flag("STATUSLINE_SHOW_CACHE_RATIO"),
         show_rate_limits: env.flag("STATUSLINE_SHOW_RATE_LIMITS"),
-        bar_width: env.int("STATUSLINE_CTX_BAR_WIDTH", 10),
+        bar_width: env.int("STATUSLINE_CTX_BAR_WIDTH", 10).clamp(0, MAX_WIDTH),
         compact_trigger: env.int("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", 90),
         home,
         now,
@@ -460,8 +477,11 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
     .into_iter()
     .flatten()
     {
-        out.extend(percent_b(&line));
-        out.push(b'\n');
+        let (bytes, stopped) = percent_b(&line);
+        out.extend(bytes);
+        if !stopped {
+            out.push(b'\n');
+        }
     }
     out
 }

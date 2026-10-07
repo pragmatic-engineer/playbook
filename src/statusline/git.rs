@@ -9,7 +9,7 @@ use std::process::Command;
 use std::time::Duration;
 
 /// Upper bound for any single git call, so a wedged repo never stalls a render.
-const GIT_TIMEOUT: Duration = Duration::from_secs(2);
+const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct GitInfo {

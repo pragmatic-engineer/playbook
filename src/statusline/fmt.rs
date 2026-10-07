@@ -157,8 +157,9 @@ pub fn visible_len(s: &str) -> usize {
     n
 }
 
-/// Interprets backslash escapes the way bash's `printf '%b'` does.
-pub fn percent_b(s: &str) -> Vec<u8> {
+/// Interprets backslash escapes the way bash's `printf '%b'` does. The flag
+/// is true when `\c` cut the output short, which ends the whole `printf`.
+pub fn percent_b(s: &str) -> (Vec<u8>, bool) {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -180,7 +181,7 @@ pub fn percent_b(s: &str) -> Vec<u8> {
             b't' => out.push(b'\t'),
             b'v' => out.push(11),
             b'\\' => out.push(b'\\'),
-            b'c' => return out,
+            b'c' => return (out, true),
             b'0'..=b'7' => {
                 let max = if c == b'0' { 3 } else { 2 };
                 let mut v = u32::from(c - b'0');
@@ -212,7 +213,7 @@ pub fn percent_b(s: &str) -> Vec<u8> {
             }
         }
     }
-    out
+    (out, false)
 }
 
 #[cfg(test)]
@@ -279,9 +280,10 @@ mod tests {
 
     #[test]
     fn percent_b_expands_escapes_like_bash() {
-        assert_eq!(percent_b("\\033[0m"), b"\x1b[0m");
-        assert_eq!(percent_b("\\033]8;;u\\033\\\\x"), b"\x1b]8;;u\x1b\\x");
-        assert_eq!(percent_b("a\\nb\\q\\"), b"a\nb\\q\\");
-        assert_eq!(percent_b("\\x41\\0101"), b"AA");
+        assert_eq!(percent_b("\\033[0m").0, b"\x1b[0m");
+        assert_eq!(percent_b("\\033]8;;u\\033\\\\x").0, b"\x1b]8;;u\x1b\\x");
+        assert_eq!(percent_b("a\\nb\\q\\").0, b"a\nb\\q\\");
+        assert_eq!(percent_b("ab\\cde"), (b"ab".to_vec(), true));
+        assert_eq!(percent_b("\\x41\\0101").0, b"AA");
     }
 }

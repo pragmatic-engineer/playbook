@@ -16,10 +16,16 @@ fn or_zero(v: &str) -> &str {
     }
 }
 
+/// `<home>/.config/playbook/runtime/<sid>`, joined as text like the script
+/// does, so an odd session id can never replace the base path.
+pub fn runtime_dir(home: &str, sid: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{home}/.config/playbook/runtime/{sid}"))
+}
+
 /// Appends one sample and updates the `capture-due` / `capture-fired` /
 /// `capture-crossings` files under `<home>/.config/playbook/runtime/<sid>`.
 pub fn record(home: &str, sid: &str, cost: &str, used: &str, capture_at: i64, now: i64) {
-    let dir = Path::new(home).join(".config/playbook/runtime").join(sid);
+    let dir = runtime_dir(home, sid);
     let _ = std::fs::create_dir_all(&dir);
     if !dir.is_dir() || !is_writable(&dir) {
         return;

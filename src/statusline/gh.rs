@@ -10,20 +10,20 @@ use std::process::{Command, Stdio};
 use std::time::SystemTime;
 
 /// Seconds a background `gh` call may run before its watchdog kills it.
-const REFRESH_TIMEOUT_SECS: u32 = 20;
+const REFRESH_TIMEOUT_SECS: u32 = 60;
 /// Age after which a refresh lock is treated as abandoned.
 const LOCK_STALE_SECS: i64 = 30;
 
 const CI_QUERY: &str = "query($owner: String!, $repo: String!, $branch: String!) { repository(owner: $owner, name: $repo) { ref(qualifiedName: $branch) { target { ... on Commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state } } } } } } } } }";
 
-const REFRESH_SCRIPT: &str = r#"trap 'rm -f "$1"' EXIT
-lock="$1"; cache="$2"; tmp="$2.tmp.$$"; limit="$3"; shift 3
+const REFRESH_SCRIPT: &str = r#"lock="$1"; cache="$2"; tmp="$2.tmp.$$"; limit="$3"; shift 3
+trap 'rm -f "$lock"' EXIT
 NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$@" >"$tmp" 2>/dev/null &
 pid=$!
 ( sleep "$limit"; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 &
 dog=$!
 if wait "$pid"; then mv "$tmp" "$cache"; else rm -f "$tmp"; fi
-kill "$dog" 2>/dev/null
+pkill -P "$dog" 2>/dev/null; kill "$dog" 2>/dev/null
 "#;
 
 /// Splits a scp-style, ssh or http(s) remote into `(host, path)`.
@@ -168,11 +168,11 @@ pub fn refresh_ci(gh: &Path, cache: &Path, now: i64, owner: &str, repo: &str, br
     let args = [
         "api".to_string(),
         "graphql".to_string(),
-        "-F".to_string(),
+        "-f".to_string(),
         format!("owner={owner}"),
-        "-F".to_string(),
+        "-f".to_string(),
         format!("repo={repo}"),
-        "-F".to_string(),
+        "-f".to_string(),
         format!("branch={branch}"),
         "-f".to_string(),
         format!("query={CI_QUERY}"),
