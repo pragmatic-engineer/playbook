@@ -225,6 +225,7 @@ else
   else
     echo "GATE_SOURCE=MISSING"
   fi
+  playbook doctor path-shadow 2>/dev/null | sed 's/^/PATH_SHADOW /'
 fi
 ```
 
@@ -262,6 +263,13 @@ Report:
   for this purpose regardless of whether it is otherwise ahead of or behind
   the plugin manifest. Remediation: update `playbook` to a version that
   supports gate staleness enforcement.
+- `PATH_SHADOW STALE_FIRST` → **WARN.** More than one `playbook` is on PATH and
+  the first one, the one every hook runs, is older than a later one. The
+  following `PATH_SHADOW <path> <version>` lines name each binary in PATH
+  order. Remediation: remove the stale one (for Homebrew, `brew uninstall
+  playbook`) or put the newer one's directory first on PATH. `MULTIPLE` is
+  INFO (several binaries, the first is not older); `SINGLE` and `NONE` need no
+  report line.
 - `GATE_SOURCE=OK` → no separate report line; folded into the `MATCH`/`SKEW`/
   etc. verdict above, since the installed binary already supports the flag
   every current caller passes.

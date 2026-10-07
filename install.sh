@@ -411,6 +411,16 @@ install_release_binary() {
     STAGE=""
 
     ensure_bin_dir_on_path
+    warn_if_shadowed
+}
+
+# Warns when another playbook earlier on PATH hides the one just installed.
+warn_if_shadowed() {
+    local first
+    first="$(command -v playbook 2>/dev/null || true)"
+    [ -n "$first" ] || return 0
+    [ "$first" -ef "$PLAYBOOK_BIN_DIR/playbook" ] && return 0
+    warn "$first runs before the new $PLAYBOOK_BIN_DIR/playbook on PATH, so hooks keep using the old binary; remove it (Homebrew: brew uninstall playbook) or put $PLAYBOOK_BIN_DIR first on PATH"
 }
 
 # Puts $PLAYBOOK_BIN_DIR on PATH for future shells via one idempotent rc-file

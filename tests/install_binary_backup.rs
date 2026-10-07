@@ -445,3 +445,39 @@ fn uninstall_removes_the_backups() {
     assert!(!sandbox.playbook().exists(), "binary should be removed");
     assert_eq!(sandbox.backups(), Vec::<String>::new());
 }
+
+#[test]
+fn install_warns_when_an_earlier_playbook_on_path_hides_the_new_one() {
+    // Arrange
+    let sandbox = Sandbox::new("shadow");
+    let stale = sandbox.root.join("stale");
+    write_executable(
+        &stale.join("playbook"),
+        "#!/bin/sh\necho 'playbook 0.14.0'\n",
+    );
+
+    // Act
+    let out = sandbox.install_with_path_prefix("1.1.0", Some(&stale));
+
+    // Assert
+    let first = stale.join("playbook");
+    assert!(
+        out.contains(&format!("{} runs before the new", first.display())),
+        "shadow warning missing from: {out}"
+    );
+}
+
+#[test]
+fn install_stays_quiet_when_the_new_binary_is_first_on_path() {
+    // Arrange
+    let sandbox = Sandbox::new("noshadow");
+
+    // Act
+    let out = sandbox.install_with_path_prefix("1.1.0", Some(&sandbox.bin_dir));
+
+    // Assert
+    assert!(
+        !out.contains("runs before the new"),
+        "unexpected warning: {out}"
+    );
+}
