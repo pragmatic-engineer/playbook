@@ -421,7 +421,12 @@ jobs:
             echo "::error::the release asset playbook-plugin-${VERSION}.zip does not match the sha256 the plugin-archive job built (${ARCHIVE_SHA256})." >&2
             exit 1
           }
-          bash shell/render-formula.sh "${VERSION}" out/SHA256SUMS > out/playbook.rb
+          # Run the binary this release built (checked against SHA256SUMS), not a rebuild.
+          bin="playbook-${VERSION}-x86_64-unknown-linux-musl"
+          gh release download "${GITHUB_REF_NAME}" --pattern "${bin}" --dir out --clobber
+          (cd out && grep -F " ${bin}" SHA256SUMS | shasum -a 256 -c -)
+          chmod +x "out/${bin}"
+          "out/${bin}" release render-formula "${VERSION}" out/SHA256SUMS > out/playbook.rb
           cat out/playbook.rb
 
       - name: Push the tap formula
@@ -446,7 +451,7 @@ jobs:
           path=".claude-plugin/marketplace.json"
           gh api "repos/${MARKETPLACE_REPO}/contents/${path}" > out/market.meta
           jq -r .content out/market.meta | base64 -d > out/marketplace.json
-          bash shell/pin-marketplace.sh "${VERSION}" out/marketplace.json "${ARCHIVE_SHA256}" > out/marketplace.new.json
+          "out/playbook-${VERSION}-x86_64-unknown-linux-musl" release pin-marketplace "${VERSION}" out/marketplace.json "${ARCHIVE_SHA256}" > out/marketplace.new.json
           gh api -X PUT "repos/${MARKETPLACE_REPO}/contents/${path}" \
             -f message="playbook ${VERSION}" \
             -f content="$(base64 < out/marketplace.new.json | tr -d '\n')" \

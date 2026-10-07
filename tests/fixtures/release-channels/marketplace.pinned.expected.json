@@ -1,0 +1,21 @@
+{
+  "name": "pragmatic-engineer",
+  "plugins": [
+    {
+      "name": "other",
+      "source": {
+        "source": "url",
+        "url": "https://example.com/other.git"
+      }
+    },
+    {
+      "name": "playbook",
+      "source": {
+        "source": "archive",
+        "url": "https://github.com/pragmatic-engineer/playbook/releases/download/v9.8.7/playbook-plugin-9.8.7.zip",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "category": "workflow"
+    }
+  ]
+}
