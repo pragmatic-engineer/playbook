@@ -28,9 +28,28 @@ struct CiChecksReshape {
 /// the `$PWD` fallback used when both `.cwd` and `.workspace.current_dir`
 /// are absent or null.
 pub fn session_fields(json: &str, pwd_env: &str) -> String {
+    let mut out = String::new();
+    for (key, value) in session_values(json, pwd_env) {
+        out.push_str(&format!("{key}={}\n", sh_value(&value)));
+    }
+    out
+}
+
+/// The text a shell variable holds after `eval`-ing [`session_fields`]'s
+/// line for `value`: the string itself, or a number's own text.
+pub(crate) fn value_text(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// The fifteen session fields as typed JSON values, in `eval` order.
+pub(crate) fn session_values(json: &str, pwd_env: &str) -> [(&'static str, Value); 15] {
     let parsed: Value = serde_json::from_str(json).unwrap_or(Value::Null);
 
-    let fields: [(&str, Value); 15] = [
+    [
         ("cwd", cwd_value(&parsed, pwd_env)),
         ("session_id", field_or_empty(&parsed, &["session_id"])),
         ("model", field_or_empty(&parsed, &["model", "display_name"])),
@@ -86,13 +105,7 @@ pub fn session_fields(json: &str, pwd_env: &str) -> String {
             "wall_ms",
             field_or_empty(&parsed, &["cost", "total_duration_ms"]),
         ),
-    ];
-
-    let mut out = String::new();
-    for (key, value) in fields {
-        out.push_str(&format!("{key}={}\n", sh_value(&value)));
-    }
-    out
+    ]
 }
 
 /// Case-insensitive match against the failed conclusions and states the real
@@ -218,7 +231,7 @@ pub fn pr_fields(json: &str) -> String {
 
 /// First Jira-shaped ticket key (`[A-Z][A-Z0-9]+-[0-9]+`) in `body`, or
 /// empty when none is present, matching `scan(...) | .[0] // ""`.
-fn jira_from_body(body: &str) -> String {
+pub(crate) fn jira_from_body(body: &str) -> String {
     let re = Regex::new(r"[A-Z][A-Z0-9]+-[0-9]+").expect("jira ticket pattern is a valid regex");
     re.find(body)
         .map(|m| m.as_str().to_string())
@@ -227,7 +240,7 @@ fn jira_from_body(body: &str) -> String {
 
 /// `.number // "" | tostring | if . == "null" then "" else . end`: the
 /// number's own text when present, empty when missing or null.
-fn pr_number_value(json: &Value) -> String {
+pub(crate) fn pr_number_value(json: &Value) -> String {
     match get_path(json, &["number"]) {
         Some(Value::Null) | None => String::new(),
         Some(Value::Number(n)) => n.to_string(),
@@ -238,7 +251,7 @@ fn pr_number_value(json: &Value) -> String {
 /// `[.reviewRequests[]? | (.login // .name // "team")]`: a requested
 /// reviewer's login, falling back to a team's name, then the literal
 /// `"team"` when neither is present.
-fn pending_logins(json: &Value) -> Vec<String> {
+pub(crate) fn pending_logins(json: &Value) -> Vec<String> {
     get_path(json, &["reviewRequests"])
         .and_then(Value::as_array)
         .map(|requests| {
@@ -261,7 +274,7 @@ fn pending_logins(json: &Value) -> Vec<String> {
 /// `coderabbitai`, whose state is not `COMMENTED`, and whose author is not
 /// currently a pending reviewer (a re-request suppresses their earlier
 /// review), rendered as `g|r|d:login:submitted_at`.
-fn completed_reviews(json: &Value, pending: &[String]) -> Vec<String> {
+pub(crate) fn completed_reviews(json: &Value, pending: &[String]) -> Vec<String> {
     get_path(json, &["latestReviews"])
         .and_then(Value::as_array)
         .map(|reviews| {
@@ -323,7 +336,7 @@ fn thinking_value(json: &Value) -> Value {
 
 /// `path // ""`: the field at `path`, or an empty string when any step is
 /// missing, or the leaf itself is `null` or `false`.
-fn field_or_empty(json: &Value, path: &[&str]) -> Value {
+pub(crate) fn field_or_empty(json: &Value, path: &[&str]) -> Value {
     match get_path(json, path) {
         None | Some(Value::Null) | Some(Value::Bool(false)) => Value::String(String::new()),
         Some(value) => value.clone(),
@@ -334,7 +347,7 @@ fn field_or_empty(json: &Value, path: &[&str]) -> Value {
 /// leaf is `null` or `false`. Every call site here reads a field the real
 /// filter always treats as string-typed once present, matching
 /// `path // ""`.
-fn str_field(json: &Value, path: &[&str]) -> String {
+pub(crate) fn str_field(json: &Value, path: &[&str]) -> String {
     match get_path(json, path) {
         Some(Value::String(s)) => s.clone(),
         None | Some(Value::Null) | Some(Value::Bool(false)) => String::new(),
@@ -343,11 +356,11 @@ fn str_field(json: &Value, path: &[&str]) -> String {
 }
 
 /// A flat object field read as `&str`, empty when missing or not a string.
-fn str_at<'a>(value: &'a Value, key: &str) -> &'a str {
+pub(crate) fn str_at<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-fn get_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+pub(crate) fn get_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
     let mut current = Some(value);
     for key in path {
         current = current.and_then(|v| v.get(key));

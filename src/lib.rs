@@ -21,6 +21,7 @@ pub mod mode;
 pub mod pr;
 pub mod sanitize;
 pub mod settings;
+pub mod statusline;
 pub mod trust;
 pub mod update;
 pub mod usage;
