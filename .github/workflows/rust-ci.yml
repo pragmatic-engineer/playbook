@@ -148,10 +148,11 @@ jobs:
 
   # ADR 0007: a container built FROM debian:stable-slim with only git and
   # the binary installed runs every hook successfully, asserted by CI, not
-  # by inspection. The 15 hooks in `HookName` are the whole contract
-  # `settings.json` invokes as a bare `playbook hook <name>`
-  # command; if any of them needed something setup-local.sh or install.sh
-  # used to provide (a shared library, a Python interpreter, anything beyond
+  # by inspection. The hooks in `HookName` (the list is read from
+  # `playbook hook --help`, so a new hook is covered automatically) are the
+  # whole contract `settings.json` and hooks.json invoke as a bare
+  # `playbook hook <name>` command; if any of them needed something
+  # setup-local.sh or install.sh used to provide (a shared library, a Python interpreter, anything beyond
   # `git`), this job is where that would show up, on the platform the tool
   # actually ships for, not on the dev machine that already has everything
   # installed.
@@ -161,9 +162,11 @@ jobs:
   # container the way a user's actually would.
   #
   # Empty `{}` JSON input, not a real payload: every hook's own "never
-  # panic" contract (see SEGMENT-B-RULES.md) already means malformed or
-  # empty input degrades to silence or a best-effort no-op, verified locally
-  # before this job existed: all 15 exit 0 on `{}`. What this job checks is
+  # panic" contract already means malformed or empty input degrades to
+  # silence or a best-effort no-op, verified locally before this job
+  # existed: every hook but the two worktree ones exits 0 on `{}`. Those two
+  # act on a git repo, so they get a payload against a throwaway repo inside
+  # the container. What this job checks is
   # narrower and different, whether the compiled binary can even START in a
   # container that has nothing but git, which `cargo test` never exercises
   # since it always runs on a machine with the full toolchain already
@@ -255,40 +258,49 @@ jobs:
               set -e
               apt-get update -qq
               apt-get install -y -qq git >/dev/null
-              for name in session-init preread-edit-check preread-size-check \
-                          search-counter memory-anchors post-edit-track \
-                          rebuild-memory-graph auto-model-detect precompact-warn \
-                          session-clean-exit memory-capture rm-workspace-guard \
-                          bg-await-guard no-slop-guard precommit-check; do
+              names="$(playbook hook --help | grep -o "possible values: .*\]" | sed "s/possible values: //; s/\]//; s/,//g")"
+              count=0
+              for name in $names; do
+                case "$name" in worktree-create|worktree-remove) continue ;; esac
                 echo "== $name"
                 echo "{}" | HOME=/tmp playbook hook "$name" \
                   || { echo "FAILED: $name did not exit 0 in a minimal container"; exit 1; }
+                count=$((count + 1))
               done
-              echo "all 15 hooks ran without crashing"
+
+              # The worktree hooks need a real repo; the container is
+              # throwaway (--rm), so nothing outlives the job.
+              export HOME=/tmp GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=smoke@example.com \
+                     GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=smoke@example.com
+              mkdir -p /tmp/wt/repo
+              git -C /tmp/wt/repo init -q -b main
+              git -C /tmp/wt/repo commit -q --allow-empty -m init
+              echo "== worktree-create"
+              path="$(echo "{\"cwd\":\"/tmp/wt/repo\",\"name\":\"smoke\"}" | playbook hook worktree-create)" \
+                || { echo "FAILED: worktree-create did not exit 0"; exit 1; }
+              test -d "$path" || { echo "FAILED: worktree-create printed $path, not a directory"; exit 1; }
+              count=$((count + 1))
+              echo "== worktree-remove"
+              echo "{\"cwd\":\"/tmp/wt/repo\",\"worktree_path\":\"$path\"}" | playbook hook worktree-remove \
+                || { echo "FAILED: worktree-remove did not exit 0"; exit 1; }
+              test ! -e "$path" || { echo "FAILED: worktree-remove left $path behind"; exit 1; }
+              count=$((count + 1))
+
+              total="$(echo "$names" | wc -w)"
+              test "$count" -eq "$total" && test "$total" -gt 0 \
+                || { echo "FAILED: ran $count of $total hooks"; exit 1; }
+              echo "all $total hooks ran without crashing"
             '
 
       - name: Exercise gate record/check end to end (rusqlite/SQLite smoke test)
-        # The 15-hook loop above predates the gate DB and never opens a
+        # The hook loop above predates the gate DB and never opens a
         # database; a hook exiting 0 proves the binary STARTS in a minimal
         # container, not that rusqlite's bundled SQLite actually works at
         # runtime on this target. Round-trip a real verdict through the
         # real CLI to prove that separately.
-        #
-        # Skip gracefully if `gate` isn't wired yet: this workflow file and
-        # the gate DB's schema/connection layer land in the same Segment
-        # (WU-0), but the `gate record`/`gate check` CLI subcommand itself
-        # is a later Segment (WU-1/WU-2) in the same stacked PR sequence.
-        # Checking `gate --help` first, rather than assuming the subcommand
-        # always exists, is what keeps this step meaningful on every
-        # Segment instead of failing the earliest one on a command it
-        # never claimed to ship.
         run: |
           set -euo pipefail
           bin="$PWD/target/${{ matrix.target }}/release/playbook"
-          if ! "$bin" gate --help >/dev/null 2>&1; then
-            echo "gate subcommand not wired yet on this branch, skipping the round-trip"
-            exit 0
-          fi
           work="$(mktemp -d)"
           (cd "$work" && git init -q && git remote add origin https://github.com/smoke-test/smoke-test.git)
           echo "VERDICT: PASS" > "$work/source.txt"

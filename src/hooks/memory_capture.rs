@@ -11,7 +11,7 @@
 //! it retains for a bounded re-block; see `REBLOCK_CAP`.
 //!
 //! Two divergences from the python source, both driven by the "never panic"
-//! rule in SEGMENT-B-RULES.md rather than a behaviour choice:
+//! rule of the port rather than a behaviour choice:
 //!
 //! 1. python's `rec.get("path")` appends whatever JSON value sits at
 //!    `"path"`, including a non-string one, and only breaks later (an
