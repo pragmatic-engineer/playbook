@@ -565,7 +565,7 @@ function poll() {
 // A hidden page closes its stream and stops polling; showing it again resumes.
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { stopLive(); return; }
-  if (tab === "live") startLive(); else refresh();
+  if (tab === "live") enterTab(); else refresh();
 });
 renderRanges();
 renderTabs();
@@ -646,7 +646,8 @@ mod tests {
             "document.addEventListener(\"visibilitychange\"",
             "if (document.hidden) { stopLive(); return; }",
             "live.controller.abort();",
-            "function enterTab() {\n  stopLive();",
+            "function enterTab() {",
+            "if (tab === \"live\") enterTab(); else refresh();",
             "if (tab !== \"live\" && !document.hidden && inFlight === 0) refresh();",
             "if (tab === \"live\") return;",
         ] {

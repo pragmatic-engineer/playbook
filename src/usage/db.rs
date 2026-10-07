@@ -535,4 +535,47 @@ mod tests {
         assert_eq!(get_watermark(&conn, "other").unwrap(), 0);
         let _ = fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn the_live_queries_filter_order_and_limit_as_documented() {
+        let dir = scratch_dir("usage-live-queries");
+        let conn = open_db(&dir.join("usage.db")).unwrap();
+        for (id, ts, session) in [
+            ("a", 100, "s1"),
+            ("b", 200, "s2"),
+            ("c", 300, "s3"),
+            ("d", 400, "s1"),
+        ] {
+            let event = UsageEvent {
+                event_id: id.into(),
+                timestamp: ts,
+                session_id: session.into(),
+                model: "m".into(),
+                ..UsageEvent::default()
+            };
+            insert_usage_event(&conn, &event).unwrap();
+        }
+        let ids = |events: Vec<UsageEvent>| -> Vec<String> {
+            events.into_iter().map(|e| e.event_id).collect()
+        };
+
+        assert_eq!(
+            ids(load_usage_events_since(&conn, 200).unwrap()),
+            ["b", "c", "d"]
+        );
+        assert_eq!(
+            ids(load_usage_events_since(&conn, 401).unwrap()),
+            Vec::<String>::new()
+        );
+        assert_eq!(ids(load_latest_usage_events(&conn, 2).unwrap()), ["d", "c"]);
+        let wanted = vec!["s1".to_string(), "s3".to_string()];
+        assert_eq!(
+            ids(load_usage_events_of_sessions(&conn, &wanted).unwrap()),
+            ["a", "c", "d"]
+        );
+        assert!(load_usage_events_of_sessions(&conn, &[])
+            .unwrap()
+            .is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
 }

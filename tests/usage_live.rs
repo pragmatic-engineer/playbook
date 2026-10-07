@@ -203,7 +203,10 @@ fn the_first_event_arrives_promptly_and_a_new_transcript_line_shows_in_a_later_o
     let mut stream = request(port, "", Some(&token));
     let first = read_until(&mut stream, "\n\n", Duration::from_secs(5));
 
-    assert!(began.elapsed() < Duration::from_secs(5));
+    assert!(
+        began.elapsed() < Duration::from_secs(4),
+        "first event is sent at once, not after a tick"
+    );
     assert!(status_line(&first).contains("200"), "{first}");
     assert!(first.contains("text/event-stream"), "{first}");
     assert!(first.contains("Transfer-Encoding: chunked"), "{first}");

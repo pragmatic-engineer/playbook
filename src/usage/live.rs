@@ -21,7 +21,7 @@ const CACHE_TTL: Duration = Duration::from_millis(1500);
 
 const HEAD: &str = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nTransfer-Encoding: chunked\r\n\r\n";
 
-type Cached = Option<(Instant, Arc<String>)>;
+type Cached = Option<(Instant, Result<Arc<String>, String>)>;
 
 #[derive(Default)]
 pub struct Live {
@@ -57,22 +57,22 @@ impl Live {
         self.open.load(Ordering::SeqCst)
     }
 
-    /// The latest summary, computed at most once per `CACHE_TTL` however many
-    /// streams ask. The lock is held while computing, so a second stream waits
+    /// The latest summary (or failure), computed at most once per `CACHE_TTL`
+    /// however many streams ask, so a busy database is not retried by each. The lock is held while computing, so a second stream waits
     /// for the first instead of ingesting again.
     pub fn summary(
         &self,
         compute: impl FnOnce() -> Result<String, String>,
     ) -> Result<Arc<String>, String> {
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((at, body)) = cache.as_ref() {
+        if let Some((at, answer)) = cache.as_ref() {
             if at.elapsed() < CACHE_TTL {
-                return Ok(Arc::clone(body));
+                return answer.clone();
             }
         }
-        let body = Arc::new(compute()?);
-        *cache = Some((Instant::now(), Arc::clone(&body)));
-        Ok(body)
+        let answer = compute().map(Arc::new);
+        *cache = Some((Instant::now(), answer.clone()));
+        answer
     }
 }
 
@@ -147,43 +147,63 @@ mod tests {
     #[test]
     fn concurrent_streams_share_one_computation_until_the_cache_expires() {
         let live = Live::new();
-        let mut runs = 0;
+        let runs = Arc::new(AtomicUsize::new(0));
+        let ask = |live: Arc<Live>, runs: Arc<AtomicUsize>| {
+            std::thread::spawn(move || {
+                live.summary(|| {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(150));
+                    Ok("one".to_string())
+                })
+                .unwrap()
+            })
+        };
 
-        let first = live.summary(|| {
-            runs += 1;
-            Ok("one".to_string())
-        });
-        let second = live.summary(|| {
-            runs += 1;
-            Ok("two".to_string())
-        });
-
-        assert_eq!(
-            (first.unwrap().as_str(), second.unwrap().as_str()),
-            ("one", "one")
+        let (a, b) = (
+            ask(Arc::clone(&live), Arc::clone(&runs)),
+            ask(Arc::clone(&live), Arc::clone(&runs)),
         );
-        assert_eq!(runs, 1);
+        let (a, b) = (a.join().unwrap(), b.join().unwrap());
+
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert!(Arc::ptr_eq(&a, &b));
         std::thread::sleep(CACHE_TTL + Duration::from_millis(50));
         assert_eq!(
             live.summary(|| Ok("three".to_string())).unwrap().as_str(),
             "three"
         );
-        assert!(
-            live.summary(|| Err("boom".to_string())).is_ok(),
-            "a fresh cache hides nothing"
-        );
     }
 
     #[test]
-    fn a_failed_computation_is_not_cached() {
+    fn a_failure_is_shared_briefly_too_and_then_retried() {
         let live = Live::new();
+        let mut runs = 0;
 
-        assert!(live.summary(|| Err("db busy".to_string())).is_err());
+        let first = live.summary(|| {
+            runs += 1;
+            Err("db busy".to_string())
+        });
+        let second = live.summary(|| {
+            runs += 1;
+            Ok("late".to_string())
+        });
 
+        assert_eq!(first.unwrap_err(), "db busy");
+        assert_eq!(second.unwrap_err(), "db busy");
+        assert_eq!(runs, 1, "a busy database is not retried by every stream");
+        std::thread::sleep(CACHE_TTL + Duration::from_millis(50));
         assert_eq!(
             live.summary(|| Ok("ok".to_string())).unwrap().as_str(),
             "ok"
         );
+    }
+
+    #[test]
+    fn events_are_framed_as_chunks_with_a_byte_length() {
+        let framed = event("live", "{\"r\":\"é\"}");
+
+        // "event: live\ndata: {"r":"é"}\n\n" is 30 bytes (é is two), 0x1e.
+        assert_eq!(framed, "1e\r\nevent: live\ndata: {\"r\":\"é\"}\n\n\r\n");
     }
 
     #[test]

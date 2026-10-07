@@ -79,7 +79,9 @@ The server answers one request at a time on its main thread, so a held-open stre
 
 - At most 4 streams at once; a fifth gets a 503. A stream's place is freed when its thread ends.
 - A stream ends when a write fails (the client left, seen within a tick or two) or after 30 minutes, with a clean end of the body, and the page reconnects.
-- Each tick runs the incremental ingest (safe across processes, see above), then reads only the last hour and today, the active sessions and the newest messages from the database. The result is cached for 1.5 seconds and shared, with the cache lock held while it is computed, so several open streams or tabs cause one ingest per tick, not one each.
+- "Last hour" and the burn chart cover the current minute and the 59 before it, so the chart adds up to the tile.
+- Each tick runs the incremental ingest (safe across processes, see above), then reads only the last hour and today, the active sessions and the newest messages from the database. The result is cached for 1.5 seconds and shared, with the cache lock held while it is computed, so several open streams or tabs cause one ingest per tick, not one each. A failure is shared the same way, so a busy database is not retried by every stream.
+- Known limits: a client that leaves is noticed on the second write after it goes (a tick or two), so a quick reopen can see a 503 and the page retries with backoff; and a client that keeps the connection open but never reads can hold a slot until the server restarts, because `tiny_http` exposes no write timeout on a taken-over socket.
 
 ## Adding another agent
 
