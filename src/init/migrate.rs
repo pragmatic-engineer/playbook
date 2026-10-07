@@ -246,8 +246,8 @@ pub fn record_shipped(home: &Path, key: &str, path: &Path) {
     record_many(home, &[(key.to_string(), path.to_path_buf())], None);
 }
 
-/// Records several files in one locked write; `drop_prefix` clears stale keys first.
-fn record_many(home: &Path, files: &[(String, PathBuf)], drop_prefix: Option<&str>) {
+/// Records several files in one locked write; `drop` clears matching stale keys first.
+fn record_many(home: &Path, files: &[(String, PathBuf)], drop: Option<&dyn Fn(&str) -> bool>) {
     let hashed: Vec<(String, String)> = files
         .iter()
         .filter_map(|(key, path)| {
@@ -260,9 +260,8 @@ fn record_many(home: &Path, files: &[(String, PathBuf)], drop_prefix: Option<&st
             return;
         };
         let before = lines.clone();
-        if let Some(drop) = drop_prefix {
-            let drop = format!("shipped {drop}");
-            lines.retain(|l| !l.starts_with(&drop));
+        if let Some(drop) = drop {
+            lines.retain(|l| !l.strip_prefix("shipped ").is_some_and(drop));
         }
         for (prefix, hash) in &hashed {
             lines.retain(|l| !l.starts_with(prefix));
@@ -286,9 +285,24 @@ pub fn record_statusline(home: &Path) {
     );
 }
 
-/// Records every shipped skill file so edits to the cached copy are detectable.
+/// Records shipped skill files, never an edited one, and drops other versions' records.
 pub fn record_skills(home: &Path, self_root: &Path) {
-    record_many(home, &skill_files(self_root), Some(SKILL_KEY_PREFIX));
+    let files = skill_files(self_root);
+    let Some(version_prefix) = files
+        .first()
+        .and_then(|(key, _)| key.rsplit_once(':'))
+        .map(|(v, _)| format!("{v}:"))
+    else {
+        return;
+    };
+    // An edited skill keeps its old record so it stays reported until resolved.
+    let lines = read_state(home);
+    let fresh: Vec<_> = files
+        .into_iter()
+        .filter(|(key, path)| !edited_in(&lines, key, path))
+        .collect();
+    let stale = |key: &str| key.starts_with(SKILL_KEY_PREFIX) && !key.starts_with(&version_prefix);
+    record_many(home, &fresh, Some(&stale));
 }
 
 /// Manual findings only, for `playbook doctor`; runs nothing else.

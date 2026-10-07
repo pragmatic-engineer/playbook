@@ -67,7 +67,10 @@ fn an_edited_prompt_is_left_in_place_and_an_unedited_one_still_updates() {
         .find(|s| s.name == "system-prompt")
         .unwrap();
     assert_eq!(step.status, StepStatus::Skipped);
-    assert!(outcome.warnings.iter().any(|w| w.contains("delete it")));
+    assert!(outcome
+        .warnings
+        .iter()
+        .any(|w| w.contains("0003-system-prompt-edited") && w.contains("delete it")));
 
     fs::remove_file(prompt_dest(&home)).unwrap();
     run(&paths(&home, &root, None));
@@ -75,7 +78,7 @@ fn an_edited_prompt_is_left_in_place_and_an_unedited_one_still_updates() {
 }
 
 #[test]
-fn a_modified_skill_is_reported_and_not_rewritten() {
+fn a_modified_skill_stays_reported_until_resolved() {
     let base = scratch("skill");
     let home = base.join("home");
     let root = plugin_root(&base, "p", "shipped");
@@ -85,10 +88,37 @@ fn a_modified_skill_is_reported_and_not_rewritten() {
     fs::write(root.join("skills/demo/SKILL.md"), "edited").unwrap();
     let second = run(&paths(&home, &root, None));
     assert!(second.warnings.iter().any(|w| w.contains("demo")));
-    assert_eq!(
-        fs::read_to_string(root.join("skills/demo/SKILL.md")).unwrap(),
-        "edited"
-    );
+    let third = run(&paths(&home, &root, None));
+    assert!(third.warnings.iter().any(|w| w.contains("demo")));
+    assert!(pending(&home, &root).contains("demo"));
+}
+
+#[test]
+fn a_dev_checkout_is_not_tracked_and_old_versions_are_pruned() {
+    let base = scratch("versions");
+    let home = base.join("home");
+    let root = plugin_root(&base, "p", "s");
+    run(&paths(&home, &root, None));
+    let state = home.join(".config/playbook/migrations.state");
+    assert!(fs::read_to_string(&state)
+        .unwrap()
+        .contains("skill:9.9.9:demo"));
+
+    let next = base.join("plugin").join("10.0.0");
+    fs::create_dir_all(next.join("skills/demo")).unwrap();
+    fs::write(next.join("skills/demo/SKILL.md"), "s").unwrap();
+    run(&paths(&home, &next, None));
+    let body = fs::read_to_string(&state).unwrap();
+    assert!(body.contains("skill:10.0.0:demo") && !body.contains("skill:9.9.9:"));
+
+    let dev = base.join("dev");
+    fs::create_dir_all(dev.join("skills/demo")).unwrap();
+    fs::create_dir_all(dev.join(".git")).unwrap();
+    fs::write(dev.join("skills/demo/SKILL.md"), "s").unwrap();
+    run(&paths(&home, &dev, None));
+    assert!(fs::read_to_string(&state)
+        .unwrap()
+        .contains("skill:10.0.0:demo"));
 }
 
 #[test]

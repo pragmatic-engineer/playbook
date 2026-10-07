@@ -141,11 +141,13 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let migrated = migrate::run_pending(&ctx);
 
     let shell_runtime_step = install_shell_runtime_step(self_root, &paths.home, paths.aliases);
-    let statusline_edited = migrate::user_edited(
-        &paths.home,
-        "statusline",
-        &statusline::playbook_statusline_path(&paths.home),
-    );
+    let statusline_dest = statusline::playbook_statusline_path(&paths.home);
+    let matches_shipped = self_root
+        .and_then(|r| fs::read(r.join("statusline.sh")).ok())
+        .zip(fs::read(&statusline_dest).ok())
+        .is_some_and(|(shipped, placed)| shipped == placed);
+    let statusline_edited =
+        !matches_shipped && migrate::user_edited(&paths.home, "statusline", &statusline_dest);
     let statusline_step = place_statusline_step(self_root, &paths.home, statusline_edited);
     if !statusline_edited && step_confirmed(&statusline_step) {
         migrate::record_statusline(&paths.home);
