@@ -30,7 +30,7 @@ pub const KNOWN_KEYS: &[&str] = &[
 pub fn default_value(key: &str) -> Option<Value> {
     match key {
         "autoReview.enabled" => Some(Value::Bool(true)),
-        "autoReview.type" => Some(Value::String("deep".to_string())),
+        "autoReview.type" => Some(Value::String("auto".to_string())),
         "autoReview.fix" => Some(Value::Bool(false)),
         "autoMerge.enabled" => Some(Value::Bool(false)),
         "commit.signOff" => Some(Value::Bool(true)),
@@ -51,7 +51,7 @@ pub fn default_value(key: &str) -> Option<Value> {
 /// enum constraint (including an unknown key).
 pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
     match key {
-        "autoReview.type" => Some(&["quick", "deep"]),
+        "autoReview.type" => Some(&["quick", "deep", "auto"]),
         "mode" => Some(&["ask", "auto"]),
         _ => None,
     }
@@ -74,7 +74,7 @@ mod tests {
     }
 
     #[test]
-    fn default_value_for_auto_review_type_is_deep() {
+    fn default_value_for_auto_review_type_is_auto() {
         // Arrange
         let key = "autoReview.type";
 
@@ -82,7 +82,7 @@ mod tests {
         let result = default_value(key);
 
         // Assert
-        assert_eq!(result, Some(Value::String("deep".to_string())));
+        assert_eq!(result, Some(Value::String("auto".to_string())));
     }
 
     #[test]
@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn allowed_enum_values_for_auto_review_type_is_quick_or_deep() {
+    fn allowed_enum_values_for_auto_review_type_is_quick_deep_or_auto() {
         // Arrange
         let key = "autoReview.type";
 
@@ -106,7 +106,7 @@ mod tests {
         let result = allowed_enum_values(key);
 
         // Assert
-        assert_eq!(result, Some(["quick", "deep"].as_slice()));
+        assert_eq!(result, Some(["quick", "deep", "auto"].as_slice()));
     }
 
     #[test]

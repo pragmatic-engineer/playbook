@@ -324,3 +324,20 @@ fn the_create_pull_request_command_documents_the_pr_draft_setting() {
         "Step 4 must not claim the draft is unconditional"
     );
 }
+
+#[test]
+fn the_self_review_step_runs_review_triage_for_auto_and_falls_back_to_deep() {
+    // Arrange
+    let step = self_review_step();
+
+    // Act
+    let runs_triage = step.contains("playbook pr review-triage");
+    let fails_to_deep = step.contains("a triage failure never skips or lightens the review");
+
+    // Assert
+    assert!(runs_triage, "Step 5 must run `playbook pr review-triage`");
+    assert!(
+        fails_to_deep,
+        "Step 5 must resolve a triage failure to deep"
+    );
+}

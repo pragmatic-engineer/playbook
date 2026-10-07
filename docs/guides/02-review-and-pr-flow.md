@@ -100,7 +100,7 @@ Six config keys shape the PR flow and the commit trailer. Read one with `playboo
 | Key | Default | What it does |
 |---|---|---|
 | `autoReview.enabled` | `true` | `/playbook:create-pull-request` reviews its own PR before it goes ready. |
-| `autoReview.type` | `deep` | Which review it runs: `deep` or `quick`. |
+| `autoReview.type` | `auto` | Which review it runs: `deep`, `quick`, or `auto`. `auto` runs `playbook pr review-triage`, which asks a small model three times and picks `quick` only when all three agree; any disagreement or failure runs `deep`. |
 | `autoReview.fix` | `false` | After the self-review, fixes every finding that survived the review's verification, pushes the fixes to the PR branch, and re-runs the scoped checks. |
 | `autoMerge.enabled` | `false` | After the review and fixes, marks the PR ready, waits until every check on the PR head is green, runs `gh pr merge <n> --auto`, then re-reads the PR and reports whether it merged, is queued, was rejected, or was closed. |
 | `commit.signOff` | `true` | Commits made through `/playbook:commit-and-push` carry a `Signed-off-by` trailer. |
