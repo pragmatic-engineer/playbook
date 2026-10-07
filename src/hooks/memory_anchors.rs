@@ -104,10 +104,10 @@ pub fn run(payload: &Payload) {
         if from_id.is_empty() || bump_seen.contains(from_id) {
             continue;
         }
-        memory_signals::bump_hit(&mem_dir(), from_id);
         newly_bumped.push(from_id.to_string());
     }
     if !newly_bumped.is_empty() {
+        memory_signals::bump_hits(&mem_dir(), &newly_bumped);
         append_seen(&bump_seen_path, &newly_bumped);
     }
 
@@ -211,9 +211,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
     // not keep re-bumping every prompt for the rest of the session, or the
     // promotion threshold would be trivially easy to cross from repetition
     // within one session rather than genuine cross-session recurrence.
-    for id in &newly_seen {
-        memory_signals::bump_hit(&mem_dir(), id);
-    }
+    memory_signals::bump_hits(&mem_dir(), &newly_seen);
 
     append_seen(&seen_path, &newly_seen);
     let msg = format!(

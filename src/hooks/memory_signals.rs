@@ -4,7 +4,7 @@
 //! `~/.config/playbook/memory/memory.signals.json` data layer: hit counters, staleness
 //! stamps, and a consolidation cursor. Every reader/writer of this file goes through this module's lock, so no caller's update is silently dropped by another's.
 
-use crate::common::atomic::with_dir_lock;
+use crate::common::atomic::{remove_stale_lock_dir, with_dir_lock, STALE_LOCK_AGE};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -75,6 +75,7 @@ struct NodeSignals {
 /// whichever write finishes second silently discards the other's change.
 pub fn modify_locked(mem_dir: &Path, f: impl FnOnce(&mut SignalsStore)) {
     let lock_path = mem_dir.join("memory.signals.json.lock");
+    remove_stale_lock_dir(&lock_path, STALE_LOCK_AGE);
     let (acquired, ()) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
         if let Some(mut store) = read_store(mem_dir) {
             store.version = 1;
@@ -95,22 +96,33 @@ pub fn modify_locked(mem_dir: &Path, f: impl FnOnce(&mut SignalsStore)) {
 /// a one-way ratchet: once `promoted` is `true`, this never resets it back
 /// to `false`.
 pub fn bump_hit(mem_dir: &Path, node_id: &str) {
+    bump_hits(mem_dir, &[node_id.to_string()]);
+}
+
+/// Applies `bump_hit` to every id in `ids` (repeats count each time) inside a
+/// single lock cycle and a single store rewrite.
+pub fn bump_hits(mem_dir: &Path, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
     let now = current_epoch_secs();
     modify_locked(mem_dir, |store| {
-        let entry = store.nodes.entry(node_id.to_string()).or_default();
-        let window_expired = entry
-            .window_start
-            .as_deref()
-            .and_then(|s| s.parse::<u64>().ok())
-            .is_none_or(|start| now.saturating_sub(start) > PROMOTION_WINDOW_SECS);
-        if window_expired {
-            entry.window_start = Some(now.to_string());
-            entry.hits = 1;
-        } else {
-            entry.hits += 1;
-        }
-        if entry.hits >= PROMOTION_HIT_THRESHOLD {
-            entry.promoted = true;
+        for node_id in ids {
+            let entry = store.nodes.entry(node_id.clone()).or_default();
+            let window_expired = entry
+                .window_start
+                .as_deref()
+                .and_then(|s| s.parse::<u64>().ok())
+                .is_none_or(|start| now.saturating_sub(start) > PROMOTION_WINDOW_SECS);
+            if window_expired {
+                entry.window_start = Some(now.to_string());
+                entry.hits = 1;
+            } else {
+                entry.hits += 1;
+            }
+            if entry.hits >= PROMOTION_HIT_THRESHOLD {
+                entry.promoted = true;
+            }
         }
     });
 }
