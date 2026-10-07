@@ -41,7 +41,7 @@ pub fn repo_slug() -> String {
 
 fn spawn_slug() -> String {
     #[cfg(test)]
-    SPAWNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    SPAWNS.with(|n| n.set(n.get() + 1));
     let mut command = Command::new("git");
     command.args(["--no-optional-locks", "remote", "get-url", "origin"]);
     let Some(output) = run_with_timeout(&mut command, GIT_TIMEOUT) else {
@@ -55,7 +55,9 @@ fn spawn_slug() -> String {
 }
 
 #[cfg(test)]
-static SPAWNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+thread_local! {
+    static SPAWNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Apply the same normalisation as the retired shell original's sed pipeline:
 /// strip a trailing `.git` (or `.git/`), a leading scheme (`https://`,
@@ -169,12 +171,12 @@ mod tests {
         let repo = repo_with_origin("slug-memo", "git@github.com:acme/widgets.git");
         let previous = std::env::current_dir().expect("read cwd");
         std::env::set_current_dir(&repo).expect("cd into repo");
-        let before = SPAWNS.load(std::sync::atomic::Ordering::SeqCst);
+        let before = SPAWNS.with(|n| n.get());
 
         // Act
         let first = repo_slug();
         let second = repo_slug();
-        let spawned = SPAWNS.load(std::sync::atomic::Ordering::SeqCst) - before;
+        let spawned = SPAWNS.with(|n| n.get()) - before;
 
         // Assert
         std::env::set_current_dir(&previous).expect("restore cwd");

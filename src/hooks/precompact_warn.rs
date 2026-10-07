@@ -8,10 +8,9 @@
 //! One divergence from the python source, non-observable: this port uses
 //! `common::atomic_append` where the python hook appends with a bare `open`.
 //!
-//! Local system time (via the `date` command, mirroring how
-//! `common::repo_slug` already shells out to `git`) stands in for python's
+//! Local system time via `localtime_r` stands in for python's
 //! `time.strftime`, which also renders in the local timezone. `std` alone
-//! has no timezone database to do this without shelling out.
+//! has no timezone database, and spawning `date` cost a process per compaction.
 
 use crate::common::atomic::with_dir_lock;
 use crate::common::payload::Payload;
@@ -150,7 +149,7 @@ mod tests {
     use std::process::Command;
 
     #[test]
-    fn timestamp_matches_the_date_command_without_spawning_it() {
+    fn timestamp_has_the_format_the_date_command_produced() {
         // Arrange, Act
         let before = current_timestamp();
         let out = Command::new("date")

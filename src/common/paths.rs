@@ -348,8 +348,7 @@ mod tests {
         let _ = fs::remove_dir_all(&repo);
     }
 
-    /// The only tests in this binary that mutate the process cwd, since
-    /// `repo_slug()` has no dir param to inject. Guarded: cwd is process-global.
+    // Tests that mutate the process cwd take this lock: cwd is process-global.
     use crate::common::test_support::lock_cwd;
 
     #[test]
