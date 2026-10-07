@@ -42,7 +42,17 @@ The server binds `127.0.0.1` on a port the OS picks, so there is never a port cl
 
 It uses `tiny_http`, which is synchronous. This binary has no async runtime on purpose (see the note at the top of `src/gate/db.rs`).
 
-The page polls `/api/data` every 5 seconds. That endpoint ingests anything new, then returns the totals, every grouping and two charts. The charts are inline SVG drawn on the server, with every label escaped.
+The page has three tabs: Overview (totals, cost per day and per model charts), Breakdowns (every grouping as a table, plus skill and agent counts) and Sessions. The tabs are buttons with `role="tab"` in a `tablist`, with arrow, Home and End keys. The chosen tab is kept in `localStorage` (never in the URL hash, which belongs to the token). The page polls every 5 seconds and fetches only the active tab's endpoint, so a hidden tab costs nothing. Every breakdown table sorts when you click a header (numbers compare as numbers).
+
+Three endpoints return usage data, all JSON, all behind the same guard (Host allowlist, `Sec-Fetch-Site`, token), which is one code path for any path under `/api/`:
+
+| Endpoint | Returns |
+|---|---|
+| `/api/data?range=` | Totals, every grouping (day, week, model, repo, branch, effort, account, agent), skill and agent counts, two charts. |
+| `/api/sessions?range=` | One row per session with a message in the range, newest first: start, end, duration, repo, branch, agent, main model and all models, messages, tokens, cost. At most 500 rows; `more` counts the rest. |
+| `/api/session?id=` | One session's messages (time, model, tokens, cost), the newest 2000 at most, and a cost-per-message chart. |
+
+Each endpoint ingests anything new first. The session `id` is checked before any lookup: 1 to 128 characters of letters, digits, `-`, `_` and `.`, starting with a letter or digit. Anything else is a 400, an unknown id is a 404. A session's row stats count only the messages inside the range, while its timeline shows all of them. The charts are inline SVG drawn on the server, with every label escaped.
 
 The page has a date range toggle: last 30, 60 or 90 days, the current month, or all time. It sends the choice as `/api/data?range=30d|60d|90d|month|all`, and the server filters usage and skill and agent counts to that window before it groups anything. Days are UTC. "Last N days" includes today. "Current month" runs from the 1st to the last day of the month. A request with no `range` gets all time, and an unknown value gets a 400. The response names the window in `range` (`key`, `start`, `end`), and the page shows those dates above the totals. The page opens on the last 30 days and remembers your choice in `localStorage`. The layout works on a phone: wide tables and charts scroll sideways in their own box.
 
@@ -72,5 +82,5 @@ Tests run against hand-written transcripts in `tests/fixtures/usage/` and a scra
 
 - Cost is an estimate (see above). It is the price at the published API rate, not what a subscription plan charges you.
 - It reads one machine's local history. It does not combine machines or users.
-- It does not track live agent sessions.
+- It does not track live agent sessions yet.
 - No LLM call is built in. The output is plain text and JSON, so the agent already running your session can read it and suggest where to cut cost.
