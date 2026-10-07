@@ -562,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn watermark_defaults_to_zero_and_only_moves_when_advanced() {
+    fn watermark_defaults_to_zero_and_only_moves_when_raised() {
         let dir = scratch_dir("usage-watermark");
         let conn = open_db(&dir.join("usage.db")).unwrap();
 
