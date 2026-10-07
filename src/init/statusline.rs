@@ -71,9 +71,11 @@ fn is_legacy_command(command: &str, home: &Path) -> bool {
     let (Some(interp), Some(path), None) = (tokens.next(), tokens.next(), tokens.next()) else {
         return false;
     };
-    let expanded =
-        path.replace("$HOME", &home.to_string_lossy())
-            .replacen('~', &home.to_string_lossy(), 1);
+    let home_str = home.to_string_lossy();
+    let expanded = match path.strip_prefix("~/") {
+        Some(rest) => format!("{home_str}/{rest}"),
+        None => path.replace("$HOME", &home_str),
+    };
     interp == "bash" && Path::new(&expanded) == playbook_statusline_path(home)
 }
 
@@ -94,7 +96,9 @@ pub fn migrate_legacy_command(settings_path: &Path, home: &Path) -> io::Result<b
     };
     *command = serde_json::Value::String(RUST_COMMAND.to_string());
     let body = serde_json::to_string_pretty(&value).map_err(io::Error::other)?;
-    crate::common::atomic::write_atomic(settings_path, &format!("{body}\n"))?;
+    // A symlinked settings.json (stow, chezmoi) stays a symlink.
+    let target = fs::canonicalize(settings_path)?;
+    crate::common::atomic::write_atomic(&target, &format!("{body}\n"))?;
     Ok(true)
 }
 

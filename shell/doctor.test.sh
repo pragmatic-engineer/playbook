@@ -328,7 +328,7 @@ scenario_layer5_match() {
 
 # G2: the old bash command at $HOME/.config/playbook/statusline.sh is flagged
 # OUTDATED even when the script is byte-identical to the shipped copy.
-scenario_layer5_match_config_playbook_path() {
+scenario_layer5_outdated_bash_command() {
   local home="$WORK/l5-g2" plugin="$WORK/l5-g2-plugin" bin="$WORK/l5-g2-bin" out
   mkdir -p "$home/.claude" "$home/.config/playbook" "$plugin"
   printf '#!/usr/bin/env bash\necho hi\n' > "$home/.config/playbook/statusline.sh"
@@ -337,6 +337,18 @@ scenario_layer5_match_config_playbook_path() {
   write_stub_binary "$bin" ""
   out="$(run_layer5 "$home" "$bin:/usr/bin:/bin" "$plugin")"
   [[ "$out" == 'OUTDATED bash $HOME/.config/playbook/statusline.sh' ]] || { echo "  got: $out"; return 1; }
+}
+
+# G2b: the absolute-home and tilde forms of the old command are OUTDATED too.
+scenario_layer5_outdated_other_forms() {
+  local home="$WORK/l5-g2b" bin="$WORK/l5-g2b-bin" out cmd
+  mkdir -p "$home/.claude"
+  write_stub_binary "$bin" ""
+  for cmd in "bash $home/.config/playbook/statusline.sh" 'bash ~/.config/playbook/statusline.sh'; do
+    write_statusline_settings "$home" "$cmd"
+    out="$(run_layer5 "$home" "$bin:/usr/bin:/bin")"
+    [[ "$out" == "OUTDATED $cmd" ]] || { echo "  got: $out"; return 1; }
+  done
 }
 
 # G3: the Rust command is the healthy value.
@@ -393,7 +405,8 @@ scenario_layer5_playbook_too_old() {
 
 run_scenario "F: statusLine.command path does not exist -> MISSING <path>" scenario_layer5_missing
 run_scenario "G: installed copy byte-identical to shipped -> MATCH"        scenario_layer5_match
-run_scenario "G2: old bash command on .config/playbook path -> OUTDATED"   scenario_layer5_match_config_playbook_path
+run_scenario "G2: old bash command on .config/playbook path -> OUTDATED"   scenario_layer5_outdated_bash_command
+run_scenario "G2b: absolute and tilde forms of the old command -> OUTDATED" scenario_layer5_outdated_other_forms
 run_scenario "G3: playbook statusline -> RUST"                             scenario_layer5_rust
 run_scenario "H: installed copy differs from shipped -> DIFFERS"           scenario_layer5_differs
 run_scenario "I: no statusLine.command at all -> NOT_CONFIGURED"           scenario_layer5_not_configured

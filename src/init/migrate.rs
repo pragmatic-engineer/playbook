@@ -539,11 +539,36 @@ mod tests {
     }
 
     #[test]
+    fn statusline_migration_rewrites_a_tilde_path() {
+        let h = home("sl-tilde");
+        let path = settings_with(&h, "bash ~/.config/playbook/statusline.sh");
+        statusline_rust_command(&ctx(&h));
+        assert_eq!(command_of(&path), "playbook statusline");
+    }
+
+    #[test]
+    fn statusline_migration_keeps_a_symlinked_settings_file_a_symlink() {
+        let h = home("sl-link");
+        let real = h.join("dotfiles").join("settings.json");
+        fs::create_dir_all(real.parent().unwrap()).unwrap();
+        let link = settings_with(&h, "bash $HOME/.config/playbook/statusline.sh");
+        fs::rename(&link, &real).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        statusline_rust_command(&ctx(&h));
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(command_of(&real), "playbook statusline");
+    }
+
+    #[test]
     fn statusline_migration_leaves_a_custom_command_alone() {
         let h = home("sl-custom");
         for cmd in [
             "bash $HOME/my-statusline.sh",
             "bash $HOME/.config/playbook/statusline.sh --extra",
+            "sh $HOME/.config/playbook/statusline.sh",
             "my-tool render",
         ] {
             let path = settings_with(&h, cmd);
