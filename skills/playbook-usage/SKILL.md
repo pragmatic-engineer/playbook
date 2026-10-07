@@ -5,7 +5,7 @@ description: Use when a session doesn't have prompts/SYSTEM_PROMPT.md installed 
 
 # Playbook Usage
 
-`pragmatic-engineer/playbook` is a Claude Code plugin: 12 slash commands under
+`pragmatic-engineer/playbook` is a Claude Code plugin: 14 slash commands under
 `/playbook:*` plus supporting skills and hooks. Its primary flow is a planning
 pipeline, `/playbook:plan` (its own divergent phase settles the direction,
 then converges on a verified plan) or `/playbook:adr` for a hard-to-reverse
@@ -30,7 +30,7 @@ for a yes before doing anything (see Trigger phrases, below).
 |---|---|---|
 | `/playbook:quick-review` | Single-pass PR review using grounding-review discipline and Conventional Comments; posts a pending GitHub review, or reports only when nothing was named to post to, `--self` was passed, or the resolved PR is yours. | A routine PR review, including a quick self-review of your own branch. |
 | `/playbook:deep-review` | Parallel swarm of specialist reviewer subagents (logic, test, security, data, types, perf, plus conditional lenses), consolidated and fact-checked into one pending review. | A substantial, risky, or cross-cutting PR that needs more scrutiny than `/playbook:quick-review`. |
-| `/playbook:address-pr-comments` | Walks unresolved PR review comments one at a time, applies fixes or drafts replies, commits and pushes, then posts replies with the new SHA. | Working through open review feedback on an existing PR. |
+| `/playbook:address-pr-comments` | Walks unresolved PR review comments one at a time, applies fixes or drafts replies, commits and pushes, then posts the queued replies. | Working through open review feedback on an existing PR. |
 
 ### Delivery
 
@@ -38,6 +38,7 @@ for a yes before doing anything (see Trigger phrases, below).
 |---|---|---|
 | `/playbook:commit-and-push` | Stages, formats, and commits with a generated message (signed and signed off), then pushes, with optional rebase. | Delivering staged changes as a commit, instead of hand-running `git commit`/`git push`. |
 | `/playbook:create-pull-request` | Runs pre-flight readiness checks and opens a PR with a conventional-commit title and the team template. | Opening a pull request, instead of hand-running `gh pr create`. |
+| `/playbook:fix` | Fixes one small bug end to end: a failing test, the smallest fix, one pull request. Escalates to /playbook:plan when the fix is not small. | A bug that is small and well understood ("fix this", "fix #123"). |
 
 ### Utilities
 

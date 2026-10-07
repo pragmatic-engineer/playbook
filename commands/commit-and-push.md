@@ -154,18 +154,13 @@ Invoke the `playbook:writing-style` skill before drafting. It governs voice, ban
 
 Analyse the staged diff from Step 1 and draft a commit message:
 
-**Header (<= 72 chars, no trailing period):**
+**Header (aim for 50 characters, never over 72, no trailing period):**
 
 - If the branch matches `[A-Z]{2,}-\d+` (e.g. `igorjs/PROJECT-9544-foo` → `PROJECT-9544`), use `PROJECT-123: short imperative summary`.
 - Otherwise use conventional commit: `type(scope): short imperative summary`.
   - Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`.
 
-**Body:**
-
-- Blank line after the header.
-- 2-4 bullets describing the change, derived strictly from the diff.
-- Each bullet starts with a verb, under ~15 words where possible.
-- Group related file changes into one bullet; don't list every file.
+**Body:** only when the why is not obvious from the header. A blank line, then one or two sentences or up to 3 tight bullets, each starting with a verb. Group related file changes; never list every file.
 
 **Optional sections (only if applicable):**
 
@@ -213,8 +208,8 @@ EOF
 # stands down wherever the trailer is already handled: --no-signoff was passed
 # on purpose, the message already carries a Signed-off-by line, or a repo
 # prepare-commit-msg or commit-msg hook writes one itself. A failed config read
-# keeps the default. Cryptographic signing (--gpg-sign) is separate and always
-# on, using the key and format from git config; commit.signOff never changes it.
+# keeps the default. Cryptographic signing (--gpg-sign) is separate: on whenever
+# user.signingkey is set; commit.signOff never changes it.
 
 # True only when the hook WRITES the trailer: git interpret-trailers with a
 # Signed-off-by --trailer, --signoff passed to git, or an append of a
@@ -245,7 +240,9 @@ for HOOK_NAME in prepare-commit-msg commit-msg; do
   fi
 done
 
-git commit ${AMEND_FLAG} ${SIGNOFF_FLAG} --gpg-sign --file "$MSG_FILE"
+GPG_FLAG=""
+git config --get user.signingkey >/dev/null && GPG_FLAG="--gpg-sign"
+git commit ${AMEND_FLAG} ${SIGNOFF_FLAG} ${GPG_FLAG} --file "$MSG_FILE"
 
 # Identify base branch (main or master), then rebase if we are behind
 BASE=""
