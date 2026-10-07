@@ -369,7 +369,8 @@ pub enum PrCommand {
         #[arg(long)]
         dir: Option<String>,
     },
-    /// Push the branch and open a draft PR from a drafted title and body.
+    /// Push the branch and open a PR from a drafted title and body, as a draft
+    /// unless the `pr.draft` setting is `false`.
     Create {
         /// PR title, at most 72 characters.
         #[arg(long)]

@@ -473,6 +473,7 @@ fn the_pr_and_commit_settings_default_then_follow_a_global_set() {
         ("autoReview.fix", "false", "true"),
         ("autoMerge.enabled", "false", "true"),
         ("commit.signOff", "true", "false"),
+        ("pr.draft", "true", "false"),
     ];
 
     for (key, default, flipped) in rows {

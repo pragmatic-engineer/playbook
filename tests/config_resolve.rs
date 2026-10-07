@@ -235,3 +235,70 @@ fn an_unknown_key_present_in_a_tier_file_still_errors() {
 
     let _ = fs::remove_dir_all(&home);
 }
+
+#[test]
+fn pr_draft_defaults_to_true() {
+    // Arrange
+    let home = scratch_home("pr-draft-default");
+
+    // Act
+    let got = resolve("pr.draft", &home, Some("owner/repo"));
+
+    // Assert
+    assert_eq!(got.unwrap(), (Value::Bool(true), Source::Default));
+    assert!(playbook::pr::create::draft_setting(
+        &home,
+        Some("owner/repo")
+    ));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn pr_draft_repo_beats_global_in_both_directions() {
+    for (global, repo) in [(false, true), (true, false)] {
+        // Arrange
+        let home = scratch_home("pr-draft-tiers");
+        write_json(
+            &global_config_path(&home),
+            &format!(r#"{{"pr": {{"draft": {global}}}}}"#),
+        );
+        write_json(
+            &repo_config_path(&home, "owner", "repo"),
+            &format!(r#"{{"pr": {{"draft": {repo}}}}}"#),
+        );
+
+        // Act
+        let got = resolve("pr.draft", &home, Some("owner/repo"));
+
+        // Assert
+        assert_eq!(got.unwrap(), (Value::Bool(repo), Source::Repo));
+        assert_eq!(
+            playbook::pr::create::draft_setting(&home, Some("owner/repo")),
+            repo
+        );
+
+        let _ = fs::remove_dir_all(&home);
+    }
+}
+
+#[test]
+fn pr_draft_false_opens_ready_and_a_broken_or_invalid_config_stays_draft() {
+    // Arrange
+    let home = scratch_home("pr-draft-global");
+    write_json(&global_config_path(&home), r#"{"pr": {"draft": false}}"#);
+
+    // Act
+    let auto = playbook::pr::create::draft_setting(&home, None);
+    write_json(&global_config_path(&home), r#"{"pr": {"draft": "banana"}}"#);
+    let invalid = playbook::pr::create::draft_setting(&home, None);
+    write_json(&global_config_path(&home), "not json");
+    let broken = playbook::pr::create::draft_setting(&home, None);
+
+    // Assert
+    assert!(!auto);
+    assert!(invalid, "an invalid value must not publish a ready PR");
+    assert!(broken, "a broken config must not publish a ready PR");
+
+    let _ = fs::remove_dir_all(&home);
+}

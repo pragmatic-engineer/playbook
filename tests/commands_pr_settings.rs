@@ -305,3 +305,19 @@ fn commit_and_push_always_signs_and_the_docs_say_so() {
     assert!(guide.contains("always signed"));
     assert!(!guide.contains("already passes `-s`"));
 }
+
+#[test]
+fn the_create_pull_request_command_documents_the_pr_draft_setting() {
+    // Arrange
+    let text = command_text("create-pull-request");
+
+    // Act
+    let step4 = step_section(&text, "4");
+
+    // Assert
+    assert!(step4.contains("pr.draft"), "Step 4 must name `pr.draft`");
+    assert!(
+        !step4.contains("unconditionally"),
+        "Step 4 must not claim the draft is unconditional"
+    );
+}

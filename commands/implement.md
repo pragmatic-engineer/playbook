@@ -488,7 +488,7 @@ Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MU
 
 **Never pass `--delete-branch`.** It is redundant where the repo sets `delete_branch_on_merge`, and it deletes the LOCAL branch even when the merge itself fails (seen during a 503), which is the one state this loop must not land in.
 
-**1. Promote to ready.** `/playbook:create-pull-request` always opens a draft, and a draft cannot enqueue (`Pull request is a draft`). Promote it directly:
+**1. Promote to ready.** `/playbook:create-pull-request` opens a draft unless `pr.draft` is `false`, and a draft cannot enqueue (`Pull request is a draft`). Promote it directly (a no-op when the PR already opened ready):
 
 ```bash
 gh pr ready "$BRANCH"

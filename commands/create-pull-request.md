@@ -8,7 +8,7 @@ agent: git
 
 # Create Pull Request
 
-Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `playbook:engineering-standards` (readiness, size) and `playbook:writing-style` (voice, banned words, no dashes). Every PR opens as a **draft**, always: `--ready` no longer publishes it immediately, it marks it for promotion to ready once Step 5's self-review passes, since a human should never be the first reviewer of unreviewed code.
+Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `playbook:engineering-standards` (readiness, size) and `playbook:writing-style` (voice, banned words, no dashes). A PR opens as a **draft** by default, controlled by the `pr.draft` setting (`true`, the default, or `false`): `--ready` does not publish it immediately, it marks it for promotion to ready once Step 5's self-review passes, since a human should never be the first reviewer of unreviewed code. With `pr.draft` set to `false`, the PR opens ready for review instead.
 
 This creates a **new** PR. If one already exists for the branch, this stops and points you at `/playbook:address-pr-comments` or `/playbook:quick-review`.
 
@@ -24,7 +24,7 @@ This command is built to run in an isolated subagent (`context: fork`) so the di
 
 Read these from `$ARGUMENTS` once and remember them. `--base`, `--ticket`, and `--dir` go straight onto the two `playbook pr` calls, and `--ready` is read by Step 5.
 
-- `--ready` → promote the PR to ready once Step 5's self-review passes, instead of leaving it a draft. Does NOT skip the draft stage: every PR opens as a draft regardless of this flag.
+- `--ready` → promote the PR to ready once Step 5's self-review passes, instead of leaving it a draft. Does NOT change how the PR opens: that is decided only by `pr.draft`.
 - `--base <branch>` → override the base branch. Pass it to both `playbook pr` calls.
 - `--ticket <ID>` → force the ticket, skipping branch auto-detect (`none` omits the line). Pass it to `playbook pr prepare`.
 - `--dir <path>` → publish the branch checked out in this directory. A caller that names a directory or branch outside the shell's current directory (for example `/playbook:implement` publishing a Segment that lives in a git worktree) passes it here. Pass it to both `playbook pr` calls. A forked shell can reset to the main checkout between calls, so without `--dir` the command acts on whatever repo the shell is in.
@@ -175,7 +175,7 @@ Rules for filling it:
 
 ## Step 4: Push and create
 
-Every PR opens as a **draft**, unconditionally. `--ready` is not used here: Step 5 reads it, after the self-review, to decide whether to promote the draft.
+`playbook pr create` reads the `pr.draft` setting itself (`playbook config get pr.draft`, default `true`) and passes `--draft` to `gh` only when it is `true`, so do not add a draft flag yourself. With the default, the PR opens as a draft. With `pr.draft` set to `false`, it opens ready for review. `--ready` is not used here: Step 5 reads it, after the self-review, to decide whether to promote a draft.
 
 Write the finished body to `<state_dir>/pr-body.md` (the `state_dir=` value from Step 1) and create the PR in one command:
 
@@ -186,7 +186,7 @@ PRBODY_EOF
 playbook pr create --title "<title>" --body-file "<state_dir>/pr-body.md" [--base <branch>] [--dir <path>]
 ```
 
-It checks the title length and the attribution and dash rules, pushes (a rejected push stops the run before any PR exists), confirms the remote carries your HEAD, opens the draft, and checks that the PR's base matches the one resolved in Step 1, correcting it if not. It prints `PR: <url>` and a one-line summary.
+It checks the title length and the attribution and dash rules, pushes (a rejected push stops the run before any PR exists), confirms the remote carries your HEAD, opens the PR (as a draft unless `pr.draft` is `false`), and checks that the PR's base matches the one resolved in Step 1, correcting it if not. It prints `PR: <url>` and a one-line summary.
 
 If it refuses with a list of problems, nothing was pushed or created: fix the title or body (or amend the named commit) and run it again. If a run fails after the PR already exists, running it again reuses the open PR and finishes the base check.
 
@@ -207,7 +207,7 @@ This step is not executable from inside this command's own forked context: it ru
 3. Fix the findings. A push updates the draft automatically, no new PR needed.
    - `autoReview.fix` is `false`: fix any findings the review surfaced, as you judge best.
    - `autoReview.fix` is `true`: fix every finding that survived the review's own verification sweep (the fact-check in `deep-review`, the grounding pass in `quick-review`), not only the ones that look easy. Commit the fixes through `/playbook:commit-and-push`, which pushes them to the PR branch, then re-run the scoped checks for the changed area (the repo's test, lint and format commands for those files) and fix what they report. If no review ran (disabled, or auto mode with no review), there are no findings to fix: say so.
-4. If `--ready` was passed (the caller wanted this published, not left as a draft), or `autoMerge.enabled` is `true` (a PR cannot merge while it is a draft): run `gh pr ready <branch>` now, after step 1 decided whether a review runs (and after fixing any findings when it did), not before. `--ready` means "ready once step 1 has run," whether that ran a review or explicitly skipped one for a disabled repo; it never means "skip step 1."
+4. If the PR is already ready (it printed `Created ready PR`, because `pr.draft` is `false`), skip `gh pr ready`, since there is nothing to promote. Otherwise, if `--ready` was passed (the caller wanted this published, not left as a draft), or `autoMerge.enabled` is `true` (a PR cannot merge while it is a draft): run `gh pr ready <branch>` now, after step 1 decided whether a review runs (and after fixing any findings when it did), not before. `--ready` means "ready once step 1 has run," whether that ran a review or explicitly skipped one for a disabled repo; it never means "skip step 1."
 5. If `autoMerge.enabled` is `true`, merge the PR only when its code was reviewed and every check is green. Take these in order, and stop at the first one that fails:
    - **Reviewed:** in auto mode, when no review ran (any caller other than `/playbook:implement`), do not merge, even with `autoMerge.enabled` on. The PR is already marked ready from step 4: say in the final report that auto-merge was skipped because no review covered the code, and stop.
    - **Stacked PR:** if the PR's base is another open PR's branch rather than the repo's default branch, do not merge it before that base merges. Check with `gh pr view <n> --json baseRefName` and `gh pr list --state open --head <baseRefName> --json number`. Say it is waiting on its base and stop, leaving the PR ready.
@@ -224,6 +224,6 @@ This step is not executable from inside this command's own forked context: it ru
      - `state` is `OPEN` and `autoMergeRequest` is set: queued, or auto-merge armed and waiting. Keep reading until the limit, then report it as still waiting.
      - `state` is `OPEN` and `autoMergeRequest` is null: the merge was rejected or auto-merge was cleared. Report it and stop.
      - `state` is `CLOSED`: closed without merging.
-6. If neither `--ready` nor `autoMerge.enabled` applies: stop after step 3. The caller asked for a draft; leave it one.
+6. If neither `--ready` nor `autoMerge.enabled` applies: stop after step 3. Leave the PR in the state it opened in (a draft by default).
 
 Never skip straight to `gh pr ready` on a fresh draft without running step 1 first, even when step 1 concludes with "review skipped" rather than an actual review.

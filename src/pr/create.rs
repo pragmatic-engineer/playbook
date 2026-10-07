@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! `pr create`: everything after the title and body are written (validate,
-//! push, confirm the push landed, open the draft PR, confirm its base).
+//! push, confirm the push landed, open the PR, confirm its base).
 
 use crate::pr::guard::{attribution_problems, dash_problems};
 use crate::pr::shared::{current_branch, git, git_net, resolve_base, GhClient};
@@ -61,13 +61,24 @@ fn refuse_bad_text(title: &str, body_file: &str, base: &str) -> Result<(), Strin
     ))
 }
 
-/// Pushes the current branch and opens a draft PR for it. The push gates the
-/// create: a rejected push must never open a PR missing the local commits.
+/// Whether `pr.draft` says to open the PR as a draft; only a resolved `false`
+/// opens it ready, so an unreadable or non-bool value stays a draft.
+pub fn draft_setting(home: &Path, repo_slug: Option<&str>) -> bool {
+    crate::config::resolve_valid("pr.draft", home, repo_slug)
+        .ok()
+        .and_then(|(value, _, _)| value.as_bool())
+        .unwrap_or(true)
+}
+
+/// Pushes the current branch and opens a PR for it, as a draft when `draft`.
+/// The push gates the create: a rejected push must never open a PR missing
+/// the local commits.
 pub fn run(
     gh: &dyn GhClient,
     title: &str,
     body_file: &str,
     base_arg: Option<&str>,
+    draft: bool,
 ) -> Result<String, String> {
     let length = title.chars().count();
     if length > TITLE_LIMIT {
@@ -109,8 +120,11 @@ pub fn run(
             format!("Using the already open PR ({branch} -> {base})"),
         ),
         _ => (
-            gh.pr_create(title, body_file, &base)?,
-            format!("Created draft PR: {title} ({branch} -> {base})"),
+            gh.pr_create(title, body_file, &base, draft)?,
+            format!(
+                "Created {} PR: {title} ({branch} -> {base})",
+                if draft { "draft" } else { "ready" }
+            ),
         ),
     };
 

@@ -417,7 +417,12 @@ fn zero_is_still_accepted_for_the_other_numeric_keys() {
     assert_written("worktreeCleanup.staleAfterDays", json!(0));
 }
 
-const BOOL_SETTINGS: [&str; 3] = ["autoReview.fix", "autoMerge.enabled", "commit.signOff"];
+const BOOL_SETTINGS: [&str; 4] = [
+    "autoReview.fix",
+    "autoMerge.enabled",
+    "commit.signOff",
+    "pr.draft",
+];
 
 #[test]
 fn a_non_bool_for_the_pr_and_commit_settings_is_rejected_and_writes_nothing() {

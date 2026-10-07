@@ -21,7 +21,7 @@ fn body(fx: &Fixture) -> String {
 
 fn create(fx: &Fixture, gh: &FakeGh, title: &str, base: Option<&str>) -> Result<String, String> {
     let body_file = body(fx);
-    in_dir(&fx.work, || run(gh, title, &body_file, base))
+    in_dir(&fx.work, || run(gh, title, &body_file, base, true))
 }
 
 fn remote_has_branch(fx: &Fixture, branch: &str) -> bool {
@@ -115,7 +115,13 @@ fn a_missing_body_file_is_rejected_before_pushing() {
 
     // Act
     let got = in_dir(&fx.work, || {
-        run(&gh, "feat(pr): add a thing", "/nonexistent/body.md", None)
+        run(
+            &gh,
+            "feat(pr): add a thing",
+            "/nonexistent/body.md",
+            None,
+            true,
+        )
     });
 
     // Assert
@@ -299,7 +305,7 @@ fn create_with_body(fx: &Fixture, gh: &FakeGh, title: &str, text: &str) -> Resul
     fs::create_dir_all(&fx.state).expect("state dir");
     fs::write(&path, text).expect("body");
     let body_file = path.to_str().expect("utf8").to_string();
-    in_dir(&fx.work, || run(gh, title, &body_file, None))
+    in_dir(&fx.work, || run(gh, title, &body_file, None, true))
 }
 
 fn assert_nothing_published(fx: &Fixture, gh: &FakeGh) {
@@ -392,4 +398,32 @@ fn dashes_inside_code_do_not_block_a_clean_pr() {
     // Assert
     assert!(got.is_ok(), "{got:?}");
     assert_eq!(gh.count("pr_create"), 1);
+}
+
+#[test]
+fn draft_true_opens_a_draft_and_false_opens_ready_for_review() {
+    for draft in [true, false] {
+        // Arrange
+        let fx = Fixture::new("draftflag", "feat/x");
+        fx.commit_lines("a.txt", 2);
+        let gh = FakeGh::creating(URL);
+        let body_file = body(&fx);
+
+        // Act
+        let got = in_dir(&fx.work, || {
+            run(&gh, "feat(pr): add a thing", &body_file, None, draft)
+        })
+        .expect("creates");
+
+        // Assert
+        assert_eq!(gh.created_draft.get(), Some(draft));
+        assert!(
+            got.contains(if draft {
+                "Created draft PR"
+            } else {
+                "Created ready PR"
+            }),
+            "got {got}"
+        );
+    }
 }

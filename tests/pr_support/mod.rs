@@ -152,6 +152,8 @@ pub struct FakeGh {
     pub base_view_error: Option<String>,
     pub calls: RefCell<Vec<String>>,
     pub created_base: RefCell<String>,
+    /// The `draft` flag the last `pr_create` call received.
+    pub created_draft: std::cell::Cell<Option<bool>>,
 }
 
 impl FakeGh {
@@ -180,8 +182,15 @@ impl GhClient for FakeGh {
         self.calls.borrow_mut().push("repo_default_branch".into());
         Ok(self.default_branch.clone())
     }
-    fn pr_create(&self, _title: &str, _body_file: &str, base: &str) -> Result<String, String> {
+    fn pr_create(
+        &self,
+        _title: &str,
+        _body_file: &str,
+        base: &str,
+        draft: bool,
+    ) -> Result<String, String> {
         self.calls.borrow_mut().push("pr_create".into());
+        self.created_draft.set(Some(draft));
         *self.created_base.borrow_mut() = base.to_string();
         Ok(self.created_url.clone())
     }

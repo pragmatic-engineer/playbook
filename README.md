@@ -188,15 +188,16 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 
 ### PR and commit settings
 
-Three config keys let each user, org or repo choose how far the PR flow goes. Set one in your global config to apply it everywhere:
+Four config keys let each user, org or repo choose how far the PR flow goes. Set one in your global config to apply it everywhere:
 
 ```bash
 playbook config set --global autoReview.fix true       # fix every finding the self-review confirms, then push
 playbook config set --global autoMerge.enabled true    # mark ready, wait for green checks, then merge with --auto
 playbook config set --global commit.signOff false      # stop adding Signed-off-by (default: true)
+playbook config set --global pr.draft false             # open PRs ready for review (default: true, draft)
 ```
 
-`autoReview.fix` and `autoMerge.enabled` default to `false`. Auto-merge never uses `--admin` or `--delete-branch`, and never merges with a failing or unfinished check or, in auto mode, a PR no review covered. A PR with no checks at all merges once a two-minute look finds none. `commit.signOff` defaults to `true`. See [PR and commit settings](docs/guides/02-review-and-pr-flow.md#pr-and-commit-settings) for the full rules.
+`autoReview.fix` and `autoMerge.enabled` default to `false`. Auto-merge never uses `--admin` or `--delete-branch`, and never merges with a failing or unfinished check or, in auto mode, a PR no review covered. A PR with no checks at all merges once a two-minute look finds none. `commit.signOff` defaults to `true`. `pr.draft` defaults to `true`, so PRs open as drafts; set it to `false` to open them ready for review. See [PR and commit settings](docs/guides/02-review-and-pr-flow.md#pr-and-commit-settings) for the full rules.
 
 ## Auto mode
 
