@@ -1,7 +1,7 @@
 # ADR 0013: Org-level memory scoping
 
 - **Status:** Accepted
-- **Date:** 2026-09-04
+- **Date created:** 2026-09-04
 - **Date modified:** 2026-09-04
 
 ## Context
