@@ -95,7 +95,7 @@ These commands read the run mode first. In `ask` mode, which is the default, not
 
 ## PR and commit settings
 
-Six config keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`, and set it with `playbook config set [--global|--org] <key> <value>`. Without a flag it writes the repo tier; `--org` writes the org tier and `--global` writes your own, for every repo. The repo tier wins over org, and org over global.
+Six config keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`, and set it with `playbook config set [--global|--org] <key> <value>`. Without a flag it writes the repo tier; `--org` writes the org tier and `--global` writes your own, for every repo. The repo tier wins over org, and org over global. The full list of keys is in [Config keys](04-config-keys.md).
 
 | Key | Default | What it does |
 |---|---|---|
