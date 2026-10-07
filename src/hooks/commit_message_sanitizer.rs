@@ -77,5 +77,11 @@ fn context(findings: &engine::Findings) -> Option<String> {
             findings.unread.join("; ")
         ));
     }
+    if findings.signed_off {
+        parts.push(
+            "commit-message-sanitizer added -s so the commit carries a Signed-off-by line."
+                .to_string(),
+        );
+    }
     (!parts.is_empty()).then(|| parts.join(" "))
 }

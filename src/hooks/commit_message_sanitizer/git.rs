@@ -8,11 +8,12 @@
 
 use super::engine::{git_output, nested_word, Call, Findings, Plan};
 use super::sources::{
-    apply, from_path, from_stdin, from_word, resolve, value_span, Rule, Source, Target,
+    apply, feed, from_path, from_stdin, from_word, joined, read_message, resolve, value_span,
+    Named, Rule, Source, Target,
 };
-use crate::common::attribution::{drop_lines, is_ai_identity, problems, trailer_shape};
+use crate::common::attribution::{has_sign_off, is_ai_identity, problems, sanitize, trailer_shape};
 use crate::common::cli_opts::{has, named, Opt, Spec};
-use crate::common::shell::{is_assignment, quote};
+use crate::common::shell::{is_assignment, program_name, quote};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -37,7 +38,15 @@ const COMMIT: Spec = Spec {
         "squash",
         "trailer",
     ],
-    long_flags: &["amend", "no-edit", "edit", "reset-author", "signoff"],
+    long_flags: &[
+        "amend",
+        "no-edit",
+        "edit",
+        "reset-author",
+        "signoff",
+        "no-signoff",
+        "dry-run",
+    ],
     other_long: &[
         "quiet",
         "verbose",
@@ -51,7 +60,6 @@ const COMMIT: Spec = Spec {
         "inter-hunk-context",
         "only",
         "no-verify",
-        "dry-run",
         "short",
         "branch",
         "ahead-behind",
@@ -78,7 +86,6 @@ const COMMIT: Spec = Spec {
         "no-squash",
         "no-reset-author",
         "no-trailer",
-        "no-signoff",
         "no-template",
         "no-cleanup",
         "no-status",
@@ -200,12 +207,13 @@ const TAG: Spec = Spec {
     ],
     abbreviate: true,
 };
+// `git commit-tree` has no `--message` or `--file`, only the short options.
 const COMMIT_TREE: Spec = Spec {
     short_values: "mFp",
     short_attached: "S",
-    long_values: &["message", "file"],
+    long_values: &[],
     long_flags: &[],
-    other_long: &[],
+    other_long: &["gpg-sign", "no-gpg-sign"],
     abbreviate: true,
 };
 
@@ -240,6 +248,8 @@ const GLOBAL_WITH_VALUE: [&str; 6] = [
     "--config-env",
 ];
 const MESSAGE_FILES: [&str; 2] = ["MERGE_MSG", "SQUASH_MSG"];
+/// Longest hook script read when looking for a sign-off.
+const MAX_SCRIPT_BYTES: u64 = 1 << 20;
 
 /// What every subcommand handler needs.
 struct Run<'a> {
@@ -352,26 +362,112 @@ fn drop_identity_config(
 }
 
 fn commit(run: &Run, plan: &mut Plan, findings: &mut Findings) {
-    let call = &run.call;
-    let opts = COMMIT.scan(&call.cmd().words[run.rest..]);
-    let label = "the commit message";
-    let (sources, written) = message_sources(run, &opts, label, findings);
+    let opts = COMMIT.scan(&run.call.cmd().words[run.rest..]);
+    let (sources, written) = message_sources(run, &opts, "the commit message", findings);
+    let mut known = (!sources.is_empty()).then(|| joined(&sources));
     apply(sources, Rule::Commit, true, plan, findings);
     drop_ai_options(run, &opts, plan, findings);
+    if !written {
+        known = reused_message(run, &opts, plan, findings);
+    }
+    sign_off(run, &opts, known.as_deref(), plan, findings);
+}
 
-    let reused = named(&opts, &["C", "c", "reuse-message", "reedit-message"]);
-    let amends_unchanged = has(&opts, &["amend"]) && has(&opts, &["no-edit"]);
-    if written {
-        return;
+/// The message a commit takes from the repository instead of the command: the
+/// one `-C` or `--amend --no-edit` reuses, or the one a merge or a squash left
+/// behind. It is rewritten to come from a heredoc when it carries
+/// attribution. An earlier git command in the same call may change what the
+/// repository holds by the time this one runs, so then it is left alone.
+fn reused_message(
+    run: &Run,
+    opts: &[Opt],
+    plan: &mut Plan,
+    findings: &mut Findings,
+) -> Option<String> {
+    let reused = named(opts, &["C", "c", "reuse-message", "reedit-message"]);
+    let amends = has(opts, &["amend"]);
+    let source = match reused.first() {
+        Some(opt) => Some((Some(*opt), opt.value.clone().unwrap_or_default())),
+        None if amends && has(opts, &["no-edit"]) => Some((None, "HEAD".to_string())),
+        None if !amends => None,
+        None => return None,
+    };
+    if git_ran_earlier(&run.call) {
+        findings
+            .unread
+            .push("the reused message (an earlier git command in this call may change it)".into());
+        return None;
     }
-    if let Some(opt) = reused.first() {
-        let rev = opt.value.clone().unwrap_or_default();
-        reuse(run, Some(opt), &rev, plan, findings);
-    } else if amends_unchanged {
-        reuse(run, None, "HEAD", plan, findings);
-    } else if !has(&opts, &["amend"]) {
-        sanitize_stored_messages(call, plan, findings);
+    match source {
+        Some((opt, rev)) => reuse(run, opt, &rev, plan, findings),
+        None => stored_message(run, plan, findings),
     }
+}
+
+/// Whether a command before this one in the script runs git, or a script that
+/// mentions it.
+fn git_ran_earlier(call: &Call) -> bool {
+    call.cmds[..call.index].iter().any(|cmd| {
+        cmd.words.iter().any(|word| {
+            program_name(word) == "git"
+                || (word.contains(char::is_whitespace) && word.to_lowercase().contains("git"))
+        })
+    })
+}
+
+/// Adds `-s` unless a sign-off is already settled: asked for or refused on the
+/// command line, in the message, or added by the repository's own hook. The
+/// commit then carries the Signed-off-by line the DCO check needs.
+fn sign_off(
+    run: &Run,
+    opts: &[Opt],
+    known: Option<&str>,
+    plan: &mut Plan,
+    findings: &mut Findings,
+) {
+    let call = &run.call;
+    let settled = has(opts, &["s", "signoff", "no-signoff", "dry-run"])
+        || known.is_some_and(|text| has_sign_off(&sanitize(text).text))
+        || hook_signs_off(call.dir);
+    if !settled {
+        let at = call.cmd().spans[run.rest - 1].end;
+        plan.edits.push((at..at, " -s".to_string()));
+        findings.signed_off = true;
+    }
+}
+
+/// Whether the repository's `prepare-commit-msg` or `commit-msg` hook, in the
+/// hooks path git uses, adds a Signed-off-by line itself.
+fn hook_signs_off(dir: &Path) -> bool {
+    let Some(hooks) = git_output(dir, &["rev-parse", "--git-path", "hooks"]) else {
+        return false;
+    };
+    let hooks = resolve(hooks.trim(), dir);
+    ["prepare-commit-msg", "commit-msg"].iter().any(|name| {
+        runnable_script(&hooks.join(name)).is_some_and(|script| {
+            script.contains("--signoff")
+                || script.contains("Signed-off-by")
+                || (script.contains("interpret-trailers") && script.contains("--trailer"))
+        })
+    })
+}
+
+/// The text of an executable file, which git runs as a hook.
+fn runnable_script(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o111 == 0 {
+            return None;
+        }
+    }
+    if !meta.is_file() || meta.len() > MAX_SCRIPT_BYTES {
+        return None;
+    }
+    std::fs::read(path)
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn tag(run: &Run, plan: &mut Plan, findings: &mut Findings) {
@@ -443,9 +539,13 @@ fn message_sources(
             }
             "F" | "file" => {
                 written = true;
-                let dynamic = call.cmd().spans[value_at].dynamic;
-                let place = value_span(call, value_at, opt.inline_at);
-                sources.extend(from_path(call, value, dynamic, place, label, findings));
+                let named = Named {
+                    path: value,
+                    dynamic: call.cmd().spans[value_at].dynamic,
+                    replace: value_span(call, value_at, opt.inline_at),
+                    opener: "- ",
+                };
+                sources.extend(from_path(call, &named, label, findings));
             }
             _ => {}
         }
@@ -493,55 +593,35 @@ fn trailer_is_ai(value: &str) -> bool {
 }
 
 /// Rewrites a commit that reuses a message, from `-C` or from `--amend
-/// --no-edit`, to pass the sanitised message on standard input instead. The
+/// --no-edit`, to read the sanitised message from a heredoc instead. The
 /// message and the author are read now, so the rewritten call does not depend
 /// on what the repository looks like when it runs.
-fn reuse(run: &Run, option: Option<&Opt>, rev: &str, plan: &mut Plan, findings: &mut Findings) {
+fn reuse(
+    run: &Run,
+    option: Option<&Opt>,
+    rev: &str,
+    plan: &mut Plan,
+    findings: &mut Findings,
+) -> Option<String> {
     let call = &run.call;
-    let Some(message) = git_output(call.dir, &["log", "-1", "--format=%B", rev, "--"]) else {
-        return;
-    };
-    let removed = problems(&message);
-    if removed.is_empty() {
-        return;
+    let message = git_output(call.dir, &["log", "-1", "--format=%B", rev, "--"])?;
+    if !problems(&message).is_empty() {
+        let spans = &call.cmd().spans;
+        let (replace, opener) = match option {
+            Some(opt) => (
+                spans[opt.word + run.rest].start..spans[opt.value_word + run.rest].end,
+                format!("{}-F - ", author_flags(call.dir, rev)),
+            ),
+            None => {
+                let at = spans[run.rest - 1].end;
+                (at..at, " -F - ".to_string())
+            }
+        };
+        let label = format!("the message reused from {rev}");
+        let source = feed(call, label, message.clone(), replace, opener);
+        apply(vec![source], Rule::Commit, false, plan, findings);
     }
-    let Some(position) = line_end(call) else {
-        findings
-            .unread
-            .push(format!("the message reused from {rev}"));
-        return;
-    };
-    let text = format!("{}\n", drop_lines(&message, &removed).trim_end());
-    let delimiter = unique_delimiter(&text);
-    let operator = format!("-F - <<'{delimiter}'");
-    let flags = match option {
-        Some(_) => author_flags(call.dir, rev),
-        None => String::new(),
-    };
-    let spans = &call.cmd().spans;
-    match option {
-        Some(opt) => {
-            let range = spans[opt.word + run.rest].start..spans[opt.value_word + run.rest].end;
-            plan.edits.push((range, format!("{flags}{operator}")));
-        }
-        None => plan
-            .edits
-            .push((call.end()..call.end(), format!(" {operator}"))),
-    }
-    // At the very end of a script the body needs a line break of its own.
-    let lead = if position.start == call.chars.len() && !call.chars.ends_with(&['\n']) {
-        "\n"
-    } else {
-        ""
-    };
-    plan.edits
-        .push((position, format!("{lead}{text}{delimiter}\n")));
-    for (n, shape) in removed {
-        findings.notes.push(format!(
-            "the message reused from {rev} line {n} ({})",
-            shape.name()
-        ));
-    }
+    Some(message)
 }
 
 /// `--author` and `--date` copied from `rev`, unless its author is an AI.
@@ -563,63 +643,33 @@ fn author_flags(dir: &Path, rev: &str) -> String {
     )
 }
 
-/// Where a heredoc body for this command starts, as an empty range: after the
-/// line break that ends its line, or at the end of the script. `None` when
-/// another heredoc is already open on the line.
-fn line_end(call: &Call) -> Option<Range<usize>> {
-    let from = call.end();
-    let start = call.chars[..from]
-        .iter()
-        .rposition(|&c| c == '\n')
-        .map_or(0, |at| at + 1);
-    let end = call.chars[from..]
-        .iter()
-        .position(|&c| c == '\n')
-        .map(|at| from + at);
-    let stop = end.unwrap_or(call.chars.len());
-    let busy = call.cmds.iter().any(|c| {
-        !c.heredocs.is_empty()
-            && c.spans
-                .first()
-                .is_some_and(|s| (start..=stop).contains(&s.start))
-    });
-    if busy {
-        return None;
-    }
-    Some(match end {
-        Some(at) => at + 1..at + 1,
-        None => stop..stop,
-    })
-}
-
-/// A heredoc terminator that no line of `text` equals.
-fn unique_delimiter(text: &str) -> String {
-    let mut delimiter = "PLAYBOOK_MESSAGE_END".to_string();
-    while text.lines().any(|line| line == delimiter) {
-        delimiter.push('_');
-    }
-    delimiter
-}
-
 /// A commit with no message option takes its message from the file a merge
-/// or a squash left behind. Those files are rewritten before git reads them.
-fn sanitize_stored_messages(call: &Call, plan: &mut Plan, findings: &mut Findings) {
-    let Some(git_dir) = git_output(call.dir, &["rev-parse", "--git-dir"]) else {
-        return;
-    };
+/// or a squash left behind, `MERGE_MSG` before `SQUASH_MSG`. It is read from a
+/// heredoc, and the file is left as it is.
+fn stored_message(run: &Run, plan: &mut Plan, findings: &mut Findings) -> Option<String> {
+    let call = &run.call;
+    let git_dir = git_output(call.dir, &["rev-parse", "--git-dir"])?;
     let git_dir = resolve(git_dir.trim(), call.dir);
-    for name in MESSAGE_FILES {
-        let path = git_dir.join(name);
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let source = Source {
-            label: name.to_string(),
-            text,
-            target: Target::File(path),
-        };
-        apply(vec![source], Rule::Commit, false, plan, findings);
-    }
+    let name = MESSAGE_FILES
+        .iter()
+        .find(|name| git_dir.join(name).exists())?;
+    let text = match read_message(&git_dir.join(name)) {
+        Ok(text) => text,
+        Err(why) => {
+            findings.unread.push(format!("{name} ({why})"));
+            return None;
+        }
+    };
+    let at = call.cmd().spans[run.rest - 1].end;
+    let source = feed(
+        call,
+        name.to_string(),
+        text.clone(),
+        at..at,
+        " -F - ".to_string(),
+    );
+    apply(vec![source], Rule::Commit, false, plan, findings);
+    Some(text)
 }
 
 /// What stays of the word of a short `-m` when the option goes: the other
@@ -703,9 +753,14 @@ mod tests {
 
     #[test]
     fn every_abbreviation_git_accepts_resolves_the_way_git_does() {
-        for (sub, spec) in [("commit", COMMIT), ("merge", MERGE), ("tag", TAG)] {
+        for (sub, spec) in [
+            ("commit", COMMIT),
+            ("merge", MERGE),
+            ("tag", TAG),
+            ("commit-tree", COMMIT_TREE),
+        ] {
             let names = git_long_options(sub);
-            assert!(names.len() > 10, "git {sub} lists its options");
+            assert!(!names.is_empty(), "git {sub} lists its options");
             let spec = known_to_git(sub, &spec, &names);
             let read: Vec<&str> = spec
                 .long_values
@@ -737,11 +792,14 @@ mod tests {
 
     #[test]
     fn the_specs_only_name_options_git_has() {
-        for (sub, spec) in [("commit", COMMIT), ("merge", MERGE), ("tag", TAG)] {
+        for (sub, spec) in [
+            ("commit", COMMIT),
+            ("merge", MERGE),
+            ("tag", TAG),
+            ("commit-tree", COMMIT_TREE),
+        ] {
             let names = git_long_options(sub);
-            for must in ["message", "file"] {
-                assert!(names.iter().any(|n| n == must), "git {sub} has no --{must}");
-            }
+            assert!(!names.is_empty(), "git {sub} lists its options");
             let ours = spec
                 .long_values
                 .iter()

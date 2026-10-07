@@ -6,7 +6,7 @@
 //! and body of a merge become a commit message.
 
 use super::engine::{Call, Findings, Plan};
-use super::sources::{apply, from_path, from_word, value_span, Rule, Source};
+use super::sources::{apply, from_path, from_word, value_span, Named, Rule, Source};
 use crate::common::cli_opts::{Opt, Spec};
 
 const PR_WRITE: Spec = Spec {
@@ -111,9 +111,13 @@ fn text_sources(
             continue;
         };
         if matches!(opt.name.as_str(), "F" | "body-file") {
-            let dynamic = call.cmd().spans[at].dynamic;
-            let place = value_span(call, at, opt.inline_at);
-            sources.extend(from_path(call, value, dynamic, place, label, findings));
+            let named = Named {
+                path: value,
+                dynamic: call.cmd().spans[at].dynamic,
+                replace: value_span(call, at, opt.inline_at),
+                opener: "- ",
+            };
+            sources.extend(from_path(call, &named, label, findings));
         } else {
             sources.extend(from_word(call, at, opt.inline_at, label, findings));
         }
