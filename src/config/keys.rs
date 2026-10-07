@@ -11,6 +11,9 @@ use serde_json::Value;
 pub const KNOWN_KEYS: &[&str] = &[
     "autoReview.enabled",
     "autoReview.type",
+    "autoReview.fix",
+    "autoMerge.enabled",
+    "commit.signOff",
     "worktreeCleanup.enabled",
     "worktreeCleanup.staleAfterDays",
     "worktreeCleanup.conflictGracePeriodDays",
@@ -27,6 +30,9 @@ pub fn default_value(key: &str) -> Option<Value> {
     match key {
         "autoReview.enabled" => Some(Value::Bool(true)),
         "autoReview.type" => Some(Value::String("deep".to_string())),
+        "autoReview.fix" => Some(Value::Bool(false)),
+        "autoMerge.enabled" => Some(Value::Bool(false)),
+        "commit.signOff" => Some(Value::Bool(true)),
         "worktreeCleanup.enabled" => Some(Value::Bool(true)),
         "worktreeCleanup.staleAfterDays" => Some(Value::Number(30.into())),
         "worktreeCleanup.conflictGracePeriodDays" => Some(Value::Number(90.into())),
@@ -123,5 +129,39 @@ mod tests {
 
         // Assert
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn default_values_for_the_pr_and_commit_settings() {
+        // Arrange
+        let cases = [
+            ("autoReview.fix", false),
+            ("autoMerge.enabled", false),
+            ("commit.signOff", true),
+        ];
+
+        for (key, expected) in cases {
+            // Act
+            let result = default_value(key);
+
+            // Assert
+            assert_eq!(result, Some(Value::Bool(expected)), "{key}");
+        }
+    }
+
+    #[test]
+    fn the_pr_and_commit_settings_are_known_keys_with_no_enum_constraint() {
+        // Arrange
+        let keys = ["autoReview.fix", "autoMerge.enabled", "commit.signOff"];
+
+        for key in keys {
+            // Act
+            let known = KNOWN_KEYS.contains(&key);
+            let allowed = allowed_enum_values(key);
+
+            // Assert
+            assert!(known, "{key} must be listed in KNOWN_KEYS");
+            assert_eq!(allowed, None, "{key}");
+        }
     }
 }
