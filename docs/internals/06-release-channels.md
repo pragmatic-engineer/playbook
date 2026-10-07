@@ -9,11 +9,13 @@ A tagged release reaches users through three channels: the GitHub release assets
 What it does, on a tag push only and only when the tag is the repo's latest
 release (so a backport tag cannot roll users back):
 
-1. Renders `Formula/playbook.rb` from `shell/formula.rb.tmpl` and the release's
-   `SHA256SUMS` (`shell/render-formula.sh`), and pushes it to the tap.
+1. Renders `Formula/playbook.rb` from `src/release/formula.rb.tmpl` and the
+   release's `SHA256SUMS` (`playbook release render-formula`), and pushes it to
+   the tap. The job runs the release's own `x86_64-unknown-linux-musl` binary,
+   downloaded from the release and checked against `SHA256SUMS` first.
 2. Points the `playbook` entry of the marketplace's `marketplace.json` at the
    release's plugin archive, with the archive's `url` and `sha256`
-   (`shell/pin-marketplace.sh`), and pushes it. It first re-downloads the
+   (`playbook release pin-marketplace`), and pushes it. It first re-downloads the
    archive and refuses to pin a hash that differs from the one the
    `plugin-archive` job computed.
 3. Reads both repos back and fails with a separate `::error::` per check if the

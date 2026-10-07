@@ -1,0 +1,33 @@
+class Playbook < Formula
+  desc "Claude Code plugin toolkit: hooks, launcher, and installer in one binary"
+  homepage "https://github.com/pragmatic-engineer/playbook"
+  license "MIT"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/pragmatic-engineer/playbook/releases/download/v9.8.7/playbook-9.8.7-aarch64-apple-darwin"
+      sha256 "1111111111111111111111111111111111111111111111111111111111111111"
+    else
+      url "https://github.com/pragmatic-engineer/playbook/releases/download/v9.8.7/playbook-9.8.7-x86_64-apple-darwin"
+      sha256 "2222222222222222222222222222222222222222222222222222222222222222"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/pragmatic-engineer/playbook/releases/download/v9.8.7/playbook-9.8.7-aarch64-unknown-linux-musl"
+      sha256 "3333333333333333333333333333333333333333333333333333333333333333"
+    else
+      url "https://github.com/pragmatic-engineer/playbook/releases/download/v9.8.7/playbook-9.8.7-x86_64-unknown-linux-musl"
+      sha256 "4444444444444444444444444444444444444444444444444444444444444444"
+    end
+  end
+
+  def install
+    bin.install Dir["playbook-*"].first => "playbook"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/playbook --version")
+  end
+end

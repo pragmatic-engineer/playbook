@@ -20,6 +20,7 @@ pub mod json;
 pub mod manifest;
 pub mod mode;
 pub mod pr;
+pub mod release;
 pub mod sanitize;
 pub mod settings;
 pub mod statusline;
@@ -155,6 +156,14 @@ pub enum Command {
         #[command(subcommand)]
         sub: Option<UsageCommand>,
     },
+    /// Render the files the release job pushes to the Homebrew tap and marketplace
+    ///
+    /// Run by the release workflow after a tag. Prints the file to stdout and
+    /// never touches the network.
+    Release {
+        #[command(subcommand)]
+        sub: ReleaseCommand,
+    },
     /// Prepare and open pull requests, and pick a review depth
     ///
     /// These are the mechanical steps behind `/playbook:create-pull-request`.
@@ -273,6 +282,19 @@ pub enum Command {
     Trust {
         /// Absolute path of the directory to trust
         path: String,
+    },
+}
+
+/// `playbook release` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ReleaseCommand {
+    /// Print the Homebrew formula for VERSION, filled from a SHA256SUMS file
+    RenderFormula { version: String, sums: PathBuf },
+    /// Print marketplace.json with the playbook plugin pinned to VERSION's archive
+    PinMarketplace {
+        version: String,
+        marketplace: PathBuf,
+        sha256: String,
     },
 }
 
