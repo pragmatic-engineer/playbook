@@ -253,7 +253,7 @@ test_commit_message_sanitizer() {
   payload="$(printf '{"tool_input":{"command":%s}}' "$(json_str "$bad")")"
   out="$(run_guard commit-message-sanitizer "$payload")"
   [[ "$out" == *'"updatedInput"'* && "$out" != *"permissionDecision"* && "$out" != *"Claude-Session: https"* ]] || return 1
-  ok="git commit -m 'feat: x' -m 'Refs: PLAT-1'"
+  ok="git commit -s -m 'feat: x' -m 'Refs: PLAT-1'"
   payload="$(printf '{"tool_input":{"command":%s}}' "$(json_str "$ok")")"
   out="$(run_guard commit-message-sanitizer "$payload")"
   [ -z "$out" ]
