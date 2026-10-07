@@ -6,7 +6,7 @@
 //! message a commit reuses, drops an `--author` or `--trailer` that names an
 //! AI, and follows the script a `git rebase --exec` runs.
 
-use super::engine::{git_output, nested_word, Call, Findings, Plan};
+use super::engine::{git_output, locate, nested_word, Call, Findings, Plan};
 use super::sources::{
     apply, feed, from_path, from_stdin, from_word, joined, read_message, resolve, value_span,
     Named, Rule, Source, Target,
@@ -253,6 +253,79 @@ const GLOBAL_WITH_VALUE: [&str; 6] = [
 const MESSAGE_FILES: [&str; 2] = ["MERGE_MSG", "SQUASH_MSG"];
 /// Longest hook script read when looking for a sign-off.
 const MAX_SCRIPT_BYTES: u64 = 1 << 20;
+
+/// What a script does with git that the backstop cares about.
+#[derive(Default)]
+pub struct GitUse {
+    /// It runs `git commit`.
+    pub commit: bool,
+    /// A commit takes its message from the command (`-m`, `-F`, `-C`,
+    /// `--no-edit`), not from an editor.
+    pub explicit_message: bool,
+    /// A commit is made with `--no-signoff`.
+    pub no_signoff: bool,
+    pub tag: bool,
+    pub push: bool,
+    /// The directory each `git commit` runs in: where the call started, or
+    /// where its `-C` points.
+    pub commit_dirs: Vec<PathBuf>,
+}
+
+/// The `git commit`, `tag` and `push` calls in `command`, which starts in
+/// `dir`, as far as they can be recognised: through wrappers such as `env` and
+/// `rtk`, not through a shell's `-c` string.
+pub fn git_use(command: &str, dir: &Path) -> GitUse {
+    let mut used = GitUse::default();
+    for cmd in commands(command) {
+        let Some((at, _)) = locate(&cmd.words)
+            .into_iter()
+            .find(|(_, name)| name == "git")
+        else {
+            continue;
+        };
+        let Some((sub, git_dir)) = subcommand(&cmd.words, at, dir) else {
+            continue;
+        };
+        match cmd.words[sub].as_str() {
+            "commit" => {
+                used.commit = true;
+                let opts = COMMIT.scan(&cmd.words[sub + 1..]);
+                let own = ["m", "message", "F", "file", "C", "reuse-message", "no-edit"];
+                used.explicit_message |= has(&opts, &own);
+                used.no_signoff |= has(&opts, &["no-signoff"]);
+                if !used.commit_dirs.contains(&git_dir) {
+                    used.commit_dirs.push(git_dir);
+                }
+            }
+            "tag" => used.tag = true,
+            "push" => used.push = true,
+            _ => {}
+        }
+    }
+    used
+}
+
+/// The index of the subcommand word of the `git` at `program`, past the
+/// global options, and the directory git runs in once the `-C` options apply.
+fn subcommand(words: &[String], program: usize, dir: &Path) -> Option<(usize, PathBuf)> {
+    let mut dir = dir.to_path_buf();
+    let mut at = program + 1;
+    while let Some(word) = words.get(at) {
+        match word.as_str() {
+            "-C" => {
+                if let Some(target) = words.get(at + 1) {
+                    dir = resolve(target, &dir);
+                }
+                at += 2;
+            }
+            "-c" => at += 2,
+            w if GLOBAL_WITH_VALUE.contains(&w) => at += 2,
+            w if w.starts_with('-') => at += 1,
+            _ => return Some((at, dir)),
+        }
+    }
+    None
+}
 
 /// What every subcommand handler needs.
 struct Run<'a> {
@@ -876,6 +949,69 @@ mod tests {
                     eprintln!("note: the installed git {sub} has no --{name}, so it is skipped");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn git_use_finds_commit_tag_and_push_through_wrappers_and_global_options() {
+        let work = Path::new("/work");
+        let used = git_use(
+            "env A=1 rtk git -C repo -c user.name=x commit -m 'x' && git push",
+            work,
+        );
+        assert!(used.commit && used.explicit_message && used.push && !used.tag);
+
+        let used = git_use("git commit --allow-empty\ngit tag -a v1 -m x", work);
+        assert!(used.commit && !used.explicit_message && used.tag && !used.push);
+
+        for message in [
+            "-m x",
+            "-F f",
+            "-C HEAD",
+            "--amend --no-edit",
+            "--message=x",
+            "-am x",
+        ] {
+            let used = git_use(&format!("git commit {message}"), work);
+            assert!(used.explicit_message, "{message}");
+        }
+    }
+
+    #[test]
+    fn git_use_resolves_the_directory_of_each_commit_and_sees_no_signoff() {
+        let work = Path::new("/work");
+
+        let used = git_use(
+            "git commit -m a && git -C ../other commit --no-signoff -m b && git -C /abs -C sub commit -m c && git commit -m d",
+            work,
+        );
+
+        assert_eq!(
+            used.commit_dirs,
+            [
+                PathBuf::from("/work"),
+                PathBuf::from("/work/../other"),
+                PathBuf::from("/abs/sub")
+            ]
+        );
+        assert!(used.no_signoff);
+        assert!(!git_use("git commit -m a", work).no_signoff);
+    }
+
+    #[test]
+    fn git_use_ignores_text_that_only_mentions_git() {
+        for command in [
+            "git status",
+            "git log --oneline",
+            "git commit-tree HEAD",
+            "echo git commit -m x",
+            "grep -r 'git tag' .",
+            "gh pr create",
+            "git config alias.ci commit",
+            "",
+        ] {
+            let used = git_use(command, Path::new("/work"));
+            assert!(!used.commit && !used.tag && !used.push, "{command}");
         }
     }
 

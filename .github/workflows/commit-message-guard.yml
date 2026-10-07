@@ -11,10 +11,13 @@
 # PR_TITLE and squash_merge_commit_message is PR_BODY), so cleaning those is
 # what keeps attribution out of the history on main.
 #
-# The sanitiser is built from the base commit, never from the PR, so a PR
-# cannot change the rule that judges it. The title and body reach the job only
-# through environment variables and files, never through the text of a command.
-# A fork's token cannot edit the PR, so forks are skipped.
+# The sanitiser binary is built from the base commit, never from the PR, so a PR
+# cannot change the rule that judges it. This workflow file itself runs as the
+# PR has it, since the `pull_request` event reads it from the PR's merge commit:
+# a PR that edits this file changes the steps, not the sanitiser. The title and
+# body reach the job only through environment variables and files, never
+# through the text of a command. A fork's token cannot edit the PR, so forks
+# are skipped.
 
 name: commit-message-guard
 
@@ -40,7 +43,6 @@ jobs:
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -68,6 +70,8 @@ jobs:
         run: cargo build --quiet
 
       - name: Sanitize the PR title and body
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
           bin="$PWD/target/debug/playbook"
@@ -86,7 +90,12 @@ jobs:
           changed=0
           edit=(gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY")
           for part in title body; do
-            if ! "$bin" sanitize pr-text "$work/$part.txt" --check 2> "$work/$part.report"; then
+            "$bin" sanitize pr-text "$work/$part.txt" --check 2> "$work/$part.report"
+            status=$?
+            if [ "$status" -eq 2 ]; then
+              # Exit 1 means something would be removed; 2 means the file could not be read.
+              echo "::warning title=commit-message-guard::the PR $part could not be read, so it was not checked"
+            elif [ "$status" -ne 0 ]; then
               # The report names a line and a shape, never the text.
               sed "s/^/PR $part: /" "$work/$part.report"
               "$bin" sanitize pr-text "$work/$part.txt" 2> /dev/null
@@ -106,5 +115,8 @@ jobs:
             echo "Nothing to edit on the PR."
             exit 0
           fi
-          "${edit[@]}"
-          echo "::notice title=commit-message-guard::removed AI attribution from the PR title or body"
+          if "${edit[@]}"; then
+            echo "::notice title=commit-message-guard::removed AI attribution from the PR title or body"
+          else
+            echo "::warning title=commit-message-guard::could not edit the PR, so its title or body still carries AI attribution; edit it by hand"
+          fi

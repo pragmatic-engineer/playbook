@@ -170,7 +170,7 @@ fn follow_cd(words: &[String], dir: &mut PathBuf) {
 /// The programs a command runs and the index of each word: past wrappers such
 /// as `env`, and through the carriers that run a `git`, `gh` or a shell given
 /// among their own words.
-fn locate(words: &[String]) -> Vec<(usize, String)> {
+pub fn locate(words: &[String]) -> Vec<(usize, String)> {
     let Some(at) = program_index(words) else {
         return Vec::new();
     };

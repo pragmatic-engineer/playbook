@@ -131,6 +131,23 @@ impl Lab {
         self.run_hook(&self.payload("PostToolUse", command, stdout))
     }
 
+    /// A call as Claude Code runs it: the PreToolUse hook sees `command`, `ran`
+    /// does what the shell did, and the PostToolUse hook sees the call after.
+    pub fn through_hooks(&self, command: &str, ran: impl FnOnce(&Lab)) -> String {
+        self.hook(command);
+        ran(self);
+        self.post(command, "")
+    }
+
+    /// [`Lab::through_hooks`] with `command` itself as what ran, not the
+    /// PreToolUse rewrite, so the backstop sees what the rewrite missed. The
+    /// command may fail, as a real commit can.
+    pub fn run_through_hooks(&self, command: &str) -> String {
+        self.through_hooks(command, |lab| {
+            lab.run(command);
+        })
+    }
+
     fn path(&self) -> String {
         format!(
             "{}:{}",

@@ -39,33 +39,49 @@ still specific to the guards: is each one actually wired to that bare form?
 wired_status="OK"
 if ! command -v playbook >/dev/null 2>&1; then
   wired_status="UNKNOWN"
-  hc_out=""
+  hc_out=""; post_out=""
 else
   hc_out=$(playbook doctor hook-commands-for-event ~/.claude/settings.json PreToolUse \
     rm-workspace-guard bg-await-guard no-slop-guard precommit-check \
+    commit-message-sanitizer 2>/dev/null) || wired_status="UNKNOWN"
+  # The sanitizer's backstop is wired separately, on PostToolUse.
+  post_out=$(playbook doctor hook-commands-for-event ~/.claude/settings.json PostToolUse \
     commit-message-sanitizer 2>/dev/null) || wired_status="UNKNOWN"
 fi
 if [ "$wired_status" = "UNKNOWN" ]; then
   echo "UNKNOWN"
 else
-  wired=0; problems=""
+  wired=0; total=0; problems=""
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     guard=${line%%=*}
     count=${line#*=}
+    total=$((total + 1))
     if [ "${count:-0}" -gt 0 ]; then
       wired=$((wired + 1))
     else
       problems="$problems $guard:NOT_WIRED"
     fi
   done <<< "$hc_out"
-  echo "wired=$wired/5$problems"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    guard=${line%%=*}
+    count=${line#*=}
+    total=$((total + 1))
+    if [ "${count:-0}" -gt 0 ]; then
+      wired=$((wired + 1))
+    else
+      problems="$problems $guard(PostToolUse):NOT_WIRED"
+    fi
+  done <<< "$post_out"
+  echo "wired=$wired/$total$problems"
 fi
 ```
 
 Report:
 
-- `wired=5/5` → PASS.
+- `wired=6/6` → PASS: the five PreToolUse guards and the
+  `commit-message-sanitizer` backstop on PostToolUse.
 - Any `NOT_WIRED` → **FAIL.** The guard is either still on its legacy
   `~/.claude/hooks/<name>.sh` command from before this change shipped, or
   missing from `settings.json` entirely; either way it is not running from
@@ -466,7 +482,7 @@ one-line remediation hint. Example shape:
 
 ```
 PASS  plugin enabled
-PASS  safety guards wired (5 of 5)
+PASS  safety guards wired (6 of 6)
 INFO  launcher not installed (opt-in; run /playbook:setup)    -- run /playbook:setup and choose Yes for the launcher question
 INFO  system prompt not installed (opt-in, recommended) -- run /playbook:setup and choose Yes for the system prompt question
 INFO  status line differs from the shipped copy -- stale, or a local fix ahead of the release; a plugin install will overwrite it either way
