@@ -413,8 +413,12 @@ fn entries_names(dir: &Path) -> Vec<String> {
 fn check_variants(dir: &Path, files: &[String]) -> Vec<String> {
     let mut violations = Vec::new();
     let mut expected: Vec<String> = Vec::new();
+    let mut baseless: Vec<String> = Vec::new();
     for (base, tiers) in variants::VARIANTS {
         let Ok(content) = fs::read_to_string(dir.join(format!("{base}.md"))) else {
+            for tier in tiers {
+                baseless.push(format!("{}.md", variants::variant_name(base, tier)));
+            }
             continue;
         };
         for tier in tiers {
@@ -441,7 +445,11 @@ fn check_variants(dir: &Path, files: &[String]) -> Vec<String> {
     for file in files {
         let generated = fs::read_to_string(dir.join(file))
             .is_ok_and(|text| text.lines().any(|l| l.starts_with(variants::MARKER)));
-        if generated && !expected.contains(file) {
+        if generated && baseless.contains(file) {
+            violations.push(format!(
+                "{file}: its base agent file is missing, restore it or drop the VARIANTS entry"
+            ));
+        } else if generated && !expected.contains(file) {
             violations.push(format!(
                 "{file}: generated file with no entry in VARIANTS, delete it"
             ));

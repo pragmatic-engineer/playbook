@@ -63,9 +63,9 @@ pub fn render_variant(base: &str, content: &str, tier: &str) -> Result<String, S
             efforted = true;
         } else if let Some(rest) = line.strip_prefix("description:") {
             let value = rest.trim();
-            *line = match value.strip_prefix('"') {
-                Some(inner) => format!("description: \"{prefix}{inner}"),
-                None => format!("description: {prefix}{value}"),
+            *line = match value.chars().next() {
+                Some(q @ ('"' | '\'')) => format!("description: {q}{prefix}{}", &value[1..]),
+                _ => format!("description: {prefix}{value}"),
             };
             described = true;
         }
@@ -116,31 +116,40 @@ mod tests {
 
     #[test]
     fn variant_changes_only_name_description_effort_and_adds_a_header() {
-        let out = render_variant("sample", BASE, "low").unwrap();
-        assert!(out.contains("name: sample-low\n"));
-        assert!(out.contains("effort: low\n"));
-        assert!(out.contains(
-            "description: \"Low-effort variant of sample. A structurally read-only fixture.\"\n"
-        ));
-        assert!(out.contains("tools: Read\nmodel: sonnet\n"));
-        assert!(out.contains(&format!("---\n{MARKER} from agents/sample.md.")));
-        assert!(out.ends_with("\n\nBody.\n"));
+        let base = BASE.replace("Body.\n", "name: body\neffort: high\nBody.\n");
+        let out = render_variant("sample", &base, "low").unwrap();
+        let expected = format!(
+            "---\nname: sample-low\ndescription: \"Low-effort variant of sample. A structurally read-only fixture.\"\ntools: Read\nmodel: sonnet\neffort: low\n---\n{MARKER} from agents/sample.md. Do not edit: change the base file and rerun it. -->\n\nname: body\neffort: high\nBody.\n"
+        );
+        assert_eq!(out, expected);
     }
 
     #[test]
-    fn unquoted_description_is_prefixed_in_place() {
-        let base = BASE.replace("\"A structurally read-only fixture.\"", "Plain text.");
-        let out = render_variant("sample", &base, "xhigh").unwrap();
+    fn unquoted_and_single_quoted_descriptions_are_prefixed_in_place() {
+        let plain = BASE.replace("\"A structurally read-only fixture.\"", "Plain text.");
+        let out = render_variant("sample", &plain, "xhigh").unwrap();
         assert!(out.contains("description: Xhigh-effort variant of sample. Plain text.\n"));
+
+        let single = BASE.replace("\"A structurally read-only fixture.\"", "'Quoted: text.'");
+        let out = render_variant("sample", &single, "low").unwrap();
+        assert!(out.contains("description: 'Low-effort variant of sample. Quoted: text.'\n"));
     }
 
     #[test]
-    fn rendering_is_deterministic_and_rejects_the_base_effort() {
+    fn rendering_is_deterministic() {
         assert_eq!(
             render_variant("sample", BASE, "low"),
             render_variant("sample", BASE, "low")
         );
-        assert!(render_variant("sample", BASE, "high").is_err());
-        assert!(render_variant("sample", "no frontmatter", "low").is_err());
+    }
+
+    #[test]
+    fn rendering_rejects_unusable_bases_with_a_specific_message() {
+        let err = |text: &str, tier: &str| render_variant("sample", text, tier).unwrap_err();
+        assert!(err(BASE, "high").contains("base effort is already 'high'"));
+        assert!(err("no frontmatter", "low").contains("missing opening ---"));
+        assert!(err("---\nname: sample\n", "low").contains("missing closing ---"));
+        let no_effort = BASE.replace("effort: high\n", "");
+        assert!(err(&no_effort, "low").contains("needs name, description and effort"));
     }
 }
