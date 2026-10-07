@@ -5,7 +5,7 @@
 //! migrations run once and are recorded; Manual ones only warn.
 
 use crate::common::atomic::{
-    acquire_dir_lock, ensure_private_dir, remove_stale_lock_dir, write_atomic, STALE_LOCK_AGE,
+    acquire_dir_lock, ensure_private_dir, remove_stale_lock_dir, write_atomic,
 };
 use crate::common::paths::playbook_root_from;
 use crate::init::run::{StepReport, StepStatus};
@@ -28,6 +28,8 @@ pub struct Ctx {
 pub enum Kind {
     /// Runs until it succeeds once, then is recorded and never run again.
     Auto,
+    /// Self-healing and idempotent: runs every init, never recorded, no lock.
+    Idempotent,
     /// Never changes anything; only warns.
     Manual,
 }
@@ -63,12 +65,12 @@ pub fn registry() -> Vec<Migration> {
     vec![
         Migration {
             id: "0001-memory-store-move",
-            kind: Kind::Auto,
+            kind: Kind::Idempotent,
             run: memory_store_move,
         },
         Migration {
             id: "0002-gate-repo-local-move",
-            kind: Kind::Auto,
+            kind: Kind::Idempotent,
             run: gate_repo_local_move,
         },
         Migration {
@@ -108,7 +110,7 @@ fn system_prompt_edited(ctx: &Ctx) -> Outcome {
     let path = system_prompt_path(&ctx.home);
     if user_edited(&ctx.home, SYSTEM_PROMPT_KEY, &path) {
         Outcome::Warn(format!(
-            "{} was edited after playbook installed it; init replaces it with the shipped copy, so re-apply your edits afterwards",
+            "{} was edited after playbook installed it; a refresh from the shipped copy overwrites it, so keep a copy of your edits",
             path.display()
         ))
     } else {
@@ -130,10 +132,18 @@ fn state_path(home: &Path) -> PathBuf {
     playbook_root_from(home).join(STATE_FILE)
 }
 
+/// Only a missing file counts as empty; any other error must not be
+/// treated as "nothing applied", or the next write would wipe the record.
+fn load_state(home: &Path) -> Option<Vec<String>> {
+    match fs::read_to_string(state_path(home)) {
+        Ok(s) => Some(s.lines().map(str::to_string).collect()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
+        Err(_) => None,
+    }
+}
+
 fn read_state(home: &Path) -> Vec<String> {
-    fs::read_to_string(state_path(home))
-        .map(|s| s.lines().map(str::to_string).collect())
-        .unwrap_or_default()
+    load_state(home).unwrap_or_default()
 }
 
 fn write_state(home: &Path, lines: &[String]) -> std::io::Result<()> {
@@ -160,7 +170,9 @@ pub fn record_shipped(home: &Path, key: &str, path: &Path) {
     let Ok(bytes) = fs::read(path) else { return };
     let prefix = format!("shipped {key} ");
     with_lock(home, || {
-        let mut lines = read_state(home);
+        let Some(mut lines) = load_state(home) else {
+            return;
+        };
         lines.retain(|l| !l.starts_with(&prefix));
         lines.push(format!("{prefix}{}", content_hash(&bytes)));
         let _ = write_state(home, &lines);
@@ -173,13 +185,20 @@ pub fn record_system_prompt(home: &Path) {
 }
 
 fn with_lock(home: &Path, f: impl FnOnce()) -> bool {
+    with_lock_retry(home, 50, f)
+}
+
+/// A migration can copy a whole store, so the stale age is far above the default.
+const MIGRATION_LOCK_STALE: Duration = Duration::from_secs(300);
+
+fn with_lock_retry(home: &Path, retries: u32, f: impl FnOnce()) -> bool {
     let root = playbook_root_from(home);
     if ensure_private_dir(&root).is_err() {
         return false;
     }
     let lock = root.join(LOCK_DIR);
-    remove_stale_lock_dir(&lock, STALE_LOCK_AGE);
-    if !acquire_dir_lock(&lock, 50, Duration::from_millis(100)) {
+    remove_stale_lock_dir(&lock, MIGRATION_LOCK_STALE);
+    if !acquire_dir_lock(&lock, retries, Duration::from_millis(100)) {
         return false;
     }
     f();
@@ -194,10 +213,26 @@ pub fn run_pending(ctx: &Ctx) -> Report {
 
 /// Runs `migrations` in order: Manual ones always, Auto ones once each.
 pub fn run_with(migrations: &[Migration], ctx: &Ctx) -> Report {
+    run_with_retries(migrations, ctx, 50)
+}
+
+fn run_with_retries(migrations: &[Migration], ctx: &Ctx, retries: u32) -> Report {
     let mut report = Report::default();
     for m in migrations.iter().filter(|m| matches!(m.kind, Kind::Manual)) {
         if let Outcome::Warn(msg) = (m.run)(ctx) {
             report.warnings.push(format!("{}: {msg}", m.id));
+        }
+    }
+    for m in migrations
+        .iter()
+        .filter(|m| matches!(m.kind, Kind::Idempotent))
+    {
+        match (m.run)(ctx) {
+            Outcome::Done(step) | Outcome::Repeat(step) | Outcome::Failed(step) => {
+                report.steps.push(step);
+            }
+            Outcome::Warn(msg) => report.warnings.push(format!("{}: {msg}", m.id)),
+            Outcome::Quiet => {}
         }
     }
     let applied = |lines: &[String]| -> Vec<String> {
@@ -207,15 +242,18 @@ pub fn run_with(migrations: &[Migration], ctx: &Ctx) -> Report {
             .collect()
     };
     let done = applied(&read_state(&ctx.home));
-    if migrations
-        .iter()
-        .all(|m| matches!(m.kind, Kind::Manual) || done.iter().any(|d| d == m.id))
-    {
+    let pending = |m: &&Migration| matches!(m.kind, Kind::Auto) && !done.iter().any(|d| d == m.id);
+    if !migrations.iter().any(|m| pending(&m)) {
         return report;
     }
-    let locked = with_lock(&ctx.home, || {
+    let locked = with_lock_retry(&ctx.home, retries, || {
         for m in migrations.iter().filter(|m| matches!(m.kind, Kind::Auto)) {
-            let mut lines = read_state(&ctx.home);
+            let Some(mut lines) = load_state(&ctx.home) else {
+                report
+                    .warnings
+                    .push("migrations skipped: could not read the migration record".to_string());
+                break;
+            };
             if applied(&lines).iter().any(|d| d == m.id) {
                 continue;
             }
@@ -241,9 +279,10 @@ pub fn run_with(migrations: &[Migration], ctx: &Ctx) -> Report {
         }
     });
     if !locked {
-        report
-            .warnings
-            .push("migrations skipped: could not take the migration lock".to_string());
+        report.steps.push(StepReport::skipped(
+            "migrations",
+            "could not take the migration lock; will retry next init",
+        ));
     }
     report
 }
@@ -369,5 +408,33 @@ mod tests {
         fs::create_dir_all(prompt.parent().unwrap()).unwrap();
         fs::write(&prompt, "anything").unwrap();
         assert!(!user_edited(&h, SYSTEM_PROMPT_KEY, &prompt));
+    }
+
+    #[test]
+    fn a_held_lock_skips_auto_migrations_with_a_warning() {
+        let h = home("held");
+        fs::create_dir_all(playbook_root_from(&h).join(LOCK_DIR)).unwrap();
+        CALLS.lock().unwrap().clear();
+        let report = run_with_retries(&[auto("held-a", order_a)], &ctx(&h), 2);
+        assert!(CALLS.lock().unwrap().is_empty());
+        assert!(report.steps[0].detail.contains("lock"));
+    }
+
+    fn repeats(_: &Ctx) -> Outcome {
+        Outcome::Repeat(StepReport::wired("rep", "ok"))
+    }
+
+    #[test]
+    fn a_repeat_migration_is_never_recorded() {
+        let h = home("repeat");
+        let ms = [Migration {
+            id: "r",
+            kind: Kind::Idempotent,
+            run: repeats,
+        }];
+        run_with(&ms, &ctx(&h));
+        let second = run_with(&ms, &ctx(&h));
+        assert_eq!(second.steps.len(), 1);
+        assert!(!read_state(&h).iter().any(|l| l.starts_with("applied")));
     }
 }

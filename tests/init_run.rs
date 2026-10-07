@@ -1234,3 +1234,23 @@ fn a_malformed_claude_json_warns_and_init_still_succeeds() {
     assert!(outcome.ok());
     assert_eq!(fs::read_to_string(&claude_json).unwrap(), "{ not json");
 }
+
+/// Init records the placed system prompt, then warns once the user edits it.
+#[test]
+fn init_warns_when_the_installed_system_prompt_was_edited() {
+    // Arrange
+    let home = scratch_home("prompt-edited");
+    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    paths.system_prompt = true;
+    let first = run(&paths);
+    assert!(first.warnings.is_empty());
+    let prompt = home.join(".config/playbook/prompts/SYSTEM_PROMPT.md");
+    std::fs::write(&prompt, "my own edits").unwrap();
+
+    // Act
+    let second = run(&paths);
+
+    // Assert
+    assert_eq!(second.warnings.len(), 1, "{:?}", second.warnings);
+    assert!(second.warnings[0].contains("edited"));
+}
