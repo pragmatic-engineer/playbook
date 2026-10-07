@@ -79,7 +79,7 @@ To escalate, stop making changes. Hand off to `/playbook:plan` and say which rul
 
 ## Step 5: Commit
 
-If you are on the default branch, create a branch named `fix/<short-slug>` first. Then invoke the `/playbook:commit-and-push` skill with the Skill tool. Use a conventional commit subject that starts with `fix:` and name the bug in plain words.
+If you are on the default branch, create a branch named `fix/<short-slug>` first. Then invoke the `/playbook:commit-and-push` skill with the Skill tool. `/playbook:commit-and-push` drafts the message from the diff; the branch name `fix/<short-slug>` carries the intent.
 
 In auto mode never force-push. If the push is rejected, stop and report it in the final output.
 

@@ -69,7 +69,7 @@ HANDOFF_EOF
 
 The command keys the file by the current directory, so a later session started in that directory loads it on its own after `/clear`. It prints the saved path. It refuses empty input. Pass `--dir <path>` to save for a directory other than the current one.
 
-If the user passes a path as an argument (e.g. `/session-handoff docs/handoffs/2026-06-22.md`), additionally write the document to that file. Create parent directories as needed. Confirm the written path in one line after the document. A bare filename with no directory goes in the current working directory. Never write to a path that was not explicitly provided; this rule governs the user-facing path, not `playbook handoff save`.
+If the user passes a path as an argument (e.g. `/playbook:session-handoff docs/handoffs/2026-06-22.md`), additionally write the document to that file. Create parent directories as needed. Confirm the written path in one line after the document. A bare filename with no directory goes in the current working directory. Never write to a path that was not explicitly provided; this rule governs the user-facing path, not `playbook handoff save`.
 
 End with one line: run `/clear`, and the next session loads the handoff automatically, or run `/playbook:session-start` to load it on demand.
 

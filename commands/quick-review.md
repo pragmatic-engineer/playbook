@@ -1,7 +1,7 @@
 ---
-description: Quick single-pass PR review using grounding-review discipline + Conventional Comments. Report-only with no PR number given, --self, when the run mode is auto, or when the resolved PR is yours; otherwise posts findings as a pending GitHub review for human submit.
+description: Use for a routine PR review or a quick check of your own branch. Single pass with grounding-review discipline and Conventional Comments; posts a pending GitHub review, or only reports when no PR is named, with --self, in auto mode, or when the PR is yours.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[PR number] [--self] [--auto] [--ask]"
+argument-hint: "[--help] [PR number] [--self] [--auto] [--ask]"
 model: sonnet
 effort: medium
 ---
@@ -12,7 +12,7 @@ Review a pull request with grounding-review discipline. Output a structured repo
 
 ## Argument parsing
 
-Parse `$ARGUMENTS` (strip `--self`, `--auto` and `--ask` before reading the rest, same as `--help`):
+Parse `$ARGUMENTS` (strip `--self`, `--auto` and `--ask` before reading the rest, and `--help` (print the argument-hint line and stop)):
 
 - **Integer or `#N`** (e.g. `4265`, `#4265`) → explicit PR number; resolve `HEAD_SHA` via `gh pr view <PR_NUMBER> --json headRefOid -q .headRefOid`.
 - **Branch name** (anything that isn't an integer and isn't empty, and passes `git check-ref-format --branch <arg>`) → resolve to its open PR number via:

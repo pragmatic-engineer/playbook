@@ -1,7 +1,7 @@
 ---
-description: Create a pull request with pre-flight checks, a conventional-commit title, and the team PR template, following engineering-standards and writing-style.
+description: Use when a branch is ready to open as a pull request. Runs pre-flight checks, writes a conventional-commit title and the team PR template, and opens it as a draft.
 allowed-tools: Bash, Read, Skill
-argument-hint: "[--ready] [--base <branch>] [--ticket <ID>] [--dir <path>] [--auto] [--ask]"
+argument-hint: "[--help] [--ready] [--base <branch>] [--ticket <ID>] [--dir <path>] [--auto] [--ask]"
 context: fork
 agent: git
 ---
@@ -29,7 +29,7 @@ Read these from `$ARGUMENTS` once and remember them. `--base`, `--ticket`, and `
 - `--ticket <ID>` → force the ticket, skipping branch auto-detect (`none` omits the line). Pass it to `playbook pr prepare`.
 - `--dir <path>` → publish the branch checked out in this directory. A caller that names a directory or branch outside the shell's current directory (for example `/playbook:implement` publishing a Segment that lives in a git worktree) passes it here. Pass it to both `playbook pr` calls. A forked shell can reset to the main checkout between calls, so without `--dir` the command acts on whatever repo the shell is in.
 - `--auto` or `--ask` → set the run mode for this run. Step 0 reads it.
-- `--help` → print the usage block above and stop.
+- `--help` → print the argument-hint line from this file's frontmatter and stop.
 
 There is no confirmation flag or gate: the command always runs end to end.
 
