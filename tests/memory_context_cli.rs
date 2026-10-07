@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! `playbook memory context`: scope, anchor, edge, and missing-graph
-//! behavior, ported from `shell/memory-context.test.sh`.
+//! behavior, ported from the retired shell test.
 
 use std::fs;
 use std::path::PathBuf;

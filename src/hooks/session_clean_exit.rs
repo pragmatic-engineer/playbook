@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Stop / SessionEnd hook (ports hooks/session-clean-exit.py): marks a
+//! Stop / SessionEnd hook (ports the retired shell original): marks a
 //! session as having ended cleanly, so the NEXT session's session-init hook
 //! can detect an orphaned, crashed session (no clean-exit marker) versus a
 //! graceful one.
@@ -26,11 +26,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const DEFAULT_AUTO_LEARN_MIN_EDITS: i64 = 5;
 
 /// How long to wait for `git rev-parse --show-toplevel` before giving up.
-/// Matches hooks/session-clean-exit.py:92's `timeout=5`.
+/// Matches the retired shell original's `timeout=5`.
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Run the session-clean-exit hook. Never panics; every failure along the
-/// way is swallowed, matching hooks/session-clean-exit.py's fail-soft
+/// way is swallowed, matching the retired shell original's fail-soft
 /// contract.
 pub fn run(payload: &Payload) {
     let dir = session_dir(payload);
@@ -52,7 +52,7 @@ pub fn run(payload: &Payload) {
 /// Stamp `last-clean-ts` with the current time. Fires on every `Stop`, not
 /// only at session end, so a crash check downstream only trips when a
 /// session is genuinely abandoned. Matches
-/// hooks/session-clean-exit.py:27-31.
+/// the retired shell original.
 fn refresh_last_clean_ts(dir: &str) {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -62,13 +62,13 @@ fn refresh_last_clean_ts(dir: &str) {
 }
 
 /// Write the `clean-exit` marker holding the session-end reason. Matches
-/// hooks/session-clean-exit.py:43-47.
+/// the retired shell original.
 fn write_clean_exit_marker(dir: &str, reason: &str) {
     let _ = fs::write(Path::new(dir).join("clean-exit"), format!("{reason}\n"));
 }
 
 /// Queue an auto-learn flag for this repo if the session made enough edits.
-/// Matches hooks/session-clean-exit.py:49-85.
+/// Matches the retired shell original.
 fn queue_auto_learn(payload: &Payload, dir: &str) {
     if std::env::var("AUTO_LEARN_NUDGE").unwrap_or_else(|_| "1".to_string()) == "0" {
         return;
@@ -81,7 +81,7 @@ fn queue_auto_learn(payload: &Payload, dir: &str) {
     let edits = read_int(&Path::new(dir).join("edit-count"));
     // Trim before parsing: python's `int(...)` strips surrounding whitespace,
     // so a padded value like " 3" must still mean 3 here rather than falling
-    // back to the default. Matches hooks/session-clean-exit.py:61-64.
+    // back to the default. Matches the retired shell original.
     let threshold = std::env::var("AUTO_LEARN_MIN_EDITS")
         .ok()
         .and_then(|v| v.trim().parse::<i64>().ok())
@@ -160,7 +160,7 @@ fn git_toplevel() -> String {
 
 /// Parse the digits in `path`'s contents as an integer, ignoring any other
 /// characters. `0` on any read or parse failure. Matches
-/// hooks/session-clean-exit.py:99-105.
+/// the retired shell original.
 fn read_int(path: &Path) -> i64 {
     let Ok(contents) = fs::read_to_string(path) else {
         return 0;
@@ -170,7 +170,7 @@ fn read_int(path: &Path) -> i64 {
 }
 
 /// Replace every character outside `[A-Za-z0-9_.-]` with `_`. Matches the
-/// slug regex hooks/session-clean-exit.py:71 applies inline.
+/// slug regex the retired shell original applies inline.
 fn slugify(s: &str) -> String {
     s.chars()
         .map(|c| {

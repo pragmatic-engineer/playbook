@@ -3,7 +3,7 @@
 
 //! Atomic file writes so concurrent hook invocations never tear state.
 //! `atomic_append` replaces the helper of the same name at
-//! hooks/lib/common.py:132 and hooks/lib/common.sh:73.
+//! the retired shell originals.
 //!
 //! Divergence from the python and shell versions: those use fcntl.flock and
 //! the `flock` command respectively, which BLOCK until the lock is acquired

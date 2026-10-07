@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/precompact-warn.py: a PreCompact hook that logs the
+//! Ports the retired shell original: a PreCompact hook that logs the
 //! compaction event and warns the user, since PreCompact has no
 //! `additionalContext` channel to speak to Claude directly.
 //!
@@ -26,7 +26,7 @@ const LOG_LINE_CAP: usize = 500;
 
 /// How long to wait for the `date` command before giving up. Matches the
 /// same `timeout=5` used for every other shelled-out call in
-/// hooks/lib/common.py.
+/// the retired shell original.
 const DATE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// PreCompact entry point. Never panics: a failed log write or a failed
@@ -109,7 +109,7 @@ fn append_line_unlocked(path: &Path, line: &str) {
 
 /// Trim `path` down to its last `limit` lines in place, via a temp file
 /// plus rename so a reader never observes a partial write. Ports
-/// `_cap_lines` (hooks/precompact-warn.py:48). Never panics; any failure
+/// `_cap_lines` (the retired shell original). Never panics; any failure
 /// leaves the file as it was.
 fn cap_lines(path: &Path, limit: usize) {
     let Ok(contents) = fs::read_to_string(path) else {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! `playbook release render-formula` and `pin-marketplace`: the behavior
-//! `shell/release-channels.test.sh` pinned, plus byte-for-byte goldens
+//! the retired shell test pinned, plus byte-for-byte goldens
 //! captured from the shell scripts they replace.
 
 use serde_json::Value;

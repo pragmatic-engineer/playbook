@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Atomic counter increment. Ports `incr_counter` (hooks/lib/common.py:192)
-//! and `_incr_counter` (hooks/lib/common.sh:125), including their mkdir-lock
+//! Atomic counter increment. Ports `incr_counter` (the retired shell original)
+//! and `_incr_counter` (the retired shell original), including their mkdir-lock
 //! plus temp-file-swap semantics and the up-to-50-tries retry behaviour.
 
 use crate::common::atomic::with_dir_lock;
@@ -31,8 +31,8 @@ pub fn incr_counter(file: &str) -> i64 {
         next
     });
     // Deliberately unconditional, even though the lock may not have been
-    // acquired: matches hooks/lib/common.py's and hooks/lib/common.sh's
-    // incr_counter, which both remove the lock directory even after
+    // acquired: matches the retired shell originals'
+    // `incr_counter`, which both remove the lock directory even after
     // exhausting every retry. See atomic.rs's module comment for the full
     // rationale; do not change this to a conditional removal.
     let _ = fs::remove_dir(&lock_path);

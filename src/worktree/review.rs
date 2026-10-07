@@ -3,7 +3,7 @@
 
 //! `playbook worktree review setup|teardown`: the locked, detached PR review
 //! worktrees `/playbook:quick-review` and `/playbook:deep-review` run in.
-//! Ported from `shell/review-worktree.sh`.
+//! Ported from the retired shell original.
 
 use std::fs;
 use std::path::{Path, PathBuf};

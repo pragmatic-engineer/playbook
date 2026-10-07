@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Agent-definition validation, backing `playbook agents`. A port of
-//! `shell/check-agents.sh`.
+//! the retired shell original.
 
 pub mod check;
 pub mod variants;

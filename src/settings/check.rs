@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Port of `shell/check-shared-settings.py`, guarding what ships in
+//! Port of the retired shell original, guarding what ships in
 //! `settings.shared.json`: a seed that pinned a model, carried a
 //! non-shippable key, or named a hook that does not exist would be
 //! installed verbatim everywhere.

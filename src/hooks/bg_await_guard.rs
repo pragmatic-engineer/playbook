@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/bg-await-guard.sh: warns when a Bash call backgrounds an
+//! Ports the retired shell original: warns when a Bash call backgrounds an
 //! install, build or typecheck whose output a later step usually needs.
 //!
 //! Warn, never block. Backgrounding a genuinely long job and awaiting its exit

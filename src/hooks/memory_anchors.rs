@@ -9,7 +9,7 @@
 //! text and this-session touched files against the same index, injecting
 //! the matched facts' BODIES (not just names), deduped per session. Both
 //! emit nothing on no match. Neither ever blocks. `PreToolUse` ports
-//! `hooks/memory-anchors.py`; `UserPromptSubmit` has no python precedent.
+//! the retired shell original; `UserPromptSubmit` has no python precedent.
 //!
 //! Performance: `PreToolUse` fires on every single Edit and Write, so it
 //! must not parse the graph on every call. The anchor index is built once
@@ -23,7 +23,7 @@
 //! the graph mid-session (via `rebuild_memory_graph.rs`, the sole writer of
 //! the file this hook reads) will not appear here until the next session
 //! starts with a fresh cache. This is deliberate and pinned by the stale
-//! cache scenario in `hooks/memory-anchors.test.sh`; see that file's own
+//! cache scenario in the retired shell test; see that file's own
 //! comment for the full rationale.
 
 use crate::common::paths::memory_dir;
@@ -41,7 +41,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 /// How long to wait for `git rev-parse --show-toplevel` before giving up.
-/// Matches hooks/memory-anchors.py:114's `timeout=5`.
+/// Matches the retired shell original's `timeout=5`.
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Total budget for `run_prompt`'s staleness-check loop across all matched
@@ -325,7 +325,7 @@ fn read_fact_body(file: &str) -> Option<String> {
 /// Anchors in the graph are repo-relative paths; the tool gives us an
 /// (usually absolute) `file_path`, so strip the git worktree root off it. No
 /// worktree root, or a `file_path` outside it: fall back to stripping a
-/// single leading slash, matching `hooks/memory-anchors.py`.
+/// single leading slash, matching the retired shell original.
 fn repo_relative_path(root: &str, raw_path: &str) -> String {
     let prefix = format!("{root}/");
     if !root.is_empty() {

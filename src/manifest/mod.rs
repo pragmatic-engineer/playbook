@@ -2,6 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 //! Tracked-file manifest validation, backing `playbook manifest`. A port of
-//! the now-deleted `shell/check-manifest.sh`.
+//! the now-deleted the retired shell original.
 
 pub mod check;

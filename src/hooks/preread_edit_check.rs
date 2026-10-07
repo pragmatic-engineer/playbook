@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports hooks/preread-edit-check.py: a PreToolUse hook on Read that injects
+//! Ports the retired shell original: a PreToolUse hook on Read that injects
 //! a "do not re-read" reminder when the target was edited by this session
 //! via Edit/Write within the last `WINDOW_SECS` seconds. Emits
 //! `additionalContext` only; never blocks.
@@ -12,7 +12,7 @@ use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Matches WINDOW in hooks/preread-edit-check.py:18 (30 minutes).
+/// Matches WINDOW in the retired shell original (30 minutes).
 const WINDOW_SECS: i64 = 1800;
 
 pub fn run(payload: &Payload) {
@@ -51,7 +51,7 @@ pub fn run(payload: &Payload) {
 /// the window, returning its timestamp in seconds. Records are
 /// `{"path":..,"ts":..}` JSON lines, one per Edit/Write.
 ///
-/// Two python oddities from hooks/preread-edit-check.py:42-54, both rooted
+/// Two python oddities from the retired shell original, both rooted
 /// in one outer `try` wrapping the whole scan while an inner `try` wraps
 /// only `json.loads`:
 ///
@@ -109,7 +109,7 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-/// Matches the age-string thresholds in hooks/preread-edit-check.py:60-66.
+/// Matches the age-string thresholds in the retired shell original.
 fn format_ago(delta: i64) -> String {
     if delta < 60 {
         format!("{delta}s ago")

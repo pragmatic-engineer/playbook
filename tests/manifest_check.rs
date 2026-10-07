@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Every scenario in `shell/check-manifest.test.sh`, ported, plus the two
+//! Every scenario in the retired shell test, ported, plus the two
 //! cases the brief called out explicitly: a brand new disallowed top-level
 //! directory being rejected, and an allowlisted one being accepted. That is
 //! the exact failure this validator exists to catch.

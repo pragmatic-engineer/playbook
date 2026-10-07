@@ -15,6 +15,8 @@ pub mod write;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+use crate::common::paths::{repo_scope_path, RepoScope};
+
 /// Which tier of the repo/org/global/default chain actually supplied a
 /// resolved value, so a caller (or a future `playbook config get` command)
 /// can report where a setting came from.
@@ -212,11 +214,7 @@ pub(crate) fn org_config_path(root: &Path, owner: &str) -> PathBuf {
 /// slot `src/common/paths.rs` reserves. Shared by `resolve` and
 /// `write::tier_path` so the two never drift on where this file lives.
 pub(crate) fn repo_config_path(root: &Path, owner: &str, repo: &str) -> PathBuf {
-    root.join("repos")
-        .join(owner)
-        .join(repo)
-        .join(".config")
-        .join("config.json")
+    repo_scope_path(root, owner, repo, RepoScope::Config, "").join("config.json")
 }
 
 /// Read one tier file and look up `key` in it. `Ok(None)` means "no
@@ -259,6 +257,12 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn repo_config_path_is_pinned_under_the_repo_config_slot() {
+        let got = repo_config_path(Path::new("/r"), "o", "p");
+        assert_eq!(got, PathBuf::from("/r/repos/o/p/.config/config.json"));
+    }
 
     /// A fresh scratch directory standing in for `$HOME`, unique per call so
     /// parallel tests never collide.
