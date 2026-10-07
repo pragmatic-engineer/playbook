@@ -7,9 +7,9 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, mode, pr,
-    sanitize, settings, trust, update, usage, worktree, AgentsCommand, CcCommand, Cli, Command,
-    ConfigCommand, DashboardCommand, DoctorCommand, GateCommand, HandoffCommand, JsonCommand,
-    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand, SanitizeCommand,
+    sanitize, settings, statusline, trust, update, usage, worktree, AgentsCommand, CcCommand, Cli,
+    Command, ConfigCommand, DashboardCommand, DoctorCommand, GateCommand, HandoffCommand,
+    JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand, SanitizeCommand,
     SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
@@ -44,11 +44,7 @@ fn main() {
             // they are no-ops so the shell dispatcher stays authoritative.
             _ => {}
         },
-        // RESERVED, not planned. No ADR 0007 Work Unit ports this: `statusline.sh`
-        // stays a shell script and WU-9 only places it where `settings.json`
-        // points. Do not read this arm as work in flight; see the blueprint's
-        // third 2026-08-17 amendment.
-        Command::Statusline => {}
+        Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
         // Retiring `hooks/hooks.json` and regenerating the seed into
         // binary-invoked form are the other two thirds of WU-11's atomic

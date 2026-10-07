@@ -518,6 +518,10 @@ Plus their `*.test.sh` suites, and `install.sh`, which the plan shrinks to a boo
 
 The two real gaps to settle are `statusline.sh` and `gh-remote.sh`. Either add a Work Unit that ports `Command::Statusline` and absorbs `gh-remote.sh` with it, or change `src/main.rs:21`'s comment to say the subcommand is reserved and not planned, so the next reader is not misled the way this one was.
 
+### Amendment 2026-10-07: `playbook statusline` is now planned, issue #446
+
+The third amendment left `Command::Statusline` reserved. Issue #446 (move all shell to Rust) reverses that: `src/statusline/` ports `statusline.sh` and `shell/gh-remote.sh`, byte for byte, and `tests/statusline.rs` runs every fixture through both. The first slice changes no user behaviour; `settings.json` still points at the script. Switching `statusLine.command` via `init` and `doctor` is the next slice.
+
 ### Amendment 2026-08-17 (fourth): findings from the Segment G gate reviews, which arrived late
 
 The adversarial and test-plan reviews recorded as INCONCLUSIVE on 2026-08-16 **did eventually deliver**, hours after being written off. They found six things the inline gate missed. Recorded here with what was verified and what was not, because two of them turned out to be conditional and one turned out to be already-correct in shipped code.
