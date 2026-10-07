@@ -44,6 +44,8 @@ It uses `tiny_http`, which is synchronous. This binary has no async runtime on p
 
 The page polls `/api/data` every 5 seconds. That endpoint ingests anything new, then returns the totals, every grouping and two charts. The charts are inline SVG drawn on the server, with every label escaped.
 
+The page has a date range toggle: last 30, 60 or 90 days, the current month, or all time. It sends the choice as `/api/data?range=30d|60d|90d|month|all`, and the server filters usage and skill and agent counts to that window before it groups anything. Days are UTC. "Last N days" includes today. "Current month" runs from the 1st to the last day of the month. A request with no `range` gets all time, and an unknown value gets a 400. The response names the window in `range` (`key`, `start`, `end`), and the page shows those dates above the totals. The page opens on the last 30 days and remembers your choice in `localStorage`. The layout works on a phone: wide tables and charts scroll sideways in their own box.
+
 The page is three same-origin files: `/` (HTML), `/app.css` and `/app.js`. They hold no data and need no token. Only `/api/data` does.
 
 Because a browser can reach the server, it is locked down:

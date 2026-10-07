@@ -23,7 +23,11 @@ pub const HTML: &str = r##"<!doctype html>
 </head>
 <body>
 <main>
+<header class="top">
 <h1>playbook usage</h1>
+<div class="ranges" id="ranges" role="group" aria-label="Date range"></div>
+</header>
+<div class="period" id="period"></div>
 <div class="muted" id="status">Loading…</div>
 <noscript><p>This page needs JavaScript to load its data.</p></noscript>
 <div class="totals" id="totals"></div>
@@ -39,24 +43,40 @@ pub const CSS: &str = r##":root { --bg:#fafafa; --fg:#1b1b1f; --muted:#666; --ca
 @media (prefers-color-scheme: dark) {
   :root { --bg:#16171a; --fg:#e8e8ea; --muted:#9a9aa2; --card:#1f2024; --line:#34353b; --bar:#6b9bf2; }
 }
-body { margin:0; padding:1rem 1rem 3rem; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; }
-main { max-width:60rem; margin:0 auto; }
-h1 { font-size:1.3rem; margin:0 0 .25rem; }
+*, *::before, *::after { box-sizing:border-box; }
+body { margin:0; padding:1rem 1rem 3rem; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; -webkit-text-size-adjust:100%; }
+main { max-width:72rem; margin:0 auto; }
+.top { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.75rem; }
+h1 { font-size:1.3rem; margin:0; }
 h2 { font-size:1rem; margin:1.5rem 0 .5rem; }
 .muted { color:var(--muted); }
-.totals { display:flex; flex-wrap:wrap; gap:.75rem; margin:1rem 0; }
-.total { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:.5rem .75rem; }
-.total b { display:block; font-size:1.1rem; }
-.charts { display:grid; grid-template-columns:repeat(auto-fit, minmax(20rem, 1fr)); gap:1rem; }
-.chart { width:100%; height:auto; background:var(--card); border:1px solid var(--line); border-radius:6px; }
+.ranges { display:flex; flex-wrap:wrap; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--card); }
+.ranges button { flex:1 1 auto; min-height:2.25rem; padding:.35rem .8rem; border:0; border-left:1px solid var(--line); background:transparent; color:var(--fg); font:inherit; cursor:pointer; }
+.ranges button:first-child { border-left:0; }
+.ranges button[aria-pressed="true"] { background:var(--bar); color:#fff; }
+.ranges button:focus-visible { outline:2px solid var(--bar); outline-offset:-2px; }
+.period { margin:.75rem 0 .25rem; font-weight:600; }
+.totals { display:grid; grid-template-columns:repeat(auto-fill, minmax(10rem, 1fr)); gap:.75rem; margin:1rem 0; }
+.total { min-width:0; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:.5rem .75rem; }
+.total b { display:block; font-size:1.1rem; overflow-wrap:anywhere; }
+.charts { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap:1rem; }
+.chart-wrap { min-width:0; overflow-x:auto; background:var(--card); border:1px solid var(--line); border-radius:6px; }
+.chart { display:block; width:100%; min-width:26rem; height:auto; }
 .chart .bar { fill:var(--bar); }
 .chart .axis { stroke:var(--line); }
 .chart text { fill:var(--fg); font-size:11px; }
 .chart .tick { fill:var(--muted); font-size:10px; }
-.scroll { overflow-x:auto; }
+.scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
 table { border-collapse:collapse; width:100%; background:var(--card); border:1px solid var(--line); }
 th, td { padding:.3rem .6rem; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
 th:first-child, td:first-child { text-align:left; }
+@media (max-width: 40rem) {
+  body { padding:.75rem .75rem 2rem; font-size:13px; }
+  .top { flex-direction:column; align-items:stretch; }
+  .totals { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:.5rem; }
+  th, td { padding:.3rem .45rem; }
+  td:first-child { max-width:12rem; overflow:hidden; text-overflow:ellipsis; }
+}
 "##;
 
 pub const JS: &str = r##"const REFRESH_MS = 5000;
@@ -64,6 +84,8 @@ const TOKEN_KEY = "playbook-usage-token";
 const NEED_LINK = "Open a fresh link with: playbook usage dashboard";
 const TABLES = [["day","By day (UTC)"],["week","By week (UTC, starting Monday)"],["model","By model"],["repo","By repo"],["branch","By branch"],["effort","By effort"],["account","By account"]];
 const COLUMNS = [["messages","Messages"],["input_tokens","Input"],["output_tokens","Output"],["cache_creation_tokens","Cache write"],["cache_read_tokens","Cache read"],["cost_usd","Cost (USD)"]];
+const RANGES = [["30d","Last 30 days"],["60d","Last 60 days"],["90d","Last 90 days"],["month","Current month"],["all","All time"]];
+const RANGE_KEY = "playbook-usage-range";
 
 // The link carries the session token in its fragment, which the browser
 // never sends to the server. Keep it for reloads and drop it from the address.
@@ -79,6 +101,13 @@ function readToken() {
   return token;
 }
 const TOKEN = readToken();
+
+function readRange() {
+  let saved = "";
+  try { saved = localStorage.getItem(RANGE_KEY) || ""; } catch (e) {}
+  return RANGES.some(r => r[0] === saved) ? saved : "30d";
+}
+let range = readRange();
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -108,12 +137,39 @@ function table(title, firstHeader, columns, rows) {
   wrap.appendChild(scroll);
   return wrap;
 }
+function renderRanges() {
+  const box = document.getElementById("ranges");
+  box.replaceChildren();
+  RANGES.forEach(r => {
+    const button = el("button", r[1]);
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(r[0] === range));
+    button.addEventListener("click", () => {
+      if (r[0] === range) return;
+      range = r[0];
+      try { localStorage.setItem(RANGE_KEY, range); } catch (e) {}
+      renderRanges();
+      document.getElementById("status").textContent = "Loading…";
+      refresh();
+    });
+    box.appendChild(button);
+  });
+}
+function rangeName(key) {
+  const found = RANGES.find(r => r[0] === key);
+  return found ? found[1] : key;
+}
 function render(data) {
+  const r = data.range;
+  document.getElementById("period").textContent = rangeName(r.key) + ": " +
+    (r.start ? r.start + " to " + r.end + " (UTC)" : "no usage recorded yet");
   const totals = document.getElementById("totals");
   totals.replaceChildren();
   [["Messages", fmt("messages", data.totals.messages)],
    ["Input tokens", fmt("t", data.totals.input_tokens)],
    ["Output tokens", fmt("t", data.totals.output_tokens)],
+   ["Cache write tokens", fmt("t", data.totals.cache_creation_tokens)],
+   ["Cache read tokens", fmt("t", data.totals.cache_read_tokens)],
    ["Estimated cost (USD)", fmt("cost_usd", data.totals.cost_usd)]].forEach(p => {
     const box = el("div", undefined, "total");
     box.appendChild(el("span", p[0], "muted"));
@@ -122,6 +178,11 @@ function render(data) {
   });
   const charts = document.getElementById("charts");
   charts.innerHTML = data.charts.cost_by_day + data.charts.cost_by_model;
+  charts.querySelectorAll("svg").forEach(svg => {
+    const wrap = el("div", undefined, "chart-wrap");
+    svg.replaceWith(wrap);
+    wrap.appendChild(svg);
+  });
   const tables = document.getElementById("tables");
   tables.replaceChildren();
   TABLES.forEach(t => tables.appendChild(table(t[1], t[0], COLUMNS, data.groups[t[0]])));
@@ -129,25 +190,40 @@ function render(data) {
   if (data.agents.length) tables.appendChild(table("Agents", "agent", [["count","Dispatches"]], data.agents));
 }
 let timer = null;
+let inFlight = 0;
 function stopPolling(status, message) {
   if (timer !== null) clearInterval(timer);
+  timer = null;
   status.textContent = message;
 }
 async function refresh() {
   const status = document.getElementById("status");
   if (!TOKEN) { stopPolling(status, "No session token. " + NEED_LINK); return; }
+  // Drop an answer only when the user switched ranges after asking for it.
+  const asked = range;
+  inFlight++;
   try {
-    const response = await fetch('/api/data', { headers: { 'X-Playbook-Token': TOKEN } });
+    const response = await fetch('/api/data?range=' + encodeURIComponent(asked), { headers: { 'X-Playbook-Token': TOKEN } });
+    if (asked !== range) return;
     if (response.status === 401) { stopPolling(status, "The session token was rejected. " + NEED_LINK); return; }
     if (!response.ok) throw new Error("HTTP " + response.status);
-    render(await response.json());
+    const data = await response.json();
+    if (asked !== range) return;
+    render(data);
     status.textContent = "Updated " + new Date().toLocaleTimeString() + ". Refreshes every " + (REFRESH_MS / 1000) + " seconds.";
   } catch (error) {
-    status.textContent = "Could not refresh: " + error.message;
+    if (asked === range) status.textContent = "Could not refresh: " + error.message;
+  } finally {
+    inFlight--;
   }
 }
+// A slow server must not have its answers dropped by the next poll.
+function poll() {
+  if (inFlight === 0) refresh();
+}
+renderRanges();
 refresh();
-timer = setInterval(refresh, REFRESH_MS);
+timer = setInterval(poll, REFRESH_MS);
 "##;
 
 #[cfg(test)]
@@ -156,9 +232,42 @@ mod tests {
 
     #[test]
     fn the_script_polls_the_data_endpoint_with_the_token_at_the_declared_interval() {
-        assert!(JS.contains("fetch('/api/data', { headers: { 'X-Playbook-Token': TOKEN } })"));
+        assert!(JS.contains("fetch('/api/data?range=' + encodeURIComponent(asked), { headers: { 'X-Playbook-Token': TOKEN } })"));
         assert!(JS.contains(&format!("const REFRESH_MS = {REFRESH_MS};")));
-        assert!(JS.contains("setInterval(refresh, REFRESH_MS)"));
+        assert!(JS.contains("setInterval(poll, REFRESH_MS)"));
+    }
+
+    #[test]
+    fn a_poll_never_drops_a_slow_answer_and_a_range_switch_drops_the_old_one() {
+        assert!(JS.contains("if (inFlight === 0) refresh();"));
+        assert!(JS.contains("const asked = range;"));
+        assert_eq!(
+            JS.matches("if (asked !== range) return;").count(),
+            2,
+            "after fetch and after json()"
+        );
+        assert!(JS.contains("if (asked === range) status.textContent"));
+        assert!(!JS.contains("latest"), "polls must not invalidate answers");
+    }
+
+    #[test]
+    fn a_bad_or_unreadable_saved_range_falls_back_to_30d() {
+        assert!(
+            JS.contains("try { saved = localStorage.getItem(RANGE_KEY) || \"\"; } catch (e) {}")
+        );
+        assert!(JS.contains("try { localStorage.setItem(RANGE_KEY, range); } catch (e) {}"));
+        assert!(JS.contains("? saved : \"30d\";"));
+    }
+
+    #[test]
+    fn every_element_the_script_looks_up_exists_in_the_page() {
+        for chunk in JS.split("getElementById(\"").skip(1) {
+            let id = chunk.split('"').next().unwrap();
+            assert!(
+                HTML.contains(&format!("id=\"{id}\"")),
+                "#{id} is missing from the HTML"
+            );
+        }
     }
 
     #[test]

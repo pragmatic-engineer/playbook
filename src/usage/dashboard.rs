@@ -7,6 +7,7 @@
 //! with a hidden flag) that outlives its parent, so no other `playbook`
 //! command ever waits on it.
 
+use super::api::Range;
 use super::lock::{self, Lock, Token};
 use super::page;
 use super::run::Paths;
@@ -73,40 +74,59 @@ pub fn fetch_site_allowed(value: Option<&str>) -> bool {
     matches!(value, None | Some("same-origin") | Some("none"))
 }
 
+/// The value of `name` in a query string, taken verbatim.
+fn query_param<'a>(query: &'a str, name: &str) -> Option<&'a str> {
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value)
+}
+
 /// What the server answers for a path: (status, content type, body). The page
 /// assets carry no data and need no token. `load_data` runs only for
-/// `/api/data`, and only when `token_ok`.
+/// `/api/data`, only when `token_ok`, and only with a known `range`.
 pub fn respond_to(
     path: &str,
+    query: &str,
     token_ok: bool,
-    load_data: impl FnOnce() -> Result<String, String>,
+    load_data: impl FnOnce(Range) -> Result<String, String>,
 ) -> (u16, &'static str, String) {
     match path {
         "/" => (200, "text/html; charset=utf-8", page::HTML.to_string()),
         "/app.js" => (200, "text/javascript; charset=utf-8", page::JS.to_string()),
         "/app.css" => (200, "text/css; charset=utf-8", page::CSS.to_string()),
         "/api/data" if !token_ok => (401, "text/plain; charset=utf-8", "unauthorized".to_string()),
-        "/api/data" => match load_data() {
-            Ok(body) => (200, "application/json", body),
-            Err(e) => (
-                500,
-                "application/json",
-                serde_json::json!({ "error": e }).to_string(),
-            ),
-        },
+        "/api/data" => {
+            let Some(range) = Range::parse(query_param(query, "range")) else {
+                return (
+                    400,
+                    "text/plain; charset=utf-8",
+                    "unknown range".to_string(),
+                );
+            };
+            match load_data(range) {
+                Ok(body) => (200, "application/json", body),
+                Err(e) => (
+                    500,
+                    "application/json",
+                    serde_json::json!({ "error": e }).to_string(),
+                ),
+            }
+        }
         _ => (404, "text/plain; charset=utf-8", "not found".to_string()),
     }
 }
 
-/// Ingest anything new, then build the dashboard JSON.
-fn load_data(paths: &Paths) -> Result<String, String> {
+/// Ingest anything new, then build the dashboard JSON for `range`.
+fn load_data(paths: &Paths, range: Range) -> Result<String, String> {
     let (conn, _) = super::run::ingest_new(paths)?;
     let usage = super::db::load_usage_events(&conn)?;
     let tools = super::db::load_tool_events(&conn)?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
-    serde_json::to_string(&super::api::data_json(&usage, &tools, now))
+    serde_json::to_string(&super::api::data_json(&usage, &tools, now, range))
         .map_err(|e| format!("failed to encode usage data: {e}"))
 }
 
@@ -292,7 +312,9 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
         let fetch_site = header_value(&request, "Sec-Fetch-Site");
         let token_ok =
             header_value(&request, "X-Playbook-Token").is_some_and(|given| token.matches(&given));
-        let path = request.url().split('?').next().unwrap_or("/").to_string();
+        let url = request.url().to_string();
+        let (path, query) = url.split_once('?').unwrap_or((url.as_str(), ""));
+        let path = path.to_string();
         let (status, content_type, body) = if !host_allowed(host.as_deref(), port) {
             (
                 403,
@@ -306,7 +328,7 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
                 "forbidden origin".to_string(),
             )
         } else {
-            respond_to(&path, token_ok, || load_data(paths))
+            respond_to(&path, query, token_ok, |range| load_data(paths, range))
         };
         let mut response = tiny_http::Response::from_string(body).with_status_code(status);
         let mut headers = vec![
@@ -352,26 +374,67 @@ mod tests {
     #[test]
     fn root_serves_the_page_data_runs_the_loader_and_anything_else_is_a_404() {
         let (status, content_type, body) =
-            respond_to("/", false, || panic!("the page must not load data"));
+            respond_to("/", "", false, |_| panic!("the page must not load data"));
         assert_eq!(status, 200);
         assert!(content_type.starts_with("text/html"));
         assert!(body.contains("/app.js"));
 
         let (status, content_type, body) =
-            respond_to("/api/data", true, || Ok("{\"ok\":true}".to_string()));
+            respond_to("/api/data", "", true, |_| Ok("{\"ok\":true}".to_string()));
         assert_eq!(
             (status, content_type, body.as_str()),
             (200, "application/json", "{\"ok\":true}")
         );
 
-        let (status, _, body) = respond_to("/api/data", true, || Err("db locked".to_string()));
+        let (status, _, body) = respond_to("/api/data", "", true, |_| Err("db locked".to_string()));
         assert_eq!(status, 500);
         assert!(body.contains("db locked"));
 
         assert_eq!(
-            respond_to("/nope", true, || panic!("unknown paths load nothing")).0,
+            respond_to("/nope", "", true, |_| panic!("unknown paths load nothing")).0,
             404
         );
+    }
+
+    #[test]
+    fn every_range_button_is_accepted_by_the_server_and_echoed_back() {
+        let list = page::JS
+            .split("const RANGES = [")
+            .nth(1)
+            .and_then(|rest| rest.split("];").next())
+            .expect("the page declares RANGES");
+        let keys: Vec<&str> = list
+            .split("],[")
+            .map(|pair| pair.split('"').nth(1).expect("a quoted key"))
+            .collect();
+
+        assert_eq!(keys, ["30d", "60d", "90d", "month", "all"]);
+        for key in keys {
+            let range = Range::parse(Some(key)).unwrap_or_else(|| panic!("{key} is refused"));
+            assert_eq!(
+                super::super::api::data_json(&[], &[], 0, range)["range"]["key"],
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn the_data_route_passes_the_range_and_refuses_an_unknown_one() {
+        let seen = |query: &str| {
+            let mut got = None;
+            let status = respond_to("/api/data", query, true, |range| {
+                got = Some(range);
+                Ok(String::new())
+            })
+            .0;
+            (status, got)
+        };
+
+        assert_eq!(seen(""), (200, Some(Range::All)));
+        assert_eq!(seen("range=30d"), (200, Some(Range::LastDays(30))));
+        assert_eq!(seen("x=1&range=month"), (200, Some(Range::CurrentMonth)));
+        assert_eq!(seen("range=7d"), (400, None));
+        assert_eq!(seen("range=<script>"), (400, None));
     }
 
     #[test]
@@ -437,9 +500,10 @@ mod tests {
 
     #[test]
     fn the_data_route_needs_the_token_and_the_assets_do_not() {
-        let never = || -> Result<String, String> { panic!("data must not load without the token") };
+        let never =
+            |_: Range| -> Result<String, String> { panic!("data must not load without the token") };
 
-        let (status, _, body) = respond_to("/api/data", false, never);
+        let (status, _, body) = respond_to("/api/data", "range=30d", false, never);
         assert_eq!((status, body.as_str()), (401, "unauthorized"));
 
         for (path, kind) in [
@@ -447,7 +511,7 @@ mod tests {
             ("/app.js", "text/javascript"),
             ("/app.css", "text/css"),
         ] {
-            let (status, content_type, body) = respond_to(path, false, never);
+            let (status, content_type, body) = respond_to(path, "", false, never);
             assert_eq!(status, 200, "{path}");
             assert!(content_type.starts_with(kind), "{path}: {content_type}");
             assert!(
@@ -460,7 +524,7 @@ mod tests {
     #[test]
     fn the_page_assets_hold_no_usage_data() {
         for path in ["/", "/app.js", "/app.css"] {
-            let (_, _, body) = respond_to(path, false, || panic!("no data"));
+            let (_, _, body) = respond_to(path, "", false, |_| panic!("no data"));
             for leaked in ["dev@example.com", "\"cost_usd\":", "\"messages\":"] {
                 assert!(!body.contains(leaked), "{path} has {leaked}");
             }
