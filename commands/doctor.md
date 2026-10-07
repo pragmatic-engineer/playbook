@@ -1,5 +1,5 @@
 ---
-description: Check the seven playbook layers and print a status table with a remediation hint for each miss.
+description: Use after install or update, or when hooks or the system prompt seem not to run. Checks the seven playbook layers and prints a status table with a fix hint for each miss.
 allowed-tools: Bash, Read
 argument-hint: ""
 model: sonnet
@@ -10,10 +10,6 @@ effort: low
 
 Run all seven checks below. Do not stop early if one fails. Then print a
 status table with one row per layer.
-
-## Step 0: Read the run mode
-
-Run `playbook mode status --json` and note the mode. This command behaves the same in either mode, so carry on if it fails.
 
 ## Layer 1: Plugin enabled
 
@@ -259,11 +255,10 @@ fi
 Report:
 
 - `MATCH` → PASS.
-- `MISSING` → **FAIL.** Every ported hook is dead. Remediation: install the
-  binary and make sure its directory is on PATH. Until ADR 0007 WU-11 lands the
-  fetch step, `install.sh` does **not** place the binary, so the honest hint
-  today is to download the asset for your platform from the latest release, or
-  build it with `cargo build --release`, and put it on PATH.
+- `MISSING` → **FAIL.** Every ported hook is dead. Remediation: run
+  `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`
+  or `brew install pragmatic-engineer/tap/playbook`, and make sure its
+  directory is on PATH.
 - `NO_VERSION` → **FAIL.** `playbook` resolved but `--version` printed nothing,
   so the file on PATH is not the binary this plugin expects. A stale shim or a
   name collision with another tool are both live causes; report the resolved
@@ -280,7 +275,7 @@ Report:
   predates the `doctor plugin-version` subcommand, so this layer cannot check
   it against the plugin manifest. Not the same as `PRESENT_NO_BASELINE`: here a
   manifest may well exist, the binary is just too old to read it this way.
-  Remediation: update `playbook`.
+  Remediation: run `playbook update`, or re-run install.sh if the binary is too old to have `update`.
 - `GATE_SOURCE=MISSING` → **FAIL, independent of the SKEW verdict above.**
   `gate record`/`gate check` both require a `--source` flag as of the gate
   staleness enforcement change; a binary built before that ships with neither
@@ -288,8 +283,8 @@ Report:
   quality gate call fails outright, not just reads stale. Unlike `SKEW`, this
   is not a direction-unknown comparison: a binary missing the flag is broken
   for this purpose regardless of whether it is otherwise ahead of or behind
-  the plugin manifest. Remediation: update `playbook` to a version that
-  supports gate staleness enforcement.
+  the plugin manifest. Remediation: run `playbook update`, or re-run install.sh if
+  the binary is too old to have `update`.
 - `PATH_SHADOW STALE_FIRST` → **WARN.** More than one `playbook` is on PATH and
   the first one, the one every hook runs, is older than a later one. The
   `PATH_SHADOW_ENTRY <path> <version>` lines name each binary in PATH order.

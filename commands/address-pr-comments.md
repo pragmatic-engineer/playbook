@@ -1,5 +1,5 @@
 ---
-description: Walk unresolved PR review comments one at a time, apply fixes or draft replies, then commit-and-push and post replies with the new SHA.
+description: Use when a PR has unresolved review comments to work through. Walks them one at a time, applies fixes or drafts replies, commits and pushes through /playbook:commit-and-push, then posts the queued replies.
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, Skill
 argument-hint: "[PR number] [--bots] [--dry-run] [-y|--yes] [--auto] [--ask]"
 model: opus
@@ -8,7 +8,7 @@ effort: high
 
 # Address PR Comments
 
-Iterate through unresolved review-thread comments and PR-level comments on a pull request. For each one: read the code, propose a fix or reply, get user approval, apply the edit (or post the reply), and move on. At the end, hand off to `/playbook:commit-and-push -A` and then post any queued thread replies that cite the resulting commit SHA.
+Iterate through unresolved review-thread comments and PR-level comments on a pull request. For each one: read the code, propose a fix or reply, get user approval, apply the edit (or post the reply), and move on. At the end, hand off to `/playbook:commit-and-push -A` and then post any queued thread replies.
 
 ## Step 0: Read the run mode
 
@@ -184,7 +184,7 @@ For each indexed item, do this loop:
 
    - **Fix**: propose a concrete diff. Show the diff snippet before applying.
    - **Reply**: draft a one-or-two-sentence reply (no fix needed). Show the reply text.
-   - **Both**: apply a fix AND queue a reply that will say "addressed in `<SHA>`" once we commit.
+   - **Both**: apply a fix AND queue a short reply ("Fixed, pushed.") that is posted once the commit lands.
    - **Skip**: neither fix nor reply. Use sparingly. Skipped items get listed in the final summary so nothing slips through silently.
 
 4. **Get user approval.** Ask `[F]ix / [R]eply / [B]oth / [S]kip / [Q]uit / [E]dit-then-fix`. Wait for the answer.
@@ -194,7 +194,7 @@ For each indexed item, do this loop:
 
 5. **Apply.** Everything above this sub-step (show context, verify the claim, choose the action, draft the exact diff or reply text, get user approval) stays in the main session unchanged. Once an action is approved and its content is fully decided, dispatch execution to `patch-applier` (`subagent_type: playbook:patch-applier`) rather than applying it directly. `patch-applier` holds `Edit` and `Bash`, so per `playbook:delegating-subagents` it delivers its outcome by file, not by return value alone: every dispatch below names a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md` (`<N>` is this item's index), and the main session reads that file the moment the dispatch returns or goes idle, before trusting any outcome.
 
-   - **For Both, dispatch the fix half now and queue the reply text for Step 6.** The reply half of a **Both** action is NEVER dispatched here: only its content is decided now. Step 6 dispatches it after commit, once `<SHA>` is known. This deferred timing is the primary rule for Both, not a trailing exception to it.
+   - **For Both, dispatch the fix half now and queue the reply text for Step 6.** The reply half of a **Both** action is NEVER dispatched here: only its content is decided now. Step 6 dispatches it after commit, once the push has succeeded. This deferred timing is the primary rule for Both, not a trailing exception to it.
    - For **Fix**, or the fix half of **Both**: dispatch `patch-applier` with the exact, already-approved diff and the report file path. Read the report file; it names the exact hunk applied, or a failure. Print the applied hunk to the user immediately, before advancing to the next indexed item.
    - For **Reply only** (no fix): dispatch `patch-applier` with the exact reply text, the exact command shape to run, and the report file path, matching the two existing shapes below:
      ```bash
@@ -228,10 +228,10 @@ If approved (or `AUTO_COMMIT=true`):
 
 1. Invoke the `commit-and-push` skill with the `-A` flag and an extra hint that the commit message should reference the PR (e.g. "address review comments on #<PR_NUMBER>"). The skill handles staging, formatting, message generation, rebase, and push. Capture the resulting commit SHA from the skill's output.
 
-2. For each `both-queued` reply, finalise the body by substituting `<SHA>`, then dispatch `patch-applier` (`subagent_type: playbook:patch-applier`) with the exact finalised body, the command shape to run, and a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md`, the same convention Step 4 uses:
+2. For each `both-queued` reply, dispatch `patch-applier` (`subagent_type: playbook:patch-applier`) with the exact reply body, the command shape to run, and a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md`, the same convention Step 4 uses:
    ```bash
    gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" \
-     -f body="$REPLY_TEXT_WITH_SHA"
+     -f body="$REPLY_TEXT"
    ```
    Read the report file the moment the dispatch returns or goes idle; it names the exact body posted, or a failure. Print the posted body before moving to the next queued reply. On a missing report file or a reported failure, apply the SAME rule Step 4 sub-step 5 uses: surface it to the user plainly, mark the item `failed` (not `both-queued` anymore), and do not count it toward "posted P queued replies" below. This is the same delegation Step 4 uses for an immediate reply, applied here to the deferred post: Step 4's "who executes the post changes, not when" claim depends on this step actually dispatching `patch-applier` too, not the main session running `gh api` directly.
 

@@ -294,7 +294,7 @@ fn a_hook_that_writes_the_trailer_stands_the_flag_down() {
 }
 
 #[test]
-fn commit_and_push_always_signs_and_the_docs_say_so() {
+fn commit_and_push_signs_when_a_key_is_set_and_the_docs_say_so() {
     // Arrange
     let step4 = step_section(&command_text("commit-and-push"), "4");
     let guide = fs::read_to_string(
@@ -303,9 +303,9 @@ fn commit_and_push_always_signs_and_the_docs_say_so() {
     .unwrap();
 
     // Assert
-    assert!(step4.contains("git commit ${AMEND_FLAG} ${SIGNOFF_FLAG} --gpg-sign"));
-    assert!(step4.contains("always"));
-    assert!(guide.contains("always signed"));
+    assert!(step4.contains("git commit ${AMEND_FLAG} ${SIGNOFF_FLAG} ${GPG_FLAG}"));
+    assert!(step4.contains("user.signingkey"));
+    assert!(guide.contains("signed whenever"));
     assert!(!guide.contains("already passes `-s`"));
 }
 

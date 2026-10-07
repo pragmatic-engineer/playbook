@@ -1,6 +1,6 @@
 ---
-description: Deeply learn the current project (git history, PRs, JIRA, Confluence), store distilled topics in the memory system (routed per-project vs global), and export a navigable memory.graph.json of the memory graph.
-allowed-tools: Bash, Read, Grep, Glob, Write, Agent, WebFetch
+description: Use when starting on a repo the memory store knows nothing about, or to refresh what it knows. Reads git history, PRs, JIRA and Confluence, stores distilled facts in memory, and exports memory.graph.json.
+allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill, WebFetch
 argument-hint: "[--refresh] [--graph-only] [--stage] [--from-staged] [--max-prs N] [--max-commits N] [--auto] [--ask]"
 model: opus
 effort: high

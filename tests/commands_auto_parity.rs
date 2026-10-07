@@ -39,7 +39,7 @@ enum Auto {
     /// Skips the `/clear` self-review and says in the final report that no
     /// self-review ran when the caller was not `implement`.
     SkipsSelfReview,
-    /// Asks nothing, so Step 0 is only the mode read.
+    /// Asks nothing and behaves the same in both modes, so it has no Step 0.
     Unchanged,
     /// Asks only inside an explicit `if mode is ask` branch, so an
     /// unattended run never reaches a question.
@@ -446,7 +446,7 @@ fn step0_section_reads_mode_status() {
     // Arrange
     let mut failures = Vec::new();
 
-    for spec in COMMANDS {
+    for spec in COMMANDS.iter().filter(|c| c.auto != Auto::Unchanged) {
         let file = load(spec.name);
 
         // Act
@@ -1012,13 +1012,12 @@ fn create_pull_request_step0_skips_the_clear_self_review_in_auto() {
 }
 
 // ---------------------------------------------------------------------------
-// repo-audit, doctor, session-start: one read line, no behaviour change
+// repo-audit, doctor, session-start: no mode block at all
 // ---------------------------------------------------------------------------
 
 #[test]
-fn commands_that_never_ask_need_only_a_read_line_in_step0() {
+fn commands_that_never_ask_carry_no_mode_block() {
     // Arrange
-    const MAX_BODY_LINES: usize = 3;
     let mut failures = Vec::new();
 
     for spec in rows(Auto::Unchanged) {
@@ -1033,38 +1032,18 @@ fn commands_that_never_ask_need_only_a_read_line_in_step0() {
                 text.trim()
             ));
         }
-        let Some(step0) = file.step0() else {
-            failures.push(format!("{}: no `Step 0` section", spec.name));
-            continue;
-        };
-        let body: Vec<&String> = file.lines[step0.start + 1..step0.end]
-            .iter()
-            .filter(|l| !l.trim().is_empty())
-            .collect();
-        let text = file.text_of(&step0).to_lowercase();
-
-        // Assert
-        if !text.contains("playbook mode status") {
-            failures.push(format!("{}: Step 0 never reads the mode", spec.name));
-        }
-        if body.len() > MAX_BODY_LINES {
+        if file.step0().is_some() {
             failures.push(format!(
-                "{}: Step 0 has {} body lines, expected at most {MAX_BODY_LINES}",
-                spec.name,
-                body.len()
-            ));
-        }
-        if text.contains("stop") || text.contains("refuse") {
-            failures.push(format!(
-                "{}: Step 0 changes behaviour, it should only read the mode",
+                "{}: has a `Step 0`, but behaves the same in either mode",
                 spec.name
             ));
         }
     }
 
+    // Assert
     assert!(
         failures.is_empty(),
-        "read-only Step 0 problems:\n{}",
+        "no-mode-block problems:\n{}",
         failures.join("\n")
     );
 }

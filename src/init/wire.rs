@@ -52,11 +52,12 @@ struct HookSpec {
 }
 
 /// The functional hooks, already ported to Rust, rewired here to the bare
-/// `playbook hook <name>` form. Eleven come from `hooks/hooks.json`, ported
-/// line for line (`session-clean-exit` fires on both `Stop` and
-/// `SessionEnd`), while `auto-guard` and `auto-cost` have no `hooks/hooks.json`
-/// entry. Together with `GUARD_SPECS` below these are exactly the 18
-/// settings-wired `HookName` variants. The two worktree hooks ship through
+/// `playbook hook <name>` form. Eleven were ported from the old
+/// `hooks/hooks.json` (it now holds only the session-start migration check and
+/// the two worktree hooks), line for line (`session-clean-exit` fires on both
+/// `Stop` and `SessionEnd`), while `auto-guard` and `auto-cost` never had a
+/// `hooks/hooks.json` entry. Together with `GUARD_SPECS` below these are exactly
+/// the 18 settings-wired `HookName` variants. The two worktree hooks ship through
 /// `hooks/hooks.json` instead, so they are not wired here.
 ///
 /// Divergence from `hooks/hooks.json`'s literal shape: that file ships

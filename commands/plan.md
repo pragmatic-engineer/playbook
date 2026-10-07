@@ -104,7 +104,7 @@ Add `--flag auto` if the arguments contain `--auto` or `--auto-design`. Add `--f
 
 **Derive `<topic-slug>` (MUST, before anything else).** Kebab-case the plain-text idea seed as typed, or, in ticket mode, the ticket id itself (e.g. `PROJ-123` becomes `proj-123`), the same convention `commands/adr.md:21`'s `{kebab-title}` filename uses. Ticket mode derives the slug from the id, not the ticket's title, because Step 1.5 (which pulls the title) runs after this check; using the id keeps the slug available before the ticket is fetched, and it stays the same value for the rest of the session, including Step 12's save. This is the same slug the checkpoint file and the final plan file both use.
 
-**Check for a checkpoint.** This command's own bespoke checkpoint/resume mechanism, not the generic `/playbook:session-handoff` (that one is explicitly invoked rather than automatic, keyed by project-slug plus a suffix rather than this topic's own slug, and produces a free-text summary rather than a structured plan-in-progress; none of that serves an automatic, topic-slug-keyed resume). Resolve the plans directory and look for a matching checkpoint:
+**Check for a checkpoint.** This command's own bespoke checkpoint/resume mechanism, not the generic `/playbook:session-handoff` (that one is keyed by directory and holds a free-text summary, not a structured plan in progress keyed by topic). Resolve the plans directory and look for a matching checkpoint:
 
 ```bash
 if ! PLANS_DIR=$(playbook path plans 2>&1); then
