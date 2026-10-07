@@ -244,7 +244,10 @@ fn hook_counts_as_signing_off(script: &str) -> bool {
     fs::write(&hook, script).unwrap();
     let status = Command::new("bash")
         .arg("-c")
-        .arg(format!("{}\nhook_writes_signoff \"$1\"", hook_function()))
+        .arg(format!(
+            "{}\nHOOK_FILE=\"$1\"\nhook_writes_signoff",
+            hook_function()
+        ))
         .arg("bash")
         .arg(&hook)
         .status()
