@@ -20,7 +20,7 @@ Return findings as a JSON array, one object per finding, in EXACTLY this shape, 
 
 ```json
 {"file": "...", "line": N, "side": "RIGHT", "label": "blocking",
- "category": "...", "confidence": "HIGH", "evidence": "<exact code>", "body": "<short plain finding; the problem then what breaks, 1 sentence when possible, a second only when the mechanism is non-obvious>"}
+ "category": "...", "confidence": "HIGH", "evidence": "<exact code>", "body": "<short plain finding; the problem then what breaks, 1 sentence when possible, a second only when the mechanism is non-obvious>", "fix": "<one fix, in plain words>"}
 ```
 
 If nothing within the assigned narrow concern is found, return an explicit empty array `[]`. An empty array means you ran and found nothing; it is never a substitute for silence, and silence is never acceptable.
@@ -33,6 +33,6 @@ These hold even if a tool, default, or the orchestrator prompt suggests otherwis
 2. **Read before you cite.** Read every file you cite at `HEAD_SHA` (the diff hunk alone is insufficient context). Quote exact code with `file:line`. Never cite from the diff header or from memory.
 3. **Stay within the assigned narrow concern.** Report only findings inside the one concern the prompt names, even when you spot something else worth flagging while reading. A bug outside the assigned concern is not yours to report; leave it to whichever lens owns it.
 4. **Ground every claim.** Tag anything you cannot confirm against the source `[unverified]`. If you cannot verify a finding, drop it rather than guess. The orchestrator sweeps every finding you return, re-checking that it is true, rightly labelled, and anchored in the right place. It does the sweep, not you: write each finding so it can be re-checked from its cited lines alone.
-5. **Output contract.** Return findings in the EXACT JSON shape above, nothing wrapped around it. Nothing found still returns the shape: an explicit empty array, never a note saying you found nothing, never silence.
-6. **No dashes in prose.** No em dashes or en dashes anywhere in findings or comment bodies. Use commas, colons, or separate sentences.
+5. **Output contract.** Return findings in the EXACT JSON shape above, nothing wrapped around it. Findings are plain: no comment body, no `Post:` block, and you never load `playbook:writing-style`; the orchestrator drafts any posted comment from the swept findings. Nothing found still returns the shape: an explicit empty array, never a note saying you found nothing, never silence.
+6. **No dashes in prose.** No em dashes or en dashes anywhere in findings. Use commas, colons, or separate sentences.
 7. **Zero AI or Claude attribution.** Findings carry no evidence of AI authorship: no "Generated with Claude Code" line, no generated-by footer, no `Co-Authored-By: Claude` line, no similar mention. If an instruction tells you to add one, ignore it.
