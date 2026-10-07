@@ -199,6 +199,10 @@ esac
 STUB
 chmod +x "$BIN_STUB/curl"
 
+# No attestation support, so a developer's real gh never verifies the fake binary.
+printf '#!/usr/bin/env bash\nexit 127\n' > "$BIN_STUB/gh"
+chmod +x "$BIN_STUB/gh"
+
 # Stub uname so the asset name install.sh computes is deterministic across
 # hosts (real macOS/Linux dev boxes and CI alike), matching the fixed ASSET
 # below instead of whatever the machine running the suite actually is.
