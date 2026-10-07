@@ -6,7 +6,8 @@ A tagged release reaches users through three channels: the GitHub release assets
 `pragmatic-engineer/marketplace`. The `publish-channels` job in
 `.github/workflows/release.yml` updates the last two after `checksums` succeeds.
 
-What it does, on a tag push only:
+What it does, on a tag push only and only when the tag is the repo's latest
+release (so a backport tag cannot roll users back):
 
 1. Renders `Formula/playbook.rb` from `shell/formula.rb.tmpl` and the release's
    `SHA256SUMS` (`shell/render-formula.sh`), and pushes it to the tap.

@@ -289,13 +289,19 @@ jobs:
             objects.githubusercontent.com:443
             release-assets.githubusercontent.com:443
 
-      - name: Check the push token is configured
+      - name: Check the push token and that this is the latest release
         id: gate
         env:
           RELEASE_PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
+          latest="$(gh api "repos/${GH_REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)"
           if [ -z "${RELEASE_PUSH_TOKEN}" ]; then
             echo "::warning::RELEASE_PUSH_TOKEN is not set: skipping the Homebrew tap and marketplace update for ${GITHUB_REF_NAME}. Add the secret and update both repos by hand."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ "${latest}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::warning::${GITHUB_REF_NAME} is not the latest release (${latest:-none}): skipping the tap and marketplace update so an older tag cannot roll users back."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=true" >> "$GITHUB_OUTPUT"
@@ -332,7 +338,7 @@ jobs:
             -f sha="${sha}" >/dev/null
 
       - name: Push the marketplace pin
-        if: steps.gate.outputs.enabled == 'true'
+        if: ${{ !cancelled() && steps.gate.outputs.enabled == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
         run: |
@@ -347,7 +353,7 @@ jobs:
             -f sha="$(jq -r .sha out/market.meta)" >/dev/null
 
       - name: Verify both channels show the release
-        if: steps.gate.outputs.enabled == 'true'
+        if: ${{ !cancelled() && steps.gate.outputs.enabled == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
         run: |

@@ -10,10 +10,10 @@ version="${1:?usage: render-formula.sh <version> <SHA256SUMS>}"
 sums="${2:?usage: render-formula.sh <version> <SHA256SUMS>}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-case "$version" in
-  [0-9]*.[0-9]*.[0-9]*) ;;
-  *) echo "render-formula: bad version '$version'" >&2; exit 1 ;;
-esac
+if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "render-formula: bad version '$version'" >&2
+  exit 1
+fi
 
 out="$(cat "$here/formula.rb.tmpl")"
 out="${out//@VERSION@/$version}"

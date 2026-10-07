@@ -32,10 +32,14 @@ check "x86_64 darwin sha" has "$out" "sha256 \"$(printf '2%.0s' {1..64})\""
 check "aarch64 linux sha" has "$out" "sha256 \"$(printf '3%.0s' {1..64})\""
 check "x86_64 linux sha" has "$out" "sha256 \"$(printf '4%.0s' {1..64})\""
 check "windows sha not used" bash -c '! grep -q 5555 <<<"$1"' _ "$out"
-check "aarch64 darwin pair is adjacent" bash -c \
-  'grep -A1 "aarch64-apple-darwin\"" <<<"$1" | grep -q "sha256 \"1111"' _ "$out"
+for pair in aarch64-apple-darwin:1 x86_64-apple-darwin:2 aarch64-unknown-linux-musl:3 x86_64-unknown-linux-musl:4; do
+  check "url and sha adjacent for ${pair%%:*}" bash -c \
+    'grep -A1 "${2}\"" <<<"$1" | grep -q "sha256 \"${3}${3}${3}${3}"' _ "$out" "${pair%%:*}" "${pair##*:}"
+done
 check "missing version in sums fails" fails bash "$DIR/render-formula.sh" 9.8.6 "$FIX/SHA256SUMS"
-check "v-prefixed version rejected" fails bash "$DIR/render-formula.sh" v9.8.7 "$FIX/SHA256SUMS"
+check "v-prefixed version rejected by the guard" bash -c \
+  'bash "$1/render-formula.sh" v9.8.7 "$2" 2>&1 | grep -q "bad version"' _ "$DIR" "$FIX/SHA256SUMS"
+check "quote in version rejected" fails bash "$DIR/render-formula.sh" '9.8.7"x' "$FIX/SHA256SUMS"
 
 m="$(bash "$DIR/pin-marketplace.sh" 9.8.7 "$FIX/marketplace.json")"
 check "playbook ref pinned" jq_is "$m" '.plugins[]|select(.name=="playbook")|.source.ref' v9.8.7
