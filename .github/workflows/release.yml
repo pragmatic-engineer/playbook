@@ -263,3 +263,110 @@ jobs:
           subject-path: |
             dist/playbook-*
             dist/SHA256SUMS
+
+  # Pushes the release to the Homebrew tap and the plugin marketplace. Org
+  # policy blocks the workflow token from opening PRs elsewhere, so this uses
+  # a fine-grained PAT (RELEASE_PUSH_TOKEN, contents: write on both repos) and
+  # writes through the contents API, which GitHub signs. Without the secret
+  # the job warns and passes, so releases keep working.
+  publish-channels:
+    needs: [verify-version, checksums]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TAP_REPO: pragmatic-engineer/homebrew-playbook
+      MARKETPLACE_REPO: pragmatic-engineer/marketplace
+      VERSION: ${{ needs.verify-version.outputs.version }}
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+
+      - name: Check the push token and that this is the latest release
+        id: gate
+        env:
+          RELEASE_PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          latest="$(gh api "repos/${GH_REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          if [ -z "${RELEASE_PUSH_TOKEN}" ]; then
+            echo "::warning::RELEASE_PUSH_TOKEN is not set: skipping the Homebrew tap and marketplace update for ${GITHUB_REF_NAME}. Add the secret and update both repos by hand."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ "${latest}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::warning::${GITHUB_REF_NAME} is not the latest release (${latest:-none}): skipping the tap and marketplace update so an older tag cannot roll users back."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+
+      - name: Render the formula and the marketplace file
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          gh release download "${GITHUB_REF_NAME}" --pattern SHA256SUMS --dir out --clobber
+          bash shell/render-formula.sh "${VERSION}" out/SHA256SUMS > out/playbook.rb
+          cat out/playbook.rb
+
+      - name: Push the tap formula
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          path="Formula/playbook.rb"
+          sha="$(gh api "repos/${TAP_REPO}/contents/${path}" --jq .sha)"
+          gh api -X PUT "repos/${TAP_REPO}/contents/${path}" \
+            -f message="playbook ${VERSION}" \
+            -f content="$(base64 < out/playbook.rb | tr -d '\n')" \
+            -f sha="${sha}" >/dev/null
+
+      - name: Push the marketplace pin
+        if: ${{ !cancelled() && steps.gate.outputs.enabled == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          path=".claude-plugin/marketplace.json"
+          gh api "repos/${MARKETPLACE_REPO}/contents/${path}" > out/market.meta
+          jq -r .content out/market.meta | base64 -d > out/marketplace.json
+          bash shell/pin-marketplace.sh "${VERSION}" out/marketplace.json > out/marketplace.new.json
+          gh api -X PUT "repos/${MARKETPLACE_REPO}/contents/${path}" \
+            -f message="playbook ${VERSION}" \
+            -f content="$(base64 < out/marketplace.new.json | tr -d '\n')" \
+            -f sha="$(jq -r .sha out/market.meta)" >/dev/null
+
+      - name: Verify both channels show the release
+        if: ${{ !cancelled() && steps.gate.outputs.enabled == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
+        run: |
+          set -uo pipefail
+          bad=0
+          formula="$(gh api "repos/${TAP_REPO}/contents/Formula/playbook.rb" --jq .content | base64 -d)"
+          if [ "$(grep -c "download/v${VERSION}/playbook-${VERSION}-" <<<"$formula")" -ne 4 ]; then
+            echo "::error::Homebrew tap ${TAP_REPO} does not show v${VERSION} on all four urls." >&2
+            bad=1
+          fi
+          ref="$(gh api "repos/${MARKETPLACE_REPO}/contents/.claude-plugin/marketplace.json" --jq .content | base64 -d | jq -r '.plugins[] | select(.name == "playbook") | .source.ref')"
+          if [ "$ref" != "v${VERSION}" ]; then
+            echo "::error::Marketplace ${MARKETPLACE_REPO} pins playbook to '${ref}', expected v${VERSION}." >&2
+            bad=1
+          fi
+          exit "$bad"
