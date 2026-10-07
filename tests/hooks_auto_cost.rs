@@ -2144,3 +2144,57 @@ fn ask_mode_leaves_self_protection_commands_and_config_writes_alone() {
         assert_eq!(tree(&session.runtime_root()), before, "{label}");
     }
 }
+
+#[cfg(unix)]
+fn bash_call(s: &Scratch) -> String {
+    json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls"},
+        "session_id": "slug-lookup",
+        "cwd": s.cwd,
+    })
+    .to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn default_mode_with_no_scoped_config_never_spawns_git() {
+    // Arrange
+    let s = scratch("no-spawn");
+    let shim = auto_env::git_shim(&s);
+
+    // Act
+    let (out, code) = auto_env::run_hook(&s, "auto-cost", &bash_call(&s), &[("PATH", &shim.path)]);
+
+    // Assert
+    assert_eq!(code, 0);
+    assert_eq!(out.trim(), "");
+    assert_eq!(
+        shim.calls(),
+        0,
+        "the slug cannot matter without a scoped tier"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_repo_tier_auto_mode_still_looks_up_the_slug_and_tracks_the_session() {
+    // Arrange
+    let s = scratch("repo-tier");
+    s.seed_repo_mode_config("acme", "widgets", "auto");
+    let shim = auto_env::git_shim(&s);
+
+    // Act
+    let (_, code) = auto_env::run_hook(&s, "auto-cost", &bash_call(&s), &[("PATH", &shim.path)]);
+
+    // Assert
+    assert_eq!(code, 0);
+    assert_eq!(shim.calls(), 1);
+    assert!(
+        tree(&s.home)
+            .iter()
+            .any(|p| p.contains("slug-lookup") && p.contains(STATE_FILE)),
+        "auto mode from the repo tier must start tracking cost"
+    );
+}

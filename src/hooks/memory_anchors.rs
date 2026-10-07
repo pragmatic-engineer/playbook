@@ -152,12 +152,13 @@ fn run_prompt(payload: &Payload, dir: &str) {
 
     let root = git_toplevel();
     let mut matches = prompt_token_matches(&contents, &prompt);
+    let index = AnchorIndex::parse(&contents);
     for touched_abs in touched_paths(dir) {
         let relpath = repo_relative_path(&root, &touched_abs);
         if relpath.is_empty() {
             continue;
         }
-        for row in matching_rows(&contents, &relpath) {
+        for row in index.matching_rows(&relpath) {
             let from_id = row.get(1).cloned().unwrap_or_default();
             if !matches
                 .iter()
@@ -263,13 +264,15 @@ fn prompt_token_matches(idx_contents: &str, prompt: &str) -> Vec<Vec<String>> {
 /// Absolute paths touched this session, from `edits.jsonl`, in file order.
 /// Same record shape `post_edit_track.rs` writes and `memory_capture.rs`'s
 /// `unique_paths_recent_first` reads; duplicated here rather than shared
-/// cross-module, since a hook binary keeps its reads local. Never panics: a
+/// cross-module, since a hook binary keeps its reads local. Repeats are
+/// dropped, keeping first-seen order. Never panics: a
 /// missing, empty, or unreadable file yields an empty list, and any line
 /// that fails to parse or lacks a string `path` is skipped.
 fn touched_paths(dir: &str) -> Vec<String> {
     let Ok(contents) = fs::read_to_string(Path::new(dir).join("edits.jsonl")) else {
         return Vec::new();
     };
+    let mut seen: HashSet<String> = HashSet::new();
     contents
         .lines()
         .filter_map(|raw| {
@@ -283,6 +286,7 @@ fn touched_paths(dir: &str) -> Vec<String> {
                 .as_str()
                 .map(str::to_string)
         })
+        .filter(|path| seen.insert(path.clone()))
         .collect()
 }
 
@@ -347,34 +351,60 @@ fn git_toplevel() -> String {
     }
 }
 
-/// Match the exact repo-relative path first, then any anchor that is a
-/// containing directory of it (an anchor of `src/` matches an edit to
-/// `src/deep/b.py`). Deduplicated by the anchoring fact's node id (column
-/// 1), keeping the first row for each.
-fn matching_rows(idx_contents: &str, relpath: &str) -> Vec<Vec<String>> {
-    let mut matches = Vec::new();
-    let mut seen_from: HashSet<String> = HashSet::new();
-    for line in idx_contents.lines() {
-        if line.is_empty() {
-            continue;
+/// The anchor index parsed once: rows split into columns, plus a map from
+/// anchor text to row numbers so a lookup does not rescan every line.
+struct AnchorIndex<'a> {
+    rows: Vec<Vec<&'a str>>,
+    by_anchor: HashMap<&'a str, Vec<usize>>,
+}
+
+impl<'a> AnchorIndex<'a> {
+    fn parse(idx_contents: &'a str) -> Self {
+        let mut rows = Vec::new();
+        let mut by_anchor: HashMap<&str, Vec<usize>> = HashMap::new();
+        for line in idx_contents.lines().filter(|l| !l.is_empty()) {
+            let cols: Vec<&str> = line.split('\t').collect();
+            by_anchor
+                .entry(cols.first().copied().unwrap_or(""))
+                .or_default()
+                .push(rows.len());
+            rows.push(cols);
         }
-        let cols: Vec<&str> = line.split('\t').collect();
-        let anchor = cols.first().copied().unwrap_or("");
-        let dirp = if anchor.ends_with('/') {
-            anchor.to_string()
-        } else {
-            format!("{anchor}/")
-        };
-        if anchor == relpath || relpath.starts_with(&dirp) {
-            let from_id = cols.get(1).copied().unwrap_or("").to_string();
-            if seen_from.contains(&from_id) {
-                continue;
-            }
-            seen_from.insert(from_id);
-            matches.push(cols.iter().map(|s| s.to_string()).collect());
-        }
+        AnchorIndex { rows, by_anchor }
     }
-    matches
+
+    /// Match the exact repo-relative path first, then any anchor that is a
+    /// containing directory of it (an anchor of `src/` matches an edit to
+    /// `src/deep/b.py`). Deduplicated by the anchoring fact's node id
+    /// (column 1), keeping the first row for each, in index order.
+    fn matching_rows(&self, relpath: &str) -> Vec<Vec<String>> {
+        let mut hits: Vec<usize> = Vec::new();
+        let mut collect = |key: &str| {
+            if let Some(found) = self.by_anchor.get(key) {
+                hits.extend(found);
+            }
+        };
+        collect(relpath);
+        for (i, _) in relpath.match_indices('/') {
+            collect(&relpath[..i]);
+            collect(&relpath[..=i]);
+        }
+        hits.sort_unstable();
+        hits.dedup();
+        let mut seen_from: HashSet<&str> = HashSet::new();
+        let mut matches = Vec::new();
+        for n in hits {
+            let cols = &self.rows[n];
+            if seen_from.insert(cols.get(1).copied().unwrap_or("")) {
+                matches.push(cols.iter().map(|s| s.to_string()).collect());
+            }
+        }
+        matches
+    }
+}
+
+fn matching_rows(idx_contents: &str, relpath: &str) -> Vec<Vec<String>> {
+    AnchorIndex::parse(idx_contents).matching_rows(relpath)
 }
 
 fn format_message(root: &str, relpath: &str, matches: &[Vec<String>]) -> String {
@@ -683,5 +713,96 @@ mod tests {
              the next per-fact staleness check instead of starting another \
              potentially slow git call"
         );
+    }
+
+    /// The pre-index linear scan, kept as the oracle for equivalence.
+    fn reference_matching_rows(idx: &str, relpath: &str) -> Vec<Vec<String>> {
+        let mut out = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        for line in idx.lines().filter(|l| !l.is_empty()) {
+            let cols: Vec<&str> = line.split('\t').collect();
+            let anchor = cols.first().copied().unwrap_or("");
+            let dirp = if anchor.ends_with('/') {
+                anchor.to_string()
+            } else {
+                format!("{anchor}/")
+            };
+            if (anchor == relpath || relpath.starts_with(&dirp))
+                && seen.insert(cols.get(1).copied().unwrap_or("").to_string())
+            {
+                out.push(cols.iter().map(|s| s.to_string()).collect());
+            }
+        }
+        out
+    }
+
+    const SAMPLE_INDEX: &str = "src/a.rs\tf1\tone\td\t\tf1.md\n\
+        src/\tf2\ttwo\td\t\tf2.md\n\
+        src\tf3\tthree\td\t\tf3.md\n\
+        src/deep/b.py\tf1\tdup\td\t\tf1.md\n\
+        \tf4\tunanchored\td\t\tf4.md\n\
+        docs//\tf5\tdouble\td\t\tf5.md\n\
+        README.md\tf6\tsix\td\t\tf6.md\n";
+
+    #[test]
+    fn index_lookup_matches_the_linear_scan_for_every_shape() {
+        // Arrange
+        let paths = [
+            "src/a.rs",
+            "src/deep/b.py",
+            "src/x",
+            "src",
+            "docs//x",
+            "docs/x",
+            "README.md",
+            "other/file",
+            "/abs/path",
+            "",
+        ];
+
+        // Act, Assert
+        for path in paths {
+            assert_eq!(
+                matching_rows(SAMPLE_INDEX, path),
+                reference_matching_rows(SAMPLE_INDEX, path),
+                "path {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn touched_paths_drops_repeats_and_keeps_first_seen_order() {
+        // Arrange
+        let dir = crate::common::test_support::scratch_dir("anchors-touched");
+        fs::create_dir_all(&dir).unwrap();
+        let lines = ["/r/b.rs", "/r/a.rs", "/r/b.rs", "/r/a.rs", "/r/c.rs"]
+            .map(|p| format!("{{\"path\":\"{p}\"}}\n"))
+            .concat();
+        fs::write(dir.join("edits.jsonl"), lines).unwrap();
+
+        // Act
+        let got = touched_paths(dir.to_str().unwrap());
+
+        // Assert
+        assert_eq!(got, ["/r/b.rs", "/r/a.rs", "/r/c.rs"]);
+    }
+
+    #[test]
+    fn many_lookups_against_a_large_index_stay_fast() {
+        // Arrange
+        let idx: String = (0..2000)
+            .map(|i| format!("src/f{i}.rs\tid{i}\tname\tdesc\t\tf{i}.md\n"))
+            .collect();
+        let index = AnchorIndex::parse(&idx);
+        let started = Instant::now();
+
+        // Act
+        let hits: usize = (0..20_000)
+            .map(|i| index.matching_rows(&format!("src/f{}.rs", i % 4000)).len())
+            .sum();
+
+        // Assert: loose bound, the per-row rescan took several seconds here.
+        assert_eq!(hits, 10_000);
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

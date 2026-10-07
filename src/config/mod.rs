@@ -217,6 +217,28 @@ pub(crate) fn repo_config_path(root: &Path, owner: &str, repo: &str) -> PathBuf 
     repo_scope_path(root, owner, repo, RepoScope::Config, "").join("config.json")
 }
 
+/// Whether any org or repo tier config file exists under `root`. When none
+/// does, resolving with or without a slug gives the same answer, so a caller
+/// can skip the slug lookup.
+pub(crate) fn any_scoped_config(root: &Path) -> bool {
+    let subdirs = |dir: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .map(|rd| rd.flatten().map(|e| e.path()).collect())
+            .unwrap_or_default()
+    };
+    let orgs = root.join("orgs");
+    if subdirs(&orgs)
+        .iter()
+        .any(|o| o.join("config.json").exists())
+    {
+        return true;
+    }
+    subdirs(&root.join("repos"))
+        .iter()
+        .flat_map(|owner| subdirs(owner))
+        .any(|repo| repo.join(".config").join("config.json").exists())
+}
+
 /// Read one tier file and look up `key` in it. `Ok(None)` means "no
 /// override here", covering both a missing file and a file that parses
 /// fine but does not contain `key`; both fall through to the next tier the

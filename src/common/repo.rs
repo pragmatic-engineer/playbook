@@ -8,7 +8,10 @@
 //! the retired shell original).
 
 use crate::common::proc::run_with_timeout;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 /// How long to wait for `git remote get-url origin` before giving up.
@@ -19,6 +22,26 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 /// remote. Empty outside a repo, when no origin remote is configured, or
 /// when `git` does not finish within `GIT_TIMEOUT`. Never panics.
 pub fn repo_slug() -> String {
+    // Keyed by cwd so a process that changes directory never sees a stale slug.
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, String>>> = OnceLock::new();
+    let Ok(cwd) = std::env::current_dir() else {
+        return spawn_slug();
+    };
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&cwd) {
+        return hit.clone();
+    }
+    let slug = spawn_slug();
+    cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(cwd, slug.clone());
+    slug
+}
+
+fn spawn_slug() -> String {
+    #[cfg(test)]
+    SPAWNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut command = Command::new("git");
     command.args(["--no-optional-locks", "remote", "get-url", "origin"]);
     let Some(output) = run_with_timeout(&mut command, GIT_TIMEOUT) else {
@@ -30,6 +53,9 @@ pub fn repo_slug() -> String {
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
     normalize_remote_url(&url)
 }
+
+#[cfg(test)]
+static SPAWNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Apply the same normalisation as the retired shell original's sed pipeline:
 /// strip a trailing `.git` (or `.git/`), a leading scheme (`https://`,
@@ -117,6 +143,71 @@ mod tests {
 
         // Assert
         assert_eq!(got, "owner/repo");
+    }
+
+    fn git_in(dir: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?}");
+    }
+
+    fn repo_with_origin(tag: &str, url: &str) -> PathBuf {
+        let dir = crate::common::test_support::scratch_dir(tag);
+        std::fs::create_dir_all(&dir).expect("create repo dir");
+        git_in(&dir, &["init", "-q", "-b", "main"]);
+        git_in(&dir, &["remote", "add", "origin", url]);
+        dir
+    }
+
+    #[test]
+    fn two_calls_in_one_directory_spawn_git_once() {
+        // Arrange
+        let _guard = crate::common::test_support::lock_cwd();
+        let repo = repo_with_origin("slug-memo", "git@github.com:acme/widgets.git");
+        let previous = std::env::current_dir().expect("read cwd");
+        std::env::set_current_dir(&repo).expect("cd into repo");
+        let before = SPAWNS.load(std::sync::atomic::Ordering::SeqCst);
+
+        // Act
+        let first = repo_slug();
+        let second = repo_slug();
+        let spawned = SPAWNS.load(std::sync::atomic::Ordering::SeqCst) - before;
+
+        // Assert
+        std::env::set_current_dir(&previous).expect("restore cwd");
+        let _ = std::fs::remove_dir_all(&repo);
+        assert_eq!(
+            (first.as_str(), second.as_str()),
+            ("acme/widgets", "acme/widgets")
+        );
+        assert_eq!(spawned, 1);
+    }
+
+    #[test]
+    fn a_different_directory_gets_its_own_slug_not_the_cached_one() {
+        // Arrange
+        let _guard = crate::common::test_support::lock_cwd();
+        let one = repo_with_origin("slug-one", "git@github.com:acme/one.git");
+        let two = repo_with_origin("slug-two", "git@github.com:acme/two.git");
+        let previous = std::env::current_dir().expect("read cwd");
+
+        // Act
+        std::env::set_current_dir(&one).expect("cd one");
+        let got_one = repo_slug();
+        std::env::set_current_dir(&two).expect("cd two");
+        let got_two = repo_slug();
+
+        // Assert
+        std::env::set_current_dir(&previous).expect("restore cwd");
+        let _ = std::fs::remove_dir_all(&one);
+        let _ = std::fs::remove_dir_all(&two);
+        assert_eq!(
+            (got_one.as_str(), got_two.as_str()),
+            ("acme/one", "acme/two")
+        );
     }
 
     /// Asserts the CONTRACT, which holds everywhere, not the shape of the
