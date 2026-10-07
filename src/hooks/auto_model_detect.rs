@@ -6,7 +6,7 @@
 //! Opus subagent, rather than reasoning inline on the default model.
 //!
 //! The python hook matches the prompt against one large case-insensitive,
-//! word-boundary regex. SEGMENT-B-RULES.md forbids adding a `regex`
+//! word-boundary regex. The port rules forbid adding a `regex`
 //! dependency for this port, so the alternation is expanded by hand into a
 //! list of literal phrases plus one wildcard phrase, matched with an
 //! explicit ASCII word-boundary scan that mirrors `\bphrase\b` semantics.
