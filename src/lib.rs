@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Library root for the `playbook` binary. Exposes the CLI shape that
-//! `main.rs` parses and dispatches on, plus the `common` helpers and `hooks`
-//! stubs every hook module builds on.
+//! `main.rs` parses and dispatches on, plus the `common` helpers and the
+//! `hooks` modules, one per hook.
 
 pub mod agents;
 pub mod cc;

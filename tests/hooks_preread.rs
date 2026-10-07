@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 //! Behavioural tests for the `preread-edit-check` and `preread-size-check`
-//! PreToolUse hooks, Rust ports of hooks/preread-edit-check.py and
-//! hooks/preread-size-check.py. Every assertion in
-//! hooks/preread-edit-check.test.sh and hooks/preread-size-check.test.sh has
+//! PreToolUse hooks, Rust ports of the retired shell original and
+//! the retired shell original. Every assertion in
+//! the retired shell tests has
 //! a counterpart here. Each test spawns the built `playbook` binary with a
 //! JSON payload on stdin and a scratch `HOME`, the same way the bash suites
 //! invoke the python scripts with `HOME="$WORK"`.
@@ -347,7 +347,7 @@ mod preread_edit_check {
         );
     }
 
-    /// hooks/preread-edit-check.py:60-66 renders the age as seconds below
+    /// the retired shell original renders the age as seconds below
     /// 60, minutes below 3600, hours otherwise. Confirmed against the
     /// python original's own formula for these values rather than assumed
     /// from the Rust formula alone: `python3 -c "for d in (59,60): print('%ds
@@ -356,7 +356,7 @@ mod preread_edit_check {
     ///
     /// Only the seconds-to-minutes transition (59/60) is reachable here: the
     /// nudge only fires for a match inside `WINDOW` (1800s, 30 minutes,
-    /// hooks/preread-edit-check.py:18), so `format_ago`'s minutes-to-hours
+    /// the retired shell original), so `format_ago`'s minutes-to-hours
     /// transition at 3600s can never actually be hit by this hook in either
     /// language and cannot be pinned through its black-box behaviour.
     #[test]

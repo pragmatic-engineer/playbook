@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Port of `shell/check-agents.sh`, validating every `agents/*.md`
+//! Port of the retired shell original, validating every `agents/*.md`
 //! definition (excluding the `_TEMPLATE.md` skeleton) against the house
 //! agent contract: real frontmatter, the required keys, a `name` matching
 //! the filename, an allowed model tier and effort level, a known tool name

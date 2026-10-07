@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Integration tests for the `session-init` and `session-clean-exit` hooks,
-//! ported from `hooks/session-init.test.sh` and
-//! `hooks/session-clean-exit.test.sh`. Runs the built `playbook` binary as
+//! ported from the retired shell test and
+//! the retired shell test. Runs the built `playbook` binary as
 //! a subprocess, exactly as Claude Code would, against a scratch `$HOME`
 //! and a scratch git repo, never the real `~/.claude`.
 
@@ -143,7 +143,7 @@ fn system_message(stdout: &str) -> String {
 }
 
 // ---------------------------------------------------------------------
-// session-init: project memory slice (hooks/session-init.test.sh cases 1-4)
+// session-init: project memory slice (the retired shell test cases 1-4)
 // ---------------------------------------------------------------------
 
 #[test]
@@ -1462,7 +1462,7 @@ fn runtime_and_cc_state_migration_leaves_old_root_untouched() {
 
 // ---------------------------------------------------------------------
 // session-clean-exit: the three `.reason` cases
-// (hooks/session-clean-exit.test.sh cases 1-2, plus the absent case)
+// (the retired shell test cases 1-2, plus the absent case)
 // ---------------------------------------------------------------------
 
 fn seeded_session_dir(home: &Path, session_id: &str) -> PathBuf {
@@ -1561,7 +1561,7 @@ fn session_clean_exit_real_reason_writes_the_marker() {
 
 // ---------------------------------------------------------------------
 // session-clean-exit: auto-learn queueing
-// (hooks/session-clean-exit.test.sh cases 3-5)
+// (the retired shell test cases 3-5)
 // ---------------------------------------------------------------------
 
 /// The real git worktree root for `dir`, resolved via `git rev-parse
@@ -1582,7 +1582,7 @@ fn git_toplevel(dir: &Path) -> String {
 
 /// Mirrors `session_clean_exit::slugify`: replace every character outside
 /// `[A-Za-z0-9_.-]` with `_`, matching the regex in
-/// hooks/session-clean-exit.py:71.
+/// the retired shell original.
 fn slugify(s: &str) -> String {
     s.chars()
         .map(|c| {

@@ -126,7 +126,7 @@ fn all_hook_commands(settings: &Value) -> Vec<String> {
     commands
 }
 
-/// The 11 hooks `wire` writes as a bare `playbook hook <name>` invocation.
+/// The 13 functional hooks `wire` writes as a bare `playbook hook <name>` invocation.
 const PORTED_HOOK_NAMES: &[&str] = &[
     "session-init",
     "preread-edit-check",
@@ -139,6 +139,8 @@ const PORTED_HOOK_NAMES: &[&str] = &[
     "precompact-warn",
     "session-clean-exit",
     "memory-capture",
+    "auto-guard",
+    "auto-cost",
 ];
 
 /// The 5 safety guards, wired the same as `PORTED_HOOK_NAMES`.

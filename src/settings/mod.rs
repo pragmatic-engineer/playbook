@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! Settings seed generation and validation, backing `playbook settings`.
-//! Both are ports: `gen` of `shell/gen-shared-settings.py`, `check` of the
-//! now-deleted `shell/check-shared-settings.py`.
+//! Both are ports: `gen` of the retired shell original, `check` of the
+//! now-deleted the retired shell original.
 
 pub mod check;
 pub mod gen;

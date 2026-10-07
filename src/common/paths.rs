@@ -123,7 +123,7 @@ fn slugify(s: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepoScope {
     /// `repos/<owner>/<repo>/.config/`: shared across every worktree.
-    /// Ships unpopulated; nothing writes here yet.
+    /// `playbook config set --repo` writes `config.json` here.
     Config,
     /// `repos/<owner>/<repo>/<worktree-id>/`: scoped to one worktree, so
     /// two worktrees of the same repo never collide.
@@ -139,11 +139,22 @@ pub fn repo_scoped_dir(kind: RepoScope) -> Option<PathBuf> {
     if id.is_empty() {
         return None;
     }
-    let base = playbook_root().join("repos").join(owner).join(repo);
-    Some(match kind {
+    Some(repo_scope_path(&playbook_root(), owner, repo, kind, &id))
+}
+
+/// Pure form of `repo_scoped_dir` for a known root, owner, repo and worktree id.
+pub(crate) fn repo_scope_path(
+    root: &Path,
+    owner: &str,
+    repo: &str,
+    kind: RepoScope,
+    worktree_id: &str,
+) -> PathBuf {
+    let base = root.join("repos").join(owner).join(repo);
+    match kind {
         RepoScope::Config => base.join(".config"),
-        RepoScope::Worktree => base.join(id),
-    })
+        RepoScope::Worktree => base.join(worktree_id),
+    }
 }
 
 #[cfg(test)]

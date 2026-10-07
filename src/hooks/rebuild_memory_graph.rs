@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! PostToolUse hook: rebuild `~/.config/playbook/memory/memory.graph.json` after any
-//! fact-file save. Ports `hooks/rebuild-memory-graph.py`. No-op unless the
+//! fact-file save. Ports the retired shell original. No-op unless the
 //! edited file is inside `~/.config/playbook/memory`. Walks the whole memory tree
 //! (not incremental), writes atomically (temp file plus rename), and emits
 //! nothing on stdout.
@@ -45,7 +45,7 @@ pub fn run(payload: &Payload) {
 /// Mirror the bash/python guard: skip the rebuild unless the edited file's
 /// path (after expanding a leading `~`) is inside `MEMORY_DIR`.
 ///
-/// Divergence from python: `hooks/rebuild-memory-graph.py`'s `_should_skip`
+/// Divergence from python: the retired shell original's `_should_skip`
 /// reads its own raw stdin (or `HOOK_INPUT`) and treats completely empty
 /// input as a signal to always rebuild, distinct from a non-empty payload
 /// that merely lacks `tool_input.file_path` (which it skips). `main.rs`
@@ -109,7 +109,7 @@ fn extract_body(content: &str) -> &str {
 
 /// A single top-level frontmatter value: a bare scalar, a block or inline
 /// list, or a dict of sub-keys (each of which is itself a scalar or a
-/// list). Mirrors the three shapes `hooks/rebuild-memory-graph.py:
+/// list). Mirrors the three shapes the retired shell original:
 /// parse_frontmatter` can produce for a python dict value.
 #[derive(Debug, Clone)]
 enum TopValue {
@@ -850,7 +850,7 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
 
 /// Recursively collect every `.md` file under `dir` except `MEMORY.md`,
 /// pruning dot-directories. Loosely mirrors the `os.walk` filter in
-/// `hooks/rebuild-memory-graph.py:rebuild`, but diverges on case: the match
+/// the retired shell original:rebuild`, but diverges on case: the match
 /// here is case-insensitive (`.MD`, `MEMORY.MD`, ...), where python's
 /// `endswith` was not. A directory that cannot be read (missing, permissions)
 /// aborts the walk with an error naming that directory, rather than silently

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Port of `shell/check-manifest.sh`, guarding the tracked-file allowlist so
+//! Port of the retired shell original, guarding the tracked-file allowlist so
 //! runtime state or a re-tracked personal settings.json cannot leak into the
 //! public repo. Every tracked path must be an allowlisted top-level file or
 //! live under an allowlisted top-level directory.

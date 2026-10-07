@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 //! `repo_slug`: the `<owner>/<repo>` slug for the current git repo's origin
-//! remote. Ports hooks/lib/common.py:243. Canonical definition: the memory
+//! remote. Ports the retired shell original. Canonical definition: the memory
 //! store keys project facts on this exact string, so every consumer must
 //! derive it identically or facts silently fail to resolve (see
-//! hooks/lib/common.sh:140-146).
+//! the retired shell original).
 
 use crate::common::proc::run_with_timeout;
 use std::process::Command;
 use std::time::Duration;
 
 /// How long to wait for `git remote get-url origin` before giving up.
-/// Matches hooks/lib/common.py:252's `timeout=5`.
+/// Matches the retired shell original's `timeout=5`.
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Return the `<owner>/<repo>` slug for the current git repo's origin
@@ -31,7 +31,7 @@ pub fn repo_slug() -> String {
     normalize_remote_url(&url)
 }
 
-/// Apply the same normalisation as hooks/lib/common.sh:149's sed pipeline:
+/// Apply the same normalisation as the retired shell original's sed pipeline:
 /// strip a trailing `.git` (or `.git/`), a leading scheme (`https://`,
 /// `ssh://`, ...), a leading `user@`, then a leading host up to its first
 /// `/` or `:`.

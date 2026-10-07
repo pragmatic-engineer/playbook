@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Renders the repo-scoped markdown slice of the graph-first memory store
-//! that `shell/memory-context.sh` (now `playbook memory context`) built with
+//! that the retired shell original (now `playbook memory context`) built with
 //! a `jq` filter. Ported
 //! function-for-function against real `jq` output (see
 //! `tests/json_memorycontext.rs`), including the empty-repo edge case
@@ -28,7 +28,7 @@ fn str_field<'a>(node: &'a Value, key: &str) -> &'a str {
 
 /// Renders `graph_json` (a `{"nodes": [...], "edges": [...]}` memory graph)
 /// into the same `Facts:`/`Edges:`/`Anchors:` markdown text
-/// `shell/memory-context.sh`'s `jq` filter produced for `repo`, an
+/// the retired shell original's `jq` filter produced for `repo`, an
 /// `owner/name` slug. Empty on malformed JSON or an unexpected shape rather
 /// than panicking, so a caller that renders this into session context never
 /// crashes on a corrupt graph file.
