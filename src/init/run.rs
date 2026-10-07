@@ -4,8 +4,8 @@
 //! Orchestrates `playbook init`: composes `merge`, `wire`, `shim` and
 //! `statusline` into one idempotent repair, backing `Command::Init`.
 
-use crate::init::memory_migrate;
 use crate::init::merge;
+use crate::init::migrate;
 use crate::init::shim::{self, ShellKind};
 use crate::init::statusline;
 use crate::init::system_prompt;
@@ -112,6 +112,8 @@ impl StepReport {
 /// Every step's outcome, in run order.
 pub struct InitOutcome {
     pub steps: Vec<StepReport>,
+    /// Manual migration findings, for stderr.
+    pub warnings: Vec<String>,
 }
 
 impl InitOutcome {
@@ -128,9 +130,19 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let settings_path = paths.claude_home.join("settings.json");
     let self_root = paths.self_root.as_deref();
 
+    let ctx = migrate::Ctx {
+        home: paths.home.clone(),
+        claude_home: paths.claude_home.clone(),
+        repo: None,
+    };
+    let migrated = migrate::run_pending(&ctx);
+
     let shell_runtime_step = install_shell_runtime_step(self_root, &paths.home, paths.aliases);
     let statusline_step = place_statusline_step(self_root, &paths.home);
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
+    if step_confirmed(&system_prompt_step) {
+        migrate::record_system_prompt(&paths.home);
+    }
 
     let statusline_confirmed = step_confirmed(&statusline_step);
     let settings_step = if statusline_confirmed {
@@ -148,22 +160,21 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         shell_runtime_confirmed,
     );
 
-    // See migrate_memory's own doc comment for what this single call covers.
-    let memory_step = memory_migrate::migrate_memory(&paths.home, &paths.claude_home);
-
     let trust_step = trust_config_dir_step(&paths.home);
 
+    let mut steps = vec![
+        shell_runtime_step,
+        statusline_step,
+        system_prompt_step,
+        settings_step,
+        hooks_step,
+        shim_step,
+    ];
+    steps.extend(migrated.steps);
+    steps.push(trust_step);
     InitOutcome {
-        steps: vec![
-            shell_runtime_step,
-            statusline_step,
-            system_prompt_step,
-            settings_step,
-            hooks_step,
-            shim_step,
-            memory_step,
-            trust_step,
-        ],
+        steps,
+        warnings: migrated.warnings,
     }
 }
 

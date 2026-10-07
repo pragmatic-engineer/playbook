@@ -80,6 +80,9 @@ fn main() {
             for step in &outcome.steps {
                 println!("{}", step.render());
             }
+            for warning in &outcome.warnings {
+                eprintln!("init: warning: {warning}");
+            }
             if !outcome.ok() {
                 let failed = outcome
                     .steps
