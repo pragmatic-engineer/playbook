@@ -547,7 +547,8 @@ struct SimilarityInfo {
     scope: Scope,
     kind: String,
     anchor_dirs: HashSet<String>,
-    body_words: HashSet<String>,
+    /// Sorted, deduplicated interned ids of the body's words.
+    body_words: Vec<u32>,
 }
 
 /// Parent directory of an anchor path, e.g. `src/foo/a.ts` -> `src/foo`. An
@@ -573,18 +574,42 @@ fn shares_anchor_dir(a: &SimilarityInfo, b: &SimilarityInfo) -> bool {
         .any(|dir| !dir.is_empty())
 }
 
-/// `|intersection| / |union|` over two word sets. A pair where either body
-/// has zero words has an empty union, handled explicitly here so the check
-/// never divides by zero and never treats two bodyless facts as similar by
-/// default.
-fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
-    let union = a.union(b).count();
+/// `|intersection| / |union|` over two sorted, deduplicated id lists. A pair
+/// where either body has zero words has an empty union, handled explicitly
+/// here so the check never divides by zero and never treats two bodyless
+/// facts as similar by default.
+fn jaccard_similarity(a: &[u32], b: &[u32]) -> f64 {
+    let intersection = sorted_intersection_len(a, b);
+    let union = a.len() + b.len() - intersection;
     if union == 0 {
         0.0
     } else {
-        let intersection = a.intersection(b).count();
         intersection as f64 / union as f64
     }
+}
+
+/// Size of the intersection of two sorted, deduplicated id lists, by merge.
+fn sorted_intersection_len(a: &[u32], b: &[u32]) -> usize {
+    let (mut i, mut j, mut n) = (0, 0, 0);
+    while i < a.len() && j < b.len() {
+        match a[i].cmp(&b[j]) {
+            std::cmp::Ordering::Less => i += 1,
+            std::cmp::Ordering::Greater => j += 1,
+            std::cmp::Ordering::Equal => {
+                n += 1;
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    n
+}
+
+/// True when the size ratio alone rules out reaching the Jaccard threshold:
+/// the score never exceeds `min / max`, and f64 division is monotonic.
+fn too_unequal_for_jaccard(a: &[u32], b: &[u32]) -> bool {
+    let (small, large) = (a.len().min(b.len()), a.len().max(b.len()));
+    small == 0 || (small as f64 / large as f64) < SIMILARITY_JACCARD_THRESHOLD
 }
 
 /// Rebuild the graph unconditionally, with no payload and no skip check.
@@ -632,6 +657,8 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
     // One entry per fact (never per code-anchor node), consumed by the
     // pairwise similarity check in pass 3, once every fact has been walked.
     let mut infos: Vec<SimilarityInfo> = Vec::new();
+    // Body word to dense id, shared by every fact so overlap is an integer merge.
+    let mut interner: HashMap<String, u32> = HashMap::new();
 
     let files = walk_markdown_files(mem_dir)
         .map_err(|e| RebuildError(format!("read memory directory tree: {e}")))?;
@@ -668,11 +695,16 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
             .list("anchors")
             .map(|anchors| anchors.iter().map(|a| anchor_parent_dir(a)).collect())
             .unwrap_or_default();
-        let body_words: HashSet<String> = extract_body(&content)
+        let mut body_words: Vec<u32> = extract_body(&content)
             .to_lowercase()
             .split_whitespace()
-            .map(str::to_string)
+            .map(|w| {
+                let next = interner.len() as u32;
+                *interner.entry(w.to_string()).or_insert(next)
+            })
             .collect();
+        body_words.sort_unstable();
+        body_words.dedup();
         infos.push(SimilarityInfo {
             id: nid.clone(),
             scope,
@@ -785,7 +817,14 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
             if a.kind == b.kind && a.scope == b.scope {
                 signals.push(SIGNAL_TYPE_SCOPE.to_string());
             }
-            if jaccard_similarity(&a.body_words, &b.body_words) >= SIMILARITY_JACCARD_THRESHOLD {
+            // Body overlap is one signal, so with no other hit the pair cannot reach 2.
+            if signals.is_empty() || too_unequal_for_jaccard(&a.body_words, &b.body_words) {
+                if signals.len() < SIMILARITY_SIGNAL_HIT_THRESHOLD {
+                    continue;
+                }
+            } else if jaccard_similarity(&a.body_words, &b.body_words)
+                >= SIMILARITY_JACCARD_THRESHOLD
+            {
                 signals.push(SIGNAL_BODY_OVERLAP.to_string());
             }
             if signals.len() >= SIMILARITY_SIGNAL_HIT_THRESHOLD {
