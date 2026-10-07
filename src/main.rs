@@ -123,7 +123,9 @@ fn main() {
                 }
             },
             MemoryCommand::Context { repo, graph } => {
-                let repo = repo.unwrap_or_else(common::repo_slug);
+                let repo = repo
+                    .filter(|r| !r.is_empty())
+                    .unwrap_or_else(common::repo_slug);
                 let graph =
                     graph.unwrap_or_else(|| common::paths::memory_dir().join("memory.graph.json"));
                 let output = json::memorycontext::render_for_graph_file(&graph, &repo);

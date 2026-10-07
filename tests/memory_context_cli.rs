@@ -181,6 +181,30 @@ fn the_default_graph_path_and_repo_come_from_home_and_origin() {
     )
     .unwrap();
 
+    let git = |args: &[&str]| {
+        let st = Command::new("git")
+            .args(args)
+            .current_dir(&home)
+            .env("HOME", &home)
+            .status()
+            .unwrap();
+        assert!(st.success());
+    };
+    git(&["init", "-q"]);
+    git(&["remote", "add", "origin", "git@github.com:acme/widget.git"]);
+    fs::write(
+        mem.join("memory.graph.json"),
+        graph(
+            &[
+                fact("g1", "global", "default-path-fact", None),
+                fact("p1", "project", "origin-repo-fact", Some("acme/widget")),
+                fact("p2", "project", "other-repo-fact", Some("acme/other")),
+            ],
+            &[],
+        ),
+    )
+    .unwrap();
+
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["memory", "context"])
         .env("HOME", &home)
@@ -188,5 +212,48 @@ fn the_default_graph_path_and_repo_come_from_home_and_origin() {
         .output()
         .unwrap();
 
-    assert!(String::from_utf8_lossy(&out.stdout).contains("default-path-fact"));
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(text.contains("default-path-fact") && text.contains("origin-repo-fact"));
+    assert!(!text.contains("other-repo-fact"));
+}
+
+#[test]
+fn an_empty_repo_flag_falls_back_to_the_origin_slug() {
+    let home = scratch("emptyrepo");
+    let mem = home.join(".config/playbook/memory");
+    fs::create_dir_all(&mem).unwrap();
+    fs::write(
+        mem.join("memory.graph.json"),
+        graph(
+            &[fact(
+                "p1",
+                "project",
+                "origin-repo-fact",
+                Some("acme/widget"),
+            )],
+            &[],
+        ),
+    )
+    .unwrap();
+    for args in [
+        vec!["init", "-q"],
+        vec!["remote", "add", "origin", "git@github.com:acme/widget.git"],
+    ] {
+        assert!(Command::new("git")
+            .args(&args)
+            .current_dir(&home)
+            .env("HOME", &home)
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["memory", "context", "--repo", ""])
+        .env("HOME", &home)
+        .current_dir(&home)
+        .output()
+        .unwrap();
+
+    assert!(String::from_utf8_lossy(&out.stdout).contains("origin-repo-fact"));
 }

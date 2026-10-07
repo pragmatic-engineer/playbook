@@ -28,6 +28,15 @@ fn git_out(args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// Like [`git_ok`] but lets git's stderr reach the caller's.
+fn git_loud(args: &[&str]) -> bool {
+    Command::new("git")
+        .args(args)
+        .stdout(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 fn git_ok(args: &[&str]) -> bool {
     Command::new("git")
         .args(args)
@@ -98,6 +107,7 @@ pub fn setup(pr: &str, head_sha: &str) -> Result<String, String> {
         _ => {
             let out = Command::new("gh")
                 .args(["repo", "view", "--json", "url", "-q", ".url"])
+                .stderr(Stdio::inherit())
                 .output();
             match out {
                 Ok(o) if o.status.success() => {
@@ -133,7 +143,7 @@ pub fn setup(pr: &str, head_sha: &str) -> Result<String, String> {
         );
     }
 
-    if !git_ok(&["cat-file", "-e", &format!("{head_sha}^{{commit}}")]) {
+    if !git_loud(&["cat-file", "-e", &format!("{head_sha}^{{commit}}")]) {
         return Err(format!(
             "head {head_sha} not found after fetch (force-push?); re-run"
         ));
@@ -161,7 +171,7 @@ pub fn setup(pr: &str, head_sha: &str) -> Result<String, String> {
         std::process::id(),
         now_secs()
     );
-    if !git_ok(&["worktree", "lock", "--reason", &reason, &dir_str]) {
+    if !git_loud(&["worktree", "lock", "--reason", &reason, &dir_str]) {
         return Err(format!("failed to lock worktree at {dir_str}"));
     }
     Ok(dir_str)
@@ -187,8 +197,13 @@ fn is_locked(dir: &str) -> bool {
 }
 
 /// Removes the review worktree at `path`, always, even after an aborted or
-/// dirty review. Never fails: a missing path is already torn down.
+/// dirty review. Never fails: a missing path is already torn down. A path
+/// outside `review-worktrees/` is left alone, so a wrong argument cannot wipe
+/// another worktree.
 pub fn teardown(path: &Path) {
+    if !super::is_review_convention(path) {
+        return;
+    }
     let path_str = path.to_string_lossy();
     git_ok(&["worktree", "unlock", &path_str]);
     let home = crate::common::home_dir();

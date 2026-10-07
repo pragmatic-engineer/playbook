@@ -242,6 +242,87 @@ fn a_stale_locked_review_worktree_is_swept_during_setup() {
 }
 
 #[test]
+fn setup_never_sweeps_an_unlocked_worktree_outside_review_worktrees() {
+    let f = Fixture::new();
+    let other = scratch("other").join("wu");
+    git_ok(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            other.to_str().unwrap(),
+            &f.sha,
+        ],
+    );
+
+    let out = f.setup("7", &f.sha);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        f.listed(other.to_str().unwrap()),
+        "unrelated worktree was swept"
+    );
+}
+
+#[test]
+fn an_unlocked_leftover_under_review_worktrees_is_swept() {
+    let f = Fixture::new();
+    let root = git_ok(
+        &f.repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    );
+    let leftover = Path::new(&root).join("review-worktrees").join("3-abcdef1");
+    fs::create_dir_all(leftover.parent().unwrap()).unwrap();
+    git_ok(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            leftover.to_str().unwrap(),
+            &f.sha,
+        ],
+    );
+
+    let out = f.setup("7", &f.sha);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        !f.listed(leftover.to_str().unwrap()),
+        "unlocked leftover survived"
+    );
+}
+
+#[test]
+fn teardown_leaves_a_worktree_outside_review_worktrees_alone() {
+    let f = Fixture::new();
+    let other = scratch("other2").join("wu");
+    git_ok(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            other.to_str().unwrap(),
+            &f.sha,
+        ],
+    );
+    fs::write(other.join("dirty.txt"), "work\n").unwrap();
+
+    let out = f.playbook(&["teardown", other.to_str().unwrap()], &[]);
+
+    assert!(out.status.success());
+    assert!(
+        other.join("dirty.txt").exists(),
+        "unrelated worktree was removed"
+    );
+}
+
+#[test]
 fn a_fresh_locked_worktree_for_another_pr_is_not_swept() {
     let f = Fixture::new();
     let sha8 = f.new_commit("pr8");
@@ -293,6 +374,7 @@ fn setup_warns_when_origin_moved_but_still_checks_out_the_requested_sha() {
 
     let out = f.setup("7", &f.sha);
 
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert!(stderr(&out).contains("has moved"), "{}", stderr(&out));
     let wt = stdout(&out);
     assert_eq!(git_ok(Path::new(&wt), &["rev-parse", "HEAD"]), f.sha);

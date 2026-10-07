@@ -100,7 +100,7 @@ fn is_cc_launcher_convention(path: &Path) -> bool {
 
 /// `review-worktrees/<pr>-<sha>` under the git common dir, per
 /// `review::setup`.
-fn is_review_convention(path: &Path) -> bool {
+pub(crate) fn is_review_convention(path: &Path) -> bool {
     let Some(common_dir) = git_stdout(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
     else {
         return false;
