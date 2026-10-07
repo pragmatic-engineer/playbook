@@ -14,8 +14,8 @@ use std::process::Command;
 use std::time::Duration;
 
 /// Claude Code's default branch prefix: `worktree-<name>`.
-const BRANCH_PREFIX: &str = "worktree-";
-const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const BRANCH_PREFIX: &str = "worktree-";
+const GIT_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Entry point for dispatch; the exit code only matters via [`execute`].
 pub fn run(payload: &Payload) {
@@ -47,6 +47,9 @@ fn create(payload: &Payload) -> Result<PathBuf, String> {
     let main = main_worktree(&porcelain).ok_or("no main worktree found")?;
     let main_root = PathBuf::from(main);
     let branch = format!("{BRANCH_PREFIX}{name}");
+    if !crate::cc::worktree::valid_branch_name(&main_root, &branch) {
+        return Err(format!("{branch:?} is not a valid git branch name"));
+    }
     let base_commit = payload.field(".base_commit");
 
     let primary = primary_target(&main_root, &name)?;
@@ -90,7 +93,8 @@ fn primary_target(main_root: &Path, name: &str) -> Result<PathBuf, String> {
     let parent = main_root
         .parent()
         .ok_or("main worktree has no parent dir")?;
-    Ok(resolve_base(main_root, parent, None).join(name))
+    let configured = std::env::var("WORKTREE_BASE_DIR").ok();
+    Ok(resolve_base(main_root, parent, configured.as_deref()).join(name))
 }
 
 /// Reuses `target` when it is already a registered worktree, else adds it.
@@ -101,7 +105,11 @@ fn add_worktree(
     base_commit: &str,
 ) -> Result<(), String> {
     if is_registered(main_root, target) {
-        return Ok(());
+        if target.is_dir() {
+            return Ok(());
+        }
+        // Registered but its folder is gone: drop the stale entry, then re-add.
+        git(main_root, &["worktree", "prune"])?;
     }
     if target.exists() {
         return Err(format!(

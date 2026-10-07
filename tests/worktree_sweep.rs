@@ -361,6 +361,10 @@ fn classify_recognises_a_worktree_created_by_the_worktree_create_hook() {
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["hook", "worktree-create"])
+        .env_remove("HOOK_INPUT")
+        .env_remove("WORKTREE_BASE_DIR")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

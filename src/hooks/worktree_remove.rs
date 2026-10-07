@@ -4,7 +4,7 @@
 //! WorktreeRemove hook: removes a worktree only when nothing would be lost.
 //! Dirty trees and unpublished commits keep the worktree; it never forces.
 
-use super::worktree_create::{git, registered_paths, same_path};
+use super::worktree_create::{git, registered_paths, same_path, BRANCH_PREFIX};
 use crate::cc::worktree::main_worktree;
 use crate::common::Payload;
 use std::path::{Path, PathBuf};
@@ -56,10 +56,12 @@ fn remove(payload: &Payload) -> Result<String, String> {
     let path_s = path.to_string_lossy().to_string();
     git(&main_root, &["worktree", "remove", &path_s])?;
 
-    if !branch.is_empty() && branch != default {
-        match fully_published(&main_root, &branch, &default) {
+    let owned = branch.starts_with(BRANCH_PREFIX) && branch != default;
+    if owned {
+        let qualified = format!("refs/heads/{branch}");
+        match fully_published(&main_root, &qualified, &default) {
             Ok(true) => {
-                let _ = git(&main_root, &["branch", "-D", &branch]);
+                let _ = git(&main_root, &["branch", "-D", "--", &branch]);
             }
             _ => eprintln!("playbook worktree-remove: kept branch {branch}"),
         }

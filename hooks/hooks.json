@@ -16,7 +16,7 @@
           {
             "type": "command",
             "command": "playbook hook worktree-create",
-            "timeout": 60
+            "timeout": 180
           }
         ]
       }
@@ -27,7 +27,7 @@
           {
             "type": "command",
             "command": "playbook hook worktree-remove",
-            "timeout": 30
+            "timeout": 120
           }
         ]
       }

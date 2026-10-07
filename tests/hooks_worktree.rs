@@ -19,6 +19,12 @@ struct Fixture {
     repo: PathBuf,
 }
 
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
 fn git(dir: &Path, args: &[&str]) -> Output {
     Command::new("git")
         .arg("-C")
@@ -49,6 +55,7 @@ fn fixture(tag: &str) -> Fixture {
     let root = fs::canonicalize(std::env::temp_dir())
         .unwrap()
         .join(format!("playbook-wt-hook-{}-{tag}-{n}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
     let repo = root.join("proj").join("app");
     let origin = root.join("origin.git");
     fs::create_dir_all(&repo).unwrap();
@@ -80,6 +87,8 @@ fn run_hook(name: &str, payload: &str) -> Output {
         .args(["hook", name])
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
+        .env_remove("HOOK_INPUT")
+        .env_remove("WORKTREE_BASE_DIR")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .stdin(Stdio::piped())
@@ -153,7 +162,7 @@ fn create_twice_reuses_the_registered_worktree() {
 #[test]
 fn create_rejects_traversal_and_separator_names() {
     let f = fixture("sanitize");
-    for bad in ["..", "../escape", "a/b", ""] {
+    for bad in ["..", "../escape", "a/b", "", "-rf", "a b", "x~y"] {
         let out = create(&f.repo, bad);
         assert!(!out.status.success(), "{bad:?} should fail");
         assert!(
@@ -161,7 +170,7 @@ fn create_rejects_traversal_and_separator_names() {
             "stdout must stay empty for {bad:?}"
         );
     }
-    assert!(!f.root.join("proj/escape").exists());
+    assert!(!f.root.join("proj/.worktrees").exists());
     assert!(!f.repo.join(".claude").exists());
 }
 
@@ -242,6 +251,9 @@ fn remove_deletes_after_the_branch_is_pushed() {
     let out = remove(&f.repo, &path);
     assert!(out.status.success());
     assert!(!path.exists());
+    assert!(git_ok(&f.repo, &["branch", "--list", "worktree-shipped"])
+        .trim()
+        .is_empty());
 }
 
 #[test]
@@ -260,4 +272,112 @@ fn remove_refuses_a_non_worktree_path_and_the_main_worktree() {
     assert!(out.status.success());
     assert!(f.repo.join("README.md").exists());
     assert!(stderr(&out).contains("main worktree"));
+}
+
+#[test]
+fn create_recreates_a_worktree_whose_folder_was_deleted() {
+    let f = fixture("stale");
+    let first = created_path(&create(&f.repo, "gone"));
+    fs::remove_dir_all(&first).unwrap();
+    let second = created_path(&create(&f.repo, "gone"));
+    assert_eq!(first, second);
+    assert!(second.join("README.md").exists());
+}
+
+#[test]
+fn create_reattaches_a_kept_branch_after_the_worktree_was_removed() {
+    let f = fixture("reattach");
+    let path = created_path(&create(&f.repo, "probe"));
+    fs::write(path.join("kept.txt"), "work\n").unwrap();
+    git_ok(&path, &["add", "."]);
+    git_ok(&path, &["commit", "-q", "-m", "kept"]);
+    git_ok(&f.repo, &["worktree", "remove", path.to_str().unwrap()]);
+    let again = created_path(&create(&f.repo, "probe"));
+    assert_eq!(path, again);
+    assert!(again.join("kept.txt").exists());
+}
+
+#[test]
+fn create_bases_on_origin_head_not_unpushed_local_commits() {
+    let f = fixture("originhead");
+    git_ok(&f.repo, &["remote", "set-head", "origin", "main"]);
+    fs::write(f.repo.join("local-only.txt"), "x\n").unwrap();
+    git_ok(&f.repo, &["add", "."]);
+    git_ok(&f.repo, &["commit", "-q", "-m", "local only"]);
+    let path = created_path(&create(&f.repo, "fresh"));
+    assert!(!path.join("local-only.txt").exists());
+}
+
+#[test]
+fn create_ignores_an_option_shaped_base_commit_and_needs_an_absolute_cwd() {
+    let f = fixture("inputs");
+    let payload = format!(
+        r#"{{"cwd":"{}","name":"vianame","base_commit":"--orphan"}}"#,
+        f.repo.display()
+    );
+    let path = created_path(&run_hook("worktree-create", &payload));
+    assert!(path.join("README.md").exists());
+    let out = run_hook("worktree-create", r#"{"cwd":"","worktree_name":"x"}"#);
+    assert!(!out.status.success());
+    assert!(stdout(&out).is_empty());
+}
+
+#[test]
+fn remove_works_without_a_usable_cwd() {
+    let f = fixture("rm-nocwd");
+    let path = created_path(&create(&f.repo, "nocwd"));
+    let payload = format!(r#"{{"cwd":"","worktree_path":"{}"}}"#, path.display());
+    let out = run_hook("worktree-remove", &payload);
+    assert!(out.status.success());
+    assert!(!path.exists());
+}
+
+#[test]
+fn remove_keeps_a_locked_worktree_and_leaves_branches_alone_when_detached() {
+    let f = fixture("rm-locked");
+    let locked = created_path(&create(&f.repo, "locked"));
+    git_ok(&f.repo, &["worktree", "lock", locked.to_str().unwrap()]);
+    let out = remove(&f.repo, &locked);
+    assert!(out.status.success());
+    assert!(locked.exists());
+
+    let detached = f.root.join("detached");
+    git_ok(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            detached.to_str().unwrap(),
+        ],
+    );
+    let before = git_ok(&f.repo, &["branch", "--list"]);
+    let out = remove(&f.repo, &detached);
+    assert!(out.status.success());
+    assert!(!detached.exists());
+    assert_eq!(before, git_ok(&f.repo, &["branch", "--list"]));
+}
+
+#[test]
+fn remove_never_deletes_a_branch_the_hook_did_not_create() {
+    let f = fixture("rm-foreign");
+    let path = f.root.join("launcher-made");
+    git_ok(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feat/mine",
+            path.to_str().unwrap(),
+        ],
+    );
+    let out = remove(&f.repo, &path);
+    assert!(out.status.success());
+    assert!(!path.exists());
+    assert!(!git_ok(&f.repo, &["branch", "--list", "feat/mine"])
+        .trim()
+        .is_empty());
 }
