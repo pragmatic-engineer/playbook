@@ -58,7 +58,8 @@ struct HookSpec {
 /// line for line (`session-clean-exit` fires on both `Stop` and
 /// `SessionEnd`), while `auto-guard` and `auto-cost` have no `hooks/hooks.json`
 /// entry. Together with `GUARD_SPECS` below these are exactly the 18
-/// `HookName` variants `src/lib.rs` declares.
+/// settings-wired `HookName` variants. The two worktree hooks ship through
+/// `hooks/hooks.json` instead, so they are not wired here.
 ///
 /// Divergence from `hooks/hooks.json`'s literal shape: that file ships
 /// `Stop`'s two hooks (`session-clean-exit`, `memory-capture`) as two

@@ -59,6 +59,16 @@ Two env vars control this behavior:
 
 Before this change, `WORKTREE_AI_RESOLVE=1` triggered silent auto-resolution with no prompt. It now always prompts first. Set `WORKTREE_AI_RESOLVE_SILENT=1` to restore the old behavior.
 
+## Claude Code worktree hooks
+
+`playbook hook worktree-create` and `playbook hook worktree-remove` are registered in `hooks/hooks.json` for the `WorktreeCreate` and `WorktreeRemove` events. They stop `claude --worktree`, `isolation: "worktree"` agents, and background sessions from creating worktrees under `.claude/worktrees/`.
+
+**Create.** The hook reads `cwd` and `worktree_name` (or `name`) from stdin, finds the main worktree of the repo at `cwd`, and targets `<main-parent>/.worktrees/<repo>/<name>`, using the same `main_worktree` and `resolve_base` the launcher uses. The name must be a single safe path segment: empty names, `..`, slashes, and a leading `-` are rejected. If the target is already a registered worktree of the repo, it is reused. Otherwise the hook runs `git worktree add -b worktree-<name> <target> <base>`, matching Claude Code's default branch name. The base is the payload's `base_commit`, then the cached `origin/HEAD`, then local `HEAD`. Stdout carries only the absolute path; all git output goes to stderr. Because the path follows the launcher convention, `classify` reports it as `CcLauncher` and the sweep cleans it once its work has landed.
+
+If anything fails, the hook says why on stderr and falls back to `<repo>/.claude/worktrees/<name>` with the same branch and base. It exits non-zero only if the fallback fails too.
+
+**Remove.** The hook acts only on a registered worktree of the repo and never on the main worktree. It keeps the worktree, prints a reason on stderr, and exits 0 when the tree has uncommitted or untracked changes, or when any commit is not reachable from a remote-tracking ref or the local default branch. Otherwise it runs `git worktree remove` without `--force`, then deletes the branch only if it passes the same reachability rule.
+
 ## See also
 
 - [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `cc` launcher that calls `_cc_worktree`.

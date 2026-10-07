@@ -185,7 +185,7 @@ a good file with a broken one.
 
 `settings.json` invokes every ported hook as a bare `playbook hook <name>`, with
 no path (`src/init/wire.rs`, and the reasoning in its module doc). So the binary
-has to resolve on PATH or all 18 ported hooks silently do nothing: the command
+has to resolve on PATH or all 20 ported hooks silently do nothing: the command
 is not found, the hook produces no output, and the session carries on as if
 nothing were wired. That is the same fail-open shape as a guard script that is
 named but absent, which is why this is a hard failure rather than an INFO.

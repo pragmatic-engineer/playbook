@@ -344,6 +344,57 @@ fn classify_returns_cc_launcher_when_called_from_a_different_linked_worktree_of_
 }
 
 #[test]
+fn classify_recognises_a_worktree_created_by_the_worktree_create_hook() {
+    // Arrange: a repo, then a worktree made by the real `worktree-create` hook.
+    let _guard = lock_cwd();
+    let container = scratch("classify-hook-created")
+        .canonicalize()
+        .expect("container should resolve");
+    let repo_root = container.join("repo");
+    init_repo(&repo_root, "https://github.com/acme/widgets.git");
+    let repo_root = repo_root.canonicalize().expect("repo root should resolve");
+    let home = container.join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let payload = format!(
+        r#"{{"cwd":"{}","worktree_name":"probe"}}"#,
+        repo_root.display()
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["hook", "worktree-create"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("playbook should spawn");
+    std::io::Write::write_all(&mut child.stdin.take().expect("stdin"), payload.as_bytes())
+        .expect("write payload");
+    let out = child.wait_with_output().expect("hook should finish");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let created = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+
+    let previous_cwd = std::env::current_dir().expect("read current dir");
+    std::env::set_current_dir(&repo_root).expect("cd into repo root");
+
+    // Act
+    let got = classify(&created, &home);
+
+    std::env::set_current_dir(&previous_cwd).expect("restore cwd");
+
+    // Assert
+    assert_eq!(
+        got,
+        Convention::CcLauncher,
+        "hook-created worktree: {got:?}"
+    );
+
+    let _ = fs::remove_dir_all(&container);
+}
+
+#[test]
 fn wu_worktree_landed_true_when_commit_reachable_from_default_branch_false_when_not() {
     // Arrange: a scratch repo with a seed commit, a hand-built `origin/main`
     // ref advanced past it (the ancestor case), and a divergent commit on an
