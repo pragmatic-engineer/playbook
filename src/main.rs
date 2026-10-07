@@ -7,7 +7,7 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, mode, pr,
-    sanitize, settings, trust, usage, worktree, AgentsCommand, CcCommand, Cli, Command,
+    sanitize, settings, trust, update, usage, worktree, AgentsCommand, CcCommand, Cli, Command,
     ConfigCommand, DashboardCommand, DoctorCommand, GateCommand, HandoffCommand, JsonCommand,
     ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand, SanitizeCommand,
     SettingsCommand, UsageCommand, WorktreeCommand,
@@ -629,6 +629,44 @@ fn main() {
                 Ok(output) => println!("{output}"),
                 Err(err) => {
                     eprintln!("handoff: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::Update {
+            version,
+            check,
+            list,
+            pre,
+            yes,
+        } => {
+            let opts = update::Options {
+                version,
+                check,
+                list,
+                pre,
+                yes,
+            };
+            let result = update::Env::real().and_then(|env| {
+                update::run(
+                    &opts,
+                    &env,
+                    &update::download::HttpFetcher { local_http: false },
+                    &update::verify::GhAttest,
+                    &update::swap::run_version,
+                )
+            });
+            match result {
+                Ok(outcome) => {
+                    for line in &outcome.out {
+                        println!("{line}");
+                    }
+                    for warning in &outcome.warnings {
+                        eprintln!("warning: {warning}");
+                    }
+                }
+                Err(err) => {
+                    eprintln!("update: {err}");
                     std::process::exit(1);
                 }
             }
