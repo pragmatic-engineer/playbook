@@ -429,6 +429,10 @@ pub enum GateCommand {
         /// otherwise silently absorb it.
         #[arg(long)]
         source: String,
+        /// Print one JSON object on stdout instead of text lines. Exit codes
+        /// are unchanged.
+        #[arg(long)]
+        json: bool,
     },
 }
 

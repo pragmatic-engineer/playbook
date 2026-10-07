@@ -512,3 +512,98 @@ fn nonexistent_source_path_returns_err() {
     let err = result.expect_err("a nonexistent source path must be a clear error");
     assert!(err.contains("failed to read"), "got: {err}");
 }
+
+fn json_of(out: &std::process::Output) -> serde_json::Value {
+    serde_json::from_str(&stdout_of(out))
+        .unwrap_or_else(|e| panic!("bad json ({e}): {}", stdout_of(out)))
+}
+
+fn run_json(f: &Fixture, phases: &[&str], content: &str) -> std::process::Output {
+    let source = f.repo.join("seed-source.txt");
+    fs::write(&source, content).expect("source fixture should write");
+    Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["gate", "check", "plan-a", "gate-run"])
+        .args(phases)
+        .arg("--source")
+        .arg(&source)
+        .arg("--json")
+        .current_dir(&f.repo)
+        .env("HOME", &f.home)
+        .output()
+        .expect("playbook binary should spawn")
+}
+
+#[test]
+fn json_all_pass_reports_ok_true_and_exits_zero() {
+    let f = Fixture::new("json-pass");
+    f.seed("plan-a", "spec", "PASS");
+    f.seed("plan-a", "impl", "WARN");
+
+    let out = run_json(&f, &["spec", "impl"], SEED_SOURCE_CONTENT);
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    let v = json_of(&out);
+    assert_eq!(v["version"], 1);
+    assert_eq!(v["slug"], "plan-a");
+    assert_eq!(v["ok"], true);
+    assert_eq!(
+        v["phases"],
+        serde_json::json!([
+            {"phase": "spec", "status": "PASS"},
+            {"phase": "impl", "status": "WARN"}
+        ])
+    );
+}
+
+#[test]
+fn json_fail_and_missing_report_ok_false_and_exit_one() {
+    let f = Fixture::new("json-fail");
+    f.seed("plan-a", "broken", "FAIL");
+
+    let out = run_json(&f, &["broken", "unrecorded"], SEED_SOURCE_CONTENT);
+
+    assert_eq!(out.status.code(), Some(1));
+    let v = json_of(&out);
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["phases"][0]["status"], "FAIL");
+    assert_eq!(v["phases"][1]["status"], "MISSING");
+}
+
+#[test]
+fn json_stale_source_reports_stale_and_exit_one() {
+    let f = Fixture::new("json-stale");
+    f.seed("plan-a", "spec", "PASS");
+
+    let out = run_json(&f, &["spec"], "different content entirely");
+
+    assert_eq!(out.status.code(), Some(1));
+    let v = json_of(&out);
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["phases"][0]["status"], "STALE");
+}
+
+#[test]
+fn json_empty_phase_list_is_ok_false_with_empty_array_and_exit_one() {
+    let f = Fixture::new("json-empty");
+
+    let out = run_json(&f, &[], SEED_SOURCE_CONTENT);
+
+    assert_eq!(out.status.code(), Some(1));
+    let v = json_of(&out);
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["phases"], serde_json::json!([]));
+    assert!(stderr_of(&out).contains("no phases specified"));
+}
+
+#[test]
+fn text_output_without_json_flag_is_byte_identical() {
+    let f = Fixture::new("text-identical");
+    f.seed("plan-a", "spec", "PASS");
+    f.seed("plan-a", "impl", "WARN");
+
+    let out = f.run("plan-a", "gate-run", &["spec", "impl"]);
+
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(stdout_of(&out), "spec: PASS\nimpl: WARN\n");
+    assert!(stderr_of(&out).is_empty());
+}
