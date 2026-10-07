@@ -273,6 +273,8 @@ jobs:
     needs: [verify-version, checksums]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    # RELEASE_PUSH_TOKEN lives on this environment, which only v* tags can use.
+    environment: release
     permissions:
       contents: read
     env:
