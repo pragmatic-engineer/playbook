@@ -16,7 +16,7 @@ Issue #266 asks for a general way to carry users across breaking changes. The on
 4. **Manual items only warn.** A Manual migration never writes. It returns a message, which `playbook init` prints to stderr.
 5. **Detection of user edits is by content hash.** When playbook places a file it records a hash of what it wrote. If the file's current hash differs from the record, the user edited it. A file with no record is never reported as edited. The hash is FNV-1a 64, chosen over a crypto hash because it must be stable across builds and the crate has no sha256 dependency; it detects edits, not tampering.
 6. **Locking.** Pending Auto migrations run under a directory lock at `~/.config/playbook/migrations.lock` (`acquire_dir_lock`, `remove_stale_lock_dir`). The record is re-read under the lock, so concurrent sessions apply a migration once. If the lock cannot be taken, Auto migrations are skipped with a reported `migrations` step, never run unguarded. The stale-lock age is 300 seconds, since a migration may copy a whole store. An unreadable record (anything but a missing file) skips the run rather than being treated as empty.
-7. **Only `init` runs it.** Per-tool-call hooks never call the registry. When nothing is pending, the cost is one read of the state file plus the Manual hash checks.
+7. **Only `init` runs it.** Per-tool-call hooks never call the registry. When no Auto migration is pending, the cost is one read of the state file plus the Manual hash checks; Idempotent entries still run, without the lock.
 
 ## Alternatives considered
 
