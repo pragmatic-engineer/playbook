@@ -43,12 +43,12 @@ pub struct Group {
     pub cost_usd: f64,
 }
 
-const SECONDS_PER_DAY: i64 = 86_400;
+pub const SECONDS_PER_DAY: i64 = 86_400;
 const UNSET: &str = "(none)";
 
 /// Days since 1970-01-01 to (year, month, day), the inverse of the
 /// days-from-civil conversion used when parsing transcript timestamps.
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;
@@ -61,7 +61,7 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (year, month, day)
 }
 
-fn date_key(days: i64) -> String {
+pub fn date_key(days: i64) -> String {
     let (y, m, d) = civil_from_days(days);
     format!("{y:04}-{m:02}-{d:02}")
 }

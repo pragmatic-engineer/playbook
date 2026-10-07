@@ -340,6 +340,23 @@ fn api_data_ingests_transcripts_and_returns_the_fixture_totals() {
 }
 
 #[test]
+fn api_data_honours_the_range_parameter_and_refuses_an_unknown_one() {
+    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new("range");
+    home.seed("usage/proj-one/s1.jsonl");
+    let port = start(&home);
+
+    let (all_status, all_body) = http_get(&home, port, "/api/data?range=all");
+    let (bad_status, _) = http_get(&home, port, "/api/data?range=7d");
+
+    assert_eq!(all_status, 200);
+    let data: serde_json::Value = serde_json::from_str(&all_body).unwrap();
+    assert_eq!(data["totals"]["messages"], 3);
+    assert_eq!(data["range"]["key"], "all");
+    assert_eq!(bad_status, 400);
+}
+
+#[test]
 fn api_data_reports_skill_and_agent_counts() {
     let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new("tools");
