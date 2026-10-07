@@ -370,6 +370,12 @@ pub struct WireOutcome {
 /// errors, because there was no pre-change snapshot to recover from or diff
 /// against.
 pub fn wire(settings_path: &Path) -> Result<WireOutcome, WireError> {
+    wire_at(settings_path, now_epoch_secs())
+}
+
+/// `wire` with the backup stamped `epoch`, so a caller that already took a
+/// backup in the same run lands on the same name and keeps its earlier copy.
+pub fn wire_at(settings_path: &Path, epoch: u64) -> Result<WireOutcome, WireError> {
     let (mut root, original) = load_settings(settings_path)?;
 
     {
@@ -402,8 +408,10 @@ pub fn wire(settings_path: &Path) -> Result<WireOutcome, WireError> {
     }
 
     let backup_path = if settings_path.is_file() {
-        let backup = timestamped_backup_path(settings_path);
-        fs::copy(settings_path, &backup)?;
+        let backup = timestamped_backup_path(settings_path, epoch);
+        if !backup.exists() {
+            fs::copy(settings_path, &backup)?;
+        }
         Some(backup)
     } else {
         None
@@ -593,14 +601,18 @@ fn canonical_entry(spec: &HookSpec) -> Value {
     Value::Object(entry)
 }
 
+/// Seconds since the unix epoch, the stamp backups are named with.
+pub fn now_epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// `settings.json.bak.<unix-seconds>` beside the original, so a bad wiring
 /// run is always recoverable, multiple runs never collide on the same
 /// backup name, and the timestamp itself shows how stale a given backup is.
-fn timestamped_backup_path(settings_path: &Path) -> PathBuf {
-    let epoch_secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+fn timestamped_backup_path(settings_path: &Path, epoch_secs: u64) -> PathBuf {
     let file_name = settings_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())

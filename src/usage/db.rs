@@ -45,6 +45,28 @@ CREATE TABLE IF NOT EXISTS usage_watermarks (
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 
+const BUSY_PAUSE: Duration = Duration::from_millis(20);
+
+/// Retries `op` while SQLite reports BUSY, until `budget` has elapsed. The busy
+/// handler is skipped when waiting could deadlock (for example while another
+/// opener switches to WAL), so `busy_timeout` alone returns BUSY at once.
+fn retry_busy<T>(
+    mut op: impl FnMut() -> rusqlite::Result<T>,
+    budget: Duration,
+) -> rusqlite::Result<T> {
+    let start = std::time::Instant::now();
+    loop {
+        match op() {
+            Err(rusqlite::Error::SqliteFailure(err, _))
+                if err.code == rusqlite::ErrorCode::DatabaseBusy && start.elapsed() < budget =>
+            {
+                std::thread::sleep(BUSY_PAUSE);
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Open (creating if missing) the usage database at `path`.
 pub fn open_db(path: &Path) -> Result<Connection, String> {
     if let Some(parent) = path.parent() {
@@ -58,9 +80,12 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
     // connection's default timeout is 0, which fails instead of retrying.
     conn.busy_timeout(BUSY_TIMEOUT)
         .map_err(|e| format!("failed to set busy_timeout: {e}"))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| format!("failed to set journal_mode=WAL: {e}"))?;
-    conn.execute_batch(SCHEMA_SQL)
+    retry_busy(
+        || conn.pragma_update(None, "journal_mode", "WAL"),
+        BUSY_TIMEOUT,
+    )
+    .map_err(|e| format!("failed to set journal_mode=WAL: {e}"))?;
+    retry_busy(|| conn.execute_batch(SCHEMA_SQL), BUSY_TIMEOUT)
         .map_err(|e| format!("failed to create usage schema: {e}"))?;
     ensure_cache_1h_column(&conn)?;
     ensure_agent_column(&conn)?;
@@ -436,6 +461,56 @@ mod tests {
             "the WAL must be private too"
         );
         let _ = fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    fn busy() -> rusqlite::Error {
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("database is locked".into()),
+        )
+    }
+
+    #[test]
+    fn a_busy_answer_is_retried_until_it_clears() {
+        let tries = std::cell::Cell::new(0);
+        let out = retry_busy(
+            || {
+                tries.set(tries.get() + 1);
+                if tries.get() <= 3 {
+                    Err(busy())
+                } else {
+                    Ok("done")
+                }
+            },
+            Duration::from_secs(5),
+        );
+        assert_eq!(out.unwrap(), "done");
+        assert_eq!(tries.get(), 4);
+    }
+
+    #[test]
+    fn a_busy_answer_that_never_clears_gives_up_and_other_errors_are_not_retried() {
+        let tries = std::cell::Cell::new(0);
+        let out: rusqlite::Result<()> = retry_busy(
+            || {
+                tries.set(tries.get() + 1);
+                Err(busy())
+            },
+            Duration::from_millis(100),
+        );
+        assert!(out.is_err());
+        assert!(tries.get() > 1, "a busy answer is retried before giving up");
+
+        let tries = std::cell::Cell::new(0);
+        let out: rusqlite::Result<()> = retry_busy(
+            || {
+                tries.set(tries.get() + 1);
+                Err(rusqlite::Error::QueryReturnedNoRows)
+            },
+            Duration::from_secs(5),
+        );
+        assert!(out.is_err());
+        assert_eq!(tries.get(), 1);
     }
 
     #[test]
