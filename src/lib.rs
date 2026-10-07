@@ -744,6 +744,8 @@ pub enum HookName {
     PrecommitCheck,
     AutoGuard,
     AutoCost,
+    WorktreeCreate,
+    WorktreeRemove,
 }
 
 /// `cc` launcher subcommands, matching `shell/shared/dispatch.sh:59-100`. No

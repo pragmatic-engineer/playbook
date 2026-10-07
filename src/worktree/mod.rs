@@ -91,7 +91,8 @@ fn is_cc_launcher_convention(path: &Path) -> bool {
     let Some(parent) = main_root.parent() else {
         return false;
     };
-    let base = crate::cc::worktree::resolve_base(&main_root, parent, None);
+    let configured = std::env::var("WORKTREE_BASE_DIR").ok();
+    let base = crate::cc::worktree::resolve_base(&main_root, parent, configured.as_deref());
     is_direct_child(path, &base)
 }
 

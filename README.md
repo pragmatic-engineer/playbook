@@ -21,7 +21,7 @@ Then open a Claude Code session and run `/playbook:doctor` to verify.
 
 `claude plugin install` gives you the skills, commands and subagents, and
 nothing else. It does **not** install the `playbook` binary, and every ported
-hook is a bare `playbook hook <name>` command, so without the binary all 18 are
+hook is a bare `playbook hook <name>` command, so without the binary all 20 are
 dead and the guards stay unwired.
 
 `/playbook:setup` closes that gap: it installs the release binary into
@@ -153,7 +153,7 @@ optional or cosmetic.
 | 3. Shell launchers | Opt-in (recommended) | Adds `cc` and `ccd` to `~/.bashrc` or `~/.zshrc`. Both shells work; `cc clean` and `cc raw` are zsh-only (see Usage). |
 | 4. Custom system prompt | Opt-in (recommended) | Copies `prompts/SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/`; `cc` passes it via `--system-prompt-file`. Plugin content works without it. |
 | 5. Status line | After `install.sh` | Installs `~/.config/playbook/statusline.sh`. `/playbook:setup` does **not** install it; `/playbook:doctor` checks it. `playbook init` and `install.sh` also mark `~/.config/playbook` as a trusted workspace in `~/.claude.json` (through `playbook trust`), so a `claude` session started directly in that folder doesn't hit the trust dialog and silently skip the status line. Best-effort: a missing `~/.claude.json` is left alone. |
-| 6. The `playbook` binary | `install.sh` or `/playbook:setup` | Installs the release binary to `~/.local/bin`, checksum-verified. **Every ported hook is a bare `playbook hook <name>` command, so without this all 18 are dead.** `claude plugin install` alone does not provide it. |
+| 6. The `playbook` binary | `install.sh` or `/playbook:setup` | Installs the release binary to `~/.local/bin`, checksum-verified. **Every ported hook is a bare `playbook hook <name>` command, so without this all 20 are dead.** `claude plugin install` alone does not provide it. |
 | 7. No dangling hook commands | Always | Flags any `settings.json` hook command pointing at a file that no longer exists, such as a leftover pre-migration Python hook a settings merge never removed. Fails open (silent no-op) if unchecked. |
 
 ## Usage
