@@ -15,8 +15,8 @@ Issue #301 asks for playbook to work with agents other than Claude Code (Cursor,
 
 **What is still Claude-specific**
 
-- `init` keys on `CLAUDE_PLUGIN_ROOT` (`src/init/self_root.rs`).
-- Hooks, the statusline and the launcher are wired through Claude Code's `settings.json` and plugin cache.
+- `init` keys on `CLAUDE_PLUGIN_ROOT`, with a fallback to Claude Code's plugin cache path (`src/init/self_root.rs`).
+- Hooks and the statusline are wired through Claude Code's `settings.json`, and the launcher through shell rc-file lines.
 - Commands, skills and agents ship as a Claude Code plugin (ADR-0001).
 - No Cursor or Codex code exists anywhere in the repo.
 
@@ -27,7 +27,7 @@ Issue #301 asks for playbook to work with agents other than Claude Code (Cursor,
 | Skills (`SKILL.md` with `name` and `description`) | `skills/<name>/SKILL.md` | `.cursor/skills/`, invoked as `/skill-name` (1) | `.agents/skills`, `~/.agents/skills`, invoked as `$skill-name` (2) |
 | Slash commands | `commands/*.md` | Commands being folded into skills, `/migrate-to-skills` (1) | `~/.codex/prompts/*.md` is deprecated in favour of skills (3) |
 | Subagents | `agents/*.md` | `.cursor/agents/`, also reads `.claude/agents/` and `.codex/agents/` (4) | Not confirmed in the docs reviewed |
-| Hooks, pre and post tool | `hooks.json` in the plugin, `PreToolUse` and `PostToolUse` | `.cursor/hooks.json`, `preToolUse`, `postToolUse`, `beforeShellExecution`, `sessionStart`, `stop` (5) | `~/.codex/hooks.json` or `config.toml`, plus project `.codex/`, with `PreToolUse`, `PostToolUse`, `SessionStart`, `UserPromptSubmit`, `Stop` (6) |
+| Hooks, pre and post tool | entries written into `settings.json` by `init` (`src/init/wire.rs`), with `PreToolUse`, `PostToolUse`, `SessionStart`, `UserPromptSubmit`, `Stop` and others | `.cursor/hooks.json`, `preToolUse`, `postToolUse`, `beforeShellExecution`, `sessionStart`, `stop` (5) | `~/.codex/hooks.json` or `config.toml`, plus project `.codex/`, with `PreToolUse`, `PostToolUse`, `SessionStart`, `UserPromptSubmit`, `Stop` (6) |
 | Hook protocol | JSON on stdin, JSON decision on stdout | JSON on stdin and stdout, `allow`, `deny` or `ask` (5) | JSON on stdin, JSON output with `continue` and `systemMessage` (6) |
 | Settings file | `settings.json` | `.cursor/` files and `~/.cursor/` | `~/.codex/config.toml` (2) |
 | Always-on instructions | `CLAUDE.md` | `.cursor/rules/*.mdc` and `AGENTS.md` (7) | `AGENTS.md` |
@@ -37,7 +37,7 @@ Sources: (1) https://cursor.com/docs/agent/chat/commands, (2) https://learn.chat
 
 Two caveats on the evidence. The Codex session format comes from a third-party reader (ccusage) and an upstream issue, not from an OpenAI schema document, so it can change between Codex releases. Interactive sessions on older Codex builds did not always emit `token_count` events (9). Cursor's agent transcript format is unverified, which rules it out as a first usage source.
 
-The convergence is the useful finding. All three agents use the same `SKILL.md` shape, the same JSON-over-stdio hook protocol with an allow or deny decision, and `AGENTS.md`-style instructions. The differences are the file locations, the event names and the settings format.
+The convergence is the useful finding. All three agents use the same `SKILL.md` shape, the same JSON-over-stdio hook protocol, and a markdown instructions file (`CLAUDE.md`, `AGENTS.md`, rules). The differences are the file locations, the event names and the settings format.
 
 ## Decision Drivers
 
@@ -93,7 +93,7 @@ Each slice is its own issue and PR. Slice 1 is the only one this ADR authorizes 
 - Cursor transcript ingest, until a stable public transcript format is confirmed.
 - A statusline for Cursor or Codex.
 - A neutral authoring schema with code generation (Alternative C).
-- Changing `init` to autodetect the host agent. That belongs to slice 2.
+- Autodetecting the host agent in `init`, before slice 2.
 - Windows paths for other agents' config directories.
 - Any change to how Claude Code installs or loads the plugin.
 - Pricing tables for non-Anthropic models beyond what slice 1 strictly needs to avoid reporting wrong cost.
