@@ -126,7 +126,7 @@ a hard fail when the file is absent.
 
 Remediation hint when not installed: "run /playbook:setup and choose Yes for the system prompt question"
 
-## Layer 5: Status line matches the shipped copy
+## Layer 5: Status line command is current
 
 The status line is the one product file `/playbook:setup` cannot install or
 repair (see the `statusline-install-and-doctor-gap` note), and it is **not
@@ -141,6 +141,10 @@ if [ $sl_status -ne 0 ]; then
   echo "UNKNOWN, playbook too old or missing, see Layer 6"
 elif [ -z "$sl_cmd" ]; then
   echo "NOT_CONFIGURED"
+elif [ "$sl_cmd" = "playbook statusline" ]; then
+  echo "RUST"
+elif [ "$sl_cmd" = "bash $HOME/.config/playbook/statusline.sh" ] || [ "$sl_cmd" = "bash ~/.config/playbook/statusline.sh" ] || [ "$sl_cmd" = 'bash $HOME/.config/playbook/statusline.sh' ]; then
+  echo "OUTDATED $sl_cmd"
 else
   sl_path=$(printf '%s\n' "$sl_cmd" | awk '{print $NF}')
   sl_path=${sl_path/#\~/$HOME}; sl_path=${sl_path//\$HOME/$HOME}
@@ -158,6 +162,11 @@ fi
 
 Report:
 
+- `RUST` → PASS. The status line runs `playbook statusline`.
+- `OUTDATED` → **FAIL.** The command still runs the old `statusline.sh` through
+  bash, which is kept for one release as a fallback and then removed.
+  Remediation: run `playbook init`, which rewrites it to `playbook statusline`.
+  A custom status line command is never reported here.
 - `MATCH` → PASS.
 - `MISSING` → **FAIL.** The status line renders nothing. Remediation: copy it
   from the plugin, `cp "$shipped" "$sl_path"`, since `/playbook:setup` cannot.
