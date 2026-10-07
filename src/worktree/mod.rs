@@ -6,6 +6,8 @@
 //! review worktrees), then decides whether an already-classified worktree is
 //! safe to reap.
 
+pub mod review;
+
 use crate::common::paths::playbook_root_from;
 use crate::common::repo_slug;
 use crate::common::run_with_timeout;
@@ -97,8 +99,8 @@ fn is_cc_launcher_convention(path: &Path) -> bool {
 }
 
 /// `review-worktrees/<pr>-<sha>` under the git common dir, per
-/// `shell/review-worktree.sh`'s `cmd_setup`.
-fn is_review_convention(path: &Path) -> bool {
+/// `review::setup`.
+pub(crate) fn is_review_convention(path: &Path) -> bool {
     let Some(common_dir) = git_stdout(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
     else {
         return false;
@@ -200,15 +202,15 @@ pub fn review_worktree_landed(
     if !is_locked {
         return lock_age_secs >= never_locked_grace_secs;
     }
-    // `review-worktree.sh`'s lock reason carries the SETUP script's own pid,
-    // and that script exits right after locking, so this pid is dead for
+    // `review::setup`'s lock reason carries the SETUP process's own pid,
+    // and that process exits right after locking, so this pid is dead for
     // every review, active ones included, not only finished ones: pid
     // liveness alone is never a safe "still in use" signal here. Requiring
     // the lock to also be older than a real TTL, not just the short
     // never-locked grace window, keeps an active review (which can run for
     // minutes, e.g. a full check-suite run) from being reaped the instant a
     // sweep happens to run. `REVIEW_LOCK_TTL_SECS` matches
-    // `review-worktree.sh`'s own `REVIEW_WT_TTL_SECONDS` default.
+    // `review::setup`'s own `REVIEW_WT_TTL_SECONDS` default.
     let stale_enough = lock_age_secs >= REVIEW_LOCK_TTL_SECS;
     match lock_owner_pid {
         Some(pid) => !pid_is_alive(pid) && stale_enough,
@@ -216,7 +218,7 @@ pub fn review_worktree_landed(
     }
 }
 
-/// Matches `review-worktree.sh`'s own `REVIEW_WT_TTL_SECONDS` default (24
+/// Matches `review::setup`'s own `REVIEW_WT_TTL_SECONDS` default (24
 /// hours): the floor a locked review worktree's lock age must clear before
 /// [`review_worktree_landed`] treats it as safe to reap, since a dead lock
 /// pid is not itself a safe signal for this convention.
@@ -236,7 +238,7 @@ pub fn pid_is_alive(pid: u32) -> bool {
         .is_ok_and(|out| out.status.success())
 }
 
-/// Extracts a pid from a lock reason string, trying `review-worktree.sh`'s
+/// Extracts a pid from a lock reason string, trying `review::setup`'s
 /// flat `pid=<n>` shape first, then the Agent tool's `pid <n>` shape. `None`
 /// if neither is found: the Agent-tool format is not a documented contract
 /// anywhere in this repo, so it is never assumed to be stable.
@@ -413,7 +415,7 @@ fn require_i64(key: &str, value: &serde_json::Value) -> Result<i64, crate::confi
 const CONFLICT_MARKER_FILE: &str = ".playbook-conflict-stop";
 
 /// A worktree just added but not yet locked needs a moment before `git
-/// worktree lock` runs, matching the gap between `review-worktree.sh`'s own
+/// worktree lock` runs, matching the gap between `review::setup`'s own
 /// `add` and `lock` calls.
 const NEVER_LOCKED_GRACE_SECS: i64 = 60;
 

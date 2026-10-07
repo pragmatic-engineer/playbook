@@ -58,9 +58,8 @@ With no argument (`SELF_MODE`), the in-place predicate runs the same check. If t
 **Worktree mode** (all other cases): set up an isolated worktree:
 
 ```bash
-[ -r "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" ] || { echo "error: review-worktree.sh not found under \$CLAUDE_PLUGIN_ROOT/shell/" >&2; exit 1; }
 WT_ERR="$(mktemp)"
-WT="$(bash "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
+WT="$(playbook worktree review setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
 if [[ $? -ne 0 || -z "$WT" ]]; then
   echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
   rm -f "$WT_ERR"
@@ -69,8 +68,8 @@ fi
 rm -f "$WT_ERR"
 ```
 
-On failure this prints the script's stderr and stops. No fallback, no degraded mode.
-Capture stdout only: `review-worktree.sh` prints the worktree path on stdout and sends
+On failure this prints the command's stderr and stops. No fallback, no degraded mode.
+Capture stdout only: `playbook worktree review setup` prints the worktree path on stdout and sends
 git's progress to stderr on purpose, so folding them together corrupts the path.
 
 When in worktree mode, read and grep all files under `$WT` instead of the local working tree. Store `WT_CREATED=true` for the teardown step.
@@ -157,7 +156,7 @@ if [[ "$LOCAL_HEAD" == "$HEAD_SHA" && -z "$DIRTY" ]]; then
   echo "Mode: in-place (HEAD matches, tree clean)"
 else
   WT_ERR="$(mktemp)"
-  WT="$(bash "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
+  WT="$(playbook worktree review setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
   if [[ $? -ne 0 || -z "$WT" ]]; then
     echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
     rm -f "$WT_ERR"
@@ -304,7 +303,7 @@ Final user-facing message: one sentence per outcome.
 If `WT_CREATED` is true, always run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" teardown "$WT"
+playbook worktree review teardown "$WT"
 ```
 
 This step is unconditional: run it whether the review completed, failed, was skipped, or was aborted by the user. It is a no-op if the worktree was already cleaned up.

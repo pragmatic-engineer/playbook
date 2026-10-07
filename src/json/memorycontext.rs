@@ -2,13 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 //! Renders the repo-scoped markdown slice of the graph-first memory store
-//! that `shell/memory-context.sh` used to build with a `jq` filter. Ported
+//! that `shell/memory-context.sh` (now `playbook memory context`) built with
+//! a `jq` filter. Ported
 //! function-for-function against real `jq` output (see
 //! `tests/json_memorycontext.rs`), including the empty-repo edge case
 //! where jq's `"" | split("/")[0]` is `null` rather than `""`.
 
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
+
+/// Reads `graph` and renders it for `repo`; empty when the file is missing
+/// or unreadable, so callers never break on absent memory.
+pub fn render_for_graph_file(graph: &std::path::Path, repo: &str) -> String {
+    match std::fs::read_to_string(graph) {
+        Ok(json) => render_memory_context(&json, repo),
+        Err(_) => String::new(),
+    }
+}
 
 /// A node's string field, or `""` when absent or not a string, matching this
 /// port's established swallow-the-mismatch behavior (`src/doctor/field.rs`).

@@ -365,6 +365,17 @@ pub enum MemoryCommand {
     /// Memory is rebuilt on its own when a fact is saved, so you only need
     /// this after editing fact files by hand.
     Rebuild,
+    /// Print the repo-scoped markdown slice of the memory graph (facts in
+    /// scope, typed edges, anchor index). Prints nothing, exit 0, when the
+    /// graph is missing or unreadable.
+    Context {
+        /// Repo slug (`owner/name`); defaults to the origin remote's slug.
+        #[arg(long)]
+        repo: Option<String>,
+        /// Graph file; defaults to `~/.config/playbook/memory/memory.graph.json`.
+        #[arg(long)]
+        graph: Option<PathBuf>,
+    },
 }
 
 /// `playbook manifest` subcommands.
@@ -622,6 +633,30 @@ pub enum WorktreeCommand {
     /// Remove one worktree if it has landed and is not in use
     Remove {
         /// Worktree path, as shown by `git worktree list`
+        path: PathBuf,
+    },
+    /// Create or remove the locked review worktrees `/playbook:quick-review`
+    /// and `/playbook:deep-review` run in
+    Review {
+        #[command(subcommand)]
+        sub: ReviewWorktreeCommand,
+    },
+}
+
+/// `playbook worktree review` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ReviewWorktreeCommand {
+    /// Fetch a PR head, add a locked detached worktree for it, and print its
+    /// absolute path on stdout (warnings go to stderr).
+    Setup {
+        /// Pull request number.
+        pr: String,
+        /// Head commit the review was resolved against.
+        head_sha: String,
+    },
+    /// Remove a review worktree, even a dirty one. Always exits 0.
+    Teardown {
+        /// Worktree path printed by `setup`.
         path: PathBuf,
     },
 }

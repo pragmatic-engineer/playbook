@@ -173,9 +173,6 @@ fn archive_contains_every_file_the_installed_plugin_reads_at_runtime() {
         "shell/setup-local.sh",
         "shell/ensure-deps.sh",
         "Brewfile",
-        "shell/review-worktree.sh",
-        "shell/memory-context.sh",
-        "shell/gh-remote.sh",
         "LICENSE",
         "README.md",
     ]

@@ -158,12 +158,8 @@ if [[ "$LOCAL_HEAD" == "$HEAD_SHA" && -z "$DIRTY" ]]; then
   WT_CREATED=false
   echo "Mode: in-place (HEAD matches, tree clean)"
 else
-  if [[ ! -r "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" ]]; then
-    echo "error: review-worktree.sh not found under \$CLAUDE_PLUGIN_ROOT/shell/" >&2
-    exit 1
-  fi
   WT_ERR="$(mktemp)"
-  WT="$(bash "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
+  WT="$(playbook worktree review setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
   if [[ $? -ne 0 || -z "$WT" ]]; then
     echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
     rm -f "$WT_ERR"
@@ -217,7 +213,7 @@ If install or run fails, log the error in `CHECK_OUTPUT` and continue: never blo
 
 ## Step 2c: Load memory (best-effort)
 
-Resolve `$CLAUDE_PLUGIN_ROOT/shell/memory-context.sh` (same resolve-then-check-`-f` convention `commands/doctor.md:108-113` uses for `statusline.sh`), run it with `--repo <owner>/<repo>` (`<owner>/<repo>` from `git remote get-url origin`), and load the fact files it names on demand. If the script produces no output (empty store, or the `playbook` binary/`bash` unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope). When both the script and the direct graph read produce nothing, skip this step silently; Step 3's reviewers get no memory section and that's expected, not an error. Note in the report which source produced the result (script output, direct graph read, or nothing found), so an operator can tell "nothing relevant" apart from "the script couldn't run."
+Run `playbook memory context --repo <owner>/<repo>` (`<owner>/<repo>` from `git remote get-url origin`), and load the fact files it names on demand. If the command produces no output (empty store, or the `playbook` binary unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope). When both the command and the direct graph read produce nothing, skip this step silently; Step 3's reviewers get no memory section and that's expected, not an error. Note in the report which source produced the result (command output, direct graph read, or nothing found), so an operator can tell "nothing relevant" apart from "the command couldn't run."
 
 ## Step 2d: Haiku triage
 
@@ -392,7 +388,7 @@ Never fabricate URLs; use the `html_url` the API returns.
 Then, if `WT_CREATED` is true, always run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/shell/review-worktree.sh" teardown "$WT"
+playbook worktree review teardown "$WT"
 ```
 
 Run this whether the review completed, failed, was skipped, or was aborted mid-swarm. It's a no-op if the worktree is already gone.
