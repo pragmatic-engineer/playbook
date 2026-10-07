@@ -24,7 +24,8 @@ pub use atomic::atomic_append;
 pub use config_hash::config_hash;
 pub use counter::incr_counter;
 pub use emit::{
-    emit_block, emit_pre_context, emit_pre_deny, emit_prompt_context, emit_system_message,
+    emit_block, emit_pre_context, emit_pre_deny, emit_pre_updated_input, emit_prompt_context,
+    emit_system_message,
 };
 pub use paths::{
     cc_state_dir, memory_dir, playbook_root, repo_scoped_dir, runtime_root, usage_db_dir, RepoScope,

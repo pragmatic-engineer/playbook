@@ -45,6 +45,16 @@ impl Payload {
     }
 }
 
+impl Payload {
+    /// The JSON value at a dotted path, for a caller that must hand a whole
+    /// object back, such as a rewritten `tool_input`.
+    pub fn value(&self, path: &str) -> Option<&Value> {
+        path.trim_start_matches('.')
+            .split('.')
+            .try_fold(&self.0, |current, key| current.as_object()?.get(key))
+    }
+}
+
 fn stringify(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
@@ -84,6 +94,17 @@ fn stringify_number(n: &serde_json::Number) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn value_returns_the_json_at_a_path_and_none_when_missing() {
+        let payload = Payload::parse(r#"{"tool_input":{"command":"ls","timeout":5}}"#);
+
+        assert_eq!(
+            payload.value(".tool_input"),
+            Some(&serde_json::json!({"command": "ls", "timeout": 5}))
+        );
+        assert_eq!(payload.value(".tool_input.missing"), None);
+    }
 
     #[test]
     fn field_string_value() {

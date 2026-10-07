@@ -723,6 +723,7 @@ pub enum HookName {
     RmWorkspaceGuard,
     BgAwaitGuard,
     NoSlopGuard,
+    CommitMessageSanitizer,
     PrecommitCheck,
     AutoGuard,
     AutoCost,
@@ -796,6 +797,7 @@ mod tests {
             "bg-await-guard",
             "no-slop-guard",
             "precommit-check",
+            "commit-message-sanitizer",
         ];
 
         // Act
