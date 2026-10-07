@@ -8,7 +8,7 @@ effort: high
 
 # Deep Review: Multi-Agent PR Review
 
-Review a pull request with a swarm of specialist reviewer subagents run in parallel, each a focused `reviewer` subagent under the `playbook:grounding-review` and `playbook:grounding-research` discipline. The orchestrating session consolidates, dedups, and fact-checks their findings, then posts them as a **pending** GitHub review (same posting flow as `/playbook:quick-review`). This is heavier and slower than `/playbook:quick-review`; use it for substantial, risky, or cross-cutting PRs.
+Review a pull request with a swarm of specialist reviewer subagents run in parallel, each a focused `reviewer` subagent under the `playbook:grounding-review` discipline. The orchestrating session consolidates, dedups, and fact-checks their findings, then posts them as a **pending** GitHub review (same posting flow as `/playbook:quick-review`). This is heavier and slower than `/playbook:quick-review`; use it for substantial, risky, or cross-cutting PRs.
 
 Invoked as `/playbook:deep-review`. The remaining arguments are an optional PR number and flags.
 
@@ -100,7 +100,7 @@ Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set 
 
 ## Voice rules
 
-Invoke the `playbook:grounding-review` and `playbook:writing-style` skills before drafting any finding (same discipline as `/playbook:quick-review`). Non-negotiables for anything posted to GitHub: Conventional Comments label in **plain text** and bare (`blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`, never bold; `blocking:` replaces `issue:` specifically for a merge-blocking finding); plain, jargon-free language; findings kept short (one sentence when possible, two at most, the problem then what breaks, a second only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
+Findings are plain: label, `file:line`, evidence, a short failure scenario, and one fix in plain words, with no comment body (same discipline as `/playbook:quick-review`). Step 5 drafts the comments after the sweep, and only when something can be posted. Non-negotiables for every finding: Conventional Comments label in **plain text** and bare (`blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`, never bold; `blocking:` replaces `issue:` specifically for a merge-blocking finding); plain, jargon-free language; findings kept short (one sentence when possible, two at most, the problem then what breaks, a second only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
 
 ## Step 1: Resolve PR and gather context
 
@@ -233,13 +233,17 @@ Three distinct fail-open rules apply, not one:
 
 Report which lenses resolved to which tier, a one-line summary, e.g. "Triage: security=full-lens, docs=cheap-check, perf=skip", the same way Step 2 already reports which reviewers it selected and why.
 
+## Step 2e: Load skills and reference files
+
+Only now, with the lenses and tiers settled, load what the run needs. The orchestrator invokes `playbook:grounding-review` (for the sweep and the report format) and loads no other skill here. Each dispatched reviewer loads `playbook:grounding-review` plus only the one reference file mapped to its lens (Step 3). A skipped lens loads nothing.
+
 ## Step 3: Spawn the reviewer swarm (parallel reviewer subagents)
 
 **Concurrency cap (MUST).** Dispatch at most 8 reviewers at once. When the selected set (Step 2) is 8 or fewer, dispatch it in one wave exactly as below. When it's larger (only possible under `--all`, up to 14 lenses), split into waves of at most 8: issue the first wave's `Agent` calls in one message, wait for them to return, `TaskStop` each, then issue the remaining lenses as a second wave. This bounds concurrent spawns; it never drops a lens to stay under the cap; every selected reviewer still runs, just possibly across two waves instead of one.
 
 For each lens in a wave, read its Step 2d tier from the captured tier map before dispatching: a lens absent from the map defaults to `full-lens`, per Step 2d's fail-open-per-lens rule (a triage dispatch that returns a partial map never silently narrows a lens's coverage). Dispatch by tier:
 
-- **`full-lens`:** dispatch a `reviewer` subagent (`subagent_type: playbook:reviewer`) exactly as this step already did before tiered dispatch existed. Do not change the reviewer prompt shape at all for this tier; everything below through "Instruct each to" describes it unchanged.
+- **`full-lens`:** dispatch a `reviewer` subagent (`subagent_type: playbook:reviewer`) as everything below through "Instruct each to" describes. It loads `playbook:grounding-review` and, when its lens has a mapped file in the `cheap-check` table below, only that reference file, resolved to an absolute path the same way. It never loads `playbook:writing-style`.
 - **`cheap-check`:** dispatch a `cheap-checker` subagent (`subagent_type: playbook:cheap-checker`) instead of `reviewer`. Its prompt names: the lens's narrow concern, taken from the tier map's `reason` field for that lens (that field is already a short, grounded justification from `review-triage`, so it doubles as the concern statement); the PR diff and `HEAD_SHA`; the absolute `$WT` path (or the in-place note when `WT` is empty), same conventions as the `reviewer` dispatch below; and ONE reference file path to read for criteria, per this mapping:
 
   | Lens | Reference file |
@@ -271,7 +275,7 @@ For each lens in a wave, read its Step 2d tier from the captured tier map before
   If the lens has a mapped file, resolve it to an absolute path this way and confirm that file exists. If a lens has no mapped file (`test`, `docs`), or the resolved file doesn't exist for some reason (defensive fallback), resolve the full `SKILL.md` path instead: the same fallback mechanism either way (no reference file to hand over), so it is one rule, not two. Hand `cheap-checker` the resolved ABSOLUTE path this bash step produced, never the unexpanded `${CLAUDE_PLUGIN_ROOT}` placeholder or a bare repo-relative string: `cheap-checker` has no `Bash`, so it cannot expand `$CLAUDE_PLUGIN_ROOT` itself, and a repo-relative path never resolves against the diff's own target repo (which is not this plugin's repo). The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern, never the full skill's breadth.
 - **`skip`:** dispatch nothing for that lens. Track it explicitly as skipped, e.g. in the same one-line summary Step 2d already reports ("Triage: security=full-lens, docs=cheap-check, perf=skip"). A skipped lens is never conflated with "returned nothing" below: it was never dispatched at all, so it has no return value to lose.
 
-Spawn each wave **in parallel** (one message, multiple `Agent` calls). The `reviewer` agent is structurally read-only (Read/Grep/Glob only, no Edit/Write/Bash) and pins its own model tier and the `playbook:grounding-review` + `playbook:grounding-research` discipline, so the orchestrator no longer sets `model` per call; `cheap-checker` is the same shape (Read/Grep/Glob/Skill, its own pinned `haiku` model). Each reviewer prompt MUST include: its focus area (from the table), the PR diff and `HEAD_SHA`, the `playbook:grounding-review` + `playbook:grounding-research` discipline, the absolute `$WT` path (or a note that the tree is in-place if `WT` is empty) with the instruction "Read and grep files under <WT>; do not install or build anything.", the `CHECK_OUTPUT` captured in Step 2b verbatim under a heading "Check suite output (from orchestrator)", and, when Step 2c loaded anything, a memory slice: facts anchored to a file touched in the diff, or otherwise related to the lens's focus area (for example, security-tagged facts for the security lens), listed by one-line hook or short body under a heading "Relevant memory (from orchestrator)". No matching facts means no section, not an empty placeholder.
+Spawn each wave **in parallel** (one message, multiple `Agent` calls). The `reviewer` agent is structurally read-only (Read/Grep/Glob only, no Edit/Write/Bash) and pins its own model tier, so the orchestrator no longer sets `model` per call; `cheap-checker` is the same shape (Read/Grep/Glob/Skill, its own pinned `haiku` model). Each reviewer prompt MUST include: its focus area (from the table), the PR diff and `HEAD_SHA`, the instruction to load `playbook:grounding-review` (plus its mapped reference file), the absolute `$WT` path (or a note that the tree is in-place if `WT` is empty) with the instruction "Read and grep files under <WT>; do not install or build anything.", the `CHECK_OUTPUT` captured in Step 2b verbatim under a heading "Check suite output (from orchestrator)", and, when Step 2c loaded anything, a memory slice: facts anchored to a file touched in the diff, or otherwise related to the lens's focus area (for example, security-tagged facts for the security lens), listed by one-line hook or short body under a heading "Relevant memory (from orchestrator)". No matching facts means no section, not an empty placeholder.
 
 In worktree mode, each reviewer prompt includes the absolute `$WT` path with the instruction "read and grep files under $WT; do not install or build." Subagents are read-only. The orchestrator has already run the checks once in Step 2b; subagents use the captured output as context, not as a trigger to re-run.
 
@@ -279,11 +283,11 @@ For full-lens dispatches, instruct the reviewer to:
 
 - Read every file it cites at `HEAD_SHA` (diff context alone is insufficient); quote exact code with `file:line`; tag anything unconfirmed `[unverified]`.
 - Stay within its focus; don't report issues another reviewer owns.
-- Return findings as a JSON array, one object per finding:
+- Return plain findings as a JSON array, one object per finding, with no comment body and no `Post:` block:
 
 ```json
 {"file": "...", "line": N, "side": "RIGHT", "label": "blocking",
- "category": "security", "confidence": "HIGH", "evidence": "<exact code>", "body": "<short plain finding; the problem then what breaks, 1 sentence when possible, a second only when the mechanism is non-obvious>"}
+ "category": "security", "confidence": "HIGH", "evidence": "<exact code>", "body": "<short plain finding; the problem then what breaks, 1 sentence when possible, a second only when the mechanism is non-obvious>", "fix": "<one fix, in plain words>"}
 ```
 
 **A silent reviewer is NOT a reviewer with zero findings.** This is the single most important rule in this command (`playbook:delegating-subagents`).
@@ -328,11 +332,17 @@ Run this after Step 4 and before any finding is shown to the user or a pending r
 2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact.
 3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
 
-Drop findings that do not hold, relabel the mislabelled, move the misplaced, and update each changed finding's `Post:` block to match. Read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list (Step 4 set them before the sweep). See the Verification Sweep section of `playbook:grounding-review`.
+Drop findings that do not hold, relabel the mislabelled, and move the misplaced. Read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list (Step 4 set them before the sweep). See the Verification Sweep section of `playbook:grounding-review`.
 
 ## Step 5: Present the consolidated report
 
-Present ALL findings that survived the Step 4b sweep (rule 7), with its `Sweep:` line under the Overview. Render the `playbook:grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line. List every lens Step 2 selected, including any Step 2d resolved to `skip`, so a reader can see what was deliberately not looked at, not just what fired. Show each lens's Step 2d tier alongside its finding count: a `full-lens` or `cheap-check` lens renders `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check`); a `skip` lens renders `<lens>: skip` with NO count, since it never ran and a count of 0 would misleadingly read the same as "ran and found nothing". For example: "security: full (2) · docs: cheap-check (0) · perf: skip". Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
+Present ALL findings that survived the Step 4b sweep (rule 7), with its `Sweep:` line under the Overview. Render the `playbook:grounding-review` Review Report Format exactly, INCLUDING the `### Reviewers` line. List every lens Step 2 selected, including any Step 2d resolved to `skip`, so a reader can see what was deliberately not looked at, not just what fired. Show each lens's Step 2d tier alongside its finding count: a `full-lens` or `cheap-check` lens renders `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check`); a `skip` lens renders `<lens>: skip` with NO count, since it never ran and a count of 0 would misleadingly read the same as "ran and found nothing". For example: "security: full (2) · docs: cheap-check (0) · perf: skip". Each finding is plain: label, `file:line`, evidence, the failure, and one fix. A finding whose evidence is not on a changed diff line ends with `Report-only: not on a changed line, no inline comment.`
+
+### Draft the comments (non-self runs only)
+
+Skip this in `SELF_MODE`, or when nothing is postable: the plain report above is the deliverable, no comment is drafted, and Step 6 stops. Otherwise, with the sweep done, load `playbook:writing-style` now. Draft one comment body for every swept finding that is not `Report-only`, from its label, problem, consequence and fix, applying that skill's GitHub rules. Each body starts with the bare plain-text label, never bold, and carries no `file:line` prefix. It MAY hold a ```suggestion``` block when the fix is mechanical.
+
+Present the report with each draft shown under its finding as a `Draft:` block. Each draft is the final text, in the humane `playbook:writing-style` register, not the terse operator voice: label, voice, no dashes, GitHub rules all applied. Nothing is rewritten between this preview and the post, so what the user reads is exactly what posts. If the user asks for a change to a draft, redraft it with `playbook:writing-style` and show the new preview before posting.
 
 ## Step 6: Orchestrate posting
 
@@ -349,7 +359,7 @@ Otherwise ask **one question at a time**:
   - `none` (stop, nothing posted)
 
   If `none`, stop.
-- Build the payload at `$REVIEW_JSON` (`{"commit_id": "<HEAD_SHA>", "comments": [{"path","line","side","body"}, ...]}`, body starting with the plain-text bare Conventional Comment label, `blocking:` for a merge-blocking finding, `issue:` otherwise, no review `body`). Build each inline comment's `body` from that finding's `Post:` block verbatim, anchored to the finding's `file:line`. What the user read in the report is exactly what posts. Skip any finding marked `Report-only`. Then create the pending review:
+- Build the payload at `$REVIEW_JSON` (`{"commit_id": "<HEAD_SHA>", "comments": [{"path","line","side","body"}, ...]}`, body starting with the plain-text bare Conventional Comment label, `blocking:` for a merge-blocking finding, `issue:` otherwise, no review `body`). Build each inline comment's `body` from that finding's previewed `Draft:` block verbatim, anchored to the finding's `file:line`. Post the previewed bodies as they are, never a rewording. Skip any finding marked `Report-only`. Then create the pending review:
 
 ```bash
 gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews --input "$REVIEW_JSON" --jq '{id, state, html_url}'

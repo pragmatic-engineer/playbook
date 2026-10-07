@@ -5,11 +5,11 @@ description: Use when reviewing a pull request or code change, whether a quick s
 
 # Review Grounding
 
-Discipline for reviewing pull requests. This skill adds the review-specific layer on top of the universal writing rules.
+Discipline for reviewing pull requests: how to ground, label, and report findings.
 
-MUST load the `playbook:writing-style` skill alongside this one. Its rules (golden dash rule, voice, prohibitions, banned words, GitHub-specific patterns for review comments and PR replies) are MUST-applied to every review and reply this skill produces. The review-specific sections below ("Voice for Reviews", "Review Report Format", etc.) layer on top; where they repeat a `playbook:writing-style` rule, it's for emphasis on the most-violated points, not a replacement.
+Load the `playbook:writing-style` skill when writing text a person will read (a posted review comment, a PR or issue body), not to produce or check findings. Findings stay plain: label first, one or two sentences, no hedging, no em or en dashes. The posting step of the review command drafts the comment bodies from the swept findings and loads `playbook:writing-style` for that.
 
-**Register precedence.** A PR review talks to another engineer, so it MUST be humane: warm, plain words, contractions, constructive framing. That comes from `playbook:writing-style`. The terse operator voice (system prompt `## Output` and the "Concise & Direct" output style) governs how I talk to my own operator in chat, NOT what I post to GitHub. For any review content, reply, or comment body, `playbook:writing-style` wins over that operator voice. Don't strip the contractions and warmth to sound concise.
+**Register precedence.** A posted review comment talks to another engineer, so it MUST be humane: warm, plain words, contractions, constructive framing. That comes from `playbook:writing-style`, applied at the posting step. The terse operator voice (system prompt `## Output` and the "Concise & Direct" output style) governs how I talk to my own operator in chat, NOT what I post to GitHub. For any posted comment body, `playbook:writing-style` wins over that operator voice. Don't strip the contractions and warmth to sound concise.
 
 ## Voice for Reviews
 
@@ -21,7 +21,7 @@ You're a senior engineer leaving a review for a teammate. Simple, direct sentenc
 - **MUST use contractions.** "wouldn't" not "would not", "it's" not "it is".
 - For blocking issues, be clear and direct. For suggestions, frame as ideas: "one option here..." or "worth considering...".
 
-Full voice rules in `playbook:writing-style` skill.
+Full voice rules for posted comments are in the `playbook:writing-style` skill.
 
 
 ## Evidence Rules
@@ -79,19 +79,19 @@ Verdict: <APPROVE | REQUEST_CHANGES | COMMENT | INCONCLUSIVE> · confidence <HIG
 ```
 N. <label>: <one-line subject naming the consequence>
    `<file>:<line>` · <category> · <HIGH|MEDIUM|LOW>
-   <1 sentence body when possible, 2 at most: the problem and the real-world consequence>
-   Post:
-   ```text
-   <label>: <exact GitHub comment body, 1 sentence when possible, 2 at most>
-   ```
+   Evidence: `<exact code at that line>`
+   <1 sentence body when possible, 2 at most: the problem and the failure it causes>
+   Fix: <one fix, in plain words>
 ```
 
 - Labels: `blocking`, `issue`, `suggestion`, `question`, `nitpick`. `blocking` replaces `issue` specifically for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. `suggestion`, `question`, and `nitpick` are non-blocking by definition, so they never take the `blocking` label. The label sets both the finding order (see Findings in the skeleton) and the report subject (see the finding block); the posted comment uses the exact same bare label, no separate decoration needed.
 - Subject names the consequence, not a rule: "user input runs as SQL", not "SQL injection".
 - Location line: `` `file:line` `` then category (security, logic, perf, tests, types, data, maintainability, and so on) then confidence, `·`-separated.
 - Body: 1 sentence when possible, 2 at most. State the problem plainly, skip restating what the code already shows (the reader can see the diff). The why is part of the sentence, not a separate paragraph. No bullet lists inside a finding.
-- `Post:` block: the exact comment that goes to GitHub. Plain text, bare label never `**bold**` (`blocking:` or `issue:`, matching whichever label the finding carries), 1 sentence when possible, 2 at most, no `file:line` prefix (GitHub anchors it). It MAY contain a ```suggestion``` block when the fix is mechanical. The posting step sends this block verbatim as the comment body.
-- Report-only finding (evidence not on a changed diff line, so no inline anchor): omit the `Post:` block and end with `Report-only: not on a changed line, no inline draft.`
+- `Evidence:` the exact code, copied, so the sweep can re-check the finding from its cited lines alone.
+- `Fix:` one fix, not a menu, the smallest change that works.
+- No comment body here. A finding is plain; the posting step of the review command drafts each GitHub comment from the swept finding and adds it as a `Draft:` block under the finding. Reviewers never write that block.
+- Report-only finding (evidence not on a changed diff line, so no inline anchor): end with `Report-only: not on a changed line, no inline comment.` The posting step skips it.
 
 ## Verification Sweep (MUST)
 
@@ -103,7 +103,7 @@ Check three things for each finding:
 2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact, not the reviewer's first guess.
 3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
 
-Drop a finding that does not hold, relabel one with the wrong label, and move a misplaced one. Update its `Post:` block to match, so the label and anchor that post are the ones the sweep settled. Read the cited lines plus what the trace needs, never whole files, to keep the main context small.
+Drop a finding that does not hold, relabel one with the wrong label, and move a misplaced one. The posting step drafts from the swept list, so what it posts carries the label and anchor the sweep settled. Read the cited lines plus what the trace needs, never whole files, to keep the main context small.
 
 Then report what the sweep changed in the `Sweep:` line under the Overview: how many findings were kept, dropped, relabelled, and moved. A finding that survives counts as kept, even when it was also relabelled or moved. Then recompute the verdict, confidence and finding order from the swept list, since drops, relabels and moves can change all three. Nothing is shown, posted or acted on until the sweep has run.
 
