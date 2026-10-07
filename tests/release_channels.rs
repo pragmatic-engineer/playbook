@@ -69,7 +69,7 @@ fn source(market: &str) -> Value {
 
 #[test]
 fn formula_matches_the_shell_output_byte_for_byte() {
-    let want = std::fs::read_to_string(fixture("formula.expected.rb")).unwrap();
+    let want = std::fs::read_to_string(fixture("formula.expected.txt")).unwrap();
     assert_eq!(formula("9.8.7").stdout, want);
 }
 
