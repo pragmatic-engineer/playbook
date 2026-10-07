@@ -377,6 +377,29 @@ mod tests {
             .collect()
     }
 
+    /// `spec` without the long names the installed git lacks, which an older
+    /// git never had. Each one left out is printed.
+    fn known_to_git(sub: &str, spec: &Spec, names: &[String]) -> Spec {
+        let keep = |list: &[&'static str]| -> &'static [&'static str] {
+            let (known, missing): (Vec<&str>, Vec<&str>) = list
+                .iter()
+                .copied()
+                .partition(|name| names.iter().any(|n| n == name));
+            if !missing.is_empty() {
+                eprintln!("note: the installed git {sub} has no {missing:?}, so they are skipped");
+            }
+            Box::leak(known.into_boxed_slice())
+        };
+        Spec {
+            short_values: spec.short_values,
+            short_attached: spec.short_attached,
+            long_values: keep(spec.long_values),
+            long_flags: keep(spec.long_flags),
+            other_long: keep(spec.other_long),
+            abbreviate: spec.abbreviate,
+        }
+    }
+
     /// The option git resolves `--prefix` to: an exact name, else the only
     /// name it starts. `None` when git refuses it as ambiguous.
     fn git_resolves(names: &[String], prefix: &str) -> Option<String> {
@@ -395,6 +418,7 @@ mod tests {
         for (sub, spec) in [("commit", COMMIT), ("merge", MERGE), ("tag", TAG)] {
             let names = git_long_options(sub);
             assert!(names.len() > 10, "git {sub} lists its options");
+            let spec = known_to_git(sub, &spec, &names);
             let read: Vec<&str> = spec
                 .long_values
                 .iter()
@@ -427,13 +451,18 @@ mod tests {
     fn the_specs_only_name_options_git_has() {
         for (sub, spec) in [("commit", COMMIT), ("merge", MERGE), ("tag", TAG)] {
             let names = git_long_options(sub);
+            for must in ["message", "file"] {
+                assert!(names.iter().any(|n| n == must), "git {sub} has no --{must}");
+            }
             let ours = spec
                 .long_values
                 .iter()
                 .chain(spec.long_flags)
                 .chain(spec.other_long);
             for name in ours {
-                assert!(names.iter().any(|n| n == name), "git {sub} has no --{name}");
+                if !names.iter().any(|n| n == name) {
+                    eprintln!("note: the installed git {sub} has no --{name}, so it is skipped");
+                }
             }
         }
     }

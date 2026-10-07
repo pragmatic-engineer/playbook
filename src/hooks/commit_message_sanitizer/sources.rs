@@ -4,9 +4,10 @@
 //! Finds where a command keeps a message and writes the sanitised text back
 //! to the same place: a shell word or a heredoc body. A message in a file is
 //! never rewritten on disk: the command is made to read the cleaned text from
-//! a heredoc instead, and the file stays as it is.
+//! a heredoc instead, and the file stays as it is. When there is no safe place
+//! for that heredoc, the file is reported as unread and left to the backstop.
 
-use super::engine::{Call, Findings, Plan};
+use super::engine::{Call, Findings, Inline, Plan};
 use crate::common::attribution::{drop_lines, problems, Shape};
 use crate::common::home_dir;
 use crate::common::shell::{commands, program_index, program_name, quote, Command};
@@ -35,11 +36,13 @@ pub enum Target {
     Body(Range<usize>),
     /// The text of a file, read from a heredoc in its place. `replace` is the
     /// file name, which becomes `-` and a `<<` operator, and the body goes at
-    /// `slot` after `lead`.
+    /// `slot` after `lead`. The terminator is never `avoid`, the delimiter of
+    /// the heredoc this one sits inside.
     Feed {
         replace: Range<usize>,
         slot: Range<usize>,
         lead: &'static str,
+        avoid: Option<String>,
     },
 }
 
@@ -179,8 +182,8 @@ fn shift(range: &Range<usize>, base: usize) -> Range<usize> {
 }
 
 /// A message read from standard input: the command's own heredoc, or what
-/// the command before a pipe prints. A pipe from a command that is not read
-/// is reported as unread.
+/// the command before a pipe prints. A pipe from a command that is not read,
+/// a redirect from a file or a here-string is reported as unread.
 pub fn from_stdin(call: &Call, label: &str, findings: &mut Findings) -> Vec<Source> {
     let cmd = call.cmd();
     if !cmd.heredocs.is_empty() {
@@ -194,7 +197,11 @@ pub fn from_stdin(call: &Call, label: &str, findings: &mut Findings) -> Vec<Sour
             })
             .collect();
     }
-    let Some(before) = call.index.checked_sub(1).filter(|_| cmd.piped) else {
+    let before = call.index.checked_sub(1).filter(|_| cmd.piped);
+    let Some(before) = before.filter(|_| !redirects_stdin(call)) else {
+        findings.unread.push(format!(
+            "{label} (standard input is not a heredoc or a pipe)"
+        ));
         return Vec::new();
     };
     let sources = producer_chain(call, before, label);
@@ -247,14 +254,20 @@ pub fn from_path(
 /// The text of `file` with the heredoc that stands in for it, or why the file
 /// is left to the backstop: it must be a regular UTF-8 file under the size
 /// cap, and no earlier command in the script may touch it, since its text at
-/// the time the command runs is then not what is read here.
+/// the time the command runs is then not what is read here. A heredoc is the
+/// command's standard input, so one that already has another input, or a
+/// carrier that would take it, rules the swap out.
 fn fed_from(call: &Call, file: &Path, value: Option<Range<usize>>) -> Result<Source, &'static str> {
     let text = read_message(file)?;
     if touched_earlier(call, file) {
         return Err("it is changed earlier in the same command");
     }
+    if !call.cmd().heredocs.is_empty() || redirects_stdin(call) || call.under_stdin_carrier() {
+        return Err("standard input is already in use or taken by a carrier such as xargs");
+    }
     let replace = value.ok_or("its name is partly quoted")?;
-    let (slot, lead) = line_slot(call, call.end()).ok_or("another heredoc is open on its line")?;
+    let avoid = host_delimiter(call.inline, &text)?;
+    let (slot, lead) = line_slot(call).ok_or("another heredoc is open on its line")?;
     Ok(Source {
         label: String::new(),
         text,
@@ -262,7 +275,38 @@ fn fed_from(call: &Call, file: &Path, value: Option<Range<usize>>) -> Result<Sou
             replace,
             slot,
             lead,
+            avoid,
         },
+    })
+}
+
+/// The delimiter of the heredoc the fed text would sit in, when there is one
+/// and the text can sit there: its shell must not expand it, no line may end
+/// that heredoc early, and `<<-` must have no tab to strip.
+fn host_delimiter(inline: Inline, text: &str) -> Result<Option<String>, &'static str> {
+    match inline {
+        Inline::Anywhere => Ok(None),
+        Inline::Nowhere => Err("it would sit in a heredoc inside an outer heredoc"),
+        Inline::InHeredoc(host) => {
+            let changed = text.lines().any(|line| {
+                line.trim_end_matches('\r') == host.delimiter
+                    || (host.strip_tabs && line.starts_with('\t'))
+            });
+            if !host.quoted || changed {
+                return Err("it would sit in an outer heredoc that expands it or could end early");
+            }
+            Ok(Some(host.delimiter.clone()))
+        }
+    }
+}
+
+/// Whether the command redirects its standard input with `<` or `<<<`, as
+/// opposed to a heredoc, which the lexer keeps apart.
+fn redirects_stdin(call: &Call) -> bool {
+    call.cmd().spans.iter().any(|span| {
+        call.raw(span.start..span.end)
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .starts_with('<')
     })
 }
 
@@ -276,39 +320,30 @@ fn touched_earlier(call: &Call, file: &Path) -> bool {
     })
 }
 
-/// Where the body of a heredoc for a command that ends at `from` goes, as an
-/// empty range: after the line break that ends its line, with a line break of
-/// its own first when the script ends there. `None` when another heredoc is
-/// already open on that line.
-fn line_slot(call: &Call, from: usize) -> Option<(Range<usize>, &'static str)> {
-    let start = call.chars[..from]
+/// Where the body of a heredoc the command opens goes, as an empty range: right
+/// after the line break that ends the command's logical line, found outside
+/// quotes, substitutions and line continuations, with a line break of its own
+/// first when the script ends there. `None` when another heredoc is already
+/// open on that line.
+fn line_slot(call: &Call) -> Option<(Range<usize>, &'static str)> {
+    let line_end = call.cmd().line_end;
+    let busy = call
+        .cmds
         .iter()
-        .rposition(|&c| c == '\n')
-        .map_or(0, |at| at + 1);
-    let end = call.chars[from..]
-        .iter()
-        .position(|&c| c == '\n')
-        .map(|at| from + at);
-    let stop = end.unwrap_or(call.chars.len());
-    let busy = call.cmds.iter().any(|c| {
-        !c.heredocs.is_empty()
-            && c.spans
-                .first()
-                .is_some_and(|s| (start..=stop).contains(&s.start))
-    });
+        .any(|c| c.line_end == line_end && !c.heredocs.is_empty());
     if busy {
         return None;
     }
-    Some(match end {
+    Some(match line_end {
         Some(at) => (at + 1..at + 1, ""),
-        None => (stop..stop, "\n"),
+        None => (call.chars.len()..call.chars.len(), "\n"),
     })
 }
 
-/// A heredoc terminator that no line of `text` equals.
-fn unique_delimiter(text: &str) -> String {
+/// A heredoc terminator that no line of `text` equals, and that is not `avoid`.
+fn unique_delimiter(text: &str, avoid: Option<&str>) -> String {
     let mut delimiter = "PLAYBOOK_MESSAGE_END".to_string();
-    while text.lines().any(|line| line == delimiter) {
+    while text.lines().any(|line| line == delimiter) || avoid == Some(delimiter.as_str()) {
         delimiter.push('_');
     }
     delimiter
@@ -392,13 +427,14 @@ fn rewrite(
             replace,
             slot,
             lead,
+            avoid,
         } => {
             let body = if text.is_empty() || text.ends_with('\n') {
                 text
             } else {
                 format!("{text}\n")
             };
-            let delimiter = unique_delimiter(&body);
+            let delimiter = unique_delimiter(&body, avoid.as_deref());
             plan.edits
                 .push((replace.clone(), format!("- <<'{delimiter}'")));
             plan.edits

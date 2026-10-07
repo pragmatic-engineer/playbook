@@ -739,6 +739,169 @@ fn a_cd_inside_parentheses_does_not_leak_to_later_commands() {
     assert!(following.contains("feat: sub\n"), "{following}");
 }
 
+/// The note the hook adds for the agent, or an empty string when there is none.
+fn note(out: &str) -> String {
+    let value: Value = serde_json::from_str(out.trim()).unwrap_or(Value::Null);
+    value["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The hook leaves the command as it is and says why it could not read the file.
+fn assert_left_unread(lab: &Lab, command: &str, reason: &str) {
+    let out = lab.hook(command);
+
+    assert!(!out.is_empty(), "no note for: {command}");
+    assert_eq!(updated_command(&out), None, "{command}: {out}");
+    assert!(note(&out).contains(reason), "{command}: {out}");
+    assert!(!out.contains("noreply@anthropic.com"), "{command}: {out}");
+}
+
+#[test]
+fn a_message_file_feeds_through_the_end_of_its_logical_line() {
+    let cases = [
+        "git commit --allow-empty -F msg.txt && \\\ngit log -1 --format=%s",
+        "git commit --allow-empty -F msg.txt && echo \"a\nb\"",
+        "git commit --allow-empty -F msg.txt && echo \"$(cat <<'EOF'\nhello\nEOF\n)\"",
+        "git commit --allow-empty -F msg.txt &&\ngit log -1 --format=%s",
+        "git commit --allow-empty -F msg.txt # a note\ngit log -1 --format=%s",
+    ];
+    for command in cases {
+        let lab = Lab::new("file-line-end");
+        write(&lab.repo, "msg.txt", &format!("feat: x\n\n{COAUTHOR}\n"));
+
+        let head = lab.commit_through_hook(command);
+
+        assert_eq!(head.trim(), "feat: x", "{command}");
+    }
+}
+
+#[test]
+fn a_message_file_with_another_heredoc_open_on_its_line_is_left_unread() {
+    let lab = Lab::new("file-busy-line");
+    write(&lab.repo, "msg.txt", &format!("feat: x\n\n{COAUTHOR}\n"));
+
+    assert_left_unread(
+        &lab,
+        "cat <<'EOF' | git commit --allow-empty -F msg.txt\nnote\nEOF",
+        "another heredoc is open",
+    );
+}
+
+#[test]
+fn a_message_file_is_never_inlined_into_an_expanding_or_ambiguous_outer_heredoc() {
+    let lab = Lab::new("file-in-heredoc");
+    write(
+        &lab.repo,
+        "msg.txt",
+        &format!("feat: x\n\nuses $(echo hi) and `id`\n{COAUTHOR}\n"),
+    );
+    write(
+        &lab.repo,
+        "eof.txt",
+        &format!("feat: x\n\nEOF\n{COAUTHOR}\n"),
+    );
+    write(
+        &lab.repo,
+        "tab.txt",
+        &format!("feat: x\n\n\tEOF\n{COAUTHOR}\n"),
+    );
+    let commit = |file: &str| format!("git commit --allow-empty -F {file}");
+
+    assert_left_unread(
+        &lab,
+        &format!("bash <<EOF\n{}\nEOF", commit("msg.txt")),
+        "outer heredoc",
+    );
+    assert_left_unread(
+        &lab,
+        &format!("bash <<'EOF'\n{}\nEOF", commit("eof.txt")),
+        "outer heredoc",
+    );
+    assert_left_unread(
+        &lab,
+        &format!("bash <<-'EOF'\n\t{}\n\tEOF", commit("tab.txt")),
+        "outer heredoc",
+    );
+    let head = lab.commit_through_hook(&format!("bash <<'EOF'\n{}\nEOF", commit("msg.txt")));
+    assert_eq!(head.trim(), "feat: x\n\nuses $(echo hi) and `id`");
+    let head = lab.commit_through_hook(&format!("bash <<'EOF'\n{}\nEOF", commit("tab.txt")));
+    assert_eq!(head.trim(), "feat: x\n\n\tEOF");
+}
+
+#[test]
+fn a_message_file_is_not_swapped_for_standard_input_when_stdin_is_spoken_for() {
+    let lab = Lab::new("file-own-stdin");
+    write(&lab.repo, "msg.txt", &format!("feat: x\n\n{COAUTHOR}\n"));
+    let commands = [
+        "git commit --allow-empty -F msg.txt < /dev/null",
+        "git commit --allow-empty -F msg.txt <<< 'text'",
+        "printf 'a\\n' | xargs git commit --allow-empty -F msg.txt",
+        "printf 'a\\n' | xargs -n1 rtk git commit --allow-empty -F msg.txt",
+        "parallel git commit --allow-empty -F msg.txt ::: a",
+    ];
+    for command in commands {
+        assert_left_unread(&lab, command, "standard input");
+    }
+}
+
+#[test]
+fn a_message_read_from_a_redirect_or_here_string_is_reported_as_unread() {
+    let lab = Lab::new("stdin-redirect");
+    write(&lab.repo, "msg.txt", &format!("feat: x\n\n{COAUTHOR}\n"));
+    let commands = [
+        "git commit --allow-empty -F - < msg.txt",
+        "git commit --allow-empty -F - <<< \"feat: x\"",
+        "git commit --allow-empty -F /dev/stdin 0< msg.txt",
+    ];
+    for command in commands {
+        assert_left_unread(&lab, command, "standard input");
+    }
+}
+
+#[test]
+fn sibling_subshells_do_not_share_a_directory() {
+    let lab = Lab::new("sibling-subshells");
+    fs::create_dir_all(lab.repo.join("sub")).unwrap();
+    write(&lab.repo, "m.txt", &format!("feat: top\n\n{COAUTHOR}\n"));
+    write(
+        &lab.repo.join("sub"),
+        "m.txt",
+        &format!("feat: sub\n\n{COAUTHOR}\n"),
+    );
+
+    let sibling = lab.rewritten("(cd sub && true) && (git commit --allow-empty -F m.txt)");
+    let nested = lab.rewritten("(cd sub && (true); git commit --allow-empty -F m.txt)");
+    let after = lab.rewritten("(cd sub) ; (cd sub) ; (git commit --allow-empty -F m.txt)");
+
+    assert!(sibling.contains("feat: top\n"), "{sibling}");
+    assert!(nested.contains("feat: sub\n"), "{nested}");
+    assert!(after.contains("feat: top\n"), "{after}");
+}
+
+#[test]
+fn a_carrier_that_runs_a_shell_hands_the_script_to_the_nested_walk() {
+    let lab = Lab::new("carrier-shell");
+    let inner = format!(
+        "git commit --allow-empty -m {}",
+        sh(&format!("feat: x\n\n{COAUTHOR}"))
+    );
+    let commands = [
+        format!("rtk bash -c {}", sh(&inner)),
+        format!("nohup sh -c {}", sh(&inner)),
+        format!("printf 'a\\n' | xargs -I{{}} sh -c {}", sh(&inner)),
+        format!("find . -maxdepth 0 -exec bash -c {} \\;", sh(&inner)),
+        format!("rtk eval {}", sh(&inner)),
+    ];
+    for command in commands {
+        let rewritten = lab.rewritten(&command);
+
+        assert_ne!(rewritten, command, "{command}");
+        assert_no_attribution(&rewritten);
+    }
+}
+
 /// `text` as one single-quoted shell word.
 fn sh(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
