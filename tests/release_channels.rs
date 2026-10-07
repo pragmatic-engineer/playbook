@@ -99,7 +99,12 @@ fn formula_fills_each_target_sha_next_to_its_own_url() {
 
 #[test]
 fn formula_fails_when_the_version_is_missing_from_the_sums() {
-    assert!(!formula("9.8.6").ok);
+    let got = formula("9.8.6");
+    assert!(
+        !got.ok && got.stderr.contains("no valid sha256"),
+        "{}",
+        got.stderr
+    );
 }
 
 #[test]
@@ -137,34 +142,101 @@ fn pin_sets_an_archive_source_and_keeps_everything_else() {
     );
 }
 
+fn scratch(name: &str, body: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!("release-{}-{name}", std::process::id()));
+    std::fs::write(&path, body).unwrap();
+    path
+}
+
 #[test]
 fn repinning_replaces_the_url_and_the_hash() {
     let first = pin("9.8.7", "marketplace.json", &sha('a')).stdout;
-    let tmp = std::env::temp_dir().join(format!("pin-repin-{}.json", std::process::id()));
-    std::fs::write(&tmp, first).unwrap();
+    let tmp = scratch("repin.json", &first);
     let again = run(&["pin-marketplace", "9.8.8", tmp.to_str().unwrap(), &sha('b')]);
     let _ = std::fs::remove_file(&tmp);
+    assert!(again.ok, "{}", again.stderr);
     let src = source(&again.stdout);
-    assert!(src["url"]
-        .as_str()
-        .unwrap()
-        .contains("v9.8.8/playbook-plugin-9.8.8.zip"));
+    assert_eq!(
+        src["url"],
+        "https://github.com/pragmatic-engineer/playbook/releases/download/v9.8.8/playbook-plugin-9.8.8.zip"
+    );
     assert_eq!(src["sha256"], sha('b'));
 }
 
 #[test]
-fn pin_rejects_bad_input() {
-    assert!(!pin("9.8.7", "marketplace-empty.json", &sha('a')).ok);
-    assert!(!pin("9.8.7", "marketplace.json", "abc123").ok);
-    assert!(!pin("9.8.7", "marketplace.json", &sha('a').to_uppercase()).ok);
-    assert!(!pin("v9.8.7", "marketplace.json", &sha('a')).ok);
+fn pin_updates_every_playbook_entry_and_accepts_a_prerelease() {
+    let two = r#"{"plugins":[{"name":"playbook","source":"x"},{"name":"playbook","source":"y"}]}"#;
+    let tmp = scratch("dup.json", two);
+    let out = run(&[
+        "pin-marketplace",
+        "9.8.7-rc.1",
+        tmp.to_str().unwrap(),
+        &sha('a'),
+    ]);
+    let _ = std::fs::remove_file(&tmp);
+    assert!(out.ok, "{}", out.stderr);
+    assert_eq!(
+        out.stdout.matches("playbook-plugin-9.8.7-rc.1.zip").count(),
+        2
+    );
+}
+
+#[test]
+fn pin_rejects_bad_input_with_a_specific_reason() {
+    let cases = [
+        (
+            pin("9.8.7", "marketplace-empty.json", &sha('a')),
+            "no playbook plugin entry",
+        ),
+        (pin("9.8.7", "marketplace.json", "abc123"), "bad sha256"),
+        (
+            pin("9.8.7", "marketplace.json", &sha('a').to_uppercase()),
+            "bad sha256",
+        ),
+        (pin("v9.8.7", "marketplace.json", &sha('a')), "bad version"),
+        (
+            run(&[
+                "pin-marketplace",
+                "9.8.7",
+                "/nonexistent/market.json",
+                &sha('a'),
+            ]),
+            "cannot read",
+        ),
+    ];
+    for (got, reason) in cases {
+        assert!(
+            !got.ok && got.stderr.contains(reason),
+            "{reason}: {}",
+            got.stderr
+        );
+    }
+}
+
+#[test]
+fn pin_without_a_sha256_fails() {
+    let m = fixture("marketplace.json");
+    assert!(!run(&["pin-marketplace", "9.8.7", m.to_str().unwrap()]).ok);
+}
+
+#[test]
+fn formula_accepts_a_binary_mode_star_and_rejects_a_duplicate_target() {
+    let sums = fixture("SHA256SUMS");
+    let body = std::fs::read_to_string(&sums).unwrap();
+    let starred = body.replace(
+        "  playbook-9.8.7-aarch64-apple-darwin",
+        " *playbook-9.8.7-aarch64-apple-darwin",
+    );
+    let tmp = scratch("starred.sums", &starred);
+    let ok = run(&["render-formula", "9.8.7", tmp.to_str().unwrap()]);
+    assert!(ok.ok, "{}", ok.stderr);
+    let dup = format!("{body}{}  playbook-9.8.7-aarch64-apple-darwin\n", sha('9'));
+    std::fs::write(&tmp, dup).unwrap();
+    let bad = run(&["render-formula", "9.8.7", tmp.to_str().unwrap()]);
+    let _ = std::fs::remove_file(&tmp);
     assert!(
-        !run(&[
-            "pin-marketplace",
-            "9.8.7",
-            "/nonexistent/market.json",
-            &sha('a')
-        ])
-        .ok
+        !bad.ok && bad.stderr.contains("no valid sha256"),
+        "{}",
+        bad.stderr
     );
 }

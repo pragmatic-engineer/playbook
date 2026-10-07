@@ -71,19 +71,25 @@ pub fn pin_marketplace(version: &str, marketplace: &str, sha256: &str) -> Result
     }
     let mut doc: Value =
         serde_json::from_str(marketplace).map_err(|e| format!("marketplace is not JSON: {e}"))?;
-    let entry = doc
-        .get_mut("plugins")
-        .and_then(Value::as_array_mut)
-        .and_then(|plugins| {
-            plugins
-                .iter_mut()
-                .find(|p| p.get("name").and_then(Value::as_str) == Some("playbook"))
-        })
-        .ok_or("no playbook plugin entry")?;
     let url = format!(
         "https://github.com/pragmatic-engineer/playbook/releases/download/v{version}/playbook-plugin-{version}.zip"
     );
-    entry["source"] = json!({"source": "archive", "url": url, "sha256": sha256});
+    let source = json!({"source": "archive", "url": url, "sha256": sha256});
+    let plugins = doc
+        .get_mut("plugins")
+        .and_then(Value::as_array_mut)
+        .ok_or("no playbook plugin entry")?;
+    let mut pinned = 0;
+    for plugin in plugins
+        .iter_mut()
+        .filter(|p| p.get("name").and_then(Value::as_str) == Some("playbook"))
+    {
+        plugin["source"] = source.clone();
+        pinned += 1;
+    }
+    if pinned == 0 {
+        return Err("no playbook plugin entry".into());
+    }
     let mut text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
     text.push('\n');
     Ok(text)
