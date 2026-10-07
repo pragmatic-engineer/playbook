@@ -30,184 +30,257 @@ pub mod worktree;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-/// The `playbook` command-line entry point.
+/// Configure and support Claude Code from the command line.
+///
+/// playbook installs hooks and a session launcher, shows a usage dashboard,
+/// and helps with pull requests, reviews, worktrees and session handoffs.
 #[derive(Parser, Debug)]
-#[command(name = "playbook", version)]
+#[command(
+    name = "playbook",
+    version,
+    after_help = "Run `playbook <command> --help` for details on one command.\n\
+Check your setup with `/playbook:doctor` inside Claude Code (`playbook doctor --help` lists its helpers).\n\
+Docs: https://github.com/pragmatic-engineer/playbook"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 }
 
+// Variant order is the order users see in `--help`; nothing else depends on it.
 /// Top-level subcommand groups.
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Run a named hook.
-    Hook {
-        /// Which hook to run, matching the name Claude Code passes from
-        /// hooks.json.
-        name: HookName,
-    },
-    /// Launcher subcommands (session, worktree, retention, and so on).
-    Cc {
-        #[command(subcommand)]
-        sub: Option<CcCommand>,
-    },
-    /// Print the Claude Code status line.
-    Statusline,
-    /// Print the version, same as `--version`.
-    Version,
-    /// Install or repair the local Claude Code configuration.
+    /// Install or repair your local Claude Code setup
+    ///
+    /// Safe to run again: it only touches what is missing or out of date.
+    /// Use the flags to opt in to the system prompt and the `cc` launcher.
+    ///
+    /// Example: `playbook init --system-prompt --aliases`
     Init {
-        /// Also install `prompts/SYSTEM_PROMPT.md` into `~/.config/playbook/prompts/`.
-        /// Opt-in, matching `shell/setup-local.sh`'s flag of the same name:
-        /// without it an already-installed copy is still refreshed, but one
-        /// is never installed for a user who did not ask.
+        /// Also install the playbook system prompt (opt in; an existing copy is refreshed either way)
         #[arg(long)]
         system_prompt: bool,
-        /// Also install the shell launcher shim (`cc`/`ccd`) and wire the rc
-        /// file. Opt-in, matching `shell/setup-local.sh`'s `--aliases` flag:
-        /// without it the `shim` step is skipped entirely, never partially
-        /// touched.
+        /// Also install the `cc` and `ccd` launcher shortcuts and wire your shell rc file (opt in)
         #[arg(long)]
         aliases: bool,
     },
-    /// Shared-settings seed subcommands (`gen` and `check`).
-    Settings {
-        #[command(subcommand)]
-        sub: SettingsCommand,
-    },
-    /// Tracked-file manifest subcommands, backing `src/manifest/`.
-    Manifest {
-        #[command(subcommand)]
-        sub: ManifestCommand,
-    },
-    /// Memory-graph subcommands.
-    Memory {
-        #[command(subcommand)]
-        sub: MemoryCommand,
-    },
-    /// Agent-definition validation subcommands, backing `src/agents/`.
-    Agents {
-        #[command(subcommand)]
-        sub: AgentsCommand,
-    },
-    /// Token and cost usage across sessions, backing `src/usage/`. Bare
-    /// `playbook usage` prints a summary.
-    Usage {
-        #[command(subcommand)]
-        sub: Option<UsageCommand>,
-    },
-    /// Gate-check database subcommands, backing `src/gate/`.
-    Gate {
-        #[command(subcommand)]
-        sub: GateCommand,
-    },
-    /// The mechanical half of `/playbook:create-pull-request`, backing
-    /// `src/pr/`.
-    Pr {
-        #[command(subcommand)]
-        sub: PrCommand,
-    },
-    /// Remove AI attribution from message text for callers that are not an
-    /// agent hook, such as a git `commit-msg` hook or CI.
-    Sanitize {
-        #[command(subcommand)]
-        sub: SanitizeCommand,
-    },
-    /// Run the model-free repo checks (manifest, agents, settings) in one step.
-    /// Prints one line per check and exits 1 if any fails; safe in CI.
-    Ci {
-        /// Print one JSON object instead of text.
+    /// Update playbook to a published release
+    ///
+    /// Downloads the release, checks its SHA256 sum and, when `gh` is
+    /// installed, its build attestation, then swaps the binary and keeps the
+    /// old one as a backup. In auto mode it refuses unless you pass `--yes`.
+    /// `--check` and `--list` change nothing. `--check` exits 0 whether or not
+    /// an update exists, and 1 on an error such as an unreachable release list
+    /// or an unknown version.
+    ///
+    /// Example: `playbook update --check`
+    #[command(alias = "upgrade")]
+    Update {
+        /// Version to install (default: the latest stable release)
+        version: Option<String>,
+        /// Only report whether an update is available
         #[arg(long)]
-        json: bool,
-        /// Also exit 1 when a check is skipped (for example in the wrong directory).
+        check: bool,
+        /// List published releases
         #[arg(long)]
-        strict: bool,
-        /// Run in this directory instead of the cwd.
+        list: bool,
+        /// Consider pre-releases when picking the latest
         #[arg(long)]
-        dir: Option<String>,
+        pre: bool,
+        /// Confirm the update when auto mode is on
+        #[arg(long)]
+        yes: bool,
     },
-    /// Playbook's own tiered (repo < org < global < default) config
-    /// subcommands, backing `src/config/`.
-    Config {
-        #[command(subcommand)]
-        sub: ConfigCommand,
-    },
-    /// Print the resolved absolute path to one of this repo's
-    /// worktree-scoped storage directories.
-    Path {
-        /// Which worktree-scoped directory to resolve.
-        kind: PathKind,
-    },
-    /// Single-field JSON reads backing `/playbook:doctor`, `src/doctor/`.
+    /// Print the installed version, same as `--version`
+    Version,
+    /// Read single facts that the health check uses
+    ///
+    /// The full health check is the `/playbook:doctor` command inside Claude
+    /// Code. These subcommands print one fact each, such as pending
+    /// migrations, plugin version or hook wiring, and help when a layer
+    /// reports a miss.
+    ///
+    /// Example: `playbook doctor pending-migrations`
     Doctor {
         #[command(subcommand)]
         sub: DoctorCommand,
     },
-    /// Reap landed worktrees across every creation convention, backing
-    /// `src/worktree/`.
+    /// Choose whether playbook asks questions or decides on its own
+    ///
+    /// `ask` is the default. `auto` lets commands pick the recommended option
+    /// and keep going. The choice is stored per repo.
+    ///
+    /// Example: `playbook mode auto`
+    Mode {
+        #[command(subcommand)]
+        sub: ModeCommand,
+    },
+    /// Read and change playbook settings
+    ///
+    /// Settings come from tiers, highest first: repo, org, global, then the
+    /// built-in default. `get` and `list` show which tier supplied a value.
+    ///
+    /// Example: `playbook config set autoReview.enabled true`
+    Config {
+        #[command(subcommand)]
+        sub: ConfigCommand,
+    },
+    /// Launcher helpers behind the `cc` shell shortcut
+    ///
+    /// Sessions are started by the `cc` shell shortcut (install it with
+    /// `playbook init --aliases`). These subcommands do its housekeeping:
+    /// list sessions, prune state, clear caches, and create worktrees.
+    ///
+    /// Example: `playbook cc worktree my-branch`
+    Cc {
+        #[command(subcommand)]
+        sub: Option<CcCommand>,
+    },
+    /// Show token and cost usage across your sessions
+    ///
+    /// With no subcommand, prints a summary of estimated cost across all
+    /// recorded sessions.
+    ///
+    /// Example: `playbook usage dashboard`
+    Usage {
+        #[command(subcommand)]
+        sub: Option<UsageCommand>,
+    },
+    /// Prepare and open pull requests, and pick a review depth
+    ///
+    /// These are the mechanical steps behind `/playbook:create-pull-request`.
+    ///
+    /// Example: `playbook pr prepare --base main`
+    Pr {
+        #[command(subcommand)]
+        sub: PrCommand,
+    },
+    /// Clean up git worktrees whose branches have landed
+    ///
+    /// Locked worktrees are kept unless the process that locked them is gone.
+    ///
+    /// Example: `playbook worktree sweep --dry-run`
     Worktree {
         #[command(subcommand)]
         sub: WorktreeCommand,
     },
-    /// Hand-written `jq` replacements over a piped session, `gh`, JSONL, or
-    /// file JSON payload, backing `src/json/`.
-    Json {
+    /// Manage the memory graph that sessions read from
+    Memory {
         #[command(subcommand)]
-        sub: JsonCommand,
+        sub: MemoryCommand,
     },
-    /// Pre-trust an absolute directory in `~/.claude.json` so Claude Code's
-    /// first-launch trust dialog never blocks `cc`/`ccd`. Always exits 0.
-    Trust {
-        /// Absolute path of the directory to trust.
-        path: String,
-    },
-    /// Save and show session handoffs, backing `src/handoff/`.
+    /// Save and show notes that carry a session over to the next one
+    ///
+    /// A handoff is a markdown note for one directory. The next session started
+    /// there loads it.
     Handoff {
         #[command(subcommand)]
         sub: HandoffCommand,
     },
-    /// Update this binary to a published release, verified by SHA256SUMS and
-    /// the build attestation, keeping the old one as a backup.
-    #[command(alias = "upgrade")]
-    Update {
-        /// Version to install (default: the latest stable release).
-        version: Option<String>,
-        /// Only report whether an update is available.
-        #[arg(long)]
-        check: bool,
-        /// List published releases.
-        #[arg(long)]
-        list: bool,
-        /// Consider pre-releases when picking the latest.
-        #[arg(long)]
-        pre: bool,
-        /// Proceed in auto mode without refusing.
-        #[arg(long)]
-        yes: bool,
+    /// Run one Claude Code hook by name
+    ///
+    /// Claude Code calls this from its settings, so you rarely type it.
+    /// Hidden from the command list but fully working.
+    #[command(hide = true)]
+    Hook {
+        /// Which hook to run, matching the name Claude Code passes from its hook settings
+        name: HookName,
     },
-    /// Set or show whether playbook asks questions (`ask`) or decides on its
-    /// own (`auto`).
-    Mode {
+    /// Print the Claude Code status line
+    ///
+    /// Claude Code runs this to draw the line at the bottom of a session.
+    Statusline,
+    /// Create or check the shared settings template
+    Settings {
         #[command(subcommand)]
-        sub: ModeCommand,
+        sub: SettingsCommand,
+    },
+    /// Check that tracked files sit in allowed top-level paths
+    Manifest {
+        #[command(subcommand)]
+        sub: ManifestCommand,
+    },
+    /// Check agent definition files
+    Agents {
+        #[command(subcommand)]
+        sub: AgentsCommand,
+    },
+    /// Record and check plan verdicts used as gates
+    ///
+    /// Verdicts are stored per worktree, keyed by plan.
+    Gate {
+        #[command(subcommand)]
+        sub: GateCommand,
+    },
+    /// Remove AI attribution lines from message text
+    ///
+    /// For callers that are not an agent hook, such as a git `commit-msg`
+    /// hook or CI. Each subcommand rewrites FILE in place unless `--check` is
+    /// given, and prints one line per removed line to stderr: its number and
+    /// the shape of the attribution, never its text. Without `--check` the exit
+    /// code is always 0, even when FILE cannot be read or written.
+    Sanitize {
+        #[command(subcommand)]
+        sub: SanitizeCommand,
+    },
+    /// Run the repo checks that need no model (manifest, agents, settings)
+    ///
+    /// Prints one line per check. Exits 0 when all pass and 1 if any fails,
+    /// so it is safe in CI. A skipped check passes unless `--strict` is set.
+    ///
+    /// Example: `playbook ci --strict`
+    Ci {
+        /// Print one JSON object instead of text
+        #[arg(long)]
+        json: bool,
+        /// Also exit 1 when a check is skipped (for example in the wrong directory)
+        #[arg(long)]
+        strict: bool,
+        /// Run in this directory instead of the current one
+        #[arg(long)]
+        dir: Option<String>,
+    },
+    /// Print the path of one of this repo's playbook storage folders
+    ///
+    /// First moves any legacy folders from the old repo-local location.
+    Path {
+        /// Which folder to print
+        kind: PathKind,
+    },
+    /// Small JSON helpers for shell scripts
+    ///
+    /// Reads JSON on stdin. Hidden from the command list, still works, and is
+    /// slated for removal.
+    #[command(hide = true)]
+    Json {
+        #[command(subcommand)]
+        sub: JsonCommand,
+    },
+    /// Mark a directory as trusted in Claude Code
+    ///
+    /// Writes to `~/.claude.json` so Claude Code's first-launch trust prompt
+    /// does not block `cc` or `ccd`. Always exits 0, even on failure, so a
+    /// script can call it without checking.
+    Trust {
+        /// Absolute path of the directory to trust
+        path: String,
     },
 }
 
 /// `playbook mode` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum ModeCommand {
-    /// Turn auto mode on for this repo.
+    /// Turn auto mode on for this repo
     Auto,
-    /// Turn auto mode off for this repo.
+    /// Turn auto mode off for this repo, so playbook asks again
     Ask,
-    /// Show the resolved mode and where it came from.
+    /// Show the current mode and where it came from
     Status {
-        /// Print one JSON object instead of a line of text.
+        /// Print one JSON object instead of a line of text
         #[arg(long)]
         json: bool,
-        /// Report as if a command ran with `--auto` or `--ask`, and warn when
-        /// the hooks would disagree.
+        /// Report as if a command ran with `--auto` or `--ask`, and warn when the hooks would disagree
         #[arg(long, value_enum)]
         flag: Option<ModeArg>,
     },
@@ -223,28 +296,26 @@ pub enum ModeArg {
 /// `playbook handoff` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum HandoffCommand {
-    /// Save the handoff markdown on stdin so the next session in this
-    /// directory loads it.
+    /// Save the handoff note read from stdin for the next session
     Save {
-        /// Directory the handoff belongs to; defaults to the current one.
+        /// Directory the handoff belongs to (default: the current one)
         #[arg(long)]
         dir: Option<String>,
     },
-    /// Print this directory's handoff without consuming it.
+    /// Print this directory's handoff without using it up
     Show {
-        /// Print every waiting handoff, not just the freshest.
+        /// Print every waiting handoff, not just the newest
         #[arg(long)]
         all: bool,
-        /// Directory to show; defaults to the current one.
+        /// Directory to show (default: the current one)
         #[arg(long)]
         dir: Option<String>,
     },
-    /// Show the last SessionStart events and this directory's handoff counts.
+    /// Show recent session starts and this directory's handoff counts
     Status,
 }
 
-/// Which worktree-scoped storage directory `playbook path` resolves under
-/// `repo_scoped_dir(RepoScope::Worktree)`.
+/// Which worktree-scoped storage directory `playbook path` prints.
 #[derive(ValueEnum, Debug, Clone, Copy)]
 pub enum PathKind {
     Plans,
@@ -263,25 +334,25 @@ impl PathKind {
     }
 }
 
-/// `playbook settings` subcommands, backing `src/settings/`.
+/// `playbook settings` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum SettingsCommand {
-    /// Derive the tracked settings.shared.json seed from a live settings.json,
-    /// ported from `shell/gen-shared-settings.py`.
+    /// Create the shared settings template from a live settings.json
     Gen {
-        /// Path to the live settings.json to derive the seed from.
+        /// Live settings.json to start from
         src: PathBuf,
-        /// Path to the canned permissions object.
+        /// File holding the default permissions
         perms: PathBuf,
     },
-    /// Validate the tracked settings.shared.json seed, ported from
-    /// `shell/check-shared-settings.py`.
+    /// Check the shared settings template is valid
+    ///
+    /// Exits 0 when valid and 1 with a message when not.
     Check {
-        /// Path to the settings.shared.json template to validate.
+        /// Shared settings template to check
         template: PathBuf,
-        /// Path to the tracked permissions.shared.json.
+        /// Shared permissions file
         perms: PathBuf,
-        /// Repo root that every hook command must resolve inside.
+        /// Repo root that every hook command must resolve inside
         repo_root: PathBuf,
     },
 }
@@ -289,54 +360,48 @@ pub enum SettingsCommand {
 /// `playbook memory` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum MemoryCommand {
-    /// Rebuild `~/.config/playbook/memory/memory.graph.json` from every fact on disk.
+    /// Rebuild the memory graph from every fact on disk
     ///
-    /// The PostToolUse hook rebuilds automatically when a fact is saved, so
-    /// this is only needed after hand-editing fact files. Forcing it through
-    /// the hook is not possible: the hook skips unless its payload names a
-    /// file under the memory dir.
+    /// Memory is rebuilt on its own when a fact is saved, so you only need
+    /// this after editing fact files by hand.
     Rebuild,
 }
 
-/// `playbook manifest` subcommands, backing `src/manifest/`.
+/// `playbook manifest` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum ManifestCommand {
-    /// Validate every tracked file lives at an allowlisted top-level path,
-    /// ported from `shell/check-manifest.sh`.
+    /// Check every tracked file is at an allowed top-level path
+    ///
+    /// Exits 0 when all pass and 1 otherwise.
     Check {
-        /// Repo root whose tracked files (`git ls-files`) are checked.
-        ///
-        /// Optional, like the shell's `${1:-}`: omitting it falls back to
-        /// `git rev-parse --show-toplevel`, so `playbook manifest check` run
-        /// from anywhere inside the repo behaves as the script did.
+        /// Repo root to check (default: the repo you are in)
         repo_root: Option<PathBuf>,
     },
 }
 
-/// `playbook agents` subcommands, backing `src/agents/`.
+/// `playbook agents` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum AgentsCommand {
-    /// Validate every `agents/*.md` definition against the house agent
-    /// contract, ported from `shell/check-agents.sh`.
+    /// Check every agent definition follows the agent rules
+    ///
+    /// Exits 0 when all pass and 1 otherwise.
     Check {
-        /// Directory holding the agent definitions to validate.
-        ///
-        /// Optional, like the shell's `[AGENTS_DIR]`: omitting it falls back
-        /// to `<repo root>/agents`, where repo root is resolved the same way
-        /// `check-agents.sh` did, via `git rev-parse --show-toplevel` from
-        /// the current directory.
+        /// Folder of agent definitions (default: `agents` at the repo root)
         agents_dir: Option<PathBuf>,
     },
 }
 
-/// `playbook usage` subcommands, backing `src/usage/`.
+/// `playbook usage` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum UsageCommand {
-    /// Read new session history into the usage store, without printing a summary.
+    /// Read new session history into the usage store without printing a summary
     Ingest,
-    /// Open the local usage dashboard, starting its server if needed.
+    /// Open the local usage dashboard in your browser
+    ///
+    /// Starts the dashboard server if it is not running. Stop it with
+    /// `playbook usage dashboard stop`.
     Dashboard {
-        /// Internal: run as the detached server process.
+        // Internal flag: runs the detached server process.
         #[arg(long, hide = true)]
         serve: bool,
         #[command(subcommand)]
@@ -347,407 +412,365 @@ pub enum UsageCommand {
 /// `playbook usage dashboard` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum DashboardCommand {
-    /// Stop the running dashboard server.
+    /// Stop the running dashboard server
     Stop,
 }
 
-/// `playbook sanitize` subcommands, backing `src/sanitize.rs`. Each rewrites
-/// FILE in place unless `--check` is given, and prints one line per removed
-/// line to stderr: its number and the shape of the attribution, never its
-/// text. Without `--check` the exit code is always 0, even when FILE cannot be
-/// read or written.
+/// `playbook sanitize` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum SanitizeCommand {
-    /// Sanitize a commit message file, such as git's `.git/COMMIT_EDITMSG`.
+    /// Clean a commit message file, such as git's `.git/COMMIT_EDITMSG`
     CommitMsg {
+        /// File holding the message
         file: PathBuf,
-        /// Report what would be removed and exit 1 if anything would, without
-        /// writing. Exits 2 when FILE cannot be read.
+        /// Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
         #[arg(long)]
         check: bool,
     },
-    /// Sanitize a PR title or body saved to FILE.
+    /// Clean a PR title or body saved to a file
     PrText {
+        /// File holding the text
         file: PathBuf,
-        /// Report what would be removed and exit 1 if anything would, without
-        /// writing. Exits 2 when FILE cannot be read.
+        /// Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
         #[arg(long)]
         check: bool,
     },
 }
 
-/// `playbook pr` subcommands, backing `src/pr/`.
+/// `playbook pr` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum PrCommand {
-    /// Resolve the branch and base, run the pre-flight checks, write the diff
-    /// to a scratch file, and print labeled lines for the PR drafter.
+    /// Run pre-flight checks and gather what a PR draft needs
+    ///
+    /// Finds the branch and base, checks the repo is ready, writes the diff
+    /// to a scratch file, and prints labeled lines for the PR drafter.
     Prepare {
-        /// Base branch for the PR; defaults to the repo's default branch.
+        /// Base branch for the PR (default: the repo's default branch)
         #[arg(long)]
         base: Option<String>,
-        /// Ticket id to cite; defaults to one found in the branch name.
+        /// Ticket id to cite (default: one found in the branch name)
         #[arg(long)]
         ticket: Option<String>,
-        /// Work in this directory (inside the repo or worktree) instead of the cwd.
+        /// Work in this directory instead of the current one
         #[arg(long)]
         dir: Option<String>,
     },
-    /// Push the branch and open a PR from a drafted title and body, as a draft
-    /// unless the `pr.draft` setting is `false`.
+    /// Push the branch and open a PR from a drafted title and body
+    ///
+    /// Opens a draft unless the `pr.draft` setting is `false`.
     Create {
-        /// PR title, at most 72 characters.
+        /// PR title, at most 72 characters
         #[arg(long)]
         title: String,
-        /// Path to the file holding the PR body.
+        /// File holding the PR body
         #[arg(long)]
         body_file: String,
-        /// Base branch for the PR; defaults to the repo's default branch.
+        /// Base branch for the PR (default: the repo's default branch)
         #[arg(long)]
         base: Option<String>,
-        /// Work in this directory (inside the repo or worktree) instead of the cwd.
+        /// Work in this directory instead of the current one
         #[arg(long)]
         dir: Option<String>,
     },
-    /// Pick `quick` or `deep` for the PR's self-review by asking a small
-    /// model three times; anything but a unanimous `quick` is `deep`.
+    /// Choose a quick or deep self-review for a PR
+    ///
+    /// Asks a small model three times. Anything but a unanimous `quick`
+    /// becomes `deep`.
     ReviewTriage {
-        /// PR number; defaults to the current branch against its base.
+        /// PR number (default: the current branch against its base)
         #[arg(long)]
         pr: Option<u64>,
-        /// Base branch when no PR number is given; defaults to the repo's default.
+        /// Base branch when no PR number is given (default: the repo's default branch)
         #[arg(long)]
         base: Option<String>,
-        /// Work in this directory (inside the repo or worktree) instead of the cwd.
+        /// Work in this directory instead of the current one
         #[arg(long)]
         dir: Option<String>,
     },
 }
 
-/// `playbook gate` subcommands, backing `src/gate/`.
+/// `playbook gate` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum GateCommand {
-    /// Parse a phase agent's raw output for a `VERDICT:` line and upsert it
-    /// into the gate-check database under `~/.config/playbook`.
+    /// Save a phase verdict for a plan
+    ///
+    /// Reads a phase agent's output, finds its `VERDICT:` line, and stores it.
     Record {
-        /// Plan slug the recorded phase belongs to.
+        /// Plan slug the phase belongs to
         plan_slug: String,
-        /// The command that produced this verdict, stored alongside it.
+        /// Command that produced this verdict
         command: String,
-        /// Which phase this verdict is for.
+        /// Which phase this verdict is for
         phase: String,
-        /// Path to the phase agent's raw output, or "-" to read stdin.
+        /// File with the phase agent's output, or "-" to read stdin
         input: String,
-        /// Path to the source content this verdict is evidence for; hashed
-        /// and stored so a later `check` can detect a stale verdict.
+        /// File with the source content the verdict covers, used to spot a stale verdict later
         #[arg(long)]
         source: String,
     },
-    /// Query one or more previously recorded phase verdicts for a plan;
-    /// exit 0 only if every named phase is PASS or WARN.
+    /// Check that recorded phase verdicts still pass
+    ///
+    /// Exits 0 only if every named phase is PASS or WARN and its source is
+    /// unchanged. Exits 1 on any other verdict, a stale one, or no phases.
     Check {
-        /// Plan slug to query recorded phases for.
+        /// Plan slug to check
         plan_slug: String,
-        /// The command this check invocation is running under, accepted for
-        /// CLI-shape parity with `Record` though `check::run` does not use
-        /// it to look up rows.
+        /// Command running this check
         command: String,
-        /// One or more phase names to check. `Vec<String>` with no minimum
-        /// `num_args`, so zero phase names still parses at the clap level;
-        /// `check::run` rejects an empty list itself with a pinned message
-        /// and exit code 1, since clap's own missing-argument usage error
-        /// exits with a different code (2) than the plan requires here.
+        /// Phase names to check
         phases: Vec<String>,
-        /// Path to the current source content, hashed and compared against
-        /// each recorded verdict's stored hash to detect staleness. Named,
-        /// not positional: `phases` has no `num_args` bound and would
-        /// otherwise silently absorb it.
+        /// File with the current source content, compared against what each verdict saw
         #[arg(long)]
         source: String,
-        /// Print one JSON object on stdout instead of text lines. Exit codes
-        /// are unchanged.
+        /// Print one JSON object instead of text (exit codes stay the same)
         #[arg(long)]
         json: bool,
     },
 }
 
-/// `playbook config` subcommands, backing `src/config/`.
+/// `playbook config` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommand {
-    /// Print a key's effective value and which tier supplied it.
+    /// Show a setting's value and which tier it came from
     Get {
-        /// Dotted config key, e.g. `autoReview.enabled`.
+        /// Dotted setting name, such as `autoReview.enabled`
         key: String,
     },
-    /// Write a key's value into one tier's config file.
+    /// Change a setting
+    ///
+    /// Writes to the repo tier unless you pass `--org` or `--global`.
     Set {
-        /// Dotted config key, e.g. `autoReview.enabled`.
+        /// Dotted setting name, such as `autoReview.enabled`
         key: String,
-        /// Raw value to parse into the key's expected type before writing.
+        /// New value; it is read as the type the setting expects
         value: String,
-        /// Write into the org tier instead of the default repo tier.
+        /// Write to the org tier instead of the repo tier
         #[arg(long)]
         org: bool,
-        /// Write into the global tier instead of the default repo tier.
+        /// Write to the global tier instead of the repo tier
         #[arg(long)]
         global: bool,
     },
-    /// Print every known key's effective value and source tier.
+    /// List every setting with its value and source tier
     List,
 }
 
-/// `playbook doctor` subcommands, backing `src/doctor/`.
+/// `playbook doctor` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum DoctorCommand {
-    /// Print one line per Manual migration finding (a file edited after
-    /// playbook placed it), or nothing when none is pending.
+    /// List files you edited after playbook placed them
+    ///
+    /// Prints one line per finding, or nothing when none is pending.
     PendingMigrations,
-    /// Print `.version` from a `plugin.json`-shaped file, or an empty line
-    /// if it is missing, unreadable, or not a string. Backs Layer 6.
+    /// Print the version from a plugin manifest
+    ///
+    /// Prints an empty line if the file is missing, unreadable, or has no version.
     PluginVersion {
-        /// Path to the plugin manifest to read.
+        /// Plugin manifest to read
         path: PathBuf,
     },
-    /// Print `.statusLine.command` from a `settings.json`-shaped file, or an
-    /// empty line if it is missing, unreadable, or not a string. Backs
-    /// Layer 5.
+    /// Print the status line command from a settings.json
+    ///
+    /// Prints an empty line if the file is missing, unreadable, or has none.
     StatuslineCommand {
-        /// Path to the settings.json to read.
+        /// settings.json to read
         path: PathBuf,
     },
-    /// Print every hook `.command` string nested under `settings.json`'s
-    /// `.hooks`, one per line, or nothing if the file is unreadable, invalid,
-    /// or has no `.hooks` object. Backs Layer 7.
+    /// List every hook command in a settings.json, one per line
+    ///
+    /// Prints nothing if the file is unreadable, invalid, or has no hooks.
     HookCommands {
-        /// Path to the settings.json to read.
+        /// settings.json to read
         path: PathBuf,
     },
-    /// Print one `guard=count` line per guard, each count the number of
-    /// `.command` entries wired to that guard under one event. Backs Layer 2.
+    /// Count the commands wired to each named guard for one event
+    ///
+    /// Prints one `guard=count` line per guard.
     HookCommandsForEvent {
-        /// Path to the settings.json to read.
+        /// settings.json to read
         path: PathBuf,
-        /// Event name the counts are scoped to, e.g. `PreToolUse`.
+        /// Event name, such as `PreToolUse`
         event: String,
-        /// Bare guard names, e.g. `rm-workspace-guard`.
+        /// Guard names, such as `rm-workspace-guard`
         guards: Vec<String>,
     },
-    /// Print a single count of `.command` entries matching a regex pattern,
-    /// across every event or scoped to one.
+    /// Count hook commands that match a pattern
+    ///
+    /// Counts across every event, or only one if you name it.
     HookCommandsMatching {
-        /// Path to the settings.json to read.
+        /// settings.json to read
         path: PathBuf,
-        /// Regex pattern, matched as an unanchored substring search.
+        /// Regex to look for anywhere in a command
         pattern: String,
-        /// Event name to scope the count to; omit to count across every event.
+        /// Only count this event (default: every event)
         event: Option<String>,
     },
 }
 
-/// `playbook worktree` subcommands, backing `src/worktree/`.
+/// `playbook worktree` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum WorktreeCommand {
-    /// Scan every registered worktree, classify it, and remove any that
-    /// have landed and are not locked (or are locked by a dead process).
+    /// Remove every landed worktree that is not in use
+    ///
+    /// Scans all worktrees of this repo, whichever tool made them. Keeps
+    /// locked ones unless the locking process is dead.
     Sweep {
-        /// Print what would be removed without touching any worktree.
+        /// Show what would be removed without removing anything
         #[arg(long)]
         dry_run: bool,
     },
-    /// Apply the same landed/lock checks to one worktree path.
+    /// Remove one worktree if it has landed and is not in use
     Remove {
-        /// Worktree path to check, as printed by `git worktree list`.
+        /// Worktree path, as shown by `git worktree list`
         path: PathBuf,
     },
 }
 
-/// `playbook json` subcommands, backing `src/json/`. Every subcommand
-/// reads its JSON payload from stdin rather than a path or inline argument,
-/// matching the piped shape a real call site uses:
-/// `gh pr checks ... --json bucket | playbook json bucket-counts pass fail`.
+/// `playbook json` subcommands. Each reads its JSON from stdin, as in
+/// `gh pr checks --json bucket | playbook json bucket-counts pass fail`.
 #[derive(Subcommand, Debug)]
 pub enum JsonCommand {
-    /// Tally a piped JSON array's `"bucket"` field against the named
-    /// buckets, printing one `bucket=count` line per bucket in the order
-    /// given. Backs `src/json/ghjson.rs::bucket_counts`.
+    /// Count array items per `bucket` value, one `bucket=count` line each
     BucketCounts {
-        /// Bucket names to tally, e.g. `pass fail pending`.
+        /// Bucket names to count, such as `pass fail pending`
         buckets: Vec<String>,
     },
-    /// Print a piped JSON array's length as a bare integer, 0 for anything
-    /// else. Backs `src/json/ghjson.rs::array_length`.
+    /// Print the length of a JSON array (0 for anything else)
     ArrayLength,
-    /// Print one field from a piped flat JSON object, empty for a missing
-    /// or malformed field. Backs `src/json/ghjson.rs::field`.
+    /// Print one field of a flat JSON object (empty if missing)
     Field {
-        /// The object key to read, e.g. `number` or `headRefOid`.
+        /// Object key to read, such as `number`
         key: String,
     },
-    /// True/false for whether the piped input is syntactically valid JSON.
-    /// Backs `evalfixture::is_valid_json`.
+    /// Print true or false for whether the input is valid JSON
     IsValidJson,
-    /// Compact JSON text of the element at `index` in a piped top-level
-    /// array, empty for an out-of-bounds index or a non-array top-level
-    /// value. Backs `evalfixture::indexed_element`.
+    /// Print one element of a JSON array as compact JSON
+    ///
+    /// Prints nothing for an out-of-range index or a non-array.
     IndexedElement {
-        /// Zero-based index into the piped array.
+        /// Zero-based index into the array
         index: usize,
     },
-    /// One field from a piped top-level JSON object as display text, empty
-    /// for a missing key or malformed input. Backs
-    /// `evalfixture::string_field`.
+    /// Print one field of a JSON object as text (empty if missing)
     StringField {
-        /// The object key to read, e.g. `id` or `pr`.
+        /// Object key to read, such as `id`
         key: String,
     },
-    /// Keys of the piped input's `.lenses` object, sorted alphabetically and
-    /// joined with `", "`. Backs `evalfixture::lens_names_joined`.
+    /// Print the names under `.lenses`, sorted and joined with commas
     LensNamesJoined,
-    /// Keys of the piped input's `.lenses` object, sorted alphabetically,
-    /// one per line. Backs `evalfixture::lens_names`.
+    /// Print the names under `.lenses`, sorted, one per line
     LensNames,
-    /// Reserializes the piped input without extra whitespace, empty for
-    /// malformed input. Backs `evalfixture::is_valid_json_compact`.
+    /// Print the input as compact JSON (empty if malformed)
     IsValidJsonCompact,
-    /// Raw text of `.lenses[lens].found` in the piped input; prints `null`
-    /// for a missing lens key or missing `found` field. Backs
-    /// `evalfixture::lens_found`.
+    /// Print `.lenses[lens].found`, or `null` if missing
     LensFound {
-        /// Lens name to read, e.g. `correctness`.
+        /// Lens name to read, such as `correctness`
         lens: String,
     },
-    /// Raw text of `.[lens].tier` in the piped input; empty for a
-    /// non-object top-level value, a missing lens key, or a missing/null
-    /// `tier` field. Backs `evalfixture::lens_tier`.
+    /// Print `.[lens].tier` (empty if missing or null)
     LensTier {
-        /// Lens name to read, e.g. `correctness`.
+        /// Lens name to read, such as `correctness`
         lens: String,
     },
-    /// Print the fifteen `key=value` session fields `statusline.sh`'s
-    /// `eval` consumes. Backs `src/json/statusline.rs::session_fields`.
+    /// Print the session fields the status line needs, as `key=value` lines
     SessionFields {
-        /// `$PWD` fallback used when the piped JSON has no `.cwd` or
-        /// `.workspace.current_dir`.
+        /// Directory to use when the input names none
         pwd: String,
     },
-    /// Reshape a piped raw `gh api graphql` CI status response into
-    /// `{"statusCheckRollup": [...]}`, ready to pipe into `ci-rollup`. Backs
-    /// `src/json/statusline.rs::graphql_ci_checks`.
+    /// Reshape a raw GraphQL CI response into a `statusCheckRollup` object
     GraphqlCiChecks {},
-    /// Print a piped `.statusCheckRollup` array's rollup as one line,
-    /// `state failed running total`. Backs
-    /// `src/json/statusline.rs::ci_rollup`.
+    /// Print one line summarizing a `statusCheckRollup` array
+    ///
+    /// The line reads `state failed running total`.
     CiRollup {},
-    /// Print the ten `key=value` PR fields `statusline.sh`'s
-    /// `render_pr_right` consumes. Backs
-    /// `src/json/statusline.rs::pr_fields`.
+    /// Print the PR fields the status line needs, as `key=value` lines
     PrFields {},
-    /// Drop every `"type":"system"` line whose `content` matches `pattern`,
-    /// passing every other line through unchanged. Backs
-    /// `src/json/jsonl.rs::filter_system_lines`.
+    /// Drop system lines whose content matches a pattern
+    ///
+    /// Every other line passes through unchanged.
     FilterSystemLines {
-        /// Regex tested against each system line's `content` field.
+        /// Regex tested against each system line's content
         pattern: String,
     },
-    /// Rewrite every line's string `sessionId` field to `new_sid`, passing
-    /// through a line with no `sessionId` or a non-string one unchanged.
-    /// Backs `src/json/jsonl.rs::rewrite_session_id`.
+    /// Set every line's `sessionId` to a new value
+    ///
+    /// Lines with no string `sessionId` pass through unchanged.
     RewriteSessionId {
-        /// Replacement session id.
+        /// New session id
         new_sid: String,
     },
-    /// Exit 0 if stdin parses as JSON, 1 otherwise. Backs
-    /// `src/json/validate.rs::is_valid_json`.
+    /// Exit 0 if stdin is valid JSON, 1 otherwise
     ValidJson,
-    /// Exit 0 if the value at `path` inside stdin's JSON is the string
-    /// `expected`, 1 otherwise. Backs `src/json/fieldeq.rs::field_equals`.
+    /// Exit 0 if the value at a path is the expected string, 1 otherwise
     FieldEquals {
-        /// Dot-separated path; a numeric segment indexes into an array.
+        /// Dot-separated path; a number indexes into an array
         path: String,
-        /// Expected string value at `path`.
+        /// Expected string value
         expected: String,
     },
-    /// Print the length (array element count or object key count) of
-    /// `field` in stdin's JSON. Backs `src/json/count.rs::field_length`.
+    /// Print the length of a field (item count or key count)
     FieldLength {
-        /// Top-level field to measure.
+        /// Top-level field to measure
         field: String,
     },
-    /// Print the raw string value of `key` in stdin's JSON, no trailing
-    /// newline added. Backs `src/json/fields.rs::string_field`. Distinct
-    /// from `StringField`: this variant is used where the call site needs
-    /// no trailing newline on the printed value.
+    /// Print a field's string value with no trailing newline
     RawStringField {
-        /// Top-level field to read.
+        /// Top-level field to read
         key: String,
     },
-    /// Print stdin's JSON re-serialized with every object's keys sorted
-    /// recursively, optionally dropping one top-level key first. Backs
-    /// `src/json/canon.rs::canonical_json`.
+    /// Print the input with every object's keys sorted
     CanonicalJson {
-        /// Top-level key to drop before sorting, if any.
+        /// Top-level key to drop before sorting
         #[arg(long)]
         del: Option<String>,
     },
-    /// Print every hook `.command` string nested under stdin's JSON's
-    /// `.hooks.<event>`, one per line. Backs
-    /// `src/json/hookevents.rs::hook_commands_for_event`.
+    /// Print every hook command under `.hooks.<event>`, one per line
     HookCommandsForEvent {
-        /// Event key under `.hooks` to read, e.g. `PreToolUse`.
+        /// Event key under `.hooks`, such as `PreToolUse`
         event: String,
     },
-    /// Print `.projects[project_path].field` from stdin's JSON, where
-    /// `project_path` is used verbatim as an object key. Backs
-    /// `src/json/claudejson.rs::project_field`.
+    /// Print `.projects[project_path].field`
     ProjectField {
-        /// Project path key under `.projects`.
+        /// Project path, used as the object key
         project_path: String,
-        /// Field to read from that project's entry.
+        /// Field to read from that project's entry
         field: String,
     },
-
-    /// Structural JSON equality between two files, ignoring key order and
-    /// any named top-level keys. Backs `json::jsoncmp::json_equal`.
+    /// Check two JSON files hold the same data, ignoring key order
     Equal {
-        /// First file to compare.
+        /// First file
         a: PathBuf,
-        /// Second file to compare.
+        /// Second file
         b: PathBuf,
-        /// Top-level keys to drop from both documents before comparing.
+        /// Top-level keys to ignore in both files, comma separated
         #[arg(long, value_delimiter = ',')]
         ignore_keys: Vec<String>,
     },
-    /// Removes top-level keys from a JSON document read on stdin and prints
-    /// the result on stdout. Backs `json::settingsjson::remove_keys_print`.
+    /// Remove top-level keys from the input and print the result
     RemoveKeys {
-        /// Top-level keys to drop.
+        /// Top-level keys to remove
         keys: Vec<String>,
     },
-    /// Prints a JSON document's top-level keys, sorted, one per line, read
-    /// on stdin. Backs `json::keylist::top_level_keys_sorted`.
+    /// Print the input's top-level keys, sorted, one per line
     KeysSorted,
-    /// Adds one boolean-true marker key to a JSON document read on stdin
-    /// and prints the result on stdout. Backs
-    /// `json::settingsjson::add_marker_key_print`.
+    /// Add one key set to `true` and print the result
     AddMarkerKey {
-        /// Top-level key to set to `true`.
+        /// Key to set to `true`
         key: String,
     },
-    /// Render the repo-scoped `Facts:`/`Edges:`/`Anchors:` markdown slice of
-    /// a memory graph, ported from `shell/memory-context.sh`'s `jq` filter.
-    /// Prints nothing (rather than a blank line) when the render is empty,
-    /// so the shell script's own `-n "$output"` gate still short-circuits.
+    /// Print the repo's slice of a memory graph as markdown
+    ///
+    /// Prints nothing when the slice is empty.
     MemoryContext {
-        /// Path to the memory graph JSON file.
+        /// Memory graph JSON file
         graph_file: PathBuf,
-        /// Repo slug (`owner/name`) to scope facts to.
+        /// Repo slug (`owner/name`) to scope facts to
         repo: String,
     },
 }
 
-/// Every hook Claude Code can invoke, one per entry in hooks.json. Kebab-case
-/// on the CLI (clap's default `ValueEnum` casing) so a typo in hooks.json
-/// surfaces immediately via clap's possible-value error rather than the hook
-/// silently doing nothing.
+// Kebab-case on the CLI, so a typo in the hook settings fails loudly.
+/// Every hook Claude Code can run.
 #[derive(ValueEnum, Debug, Clone, Copy)]
 pub enum HookName {
     SessionInit,
@@ -772,30 +795,37 @@ pub enum HookName {
     WorktreeRemove,
 }
 
-/// `cc` launcher subcommands, matching `shell/shared/dispatch.sh:59-100`. No
-/// subcommand at all (`Cc { sub: None }`) replicates the default path there:
-/// resume the most recent session for this project by its custom title.
+/// `playbook cc` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum CcCommand {
-    /// Clean and resume the most recent matching session.
+    /// Mode of the `cc` shortcut: clean up and resume (no action by itself)
     Clean,
-    /// Start a fresh session; no resume, settings.json re-applied.
+    /// Mode of the `cc` shortcut: start a fresh session (no action by itself)
     Fresh,
-    /// Resume raw, optionally by session id; no fork, overrides preserved.
-    Raw { sid: Option<String> },
-    /// List sessions for the current project.
+    /// Mode of the `cc` shortcut: resume a session as it was (no action by itself)
+    ///
+    /// The `cc` shortcut handles these modes. Running this command directly
+    /// does nothing and exits 0.
+    Raw {
+        /// Session id to resume (default: the most recent)
+        sid: Option<String>,
+    },
+    /// List sessions for the current project
     #[command(alias = "ls")]
     List,
-    /// Prune stale runtime state.
+    /// Remove stale runtime state
     Prune,
-    /// Clear caches that would otherwise freeze stale settings into a session.
+    /// Clear caches that would freeze old settings into a session
     #[command(name = "bust-cache")]
     BustCache,
-    /// Create a worktree and resume into it.
+    /// Create a git worktree for a branch and print its path
+    ///
+    /// Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"`.
     #[command(alias = "new")]
     Worktree {
+        /// Branch to create the worktree for
         branch: String,
-        /// Folder (relative to the repo root) holding the `.env` to copy in.
+        /// Folder (relative to the repo root) holding the `.env` to copy in
         env_base: Option<String>,
     },
 }
@@ -905,5 +935,83 @@ mod tests {
         assert!(raw_no_sid.is_ok(), "cc raw with no sid should parse");
         assert!(raw_with_sid.is_ok(), "cc raw SID should parse");
         assert!(default.is_ok(), "cc with no subcommand should parse");
+    }
+
+    fn help_texts(cmd: &clap::Command, path: &str, out: &mut Vec<(String, String)>) {
+        let here = format!("{path} {}", cmd.get_name());
+        for text in [
+            cmd.get_about(),
+            cmd.get_long_about(),
+            cmd.get_before_help(),
+            cmd.get_before_long_help(),
+            cmd.get_after_help(),
+            cmd.get_after_long_help(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            out.push((here.clone(), text.to_string()));
+        }
+        for arg in cmd.get_arguments() {
+            for text in [arg.get_help(), arg.get_long_help()].into_iter().flatten() {
+                out.push((format!("{here} --{}", arg.get_id()), text.to_string()));
+            }
+            for value in arg.get_possible_values() {
+                if let Some(text) = value.get_help() {
+                    out.push((format!("{here} {}", value.get_name()), text.to_string()));
+                }
+            }
+        }
+        for sub in cmd.get_subcommands() {
+            help_texts(sub, &here, out);
+        }
+    }
+
+    #[test]
+    fn user_facing_help_never_names_source_files_or_rust_paths() {
+        // Arrange
+        let mut texts = Vec::new();
+
+        // Act
+        help_texts(&Cli::command(), "", &mut texts);
+
+        // Assert
+        assert!(texts.len() > 100, "the walk found too little help text");
+        for (place, text) in texts {
+            for banned in ["src/", "shell/", "::", ".rs", ".sh", ".py"] {
+                assert!(
+                    !text.contains(banned),
+                    "help for `{place}` leaks `{banned}`: {text}"
+                );
+            }
+            assert!(
+                !text.contains('\u{2014}') && !text.contains('\u{2013}'),
+                "help for `{place}` has a dash: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_and_hook_are_hidden_but_still_parse() {
+        // Arrange
+        let cmd = Cli::command();
+
+        // Act
+        let hidden: Vec<_> = cmd
+            .get_subcommands()
+            .filter(|c| c.is_hide_set())
+            .map(|c| c.get_name().to_string())
+            .collect();
+
+        // Assert
+        let mut hidden = hidden;
+        hidden.sort();
+        assert_eq!(hidden, ["hook", "json"]);
+        assert!(Cli::command()
+            .try_get_matches_from(["playbook", "json", "array-length"])
+            .is_ok());
+        assert!(Cli::command()
+            .try_get_matches_from(["playbook", "hook", "session-init"])
+            .is_ok());
     }
 }
