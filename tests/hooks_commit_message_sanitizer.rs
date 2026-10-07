@@ -50,6 +50,12 @@ impl Lab {
         lab
     }
 
+    fn write_global_config(&self, json: &str) {
+        let dir = self.scratch.home.join(".config").join("playbook");
+        fs::create_dir_all(&dir).expect("config dir");
+        fs::write(dir.join("config.json"), json).expect("config file");
+    }
+
     fn write_stub(&self, name: &str, body: &str) {
         let path = self.bin.join(name);
         fs::write(&path, body).expect("stub");
@@ -1025,6 +1031,25 @@ fn a_sign_off_that_is_already_settled_leaves_the_command_alone() {
 }
 
 #[test]
+fn commit_sign_off_false_stops_the_hook_adding_dash_s() {
+    let lab = Lab::new("sign-off-config-off");
+    lab.write_global_config(r#"{"commit":{"signOff":false}}"#);
+
+    assert_eq!(lab.hook("git commit --allow-empty -m 'feat: x'"), "");
+}
+
+#[test]
+fn an_unreadable_config_keeps_adding_dash_s() {
+    let lab = Lab::new("sign-off-config-broken");
+    lab.write_global_config("{not json");
+
+    assert_eq!(
+        updated_command(&lab.hook("git commit --allow-empty -m 'feat: x'")).as_deref(),
+        Some("git commit -s --allow-empty -m 'feat: x'")
+    );
+}
+
+#[test]
 fn an_ai_sign_off_is_removed_and_replaced_by_the_real_one() {
     let lab = Lab::new("sign-off-ai");
     let message = "feat: x\n\nSigned-off-by: Claude <noreply@anthropic.com>";
@@ -1066,7 +1091,8 @@ fn a_reused_message_gets_a_sign_off_only_when_it_has_none() {
 fn a_repository_hook_that_signs_off_stops_the_hook_adding_dash_s() {
     let signing = [
         ("prepare-commit-msg", "#!/bin/sh\ngit interpret-trailers --in-place --trailer \"Signed-off-by: $(git config user.name) <$(git config user.email)>\" \"$1\"\n"),
-        ("commit-msg", "#!/bin/sh\ngrep -q '^Signed-off-by:' \"$1\" || printf '\\nSigned-off-by: A <a@b.c>\\n' >> \"$1\"\n"),
+        ("commit-msg", "#!/bin/sh\ngit interpret-trailers --in-place --trailer 'sign-off: A <a@b.c>' \"$1\"\n"),
+        ("commit-msg", "#!/bin/sh\ngit interpret-trailers --in-place --trailer=Signed-off-by:A \"$1\"\n"),
         ("prepare-commit-msg", "#!/bin/sh\nexec git commit --amend --signoff --no-edit\n"),
     ];
     for (name, script) in signing {
@@ -1079,6 +1105,42 @@ fn a_repository_hook_that_signs_off_stops_the_hook_adding_dash_s() {
         assert_eq!(
             lab.hook("git commit --allow-empty -m 'feat: x'"),
             "",
+            "{name}: {script}"
+        );
+    }
+}
+
+#[test]
+fn a_hook_that_only_checks_or_adds_another_trailer_does_not_stop_dash_s() {
+    let not_signing = [
+        (
+            "commit-msg",
+            "#!/bin/sh\ngrep -q '^Signed-off-by:' \"$1\" || exit 1\n",
+        ),
+        (
+            "commit-msg",
+            "#!/bin/sh\ngrep -q '^Signed-off-by:' \"$1\" || printf 'missing\\n' >&2\n",
+        ),
+        (
+            "prepare-commit-msg",
+            "#!/bin/sh\ngit interpret-trailers --in-place --trailer 'Change-Id: I1' \"$1\"\n",
+        ),
+        (
+            "prepare-commit-msg",
+            "#!/bin/sh\n# git commit --signoff and a Signed-off-by trailer, in a comment\ntrue\n",
+        ),
+    ];
+    for (name, script) in not_signing {
+        let lab = Lab::new("sign-off-hook-no");
+        let hooks = lab.repo.join("custom-hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        write_executable(&hooks, name, script);
+        lab.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+        let command = "git commit --allow-empty -m 'feat: x'";
+
+        assert_eq!(
+            lab.rewritten(command),
+            "git commit -s --allow-empty -m 'feat: x'",
             "{name}: {script}"
         );
     }
@@ -1174,7 +1236,7 @@ fn plain_echo_text_with_a_backslash_is_reported_as_unread_not_guessed() {
     }
     let flagged = [
         format!("git commit -s --allow-empty -m \"$(echo -e '{text}')\""),
-        format!("git commit -s --allow-empty -m \"$(echo -E 'feat: x\n\n{COAUTHOR}')\""),
+        format!("git commit -s --allow-empty -m \"$(echo -E 'feat: C:\\dir\n\n{COAUTHOR}')\""),
         format!("git commit -s --allow-empty -m \"$(echo 'feat: x\n\n{COAUTHOR}')\""),
     ];
     for command in flagged {
@@ -1534,6 +1596,77 @@ fn a_gh_call_through_a_carrier_is_cleaned_like_a_direct_one() {
         assert_ne!(rewritten, command, "{command}");
         assert_no_attribution(&rewritten);
     }
+}
+
+/// A repository whose last commit and merge message both carry attribution.
+fn lab_with_dirty_reuse(tag: &str) -> Lab {
+    let lab = Lab::new(tag);
+    lab.git(&[
+        "commit",
+        "--allow-empty",
+        "-q",
+        "-m",
+        &format!("feat: x\n\n{COAUTHOR}"),
+    ]);
+    fs::write(
+        lab.repo.join(".git/MERGE_MSG"),
+        format!("merge\n\n{COAUTHOR}\n"),
+    )
+    .unwrap();
+    lab
+}
+
+#[test]
+fn a_reused_message_inside_a_nested_script_is_never_rewritten() {
+    let lab = lab_with_dirty_reuse("reuse-nested");
+    let commands = [
+        "git rebase -x 'git commit --amend --no-edit -s' main",
+        "git rebase --exec 'git commit --allow-empty -C HEAD -s' main",
+        "bash -c 'git commit --allow-empty --amend --no-edit -s'",
+        "eval 'git commit --allow-empty -C HEAD -s'",
+        "bash -c 'git commit --allow-empty --no-edit -s'",
+    ];
+    for command in commands {
+        let out = lab.hook(command);
+
+        assert!(!out.is_empty(), "no note for: {command}");
+        let updated = updated_command(&out).unwrap_or_default();
+        assert!(
+            !updated.contains("PLAYBOOK_MESSAGE_END"),
+            "{command}: {out}"
+        );
+        assert!(
+            context_of(&out).contains("could not read"),
+            "{command}: {out}"
+        );
+        assert!(!out.contains("noreply@anthropic.com"), "{command}: {out}");
+    }
+}
+
+#[test]
+fn a_reused_message_with_reset_author_is_left_alone_and_reported() {
+    let lab = lab_with_dirty_reuse("reuse-reset-author");
+    let commands = [
+        "git commit --allow-empty -C HEAD --reset-author",
+        "git commit --allow-empty -c HEAD --reset-author",
+        "git commit --allow-empty --reuse-message=HEAD --reset-author",
+    ];
+    for command in commands {
+        let out = lab.hook(command);
+
+        assert!(!out.is_empty(), "no note for: {command}");
+        let updated = updated_command(&out).unwrap_or_default();
+        assert!(
+            !updated.contains("PLAYBOOK_MESSAGE_END"),
+            "{command}: {out}"
+        );
+        assert!(
+            context_of(&out).contains("--reset-author"),
+            "{command}: {out}"
+        );
+    }
+    let kept = lab.hook("git commit --allow-empty -C HEAD");
+    assert!(kept.contains("PLAYBOOK_MESSAGE_END"), "{kept}");
 }
 
 /// `text` as one single-quoted shell word.

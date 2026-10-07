@@ -13,7 +13,10 @@ use super::sources::{
 };
 use crate::common::attribution::{has_sign_off, is_ai_identity, problems, sanitize, trailer_shape};
 use crate::common::cli_opts::{has, named, Opt, Spec};
-use crate::common::shell::{is_assignment, program_name, quote};
+use crate::common::repo::repo_slug;
+use crate::common::session::home_dir;
+use crate::common::shell::{commands, is_assignment, program_name, quote};
+use crate::config;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -376,8 +379,11 @@ fn commit(run: &Run, plan: &mut Plan, findings: &mut Findings) {
 /// The message a commit takes from the repository instead of the command: the
 /// one `-C` or `--amend --no-edit` reuses, or the one a merge or a squash left
 /// behind. It is rewritten to come from a heredoc when it carries
-/// attribution. An earlier git command in the same call may change what the
-/// repository holds by the time this one runs, so then it is left alone.
+/// attribution. It is left alone, and reported as unread, when an earlier git
+/// command in the same call may change what the repository holds by the time
+/// this one runs, when the commit sits in a nested script such as a rebase
+/// `--exec`, which runs later against other commits, and when `--reset-author`
+/// changes the author the rewrite would copy.
 fn reused_message(
     run: &Run,
     opts: &[Opt],
@@ -398,11 +404,25 @@ fn reused_message(
             .push("the reused message (an earlier git command in this call may change it)".into());
         return None;
     }
+    if source.is_some() && run.call.depth > 0 {
+        findings.unread.push(NESTED_REUSE.into());
+        return None;
+    }
+    if !reused.is_empty() && has(opts, &["reset-author"]) {
+        findings.unread.push(
+            "the message reused with --reset-author (the rewrite would copy the author it resets)"
+                .into(),
+        );
+        return None;
+    }
     match source {
         Some((opt, rev)) => reuse(run, opt, &rev, plan, findings),
         None => stored_message(run, plan, findings),
     }
 }
+
+const NESTED_REUSE: &str =
+    "the reused message (it is in a nested script, which may run against other commits)";
 
 /// Whether a command before this one in the script runs git, or a script that
 /// mentions it.
@@ -416,8 +436,9 @@ fn git_ran_earlier(call: &Call) -> bool {
 }
 
 /// Adds `-s` unless a sign-off is already settled: asked for or refused on the
-/// command line, in the message, or added by the repository's own hook. The
-/// commit then carries the Signed-off-by line the DCO check needs.
+/// command line, in the message, added by the repository's own hook, or turned
+/// off by `commit.signOff`. The commit then carries the Signed-off-by line the
+/// DCO check needs.
 fn sign_off(
     run: &Run,
     opts: &[Opt],
@@ -428,7 +449,8 @@ fn sign_off(
     let call = &run.call;
     let settled = has(opts, &["s", "signoff", "no-signoff", "dry-run"])
         || known.is_some_and(|text| has_sign_off(&sanitize(text).text))
-        || hook_signs_off(call.dir);
+        || hook_signs_off(call.dir)
+        || !sign_off_enabled();
     if !settled {
         let at = call.cmd().spans[run.rest - 1].end;
         plan.edits.push((at..at, " -s".to_string()));
@@ -436,20 +458,58 @@ fn sign_off(
     }
 }
 
+/// Whether `commit.signOff` allows adding a sign-off. A config that cannot be
+/// read keeps the default, on, so the DCO check still passes.
+pub fn sign_off_enabled() -> bool {
+    let slug = repo_slug();
+    let slug = (!slug.is_empty()).then_some(slug.as_str());
+    config::resolve("commit.signOff", &home_dir(), slug)
+        .ok()
+        .and_then(|(value, _)| value.as_bool())
+        .unwrap_or(true)
+}
+
 /// Whether the repository's `prepare-commit-msg` or `commit-msg` hook, in the
-/// hooks path git uses, adds a Signed-off-by line itself.
+/// hooks path git uses, adds a Signed-off-by line itself. A hook that only
+/// checks for the line, or adds another trailer, does not.
 fn hook_signs_off(dir: &Path) -> bool {
     let Some(hooks) = git_output(dir, &["rev-parse", "--git-path", "hooks"]) else {
         return false;
     };
     let hooks = resolve(hooks.trim(), dir);
     ["prepare-commit-msg", "commit-msg"].iter().any(|name| {
-        runnable_script(&hooks.join(name)).is_some_and(|script| {
-            script.contains("--signoff")
-                || script.contains("Signed-off-by")
-                || (script.contains("interpret-trailers") && script.contains("--trailer"))
-        })
+        runnable_script(&hooks.join(name)).is_some_and(|script| script_adds_sign_off(&script))
     })
+}
+
+/// Whether a hook script runs a command that signs off: `--signoff`, or
+/// `git interpret-trailers` with a `--trailer` for the sign-off.
+fn script_adds_sign_off(script: &str) -> bool {
+    commands(script).iter().any(|cmd| {
+        let words = &cmd.words;
+        let trailers = words.iter().any(|w| w == "interpret-trailers")
+            && words.iter().enumerate().any(|(i, w)| {
+                let value = match w.strip_prefix("--trailer=") {
+                    Some(inline) => Some(inline),
+                    None if w == "--trailer" => words.get(i + 1).map(String::as_str),
+                    None => None,
+                };
+                value.is_some_and(is_sign_off_trailer)
+            });
+        words.iter().any(|w| w == "--signoff") || trailers
+    })
+}
+
+/// A `--trailer` value whose token is `Signed-off-by` or `sign-off`, however
+/// it is spelled.
+fn is_sign_off_trailer(value: &str) -> bool {
+    let token = value.split([':', '=']).next().unwrap_or_default();
+    let token: String = token
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_lowercase();
+    token == "signedoffby" || token == "signoff"
 }
 
 /// The text of an executable file, which git runs as a hook.
@@ -653,6 +713,12 @@ fn stored_message(run: &Run, plan: &mut Plan, findings: &mut Findings) -> Option
     let name = MESSAGE_FILES
         .iter()
         .find(|name| git_dir.join(name).exists())?;
+    if call.depth > 0 {
+        findings
+            .unread
+            .push(format!("{name} (in a nested script, which may run later)"));
+        return None;
+    }
     let text = match read_message(&git_dir.join(name)) {
         Ok(text) => text,
         Err(why) => {

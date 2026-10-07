@@ -8,6 +8,14 @@
 //! applies. A message kept in a file is read from a heredoc instead, and the
 //! file itself is never rewritten.
 //!
+//! Every `git commit` that would carry no `Signed-off-by` line gets `-s`, so
+//! the DCO check passes. The hook stands down when the command has `-s`,
+//! `--signoff`, `--no-signoff` or `--dry-run`, when the message already has a
+//! sign-off, when the `commit.signOff` setting is false, or when a
+//! `prepare-commit-msg` or `commit-msg` hook of the repository adds the line
+//! itself, by `--signoff` or by `git interpret-trailers --trailer` for it. A
+//! hook that only checks for the line does not count.
+//!
 //! Best effort against an agent drifting, not a security boundary: it does
 //! not expand variables in a message, an alias or a script that builds one.
 
