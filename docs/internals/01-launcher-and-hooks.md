@@ -133,3 +133,12 @@ It rewrites the message file in place and always exits 0, even when the file can
 - [Authoring Commands, Skills, and Hooks](../authoring/01-commands-skills-hooks.md): how to write your own hook.
 - [Internals: Model Routing and Memory](02-model-routing-and-memory.md): model routing and the system prompt.
 - [Docs index](../index.md)
+
+## Status line
+
+`statusLine.command` runs `playbook statusline`, the Rust renderer, which is
+byte-for-byte equal to `statusline.sh` and several times faster per refresh.
+`playbook init` rewrites the old `bash $HOME/.config/playbook/statusline.sh`
+command and leaves any custom command alone. `statusline.sh` is still placed
+for one release as a fallback; after that release it is deleted and init stops
+placing it.
