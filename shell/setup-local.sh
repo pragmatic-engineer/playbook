@@ -5,8 +5,9 @@
 # setup-local.sh: idempotent local wiring for pragmatic-engineer/playbook.
 # Bootstraps the `playbook` binary, then seeds or merges settings.json and
 # wires every guard/functional hook via `playbook init`, and optionally
-# installs deps (brew), the shell launchers (cc.sh/cc.zsh), and the system
-# prompt.
+# installs deps (brew). The shell launchers (cc.sh/cc.zsh) and the system
+# prompt are installed by `playbook init`, which this script hands
+# --aliases and --system-prompt to.
 #
 # Self-locates its own source tree so it works when called from install.sh
 # (after the file-copy loop) or directly from the /playbook:setup plugin command.
@@ -130,8 +131,6 @@ ensure_playbook_binary() {
 ensure_playbook_binary ||
     warn "binary: missing; the 17 ported hooks will not run until it is installed"
 
-STAMP="$(date +%Y%m%d-%H%M%S)"
-
 # ---------------------------------------------------------------------------
 # 2. Seed or 3-way-merge settings.json from the shipped template, and rewire
 #    every guard and functional hook, in one `playbook init` call. This
@@ -165,15 +164,34 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 #    hooks fix the old two-step dance used to still apply.
 #
 #    Wrapped with `|| warn`, not a bare call: `playbook init` exits 1 if ANY
-#    of its six internal steps fails (settings, guards, hooks, shim,
-#    statusline, system-prompt), and this script runs under `set -euo
-#    pipefail`, so a bare call would abort Steps 3/4/5 the moment one
-#    unrelated step errors.
+#    of its internal steps fails, and this script runs under `set -euo
+#    pipefail`, so a bare call would abort the dependency install the moment
+#    one unrelated step errors.
+#
+#    --aliases and --system-prompt are forwarded to `playbook init`, which owns
+#    the launcher runtime, the rc-file wiring and the system prompt. A binary
+#    whose `init --help` lacks a flag (an older release, or one already on
+#    PATH) is called without it: an unknown flag would make `init` exit before
+#    writing anything, settings.json included.
 # ---------------------------------------------------------------------------
+init_flags=()
+init_supports() { playbook init --help 2>/dev/null | grep -q -- "$1"; }
+add_init_flag() {
+    if init_supports "$1"; then
+        init_flags+=("$1")
+    else
+        # On stdout as well as stderr: /playbook:setup reports stdout, and
+        # this script cannot update the binary itself.
+        printf '%swarning:%s the installed playbook does not support %s; skipping it. Upgrade it with: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash, then re-run this script.\n' \
+            "$C_Y" "$C_0" "$1"
+    fi
+}
 if [ "$CLAUDE_HOME" != "$HOME/.claude" ]; then
-    warn "CLAUDE_HOME is not \$HOME/.claude; skipping playbook init (it has no CLAUDE_HOME override)"
+    warn "CLAUDE_HOME is not \$HOME/.claude; skipping playbook init, including the launchers and system prompt (it has no CLAUDE_HOME override)"
 elif command -v playbook >/dev/null 2>&1; then
-    CLAUDE_PLUGIN_ROOT="$SELF_ROOT" playbook init \
+    [ "$OPT_ALIASES" -eq 1 ] && add_init_flag --aliases
+    [ "$OPT_SYSTEM_PROMPT" -eq 1 ] && add_init_flag --system-prompt
+    CLAUDE_PLUGIN_ROOT="$SELF_ROOT" playbook init ${init_flags[@]+"${init_flags[@]}"} \
         || warn "playbook init reported errors; settings merge and/or hooks may be incomplete"
 else
     warn "playbook binary unavailable; settings.json and guards may be unwired. Re-run /playbook:setup once it is installed."
@@ -200,133 +218,6 @@ if [ "$SKIP_DEPS" -eq 0 ]; then
             || warn "brew bundle reported errors"
     else
         warn "Cannot resolve dependencies (no ensure-deps.sh and no brew). See https://brew.sh"
-    fi
-fi
-
-# ---------------------------------------------------------------------------
-# 4. (--aliases) Copy the shell launcher runtime files and wire the rc file.
-#    Copies every file/dir in shell/ EXCEPT *.test.sh files.
-#    Uses an -ef self-copy guard per file. For regular files also checks
-#    content equality (cmp -s) to report "already up to date" without re-copy.
-#    Detects the user's shell from $SHELL (basename):
-#      zsh  -> ~/.zshrc   sources $HOME/.claude/shell/zsh/cc.zsh
-#      bash -> ~/.bashrc  sources $HOME/.claude/shell/bash/cc.sh
-#    Idempotent: grep -qF guard before appending to the rc file.
-# ---------------------------------------------------------------------------
-if [ "$OPT_ALIASES" -eq 1 ]; then
-    CLAUDE_SHELL_DIR="$CLAUDE_HOME/shell"
-    SELF_SHELL_DIR="$SELF_ROOT/shell"
-    mkdir -p "$CLAUDE_SHELL_DIR"
-
-    for src in "$SELF_SHELL_DIR"/*; do
-        name="$(basename "$src")"
-        case "$name" in
-            *.test.sh) continue ;;
-        esac
-        dst="$CLAUDE_SHELL_DIR/$name"
-        # Self-copy guard: same device+inode means SELF_ROOT == CLAUDE_HOME.
-        if [ "$src" -ef "$dst" ] 2>/dev/null; then
-            log "shell/$name ... already up to date"
-            continue
-        fi
-        if [ -d "$src" ]; then
-            cp -R "$src" "$dst"
-            log "shell/$name/ ... installed"
-        elif [ -f "$dst" ] && cmp -s "$src" "$dst" 2>/dev/null; then
-            log "shell/$name ... already up to date"
-        else
-            cp "$src" "$dst"
-            log "shell/$name ... installed"
-        fi
-    done
-
-    # Detect shell and wire the appropriate rc file.
-    _SHELL_BIN="$(basename "${SHELL:-}")"
-    case "$_SHELL_BIN" in
-        zsh)
-            RC_FILE="$HOME/.zshrc"
-            # shellcheck disable=SC2016
-            SOURCE_LINE='source "$HOME/.claude/shell/zsh/cc.zsh"'
-            GREP_PAT='shell/zsh/cc.zsh'
-            OLD_GREP_PAT='shell/cc.zsh'
-            ;;
-        bash)
-            RC_FILE="$HOME/.bashrc"
-            # shellcheck disable=SC2016
-            SOURCE_LINE='source "$HOME/.claude/shell/bash/cc.sh"'
-            GREP_PAT='shell/bash/cc.sh'
-            OLD_GREP_PAT='shell/cc.sh'
-            ;;
-        *)
-            warn "Shell '$_SHELL_BIN' not recognised; source the launcher manually."
-            warn "For zsh:  source \"\$HOME/.claude/shell/zsh/cc.zsh\" in ~/.zshrc"
-            warn "For bash: source \"\$HOME/.claude/shell/bash/cc.sh\" in ~/.bashrc"
-            _SHELL_BIN=""
-            ;;
-    esac
-
-    if [ -n "$_SHELL_BIN" ]; then
-        # Migrate a pre-reorganisation source line to the current path. The
-        # new-path guard below cannot see the old form, because shell/cc.zsh is
-        # not a substring of shell/zsh/cc.zsh (nor shell/cc.sh of
-        # shell/bash/cc.sh). Without this step a re-run appends a second line
-        # and the launcher gets sourced twice: once through the transitional
-        # shim at the old path, once directly.
-        if [ -f "$RC_FILE" ] && grep -qF "$OLD_GREP_PAT" "$RC_FILE" 2>/dev/null; then
-            cp "$RC_FILE" "${RC_FILE}.bak-${STAMP}"
-            RC_TMP="$(mktemp "${RC_FILE}.tmp.XXXXXX")"
-            # Drop the old source line and absorb the launchers comment that
-            # immediately precedes it, then squeeze the doubled blank line the
-            # removal leaves behind. Same shape as uninstall.sh's remover.
-            # has: an explicit "prev holds a line" flag. Using prev != "" as the
-            # sentinel instead would treat a buffered blank line as nothing
-            # buffered and silently eat the user's blank lines around the block.
-            awk -v pat="$OLD_GREP_PAT" '
-              index($0, pat) {
-                if (has && prev ~ /launchers \(cc\/ccd\)/) has = 0
-                if (has) print prev
-                has = 0; next
-              }
-              { if (has) print prev; prev = $0; has = 1 }
-              END { if (has) print prev }
-            ' "$RC_FILE" | awk '
-              /^[[:space:]]*$/ { blank++; if (blank <= 1) print; next }
-              { blank = 0; print }
-            ' > "$RC_TMP"
-            mv -f "$RC_TMP" "$RC_FILE"
-            log "Migrated the old launcher line in $RC_FILE (backup: ${RC_FILE}.bak-${STAMP})"
-        fi
-        if grep -qF "$GREP_PAT" "$RC_FILE" 2>/dev/null; then
-            log "$RC_FILE already sources the launcher ... already up to date"
-        else
-            printf '\n# playbook launchers (cc/ccd)\n%s\n' "$SOURCE_LINE" >> "$RC_FILE"
-            log "Added launcher source line to $RC_FILE"
-        fi
-    fi
-fi
-
-# ---------------------------------------------------------------------------
-# 5. (--system-prompt) Copy SYSTEM_PROMPT.md to CLAUDE_HOME/prompts/.
-#    Implied by --system-prompt; --aliases runs first.
-#    -ef guard prevents self-copy when SELF_ROOT == CLAUDE_HOME.
-#    cmp -s guard prevents unnecessary overwrites on re-run.
-# ---------------------------------------------------------------------------
-if [ "$OPT_SYSTEM_PROMPT" -eq 1 ]; then
-    SRC_PROMPT="$SELF_ROOT/prompts/SYSTEM_PROMPT.md"
-    DST_PROMPT_DIR="$CLAUDE_HOME/prompts"
-    DST_PROMPT="$DST_PROMPT_DIR/SYSTEM_PROMPT.md"
-    if [ -f "$SRC_PROMPT" ]; then
-        mkdir -p "$DST_PROMPT_DIR"
-        if [ "$SRC_PROMPT" -ef "$DST_PROMPT" ] 2>/dev/null; then
-            log "prompts/SYSTEM_PROMPT.md ... already up to date"
-        elif [ -f "$DST_PROMPT" ] && cmp -s "$SRC_PROMPT" "$DST_PROMPT" 2>/dev/null; then
-            log "prompts/SYSTEM_PROMPT.md ... already up to date"
-        else
-            cp "$SRC_PROMPT" "$DST_PROMPT"
-            log "prompts/SYSTEM_PROMPT.md ... installed"
-        fi
-    else
-        warn "prompts/SYSTEM_PROMPT.md not found at $SRC_PROMPT; skipping."
     fi
 fi
 

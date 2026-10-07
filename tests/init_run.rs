@@ -736,9 +736,8 @@ fn unrecognised_shell_skips_shim_only() {
 }
 
 /// `aliases: false` (the default, absent `--aliases`) must skip the `shim`
-/// step entirely, the same all-or-nothing gate `setup-local.sh`'s own Step 4
-/// uses, so a caller like `setup-local.sh` can call `playbook init` for
-/// guards and settings without silently installing a shell launcher the
+/// step entirely, so a caller like `setup-local.sh` can call `playbook init`
+/// for guards and settings without silently installing a shell launcher the
 /// user did not opt into this run.
 #[test]
 fn aliases_false_skips_shim_entirely() {
@@ -770,6 +769,52 @@ fn aliases_false_skips_shim_entirely() {
     // The other steps still ran; only `shim` is gated by `aliases`.
     assert_eq!(find_step(&outcome, "settings").status, StepStatus::Wired);
     assert_eq!(find_step(&outcome, "hooks").status, StepStatus::Wired);
+}
+
+/// A read-only rc file is reported as a skipped step, not a failure, and is
+/// left as it was.
+#[cfg(unix)]
+#[test]
+fn read_only_rc_file_is_reported_as_a_skipped_shim_step() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Arrange
+    let home = scratch_home("readonly-rc");
+    let rc_file = home.join(".zshrc");
+    let before = "source \"$HOME/.claude/shell/cc.zsh\"\n";
+    write_text(&rc_file, before);
+    fs::set_permissions(&rc_file, fs::Permissions::from_mode(0o444)).unwrap();
+
+    // Act
+    let outcome = run(&base_paths(&home, Some(ShellKind::Zsh)));
+
+    // Assert
+    assert!(outcome.ok(), "a read-only rc is not a failure");
+    let shim_step = find_step(&outcome, "shim");
+    assert_eq!(shim_step.status, StepStatus::Skipped);
+    assert!(
+        shim_step.detail.contains("not writable"),
+        "{}",
+        shim_step.detail
+    );
+    assert_eq!(fs::read_to_string(&rc_file).unwrap(), before);
+}
+
+/// `shell/shared/config-drift.sh` sources this file from the playbook config
+/// dir, so a fresh `init --aliases` must leave it there.
+#[test]
+fn fresh_init_with_aliases_places_config_hash() {
+    // Arrange
+    let home = scratch_home("config-hash");
+
+    // Act
+    let outcome = run(&base_paths(&home, Some(ShellKind::Zsh)));
+
+    // Assert
+    assert!(outcome.ok());
+    assert!(home
+        .join(".config/playbook/hooks/lib/config-hash.sh")
+        .is_file());
 }
 
 /// Spawns the real compiled binary rather than calling `run` directly: the

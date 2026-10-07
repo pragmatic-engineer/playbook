@@ -36,11 +36,10 @@ pub struct InitPaths {
     /// behaviour change rather than a port.
     pub system_prompt: bool,
     /// Whether the user asked for the shell launcher shim via `--aliases`,
-    /// matching `shell/setup-local.sh`'s flag of the same name. False skips
-    /// the `shim` step entirely, the same all-or-nothing gate
-    /// `setup-local.sh`'s own Step 4 uses: unlike `system_prompt`, there is
-    /// no "refresh an existing copy" case here, since a launcher a user
-    /// never asked for should not be touched at all.
+    /// which `shell/setup-local.sh` forwards from `/playbook:setup`. False
+    /// skips the `shim` step entirely: unlike `system_prompt`, there is no
+    /// "refresh an existing copy" case here, since a launcher a user never
+    /// asked for should not be touched at all.
     pub aliases: bool,
 }
 
@@ -482,6 +481,13 @@ fn rewire_rc_file_step(
         return StepReport::skipped("shim", "launcher runtime copy not confirmed complete");
     }
     match shim::rewire_rc_file(home, shell_kind) {
+        Ok(outcome) if outcome.unwritable => StepReport::skipped(
+            "shim",
+            format!(
+                "{} is not writable; left unchanged, source the launcher there by hand",
+                outcome.rc_file.display()
+            ),
+        ),
         Ok(outcome) if outcome.appended => StepReport::wired(
             "shim",
             format!(
