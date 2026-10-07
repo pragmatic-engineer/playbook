@@ -64,7 +64,7 @@ Other facts:
 
 ### The memory Stop hook
 
-`memory-capture` blocks Stop only when a `capture-due` marker exists. That marker is written by `statusline.sh`, which does not run headless, so in normal headless runs it never fires (checked: zero markers after four runs).
+`memory-capture` blocks Stop only when a `capture-due` marker exists. That marker is written by the status line renderer (`playbook statusline`), which does not run headless, so in normal headless runs it never fires (checked: zero markers after four runs).
 
 To see the worst case, a marker was created for a fixed `--session-id`. The hook blocked Stop twice, then released. The run took 3 turns instead of 1, cost about 2 cents, and ended with exit 0. It did not loop or hang (the re-block cap is 2). One side effect: the final `result` text was the model's answer to the nudge, not to the prompt. Do not trust `result` as the answer when this hook may fire.
 
@@ -77,12 +77,12 @@ Each hook was judged for a normal `claude -p` run in a clean CI `HOME`. The last
 | `session-init` | Exits 0 and writes `session-start.log`. On a cold `HOME` it injects about 800 bytes (an async and deferred-tool discipline note). Its nudges are switched off by `AUTO_LEARN_NUDGE=0`, `SKILLS_PRIMER=0`, and `ASYNC_DISCIPLINE=0`; with all three off it injects nothing. | Done: headless skips every nudge and injects no memory unless `PLAYBOOK_HEADLESS_MEMORY=1`. |
 | `session-init` worktree sweep | Rate limited to once a day and gated by `worktreeCleanup.enabled`. A fresh CI checkout has nothing to sweep. No harm seen. | Done: skipped headless. |
 | `session-init` config drift and memory injection | A cold `HOME` has no memory, so nothing is injected. A warm `HOME` (restored cache) would inject memory and spend tokens. | Done: opt in with `PLAYBOOK_HEADLESS_MEMORY=1`. |
-| `memory-capture` (Stop) | Blocks only when `capture-due` exists, and only `statusline.sh` writes it, so it does not fire headless. If forced, it adds 2 turns and ends cleanly. | Done: never blocks headless, and never when `stop_hook_active` is true. |
+| `memory-capture` (Stop) | Blocks only when `capture-due` exists, and only the status line renderer writes it, so it does not fire headless. If forced, it adds 2 turns and ends cleanly. | Done: never blocks headless. |
 | `memory-anchors`, `auto-model-detect` (UserPromptSubmit) | Fire and print nothing on a cold `HOME`. `auto-model-detect` only suggests a model. | Done: `auto-model-detect` is silent headless. |
 | `preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check` (PreToolUse) | Fire and stay quiet. These are safety guards. | Keep them on. They are the reason to run with hooks. |
 | `search-counter`, `post-edit-track`, `session-clean-exit` | Write small files under `runtime/`. Harmless. | None, or skip the writes headless. |
 
-No hook reads a TTY or prompts: only `src/hooks/mod.rs` touches stdin, to read the hook payload.
+No hook reads a TTY or prompts: only `src/main.rs` reads stdin, to get the hook payload.
 
 ## The headless switch
 

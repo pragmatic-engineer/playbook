@@ -158,7 +158,7 @@ optional or cosmetic.
 
 | Layer | When | What it does |
 |---|---|---|
-| 1. Plugin content | Always, after `claude plugin install` | Skills, commands and subagents load from the plugin. No files written to `~/.claude`. The functional hooks are registered but **need Layer 6 to run**. |
+| 1. Plugin content | Always, after `claude plugin install` | Skills, commands and subagents load from the plugin. No files written to `~/.claude`. Only the worktree hooks and a SessionStart migration check are registered by the plugin. The 13 functional hooks and 5 guards are written into `settings.json` by `playbook init` (Layer 2) and need the binary (Layer 6). |
 | 2. Safety guards and settings | After `install.sh`, or `/playbook:setup` | Wires the guards and seeds or merges `~/.claude/settings.json`. `install.sh` wires them as `playbook hook <name>`; `/playbook:setup` still copies the legacy `~/.claude/hooks/*.sh` scripts, which `/playbook:doctor` reports as not wired. |
 | 3. Shell launchers | Opt-in (recommended) | Adds `cc` and `ccd` to `~/.bashrc` or `~/.zshrc`. Both shells work; `cc clean` and `cc raw` are zsh-only (see Usage). |
 | 4. Custom system prompt | Opt-in (recommended) | Copies `prompts/SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/`; `cc` passes it via `--system-prompt-file`. Plugin content works without it. |
@@ -209,7 +209,7 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 
 ### PR and commit settings
 
-Four config keys let each user, org or repo choose how far the PR flow goes. Set one in your global config to apply it everywhere:
+Four of the config keys shape how far the PR flow goes (the full list is in [Config keys](docs/guides/04-config-keys.md), or run `playbook config list`). Each user, org or repo can set them. Set one in your global config to apply it everywhere:
 
 ```bash
 playbook config set --global autoReview.fix true       # fix every finding the self-review confirms, then push
@@ -272,15 +272,19 @@ Skills live in `skills/` and load on demand. See [docs/authoring/01-commands-ski
 | `engineering-standards-javascript` | JS/TS companion to `engineering-standards`; covers Zod validation and Jest/Vitest mocking. |
 | `writing-style` | Voice rules for human-facing prose; spartan, active voice, contractions, no dashes. |
 | `session-handoff` | Decision-first handoff, saved with `playbook handoff save`, so the next session picks up cold without rereading the thread. |
+| `delegating-subagents` | When and how to dispatch subagents, which tier to pick (including the `-low` and `-xhigh` variants), and what to do when one finishes or goes quiet. |
+| `systematic-debugging` | Reproduce, isolate and root-cause a bug before proposing a fix. |
+| `playbook-usage` | Discovery aid: which `/playbook:*` command fits a task, for sessions without the system prompt. |
+| `atlassian-cli` | Read and write Jira and Confluence through `acli`, used by `/playbook:learn-project` when no Atlassian MCP server is connected. |
 
 ## Docs
 
 Full documentation: [`docs/index.md`](docs/index.md).
 
 - **Concepts** (`docs/concepts/`): system prompt design and the memory system.
-- **Guides** (`docs/guides/`): install, plan-and-implement, review and PR flow, decisions and memory.
+- **Guides** (`docs/guides/`): install, plan-and-implement, review and PR flow, decisions and memory, config keys.
 - **Authoring** (`docs/authoring/`): writing commands, skills, and hooks.
-- **Internals** (`docs/internals/`): launcher, hooks, model routing, and memory injection.
+- **Internals** (`docs/internals/`): launcher and hooks, model routing and memory, worktree engine, usage dashboard, headless mode, release channels.
 
 ## System prompt
 

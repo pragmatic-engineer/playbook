@@ -1,7 +1,8 @@
 # ADR 0003: Purpose-built subagents over generic fallbacks
 
-**Status:** Accepted
-**Date:** 2026-08-07
+- **Status:** Accepted
+- **Date created:** 2026-08-07
+- **Date modified:** 2026-08-07
 
 ## Context
 
