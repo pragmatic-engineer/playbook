@@ -115,6 +115,9 @@ pub struct Heredoc {
     pub delimiter: String,
     /// The body is not expanded, because the delimiter was quoted.
     pub quoted: bool,
+    /// The operator was `<<-`, so leading tabs of the body and of the
+    /// delimiter line are ignored.
+    pub strip_tabs: bool,
     /// The body's lines, with leading tabs removed for `<<-`.
     pub text: String,
     /// The body's lines in the source, up to the delimiter line.
@@ -133,6 +136,14 @@ pub struct Command {
     /// How many parentheses, as in `( ... )` or `$( ... )`, enclose the
     /// command: what it changes, such as the directory, ends with them.
     pub depth: usize,
+    /// Which innermost parenthesis group the command is in, numbered from 1 in
+    /// the order they open, or 0 outside any. Sibling groups differ.
+    pub group: usize,
+    /// The line break, as a character index, that ends the logical line the
+    /// command sits on: the first one outside quotes, substitutions and line
+    /// continuations after it. A heredoc the command opens has its body right
+    /// after it. `None` when the script ends first.
+    pub line_end: Option<usize>,
 }
 
 /// The words of each simple command in `command`. Heredoc bodies and comments
@@ -162,7 +173,9 @@ pub fn commands(command: &str) -> Vec<Command> {
         opened: Vec::new(),
         opened_here: Vec::new(),
         piped_next: false,
-        depth: 0,
+        groups: Vec::new(),
+        groups_opened: 0,
+        line_first: 0,
     }
     .run()
 }
@@ -283,8 +296,11 @@ struct Lexer {
     opened_here: Vec<usize>,
     /// The next command reads the output of the one before it.
     piped_next: bool,
-    /// Parentheses open around the position being read.
-    depth: usize,
+    /// The ids of the parentheses open around the position being read.
+    groups: Vec<usize>,
+    groups_opened: usize,
+    /// Index in `commands` of the first command on the current line.
+    line_first: usize,
 }
 
 impl Lexer {
@@ -352,14 +368,23 @@ impl Lexer {
                     self.end_command();
                     self.piped_next = false;
                     match c {
-                        '(' => self.depth += 1,
-                        ')' => self.depth = self.depth.saturating_sub(1),
+                        '(' => {
+                            self.groups_opened += 1;
+                            self.groups.push(self.groups_opened);
+                        }
+                        ')' => {
+                            self.groups.pop();
+                        }
                         _ => {}
                     }
                 }
                 '\n' | '\r' => {
                     self.end_command();
                     if c == '\n' {
+                        for command in &mut self.commands[self.line_first..] {
+                            command.line_end = Some(start);
+                        }
+                        self.line_first = self.commands.len();
                         self.read_heredoc_bodies();
                     }
                 }
@@ -434,7 +459,9 @@ impl Lexer {
             spans: std::mem::take(&mut self.spans),
             heredocs: Vec::new(),
             piped: std::mem::take(&mut self.piped_next),
-            depth: self.depth,
+            depth: self.groups.len(),
+            group: self.groups.last().copied().unwrap_or(0),
+            line_end: None,
         });
     }
 
@@ -669,6 +696,7 @@ impl Lexer {
                 owner.heredocs.push(Heredoc {
                     delimiter: opened.delimiter,
                     quoted: opened.quoted,
+                    strip_tabs: opened.strip_tabs,
                     text,
                     body: start..end,
                 });
@@ -888,6 +916,42 @@ mod tests {
             depth,
             [("a", 0), ("b", 1), ("c", 2), ("d", 0), ("e", 1), ("f", 0)]
         );
+    }
+
+    #[test]
+    fn sibling_parenthesis_groups_have_different_ids_and_nested_ones_differ_from_their_parent() {
+        let got = commands("a; (b; c) && (d; (e)); f");
+
+        let groups: Vec<(&str, usize)> =
+            got.iter().map(|c| (c.words[0].as_str(), c.group)).collect();
+        assert_eq!(
+            groups,
+            [("a", 0), ("b", 1), ("c", 1), ("d", 2), ("e", 3), ("f", 0)]
+        );
+    }
+
+    #[test]
+    fn a_command_line_ends_at_the_line_break_outside_quotes_substitutions_and_continuations() {
+        let table = [
+            ("a && \\\nb\nc", vec![Some(8), Some(8), None]),
+            ("a \"x\ny\" ; b\nc", vec![Some(11), Some(11), None]),
+            ("a \"$(cat <<'EOF'\nx\nEOF\n)\"\nb", vec![Some(25), None]),
+            ("a &&\nb", vec![Some(4), None]),
+            ("a # note\nb", vec![Some(8), None]),
+        ];
+        for (script, expected) in table {
+            let got: Vec<Option<usize>> = commands(script).iter().map(|c| c.line_end).collect();
+
+            assert_eq!(got, expected, "{script:?}");
+        }
+    }
+
+    #[test]
+    fn a_heredoc_remembers_whether_its_operator_stripped_tabs() {
+        let got = commands("cat <<-A\n\tx\n\tA\ncat <<B\nx\nB\n");
+
+        assert!(got[0].heredocs[0].strip_tabs);
+        assert!(!got[1].heredocs[0].strip_tabs);
     }
 
     #[test]

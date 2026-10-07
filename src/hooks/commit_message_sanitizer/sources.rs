@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 //! Finds where a command keeps a message and writes the sanitised text back
-//! to the same place: a shell word, a heredoc body, a file on disk, or the
-//! `printf` or `echo` that produces it.
+//! to the same place: a shell word or a heredoc body. A message in a file is
+//! never rewritten on disk: the command is made to read the cleaned text from
+//! a heredoc instead, and the file stays as it is. When there is no safe place
+//! for that heredoc, the file is reported as unread and left to the backstop.
 
-use super::engine::{Call, Findings, Plan};
-use crate::common::atomic::write_atomic;
+use super::engine::{Call, Findings, Inline, Plan};
 use crate::common::attribution::{drop_lines, problems, Shape};
 use crate::common::home_dir;
 use crate::common::shell::{commands, program_index, program_name, quote, Command};
@@ -24,16 +25,25 @@ const STDIN_PATHS: [&str; 4] = ["-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0
 /// How the sanitised text is written back.
 pub enum Target {
     /// A shell word, or the value inside one: the range becomes a quoted
-    /// literal. When nothing is left of the text, `whole` (the option that
-    /// held it) is removed instead.
+    /// literal. When nothing is left of the text, the range of `whole` (the
+    /// option that held it) is replaced by what is left of that option, which
+    /// is the other letters of a cluster such as `-nm`.
     Word {
         range: Range<usize>,
-        whole: Option<Range<usize>>,
+        whole: Option<(Range<usize>, String)>,
     },
     /// The lines of a heredoc body.
     Body(Range<usize>),
-    /// A file on disk, rewritten in place.
-    File(PathBuf),
+    /// The text of a file, read from a heredoc in its place. `replace` is the
+    /// file name, which becomes `-` and a `<<` operator, and the body goes at
+    /// `slot` after `lead`. The terminator is never `avoid`, the delimiter of
+    /// the heredoc this one sits inside.
+    Feed {
+        replace: Range<usize>,
+        slot: Range<usize>,
+        lead: &'static str,
+        avoid: Option<String>,
+    },
 }
 
 pub struct Source {
@@ -94,23 +104,16 @@ pub fn from_word(
 ) -> Vec<Source> {
     let word = &call.cmd().words[at];
     let span = &call.cmd().spans[at];
-    let skip = inline_at.unwrap_or(0);
-    let text: String = word.chars().skip(skip).collect();
+    let text: String = word.chars().skip(inline_at.unwrap_or(0)).collect();
     if !span.dynamic {
-        let start = span.start + skip;
-        let unquoted_prefix =
-            call.raw(span.start..start) == word.chars().take(skip).collect::<String>();
-        if !unquoted_prefix {
+        let Some(range) = value_span(call, at, inline_at) else {
             findings.unread.push(label.to_string());
             return Vec::new();
-        }
+        };
         return vec![Source {
             label: label.to_string(),
             text,
-            target: Target::Word {
-                range: start..span.end,
-                whole: None,
-            },
+            target: Target::Word { range, whole: None },
         }];
     }
     let raw = call.raw(span.start..span.end);
@@ -124,6 +127,16 @@ pub fn from_word(
         findings.unread.push(label.to_string());
     }
     sources
+}
+
+/// Where the value of the option in the word at `at` sits in the script, past
+/// its first `inline_at` characters, when those are written without quotes.
+pub fn value_span(call: &Call, at: usize, inline_at: Option<usize>) -> Option<Range<usize>> {
+    let span = call.span(at);
+    let skip = inline_at.unwrap_or(0);
+    let start = span.start + skip;
+    let prefix: String = call.cmd().words[at].chars().take(skip).collect();
+    (call.raw(span.start..start) == prefix).then_some(start..span.end)
 }
 
 /// The script inside the first `$(` and the last `)` of a word, or inside its
@@ -169,8 +182,9 @@ fn shift(range: &Range<usize>, base: usize) -> Range<usize> {
 }
 
 /// A message read from standard input: the command's own heredoc, or what
-/// the command before a pipe prints.
-pub fn from_stdin(call: &Call, label: &str) -> Vec<Source> {
+/// the command before a pipe prints. A pipe from a command that is not read,
+/// a redirect from a file or a here-string is reported as unread.
+pub fn from_stdin(call: &Call, label: &str, findings: &mut Findings) -> Vec<Source> {
     let cmd = call.cmd();
     if !cmd.heredocs.is_empty() {
         return cmd
@@ -183,26 +197,37 @@ pub fn from_stdin(call: &Call, label: &str) -> Vec<Source> {
             })
             .collect();
     }
-    match call.index.checked_sub(1).filter(|_| cmd.piped) {
-        Some(before) => producer_chain(call, before, label),
-        None => Vec::new(),
+    let before = call.index.checked_sub(1).filter(|_| cmd.piped);
+    let Some(before) = before.filter(|_| !redirects_stdin(call)) else {
+        findings.unread.push(format!(
+            "{label} (standard input is not a heredoc or a pipe)"
+        ));
+        return Vec::new();
+    };
+    let sources = producer_chain(call, before, label);
+    if sources.is_empty() {
+        findings.unread.push(format!("{label} (read from a pipe)"));
     }
+    sources
 }
 
 fn producer_chain(call: &Call, before: usize, label: &str) -> Vec<Source> {
     producer(&call.cmds[before], 0, label)
 }
 
-/// A message in a file: standard input for `-`, or the file on disk.
+/// A message in a file: standard input for `-`, or the file on disk, whose
+/// text is read from a heredoc in its place. `value` is where the file name
+/// sits in the script.
 pub fn from_path(
     call: &Call,
     path: &str,
     dynamic: bool,
+    value: Option<Range<usize>>,
     label: &str,
     findings: &mut Findings,
 ) -> Vec<Source> {
     if is_stdin_path(path) {
-        return from_stdin(call, label);
+        return from_stdin(call, label, findings);
     }
     let named = format!("{label} in {path}");
     let expanded = if dynamic {
@@ -214,27 +239,130 @@ pub fn from_path(
         findings.unread.push(named);
         return Vec::new();
     };
-    match read_file(&file) {
-        Some(text) => vec![Source {
+    match fed_from(call, &file, value) {
+        Ok(source) => vec![Source {
             label: named,
-            text,
-            target: Target::File(file),
+            ..source
         }],
-        None => {
-            findings.unread.push(named);
+        Err(why) => {
+            findings.unread.push(format!("{named} ({why})"));
             Vec::new()
         }
     }
 }
 
-fn read_file(path: &Path) -> Option<String> {
+/// The text of `file` with the heredoc that stands in for it, or why the file
+/// is left to the backstop: it must be a regular UTF-8 file under the size
+/// cap, and no earlier command in the script may touch it, since its text at
+/// the time the command runs is then not what is read here. A heredoc is the
+/// command's standard input, so one that already has another input, or a
+/// carrier that would take it, rules the swap out.
+fn fed_from(call: &Call, file: &Path, value: Option<Range<usize>>) -> Result<Source, &'static str> {
+    let text = read_message(file)?;
+    if touched_earlier(call, file) {
+        return Err("it is changed earlier in the same command");
+    }
+    if !call.cmd().heredocs.is_empty() || redirects_stdin(call) || call.under_stdin_carrier() {
+        return Err("standard input is already in use or taken by a carrier such as xargs");
+    }
+    let replace = value.ok_or("its name is partly quoted")?;
+    let avoid = host_delimiter(call.inline, &text)?;
+    let (slot, lead) = line_slot(call).ok_or("another heredoc is open on its line")?;
+    Ok(Source {
+        label: String::new(),
+        text,
+        target: Target::Feed {
+            replace,
+            slot,
+            lead,
+            avoid,
+        },
+    })
+}
+
+/// The delimiter of the heredoc the fed text would sit in, when there is one
+/// and the text can sit there: its shell must not expand it, no line may end
+/// that heredoc early, and `<<-` must have no tab to strip.
+fn host_delimiter(inline: Inline, text: &str) -> Result<Option<String>, &'static str> {
+    match inline {
+        Inline::Anywhere => Ok(None),
+        Inline::Nowhere => Err("it would sit in a heredoc inside an outer heredoc"),
+        Inline::InHeredoc(host) => {
+            let changed = text.lines().any(|line| {
+                line.trim_end_matches('\r') == host.delimiter
+                    || (host.strip_tabs && line.starts_with('\t'))
+            });
+            if !host.quoted || changed {
+                return Err("it would sit in an outer heredoc that expands it or could end early");
+            }
+            Ok(Some(host.delimiter.clone()))
+        }
+    }
+}
+
+/// Whether the command redirects its standard input with `<` or `<<<`, as
+/// opposed to a heredoc, which the lexer keeps apart.
+fn redirects_stdin(call: &Call) -> bool {
+    call.cmd().spans.iter().any(|span| {
+        call.raw(span.start..span.end)
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .starts_with('<')
+    })
+}
+
+/// Whether a command before this one in the script names `file`.
+fn touched_earlier(call: &Call, file: &Path) -> bool {
+    call.cmds[..call.index].iter().any(|cmd| {
+        cmd.words
+            .iter()
+            .map(|word| word.trim_start_matches(['<', '>']))
+            .any(|word| !word.is_empty() && resolve(word, call.dir) == file)
+    })
+}
+
+/// Where the body of a heredoc the command opens goes, as an empty range: right
+/// after the line break that ends the command's logical line, found outside
+/// quotes, substitutions and line continuations, with a line break of its own
+/// first when the script ends there. `None` when another heredoc is already
+/// open on that line.
+fn line_slot(call: &Call) -> Option<(Range<usize>, &'static str)> {
+    let line_end = call.cmd().line_end;
+    let busy = call
+        .cmds
+        .iter()
+        .any(|c| c.line_end == line_end && !c.heredocs.is_empty());
+    if busy {
+        return None;
+    }
+    Some(match line_end {
+        Some(at) => (at + 1..at + 1, ""),
+        None => (call.chars.len()..call.chars.len(), "\n"),
+    })
+}
+
+/// A heredoc terminator that no line of `text` equals, and that is not `avoid`.
+fn unique_delimiter(text: &str, avoid: Option<&str>) -> String {
+    let mut delimiter = "PLAYBOOK_MESSAGE_END".to_string();
+    while text.lines().any(|line| line == delimiter) || avoid == Some(delimiter.as_str()) {
+        delimiter.push('_');
+    }
+    delimiter
+}
+
+/// The text of a regular, UTF-8 file within the size cap.
+fn read_message(path: &Path) -> Result<String, &'static str> {
+    let meta = std::fs::symlink_metadata(path).map_err(|_| "it cannot be read")?;
+    if meta.file_type().is_symlink() {
+        return Err("it is a symbolic link");
+    }
+    if !meta.is_file() || meta.len() > MAX_MESSAGE_BYTES {
+        return Err("it is not a regular file under 1 MiB");
+    }
     let mut bytes = Vec::new();
     File::open(path)
-        .ok()?
-        .take(MAX_MESSAGE_BYTES)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+        .and_then(|file| file.take(MAX_MESSAGE_BYTES).read_to_end(&mut bytes))
+        .map_err(|_| "it cannot be read")?;
+    String::from_utf8(bytes).map_err(|_| "it is not valid UTF-8")
 }
 
 /// Sanitises `sources` as one message, the way git joins repeated `-m`, and
@@ -282,8 +410,8 @@ fn rewrite(
     }
     match &source.target {
         Target::Word { range, whole } => match whole {
-            Some(option) if text.trim().is_empty() => {
-                plan.edits.push((option.clone(), String::new()))
+            Some((option, kept)) if text.trim().is_empty() => {
+                plan.edits.push((option.clone(), kept.clone()))
             }
             _ => plan.edits.push((range.clone(), quote(&text))),
         },
@@ -295,12 +423,22 @@ fn rewrite(
             };
             plan.edits.push((range.clone(), body));
         }
-        Target::File(path) => {
-            if write_atomic(path, &text).is_err() {
-                findings
-                    .unread
-                    .push(format!("{} (could not rewrite)", source.label));
-            }
+        Target::Feed {
+            replace,
+            slot,
+            lead,
+            avoid,
+        } => {
+            let body = if text.is_empty() || text.ends_with('\n') {
+                text
+            } else {
+                format!("{text}\n")
+            };
+            let delimiter = unique_delimiter(&body, avoid.as_deref());
+            plan.edits
+                .push((replace.clone(), format!("- <<'{delimiter}'")));
+            plan.edits
+                .push((slot.clone(), format!("{lead}{body}{delimiter}\n")));
         }
     }
 }
