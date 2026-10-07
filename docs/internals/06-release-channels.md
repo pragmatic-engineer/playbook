@@ -2,7 +2,7 @@
 
 A tagged release reaches users through three channels: the GitHub release assets
 (built by the `build` and `checksums` jobs), the Homebrew tap
-`pragmatic-engineer/homebrew-playbook`, and the plugin marketplace
+`pragmatic-engineer/homebrew-tap`, and the plugin marketplace
 `pragmatic-engineer/marketplace`. The `publish-channels` job in
 `.github/workflows/release.yml` updates the last two after `checksums` succeeds.
 
@@ -20,7 +20,7 @@ release (so a backport tag cannot roll users back):
 
 The workflow token cannot write to other repos, so the job needs the secret
 `RELEASE_PUSH_TOKEN`: a fine-grained personal access token with
-`contents: write` on both `homebrew-playbook` and `marketplace`. Writes go
+`contents: write` on both `homebrew-tap` and `marketplace`. Writes go
 through the contents API, so GitHub signs the commits.
 
 Store it as an environment secret on the `release` environment (Settings,
