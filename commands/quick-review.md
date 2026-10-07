@@ -77,21 +77,19 @@ When in worktree mode, read and grep all files under `$WT` instead of the local 
 
 ## Voice rules (mandatory)
 
-Invoke the `playbook:grounding-review` skill before drafting any finding, and load the `playbook:writing-style` skill alongside it (grounding-review depends on it for voice, banned words, and GitHub comment patterns). The full discipline lives in those two skills.
+Findings are plain: a label, `file:line`, the exact evidence, a short failure scenario, and one fix in plain words. They are not comment bodies yet. Step 4 drafts the comment for each finding after the sweep, and only when something will be posted. The non-negotiable points for every finding:
 
-Comment bodies are read by another engineer, so they use the humane `playbook:writing-style` register (warm, contractions, constructive), NOT the terse operator voice from the "Concise & Direct" output style or system prompt `## Output`. Where those would conflict, `playbook:writing-style` wins for anything posted to GitHub. The non-negotiable points for inline comments posted to GitHub:
-
-- **Conventional Comments label on every finding, PLAIN TEXT (no bold), bare.** Start the body with the bare label: `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. NEVER wrap in `**...**`. Per writing-style: "a human typing fast doesn't wrap labels in `**`." Valid labels: `blocking`, `issue`, `suggestion`, `nitpick`, `question`. `blocking` replaces `issue` for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. The label itself orders the findings and is what posts, no separate decoration.
+- **Conventional Comments label on every finding, PLAIN TEXT (no bold), bare.** Start with the bare label: `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. NEVER wrap in `**...**`. Valid labels: `blocking`, `issue`, `suggestion`, `nitpick`, `question`. `blocking` replaces `issue` for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. The label itself orders the findings and is what posts, no separate decoration.
 - **One sentence by default, two at most: the problem, then what breaks.** State the defect and its failure, then stop. A second sentence only when the mechanism is genuinely non-obvious. A finding that argues a real decision can run a little longer. Avoid jargon; plainest words available. Don't teach the author what they already know or recap the diff.
 - **Pick one pragmatic fix.** No "X, or Y" options. If both work, prefer the smallest diff and recommend that one.
-- **Paraphrase, don't quote.** Block-quoting the README or source code is almost always longer than restating it in your own words.
+- **Paraphrase, don't quote, in the sentence itself.** The exact code belongs in the evidence line. Block-quoting the README or source code is almost always longer than restating it in your own words.
 - **Don't restate the diff or the anchor.** The author wrote the code; the comment is already on the line. Skip "this function adds X" and skip "at file:line" when the comment IS at that line.
 - **Cause or consequence, not both.** State the cause; trust the reader to infer the consequence.
 - **Drop intermediate-state padding.** "X is blank" beats "ships a blank X to the CSV".
 - **No hedging.** Ban: "may actually be", "I'd lean toward", "that said", "worth noting", "it's worth mentioning", "one could argue".
 - **No meta-justification.** "since X is a foot-gun" is reviewer-reasoning, not actionable info.
 - **Casual register.** Fragments OK. Lowercase verbs fine.
-- **No em dashes or en dashes.** Use commas, colons, or periods. Hard rule, also enforced in the system prompt and `playbook:writing-style`.
+- **No em dashes or en dashes.** Use commas, colons, or periods. Hard rule, also enforced in the system prompt.
 
 ## Execution rules
 
@@ -188,14 +186,16 @@ Capture: `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JS
 
 Reading and analysing the changed files is where main-context rot accumulates, so it runs in an isolated `reviewer` subagent, not the main session. The orchestrator keeps only the returned report, never the file contents.
 
+Before spawning, `SELF_MODE` is already settled (Step 1), so decide here whether anything can be posted. The orchestrator invokes `playbook:grounding-review` now, for the sweep and the report format, and loads no `playbook:writing-style` here.
+
 Spawn ONE `reviewer` subagent (`subagent_type: playbook:reviewer`); it pins its own model tier, so the orchestrator doesn't set `model` on this call. Because the review is single-pass, its focus is the ENTIRE diff (logic, tests, security, data, types, perf, docs), not one lens.
 
 The subagent prompt MUST include:
 
 - The PR diff and `HEAD_SHA`.
 - How to read files: **worktree mode** → the absolute `$WT` path with "read and grep files under $WT; do not install or build"; **in-place mode** (`WT` empty) → "read the local working tree, which is at HEAD_SHA".
-- The full **Voice rules (mandatory)** and **Anti-patterns to refuse** sections from this command, verbatim, plus the instruction to load `playbook:grounding-review` and `playbook:writing-style` for the rest of the discipline.
-- The output contract in Step 3: it MUST return exactly that report, one `Post:` block per finding.
+- The full **Voice rules (mandatory)** and **Anti-patterns to refuse** sections from this command, verbatim, plus the instruction to load `playbook:grounding-review` for the rest of the discipline. The reviewer loads no other skill and writes no comment body.
+- The output contract in Step 3: it MUST return exactly that report of plain findings, with no `Post:` block.
 - Read every cited file at `HEAD_SHA` before drafting; quote exact evidence; tag anything unconfirmed `[unverified]`.
 
 Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`); the moment it returns its report, `TaskStop` it. `TaskStop` can itself report failure, e.g. `no task found with ID: qr-<PR_NUMBER>`, when the agent already finished and was cleaned up before this call ran. That failure means the goal (nothing left running) is already satisfied: treat it as a benign no-op, not a command error, and continue to Step 3 with the report already in hand. There is no gh-api fallback; if the worktree setup in Step 1 failed, execution has already stopped.
@@ -210,7 +210,7 @@ So:
 - **A silent reviewer is NOT a clean review.** If nothing comes back, say the review did not run. Do not report zero findings, and do not post a pending review implying the diff was reviewed. Those are different outcomes and only one is safe to act on.
 - After the idle notification fires, one `SendMessage` asking for partial results is worth a single try; it sometimes works. Do not spend more than one round on it.
 
-The report is rendered in the `playbook:grounding-review` Review Report Format. `/playbook:quick-review` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding carries its `Post:` block (the exact GitHub comment), or `Report-only: not on a changed line, no inline draft.` when the evidence is not on a changed diff line.
+The report is rendered in the `playbook:grounding-review` Review Report Format. `/playbook:quick-review` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding is plain, with no comment body: label, `file:line`, evidence, the failure, and one fix. A finding whose evidence is not on a changed diff line ends with `Report-only: not on a changed line, no inline comment.`
 
 Do not relay the report yet. It goes through Step 3b first.
 
@@ -222,15 +222,23 @@ Run this before the report is shown to the user and before anything is posted. Y
 2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact.
 3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
 
-Drop findings that do not hold, relabel the mislabelled, move the misplaced, and update each changed finding's `Post:` block to match. To keep main context small, read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list. See the Verification Sweep section of `playbook:grounding-review`.
+Drop findings that do not hold, relabel the mislabelled, and move the misplaced. To keep main context small, read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list. See the Verification Sweep section of `playbook:grounding-review`.
 
-Only now relay the swept report to the user and go on to posting. Post findings verbatim from their `Post:` blocks as the sweep left them.
+Only now continue. In `SELF_MODE`, or when nothing is postable (zero findings, or only `Report-only` ones), relay the swept report as it is and go to Step 5: nothing will be posted, so no comment is drafted. Otherwise go to Step 4, which relays the swept report together with the drafted comments.
 
 ## Step 4: Orchestrate posting
 
-If `SELF_MODE` is true (explicit `--self`, no PR number/branch was given, the run mode is auto, or the resolved PR is authored by you), stop here: the report IS the deliverable, no GitHub posting.
+If `SELF_MODE` is true (explicit `--self`, no PR number/branch was given, the run mode is auto, or the resolved PR is authored by you), or nothing is postable (zero findings, or only `Report-only` ones), stop here: the report IS the deliverable, no `playbook:writing-style` load, no question, no GitHub posting.
 
-Otherwise, **ask the user, one question at a time** (memory rule):
+### Draft the comments (not in `SELF_MODE`, and only when something is postable)
+
+Now that the sweep is done and something can be posted, load `playbook:writing-style`. Draft one comment body for every swept finding that is not `Report-only`, from its label, problem, consequence and fix, applying that skill's GitHub rules. Comment bodies are read by another engineer, so they use the humane register (warm, contractions, constructive), NOT the terse operator voice from the "Concise & Direct" output style or system prompt `## Output`. Where those would conflict, `playbook:writing-style` wins for anything posted to GitHub. A body starts with the bare plain-text label, never bold, and carries no `file:line` prefix: GitHub anchors it. It MAY hold a ```suggestion``` block when the fix is mechanical.
+
+Relay the swept report with each draft shown under its finding as a `Draft:` block. Each draft is the final text: label, voice, no dashes, GitHub rules, all applied. Nothing is rewritten between this preview and the post, so what the user reads is exactly what posts. If the user asks for a change to a draft, redraft it with `playbook:writing-style` and show the new preview before posting.
+
+### Ask what to post
+
+**Ask the user, one question at a time** (memory rule):
 
 **Q1**: "Post which findings as a pending review?" Offer exactly these six tiers, each a strict superset of the one before, blocking and questions take precedence, suggestions and nitpicks stay optional:
 
@@ -243,7 +251,7 @@ Otherwise, **ask the user, one question at a time** (memory rule):
 
 Wait for response. If `none`, stop here.
 
-Build each inline comment from that finding's `Post:` block verbatim as the comment `body`, anchored to the finding's `file:line`. What the user read in the report is exactly what posts. Skip any finding marked `Report-only`.
+Build each inline comment from that finding's previewed `Draft:` block verbatim as the comment `body`, anchored to the finding's `file:line`. Post the previewed bodies as they are, never a rewording. Skip any finding marked `Report-only`.
 
 Build a JSON payload at `$REVIEW_JSON` (`/tmp/<org>/<repo>/quick-review-<number>.json`; the directory was created in Step 1):
 

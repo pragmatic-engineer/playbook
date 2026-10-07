@@ -11,6 +11,10 @@
 //! code instead of grepping, so a marker in prose or an example cannot pass
 //! for a real section. Model behaviour is not testable here: they cover prose
 //! structure only.
+//!
+//! The same parsing checks when `playbook:writing-style` loads: reviewers
+//! return plain findings and never load it, and the review commands load it
+//! only at the posting step, after the sweep and outside self mode.
 
 use std::fs;
 use std::path::PathBuf;
@@ -25,6 +29,9 @@ const SWEEP_FILES: &[&str] = &[
 
 /// Reviewer agents that tell their output will be swept.
 const SWEPT_AGENTS: &[&str] = &["agents/reviewer.md", "agents/cheap-checker.md"];
+
+/// The phrase a load instruction for the writing skill uses, lowercase.
+const WRITING_STYLE_LOAD: &str = "load `playbook:writing-style`";
 
 /// The three checks, as the numbered lead of each item.
 const CHECKS: &[&str] = &["1. **True.**", "2. **Label.**", "3. **Anchor.**"];
@@ -105,6 +112,26 @@ impl Doc {
 
     fn text_of(&self, s: &Section) -> String {
         self.lines[s.start..s.end].join("\n")
+    }
+
+    /// Indexes of lines in `start..end` that tell the reader to load the
+    /// skill. A mention that is negated ("never load", "do not load") or that
+    /// merely names the skill does not count.
+    fn writing_style_loads(&self, start: usize, end: usize) -> Vec<usize> {
+        (start..end)
+            .filter(|&i| {
+                let line = self.lines[i].to_lowercase();
+                line.match_indices(WRITING_STYLE_LOAD).any(|(at, _)| {
+                    let before = line[..at].trim_end();
+                    !before.ends_with("never") && !before.ends_with("not")
+                })
+            })
+            .collect()
+    }
+
+    /// Index of the first line at or after `from` that contains `needle`.
+    fn find_line(&self, from: usize, needle: &str) -> Option<usize> {
+        (from..self.lines.len()).find(|&i| self.lines[i].contains(needle))
     }
 }
 
@@ -305,4 +332,274 @@ fn sweep_detector_finds_nothing_in_a_file_without_one() {
 
     // Assert
     assert!(sweep.is_none(), "a fenced heading must not count");
+}
+
+fn draft_section(doc: &Doc) -> Section {
+    doc.section(|t| t.starts_with("Draft the comments"))
+        .unwrap_or_else(|| panic!("{} has no `Draft the comments` section", doc.path))
+}
+
+#[test]
+fn reviewer_agents_never_load_writing_style() {
+    for rel in SWEPT_AGENTS {
+        // Arrange
+        let doc = load(rel);
+
+        // Act
+        let loads = doc.writing_style_loads(0, doc.lines.len());
+        let text = doc.lines.join("\n");
+
+        // Assert
+        assert!(loads.is_empty(), "{rel}: loads writing-style: {loads:?}");
+        assert!(
+            text.contains("no `Post:` block"),
+            "{rel}: does not say findings carry no Post block"
+        );
+    }
+}
+
+#[test]
+fn reviewer_prompt_sections_never_load_writing_style() {
+    // Arrange: the sections each command hands to a reviewer prompt.
+    let quick = load("commands/quick-review.md");
+    let deep = load("commands/deep-review.md");
+    let implement = load("commands/implement.md");
+    let step9 = implement.step("Step 9:");
+    let fixes = implement
+        .section(|t| t.starts_with("Fix, open the PRs"))
+        .expect("implement has a section that applies the fixes");
+    let spans = [
+        (&quick, quick.step("Voice rules")),
+        (&quick, quick.step("Step 2:")),
+        (&deep, deep.step("Voice rules")),
+        (&deep, deep.step("Step 3:")),
+        (
+            &implement,
+            Section {
+                start: step9.start,
+                end: fixes.start,
+            },
+        ),
+    ];
+
+    for (doc, span) in spans {
+        // Act
+        let loads = doc.writing_style_loads(span.start, span.end);
+
+        // Assert
+        assert!(
+            loads.is_empty(),
+            "{}: a reviewer prompt section loads writing-style: {loads:?}",
+            doc.path
+        );
+    }
+}
+
+#[test]
+fn quick_review_loads_writing_style_once_after_the_sweep_outside_self_mode() {
+    // Arrange
+    let doc = load("commands/quick-review.md");
+
+    // Act
+    let sweep = doc.sweep().expect("quick-review has a sweep section");
+    let posting = doc.step("Step 4:");
+    let draft = draft_section(&doc);
+    let loads = doc.writing_style_loads(0, doc.lines.len());
+    let self_stop = doc
+        .find_line(posting.start, "If `SELF_MODE` is true")
+        .expect("Step 4 stops in self mode");
+    let show = doc
+        .find_line(draft.start, "Relay the swept report with each draft")
+        .expect("quick-review shows the drafts");
+    let ask = doc
+        .find_line(draft.end, "Post which findings")
+        .expect("quick-review asks which findings to post");
+
+    // Assert
+    assert_eq!(
+        loads.len(),
+        1,
+        "quick-review must load writing-style once: {loads:?}"
+    );
+    let load = loads[0];
+    assert!(
+        sweep.end <= load,
+        "quick-review: the load must sit after the sweep"
+    );
+    assert!(
+        posting.start < self_stop && self_stop < load && load < posting.end,
+        "quick-review: the load must sit inside Step 4, after the self mode stop"
+    );
+    assert!(
+        draft.start <= load && load < show && show < ask,
+        "quick-review: the load must come before the drafts are shown and the post question"
+    );
+}
+
+#[test]
+fn deep_review_loads_writing_style_once_after_the_sweep_outside_self_mode() {
+    // Arrange
+    let doc = load("commands/deep-review.md");
+
+    // Act
+    let sweep = doc.sweep().expect("deep-review has a sweep section");
+    let present = doc.step("Step 5:");
+    let posting = doc.step("Step 6:");
+    let draft = draft_section(&doc);
+    let loads = doc.writing_style_loads(0, doc.lines.len());
+    let show = doc
+        .find_line(draft.start, "Present the report with each draft")
+        .expect("deep-review shows the drafts");
+    let ask = doc
+        .find_line(posting.start, "Post which findings")
+        .expect("deep-review asks which findings to post");
+
+    // Assert
+    assert_eq!(
+        loads.len(),
+        1,
+        "deep-review must load writing-style once: {loads:?}"
+    );
+    let load = loads[0];
+    let line = doc.lines[load].to_lowercase();
+    assert!(
+        sweep.end <= load,
+        "deep-review: the load must sit after the sweep"
+    );
+    assert!(
+        present.start < draft.start && draft.start <= load && load < draft.end,
+        "deep-review: the load must sit in the draft section of the presenting step"
+    );
+    assert!(
+        line.find("skip this in `self_mode`")
+            .is_some_and(|skip| skip < line.find(WRITING_STYLE_LOAD).unwrap_or(0)),
+        "deep-review: the load must come after the self mode skip"
+    );
+    assert!(
+        load < show && show < posting.start && posting.start < ask,
+        "deep-review: the load must come before the drafts are shown and the post question"
+    );
+}
+
+#[test]
+fn deep_review_loads_skills_only_after_triage_settles_the_lenses() {
+    // Arrange
+    let doc = load("commands/deep-review.md");
+
+    // Act
+    let triage = doc.step("Step 2d:");
+    let load_step = doc.step("Step 2e:");
+
+    // Assert
+    assert!(
+        triage.start < load_step.start,
+        "deep-review: Step 2e must start after the Step 2d triage"
+    );
+}
+
+#[test]
+fn quick_review_invokes_grounding_review_after_self_mode_is_settled() {
+    // Arrange
+    let doc = load("commands/quick-review.md");
+
+    // Act
+    let resolve = doc.step("Step 1:");
+    let delegate = doc.step("Step 2:");
+    let invoke = doc
+        .find_line(delegate.start, "invokes `playbook:grounding-review`")
+        .expect("Step 2 invokes grounding-review");
+
+    // Assert
+    assert!(
+        doc.text_of(&resolve).contains("`SELF_MODE`"),
+        "quick-review: Step 1 does not settle SELF_MODE"
+    );
+    assert!(
+        resolve.end <= invoke,
+        "quick-review: grounding-review is invoked before Step 1 settles SELF_MODE"
+    );
+}
+
+#[test]
+fn posting_steps_post_the_previewed_drafts_as_they_are() {
+    for rel in ["commands/quick-review.md", "commands/deep-review.md"] {
+        // Arrange
+        let doc = load(rel);
+
+        // Act
+        let draft_text = doc.text_of(&draft_section(&doc));
+        let build = doc
+            .lines
+            .iter()
+            .find(|l| l.contains("previewed `Draft:` block verbatim"))
+            .unwrap_or_else(|| panic!("{rel}: the payload is not built from the previewed drafts"));
+
+        // Assert
+        assert!(
+            draft_text.contains("Nothing is rewritten between this preview and the post"),
+            "{rel}: does not forbid rewriting between preview and post"
+        );
+        assert!(
+            draft_text
+                .contains("redraft it with `playbook:writing-style` and show the new preview"),
+            "{rel}: does not redraft and re-preview on a requested change"
+        );
+        assert!(
+            build.contains("never a rewording"),
+            "{rel}: the post step may reword the previewed drafts"
+        );
+        assert!(
+            !doc.lines.join("\n").contains("`Post:` block verbatim"),
+            "{rel}: still builds comments from a reviewer Post block"
+        );
+    }
+}
+
+#[test]
+fn grounding_review_loads_writing_style_for_human_text_only() {
+    // Arrange
+    let doc = load("skills/grounding-review/SKILL.md");
+
+    // Act
+    let text = doc.lines.join("\n");
+    let format = doc
+        .section(|t| t == "Review Report Format")
+        .expect("report format");
+    let format_text = doc.text_of(&format);
+    let sweep_text = doc.text_of(&doc.sweep().expect("sweep section"));
+
+    // Assert
+    assert!(
+        !text.contains("MUST load the `playbook:writing-style` skill alongside"),
+        "grounding-review still requires writing-style alongside it"
+    );
+    assert!(
+        text.contains(
+            "Load the `playbook:writing-style` skill when writing text a person will read"
+        ) && text.contains("not to produce or check findings"),
+        "grounding-review does not scope the writing-style load to human text"
+    );
+    for (name, part) in [("report format", &format_text), ("sweep", &sweep_text)] {
+        assert!(
+            !part.contains("Post:\n") && !part.contains("`Post:` block:"),
+            "grounding-review {name} still defines a Post block"
+        );
+    }
+}
+
+#[test]
+fn sweeps_no_longer_update_post_blocks() {
+    for rel in SWEEP_FILES {
+        // Arrange
+        let doc = load(rel);
+
+        // Act
+        let text = doc.text_of(&doc.sweep().expect("sweep section"));
+
+        // Assert
+        assert!(
+            !text.contains("`Post:`"),
+            "{rel}: the sweep still touches Post blocks"
+        );
+    }
 }
