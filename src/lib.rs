@@ -332,14 +332,16 @@ pub enum DashboardCommand {
 
 /// `playbook sanitize` subcommands, backing `src/sanitize.rs`. Each rewrites
 /// FILE in place unless `--check` is given, and prints one line per removed
-/// line to stderr: its number and the shape of the attribution, never its text.
+/// line to stderr: its number and the shape of the attribution, never its
+/// text. Without `--check` the exit code is always 0, even when FILE cannot be
+/// read or written.
 #[derive(Subcommand, Debug)]
 pub enum SanitizeCommand {
     /// Sanitize a commit message file, such as git's `.git/COMMIT_EDITMSG`.
     CommitMsg {
         file: PathBuf,
         /// Report what would be removed and exit 1 if anything would, without
-        /// writing.
+        /// writing. Exits 2 when FILE cannot be read.
         #[arg(long)]
         check: bool,
     },
@@ -347,7 +349,7 @@ pub enum SanitizeCommand {
     PrText {
         file: PathBuf,
         /// Report what would be removed and exit 1 if anything would, without
-        /// writing.
+        /// writing. Exits 2 when FILE cannot be read.
         #[arg(long)]
         check: bool,
     },

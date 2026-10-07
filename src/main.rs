@@ -239,10 +239,14 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
-                Err(err) => {
+                // A commit-msg hook must never block a commit, so only
+                // `--check` turns an unreadable file into a failing exit, and
+                // its own code tells CI the file was not read.
+                Err(err) if check => {
                     eprintln!("sanitize: {err}");
-                    std::process::exit(1);
+                    std::process::exit(2);
                 }
+                Err(err) => eprintln!("sanitize: warning: {err}; leaving the file as it is"),
             }
         }
         Command::Ci { json, strict, dir } => match ci::run(dir.as_deref(), json, strict) {
