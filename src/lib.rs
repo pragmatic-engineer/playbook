@@ -39,7 +39,7 @@ use std::path::PathBuf;
     name = "playbook",
     version,
     after_help = "Run `playbook <command> --help` for details on one command.\n\
-Run `playbook doctor --help` to check your setup, or `/playbook:doctor` inside Claude Code.\n\
+Check your setup with `/playbook:doctor` inside Claude Code (`playbook doctor --help` lists its helpers).\n\
 Docs: https://github.com/pragmatic-engineer/playbook"
 )]
 pub struct Cli {
@@ -67,11 +67,12 @@ pub enum Command {
     },
     /// Update playbook to a published release
     ///
-    /// Downloads the release, checks its SHA256 sum and build attestation,
-    /// then swaps the binary and keeps the old one as a backup. In auto mode
-    /// it asks for `--yes` first. `--check` and `--list` change nothing.
-    /// `--check` exits 0 whether or not an update exists, and 1 if it cannot
-    /// reach the release list.
+    /// Downloads the release, checks its SHA256 sum and, when `gh` is
+    /// installed, its build attestation, then swaps the binary and keeps the
+    /// old one as a backup. In auto mode it refuses unless you pass `--yes`.
+    /// `--check` and `--list` change nothing. `--check` exits 0 whether or not
+    /// an update exists, and 1 on an error such as an unreachable release list
+    /// or an unknown version.
     ///
     /// Example: `playbook update --check`
     #[command(alias = "upgrade")]
@@ -93,11 +94,12 @@ pub enum Command {
     },
     /// Print the installed version, same as `--version`
     Version,
-    /// Read the settings facts that the health check uses
+    /// Read single facts that the health check uses
     ///
     /// The full health check is the `/playbook:doctor` command inside Claude
-    /// Code. These subcommands print single facts it needs, such as plugin
-    /// version or hook wiring, and are handy when a layer reports a miss.
+    /// Code. These subcommands print one fact each, such as pending
+    /// migrations, plugin version or hook wiring, and help when a layer
+    /// reports a miss.
     ///
     /// Example: `playbook doctor pending-migrations`
     Doctor {
@@ -124,10 +126,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: ConfigCommand,
     },
-    /// Start or resume Claude Code sessions with the launcher
+    /// Launcher helpers behind the `cc` shell shortcut
     ///
-    /// With no subcommand, resumes the most recent session for this project.
-    /// This is what the `cc` shell shortcut runs.
+    /// Sessions are started by the `cc` shell shortcut (install it with
+    /// `playbook init --aliases`). These subcommands do its housekeeping:
+    /// list sessions, prune state, clear caches, and create worktrees.
     ///
     /// Example: `playbook cc worktree my-branch`
     Cc {
@@ -205,7 +208,7 @@ pub enum Command {
     },
     /// Record and check plan verdicts used as gates
     ///
-    /// Verdicts are stored under `~/.config/playbook`, keyed by plan.
+    /// Verdicts are stored per worktree, keyed by plan.
     Gate {
         #[command(subcommand)]
         sub: GateCommand,
@@ -239,6 +242,8 @@ pub enum Command {
         dir: Option<String>,
     },
     /// Print the path of one of this repo's playbook storage folders
+    ///
+    /// First moves any legacy folders from the old repo-local location.
     Path {
         /// Which folder to print
         kind: PathKind,
@@ -246,7 +251,7 @@ pub enum Command {
     /// Small JSON helpers for shell scripts
     ///
     /// Reads JSON on stdin. Hidden from the command list, still works, and is
-    /// planned for removal.
+    /// slated for removal.
     #[command(hide = true)]
     Json {
         #[command(subcommand)]
@@ -793,13 +798,14 @@ pub enum HookName {
 /// `playbook cc` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum CcCommand {
-    /// Clean up and resume the most recent matching session
+    /// Mode of the `cc` shortcut: clean up and resume (no action by itself)
     Clean,
-    /// Start a fresh session with settings.json re-applied
+    /// Mode of the `cc` shortcut: start a fresh session (no action by itself)
     Fresh,
-    /// Resume a session as it was, optionally by session id
+    /// Mode of the `cc` shortcut: resume a session as it was (no action by itself)
     ///
-    /// Does not fork the session and keeps your overrides.
+    /// The `cc` shortcut handles these modes. Running this command directly
+    /// does nothing and exits 0.
     Raw {
         /// Session id to resume (default: the most recent)
         sid: Option<String>,
@@ -812,7 +818,9 @@ pub enum CcCommand {
     /// Clear caches that would freeze old settings into a session
     #[command(name = "bust-cache")]
     BustCache,
-    /// Create a git worktree for a branch and start a session in it
+    /// Create a git worktree for a branch and print its path
+    ///
+    /// Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"`.
     #[command(alias = "new")]
     Worktree {
         /// Branch to create the worktree for
@@ -931,15 +939,27 @@ mod tests {
 
     fn help_texts(cmd: &clap::Command, path: &str, out: &mut Vec<(String, String)>) {
         let here = format!("{path} {}", cmd.get_name());
-        for text in [cmd.get_about(), cmd.get_long_about(), cmd.get_after_help()]
-            .into_iter()
-            .flatten()
+        for text in [
+            cmd.get_about(),
+            cmd.get_long_about(),
+            cmd.get_before_help(),
+            cmd.get_before_long_help(),
+            cmd.get_after_help(),
+            cmd.get_after_long_help(),
+        ]
+        .into_iter()
+        .flatten()
         {
             out.push((here.clone(), text.to_string()));
         }
         for arg in cmd.get_arguments() {
             for text in [arg.get_help(), arg.get_long_help()].into_iter().flatten() {
                 out.push((format!("{here} --{}", arg.get_id()), text.to_string()));
+            }
+            for value in arg.get_possible_values() {
+                if let Some(text) = value.get_help() {
+                    out.push((format!("{here} {}", value.get_name()), text.to_string()));
+                }
             }
         }
         for sub in cmd.get_subcommands() {
@@ -958,7 +978,7 @@ mod tests {
         // Assert
         assert!(texts.len() > 100, "the walk found too little help text");
         for (place, text) in texts {
-            for banned in ["src/", "shell/", "::"] {
+            for banned in ["src/", "shell/", "::", ".rs", ".sh", ".py"] {
                 assert!(
                     !text.contains(banned),
                     "help for `{place}` leaks `{banned}`: {text}"
@@ -984,6 +1004,8 @@ mod tests {
             .collect();
 
         // Assert
+        let mut hidden = hidden;
+        hidden.sort();
         assert_eq!(hidden, ["hook", "json"]);
         assert!(Cli::command()
             .try_get_matches_from(["playbook", "json", "array-length"])
