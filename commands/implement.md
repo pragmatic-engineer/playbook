@@ -454,7 +454,21 @@ Give each reviewer Task a stable `name` and call `TaskStop` on it the moment it 
 
 **The `reviewer` agent is structurally read-only, so a lens can only deliver by returning, and that channel is unreliable** (`playbook:delegating-subagents`). It holds Read, Grep, Glob and Skill; `playbook agents check` forbids `Write` and `Bash` for that tier by design, so there is no file to fall back on. **A lens that returned nothing did NOT run.** Never count it as a clean lens, and never let a swarm with missing lenses read as "no findings": that is how a review swarm silently becomes a no-op while looking thorough. Name the missing lenses in the final report. Start your own pass on the riskiest part of the diff while the swarm runs, so lost lenses cost latency rather than coverage.
 
-Each lens gives severity-classified findings with `file:line` evidence and a fix per finding. **Consolidate:** merge the files, dedup overlapping findings, drop anything already addressed, and fact-check each surviving finding against the file at HEAD before acting (discard stale or hallucinated ones). Then apply the fixes you hold with HIGH confidence plus every blocking correctness/security finding, routing each per Step 8's multi-Segment routing (savepoint: fix the owning branch and locally rebase the stack before any push; pause: fix the current Segment only, earlier-Segment fixes become follow-ups), and re-run the Step 7 validation checks. Surface the rest as known follow-ups: don't silently drop them, and don't start a second refinement loop.
+Each lens gives severity-classified findings with `file:line` evidence and a fix per finding. **Consolidate:** merge the files, dedup overlapping findings, and drop anything already addressed. Then run the verification sweep below before presenting or acting on any finding.
+
+### Verification sweep (MUST, before presenting or acting)
+
+You do this yourself, not a reviewer: reviewers are read-only and can be wrong. Check every consolidated finding against the code at HEAD:
+
+1. **True.** Re-read the cited lines. Trace or run the failure scenario where that is cheap. A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
+2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact.
+3. **Anchor.** The file and line are right. In a stacked or multi-PR run, the finding sits on the PR or branch that owns the code.
+
+Drop findings that do not hold, relabel the mislabelled, and move the misplaced. Read only the cited lines, never whole files. Then say in one line what the sweep changed, with the counts: kept, dropped, relabelled, moved. See the Verification Sweep section of `playbook:grounding-review`.
+
+### Fix, open the PRs, finish
+
+Apply the fixes you hold with HIGH confidence plus every blocking correctness/security finding, routing each per Step 8's multi-Segment routing (savepoint: fix the owning branch and locally rebase the stack before any push; pause: fix the current Segment only, earlier-Segment fixes become follow-ups), and re-run the Step 7 validation checks. Surface the rest as known follow-ups: don't silently drop them, and don't start a second refinement loop.
 
 **Open the PR set (MUST).** Once the Step 7 checks are green after the adversarial fixes, deliver the Segments as pull requests per the Step 4.5 topology, one PR per Segment, via the `/playbook:create-pull-request` skill (never raw `gh pr create`; it applies pre-flight checks, the conventional-commit title, the team template, and the `playbook:writing-style` voice). Each PR body names the Segment's concern and lists that Segment's slice of the unresolved follow-ups under a "Follow-ups" heading. Under `--no-tests`, each PR body also carries one line: "No new tests, by explicit choice." The PR readiness check prints `VERDICT tests: NONE`, a warning; that is expected here.
 
