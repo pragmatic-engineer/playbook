@@ -45,6 +45,18 @@ fn main() {
                 skip_permissions,
                 args,
             }) => std::process::exit(cc::launch::run(skip_permissions, &args)),
+            Some(CcCommand::Housekeep {
+                repo_root,
+                worktree,
+                branch,
+                no_push,
+            }) => cc::worktree_run::Housekeep::new(
+                std::path::Path::new(&repo_root),
+                std::path::Path::new(&worktree),
+                &branch,
+                no_push,
+            )
+            .run(),
             Some(CcCommand::Clean) => std::process::exit(cc::launch::run(false, &["clean".into()])),
             Some(CcCommand::Fresh) => std::process::exit(cc::launch::run(false, &["fresh".into()])),
             Some(CcCommand::Raw { sid }) => {

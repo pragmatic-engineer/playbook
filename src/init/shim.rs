@@ -122,7 +122,7 @@ pub fn rewire_rc_file(home: &Path, shell_kind: ShellKind) -> io::Result<ShimOutc
     };
 
     let rewritten = rewrite_legacy_lines(&existing, shell_kind);
-    if rewritten.is_none() && has_line(&existing, SOURCE_LINE) {
+    if rewritten.is_none() && has_current_line(&existing) {
         return Ok(unchanged);
     }
     if !owner_can_write(&rc_file) {
@@ -170,26 +170,49 @@ fn has_line(content: &[u8], wanted: &str) -> bool {
         .any(|line| line.trim_ascii() == wanted.as_bytes())
 }
 
-/// Drop every legacy source line from `content`. The first one becomes the
-/// current line when no current line exists yet. `None` if there was no
+/// Drop every legacy source line (and the managed comment right above it)
+/// from `content`, then append the current block at the end unless it is
+/// already there. At the end, so the line runs after any `PATH` export the
+/// installer appended below the old `source` line. `None` if there was no
 /// legacy line to touch.
 fn rewrite_legacy_lines(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
-    let mut current_present = has_line(content, SOURCE_LINE);
-    let mut out = Vec::with_capacity(content.len());
+    let mut lines: Vec<&[u8]> = Vec::new();
     let mut touched = false;
     for line in content.split_inclusive(|&b| b == b'\n') {
         if !is_legacy_source_line(line, shell_kind) {
-            out.extend_from_slice(line);
+            lines.push(line);
             continue;
         }
         touched = true;
-        if !current_present {
-            out.extend_from_slice(SOURCE_LINE.as_bytes());
-            out.push(b'\n');
-            current_present = true;
+        if lines
+            .last()
+            .is_some_and(|prev| prev.trim_ascii() == BLOCK_COMMENT.as_bytes())
+        {
+            lines.pop();
         }
     }
-    touched.then_some(out)
+    if !touched {
+        return None;
+    }
+    let mut out: Vec<u8> = lines.concat();
+    if !has_current_line(&out) {
+        while out.ends_with(b"\n\n") {
+            out.pop();
+        }
+        if !out.is_empty() && !out.ends_with(b"\n") {
+            out.push(b'\n');
+        }
+        if !out.is_empty() {
+            out.push(b'\n');
+        }
+        out.extend_from_slice(format!("{BLOCK_COMMENT}\n{SOURCE_LINE}\n").as_bytes());
+    }
+    Some(out)
+}
+
+/// The guarded line, or the bare `eval` a user may have written by hand.
+fn has_current_line(content: &[u8]) -> bool {
+    has_line(content, SOURCE_LINE) || has_line(content, "eval \"$(playbook shell-init)\"")
 }
 
 /// A non-comment line that sources (`source` or `.`) a legacy launcher path,

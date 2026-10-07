@@ -124,6 +124,63 @@ fn an_existing_titled_session_is_resumed_and_forks_only_on_drift() {
 }
 
 #[test]
+fn config_drift_forks_the_resume_once_per_change() {
+    let e = env("drift");
+    e.session();
+    let hash_script = e.home.join(".config/playbook/hooks/lib/config-hash.sh");
+    fs::create_dir_all(hash_script.parent().unwrap()).unwrap();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("hooks/lib/config-hash.sh"),
+        &hash_script,
+    )
+    .unwrap();
+    let settings = e.home.join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, "{\"a\":1}").unwrap();
+
+    e.launch(&[]);
+    e.launch(&[]);
+    fs::write(&settings, "{\"a\":2}").unwrap();
+    e.launch(&[]);
+
+    let calls = e.calls();
+    assert_eq!(calls[0], format!("-n proj --resume {SID} --fork-session"));
+    assert_eq!(calls[1], format!("-n proj --resume {SID}"));
+    assert_eq!(calls[2], format!("-n proj --resume {SID} --fork-session"));
+}
+
+#[test]
+fn launching_trusts_the_dir_but_listing_does_not() {
+    let e = env("trust");
+    let claude_json = e.home.join(".claude.json");
+    fs::write(&claude_json, "{\"projects\":{}}").unwrap();
+
+    e.launch(&["list"]);
+    assert!(!fs::read_to_string(&claude_json)
+        .unwrap()
+        .contains("hasTrustDialogAccepted"));
+    e.launch(&["fresh"]);
+
+    let doc: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
+    assert_eq!(
+        doc["projects"][e.work.to_str().unwrap()]["hasTrustDialogAccepted"],
+        true
+    );
+}
+
+#[test]
+fn claude_does_not_inherit_the_cd_file_variable() {
+    let e = env("cd-env");
+    make_exec(
+        &e.root.join("bin/claude"),
+        "#!/bin/sh\nprintf '%s\\n' \"${PLAYBOOK_CC_CD_FILE:-unset}\" >> \"$FAKE_LOG\"\n",
+    );
+    e.launch_with(&["--"], &[], &[("PLAYBOOK_CC_CD_FILE", "/tmp/x")]);
+    assert_eq!(e.calls(), vec!["unset"]);
+}
+
+#[test]
 fn a_value_flag_is_not_taken_for_the_subcommand() {
     let e = env("flag-value");
     e.session();
@@ -243,7 +300,7 @@ fn worktree_launches_inside_the_new_tree_and_records_the_cd_target() {
     let cd = e.root.join("cd-file");
 
     let out = e.launch_with(
-        &["--"],
+        &["--skip-permissions", "--"],
         &["worktree", "develop"],
         &[
             ("PLAYBOOK_CC_CD_FILE", cd.to_str().unwrap()),
@@ -262,7 +319,7 @@ fn worktree_launches_inside_the_new_tree_and_records_the_cd_target() {
     assert!(Path::new(target).is_dir());
     let pwd = fs::read_to_string(format!("{}.pwd", e.log().display())).unwrap();
     assert_eq!(pwd.trim(), target);
-    assert_eq!(e.calls()[0], "-n develop");
+    assert_eq!(e.calls()[0], "--dangerously-skip-permissions -n develop");
 }
 
 #[test]
@@ -333,5 +390,11 @@ fn shell_init_defines_working_functions_in_every_available_shell() {
             fs::read_to_string(e.root.join("argv")).unwrap().trim(),
             "cc launch --skip-permissions -- one two"
         );
+        let leftovers = fs::read_dir(&e.root)
+            .unwrap()
+            .flatten()
+            .filter(|f| f.file_name().to_string_lossy().starts_with("playbook-cc."))
+            .count();
+        assert_eq!(leftovers, 0, "{shell}: the cd temp file is removed");
     }
 }

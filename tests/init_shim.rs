@@ -311,7 +311,7 @@ fn rewire_rc_file_matches_legacy_lines_loosely() {
         let contents = fs::read_to_string(&rc_file).unwrap();
         assert_eq!(
             contents,
-            format!("{comment}\n{ZSH_CURRENT}\nexport A=1\n"),
+            format!("{comment}\nexport A=1\n\n# playbook launchers (cc/ccd)\n{ZSH_CURRENT}\n"),
             "form {form:?}"
         );
 
@@ -366,7 +366,7 @@ fn rewire_rc_file_keeps_a_symlinked_rc_and_updates_its_target() {
     );
     assert_eq!(
         fs::read_to_string(&target).unwrap(),
-        format!("{ZSH_CURRENT}\n")
+        format!("# playbook launchers (cc/ccd)\n{ZSH_CURRENT}\n")
     );
 
     let _ = fs::remove_dir_all(&home);
@@ -398,8 +398,10 @@ fn rewire_rc_file_preserves_a_non_utf8_rc_file() {
     // Act
     rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed");
 
-    // Assert: the legacy line is replaced, the Latin-1 bytes are intact.
-    assert_eq!(fs::read(&rc_file).unwrap(), original);
+    // Assert: the legacy line is replaced by a block at the end, the Latin-1 bytes are intact.
+    let mut migrated = b"# configura\xe7\xe3o\n\n# playbook launchers (cc/ccd)\n".to_vec();
+    migrated.extend_from_slice(format!("{ZSH_CURRENT}\n").as_bytes());
+    assert_eq!(fs::read(&rc_file).unwrap(), migrated);
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -461,7 +463,7 @@ fn upgrade_legacy_rc_files_rewrites_every_legacy_form_and_skips_clean_files() {
     );
     assert_eq!(
         fs::read_to_string(home.join(".bashrc")).unwrap(),
-        format!("{SOURCE_LINE}\nexport A=1\n")
+        format!("export A=1\n\n# playbook launchers (cc/ccd)\n{SOURCE_LINE}\n")
     );
 
     let _ = fs::remove_dir_all(&home);

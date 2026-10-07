@@ -42,7 +42,8 @@ const EXIT_NOT_A_GIT_REPO: i32 = 10;
 /// process-global state to point this at a scratch repo.
 pub fn run(start_dir: &Path, branch_raw: &str, env_base_arg: Option<&str>) -> i32 {
     match setup(start_dir, branch_raw, env_base_arg) {
-        Ok(path) => {
+        Ok((path, housekeep)) => {
+            housekeep.run();
             println!("{}", path.display());
             0
         }
@@ -50,13 +51,66 @@ pub fn run(start_dir: &Path, branch_raw: &str, env_base_arg: Option<&str>) -> i3
     }
 }
 
+/// The slow background half of a worktree setup: fetch, upstream, sync and
+/// sweep. The caller runs it in place or hands it to a detached process.
+pub struct Housekeep {
+    repo_root: PathBuf,
+    worktree_path: PathBuf,
+    branch: String,
+    no_push: bool,
+}
+
+impl Housekeep {
+    pub fn new(repo_root: &Path, worktree_path: &Path, branch: &str, no_push: bool) -> Self {
+        Housekeep {
+            repo_root: repo_root.to_path_buf(),
+            worktree_path: worktree_path.to_path_buf(),
+            branch: branch.to_string(),
+            no_push,
+        }
+    }
+
+    pub fn run(&self) {
+        run_housekeep(
+            &self.repo_root,
+            &self.worktree_path,
+            &self.branch,
+            self.no_push,
+        );
+    }
+
+    /// Runs the housekeeping in its own silent process group, so it outlives
+    /// the launcher and never writes into the session's terminal.
+    pub fn spawn_detached(&self) {
+        use std::os::unix::process::CommandExt;
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
+        let mut cmd = Command::new(exe);
+        cmd.args(["cc", "housekeep", "--repo-root"])
+            .arg(&self.repo_root)
+            .arg("--worktree")
+            .arg(&self.worktree_path)
+            .args(["--branch", &self.branch])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .process_group(0);
+        if self.no_push {
+            cmd.arg("--no-push");
+        }
+        let _ = cmd.spawn();
+    }
+}
+
 /// The same flow as [`run`], returning the worktree path instead of printing
-/// it, so the launcher can enter it. Messages still go to stderr.
+/// it, so the launcher can enter it. Messages still go to stderr. The
+/// housekeeping is returned, not run.
 pub fn setup(
     start_dir: &Path,
     branch_raw: &str,
     env_base_arg: Option<&str>,
-) -> Result<PathBuf, i32> {
+) -> Result<(PathBuf, Housekeep), i32> {
     eprintln!("worktree: setting up '{branch_raw}'...");
 
     if !git_ok(start_dir, &["rev-parse", "--is-inside-work-tree"]) {
@@ -97,14 +151,7 @@ pub fn setup(
     // `prepare_and_finish` is a normal return, so this line always runs next,
     // which is what guarantees a stash taken above is never left behind on a
     // failure path.
-    let outcome = prepare_and_finish(
-        &repo_root,
-        &wt_root,
-        &branch,
-        env_base_arg,
-        &base_ref,
-        no_push,
-    );
+    let outcome = prepare_and_finish(&repo_root, &wt_root, &branch, env_base_arg, &base_ref);
     worktree::restore_stash(&repo_root, stash_applied);
 
     match outcome {
@@ -115,7 +162,8 @@ pub fn setup(
                 );
             }
             eprintln!("Ready: {}", path.display());
-            Ok(path)
+            let housekeep = Housekeep::new(&repo_root, &path, &branch, no_push);
+            Ok((path, housekeep))
         }
         Err(code) => Err(code),
     }
@@ -131,7 +179,6 @@ fn prepare_and_finish(
     branch: &str,
     env_base_arg: Option<&str>,
     base_ref: &str,
-    no_push: bool,
 ) -> Result<PathBuf, i32> {
     let target = resolve_target(repo_root, wt_root, branch);
     let env_base = worktree::find_env_base(repo_root, env_base_arg);
@@ -174,7 +221,6 @@ fn prepare_and_finish(
     }
 
     run_rebase(&worktree_path, branch, base_ref);
-    run_housekeep(repo_root, &worktree_path, branch, no_push);
 
     Ok(worktree_path)
 }

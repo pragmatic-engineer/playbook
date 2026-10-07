@@ -504,7 +504,7 @@ fn rewire_rc_file_step(
         );
     };
     if !shell_runtime_confirmed {
-        return StepReport::skipped("shim", "launcher runtime copy not confirmed complete");
+        return StepReport::skipped("shim", "config-hash.sh copy not confirmed complete");
     }
     match shim::rewire_rc_file(home, shell_kind) {
         Ok(outcome) if outcome.unwritable => StepReport::skipped(

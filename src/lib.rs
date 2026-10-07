@@ -917,6 +917,18 @@ pub enum CcCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Background half of `cc worktree`, spawned by the launcher
+    #[command(hide = true)]
+    Housekeep {
+        #[arg(long)]
+        repo_root: String,
+        #[arg(long)]
+        worktree: String,
+        #[arg(long)]
+        branch: String,
+        #[arg(long)]
+        no_push: bool,
+    },
     /// Create a git worktree for a branch and print its path
     ///
     /// Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"`.

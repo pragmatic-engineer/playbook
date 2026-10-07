@@ -8,7 +8,7 @@
 //! to the path written to `$PLAYBOOK_CC_CD_FILE`, the one thing a child cannot do.
 
 use super::{bust_cache, clean_resume, config_drift, retention, sessions, worktree_run};
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -53,7 +53,6 @@ pub fn split_flags(args: &[String]) -> (Vec<String>, Vec<String>) {
 
 /// Runs the launcher and returns the exit code of the session (or the failure).
 pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
-    ignore_sigint_in_parent();
     let mut all: Vec<String> = Vec::new();
     if skip_permissions {
         all.push("--dangerously-skip-permissions".into());
@@ -73,13 +72,16 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
 
 extern "C" fn noop(_: libc::c_int) {}
 
-/// Ctrl-C reaches the whole foreground group; the parent must outlive the
-/// session to prune and report the worktree. A handler (not SIG_IGN) resets on exec.
-fn ignore_sigint_in_parent() {
+/// Runs `f` with a no-op SIGINT handler: Ctrl-C reaches the whole foreground
+/// group, and the launcher must outlive the session to prune and report. A
+/// handler (not SIG_IGN) resets on exec, so claude keeps its own behaviour.
+fn with_sigint_held<T>(f: impl FnOnce() -> T) -> T {
     // SAFETY: installing an empty handler is async-signal-safe.
-    unsafe {
-        libc::signal(libc::SIGINT, noop as *const () as libc::sighandler_t);
-    }
+    let previous = unsafe { libc::signal(libc::SIGINT, noop as *const () as libc::sighandler_t) };
+    let out = f();
+    // SAFETY: restores the handler captured above.
+    unsafe { libc::signal(libc::SIGINT, previous) };
+    out
 }
 
 fn dispatch(cwd: &mut PathBuf, args: &[String]) -> i32 {
@@ -195,8 +197,7 @@ fn resume(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], rest: &[
         head.push("--fork-session".into());
         println!("-> cc: config changed; forking to reload settings/plugins/hooks");
     }
-    let err_path = std::env::temp_dir().join(format!("playbook-cc-err-{}", std::process::id()));
-    let stderr = File::create(&err_path).map(Stdio::from).ok();
+    let (err_path, stderr) = private_err_file();
     let argv = [flags, &name_args[..], &head[..], rest].concat();
     let rc = spawn(cwd, &argv, stderr);
     let err = fs::read_to_string(&err_path).unwrap_or_default();
@@ -214,10 +215,11 @@ fn resume(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], rest: &[
 
 fn worktree(cwd: &mut PathBuf, flags: &[String], tail: &[String]) -> i32 {
     let mut positional: Vec<&str> = Vec::new();
+    let mut no_push = false;
     for arg in tail {
         match arg.as_str() {
             "--ai-resolve" | "--" => {}
-            "--no-push" => std::env::set_var("WORKTREE_NO_PUSH", "1"),
+            "--no-push" => no_push = true,
             "-h" | "--help" => {
                 eprintln!("usage: cc worktree <branch> [env-base-folder] [--no-push]");
                 return 0;
@@ -230,8 +232,21 @@ fn worktree(cwd: &mut PathBuf, flags: &[String], tail: &[String]) -> i32 {
         }
     }
     let branch = positional.first().copied().unwrap_or("");
-    let path = match worktree_run::setup(cwd, branch, positional.get(1).copied()) {
-        Ok(path) => path,
+    // The flag reaches the worktree code through the same variable the
+    // shell used; it is cleared again so the session does not inherit it.
+    let had_no_push = std::env::var_os("WORKTREE_NO_PUSH").is_some();
+    if no_push {
+        std::env::set_var("WORKTREE_NO_PUSH", "1");
+    }
+    let setup = worktree_run::setup(cwd, branch, positional.get(1).copied());
+    if no_push && !had_no_push {
+        std::env::remove_var("WORKTREE_NO_PUSH");
+    }
+    let path = match setup {
+        Ok((path, housekeep)) => {
+            housekeep.spawn_detached();
+            path
+        }
         Err(code) => return code,
     };
     record_cd(&path);
@@ -245,17 +260,38 @@ fn record_cd(path: &Path) {
     }
 }
 
+/// A fresh 0600 file that fails rather than follow a planted path, standing
+/// in for the `mktemp` the shell used.
+fn private_err_file() -> (PathBuf, Option<Stdio>) {
+    use std::os::unix::fs::OpenOptionsExt;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("playbook-cc-err-{}-{nanos}", std::process::id()));
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .ok();
+    (path, file.map(Stdio::from))
+}
+
 fn claude(cwd: &Path, args: Vec<String>) -> i32 {
     spawn(cwd, &args, None)
 }
 
 fn spawn(cwd: &Path, args: &[String], stderr: Option<Stdio>) -> i32 {
     let mut cmd = Command::new("claude");
-    cmd.args(args).current_dir(cwd);
+    cmd.args(args)
+        .current_dir(cwd)
+        .env("PWD", cwd)
+        .env_remove(CD_FILE_ENV);
     if let Some(stderr) = stderr {
         cmd.stderr(stderr);
     }
-    match cmd.status() {
+    match with_sigint_held(|| cmd.status()) {
         Ok(status) => {
             use std::os::unix::process::ExitStatusExt;
             status
