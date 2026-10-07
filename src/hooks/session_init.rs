@@ -7,12 +7,9 @@
 //! additionalContext: the project memory slice, an auto-learn nudge, a
 //! skills/commands primer, and the async/deferred-tool discipline reminder.
 //!
-//! Two steps shell out to the bash scripts that remain the single source of
-//! truth for their computation: `hooks/lib/config-hash.sh` (config_hash) and
-//! `shell/memory-context.sh` (the memory slice), both resolved under
-//! `CLAUDE_PLUGIN_ROOT`. Their output is folded in unchanged; either
-//! shelling out itself, or the script it calls, failing degrades quietly
-//! rather than breaking the hook.
+//! The config hash shells out to `hooks/lib/config-hash.sh` under
+//! `CLAUDE_PLUGIN_ROOT`; that failing degrades quietly rather than breaking
+//! the hook. The memory slice is rendered in process.
 
 use crate::common::mode::{resolve_for_hook, Mode, Source};
 use crate::common::{config_hash, home_dir, repo_slug, run_with_timeout, session_dir, Payload};
@@ -97,7 +94,7 @@ pub fn run(payload: &Payload) {
 
     if !headless || crate::common::headless::headless_memory_enabled() {
         append_promoted_facts(&mut extra_context, &repo_root);
-        append_memory_slice(&mut extra_context, &plugin_root, &repo_root);
+        append_memory_slice(&mut extra_context, &repo_root);
     }
     let injected = if headless {
         0
@@ -336,53 +333,31 @@ fn in_promotion_scope(node: &serde_json::Value, repo: &str) -> bool {
     }
 }
 
-/// Inject the project memory slice into `extra_context`: the graph-backed
-/// slice from `shell/memory-context.sh` when available, else a native,
-/// dependency-free parse of `memory.graph.json`, else nothing. Matches
-/// hooks/session-init.py:154-188.
-fn append_memory_slice(extra_context: &mut String, plugin_root: &str, repo_root: &str) {
+/// Inject the project memory slice into `extra_context`: the repo-scoped
+/// facts, edges, and anchor index rendered from `memory.graph.json`, capped,
+/// or nothing when the graph is absent or empty.
+fn append_memory_slice(extra_context: &mut String, repo_root: &str) {
     let mem_slug = repo_slug();
     if repo_root.is_empty() || mem_slug.is_empty() {
         return;
     }
 
-    let mem_script = if plugin_root.is_empty() {
-        None
-    } else {
-        Some(
-            Path::new(plugin_root)
-                .join("shell")
-                .join("memory-context.sh"),
-        )
-    };
-    let mut mem_body = match &mem_script {
-        Some(script) if script.is_file() => {
-            let raw = run_memory_context(script, &mem_slug).unwrap_or_default();
-            cap_memory_body(raw)
-        }
-        _ => String::new(),
-    };
-
-    let mem_preamble = if !mem_body.is_empty() {
-        format!(
-            "Project memory for this repo ({mem_slug}), stored in the central memory store at \
-            ~/.config/playbook/memory/{mem_slug}/. A scoped slice: facts in scope, their typed \
-            edges, and an anchor index mapping code paths to the facts that describe them. Fact \
-            bodies are read on demand."
-        )
-    } else {
-        mem_body = read_graph_slice_fallback(&mem_slug);
-        format!(
-            "Project memory for this repo ({mem_slug}), read from the central memory store at \
-            ~/.config/playbook/memory/. Facts in scope for this repo (global, org, and \
-            project), names and descriptions only. Index:"
-        )
-    };
-
+    let graph = crate::common::paths::memory_dir().join("memory.graph.json");
+    let mem_body = cap_memory_body(
+        crate::json::memorycontext::render_for_graph_file(&graph, &mem_slug)
+            .trim_matches('\n')
+            .to_string(),
+    );
     if mem_body.is_empty() {
         return;
     }
-    let mem_ctx = format!("{mem_preamble}\n{mem_body}");
+
+    let mem_ctx = format!(
+        "Project memory for this repo ({mem_slug}), stored in the central memory store at \
+        ~/.config/playbook/memory/{mem_slug}/. A scoped slice: facts in scope, their typed \
+        edges, and an anchor index mapping code paths to the facts that describe them. Fact \
+        bodies are read on demand.\n{mem_body}"
+    );
     push_context(extra_context, &mem_ctx);
 }
 
@@ -412,66 +387,6 @@ fn append_handoff_slice(extra_context: &mut String) -> usize {
         push_context(extra_context, &ctx);
     }
     taken.contents.len()
-}
-
-/// Shell out to `shell/memory-context.sh --repo <slug>` and return its
-/// stdout with surrounding newlines trimmed, or `None` on any failure
-/// (missing bash, non-zero exit, ...). Never panics.
-fn run_memory_context(script: &Path, mem_slug: &str) -> Option<String> {
-    let mut command = Command::new("bash");
-    command.arg(script).arg("--repo").arg(mem_slug);
-    match run_with_timeout(&mut command, SUBPROCESS_TIMEOUT) {
-        Some(o) if o.status.success() => Some(
-            String::from_utf8_lossy(&o.stdout)
-                .trim_matches('\n')
-                .to_string(),
-        ),
-        _ => None,
-    }
-}
-
-/// A native, dependency-free parse of `memory.graph.json` for the fallback
-/// path, used when `shell/memory-context.sh` is unavailable: no jq, no
-/// shelling out. Keeps every node in scope for `repo` (see
-/// `in_promotion_scope`) that has a `name` (a code-anchor node has none, so
-/// this alone excludes it), sorted by name, rendered as `"name:
-/// description"` lines. Empty on any read or parse failure, or if there are
-/// no matching nodes. Never panics.
-fn read_graph_slice_fallback(repo: &str) -> String {
-    let Ok(content) =
-        fs::read_to_string(crate::common::paths::memory_dir().join("memory.graph.json"))
-    else {
-        return String::new();
-    };
-    let Ok(graph) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return String::new();
-    };
-    let empty_nodes = Vec::new();
-    let nodes = graph
-        .get("nodes")
-        .and_then(serde_json::Value::as_array)
-        .unwrap_or(&empty_nodes);
-
-    let mut facts: Vec<(&str, &str)> = nodes
-        .iter()
-        .filter(|node| in_promotion_scope(node, repo))
-        .filter_map(|node| {
-            let name = node.get("name").and_then(serde_json::Value::as_str)?;
-            let description = node
-                .get("description")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            Some((name, description))
-        })
-        .collect();
-    facts.sort_by_key(|(name, _)| *name);
-
-    let body = facts
-        .iter()
-        .map(|(name, description)| format!("{name}: {description}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    cap_memory_body(body)
 }
 
 /// ADR 0008 WU-1: the graph-backed slice had no cap, unlike the fallback

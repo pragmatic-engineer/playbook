@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! GitHub-facing helpers: remote parsing (`shell/gh-remote.sh`), ISO-8601
+//! GitHub-facing helpers: remote parsing, ISO-8601
 //! parsing, `PATH` lookup and the detached cache refreshes.
 
 use std::path::{Path, PathBuf};
@@ -209,6 +209,24 @@ mod tests {
             remote_parse("ssh://git@acme.ghe.com:22/o/r.git"),
             gh("acme.ghe.com", "o/r")
         );
+        for (url, host) in [
+            ("https://github.com/acme/widgets", "github.com"),
+            ("ssh://git@github.com/acme/widgets.git", "github.com"),
+            ("https://x-token@github.com/acme/widgets.git", "github.com"),
+            ("https://acme.ghe.com/acme/widgets.git", "acme.ghe.com"),
+            ("git@acme.ghe.com:acme/widgets.git", "acme.ghe.com"),
+            ("ssh://git@acme.ghe.com/acme/widgets.git", "acme.ghe.com"),
+        ] {
+            assert_eq!(remote_parse(url), gh(host, "acme/widgets"), "{url}");
+        }
+        for url in [
+            "https://bitbucket.org/acme/widgets.git",
+            "git@github.acme.com:acme/widgets.git",
+            "https://evilghe.com/acme/widgets.git",
+            "some-garbage",
+        ] {
+            assert_eq!(remote_parse(url), None, "{url}");
+        }
         assert_eq!(remote_parse("git@gitlab.com:o/r.git"), None);
         assert_eq!(remote_parse("https://github.com/owner"), None);
         assert_eq!(remote_parse("/local/path"), None);

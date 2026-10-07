@@ -22,9 +22,8 @@ fn playbook_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_playbook"))
 }
 
-/// The repo checkout root: where `hooks/lib/config-hash.sh` and
-/// `shell/memory-context.sh` actually live, so tests can point
-/// `CLAUDE_PLUGIN_ROOT` at real scripts the same way Claude Code would.
+/// The repo checkout root: where `hooks/lib/config-hash.sh` lives, so tests can point `CLAUDE_PLUGIN_ROOT` at them
+/// the same way Claude Code would.
 fn plugin_root() -> &'static str {
     env!("CARGO_MANIFEST_DIR")
 }
@@ -190,8 +189,7 @@ fn session_init_injects_the_graph_backed_slice() {
     );
 }
 
-/// ADR 0008 WU-1: the graph-backed slice has no cap today, unlike the native
-/// fallback (`read_graph_slice_fallback`, capped at 16000 chars). A
+/// ADR 0008 WU-1: the graph-backed slice is capped at 16000 chars. A
 /// repo-slice with enough facts to exceed that cap must still be truncated:
 /// an early fact (guaranteed within the first 16000 chars) survives, a fact
 /// deliberately placed past that boundary does not.
@@ -199,7 +197,7 @@ fn session_init_injects_the_graph_backed_slice() {
 fn session_init_caps_the_graph_backed_slice_like_the_native_fallback() {
     // Arrange: ~120 facts, each with a ~150-char description, so the
     // rendered "Facts:" section alone exceeds 16000 chars well before the
-    // last node. Zero-padded names sort in the same order memory-context.sh
+    // last node. Zero-padded names sort in the order the slice
     // renders them (`sort_by(.name)`), so "fact-001" is early and
     // "fact-120" is guaranteed past the cap.
     let work = scratch_dir("graph-cap");
@@ -249,8 +247,7 @@ fn session_init_caps_the_graph_backed_slice_like_the_native_fallback() {
 #[test]
 fn session_init_falls_back_to_a_native_graph_read() {
     // Arrange: a fake HOME with memory.graph.json but no CLAUDE_PLUGIN_ROOT,
-    // so the fallback branch parses the graph directly instead of shelling
-    // out to shell/memory-context.sh.
+    // so the memory slice renders from the graph file alone.
     let work = scratch_dir("native-fallback");
     let repo_slug = "acme/widget";
     let repo_dir = work.join("repo");
@@ -267,7 +264,7 @@ fn session_init_falls_back_to_a_native_graph_read() {
     )
     .unwrap();
 
-    // Act: no CLAUDE_PLUGIN_ROOT, so mem_script is None and the fallback runs.
+    // Act: no CLAUDE_PLUGIN_ROOT; the slice never needed it.
     let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
     let context = additional_context(&outcome.stdout);
 
@@ -280,108 +277,6 @@ fn session_init_falls_back_to_a_native_graph_read() {
     assert!(
         context.contains("parsed straight from the graph file, no script involved"),
         "additionalContext should carry the fact description: {context}"
-    );
-}
-
-/// The far more common production trigger for the fallback than an unset
-/// `CLAUDE_PLUGIN_ROOT`: the script is present and runs, but exits 0 with
-/// empty stdout because the `playbook` binary is not on PATH
-/// (`command -v playbook >/dev/null 2>&1 || exit 0`, shell/memory-context.sh:53).
-/// That empty output must still fall through to the native fallback rather
-/// than short-circuiting on "the script ran, so trust it."
-#[test]
-fn session_init_falls_back_to_native_graph_read_when_script_produces_no_output() {
-    use std::os::unix::fs::PermissionsExt;
-
-    // Arrange: a scratch plugin root whose shell/memory-context.sh stands in
-    // for the real script's playbook-missing exit.
-    let work = scratch_dir("script-empty-stdout");
-    let repo_slug = "acme/widget";
-    let repo_dir = work.join("repo");
-    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
-
-    let fake_plugin_root = work.join("fake-plugin-root");
-    let script_dir = fake_plugin_root.join("shell");
-    fs::create_dir_all(&script_dir).unwrap();
-    let script_path = script_dir.join("memory-context.sh");
-    fs::write(&script_path, "#!/usr/bin/env bash\nexit 0\n").unwrap();
-    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
-
-    let home = work.join("home-script-empty-stdout");
-    let memory_dir = home.join(".config").join("playbook").join("memory");
-    fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
-        format!(
-            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"fallback-through-empty-script","description":"surfaced by the native fallback when the script has nothing to say","project":"{repo_slug}"}}],"edges":[]}}"#
-        ),
-    )
-    .unwrap();
-
-    // Act: the script exists and runs, but produces no stdout.
-    let outcome = run_hook(
-        "session-init",
-        &repo_dir,
-        &home,
-        "{}",
-        &[("CLAUDE_PLUGIN_ROOT", fake_plugin_root.to_str().unwrap())],
-    );
-    let context = additional_context(&outcome.stdout);
-
-    // Assert
-    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    assert!(
-        context.contains("fallback-through-empty-script"),
-        "an empty-stdout script run should still fall through to the native fallback: {context}"
-    );
-}
-
-/// The native fallback shares `MEMORY_BODY_CAP_CHARS` with the graph-backed
-/// slice, so it truncates the same way: an early fact survives, a fact
-/// placed past the boundary does not. Its rendering has no "Facts:\n"
-/// preamble, unlike the script-backed slice, so the boundary math is computed
-/// against its own "name: description" lines rather than the script path's.
-#[test]
-fn session_init_caps_the_native_graph_fallback() {
-    // Arrange: 120 facts, each rendering as "fact-NNN: desc-NNN-<140 x's>"
-    // (159 chars) joined by newlines, ~19080 chars total: comfortably past
-    // the 16000-char cap well before the last node. Zero-padded names sort
-    // in the same ascending order the fallback renders them.
-    let work = scratch_dir("native-fallback-cap");
-    let repo_slug = "acme/widget";
-    let repo_dir = work.join("repo");
-    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
-
-    let home = work.join("home-native-cap");
-    let memory_dir = home.join(".config").join("playbook").join("memory");
-    fs::create_dir_all(&memory_dir).unwrap();
-    let padding = "x".repeat(140);
-    let nodes: Vec<String> = (1..=120)
-        .map(|n| {
-            format!(
-                r#"{{"id":"{repo_slug}/f{n:03}","file":"{repo_slug}/f{n:03}.md","scope":"project","type":"project","name":"fact-{n:03}","description":"desc-{n:03}-{padding}","project":"{repo_slug}"}}"#
-            )
-        })
-        .collect();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
-        format!(r#"{{"nodes":[{}],"edges":[]}}"#, nodes.join(",")),
-    )
-    .unwrap();
-
-    // Act: no CLAUDE_PLUGIN_ROOT, so the native fallback runs.
-    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
-    let context = additional_context(&outcome.stdout);
-
-    // Assert
-    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    assert!(
-        context.contains("fact-001"),
-        "an early fact, well within the cap, should survive: {context}"
-    );
-    assert!(
-        !context.contains("fact-120"),
-        "a fact placed past the 16000-char cap should be truncated away: {context}"
     );
 }
 
@@ -471,44 +366,6 @@ fn session_init_native_fallback_no_nodes_array_emits_no_memory_block() {
     assert!(
         !context.contains("Project memory for this repo"),
         "no memory block should be emitted when the graph file has no nodes array: {context}"
-    );
-}
-
-#[test]
-fn session_init_native_fallback_ignores_a_code_anchor_only_graph() {
-    // Arrange: the graph has one code-anchor node (no `name` field, matching
-    // how rebuild_memory_graph.rs serializes one), rejected by the scope
-    // filter before the `name` check ever runs since its scope is "code",
-    // plus a second node that IS in scope (`scope: "project"`, matching this
-    // repo) but also has no `name`. That second node is the only one that
-    // actually isolates the `name`-presence filter: a graph with just the
-    // code-anchor node would stay green even if the `name` filter itself
-    // were broken, since the scope filter alone already excludes it.
-    let work = scratch_dir("native-fallback-code-anchor");
-    let repo_slug = "acme/widget";
-    let repo_dir = work.join("repo");
-    init_repo_with_origin(&repo_dir, &format!("git@github.com:{repo_slug}.git"));
-
-    let home = work.join("home-code-anchor");
-    let memory_dir = home.join(".config").join("playbook").join("memory");
-    fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
-        format!(
-            r#"{{"nodes":[{{"id":"code:{repo_slug}/src/lib.rs","file":"src/lib.rs","scope":"code","type":"code","project":"{repo_slug}"}},{{"id":"{repo_slug}/no-name-fact","file":"{repo_slug}/no-name-fact.md","scope":"project","type":"project","project":"{repo_slug}"}}],"edges":[]}}"#
-        ),
-    )
-    .unwrap();
-
-    // Act
-    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
-    let context = additional_context(&outcome.stdout);
-
-    // Assert
-    assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    assert!(
-        !context.contains("Project memory for this repo"),
-        "a code-anchor-only graph has no facts, so no memory block should be emitted: {context}"
     );
 }
 
@@ -1503,7 +1360,7 @@ fn session_init_resume_with_matching_hash_emits_no_drift_warning() {
 #[test]
 fn session_init_degrades_quietly_when_both_shell_outs_are_unreachable() {
     // Arrange: a plugin root that does not exist, so both
-    // hooks/lib/config-hash.sh and shell/memory-context.sh are unreachable.
+    // hooks/lib/config-hash.sh is unreachable.
     // Every other additionalContext source is disabled so the only thing
     // left that could emit is the (failed) memory slice, proving the
     // failure produces nothing rather than malformed output.

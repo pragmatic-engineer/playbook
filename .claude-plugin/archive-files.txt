@@ -31,8 +31,3 @@ shell/shared
 shell/setup-local.sh
 shell/ensure-deps.sh
 Brewfile
-shell/review-worktree.sh
-shell/memory-context.sh
-
-# Sourced by statusline.sh when present next to it
-shell/gh-remote.sh

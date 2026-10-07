@@ -1,11 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Integration tests for `shell/review-worktree.sh`'s `cmd_teardown`, which
-//! now delegates to `playbook worktree remove` (falling back to the old
-//! unconditional `git worktree remove -f -f` when that refuses), matching
-//! `tests/cc_core.rs`'s convention of shelling out to the real script rather
-//! than re-implementing its logic in Rust.
+//! Integration tests for `playbook worktree review teardown`, which tries
+//! `playbook worktree remove` first and falls back to an unconditional
+//! `git worktree remove -f -f` when that refuses.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -65,44 +63,21 @@ fn repo() -> PathBuf {
     dir
 }
 
-/// Runs `shell/review-worktree.sh teardown <path>` with the compiled
-/// `playbook` binary on `PATH`, matching how the script calls it in
-/// production (a bare `playbook`, resolved via the shell's own PATH).
+/// Runs `playbook worktree review teardown <path>` from `repo_root`.
 fn run_teardown(repo_root: &Path, worktree_path: &Path) -> Output {
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shell/review-worktree.sh");
-    let bin_dir = PathBuf::from(env!("CARGO_BIN_EXE_playbook"))
-        .parent()
-        .expect("compiled binary has a parent dir")
-        .to_path_buf();
-    let path_var = format!(
-        "{}:{}",
-        bin_dir.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-    Command::new("bash")
-        .arg(&script)
-        .arg("teardown")
+    Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["worktree", "review", "teardown"])
         .arg(worktree_path)
         .current_dir(repo_root)
-        .env("PATH", path_var)
         .env("HOME", repo_root) // isolate from the developer's real config
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .output()
-        .expect("bash should run review-worktree.sh")
-}
-
-fn bash_available() -> bool {
-    Command::new("bash").arg("--version").output().is_ok()
+        .expect("playbook should run")
 }
 
 #[test]
 fn teardown_removes_a_normally_unlocked_review_worktree() {
-    if !bash_available() {
-        eprintln!("SKIP: bash not available");
-        return;
-    }
-
     // Arrange: a review-convention worktree, unlocked (the normal shape
     // `cmd_teardown` runs `git worktree unlock` against first).
     let repo_root = repo();
@@ -153,11 +128,6 @@ fn teardown_removes_a_normally_unlocked_review_worktree() {
 
 #[test]
 fn teardown_removes_a_dirty_worktree_left_by_an_aborted_review() {
-    if !bash_available() {
-        eprintln!("SKIP: bash not available");
-        return;
-    }
-
     // Arrange: a review-convention worktree with an untracked file left
     // behind, standing in for build artifacts a check suite run during
     // review can leave uncommitted (deep-review always runs the full check

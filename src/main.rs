@@ -9,8 +9,8 @@ use playbook::{
     agents, cc, ci, common, config, doctor, gate, handoff, hooks, init, json, manifest, mode, pr,
     sanitize, settings, statusline, trust, update, usage, worktree, AgentsCommand, CcCommand, Cli,
     Command, ConfigCommand, DashboardCommand, DoctorCommand, GateCommand, HandoffCommand,
-    JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand, SanitizeCommand,
-    SettingsCommand, UsageCommand, WorktreeCommand,
+    JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand,
+    ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -122,6 +122,15 @@ fn main() {
                     std::process::exit(1);
                 }
             },
+            MemoryCommand::Context { repo, graph } => {
+                let repo = repo.unwrap_or_else(common::repo_slug);
+                let graph =
+                    graph.unwrap_or_else(|| common::paths::memory_dir().join("memory.graph.json"));
+                let output = json::memorycontext::render_for_graph_file(&graph, &repo);
+                if !output.is_empty() {
+                    println!("{output}");
+                }
+            }
         },
         Command::Manifest { sub } => match sub {
             // Exit 1, not 2: the shell original used it and both CI lanes key
@@ -412,6 +421,20 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        Command::Worktree {
+            sub: WorktreeCommand::Review { sub },
+        } => match sub {
+            ReviewWorktreeCommand::Setup { pr, head_sha } => {
+                match worktree::review::setup(&pr, &head_sha) {
+                    Ok(path) => println!("{path}"),
+                    Err(err) => {
+                        eprintln!("review worktree: {err}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            ReviewWorktreeCommand::Teardown { path } => worktree::review::teardown(&path),
+        },
         Command::Worktree { sub } => {
             let home = common::home_dir();
             let slug = common::repo_slug();
@@ -439,6 +462,7 @@ fn main() {
                         }
                     }
                 }
+                WorktreeCommand::Review { .. } => unreachable!("handled above"),
                 WorktreeCommand::Remove { path } => {
                     let now_epoch = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)

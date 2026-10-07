@@ -42,12 +42,24 @@ CI_CACHE_TTL="${STATUSLINE_CI_CACHE_TTL:-60}"        # Seconds before cached CI 
 # Created with 0700 perms (owner-only) on first run so cached PR bodies stay private.
 CACHE_DIR="${STATUSLINE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/statusline}"
 
-# GitHub remote parsing (github.com + GitHub Enterprise *.ghe.com) lives in a
-# standalone, unit-tested helper so the status line builds host-correct PR and
-# branch links. A missing file just leaves the GitHub segments disabled.
-STATUSLINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=shell/gh-remote.sh
-[[ -r "$STATUSLINE_DIR/shell/gh-remote.sh" ]] && source "$STATUSLINE_DIR/shell/gh-remote.sh"
+# GitHub remote parsing now lives in `playbook statusline` (src/statusline/gh.rs).
+# This fallback script only recognises github.com and *.ghe.com remotes inline.
+gh_remote_parse() {
+    local url="$1" host="" path=""
+    if [[ "$url" =~ ^git@([^:]+):(.+)$ ]]; then
+        host="${BASH_REMATCH[1]}"; path="${BASH_REMATCH[2]}"
+    elif [[ "$url" =~ ^ssh://git@([^/]+)/(.+)$ ]]; then
+        host="${BASH_REMATCH[1]%%:*}"; path="${BASH_REMATCH[2]}"
+    elif [[ "$url" =~ ^https?://([^/]+)/(.+)$ ]]; then
+        host="${BASH_REMATCH[1]##*@}"; path="${BASH_REMATCH[2]}"; host="${host%%:*}"
+    else
+        return 1
+    fi
+    path="${path%.git}"
+    case "$host" in github.com|*.ghe.com) : ;; *) return 1 ;; esac
+    [[ "$path" == */* ]] || return 1
+    printf '%s\t%s\n' "$host" "$path"
+}
 
 # ┌──────────────────────────────────────────────────────────────────────────────┐
 # │  Colour Palette: Catppuccin Mocha                                           │

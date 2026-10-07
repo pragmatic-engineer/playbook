@@ -575,7 +575,7 @@ fn review_worktree_landed_covers_lock_state_and_pid_liveness() {
     // Arrange: a live child process standing in for a lock still held by a
     // running review session, and a reaped child standing in for one whose
     // owner already exited without releasing the lock. A dead lock pid is
-    // never sufficient on its own here: `review-worktree.sh` locks with its
+    // never sufficient on its own here: `review::setup` locks with its
     // own short-lived setup script's pid, so that pid is dead even for a
     // review still actively running; the lock's age must also clear a real
     // TTL (`REVIEW_LOCK_TTL_SECS`, 24 hours) before it reads as landed.
@@ -634,7 +634,7 @@ fn review_worktree_landed_covers_lock_state_and_pid_liveness() {
 
 #[test]
 fn parse_lock_pid_covers_both_lock_formats_and_malformed_input() {
-    // Arrange: a flat `pid=<n>` reason as `review-worktree.sh` writes it, a
+    // Arrange: a flat `pid=<n>` reason as `review::setup` writes it, a
     // parenthesized `pid <n>` reason as the Agent tool writes it, and two
     // malformed shapes: no pid token at all, and a `pid=` key with no digits.
     let cases = [

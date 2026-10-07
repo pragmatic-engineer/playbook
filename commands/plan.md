@@ -182,22 +182,17 @@ Alongside the `Explore` agents, dispatch one independent `critic` agent (`subage
 
 Built-in `Explore` agents have been reliable at returning results; the `critic` is structurally read-only and has only the return channel, so it may deliver nothing (`playbook:delegating-subagents`). An area whose agent returned nothing was NOT explored: it does not mean there is nothing there. Say which areas are unexplored rather than treating the digest as complete, and if the premise-challenge came back empty, challenge the premise yourself before moving to Step 3.
 
-**Check memory and prior plans.** Alongside the `Explore` agents, resolve `shell/memory-context.sh` and run it for this repo's memory context:
+**Check memory and prior plans.** Alongside the `Explore` agents, run this repo's memory context:
 
 ```bash
-MCTX="${CLAUDE_PLUGIN_ROOT:-}/shell/memory-context.sh"
-if [ ! -f "$MCTX" ]; then
-  MCTX=$(ls -d "$HOME"/.claude/plugins/cache/*/playbook/*/shell/memory-context.sh 2>/dev/null | sort -V | tail -1)
-fi
-MEMORY_SLICE=""
-[ -n "$MCTX" ] && [ -f "$MCTX" ] && MEMORY_SLICE="$(bash "$MCTX" --repo <owner>/<repo> 2>/dev/null)"
+playbook memory context --repo <owner>/<repo> 2>/dev/null
 ```
 
-`<owner>/<repo>` comes from `git remote get-url origin`, the same slug the script derives itself when `--repo` is omitted. Load the fact files `$MEMORY_SLICE` names on demand rather than treating the compact digest alone as the full content.
+`<owner>/<repo>` comes from `git remote get-url origin`, the same slug the command derives itself when `--repo` is omitted. Load the fact files the output names on demand rather than treating the compact digest alone as the full content.
 
-If `$MEMORY_SLICE` comes back empty (an empty store, or the `playbook` binary/`bash` unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope): a dependency-free shape, since this command is an LLM session and can parse JSON without shelling to `playbook`.
+If the output comes back empty (an empty store, or the `playbook` binary unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope): a dependency-free shape, since this command is an LLM session and can parse JSON without shelling to `playbook`.
 
-Also scan `$(playbook path plans)/*.md` (excluding `*.checkpoint.md` and `*-quality.md`) for a prior saved plan whose title or topic overlaps this idea, a cheap keyword match, not semantic search. When neither memory nor prior plans have anything relevant, skip this silently. When either surfaces a plausible match, a decision already made or an idea already rejected, say so in the digest: what was decided, when, and why. Either way, note in the digest which path actually produced the memory context, `memory-context.sh` output, a direct graph read, or nothing found, so an operator can tell "nothing relevant" apart from "the script couldn't run." Ask directly whether anything has changed before diverging into new approaches, rather than re-litigating a settled call from scratch.
+Also scan `$(playbook path plans)/*.md` (excluding `*.checkpoint.md` and `*-quality.md`) for a prior saved plan whose title or topic overlaps this idea, a cheap keyword match, not semantic search. When neither memory nor prior plans have anything relevant, skip this silently. When either surfaces a plausible match, a decision already made or an idea already rejected, say so in the digest: what was decided, when, and why. Either way, note in the digest which path actually produced the memory context, `playbook memory context` output, a direct graph read, or nothing found, so an operator can tell "nothing relevant" apart from "the command couldn't run." Ask directly whether anything has changed before diverging into new approaches, rather than re-litigating a settled call from scratch.
 
 Consolidate into a short cited digest (a few bullets, each with `file:line`). This grounds the questions that follow so you ask about intent, not about facts the code already holds. In ticket mode, fold the Step 1.5 ticket findings into the same digest, citing the source id or url for those. Assign each `Explore` agent a stable `name` at spawn and `TaskStop` it as soon as it returns. A spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps a subagent running in the background.
 
