@@ -14,7 +14,7 @@ is idempotent; re-running /playbook:setup is safe and only changes what is missi
 
 ## Step 0: Read the run mode
 
-Do this first. If `command -v playbook` finds nothing, stop with one line: "playbook is not installed. Run `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`, then run /playbook:setup again." Otherwise read the mode from the CLI:
+Do this first. If `command -v playbook` finds nothing, stop with one line: "playbook is not on PATH. If you just installed it, open a new terminal and run /playbook:setup again; otherwise run `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash` first." Otherwise read the mode from the CLI:
 
 ```bash
 playbook mode status --json
@@ -87,11 +87,11 @@ non-interactive run would contradict what `--yes` says it does.
 `playbook init` always runs (guards and settings are wired regardless of the answers). It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder. Then check the tools the plugin needs and install only the missing ones:
 
 ```bash
-playbook init [flags]
+CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" playbook init [flags]
 playbook deps ensure "${CLAUDE_PLUGIN_ROOT}/Brewfile"
 ```
 
-If `playbook init` exits non-zero, still run the second command, then report which init steps failed.
+If `playbook init` exits non-zero, still run the second command, then report which init steps failed. If it fails with "unexpected argument", the installed binary is older than the plugin: run `playbook init` again without that flag and tell the user to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`. If `playbook deps --help` fails the same way, skip the second command and say so.
 
 ## Step 4: Report
 

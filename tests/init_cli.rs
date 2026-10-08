@@ -225,12 +225,17 @@ fn a_custom_settings_key_survives() {
 fn a_plain_run_twice_is_byte_identical_and_makes_no_new_backups() {
     let sb = Sandbox::new("idempotent");
     sb.init("/bin/bash", &[]);
-    sb.init("/bin/bash", &[]);
     let settings = sb.read(".claude/settings.json");
     let base = sb.read(".claude/.settings.base.json");
     let backups = sb.count(".claude", "settings.json.bak.");
     let skips = sb.count(".claude", "settings-merge-skipped.");
-    sb.init("/bin/bash", &[]);
+    let again = text(&sb.init("/bin/bash", &[]));
+    for step in ["settings", "hooks", "statusline"] {
+        assert!(
+            again.contains(&format!("{step}: ok")),
+            "{step} rewrote: {again}"
+        );
+    }
     assert_eq!(sb.read(".claude/settings.json"), settings);
     assert_eq!(sb.read(".claude/.settings.base.json"), base);
     assert_eq!(sb.count(".claude", "settings.json.bak."), backups);
@@ -253,6 +258,7 @@ fn an_old_launcher_line_is_migrated_and_the_users_lines_and_blanks_survive() {
         assert!(!rc.contains(old), "{rc}");
         assert_eq!(rc.matches("playbook shell-init").count(), 1, "{rc}");
         assert_eq!(rc.matches("launchers (cc/ccd)").count(), 1, "{rc}");
+        assert!(rc.lines().any(|l| l == SHELL_INIT_LINE), "{rc}");
         assert!(rc.starts_with("export FOO=1\n\nexport BAR=2\n"), "{rc}");
 
         sb.init("/bin/zsh", &["--aliases"]);
