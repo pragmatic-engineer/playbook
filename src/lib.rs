@@ -12,6 +12,7 @@ pub mod common;
 pub mod config;
 pub mod deps;
 pub mod doctor;
+pub mod eval;
 pub mod gate;
 pub mod handoff;
 pub mod hooks;
@@ -172,6 +173,17 @@ pub enum Command {
         #[command(subcommand)]
         sub: ReleaseCommand,
     },
+    /// Check how well the review triage classifier sorts real pull requests
+    ///
+    /// Each case is a pull request with a known answer per review lens. Costs
+    /// one `gh pr diff` fetch and one live `claude` call per case, so run it
+    /// by hand or on a schedule.
+    ///
+    /// Example: `playbook eval review-triage`
+    Eval {
+        #[command(subcommand)]
+        sub: EvalCommand,
+    },
     /// Prepare and open pull requests, and pick a review depth
     ///
     /// These are the mechanical steps behind `/playbook:create-pull-request`.
@@ -290,6 +302,25 @@ pub enum Command {
     Trust {
         /// Absolute path of the directory to trust
         path: String,
+    },
+}
+
+/// `playbook eval` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum EvalCommand {
+    /// Run the review triage classifier on each case and compare with the known answers
+    ///
+    /// Needs network access, a logged-in `gh`, and a working `claude` with a
+    /// live API key. Exits 0 when no lens was wrongly skipped and no case
+    /// errored, and 1 otherwise. Re-run it whenever the triage prompt changes.
+    ///
+    /// Example: `playbook eval review-triage`
+    ReviewTriage {
+        /// Case file to run; defaults to the cases shipped in the playbook repo
+        fixtures: Option<PathBuf>,
+        /// Triage prompt to send; defaults to the one shipped in the playbook repo
+        #[arg(long)]
+        prompt: Option<PathBuf>,
     },
 }
 
@@ -731,36 +762,6 @@ pub enum JsonCommand {
     Field {
         /// Object key to read, such as `number`
         key: String,
-    },
-    /// Print true or false for whether the input is valid JSON
-    IsValidJson,
-    /// Print one element of a JSON array as compact JSON
-    ///
-    /// Prints nothing for an out-of-range index or a non-array.
-    IndexedElement {
-        /// Zero-based index into the array
-        index: usize,
-    },
-    /// Print one field of a JSON object as text (empty if missing)
-    StringField {
-        /// Object key to read, such as `id`
-        key: String,
-    },
-    /// Print the names under `.lenses`, sorted and joined with commas
-    LensNamesJoined,
-    /// Print the names under `.lenses`, sorted, one per line
-    LensNames,
-    /// Print the input as compact JSON (empty if malformed)
-    IsValidJsonCompact,
-    /// Print `.lenses[lens].found`, or `null` if missing
-    LensFound {
-        /// Lens name to read, such as `correctness`
-        lens: String,
-    },
-    /// Print `.[lens].tier` (empty if missing or null)
-    LensTier {
-        /// Lens name to read, such as `correctness`
-        lens: String,
     },
     /// Print the session fields the status line needs, as `key=value` lines
     SessionFields {

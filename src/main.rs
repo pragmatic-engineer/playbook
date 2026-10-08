@@ -6,12 +6,12 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, ci, common, config, deps, doctor, gate, handoff, hooks, init, json, manifest, mode,
-    pr, release, sanitize, settings, statusline, trust, update, usage, worktree, AgentsCommand,
-    CcCommand, Cli, Command, ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand,
-    GateCommand, HandoffCommand, JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand,
-    PrCommand, ReleaseCommand, ReviewWorktreeCommand, SanitizeCommand, SettingsCommand,
-    UsageCommand, WorktreeCommand,
+    agents, cc, ci, common, config, deps, doctor, eval, gate, handoff, hooks, init, json, manifest,
+    mode, pr, release, sanitize, settings, statusline, trust, update, usage, worktree,
+    AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DashboardCommand, DepsCommand,
+    DoctorCommand, EvalCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
+    MemoryCommand, ModeArg, ModeCommand, PrCommand, ReleaseCommand, ReviewWorktreeCommand,
+    SanitizeCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -361,6 +361,11 @@ fn main() {
                 }
             }
         }
+        Command::Eval { sub } => match sub {
+            EvalCommand::ReviewTriage { fixtures, prompt } => {
+                std::process::exit(eval::review_triage(fixtures, prompt));
+            }
+        },
         Command::Pr { sub } => {
             let gh = pr::shared::RealGhClient;
             match sub {
@@ -616,38 +621,6 @@ fn main() {
                 }
                 JsonCommand::Field { key } => {
                     println!("{}", json::ghjson::field(&input, &key));
-                }
-                JsonCommand::IsValidJson => {
-                    println!("{}", json::evalfixture::is_valid_json(&input));
-                }
-                JsonCommand::IndexedElement { index } => {
-                    println!(
-                        "{}",
-                        json::evalfixture::indexed_element(&input, index).unwrap_or_default()
-                    );
-                }
-                JsonCommand::StringField { key } => {
-                    println!("{}", json::evalfixture::string_field(&input, &key));
-                }
-                JsonCommand::LensNamesJoined => {
-                    println!("{}", json::evalfixture::lens_names_joined(&input));
-                }
-                JsonCommand::LensNames => {
-                    for name in json::evalfixture::lens_names(&input) {
-                        println!("{name}");
-                    }
-                }
-                JsonCommand::IsValidJsonCompact => {
-                    println!(
-                        "{}",
-                        json::evalfixture::is_valid_json_compact(&input).unwrap_or_default()
-                    );
-                }
-                JsonCommand::LensFound { lens } => {
-                    println!("{}", json::evalfixture::lens_found(&input, &lens));
-                }
-                JsonCommand::LensTier { lens } => {
-                    println!("{}", json::evalfixture::lens_tier(&input, &lens));
                 }
                 JsonCommand::Equal { a, b, ignore_keys } => {
                     let ignore_keys: Vec<&str> = ignore_keys.iter().map(String::as_str).collect();
