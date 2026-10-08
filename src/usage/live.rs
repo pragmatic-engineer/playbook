@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The live stream behind `/api/live`: Server-Sent Events over a chunked
 //! response, one thread per open stream. A shared cache means several streams

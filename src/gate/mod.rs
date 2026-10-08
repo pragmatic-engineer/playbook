@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook gate` subcommand family, backed by a local SQLite database under
 //! `~/.config/playbook`, scoped per repo and worktree. This module holds the schema and connection layer

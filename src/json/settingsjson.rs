@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Prints a settings-style JSON document with a top-level key change
 //! applied, either named keys removed or one boolean-true marker key added,

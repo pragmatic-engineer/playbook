@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Binary-level tests for `playbook usage` and `playbook usage ingest`, run
 //! against a scratch `$HOME` seeded from the committed fixtures. The real

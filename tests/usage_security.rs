@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Spawned-binary tests for the dashboard's local-access hardening: who may
 //! fetch the data, what the page policy forbids, and who can read the files.

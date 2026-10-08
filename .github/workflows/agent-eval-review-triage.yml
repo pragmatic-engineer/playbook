@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # Runs `playbook eval review-triage`, the real, live-call regression eval for
 # the review-triage classifier (agents/review-triage.md), automatically on

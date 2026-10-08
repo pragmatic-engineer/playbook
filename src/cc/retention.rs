@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Replaces the retired shell retention step: bounds disk use by keeping only the
 //! newest transcripts for the current project.

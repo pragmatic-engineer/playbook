@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook deps ensure`: per-dependency check-then-install from a Brewfile.
 //! Ported from the retired shell original. A tool already on PATH (from any

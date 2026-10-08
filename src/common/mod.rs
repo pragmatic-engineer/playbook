@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Shared helpers ported from the retired shell originals.
 //! Every hook in `src/hooks` uses this module instead of re-deriving these

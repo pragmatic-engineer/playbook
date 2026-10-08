@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook deps ensure`, ported from the former shell test. Each case runs
 //! the binary with a PATH of stub tools (a fake `brew` that logs its

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Moves a legacy `statusLine.command` that runs the old `statusline.sh` over
 //! to `playbook statusline`. Init no longer places the script.

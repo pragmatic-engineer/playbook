@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Deadline-bounded subprocess execution, standing in for python's
 //! `subprocess.run(..., timeout=N)` (the retired shell original,

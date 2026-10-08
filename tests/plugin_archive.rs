@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The marketplace plugin archive (`playbook-plugin-<version>.zip`) is built
 //! from `.claude-plugin/archive-files.txt`. These tests build it exactly the

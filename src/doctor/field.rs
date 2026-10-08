@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Reads the JSON shapes `commands/doctor.md`'s Layer 5, 6, and 7 checks
 //! need: `.claude-plugin/plugin.json`'s `.version`, `settings.json`'s

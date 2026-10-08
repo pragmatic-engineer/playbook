@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Tests for `worktree::classify`'s path-convention matching, using real
 //! scratch git repos and real `git worktree add` calls rather than mocked

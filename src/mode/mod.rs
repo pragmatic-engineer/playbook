@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook mode`: set the repo's `ask`/`auto` mode and report which mode
 //! resolves, from where, and what the guard hook sees.

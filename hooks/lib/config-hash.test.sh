@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # config-hash.test.sh: tests for config_hash() in hooks/lib/config-hash.sh.
 # Runs HOME-isolated under a scratch directory; verifies the test-file exclusion

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook eval review-triage`: a live regression eval for the review
 //! triage classifier. For each case it fetches the pull request's diff with

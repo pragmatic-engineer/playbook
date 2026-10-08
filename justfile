@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # Task runner for this repo. Replaces the Makefile, which had one target and
 # still shelled out to `python3 shell/gen-shared-settings.py` even after

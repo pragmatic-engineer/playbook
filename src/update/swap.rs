@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Replacing the binary: smoke test the staged file, back up the old one
 //! (`playbook.<old>.bak`, newest 3, same rule as install.sh), rename into

@@ -1,7 +1,7 @@
 class Playbook < Formula
   desc "Claude Code plugin toolkit: hooks, launcher, and installer in one binary"
   homepage "https://github.com/pragmatic-engineer/playbook"
-  license "MIT"
+  license "Apache-2.0"
 
   on_macos do
     if Hardware::CPU.arm?

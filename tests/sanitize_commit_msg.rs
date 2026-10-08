@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook sanitize commit-msg|pr-text <file> [--check]` from the real
 //! binary: the default rewrites the file and always exits 0, `--check` exits 1

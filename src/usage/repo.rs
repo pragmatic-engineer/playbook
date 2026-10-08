@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Maps a transcript's working directory to the real repository name, so a
 //! worktree or an agent folder counts toward its repo instead of showing up

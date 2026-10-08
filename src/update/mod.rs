@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook update`: fetch a release binary, verify it (SHA256SUMS, then the
 //! build attestation), swap it in with a backup, then check PATH and the

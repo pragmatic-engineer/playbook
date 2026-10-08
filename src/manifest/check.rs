@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Port of the retired shell original, guarding the tracked-file allowlist so
 //! runtime state or a re-tracked personal settings.json cannot leak into the
@@ -18,10 +18,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 14] = [
+const ALLOW_FILES: [&str; 15] = [
     ".gitignore",
     "README.md",
     "LICENSE",
+    "NOTICE",
     "Brewfile",
     "justfile",
     "install.sh",

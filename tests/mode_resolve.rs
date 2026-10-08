@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Mode resolver precedence (flag > env > config > default) as a pure table,
 //! the hook-side resolution, and a `mode` value written straight into the

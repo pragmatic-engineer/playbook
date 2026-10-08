@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Atomic counter increment. Ports `incr_counter` (the retired shell original)
 //! and `_incr_counter` (the retired shell original), including their mkdir-lock

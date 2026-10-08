@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Per-render telemetry sample and the once-per-crossing capture latch. Every
 //! write is best effort: a failure here never stops the status line printing.

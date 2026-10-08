@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Atomic file writes so concurrent hook invocations never tear state.
 //! `atomic_append` replaces the helper of the same name at

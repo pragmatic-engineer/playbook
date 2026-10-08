@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Pins the roster table in `skills/delegating-subagents/SKILL.md` against
 //! `agents/*.md`. That table went stale once, listing 7 of the 12 real

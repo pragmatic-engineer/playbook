@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The HEAD each repository had before a Bash call that commits ran, kept per
 //! session in a small JSON file keyed by the repository's top directory, so the

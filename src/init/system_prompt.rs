@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Places `prompts/SYSTEM_PROMPT.md` under `$HOME/.config/playbook/prompts/`,
 //! porting the retired `setup-local.sh`, the only prior installer of it.

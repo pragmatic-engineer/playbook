@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # install-seed.test.sh: hermetic tests for install.sh's settings.json handling
 # now that the seam is `playbook init`, not shell/setup-local.sh. Exercises the

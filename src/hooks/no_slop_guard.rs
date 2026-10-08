@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! PreToolUse guard denying AI-slop output: an em or en dash in a posting
 //! command (`Bash`), or new code with a slop comment (`Edit`/`Write`).

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Wires the 18 hooks Claude Code can invoke into `settings.json` as a bare
 //! `playbook hook <name>` command: 13 functional hooks plus 5 guards.

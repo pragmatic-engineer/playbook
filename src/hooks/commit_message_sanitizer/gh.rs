@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The `gh pr` calls that write text on GitHub: `create` (also spelled `new`),
 //! `edit` and `merge`. A PR title and body are free text, while the subject

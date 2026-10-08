@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Library root for the `playbook` binary. Exposes the CLI shape that
 //! `main.rs` parses and dispatches on, plus the `common` helpers and the

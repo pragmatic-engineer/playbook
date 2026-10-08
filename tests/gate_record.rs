@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Binary-spawn tests for `playbook gate record`. These prove the CLI-level
 //! half of the plan's claims that unit tests on `record::run` alone cannot:

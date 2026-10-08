@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook gate check` CLI entry point: query one or more previously
 //! recorded phase verdicts for a plan and succeed only when every named

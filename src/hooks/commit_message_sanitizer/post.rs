@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! PostToolUse backstop for what the PreToolUse rewrite did not see: another
 //! hook rewriting the same command, an alias, a message built outside the

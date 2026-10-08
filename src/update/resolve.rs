@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Which release to install: parse the GitHub releases API, order versions,
 //! pick latest, explicit or pre-release, and name the asset for a platform.

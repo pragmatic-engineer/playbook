@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook release render-formula` and `pin-marketplace`: the behavior
 //! the retired shell test pinned, plus byte-for-byte goldens

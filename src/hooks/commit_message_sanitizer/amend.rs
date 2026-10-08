@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Replaces the message of HEAD with git plumbing, so no hook runs and the
 //! index and the working tree are never touched: a new commit object is built

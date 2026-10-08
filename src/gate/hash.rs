@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! FNV-1a 64-bit content hashing, shared by `record.rs` and `check.rs` so
 //! both hash their staleness inputs the same way instead of duplicating it.

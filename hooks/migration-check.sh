@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # migration-check.sh: the one hook hooks.json still registers. Detects a
 # settings.json that install.sh's `playbook init` handoff never wired (a

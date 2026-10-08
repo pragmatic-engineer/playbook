@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Reads the flat JSON array `gh pr checks --json` produces: one object per
 //! check, each carrying a `bucket` field (`"pass"`, `"fail"`, `"pending"`,

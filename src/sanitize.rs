@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook sanitize`: removes AI attribution from a message file for callers
 //! that are not an agent hook, such as a git `commit-msg` hook or CI.

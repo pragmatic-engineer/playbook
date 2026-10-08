@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for the turn-scoped hooks this Work Unit ports:
 //! auto-model-detect, precompact-warn, and memory-capture. Each test spawns

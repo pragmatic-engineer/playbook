@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # doctor.test.sh: hermetic tests for the bash snippets embedded in
 # commands/doctor.md (Layers 2, 5, 6, 7).

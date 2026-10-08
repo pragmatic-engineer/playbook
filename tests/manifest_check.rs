@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Every scenario in the retired shell test, ported, plus the two
 //! cases the brief called out explicitly: a brand new disallowed top-level

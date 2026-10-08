@@ -9,7 +9,7 @@
   },
   "homepage": "https://github.com/pragmatic-engineer/playbook",
   "repository": "https://github.com/pragmatic-engineer/playbook",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "skills",
     "commands",

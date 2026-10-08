@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Server-rendered inline SVG bar charts. Self-contained on purpose: no
 //! external resources, no scripts, every label escaped, so the page needs no

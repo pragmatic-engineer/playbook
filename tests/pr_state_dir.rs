@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `pr_state_dir` reads the process cwd and `$HOME`, so these tests serialise
 //! on them the way `tests/gate_record.rs`'s `ENV_LOCK` does.

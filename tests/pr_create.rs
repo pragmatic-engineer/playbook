@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `pr create` against real scratch git repos with a local bare `origin` and
 //! a fake `GhClient` that records the calls it receives.

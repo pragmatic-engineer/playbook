@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # WU-10 of ADR 0007. Attaches verified binaries to a release that already
 # exists: releases are cut by pushing a signed annotated tag and then running

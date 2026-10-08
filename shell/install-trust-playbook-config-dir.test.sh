@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # install-trust-playbook-config-dir.test.sh: install.sh must mark
 # $HOME/.config/playbook as a trusted workspace in ~/.claude.json once it

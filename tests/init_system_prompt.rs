@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for the `system-prompt` step `playbook::init::run`
 //! composes in, backed by `playbook::init::system_prompt`.
