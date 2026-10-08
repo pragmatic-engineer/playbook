@@ -36,7 +36,7 @@ pub struct InitPaths {
     /// behaviour change rather than a port.
     pub system_prompt: bool,
     /// Whether the user asked for the shell launcher shim via `--aliases`,
-    /// which `shell/setup-local.sh` forwards from `/playbook:setup`. False
+    /// which `/playbook:setup` forwards. False
     /// skips the `shim` step entirely: unlike `system_prompt`, there is no
     /// "refresh an existing copy" case here, since a launcher a user never
     /// asked for should not be touched at all.
@@ -264,7 +264,7 @@ fn place_system_prompt_step(self_root: Option<&Path>, home: &Path, opt_in: bool)
 /// A missing `settings.json` is treated as a user with zero customisations:
 /// it is seeded as an empty object first, so `merge::merge` loads it validly
 /// and adopts every template key through its ordinary "user never touched
-/// this key" branch. `setup-local.sh` instead special-cases a fresh install
+/// this key" branch. The retired `setup-local.sh` instead special-cased a fresh install
 /// as a verbatim template copy, which is byte-for-byte faithful to the
 /// template's own key order on that one run, but `merge::merge` serialises
 /// its OWN output with keys in sorted order (matching the python it ports),

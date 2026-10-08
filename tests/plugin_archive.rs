@@ -168,7 +168,6 @@ fn archive_contains_every_file_the_installed_plugin_reads_at_runtime() {
         "hooks/hooks.json",
         "hooks/migration-check.sh",
         "hooks/lib/config-hash.sh",
-        "shell/setup-local.sh",
         "Brewfile",
         "LICENSE",
         "README.md",
