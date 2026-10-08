@@ -3,13 +3,13 @@
 
 //! Token counts to dollars. Transcripts carry no cost field, so cost comes
 //! from this hand-maintained per-model table, taken from
-//! <https://platform.claude.com/docs/en/about-claude/pricing> on 2026-10-02.
+//! <https://platform.claude.com/docs/en/about-claude/pricing> on 2026-10-08.
 //! It can drift from published pricing. A model not in the table is never
 //! guessed: it is reported as unpriced by the callers.
 
 /// (normalized model name, input USD per MTok, output USD per MTok, cache read
 /// as a fraction of the input price).
-const PRICES: [(&str, f64, f64, f64); 20] = [
+const PRICES: [(&str, f64, f64, f64); 21] = [
     ("fable-5-1", 10.0, 50.0, 0.025),
     ("mythos-5-1", 10.0, 50.0, 0.025),
     ("fable-5", 10.0, 50.0, 0.1),
@@ -22,15 +22,21 @@ const PRICES: [(&str, f64, f64, f64); 20] = [
     ("opus-4-5", 5.0, 25.0, 0.1),
     ("opus-4-1", 15.0, 75.0, 0.1),
     ("opus-4", 15.0, 75.0, 0.1),
-    ("sonnet-5-5", 2.0, 10.0, 0.1),
+    ("sonnet-5-5", 2.0, 10.0, 0.05),
     ("sonnet-5", 2.0, 10.0, 0.1),
     ("sonnet-4-6", 3.0, 15.0, 0.1),
     ("sonnet-4-5", 3.0, 15.0, 0.1),
     ("sonnet-4", 3.0, 15.0, 0.1),
+    ("haiku-5-5", 0.1, 0.5, 0.1),
     ("haiku-4-5", 1.0, 5.0, 0.1),
     ("3-5-haiku", 0.8, 4.0, 0.1),
     ("haiku-3-5", 0.8, 4.0, 0.1),
 ];
+
+/// Haiku 5.5 charges more for a prompt over 100,000 tokens: input and output
+/// prices are 5x the base ones (0.50 and 2.50 per MTok against 0.10 and 0.50).
+const HAIKU_5_5_LONG_PROMPT_TOKENS: u64 = 100_000;
+const HAIKU_5_5_LONG_PROMPT_FACTOR: f64 = 5.0;
 
 const CACHE_WRITE_5M_MULTIPLIER: f64 = 1.25;
 const CACHE_WRITE_1H_MULTIPLIER: f64 = 2.0;
@@ -72,6 +78,13 @@ fn normalize(model: &str) -> String {
 pub fn cost_usd(model: &str, tokens: &Tokens) -> Option<f64> {
     let name = normalize(model);
     let (_, input, output, read_fraction) = PRICES.iter().find(|(n, _, _, _)| *n == name)?;
+    let prompt = tokens.input + tokens.cache_write_5m + tokens.cache_write_1h + tokens.cache_read;
+    let factor = if name == "haiku-5-5" && prompt > HAIKU_5_5_LONG_PROMPT_TOKENS {
+        HAIKU_5_5_LONG_PROMPT_FACTOR
+    } else {
+        1.0
+    };
+    let (input, output) = (input * factor, output * factor);
     let total = tokens.input as f64 * input
         + tokens.output as f64 * output
         + tokens.cache_write_5m as f64 * input * CACHE_WRITE_5M_MULTIPLIER
@@ -160,7 +173,7 @@ mod tests {
         assert!(close(per_million("claude-fable-5-1", reads), 0.25));
         assert!(close(per_million("claude-fable-5", reads), 1.0));
         assert!(close(per_million("claude-opus-5-5", reads), 0.2));
-        assert!(close(per_million("claude-sonnet-5-5", reads), 0.2));
+        assert!(close(per_million("claude-sonnet-5-5", reads), 0.1));
         assert!(close(per_million("claude-haiku-4-5", reads), 0.1));
     }
 
@@ -199,5 +212,43 @@ mod tests {
         // A near-miss version must not borrow a neighbour's price.
         assert_eq!(cost_usd("claude-opus-4-9", &tokens), None);
         assert_eq!(cost_usd("claude-haiku-5", &tokens), None);
+    }
+
+    #[test]
+    fn sonnet_5_5_cache_reads_cost_five_percent_of_input() {
+        let read = Tokens {
+            cache_read: 1_000_000,
+            ..Tokens::default()
+        };
+        assert!(close(per_million("claude-sonnet-5-5", read), 0.10));
+        assert!(close(per_million("claude-sonnet-5", read), 0.20));
+    }
+
+    #[test]
+    fn haiku_5_5_is_priced_and_steps_up_for_a_long_prompt() {
+        let short = Tokens {
+            input: 1_000_000,
+            output: 1_000_000,
+            ..Tokens::default()
+        };
+        // 100,000 prompt tokens or fewer: 0.10 in, 0.50 out per MTok.
+        let small = Tokens {
+            input: 100_000,
+            output: 1_000_000,
+            ..Tokens::default()
+        };
+        assert!(close(per_million("claude-haiku-5-5", small), 0.01 + 0.50));
+        // Over 100,000 prompt tokens: 0.50 in, 2.50 out per MTok.
+        assert!(close(per_million("claude-haiku-5-5", short), 0.50 + 2.50));
+    }
+
+    #[test]
+    fn haiku_5_5_cache_prices_follow_the_input_price() {
+        let t = Tokens {
+            cache_write_5m: 1_000_000,
+            ..Tokens::default()
+        };
+        // Over the long-prompt line, so 0.50 base: 5m write is 1.25x = 0.625.
+        assert!(close(per_million("claude-haiku-5-5", t), 0.625));
     }
 }
