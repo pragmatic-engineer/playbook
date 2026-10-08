@@ -46,9 +46,8 @@ fn run_guard(name: &str, command: &str) -> String {
     String::from_utf8_lossy(&out.stdout).to_string()
 }
 
-/// Pipes the payload over stdin instead of setting `HOOK_INPUT`, the same
-/// contract `shell/plugin-e2e.sh` Section G exercises against the built
-/// binary. `HOOK_INPUT` is explicitly removed so a leftover in the test
+/// Pipes the payload over stdin instead of setting `HOOK_INPUT`, the contract
+/// the installed hooks use. `HOOK_INPUT` is explicitly removed so a leftover in the test
 /// process's own environment cannot mask a stdin regression.
 fn run_guard_via_stdin(name: &str, command: &str) -> String {
     let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
@@ -1046,8 +1045,7 @@ mod no_slop_guard {
         assert!(String::from_utf8_lossy(&out.stdout).trim().is_empty());
     }
 
-    /// `shell/plugin-e2e.sh` Section G exercises this over stdin; see also
-    /// the comment-slop stdin test below.
+    /// Stdin is the real hook contract; see also the comment-slop stdin test below.
     #[test]
     fn stdin_piped_input_is_read_when_hook_input_is_unset() {
         let deny = run_guard_via_stdin("no-slop-guard", "git commit -m \"fix: a \u{2014} b\"");

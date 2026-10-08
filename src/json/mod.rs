@@ -7,7 +7,6 @@
 
 pub mod claudejson;
 pub mod count;
-pub mod evalfixture;
 pub mod fieldeq;
 pub mod fields;
 pub mod ghjson;
