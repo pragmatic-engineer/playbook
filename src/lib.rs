@@ -25,6 +25,7 @@ pub mod sanitize;
 pub mod settings;
 pub mod statusline;
 pub mod trust;
+pub mod uninstall;
 pub mod update;
 pub mod usage;
 pub mod worktree;
@@ -66,6 +67,28 @@ pub enum Command {
         /// Also install the `cc` and `ccd` launcher shortcuts and wire your shell rc file (opt in)
         #[arg(long)]
         aliases: bool,
+    },
+    /// Remove what playbook installed from this machine
+    ///
+    /// Takes out the hook entries and status line that `playbook init` wrote
+    /// into `settings.json`, the launcher block in your shell rc files, and
+    /// the files playbook placed under `~/.config/playbook`. Everything else
+    /// in `settings.json` and the rc files stays, each changed file is backed
+    /// up first, and memory, sessions and history are never touched. The
+    /// `playbook` binary stays unless you pass `--remove-binary`. It changes
+    /// nothing without `--yes`; `--dry-run` lists what would go.
+    ///
+    /// Example: `playbook uninstall --dry-run`
+    Uninstall {
+        /// Go ahead and remove (without it, nothing is changed)
+        #[arg(long)]
+        yes: bool,
+        /// List what would be removed and change nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Also remove the `playbook` binary, its backups and the PATH line the installer added
+        #[arg(long)]
+        remove_binary: bool,
     },
     /// Print the shell functions `cc` and `ccd`
     ///

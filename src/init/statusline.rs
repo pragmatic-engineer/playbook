@@ -66,7 +66,7 @@ pub const RUST_COMMAND: &str = "playbook statusline";
 
 /// Whether `command` runs the playbook-installed `statusline.sh` through an
 /// interpreter. A custom script elsewhere, or any extra argument, is not it.
-fn is_legacy_command(command: &str, home: &Path) -> bool {
+pub(crate) fn is_legacy_command(command: &str, home: &Path) -> bool {
     let mut tokens = command.split_whitespace();
     let (Some(interp), Some(path), None) = (tokens.next(), tokens.next(), tokens.next()) else {
         return false;
