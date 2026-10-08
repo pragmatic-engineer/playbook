@@ -22,6 +22,7 @@ struct Run {
 fn scratch() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("playbook-eval-{}-{n}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -49,7 +50,7 @@ fn shims(dir: &Path, gh_ok: bool) {
         dir,
         "claude",
         &format!(
-            "touch '{d}/sentinel'\nn=0; [ -f '{d}/count' ] && n=$(cat '{d}/count')\nn=$((n+1)); echo $n > '{d}/count'\nif [ -f '{d}/response_'$n'.json' ]; then cat '{d}/response_'$n'.json'; else cat '{d}/response.json'; fi"
+            "touch '{d}/sentinel'\necho \"$@\" > '{d}/argv'\nn=0; [ -f '{d}/count' ] && n=$(cat '{d}/count')\nn=$((n+1)); echo $n > '{d}/count'\nif [ -f '{d}/response_'$n'.json' ]; then cat '{d}/response_'$n'.json'; else cat '{d}/response.json'; fi"
         ),
     );
 }
@@ -223,4 +224,16 @@ fn an_empty_case_file_fails_instead_of_passing_vacuously() {
     let r = run_with("[]", SEC_FULL, true, &[]);
     assert_eq!(r.code, 1, "{}", r.out);
     assert!(r.out.contains("nothing was validated"));
+}
+
+#[test]
+fn the_prompt_sent_to_claude_carries_the_body_lenses_and_diff() {
+    let r = run_with(&one(true), SEC_FULL, true, &[]);
+    let argv = fs::read_to_string(r.dir.join("argv")).unwrap();
+    assert!(argv.starts_with("-p --model haiku"), "{argv}");
+    assert!(argv.contains("Classify each lens."));
+    assert!(!argv.contains("name: t"), "frontmatter leaked: {argv}");
+    assert!(argv.contains("Candidate lenses to classify"));
+    assert!(argv.contains("security"));
+    assert!(argv.contains("+placeholder"));
 }
