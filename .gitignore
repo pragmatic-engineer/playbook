@@ -13,7 +13,6 @@
 !/SECURITY.md
 !/Brewfile
 !/install.sh
-!/uninstall.sh
 !/justfile
 !/prompts/
 # settings.json is intentionally NOT tracked: it is the owner's live, personal

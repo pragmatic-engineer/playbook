@@ -73,6 +73,36 @@ fn main() {
                 .unwrap_or(ShellKind::Bash);
             print!("{}", init::shell_init::script(kind));
         }
+        Command::Uninstall {
+            yes,
+            dry_run,
+            remove_binary,
+        } => {
+            let home = common::home_dir();
+            let opts = playbook::uninstall::Options {
+                bin_dir: playbook::uninstall::default_bin_dir(
+                    &home,
+                    std::env::var("PLAYBOOK_BIN_DIR").ok().as_deref(),
+                ),
+                home,
+                remove_binary,
+                dry_run: dry_run || !yes,
+            };
+            let report = playbook::uninstall::run(&opts);
+            for line in &report.lines {
+                println!("{line}");
+            }
+            for error in &report.errors {
+                eprintln!("uninstall: {error}");
+            }
+            if !yes && !dry_run {
+                eprintln!("uninstall: nothing was changed; re-run with --yes to remove these");
+                std::process::exit(1);
+            }
+            if !report.errors.is_empty() {
+                std::process::exit(1);
+            }
+        }
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
         // Retiring `hooks/hooks.json` and regenerating the seed into

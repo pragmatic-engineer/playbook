@@ -420,8 +420,8 @@ warn_if_shadowed() {
 
 # Puts $PLAYBOOK_BIN_DIR on PATH for future shells via one idempotent rc-file
 # line, using the same grep -qF guard and comment-marker idiom as
-# shell/setup-local.sh:263-268, so uninstall.sh can find and strip this exact
-# line later.
+# shell/setup-local.sh:263-268, so `playbook uninstall --remove-binary` can find
+# and strip this exact line later.
 ensure_bin_dir_on_path() {
     local shell_bin rc_file
     shell_bin="$(basename "${SHELL:-}")"
@@ -488,7 +488,7 @@ backed_up=0
 
 log "Installing config into $CLAUDE_HOME"
 # `playbook init` (below) copies everything else it needs on its own.
-CONFIG_FILES="install.sh uninstall.sh"
+CONFIG_FILES="install.sh"
 for rel in $CONFIG_FILES; do
     src="$SRC/$rel"
     [ -e "$src" ] || continue

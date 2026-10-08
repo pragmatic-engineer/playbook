@@ -163,6 +163,140 @@ pub fn upgrade_legacy_rc_files(home: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(changed)
 }
 
+/// One rc file `strip_rc_files` changed, or would change on a dry run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RcStrip {
+    pub rc_file: PathBuf,
+    /// The copy taken before the write; `None` on a dry run or when unwritable.
+    pub backup: Option<PathBuf>,
+    /// The file needs a change but lacks the owner write bit, so it was left alone.
+    pub unwritable: bool,
+    /// Why the backup or the write failed; the file was left as it was.
+    pub error: Option<String>,
+}
+
+/// Remove the managed launcher block (and legacy `source` lines) from every
+/// shell's rc file under `home`, and with `binary_path` also the `PATH` block
+/// the installer appends. Anything else in the file is kept byte for byte.
+/// A changed file is first copied to `<rc>.bak-<stamp>`.
+pub fn strip_rc_files(home: &Path, stamp: u64, binary_path: bool, dry_run: bool) -> Vec<RcStrip> {
+    let mut changed = Vec::new();
+    for kind in ShellKind::ALL {
+        let rc_file = home.join(kind.rc_file_name());
+        let Ok(existing) = fs::read(&rc_file) else {
+            continue;
+        };
+        let mut content = strip_launcher(&existing, kind);
+        if binary_path {
+            let base = content.as_deref().unwrap_or(&existing);
+            content = strip_binary_path(base).or(content);
+        }
+        let Some(content) = content else { continue };
+        let mut entry = RcStrip {
+            rc_file: rc_file.clone(),
+            backup: None,
+            unwritable: false,
+            error: None,
+        };
+        if !owner_can_write(&rc_file) {
+            entry.unwritable = true;
+        } else if !dry_run {
+            let name = rc_file.file_name().unwrap_or_default().to_string_lossy();
+            let backup = rc_file.with_file_name(format!("{name}.bak-{stamp}"));
+            match fs::copy(&rc_file, &backup).and_then(|_| atomic_write_rc_file(&rc_file, &content))
+            {
+                Ok(()) => entry.backup = Some(backup),
+                Err(err) => entry.error = Some(err.to_string()),
+            }
+        }
+        changed.push(entry);
+    }
+    changed
+}
+
+/// `content` without the launcher line(s) and the comment right above each.
+/// `None` when there was nothing to remove.
+fn strip_launcher(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
+    strip_lines(
+        content,
+        |lines, i| {
+            let line = lines[i];
+            let trimmed = line.trim_ascii();
+            let current =
+                trimmed == SOURCE_LINE.as_bytes() || trimmed == b"eval \"$(playbook shell-init)\"";
+            usize::from(current || is_legacy_source_line(line, shell_kind))
+        },
+        |prev| {
+            let prev = prev.trim_ascii();
+            prev.starts_with(b"#") && prev.windows(18).any(|w| w == b"launchers (cc/ccd)")
+        },
+    )
+}
+
+/// `content` without the `# playbook binary` marker and the `export PATH=`
+/// line the installer writes right after it. Anchored on the marker, so a
+/// user's own `PATH` edits are never touched.
+fn strip_binary_path(content: &[u8]) -> Option<Vec<u8>> {
+    strip_lines(
+        content,
+        |lines, i| {
+            let marker = lines[i].trim_ascii() == b"# playbook binary";
+            let export = lines
+                .get(i + 1)
+                .is_some_and(|l| l.trim_ascii().starts_with(b"export PATH="));
+            if marker && export {
+                2
+            } else {
+                0
+            }
+        },
+        |_| false,
+    )
+}
+
+/// Remove the spans `remove_at` reports (a line count at line `i`, 0 for
+/// none), with the line above a span when `is_marker` accepts it, and the
+/// blank line the gap would otherwise double or leave dangling at the end.
+fn strip_lines(
+    content: &[u8],
+    remove_at: impl Fn(&[&[u8]], usize) -> usize,
+    is_marker: impl Fn(&[u8]) -> bool,
+) -> Option<Vec<u8>> {
+    let lines: Vec<&[u8]> = content.split_inclusive(|&b| b == b'\n').collect();
+    let is_blank = |l: &[u8]| l.trim_ascii().is_empty();
+    let mut out: Vec<&[u8]> = Vec::new();
+    let mut touched = false;
+    let mut just_removed = false;
+    let mut i = 0;
+    while i < lines.len() {
+        let span = remove_at(&lines, i);
+        if span > 0 {
+            touched = true;
+            just_removed = true;
+            if out.last().is_some_and(|prev| is_marker(prev)) {
+                out.pop();
+            }
+            i += span;
+            continue;
+        }
+        let line = lines[i];
+        i += 1;
+        if just_removed && is_blank(line) && out.last().is_none_or(|l| is_blank(l)) {
+            just_removed = false;
+            continue;
+        }
+        just_removed = false;
+        out.push(line);
+    }
+    if !touched {
+        return None;
+    }
+    if just_removed && out.last().is_some_and(|l| is_blank(l)) {
+        out.pop();
+    }
+    Some(out.concat())
+}
+
 /// Whether some line of `content` trims to exactly `wanted`.
 fn has_line(content: &[u8], wanted: &str) -> bool {
     content

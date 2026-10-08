@@ -18,14 +18,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 16] = [
+const ALLOW_FILES: [&str; 15] = [
     ".gitignore",
     "README.md",
     "LICENSE",
     "Brewfile",
     "justfile",
     "install.sh",
-    "uninstall.sh",
     "settings.shared.json",
     "permissions.shared.json",
     "statusline.sh",

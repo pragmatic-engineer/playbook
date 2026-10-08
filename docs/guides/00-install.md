@@ -94,22 +94,21 @@ If an install is interrupted after writing `settings.json` but before writing th
 ## Uninstall
 
 ```bash
-bash ~/.claude/uninstall.sh
+playbook uninstall --dry-run   # list what would be removed, change nothing
+playbook uninstall --yes       # remove it
 ```
 
-This removes every shipped file from `~/.claude` and strips the launcher source lines from `~/.zshrc` and `~/.bashrc`. It backs up the rc files before editing.
+It removes only what playbook placed: the hook entries and status line `playbook init` wrote into `~/.claude/settings.json`, the launcher block in `~/.zshrc` and `~/.bashrc`, the files playbook copied under `~/.config/playbook` (`statusline.sh`, `prompts/SYSTEM_PROMPT.md`, `hooks/lib/config-hash.sh`), and `install.sh` and `uninstall.sh` in `~/.claude`. Without `--yes` it only lists the plan and exits with status 1.
 
-**Preserved by default:** `settings.json`, `.settings.base.json`, `backups/`, and all runtime state (`sessions/`, `projects/`, `history*`, `plugins/`, `memory/`, `plans/`, `runtime/`, `cache/`, `logs/`, `todos/`, `shell-snapshots/`, `.credentials*`, `cc-state/`, `ccd-state/`).
-
-Pass `--purge` to also remove `settings.json`, `.settings.base.json`, and `backups/`.
+Everything else stays: the rest of `settings.json` (including any hook or status line you added yourself), the rest of your rc files, `.settings.base.json`, `backups/`, memory, and all runtime state. Each changed file is backed up first, as `settings.json.bak.<epoch>` and `<rc file>.bak-<epoch>`. A `statusline.sh` or system prompt you edited by hand, or that playbook has no record of placing, is kept, and so is `statusline.sh` while your own status line still runs it. If `settings.json` cannot be edited (invalid JSON, for example), the placed files and the binary stay too, because the hooks in it still need them.
 
 **Flags:**
 
-- `--yes`: skip the confirmation prompt.
-- `--force`: bypass the git-repo guard (see below).
-- `--purge`: remove user config in addition to shipped files.
+- `--yes`: do the removal (nothing changes without it).
+- `--dry-run`: list what would be removed and change nothing.
+- `--remove-binary`: also remove the `playbook` binary, its `playbook.<version>.bak` backups, and the `# playbook binary` PATH line the installer added.
 
-**Git-repo guard:** if `~/.claude` is a git working tree, the script refuses to run. Raw `rm` leaves index entries dangling; the correct path for decommissioning is `git rm -r <entries>`. Pass `--force` to bypass this guard if you know what you are doing. `--force` bypasses only the git guard; it does not skip the confirmation prompt.
+**Older installs:** a machine installed before the installer shrank to a few files may still hold a full copy of the source tree in `~/.claude` (`docs`, `src`, `tests`, and so on). `playbook uninstall` does not guess at those; remove them by hand if you want them gone.
 
 ## Notes
 

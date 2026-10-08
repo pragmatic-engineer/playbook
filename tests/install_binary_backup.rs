@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //! The previous-binary backup that `install.sh` keeps when it replaces an
-//! existing `$PLAYBOOK_BIN_DIR/playbook`, and `uninstall.sh` removing those
-//! backups, driving the real scripts with bash.
+//! existing `$PLAYBOOK_BIN_DIR/playbook`, and `playbook uninstall --remove-binary`
+//! removing those backups. The installer runs as the real script under bash.
 //!
 //! A stub `curl` serves a fake release and a stub `uname` pins the platform,
 //! both ahead of the real tools on a scratch `PATH`, so the shipped functions
@@ -176,14 +176,15 @@ impl Sandbox {
     }
 
     fn uninstall(&self) {
-        let mut command = self.script_command("uninstall.sh");
-        command.args(["--yes", "--force"]);
-        let out = command.output().expect("bash should spawn");
-        assert!(
-            out.status.success(),
-            "uninstall.sh exited with {}",
-            out.status
-        );
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["uninstall", "--yes", "--remove-binary"])
+            .env("HOME", &self.home)
+            .env("PLAYBOOK_BIN_DIR", &self.bin_dir)
+            .env("SHELL", "/bin/bash")
+            .current_dir(&self.root)
+            .output()
+            .expect("playbook should spawn");
+        assert!(out.status.success(), "uninstall exited with {}", out.status);
     }
 
     /// What the installed binary prints for `--version`.

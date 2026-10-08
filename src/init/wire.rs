@@ -401,6 +401,130 @@ pub fn wire_at(settings_path: &Path, epoch: u64) -> Result<WireOutcome, WireErro
     })
 }
 
+/// What `unwire_at` found, and did unless it ran dry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnwireOutcome {
+    /// Hook entries removed (or that would be, on a dry run).
+    pub hooks_removed: usize,
+    /// Whether the `statusLine` setting init wrote was removed too.
+    pub statusline_removed: bool,
+    /// The backup taken before the write; `None` on a dry run or no change.
+    pub backup_path: Option<PathBuf>,
+}
+
+/// Undo `wire`: remove each hook entry whose command is exactly the bare
+/// `playbook hook <name>` form `wire` writes, then any group or event that
+/// leaves empty, and the `statusLine` when it is the command init placed.
+/// Every other key, hook entry and group stays as the user left it. Backs the
+/// file up first when something changes; `dry_run` only counts.
+pub fn unwire_at(
+    settings_path: &Path,
+    home: &Path,
+    epoch: u64,
+    dry_run: bool,
+) -> Result<UnwireOutcome, WireError> {
+    let (mut root, original) = load_settings(settings_path)?;
+    let mut outcome = UnwireOutcome {
+        hooks_removed: 0,
+        statusline_removed: false,
+        backup_path: None,
+    };
+
+    let mut drop_hooks_key = false;
+    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+        let managed: Vec<String> = PORTED_HOOK_SPECS
+            .iter()
+            .chain(GUARD_SPECS)
+            .map(|spec| bare_command(spec.name))
+            .collect();
+        let mut touched_events = Vec::new();
+        for (event, groups) in hooks.iter_mut() {
+            let Some(groups) = groups.as_array_mut() else {
+                continue;
+            };
+            let mut touched = false;
+            groups.retain_mut(|group| {
+                let Some(entries) = group
+                    .as_object_mut()
+                    .and_then(|g| g.get_mut("hooks"))
+                    .and_then(Value::as_array_mut)
+                else {
+                    return true;
+                };
+                let before = entries.len();
+                entries.retain(|e| !is_managed_entry(e, &managed));
+                let removed = before - entries.len();
+                outcome.hooks_removed += removed;
+                touched |= removed > 0;
+                removed == 0 || !entries.is_empty()
+            });
+            if touched {
+                touched_events.push(event.clone());
+            }
+        }
+        for event in touched_events {
+            if hooks
+                .get(&event)
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+            {
+                hooks.remove(&event);
+            }
+        }
+        drop_hooks_key = hooks.is_empty() && outcome.hooks_removed > 0;
+    }
+    if drop_hooks_key {
+        root.remove("hooks");
+    }
+
+    let placed_statusline = root
+        .get("statusLine")
+        .and_then(|s| s.get("command"))
+        .and_then(Value::as_str)
+        .is_some_and(|c| {
+            c == crate::init::statusline::RUST_COMMAND
+                || crate::init::statusline::is_legacy_command(c, home)
+        });
+    if placed_statusline {
+        root.remove("statusLine");
+        outcome.statusline_removed = true;
+    }
+
+    if outcome.hooks_removed == 0 && !outcome.statusline_removed {
+        return Ok(outcome);
+    }
+    if dry_run {
+        return Ok(outcome);
+    }
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&Value::Object(root))
+            .expect("a JSON value built from valid JSON always re-serializes")
+    );
+    if rendered == original {
+        return Ok(outcome);
+    }
+    // Never reuse a name: an earlier backup holds an older state worth keeping.
+    let mut stamp = epoch;
+    let mut backup = timestamped_backup_path(settings_path, stamp);
+    while backup.exists() {
+        stamp += 1;
+        backup = timestamped_backup_path(settings_path, stamp);
+    }
+    fs::copy(settings_path, &backup)?;
+    outcome.backup_path = Some(backup);
+    atomic_write(settings_path, &rendered)?;
+    Ok(outcome)
+}
+
+/// Whether `entry` is a command hook running exactly one of `managed`.
+fn is_managed_entry(entry: &Value, managed: &[String]) -> bool {
+    entry
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|cmd| managed.iter().any(|m| m == cmd))
+}
+
 /// Reads `path` as a JSON object, returning it alongside the exact bytes
 /// read so `wire` can compare its own re-serialization against them to
 /// decide whether anything actually changed. A missing file starts from an
@@ -581,11 +705,14 @@ fn timestamped_backup_path(settings_path: &Path, epoch_secs: u64) -> PathBuf {
 /// promoting `src/init/merge.rs`'s private helper to `pub(crate)` for one
 /// caller is not worth it. Duplicating a five-line function is cheaper.
 fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
-    let dir = path
+    // A symlinked settings file (stow, chezmoi) stays a symlink: only its target is replaced.
+    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let dir = target
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(dir)?;
+    let permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     let tmp_path = dir.join(format!(
         ".wire-settings-{}-{:?}.tmp",
         std::process::id(),
@@ -595,7 +722,13 @@ fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
         let _ = fs::remove_file(&tmp_path);
         return Err(err);
     }
-    if let Err(err) = fs::rename(&tmp_path, path) {
+    if let Some(permissions) = permissions {
+        if let Err(err) = fs::set_permissions(&tmp_path, permissions) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(err);
+        }
+    }
+    if let Err(err) = fs::rename(&tmp_path, &target) {
         let _ = fs::remove_file(&tmp_path);
         return Err(err);
     }
