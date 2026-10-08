@@ -469,6 +469,10 @@ fn effort_cap_step(home: &Path, claude_home: &Path) -> StepReport {
         Ok(crate::effort::Synced::Unchanged) => {
             StepReport::already_correct("effort", format!("already capped at {level}"))
         }
+        Ok(crate::effort::Synced::Deferred(cap)) => StepReport::already_correct(
+            "effort",
+            format!("Claude Code already caps at {cap}, which is as low or lower than {level}"),
+        ),
         Err(err) => StepReport::failed("effort", err.to_string()),
     }
 }

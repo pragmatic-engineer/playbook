@@ -63,12 +63,13 @@ You do not edit the variants by hand. `playbook agents gen` writes them from the
 
 Playbook sets the defaults, in each file. You set the ceiling.
 
-`playbook effort <level>` stores the config key `effort.max` and writes it to `maxEffortLevel` in `~/.claude/settings.json`. Claude Code applies that setting to every session, including the effort a command, skill or agent sets in its own frontmatter. So with `playbook effort medium`, `fact-checker-xhigh` runs at `medium`, and an agent that ships at `low` still runs at `low`. A cap never raises anything.
+Playbook has its own ceiling, the config key `effort.max`, set with `playbook effort <level>`. Claude Code has one too, `maxEffortLevel` in `~/.claude/settings.json`, and it is the only thing that caps the effort a command, skill or agent sets in its own frontmatter. The effective ceiling is the lower of the two:
 
-- `auto` is the default. Playbook sets no cap and the shipped values apply.
-- `playbook init` reapplies the cap, and `playbook effort auto` removes it. Playbook removes a cap only when it wrote it. A `maxEffortLevel` you set by hand is never touched.
-- The setting needs Claude Code 2.1.267 or later. On an older version the cap has no effect.
-- Claude Code's own `/effort` and `--effort` still work, below the cap.
+- Playbook `xhigh`, Claude Code `max`: `xhigh` applies. Playbook writes `maxEffortLevel: xhigh`.
+- Playbook `xhigh`, Claude Code `medium`: `medium` applies. Playbook writes nothing and never goes above Claude Code's value.
+- A cap never raises anything. An agent that ships at `low` still runs at `low`.
+
+When playbook writes `maxEffortLevel`, it remembers the value it replaced. `playbook effort auto` puts your value back. A `maxEffortLevel` you set by hand is never deleted. `playbook init` reapplies the rule, `playbook effort` with no level shows both values and the winner, and Claude Code's own `/effort` and `--effort` still work below the cap. The setting needs Claude Code 2.1.267 or later.
 
 Planned work:
 

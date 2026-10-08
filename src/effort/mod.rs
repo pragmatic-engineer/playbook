@@ -1,18 +1,22 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook effort`: the user's ceiling on effort.
+//! `playbook effort`: playbook's own ceiling on effort.
 //!
 //! The config key `effort.max` (`auto`, `low`, `medium`, `high`, `xhigh`,
-//! `max`) is written to the `maxEffortLevel` setting in
-//! `~/.claude/settings.json`. Claude Code applies that cap to every session,
-//! including the effort a command, skill or agent sets in its own
-//! frontmatter, so an `xhigh` agent runs at `medium` under a `medium` cap.
-//! `auto` means playbook sets no cap and the shipped defaults apply. Claude
-//! Code 2.1.267 or later is needed for the setting to take effect.
+//! `max`) is playbook's setting. Claude Code has its own, `maxEffortLevel` in
+//! `~/.claude/settings.json`, and it is the only thing that caps the effort a
+//! command, skill or agent sets in its own frontmatter. The effective ceiling
+//! is the lower of the two:
 //!
-//! Playbook removes the cap on `auto` only when it wrote the value itself. A
-//! `maxEffortLevel` the user set by hand is never touched.
+//! - Claude Code's cap is already as low or lower: playbook writes nothing and
+//!   Claude Code enforces its own.
+//! - Playbook's is lower: playbook writes it as `maxEffortLevel` and remembers
+//!   the value it replaced, so `auto` (or a later, higher level) puts it back.
+//! - `auto` means playbook sets no ceiling.
+//!
+//! A `maxEffortLevel` the user set is never lost: it is restored, not
+//! deleted. Claude Code 2.1.267 or later is needed for the cap to apply.
 
 use crate::common::atomic::write_atomic;
 use crate::common::paths::playbook_root_from;
@@ -28,19 +32,78 @@ pub const KEY: &str = "effort.max";
 /// Every accepted value, `auto` first.
 pub const LEVELS: [&str; 6] = ["auto", "low", "medium", "high", "xhigh", "max"];
 
+/// Position of `level` from lowest to highest, `None` for `auto` or unknown.
+fn rank(level: &str) -> Option<usize> {
+    LEVELS.iter().skip(1).position(|l| *l == level)
+}
+
+/// The lower of two levels. An unknown or missing side loses.
+fn lower<'a>(a: Option<&'a str>, b: Option<&'a str>) -> Option<&'a str> {
+    match (
+        a.and_then(|l| rank(l).map(|r| (l, r))),
+        b.and_then(|l| rank(l).map(|r| (l, r))),
+    ) {
+        (Some((la, ra)), Some((lb, rb))) => Some(if ra <= rb { la } else { lb }),
+        (Some((l, _)), None) | (None, Some((l, _))) => Some(l),
+        (None, None) => None,
+    }
+}
+
 /// What `sync` did to `settings.json`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Synced {
-    /// The cap was written or changed.
+    /// Playbook's cap was written.
     Set(String),
-    /// A cap that playbook wrote earlier was removed.
+    /// Playbook's cap was removed and the user's earlier value put back.
     Cleared,
+    /// The Claude Code cap is as low or lower, so it stays and wins.
+    Deferred(String),
     /// Nothing needed to change.
     Unchanged,
 }
 
+/// What playbook wrote, and the user's value it replaced.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Owned {
+    value: String,
+    previous: Option<String>,
+}
+
 fn marker_path(home: &Path) -> PathBuf {
     playbook_root_from(home).join(".effort-owned")
+}
+
+fn read_marker(home: &Path) -> Option<Owned> {
+    let text = fs::read_to_string(marker_path(home)).ok()?;
+    let text = text.trim();
+    // The first release wrote the bare level, with nothing to restore.
+    if !text.starts_with('{') {
+        return (!text.is_empty()).then(|| Owned {
+            value: text.to_string(),
+            previous: None,
+        });
+    }
+    let v: Value = serde_json::from_str(text).ok()?;
+    Some(Owned {
+        value: v.get("owned")?.as_str()?.to_string(),
+        previous: v
+            .get("previous")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
+}
+
+fn write_marker(home: &Path, owned: &Owned) -> io::Result<()> {
+    let marker = marker_path(home);
+    if let Some(dir) = marker.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let body = serde_json::json!({"owned": owned.value, "previous": owned.previous});
+    write_atomic(&marker, &format!("{body}\n"))
+}
+
+fn clear_marker(home: &Path) {
+    let _ = fs::remove_file(marker_path(home));
 }
 
 /// The configured level, `auto` when no tier sets one.
@@ -51,63 +114,104 @@ pub fn configured(home: &Path) -> String {
     }
 }
 
+fn read_settings(path: &Path) -> io::Result<Map<String, Value>> {
+    match fs::read_to_string(path) {
+        Ok(text) => match serde_json::from_str::<Value>(&text) {
+            Ok(Value::Object(map)) => Ok(map),
+            _ => Err(io::Error::other(format!(
+                "{} is not a JSON object, left unchanged",
+                path.display()
+            ))),
+        },
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Map::new()),
+        Err(err) => Err(err),
+    }
+}
+
+fn cap_of(root: &Map<String, Value>) -> Option<String> {
+    root.get("maxEffortLevel")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// The Claude Code cap the user set, ignoring one playbook wrote itself.
+pub fn claude_cap(home: &Path, claude_home: &Path) -> Option<String> {
+    let root = read_settings(&claude_home.join("settings.json")).ok()?;
+    let current = cap_of(&root);
+    match read_marker(home) {
+        Some(o) if current.as_deref() == Some(o.value.as_str()) => o.previous,
+        _ => current,
+    }
+}
+
+/// The ceiling that applies: the lower of playbook's and Claude Code's.
+pub fn effective(configured: &str, claude: Option<&str>) -> Option<String> {
+    lower(Some(configured), claude).map(str::to_string)
+}
+
 /// Make `settings.json` agree with `level`.
 pub fn sync(home: &Path, claude_home: &Path, level: &str) -> io::Result<Synced> {
     let settings_path = claude_home.join("settings.json");
-    let marker = marker_path(home);
-    let owned = fs::read_to_string(&marker)
-        .ok()
-        .map(|s| s.trim().to_string());
-
-    let mut root = match fs::read_to_string(&settings_path) {
-        Ok(text) => match serde_json::from_str::<Value>(&text) {
-            Ok(Value::Object(map)) => map,
-            _ => {
-                return Err(io::Error::other(format!(
-                    "{} is not a JSON object, left unchanged",
-                    settings_path.display()
-                )))
-            }
-        },
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Map::new(),
-        Err(err) => return Err(err),
+    let mut root = read_settings(&settings_path)?;
+    let current = cap_of(&root);
+    let marker = read_marker(home);
+    let ours = marker
+        .as_ref()
+        .filter(|o| current.as_deref() == Some(o.value.as_str()));
+    // The user's own cap: what was there before ours, or what is there now.
+    let user_cap: Option<String> = match ours {
+        Some(o) => o.previous.clone(),
+        None => current.clone(),
     };
-    let current = root
-        .get("maxEffortLevel")
-        .and_then(Value::as_str)
-        .map(str::to_string);
 
-    if level == "auto" {
-        let ours = owned.is_some() && owned == current;
-        if owned.is_some() {
-            let _ = fs::remove_file(&marker);
+    let wants_ours = level != "auto"
+        && match (rank(level), user_cap.as_deref().and_then(rank)) {
+            (Some(mine), Some(theirs)) => mine < theirs,
+            (Some(_), None) => true,
+            _ => false,
+        };
+
+    if !wants_ours {
+        // Put the user's value back, or leave theirs alone.
+        if let Some(o) = ours {
+            match &o.previous {
+                Some(prev) => {
+                    root.insert("maxEffortLevel".into(), Value::String(prev.clone()));
+                }
+                None => {
+                    root.remove("maxEffortLevel");
+                }
+            }
+            write_settings(&settings_path, root)?;
+            clear_marker(home);
+            return Ok(if level == "auto" {
+                Synced::Cleared
+            } else {
+                Synced::Deferred(user_cap.unwrap_or_default())
+            });
         }
-        if !ours {
-            return Ok(Synced::Unchanged);
+        if marker.is_some() {
+            clear_marker(home);
         }
-        root.remove("maxEffortLevel");
-        write_settings(&settings_path, root)?;
-        return Ok(Synced::Cleared);
+        return Ok(match (level, user_cap) {
+            ("auto", _) | (_, None) => Synced::Unchanged,
+            (_, Some(cap)) => Synced::Deferred(cap),
+        });
     }
 
-    if current.as_deref() == Some(level) {
-        write_marker(&marker, level)?;
+    if ours.is_some() && current.as_deref() == Some(level) {
         return Ok(Synced::Unchanged);
     }
-    root.insert(
-        "maxEffortLevel".to_string(),
-        Value::String(level.to_string()),
-    );
+    root.insert("maxEffortLevel".into(), Value::String(level.to_string()));
     write_settings(&settings_path, root)?;
-    write_marker(&marker, level)?;
+    write_marker(
+        home,
+        &Owned {
+            value: level.to_string(),
+            previous: user_cap,
+        },
+    )?;
     Ok(Synced::Set(level.to_string()))
-}
-
-fn write_marker(marker: &Path, level: &str) -> io::Result<()> {
-    if let Some(dir) = marker.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    write_atomic(marker, &format!("{level}\n"))
 }
 
 fn write_settings(path: &Path, root: Map<String, Value>) -> io::Result<()> {
@@ -138,32 +242,39 @@ pub fn run_set(home: &Path, claude_home: &Path, level: &str) -> Result<String, S
     .map_err(|err| err.to_string())?;
     let synced = sync(home, claude_home, level).map_err(|err| err.to_string())?;
     Ok(match (level, synced) {
-        ("auto", Synced::Cleared) => "effort cap removed, playbook defaults apply".to_string(),
+        ("auto", Synced::Cleared) => {
+            "effort cap removed, your earlier Claude Code cap is back, playbook defaults apply"
+                .to_string()
+        }
         ("auto", _) => "effort set to auto, playbook defaults apply".to_string(),
         (l, Synced::Set(_)) => format!(
             "effort capped at {l}: anything set higher runs at {l} (needs Claude Code 2.1.267 or later)"
+        ),
+        (l, Synced::Deferred(cap)) => format!(
+            "effort set to {l}, but Claude Code already caps at {cap}, which is lower or equal, so {cap} applies"
         ),
         (l, _) => format!("effort already capped at {l}"),
     })
 }
 
-/// `playbook effort` with no level: what is configured and what is applied.
+/// `playbook effort` with no level: playbook's value, Claude Code's value and
+/// the one that wins.
 pub fn run_status(home: &Path, claude_home: &Path) -> String {
     let level = configured(home);
-    let applied = fs::read_to_string(claude_home.join("settings.json"))
+    let claude = claude_cap(home, claude_home);
+    let applied = read_settings(&claude_home.join("settings.json"))
         .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| {
-            v.get("maxEffortLevel")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
-    let applied_text = applied.as_deref().unwrap_or("none");
-    let mut out = format!("effort.max: {level}\nmaxEffortLevel in settings.json: {applied_text}");
-    let in_sync = match (level.as_str(), applied.as_deref()) {
-        ("auto", _) => true,
-        (l, Some(a)) => l == a,
-        _ => false,
+        .and_then(|r| cap_of(&r));
+    let eff = effective(&level, claude.as_deref());
+    let mut out = format!(
+        "playbook effort.max: {level}\nClaude Code maxEffortLevel: {}\neffective ceiling: {}",
+        claude.as_deref().unwrap_or("none"),
+        eff.as_deref().unwrap_or("none, shipped defaults apply"),
+    );
+    let in_sync = match (eff.as_deref(), applied.as_deref()) {
+        (None, _) => true,
+        (Some(e), Some(a)) => e == a,
+        (Some(_), None) => false,
     };
     if !in_sync {
         out.push_str("\nnot applied yet, run `playbook init` or `playbook effort <level>`");
@@ -176,84 +287,158 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
 
-    fn read_cap(claude: &Path) -> Option<String> {
-        let text = fs::read_to_string(claude.join("settings.json")).ok()?;
-        let v: Value = serde_json::from_str(&text).ok()?;
-        v.get("maxEffortLevel")?.as_str().map(str::to_string)
+    struct Env {
+        home: PathBuf,
+        claude: PathBuf,
+    }
+
+    fn env(tag: &str) -> Env {
+        let home = scratch_dir(tag);
+        let claude = home.join(".claude");
+        fs::create_dir_all(&claude).unwrap();
+        Env { home, claude }
+    }
+
+    impl Env {
+        fn settings(&self, body: &str) {
+            fs::write(self.claude.join("settings.json"), body).unwrap();
+        }
+        fn cap(&self) -> Option<String> {
+            let v: Value =
+                serde_json::from_str(&fs::read_to_string(self.claude.join("settings.json")).ok()?)
+                    .ok()?;
+            v.get("maxEffortLevel")?.as_str().map(str::to_string)
+        }
+        fn sync(&self, level: &str) -> Synced {
+            sync(&self.home, &self.claude, level).unwrap()
+        }
     }
 
     #[test]
-    fn a_level_is_written_and_other_settings_survive() {
-        let home = scratch_dir("effort-set");
-        let claude = home.join(".claude");
-        fs::create_dir_all(&claude).unwrap();
-        fs::write(claude.join("settings.json"), r#"{"theme":"dark"}"#).unwrap();
+    fn the_lower_of_two_levels_wins() {
+        assert_eq!(lower(Some("xhigh"), Some("max")), Some("xhigh"));
+        assert_eq!(lower(Some("xhigh"), Some("medium")), Some("medium"));
+        assert_eq!(lower(Some("auto"), Some("high")), Some("high"));
+        assert_eq!(lower(Some("low"), None), Some("low"));
+        assert_eq!(lower(Some("auto"), None), None);
+    }
 
-        let out = sync(&home, &claude, "medium").unwrap();
+    #[test]
+    fn playbook_xhigh_under_claude_max_applies_xhigh() {
+        let e = env("effort-xhigh-max");
+        e.settings(r#"{"maxEffortLevel":"max","theme":"dark"}"#);
+        assert_eq!(e.sync("xhigh"), Synced::Set("xhigh".into()));
+        assert_eq!(e.cap().as_deref(), Some("xhigh"));
+        assert_eq!(
+            effective("xhigh", claude_cap(&e.home, &e.claude).as_deref()).as_deref(),
+            Some("xhigh")
+        );
+    }
 
-        assert_eq!(out, Synced::Set("medium".into()));
-        assert_eq!(read_cap(&claude).as_deref(), Some("medium"));
-        let v: Value =
-            serde_json::from_str(&fs::read_to_string(claude.join("settings.json")).unwrap())
-                .unwrap();
-        assert_eq!(v["theme"], "dark");
+    #[test]
+    fn playbook_xhigh_under_claude_medium_keeps_medium_and_writes_nothing() {
+        let e = env("effort-xhigh-medium");
+        e.settings(r#"{"maxEffortLevel":"medium"}"#);
+        assert_eq!(e.sync("xhigh"), Synced::Deferred("medium".into()));
+        assert_eq!(e.cap().as_deref(), Some("medium"));
+        assert!(!marker_path(&e.home).exists());
+        assert_eq!(
+            effective("xhigh", claude_cap(&e.home, &e.claude).as_deref()).as_deref(),
+            Some("medium")
+        );
+    }
+
+    #[test]
+    fn auto_restores_the_value_playbook_replaced() {
+        let e = env("effort-restore");
+        e.settings(r#"{"maxEffortLevel":"max"}"#);
+        e.sync("low");
+        assert_eq!(e.cap().as_deref(), Some("low"));
+        assert_eq!(claude_cap(&e.home, &e.claude).as_deref(), Some("max"));
+        assert_eq!(e.sync("auto"), Synced::Cleared);
+        assert_eq!(e.cap().as_deref(), Some("max"));
+        assert!(!marker_path(&e.home).exists());
+    }
+
+    #[test]
+    fn auto_removes_a_cap_when_there_was_none_before() {
+        let e = env("effort-none-before");
+        e.sync("low");
+        assert_eq!(e.sync("auto"), Synced::Cleared);
+        assert_eq!(e.cap(), None);
+    }
+
+    #[test]
+    fn raising_playbook_above_the_user_cap_gives_the_user_cap_back() {
+        let e = env("effort-raise");
+        e.settings(r#"{"maxEffortLevel":"high"}"#);
+        e.sync("low");
+        assert_eq!(e.cap().as_deref(), Some("low"));
+        assert_eq!(e.sync("max"), Synced::Deferred("high".into()));
+        assert_eq!(e.cap().as_deref(), Some("high"));
     }
 
     #[test]
     fn the_same_level_twice_changes_nothing() {
-        let home = scratch_dir("effort-twice");
-        let claude = home.join(".claude");
-        sync(&home, &claude, "high").unwrap();
-        assert_eq!(sync(&home, &claude, "high").unwrap(), Synced::Unchanged);
-    }
-
-    #[test]
-    fn auto_removes_a_cap_playbook_wrote() {
-        let home = scratch_dir("effort-clear");
-        let claude = home.join(".claude");
-        sync(&home, &claude, "low").unwrap();
-        assert_eq!(sync(&home, &claude, "auto").unwrap(), Synced::Cleared);
-        assert_eq!(read_cap(&claude), None);
+        let e = env("effort-twice");
+        e.sync("high");
+        assert_eq!(e.sync("high"), Synced::Unchanged);
     }
 
     #[test]
     fn auto_keeps_a_cap_the_user_set_by_hand() {
-        let home = scratch_dir("effort-hand");
-        let claude = home.join(".claude");
-        fs::create_dir_all(&claude).unwrap();
-        fs::write(claude.join("settings.json"), r#"{"maxEffortLevel":"high"}"#).unwrap();
-        assert_eq!(sync(&home, &claude, "auto").unwrap(), Synced::Unchanged);
-        assert_eq!(read_cap(&claude).as_deref(), Some("high"));
+        let e = env("effort-hand");
+        e.settings(r#"{"maxEffortLevel":"high"}"#);
+        assert_eq!(e.sync("auto"), Synced::Unchanged);
+        assert_eq!(e.cap().as_deref(), Some("high"));
     }
 
     #[test]
-    fn auto_after_the_user_changed_our_value_keeps_theirs() {
-        let home = scratch_dir("effort-edited");
-        let claude = home.join(".claude");
-        sync(&home, &claude, "low").unwrap();
-        fs::write(claude.join("settings.json"), r#"{"maxEffortLevel":"max"}"#).unwrap();
-        assert_eq!(sync(&home, &claude, "auto").unwrap(), Synced::Unchanged);
-        assert_eq!(read_cap(&claude).as_deref(), Some("max"));
+    fn the_user_changing_our_value_is_respected() {
+        let e = env("effort-edited");
+        e.sync("low");
+        e.settings(r#"{"maxEffortLevel":"max"}"#);
+        assert_eq!(e.sync("auto"), Synced::Unchanged);
+        assert_eq!(e.cap().as_deref(), Some("max"));
+    }
+
+    #[test]
+    fn an_old_bare_marker_still_works() {
+        let e = env("effort-old-marker");
+        e.settings(r#"{"maxEffortLevel":"low"}"#);
+        fs::create_dir_all(marker_path(&e.home).parent().unwrap()).unwrap();
+        fs::write(marker_path(&e.home), "low\n").unwrap();
+        assert_eq!(e.sync("auto"), Synced::Cleared);
+        assert_eq!(e.cap(), None);
     }
 
     #[test]
     fn a_broken_settings_file_is_left_alone() {
-        let home = scratch_dir("effort-broken");
-        let claude = home.join(".claude");
-        fs::create_dir_all(&claude).unwrap();
-        fs::write(claude.join("settings.json"), "{not json").unwrap();
-        assert!(sync(&home, &claude, "medium").is_err());
+        let e = env("effort-broken");
+        e.settings("{not json");
+        assert!(sync(&e.home, &e.claude, "medium").is_err());
         assert_eq!(
-            fs::read_to_string(claude.join("settings.json")).unwrap(),
+            fs::read_to_string(e.claude.join("settings.json")).unwrap(),
             "{not json"
         );
     }
 
     #[test]
+    fn status_shows_both_sides_and_the_winner() {
+        let e = env("effort-status");
+        e.settings(r#"{"maxEffortLevel":"medium"}"#);
+        let out = run_set(&e.home, &e.claude, "xhigh").unwrap();
+        assert!(out.contains("already caps at medium"), "{out}");
+        let s = run_status(&e.home, &e.claude);
+        assert!(s.contains("playbook effort.max: xhigh"), "{s}");
+        assert!(s.contains("Claude Code maxEffortLevel: medium"), "{s}");
+        assert!(s.contains("effective ceiling: medium"), "{s}");
+    }
+
+    #[test]
     fn an_unknown_level_is_rejected_before_any_write() {
-        let home = scratch_dir("effort-unknown");
-        let claude = home.join(".claude");
-        assert!(run_set(&home, &claude, "turbo").is_err());
-        assert!(!claude.join("settings.json").exists());
+        let e = env("effort-unknown");
+        assert!(run_set(&e.home, &e.claude, "turbo").is_err());
+        assert!(!e.claude.join("settings.json").exists());
     }
 }

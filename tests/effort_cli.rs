@@ -92,13 +92,52 @@ fn init_reapplies_the_configured_cap() {
 }
 
 #[test]
-fn status_shows_the_configured_and_applied_level() {
+fn status_shows_playbook_claude_code_and_the_effective_level() {
     let h = Home::new("status");
     assert!(h.run(&["effort", "high"]).status.success());
-    let out = h.run(&["effort"]);
-    let body = text(&out);
-    assert!(body.contains("effort.max: high"), "{body}");
-    assert!(body.contains("settings.json: high"), "{body}");
+    let body = text(&h.run(&["effort"]));
+    assert!(body.contains("playbook effort.max: high"), "{body}");
+    assert!(body.contains("Claude Code maxEffortLevel: none"), "{body}");
+    assert!(body.contains("effective ceiling: high"), "{body}");
+}
+
+#[test]
+fn a_lower_claude_code_cap_wins_and_is_left_alone() {
+    let h = Home::new("lower-claude");
+    fs::create_dir_all(h.0.join(".claude")).unwrap();
+    fs::write(
+        h.0.join(".claude/settings.json"),
+        r#"{"maxEffortLevel":"medium"}"#,
+    )
+    .unwrap();
+
+    let out = h.run(&["effort", "xhigh"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(h.cap().as_deref(), Some("medium"));
+    let body = text(&h.run(&["effort"]));
+    assert!(body.contains("playbook effort.max: xhigh"), "{body}");
+    assert!(body.contains("effective ceiling: medium"), "{body}");
+}
+
+#[test]
+fn a_higher_claude_code_cap_is_replaced_then_restored_on_auto() {
+    let h = Home::new("higher-claude");
+    fs::create_dir_all(h.0.join(".claude")).unwrap();
+    fs::write(
+        h.0.join(".claude/settings.json"),
+        r#"{"maxEffortLevel":"max"}"#,
+    )
+    .unwrap();
+
+    assert!(h.run(&["effort", "xhigh"]).status.success());
+    assert_eq!(h.cap().as_deref(), Some("xhigh"));
+    let body = text(&h.run(&["effort"]));
+    assert!(body.contains("Claude Code maxEffortLevel: max"), "{body}");
+    assert!(body.contains("effective ceiling: xhigh"), "{body}");
+
+    assert!(h.run(&["effort", "auto"]).status.success());
+    assert_eq!(h.cap().as_deref(), Some("max"));
 }
 
 #[test]
