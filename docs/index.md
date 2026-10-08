@@ -10,6 +10,7 @@ Why the foundations work the way they do.
 
 - [The system prompt](concepts/01-system-prompt.md): what the custom prompt defines, and why a custom prompt behaves better than the default.
 - [The memory system](concepts/02-memory-system.md): the global, org, and project fact store, typed edges, and how it feeds the commands.
+- [Why the pieces are shaped this way](concepts/03-why-the-pieces-are-shaped-this-way.md): why commands, skills, agents and hooks are separate, why each model and effort level was chosen, and where to change them.
 
 ## Guides
 
