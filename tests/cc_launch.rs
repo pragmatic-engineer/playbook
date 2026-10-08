@@ -398,3 +398,67 @@ fn shell_init_defines_working_functions_in_every_available_shell() {
         assert_eq!(leftovers, 0, "{shell}: the cd temp file is removed");
     }
 }
+
+fn set_effort(e: &Env, level: &str) {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["effort", level])
+        .current_dir(&e.work)
+        .env("HOME", &e.home)
+        .output()
+        .expect("run playbook effort");
+    assert!(out.status.success(), "{out:?}");
+}
+
+#[test]
+fn a_playbook_effort_ceiling_reaches_the_session_through_settings() {
+    let e = env("effort-ceiling");
+    set_effort(&e, "xhigh");
+    e.launch(&["fresh"]);
+    assert_eq!(
+        e.calls()[0],
+        r#"--settings {"maxEffortLevel":"xhigh"} -n proj"#
+    );
+}
+
+#[test]
+fn a_lower_claude_code_ceiling_adds_nothing_and_is_never_edited() {
+    let e = env("effort-claude-lower");
+    let settings = e.home.join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, r#"{"maxEffortLevel":"medium"}"#).unwrap();
+    set_effort(&e, "xhigh");
+    e.launch(&["fresh"]);
+    assert_eq!(e.calls()[0], "-n proj");
+    assert_eq!(
+        fs::read_to_string(&settings).unwrap(),
+        r#"{"maxEffortLevel":"medium"}"#
+    );
+}
+
+#[test]
+fn a_higher_claude_code_ceiling_is_read_and_left_alone() {
+    let e = env("effort-claude-higher");
+    let settings = e.home.join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, r#"{"maxEffortLevel":"max"}"#).unwrap();
+    set_effort(&e, "xhigh");
+    e.launch(&["fresh"]);
+    assert_eq!(
+        e.calls()[0],
+        r#"--settings {"maxEffortLevel":"xhigh"} -n proj"#
+    );
+    assert_eq!(
+        fs::read_to_string(&settings).unwrap(),
+        r#"{"maxEffortLevel":"max"}"#
+    );
+}
+
+#[test]
+fn auto_and_an_own_settings_flag_add_nothing() {
+    let e = env("effort-auto");
+    e.launch(&["fresh"]);
+    assert_eq!(e.calls()[0], "-n proj");
+    set_effort(&e, "low");
+    e.launch_with(&["--settings", "my.json", "--"], &["fresh"], &[]);
+    assert!(!e.calls()[1].contains("maxEffortLevel"), "{:?}", e.calls());
+}

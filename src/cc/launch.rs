@@ -62,9 +62,21 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         all.push("--system-prompt-file".into());
         all.push(prompt.to_string_lossy().into_owned());
     }
+    let cwd_now = PathBuf::from(super::logical_cwd());
+    let has_settings = args
+        .iter()
+        .any(|a| a == "--settings" || a.starts_with("--settings="));
+    if !has_settings {
+        let home = crate::common::home_dir();
+        if let Some(json) = crate::effort::launcher_settings(&home, &home.join(".claude"), &cwd_now)
+        {
+            all.push("--settings".into());
+            all.push(json);
+        }
+    }
     all.extend_from_slice(args);
 
-    let mut cwd = PathBuf::from(super::logical_cwd());
+    let mut cwd = cwd_now;
     let rc = dispatch(&mut cwd, &all);
     retention::prune(&cwd.to_string_lossy());
     rc
