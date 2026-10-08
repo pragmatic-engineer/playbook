@@ -217,6 +217,42 @@ pub(crate) fn repo_config_path(root: &Path, owner: &str, repo: &str) -> PathBuf 
     repo_scope_path(root, owner, repo, RepoScope::Config, "").join("config.json")
 }
 
+/// Whether any org or repo tier config file exists under `root`. When none
+/// does, resolving with or without a slug gives the same answer, so a caller
+/// can skip the slug lookup.
+pub(crate) fn any_scoped_config(root: &Path) -> bool {
+    let subdirs = |dir: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    if subdirs(&root.join("orgs"))
+        .iter()
+        .any(|o| o.join("config.json").exists())
+    {
+        return true;
+    }
+    // A slug can have more than two segments (GitLab subgroups), so walk deep.
+    let mut stack: Vec<(PathBuf, usize)> = vec![(root.join("repos"), 0)];
+    while let Some((dir, depth)) = stack.pop() {
+        if dir.file_name().is_some_and(|n| n == ".config") {
+            if dir.join("config.json").exists() {
+                return true;
+            }
+            continue;
+        }
+        if depth < 8 {
+            stack.extend(subdirs(&dir).into_iter().map(|d| (d, depth + 1)));
+        }
+    }
+    false
+}
+
 /// Read one tier file and look up `key` in it. `Ok(None)` means "no
 /// override here", covering both a missing file and a file that parses
 /// fine but does not contain `key`; both fall through to the next tier the
@@ -274,6 +310,32 @@ mod tests {
         ));
         fs::create_dir_all(&dir).expect("scratch home should be creatable");
         dir
+    }
+
+    #[test]
+    fn scoped_config_is_found_for_every_slug_depth_and_absent_otherwise() {
+        // Arrange
+        let home = scratch_home("scoped-any");
+        let root = home.join("root");
+        fs::create_dir_all(root.join("repos/acme/widgets/memory")).unwrap();
+        fs::create_dir_all(root.join("orgs")).unwrap();
+        let absent = any_scoped_config(&root);
+        let cases = [
+            "repos/acme/widgets/.config",
+            "repos/group/sub/repo/.config",
+            "orgs/acme",
+        ];
+
+        // Act, Assert
+        assert!(!absent, "dirs alone are not config");
+        for case in cases {
+            let dir = root.join(case);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("config.json"), "{}").unwrap();
+            assert!(any_scoped_config(&root), "{case}");
+            fs::remove_file(dir.join("config.json")).unwrap();
+        }
+        let _ = fs::remove_dir_all(&home);
     }
 
     #[test]

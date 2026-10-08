@@ -8,26 +8,19 @@
 //! One divergence from the python source, non-observable: this port uses
 //! `common::atomic_append` where the python hook appends with a bare `open`.
 //!
-//! Local system time (via the `date` command, mirroring how
-//! `common::repo_slug` already shells out to `git`) stands in for python's
+//! Local system time via `localtime_r` stands in for python's
 //! `time.strftime`, which also renders in the local timezone. `std` alone
-//! has no timezone database to do this without shelling out.
+//! has no timezone database, and spawning `date` cost a process per compaction.
 
 use crate::common::atomic::with_dir_lock;
 use crate::common::payload::Payload;
-use crate::common::{emit_system_message, run_with_timeout, session_id};
+use crate::common::{emit_system_message, session_id};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 const LOG_LINE_CAP: usize = 500;
-
-/// How long to wait for the `date` command before giving up. Matches the
-/// same `timeout=5` used for every other shelled-out call in
-/// the retired shell original.
-const DATE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// PreCompact entry point. Never panics: a failed log write or a failed
 /// timestamp lookup still emits the user-facing warning.
@@ -84,17 +77,34 @@ wrap up (a session handoff), then /clear for a fresh session."
     emit_system_message(&user_msg);
 }
 
-/// Current local time as `%Y-%m-%d %H:%M:%S`. Empty on any failure; never
-/// panics.
+/// Current local time as `%Y-%m-%d %H:%M:%S`, formatted in process with
+/// `localtime_r`. Empty on any failure; never panics.
+#[cfg(unix)]
 fn current_timestamp() -> String {
-    let mut command = Command::new("date");
-    command.arg("+%Y-%m-%d %H:%M:%S");
-    match run_with_timeout(&mut command, DATE_TIMEOUT) {
-        Some(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
+    // SAFETY: `time` and `localtime_r` write only to the locals passed in, and
+    // `strftime` stays within the buffer length it is given.
+    unsafe {
+        let now = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&now, &mut tm).is_null() {
+            return String::new();
         }
-        _ => String::new(),
+        let mut buf = [0 as libc::c_char; 32];
+        let n = libc::strftime(
+            buf.as_mut_ptr(),
+            buf.len(),
+            c"%Y-%m-%d %H:%M:%S".as_ptr(),
+            &tm,
+        );
+        let bytes: Vec<u8> = buf[..n].iter().map(|&c| c as u8).collect();
+        String::from_utf8_lossy(&bytes).into_owned()
     }
+}
+
+/// No `localtime_r` off unix, so the log line carries an empty timestamp.
+#[cfg(not(unix))]
+fn current_timestamp() -> String {
+    String::new()
 }
 
 /// Append `line` plus a trailing newline to `path`, with no locking of its
@@ -131,4 +141,29 @@ fn cap_lines(path: &Path, limit: usize) {
         }
     }
     let _ = fs::rename(&tmp_path, path);
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn timestamp_has_the_format_the_date_command_produced() {
+        // Arrange, Act
+        let before = current_timestamp();
+        let out = Command::new("date")
+            .arg("+%Y-%m-%d %H:%M:%S")
+            .output()
+            .expect("date runs");
+        let after = current_timestamp();
+        let date = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+        // Assert: `date` ran between the two reads, so it equals one of them.
+        assert_eq!(before.len(), 19, "got {before:?}");
+        assert!(
+            date == before || date == after,
+            "{date} vs {before}/{after}"
+        );
+    }
 }

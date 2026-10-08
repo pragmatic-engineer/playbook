@@ -459,6 +459,26 @@ mod preread_size_check {
     }
 
     #[test]
+    fn file_over_the_byte_limit_is_denied_with_a_bounded_line_count() {
+        // Arrange: 5000 lines of 80 bytes, 400 KB, past both limits.
+        let home = scratch_dir("size-huge-denied");
+        let big = home.join("huge.log");
+        write_text(&big, &format!("{}\n", "x".repeat(79)).repeat(5000));
+
+        // Act
+        let output = run_hook(
+            "preread-size-check",
+            &home,
+            &payload(big.to_str().unwrap(), ""),
+        );
+
+        // Assert
+        let out = stdout_string(&output);
+        assert!(out.contains(r#""permissionDecision":"deny""#), "{out}");
+        assert!(out.contains("over 1000 lines / 400000 bytes"), "{out}");
+    }
+
+    #[test]
     fn small_file_passes() {
         // Arrange
         let home = scratch_dir("size-small-passes");

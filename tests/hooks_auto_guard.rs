@@ -335,3 +335,48 @@ fn helper_isolates_the_child_env_without_touching_the_parent() {
         "the parent env must not change"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn default_mode_with_no_scoped_config_never_spawns_git() {
+    // Arrange
+    let s = scratch("no-spawn");
+    let shim = auto_env::git_shim(&s);
+
+    // Act
+    let (out, code) = run_hook(
+        &s,
+        HOOK,
+        &prompt_payload(Some("default")),
+        &[("PATH", &shim.path)],
+    );
+
+    // Assert
+    assert_eq!(code, 0);
+    assert_eq!(out.trim(), "");
+    assert_eq!(
+        shim.calls(),
+        0,
+        "the slug cannot matter without a scoped tier"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_repo_tier_mode_is_still_honoured_through_the_slug_lookup() {
+    // Arrange
+    let s = scratch("repo-tier");
+    s.seed_repo_mode_config("acme", "widgets", "auto");
+    let shim = auto_env::git_shim(&s);
+
+    // Act
+    let (out, code) = run_hook(&s, HOOK, ASK_USER_QUESTION, &[("PATH", &shim.path)]);
+
+    // Assert
+    assert_eq!(code, 0);
+    assert_eq!(
+        parse(&out)["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    assert_eq!(shim.calls(), 1);
+}

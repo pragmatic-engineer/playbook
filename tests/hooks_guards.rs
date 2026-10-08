@@ -742,6 +742,64 @@ mod precommit_check {
         assert!(String::from_utf8_lossy(&out.stdout).trim().is_empty());
     }
 
+    /// A shim that logs each git call, then runs the real git.
+    #[cfg(unix)]
+    #[test]
+    fn the_repo_probe_is_not_a_separate_git_call() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = repo("spawn-count");
+        fs::write(dir.join("a.txt"), "hello\n").expect("write");
+        git_in(&dir, &["add", "a.txt"]);
+        let real = String::from_utf8_lossy(
+            &Command::new("sh")
+                .args(["-c", "command -v git"])
+                .output()
+                .expect("sh")
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        let bin = scratch("spawn-count-bin");
+        let log = bin.join("calls.log");
+        let shim = bin.join("git");
+        fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{}'\nexec '{real}' \"$@\"\n",
+                log.display()
+            ),
+        )
+        .expect("shim");
+        fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).expect("chmod");
+        let payload =
+            serde_json::json!({ "tool_input": { "command": "git commit -m x" } }).to_string();
+
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    bin.display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            )
+            .args(["hook", "precommit-check"])
+            .current_dir(&dir)
+            .env("HOOK_INPUT", payload)
+            .output()
+            .expect("spawn");
+
+        assert!(out.status.success());
+        let calls = fs::read_to_string(&log).unwrap_or_default();
+        assert!(!calls.contains("rev-parse"), "calls: {calls}");
+        assert!(
+            calls.contains("diff --cached --name-only"),
+            "calls: {calls}"
+        );
+    }
+
     /// Outside a repo the guard has no diff to read, and it must stay quiet
     /// rather than surfacing git's error.
     #[test]

@@ -348,12 +348,8 @@ mod tests {
         let _ = fs::remove_dir_all(&repo);
     }
 
-    /// The only tests in this binary that mutate the process cwd, since
-    /// `repo_slug()` has no dir param to inject. Guarded: cwd is process-global.
-    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    fn lock_cwd() -> std::sync::MutexGuard<'static, ()> {
-        CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
+    // Tests that mutate the process cwd take this lock: cwd is process-global.
+    use crate::common::test_support::lock_cwd;
 
     #[test]
     fn repo_scoped_dir_none_outside_a_git_repo() {

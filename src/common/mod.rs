@@ -45,6 +45,12 @@ pub(crate) mod test_support {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
+    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Serialises tests that change the process-global cwd.
+    pub(crate) fn lock_cwd() -> std::sync::MutexGuard<'static, ()> {
+        CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     pub(crate) fn scratch_dir(tag: &str) -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
