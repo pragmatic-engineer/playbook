@@ -51,9 +51,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The repo checkout root, where `settings.shared.json`, `shell/bash/cc.sh`,
-/// `shell/zsh/cc.zsh`, `shell/shared/*.sh` and `statusline.sh` actually live,
-/// standing in for `CLAUDE_PLUGIN_ROOT` on a real install.
+/// The repo checkout root, where `settings.shared.json`, `hooks/lib/config-hash.sh`
+/// and `statusline.sh` actually live, standing in for `CLAUDE_PLUGIN_ROOT` on a
+/// real install.
 fn self_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -910,8 +910,8 @@ fn read_only_rc_file_is_reported_as_a_skipped_shim_step() {
     assert_eq!(fs::read_to_string(&rc_file).unwrap(), before);
 }
 
-/// `shell/shared/config-drift.sh` sources this file from the playbook config
-/// dir, so a fresh `init --aliases` must leave it there.
+/// `cc::config_drift` runs this file from the playbook config dir, so a fresh
+/// `init --aliases` must leave it there.
 #[test]
 fn fresh_init_with_aliases_places_config_hash() {
     // Arrange

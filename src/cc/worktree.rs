@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports the decision and path logic of `shell/shared/worktree.sh`.
+//! Decision and path logic for `cc worktree`, ported from the retired shell launcher.
 //!
 //! Final slice of WU-17: every decision and git-driving action `_wt_main`
 //! takes is now ported. What is left outside this file is CLI wiring:
@@ -1521,10 +1521,8 @@ fn ls_remote_heads_has_branch(repo_root: &Path, remote: &str, branch: &str) -> b
 /// force-deletes the branch. An unreachable remote, expired credentials or a
 /// timeout therefore refuse rather than reap.
 ///
-/// This deliberately DIVERGES from the shell as originally written, which
-/// piped `ls-remote` into `grep -q .` and so read a failed call as "absent"
-/// and recycled. `shell/shared/worktree.sh` carries the same fix, so the two
-/// stay in parity; changing only one would be the real defect.
+/// This deliberately DIVERGES from the retired shell, which piped `ls-remote`
+/// into `grep -q .` and so read a failed call as "absent" and recycled.
 fn remote_may_still_have_branch(repo_root: &Path, remote: &str, branch: &str) -> bool {
     let mut command = Command::new("git");
     command

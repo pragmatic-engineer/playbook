@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports `shell/shared/bust-cache.sh`: clears caches that would otherwise
+//! Replaces the retired shell launcher's cache bust: clears caches that would otherwise
 //! freeze stale settings into a new session.
 //!
 //! Every removal is best-effort. This runs on the launch path, so a missing

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports the transcript half of `shell/shared/clean-resume.sh`: clone a
+//! Replaces the transcript half of the retired shell clean-resume: clone a
 //! transcript, drop the config-override entries, and give the clone a fresh
 //! session id so the harness sees a coherent history.
 //!
