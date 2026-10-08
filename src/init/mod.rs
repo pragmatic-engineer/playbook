@@ -8,7 +8,7 @@
 //! - `wire` writes the ported hook entries into `settings.json`, backing it up
 //!   first.
 //! - `shim` installs the bash and zsh launcher shim idempotently.
-//! - `statusline` places `statusline.sh` at the path `settings.json` names.
+//! - `statusline` moves a legacy `statusLine.command` to `playbook statusline`.
 //! - `system_prompt` places the opt-in `prompts/SYSTEM_PROMPT.md`.
 //! - `memory_migrate`, `migrate` and `self_root` handle upgrades and the plugin root.
 //! - `run` composes all five above into `Command::Init`'s dispatch arm.

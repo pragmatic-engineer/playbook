@@ -52,7 +52,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The repo checkout root, where `settings.shared.json`, `hooks/lib/config-hash.sh`
-/// and `statusline.sh` actually live, standing in for `CLAUDE_PLUGIN_ROOT` on a
+/// actually live, standing in for `CLAUDE_PLUGIN_ROOT` on a
 /// real install.
 fn self_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -270,11 +270,9 @@ fn fresh_config_gets_fully_wired() {
         read_json(&settings_path)["statusLine"]["command"],
         "playbook statusline"
     );
-    let statusline_dest = home.join(".config/playbook/statusline.sh");
-    assert_eq!(
-        fs::read(&statusline_dest).expect("placed statusline should be readable"),
-        fs::read(self_root().join("statusline.sh"))
-            .expect("shipped statusline.sh should be readable")
+    assert!(
+        !home.join(".config/playbook/statusline.sh").exists(),
+        "init no longer places statusline.sh"
     );
 }
 
@@ -301,7 +299,6 @@ fn init_rewrites_the_old_statusline_command_even_when_base_is_missing() {
     // Assert
     assert!(outcome.ok());
     assert_eq!(status_line_command(&claude_home), "playbook statusline");
-    assert!(home.join(".config/playbook/statusline.sh").is_file());
 }
 
 #[test]
@@ -331,11 +328,14 @@ fn init_leaves_a_custom_statusline_command_alone() {
 
 #[test]
 fn init_keeps_the_old_command_when_the_user_edited_statusline_sh() {
-    // Arrange: a first init records the shipped script, then the user edits it.
+    // Arrange: an older init recorded the shipped script, then the user edited it.
     let home = scratch_home("sl-edited");
     let claude_home = claude_home_of(&home);
     let paths = base_paths(&home, Some(ShellKind::Bash));
     run(&paths);
+    let script = home.join(".config/playbook/statusline.sh");
+    write_text(&script, "#!/bin/sh\necho shipped\n");
+    playbook::init::migrate::record_shipped(&home, "statusline", &script);
     let old = json!({"statusLine": {"type": "command", "command": OLD_STATUSLINE}});
     write_json(&claude_home.join("settings.json"), &old);
     write_json(&claude_home.join(".settings.base.json"), &old);
@@ -670,7 +670,6 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     let settings_path = claude_home.join("settings.json");
     let base_path = claude_home.join(".settings.base.json");
     let rc_path = home.join(".bashrc");
-    let statusline_dest = home.join(".config/playbook/statusline.sh");
 
     // Act: first run wires everything.
     let first = run(&base_paths(&home, Some(ShellKind::Bash)));
@@ -679,7 +678,6 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
         fs::read(&settings_path).unwrap(),
         fs::read(&base_path).unwrap(),
         fs::read(&rc_path).unwrap(),
-        fs::read(&statusline_dest).unwrap(),
     );
 
     // Act: second run against the exact same paths.
@@ -710,7 +708,6 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
         fs::read(&settings_path).unwrap(),
         fs::read(&base_path).unwrap(),
         fs::read(&rc_path).unwrap(),
-        fs::read(&statusline_dest).unwrap(),
     );
     assert_eq!(
         after_first, after_second,
@@ -816,10 +813,6 @@ fn missing_self_root_skips_template_dependent_steps() {
     assert!(outcome.ok());
     assert_eq!(find_step(&outcome, "settings").status, StepStatus::Skipped);
     assert_eq!(find_step(&outcome, "shim").status, StepStatus::Skipped);
-    assert_eq!(
-        find_step(&outcome, "statusline").status,
-        StepStatus::Skipped
-    );
     assert_eq!(find_step(&outcome, "hooks").status, StepStatus::Wired);
     assert!(!home.join(".bashrc").is_file());
 }
@@ -1150,16 +1143,10 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
     assert!(rc.contains("playbook shell-init"));
     assert!(!rc.contains("$HOME/.claude/shell/bash/cc.sh"));
 
-    // Doctor Layer 5 shape: the Rust command, with the fallback script still placed.
+    // Doctor Layer 5 shape: the Rust command.
     let settings_path = claude_home.join("settings.json");
     let settings = read_json(&settings_path);
     assert_eq!(settings["statusLine"]["command"], "playbook statusline");
-    let statusline_dest = home.join(".config/playbook/statusline.sh");
-    assert_eq!(
-        fs::read(&statusline_dest).unwrap(),
-        fs::read(self_root().join("statusline.sh")).unwrap(),
-        "the migrated statusline.sh should MATCH the shipped copy"
-    );
 
     // Doctor Layer 7 shape: every hook command is bare, so nothing dangles.
     let commands = all_hook_commands(&settings);
@@ -1170,88 +1157,6 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
             "no lingering path-shaped hook command: {cmd}"
         );
     }
-}
-
-/// A copy step that cannot even start must leave `settings.json` and the rc
-/// file pointing at the fully-intact OLD location.
-#[cfg(unix)]
-#[test]
-fn crash_between_file_copy_and_settings_rewrite_leaves_old_wiring_intact() {
-    use std::os::unix::fs::PermissionsExt;
-
-    // Arrange: a full pre-migration install, fully functional.
-    let home = scratch_home("crash-copy-before-settings");
-    let claude_home = claude_home_of(&home);
-    let old_statusline_content = "#!/bin/sh\necho old-statusline\n";
-    write_text(&claude_home.join("statusline.sh"), old_statusline_content);
-    write_text(&claude_home.join("shell/bash/cc.sh"), "# old cc.sh\n");
-    write_json(
-        &claude_home.join("settings.json"),
-        &json!({
-            "statusLine": {
-                "type": "command",
-                "command": "bash $HOME/.claude/statusline.sh",
-                "refreshInterval": 30
-            }
-        }),
-    );
-    let old_rc_line = "source \"$HOME/.claude/shell/bash/cc.sh\"\n";
-    write_text(&home.join(".bashrc"), old_rc_line);
-
-    // Simulate a crash mid-copy: the new destination's parent is unwritable.
-    let config_dir = home.join(".config");
-    fs::create_dir_all(&config_dir).unwrap();
-    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o555)).unwrap();
-
-    let probe = config_dir.join(".write-probe");
-    let permissions_are_enforced = fs::write(&probe, "x").is_err();
-    let _ = fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o755));
-    let _ = fs::remove_file(&probe);
-    if !permissions_are_enforced {
-        eprintln!(
-            "skipping crash_between_file_copy_and_settings_rewrite_leaves_old_wiring_intact: \
-             running as a user that bypasses directory permissions"
-        );
-        let _ = fs::remove_dir_all(&home);
-        return;
-    }
-    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o555)).unwrap();
-
-    let paths = base_paths(&home, Some(ShellKind::Bash));
-
-    // Act
-    let outcome = run(&paths);
-
-    // Restore permissions before any assertion can panic and skip cleanup.
-    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o755)).unwrap();
-
-    // Assert: the blocked copy is reported, both dependent writes skipped.
-    assert!(
-        !outcome.ok(),
-        "a blocked copy step must be reported as a failure"
-    );
-    assert_eq!(find_step(&outcome, "statusline").status, StepStatus::Failed);
-    assert_eq!(find_step(&outcome, "settings").status, StepStatus::Skipped);
-    assert_eq!(find_step(&outcome, "shim").status, StepStatus::Skipped);
-
-    let settings = read_json(&claude_home.join("settings.json"));
-    assert_eq!(
-        settings["statusLine"]["command"], "bash $HOME/.claude/statusline.sh",
-        "settings.json must not be repointed while the copy is unconfirmed"
-    );
-    assert_eq!(
-        fs::read_to_string(claude_home.join("statusline.sh")).unwrap(),
-        old_statusline_content,
-        "the old statusline.sh must remain untouched and fully functional"
-    );
-
-    let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
-    assert!(
-        rc.contains("playbook shell-init") && !rc.contains("cc.sh"),
-        "the legacy line is migrated even when the copy step failed: {rc}"
-    );
-
-    let _ = fs::remove_dir_all(&home);
 }
 
 // ── trust step ───────────────────────────────────────────────────────────────

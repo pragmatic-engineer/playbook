@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Ports the retired shell original: a Stop hook that pauses the turn once
-//! statusline.sh's `capture-due` marker fires.
+//! `playbook statusline` `capture-due` marker fires.
 
 //! `{"decision":"block","reason":<text>}` asks the model to write down
 //! durable facts before continuing.
