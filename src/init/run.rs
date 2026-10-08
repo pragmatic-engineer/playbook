@@ -153,6 +153,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let settings_step =
         seed_or_merge_settings(self_root, &paths.claude_home, &settings_path, epoch);
     let hooks_step = wire_hooks(&settings_path, epoch);
+    let effort_step = effort_cap_step(&paths.home, &paths.claude_home);
 
     let shell_runtime_confirmed = step_confirmed(&shell_runtime_step);
     let shim_step = rewire_rc_file_step(
@@ -169,6 +170,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         system_prompt_step,
         settings_step,
         hooks_step,
+        effort_step,
         shim_step,
     ];
     steps.extend(migrated.steps);
@@ -448,6 +450,26 @@ fn wire_hooks(settings_path: &Path, epoch: u64) -> StepReport {
         }
         Ok(_) => StepReport::already_correct("hooks", "all hooks already wired"),
         Err(err) => StepReport::failed("hooks", err.to_string()),
+    }
+}
+
+/// Apply the `effort.max` ceiling to `settings.json`.
+fn effort_cap_step(home: &Path, claude_home: &Path) -> StepReport {
+    let level = crate::effort::configured(home);
+    match crate::effort::sync(home, claude_home, &level) {
+        Ok(crate::effort::Synced::Set(l)) => {
+            StepReport::wired("effort", format!("capped effort at {l} (maxEffortLevel)"))
+        }
+        Ok(crate::effort::Synced::Cleared) => {
+            StepReport::wired("effort", "removed the effort cap, defaults apply")
+        }
+        Ok(crate::effort::Synced::Unchanged) if level == "auto" => {
+            StepReport::skipped("effort", "no cap set, playbook defaults apply")
+        }
+        Ok(crate::effort::Synced::Unchanged) => {
+            StepReport::already_correct("effort", format!("already capped at {level}"))
+        }
+        Err(err) => StepReport::failed("effort", err.to_string()),
     }
 }
 

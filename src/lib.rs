@@ -12,6 +12,7 @@ pub mod common;
 pub mod config;
 pub mod deps;
 pub mod doctor;
+pub mod effort;
 pub mod eval;
 pub mod gate;
 pub mod handoff;
@@ -172,6 +173,19 @@ pub enum Command {
     Config {
         #[command(subcommand)]
         sub: ConfigCommand,
+    },
+    /// Set the highest effort level anything may run at
+    ///
+    /// `auto` (the default) applies the effort each skill, command and agent
+    /// ships with. `low`, `medium`, `high`, `xhigh` or `max` caps all of them:
+    /// an agent that defaults to `xhigh` runs at `medium` under `medium`.
+    /// The cap is written to `maxEffortLevel` in `~/.claude/settings.json`
+    /// (Claude Code 2.1.267 or later). With no level, shows what is set.
+    ///
+    /// Example: `playbook effort medium`
+    Effort {
+        /// auto, low, medium, high, xhigh or max
+        level: Option<String>,
     },
     /// Launcher helpers behind the `cc` shell shortcut
     ///
