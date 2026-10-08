@@ -30,6 +30,8 @@ On a match, the hook emits a prompt context message reminding Claude the session
 
 ### Effort policy
 
+The reasoning behind these choices, and how skills, agents and variants fit together, is in [Why the pieces are shaped this way](../concepts/03-why-the-pieces-are-shaped-this-way.md).
+
 Effort is a second dial next to the model tier. Agent files, commands, and skills all accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort override, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, `playbook agents gen` writes tier variants (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name.
 
 The rule: lower effort where the work is mechanical or already decided, and never where a missed finding is costly. A model that is wrong costs a rerun; a reviewer that stops looking costs a bug in production.
