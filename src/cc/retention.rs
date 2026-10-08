@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports `shell/shared/retention.sh`: bounds disk use by keeping only the
+//! Replaces the retired shell retention step: bounds disk use by keeping only the
 //! newest transcripts for the current project.
 //!
 //! Deletes three things per pruned session: the transcript, its tool-result

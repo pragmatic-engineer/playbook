@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports `shell/shared/config-drift.sh`: tracks whether runtime config changed
+//! Replaces the retired shell config-drift check: tracks whether runtime config changed
 //! since a project last launched, so the default resume can fork to reload
 //! settings, plugins and hooks only when it has to.
 //!

@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 //! Wires the ported `cc::worktree` library into the `cc worktree <branch>
-//! [env-base]` subcommand: the prerequisite ADR 0007's WU-18 needed before the
-//! shell shim in `shell/shared/worktree.sh` has a `cc worktree` to call into.
+//! [env-base]` subcommand, the Rust replacement for the retired shell launcher's
+//! `cc worktree`.
 //!
 //! Every git-driving decision already lives in [`crate::cc::worktree`]; this
-//! module is composition only, mirroring `_cc_worktree`/`_wt_main`
-//! (shell/shared/worktree.sh:255-496) in the order they run.
+//! module is composition only, keeping the order the
+//! retired shell ran them in.
 //!
 //! OUTPUT CONTRACT: stdout carries ONLY the final worktree path on success, so
 //! a shell can safely `cd "$(playbook cc worktree foo)"`. Every message, human
@@ -25,9 +25,8 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 /// value (`local REMOTE="origin"` in `_cc_worktree`, worktree.sh:464).
 const REMOTE: &str = "origin";
 
-// Exit codes match `_wt_die`'s codes at each corresponding call site in
-// shell/shared/worktree.sh, so a caller cannot tell this port apart from the
-// shell by exit status alone.
+// Exit codes match the retired shell launcher's, so a caller cannot tell the
+// port apart from it by exit status alone.
 const EXIT_USAGE_OR_INVALID_BRANCH: i32 = 2;
 const EXIT_CREATE_FAILED: i32 = 3;
 const EXIT_COULD_NOT_ENTER: i32 = 4;

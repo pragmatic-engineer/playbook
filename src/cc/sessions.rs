@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Ports `shell/shared/sessions.sh`: session lookup, enumeration and listing.
+//! Replaces the retired shell session helpers: session lookup, enumeration and listing.
 //!
 //! A session is a UUID-named `.jsonl` transcript under the project directory.
 //! The `customTitle` embedded in its body is what `cc` resumes by, so a lookup
