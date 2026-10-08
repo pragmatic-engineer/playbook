@@ -180,6 +180,8 @@ cc clean               # resume with /model, /effort, /config, /output-style, /s
 cc raw [id]            # resume verbatim, no fork or cleanup
 ```
 
+`pb` and `pbd` are the same two commands under names that do not clash with the C compiler (`cc`). Use them everywhere you see `cc` and `ccd` below. To stop playbook defining `cc` and `ccd` at all, load the functions with `eval "$(playbook shell-init --no-cc)"`.
+
 `cc` loads the system prompt (when installed), picks a model, and prunes old transcripts (keeps the newest 5; set `CCD_KEEP` to change, `CCD_KEEP=0` disables).
 
 **One launcher, both shells.** `cc` and `ccd` are two small shell functions printed by `playbook shell-init`, and the work happens in the binary (`playbook cc launch`). So bash and zsh behave identically: every subcommand above, the config-drift auto-fork on the default resume, and retention all work the same in either shell. The rc file holds one line, `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`; `/playbook:setup --install-aliases` (or `playbook init --aliases`) writes it, and also rewrites an older `source .../cc.sh` line to it.

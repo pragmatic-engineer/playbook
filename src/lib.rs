@@ -91,10 +91,16 @@ pub enum Command {
         #[arg(long)]
         remove_binary: bool,
     },
-    /// Print the shell functions `cc` and `ccd`
+    /// Print the shell functions `pb`, `pbd`, `cc` and `ccd`
     ///
-    /// Load them from your rc file with `eval "$(playbook shell-init)"`.
+    /// `pb` and `pbd` are the same launchers as `cc` and `ccd`, under names
+    /// that do not clash with the C compiler. Pass `--no-cc` to leave `cc` and
+    /// `ccd` undefined. Load them from your rc file with
+    /// `eval "$(playbook shell-init)"`.
     ShellInit {
+        /// Do not define `cc` and `ccd` (they shadow the C compiler)
+        #[arg(long)]
+        no_cc: bool,
         /// Target shell (default: the one named by `$SHELL`)
         #[arg(long, value_parser = ["bash", "zsh"])]
         shell: Option<String>,
