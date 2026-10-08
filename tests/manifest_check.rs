@@ -107,7 +107,6 @@ fn seed_skeleton(dir: &Path) {
     add_file(dir, "LICENSE");
     add_file(dir, "settings.shared.json");
     add_file(dir, "permissions.shared.json");
-    add_file(dir, "statusline.sh");
     add_file(dir, "shell/worktree.zsh");
     add_file(dir, "hooks/session-init.sh");
     add_file(dir, "docs/index.md");
