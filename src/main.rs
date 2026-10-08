@@ -6,8 +6,8 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, ci, common, config, deps, doctor, eval, gate, handoff, hooks, init, json, manifest,
-    mode, pr, release, sanitize, settings, statusline, trust, update, usage, worktree,
+    agents, cc, ci, common, config, deps, doctor, effort, eval, gate, handoff, hooks, init, json,
+    manifest, mode, pr, release, sanitize, settings, statusline, trust, update, usage, worktree,
     AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DashboardCommand, DepsCommand,
     DoctorCommand, EvalCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
     MemoryCommand, ModeArg, ModeCommand, PrCommand, ReleaseCommand, ReviewWorktreeCommand,
@@ -66,6 +66,20 @@ fn main() {
             }
             None => std::process::exit(cc::launch::run(false, &[])),
         },
+        Command::Effort { level } => {
+            let home = common::home_dir();
+            let claude_home = home.join(".claude");
+            match level {
+                Some(level) => match effort::run_set(&home, &claude_home, &level) {
+                    Ok(msg) => println!("{msg}"),
+                    Err(err) => {
+                        eprintln!("error: {err}");
+                        std::process::exit(1);
+                    }
+                },
+                None => println!("{}", effort::run_status(&home, &claude_home)),
+            }
+        }
         Command::ShellInit { shell, no_cc } => {
             let kind = shell
                 .or_else(|| std::env::var("SHELL").ok())
