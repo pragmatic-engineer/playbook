@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Alone in its own integration test binary so that setting
 //! `PLAYBOOK_TEST_COPY_DELAY_MS` here can never race a sibling test in

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Spawned-binary tests for the dashboard server lifecycle. Each test gets a
 //! scratch `$HOME`, sets `PLAYBOOK_USAGE_NO_BROWSER` so no real browser is

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook shell-init`: the shell functions `pb`, `pbd`, `cc` and `ccd`,
 //! printed for the rc file to `eval`. `pb` and `pbd` exist because `cc` is the

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Resolves `InitPaths::self_root`: `CLAUDE_PLUGIN_ROOT` when Claude Code set
 //! it, or the marketplace cache directory a direct terminal run has neither.

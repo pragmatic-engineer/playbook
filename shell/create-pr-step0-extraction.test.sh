@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # create-pr-step0-extraction.test.sh: pins commands/create-pull-request.md's
 # Step 0 sed extraction against the real skill files' current heading

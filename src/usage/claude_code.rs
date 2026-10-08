@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `UsageSource` over Claude Code's own session transcripts
 //! (`~/.claude/projects/**/*.jsonl`). The root is injected so tests never

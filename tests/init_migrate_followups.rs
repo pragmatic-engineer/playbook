@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Follow-ups to ADR 0016: edited files are kept, the gate move runs from
 //! init inside a repo, and `playbook doctor pending-migrations` reports edits.

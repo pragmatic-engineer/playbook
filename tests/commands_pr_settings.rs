@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Structural checks that the PR and commit commands read the
 //! `autoReview.fix`, `autoMerge.enabled` and `commit.signOff` settings and

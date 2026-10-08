@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Canonical path resolution for the directories playbook itself owns:
 //! memory, runtime state, config-drift baselines, per-repo scoped storage.

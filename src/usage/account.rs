@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Which account the local Claude Code install is signed in to. Read once per
 //! ingest and tagged onto every event; the transcripts do not carry it.

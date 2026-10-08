@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `pr prepare`: every judgment-free step that comes before drafting a PR's
 //! title and body (branch and base, size and test checks, the diff, the

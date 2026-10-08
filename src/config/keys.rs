@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Known playbook config keys, their default values, and their allowed enum
 //! values where one exists. Used by the resolution and write modules to

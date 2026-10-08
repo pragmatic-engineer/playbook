@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Pieces `pr prepare` and `pr create` share: the scratch directory both
 //! read and write, and the `gh` seam both call through.

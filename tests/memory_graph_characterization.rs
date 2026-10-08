@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Pins the exact `possible_relates_to` edges the memory graph rebuild
 //! produces for a generated corpus, so an optimisation of the pairwise

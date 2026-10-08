@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Incremental ingest: read events newer than the source's watermark, tag the
 //! account, write them, and advance the watermark, all in one transaction. A

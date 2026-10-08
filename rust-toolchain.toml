@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # Pins the exact Rust version for both CI and local dev. Before this file,
 # every CI leg used whatever rustc happened to be preinstalled on that day's

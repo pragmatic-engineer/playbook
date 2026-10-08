@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Replaces the retired shell launcher's cache bust: clears caches that would otherwise
 //! freeze stale settings into a new session.

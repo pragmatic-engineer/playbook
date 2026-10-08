@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # Installer for pragmatic-engineer/playbook. Plugin based: the toolkit (skills,
 # commands, and agents) is delivered as a Claude Code plugin, while this

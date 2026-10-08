@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Finds where a command keeps a message and writes the sanitised text back
 //! to the same place: a shell word, a heredoc body, or the `printf` or `echo`

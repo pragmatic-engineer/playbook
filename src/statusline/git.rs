@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Cheap, bounded git lookups. One probe decides whether `cwd` is a repo; the
 //! remaining reads then run concurrently, each under its own timeout.

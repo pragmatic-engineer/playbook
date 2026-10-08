@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook worktree review setup|teardown`: the locked, detached PR review
 //! worktrees `/playbook:quick-review` and `/playbook:deep-review` run in.

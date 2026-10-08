@@ -135,7 +135,7 @@ The `src/common/emit.rs` helpers (`emit_pre_context`, `emit_pre_deny`, `emit_pro
 
 ```rust
 // SPDX-FileCopyrightText: 2026 Your Name
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 use crate::common::emit_pre_context;
 use crate::common::payload::Payload;

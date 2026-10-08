@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Session handoffs: the markdown one session leaves for the next. The write
 //! side (`playbook handoff save`) and the read side (the SessionStart hook)

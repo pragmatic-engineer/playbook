@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Per-project field reads from a `~/.claude.json`-shaped document, where
 //! the project path is a dynamic key (a filesystem path, so it may contain

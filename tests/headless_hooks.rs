@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The headless switch (`PLAYBOOK_HEADLESS`, with `CI=true` as an alias) as
 //! seen from a real hook process: what session-init injects, that the Stop

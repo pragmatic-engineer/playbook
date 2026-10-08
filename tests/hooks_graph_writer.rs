@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Behavioural tests for the `rebuild-memory-graph` hook, the sole writer
 //! of `~/.config/playbook/memory/memory.graph.json`. Exercised black-box, through the

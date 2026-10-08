@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Dotted-path field extraction over the hook input JSON payload. Replaces
 //! `field()` (the retired shell original) and `hi_field` (the retired shell original).

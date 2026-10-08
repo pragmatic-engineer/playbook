@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for `playbook::config::write::set`: creating and
 //! merging tier files, rejecting an invalid key, value, or missing repo

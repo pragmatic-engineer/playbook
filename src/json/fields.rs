@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Raw string value of one top-level field of a JSON document, replacing
 //! `jq -j '.<key>'`/`jq -r '.<key> // empty'` sites. No trailing newline is

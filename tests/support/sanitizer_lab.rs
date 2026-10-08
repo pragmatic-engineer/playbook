@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! A scratch git repository, stub `gh` and `rtk` programs, and a way to run
 //! the `commit-message-sanitizer` hook against them, shared by the tests of

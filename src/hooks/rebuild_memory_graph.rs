@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! PostToolUse hook: rebuild `~/.config/playbook/memory/memory.graph.json` after any
 //! fact-file save. Ports the retired shell original. No-op unless the

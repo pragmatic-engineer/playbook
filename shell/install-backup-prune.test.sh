@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # install-backup-prune.test.sh: re-running install.sh must not grow
 # CLAUDE_HOME/backups without bound.

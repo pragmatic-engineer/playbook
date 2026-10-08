@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Pure grouping over normalized events. The ASCII summary and the dashboard
 //! both call this, so there is exactly one aggregation implementation.

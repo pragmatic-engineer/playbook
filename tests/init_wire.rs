@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for `playbook::init::wire`, the module that writes
 //! every hook Claude Code can invoke into `settings.json` as a bare

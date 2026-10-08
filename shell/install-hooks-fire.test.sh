@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # install-hooks-fire.test.sh: WU-11's headline acceptance criterion. Installs
 # into a scratch HOME via install.sh (the PLAYBOOK_SRC local-source seam, no

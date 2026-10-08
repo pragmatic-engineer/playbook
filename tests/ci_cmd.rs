@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook ci` through the real binary: no stdin, an empty HOME, and
 //! `CI=true`, exactly how a pipeline runs it.

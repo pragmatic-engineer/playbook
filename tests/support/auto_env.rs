@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Shared isolation for tests that spawn the real `playbook hook` binary and
 //! depend on the resolved mode. `hook_command` strips every variable that can

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # shared-settings-keys.test.sh: pins the top-level key SET of
 # settings.shared.json, the public install seed. The seed is generated from

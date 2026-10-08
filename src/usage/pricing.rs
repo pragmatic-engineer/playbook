@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Token counts to dollars. Transcripts carry no cost field, so cost comes
 //! from this hand-maintained per-model table, taken from

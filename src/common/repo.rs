@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `repo_slug`: the `<owner>/<repo>` slug for the current git repo's origin
 //! remote. Ports the retired shell original. Canonical definition: the memory

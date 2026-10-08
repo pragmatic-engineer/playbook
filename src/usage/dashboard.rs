@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The local dashboard server. `playbook usage dashboard` is a short-lived
 //! process: it reuses a live server or starts a detached one, opens the

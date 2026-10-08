@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Binary-level tests for `playbook handoff` and the SessionStart hook's
 //! handoff load and log. Every test uses a scratch HOME, never the real one.

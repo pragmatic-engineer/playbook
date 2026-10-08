@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The previous-binary backup that `install.sh` keeps when it replaces an
 //! existing `$PLAYBOOK_BIN_DIR/playbook`, and `playbook uninstall --remove-binary`

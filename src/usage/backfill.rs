@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! One-time repair of rows stored by the first ingest, which took the repo
 //! from the last folder of the working directory and had no cache lifetime

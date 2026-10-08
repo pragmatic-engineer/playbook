@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Behavioural tests for `staleness::check_staleness`, exercised directly
 //! in-process, mirroring `tests/hooks_signals.rs`'s pattern.

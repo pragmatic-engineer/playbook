@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Two events, one cache. `PreToolUse` on Edit|Write: when the target path
 //! is anchored in the graph-first memory store

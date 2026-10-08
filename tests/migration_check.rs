@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `hooks/migration-check.sh`, the SessionStart hook that runs before
 //! `playbook` is installed. It stays shell on purpose; this drives it with a

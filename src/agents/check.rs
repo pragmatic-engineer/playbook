@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Port of the retired shell original, validating every `agents/*.md`
 //! definition (excluding the `_TEMPLATE.md` skeleton) against the house

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Pure formatting helpers for the status line, ported from `statusline.sh`.
 //! Colours stay as the script's literal `\033[...m` text and are turned into

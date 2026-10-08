@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Schema and connection layer for the gate-check database at the repo and worktree-scoped path under `$HOME/.config/playbook`, backed by `rusqlite` (the `bundled` feature compiles SQLite from source, so no system SQLite install is required).
 //!

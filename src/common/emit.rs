@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The emitters that write hook decisions to stdout for Claude Code to
 //! parse. Output shapes must match the retired shell original byte for byte;
