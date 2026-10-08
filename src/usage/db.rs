@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS usage_events (
     cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,
     agent TEXT NOT NULL DEFAULT 'claude-code'
 );
+CREATE INDEX IF NOT EXISTS usage_events_by_time ON usage_events (timestamp, event_id);
+CREATE INDEX IF NOT EXISTS usage_events_by_session ON usage_events (session_id, timestamp);
 CREATE TABLE IF NOT EXISTS tool_invocation_events (
     event_id TEXT PRIMARY KEY,
     timestamp INTEGER NOT NULL,
@@ -284,6 +286,14 @@ const USAGE_COLUMNS: &str = "event_id, timestamp, session_id, account, model, ef
     input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
     cache_creation_1h_tokens, agent";
 
+const TAIL_ALL: &str = "ORDER BY timestamp, event_id";
+const TAIL_SINCE: &str = "WHERE timestamp >= ?1 ORDER BY timestamp, event_id";
+const TAIL_LATEST: &str = "ORDER BY timestamp DESC, event_id DESC LIMIT ?1";
+
+fn tail_of_sessions(marks: &str) -> String {
+    format!("WHERE session_id IN ({marks}) ORDER BY timestamp, event_id")
+}
+
 fn query_usage(
     conn: &Connection,
     tail: &str,
@@ -323,25 +333,17 @@ fn query_usage(
 /// and the current price table. The stored `cost_usd` column is ignored, so a
 /// price correction never needs a re-ingest.
 pub fn load_usage_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, "ORDER BY timestamp, event_id", &[])
+    query_usage(conn, TAIL_ALL, &[])
 }
 
 /// Events at or after `since` (epoch seconds), oldest first.
 pub fn load_usage_events_since(conn: &Connection, since: i64) -> Result<Vec<UsageEvent>, String> {
-    query_usage(
-        conn,
-        "WHERE timestamp >= ?1 ORDER BY timestamp, event_id",
-        &[&since],
-    )
+    query_usage(conn, TAIL_SINCE, &[&since])
 }
 
 /// The newest `limit` events, newest first.
 pub fn load_latest_usage_events(conn: &Connection, limit: i64) -> Result<Vec<UsageEvent>, String> {
-    query_usage(
-        conn,
-        "ORDER BY timestamp DESC, event_id DESC LIMIT ?1",
-        &[&limit],
-    )
+    query_usage(conn, TAIL_LATEST, &[&limit])
 }
 
 /// Every event of the given sessions, oldest first.
@@ -355,11 +357,7 @@ pub fn load_usage_events_of_sessions(
     let marks = vec!["?"; sessions.len()].join(",");
     let params: Vec<&dyn rusqlite::ToSql> =
         sessions.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-    query_usage(
-        conn,
-        &format!("WHERE session_id IN ({marks}) ORDER BY timestamp, event_id"),
-        &params,
-    )
+    query_usage(conn, &tail_of_sessions(&marks), &params)
 }
 
 pub fn load_tool_events(conn: &Connection) -> Result<Vec<ToolInvocationEvent>, String> {
@@ -558,6 +556,88 @@ mod tests {
             "old rows default to Claude Code"
         );
         assert_eq!(count_usage_events(&again).unwrap(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn index_names(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'usage_events'
+                 AND name NOT LIKE 'sqlite_%' ORDER BY name",
+            )
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn an_older_database_gains_the_indexes_and_reopening_is_harmless() {
+        let dir = scratch_dir("usage-old-indexes");
+        let path = dir.join("usage.db");
+        fs::create_dir_all(&dir).unwrap();
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE usage_events (
+                event_id TEXT PRIMARY KEY, timestamp INTEGER NOT NULL,
+                session_id TEXT NOT NULL, account TEXT NOT NULL, model TEXT NOT NULL,
+                effort TEXT NOT NULL, repo TEXT NOT NULL, branch TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+                cache_creation_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL,
+                cost_usd REAL NOT NULL CHECK(cost_usd >= 0));
+             INSERT INTO usage_events VALUES
+                ('old', 1, 's', 'a', 'claude-sonnet-5', '', 'r', 'b', 1, 2, 3, 4, 0.5);",
+        )
+        .unwrap();
+        assert!(index_names(&old).is_empty());
+        drop(old);
+
+        let conn = open_db(&path).unwrap();
+        let expected = vec!["usage_events_by_session", "usage_events_by_time"];
+        assert_eq!(index_names(&conn), expected);
+        assert_eq!(index_names(&open_db(&path).unwrap()), expected);
+        assert_eq!(count_usage_events(&conn).unwrap(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn plan(conn: &Connection, tail: &str, params: &[&dyn rusqlite::ToSql]) -> String {
+        let sql = format!("EXPLAIN QUERY PLAN SELECT {USAGE_COLUMNS} FROM usage_events {tail}");
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let rows: Vec<String> = stmt
+            .query_map(params, |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        rows.join(" | ")
+    }
+
+    #[test]
+    fn every_loader_query_uses_an_index_instead_of_scanning_the_table() {
+        let dir = scratch_dir("usage-plan");
+        let conn = open_db(&dir.join("usage.db")).unwrap();
+        for i in 0..50 {
+            let mut e = event(&format!("e{i}"), "claude-sonnet-5", 0.0);
+            e.timestamp = i;
+            e.session_id = format!("s{}", i % 5);
+            upsert_usage_event(&conn, &e).unwrap();
+        }
+        let ids = ["s1".to_string(), "s2".to_string()];
+        let id_params: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+
+        let all = plan(&conn, TAIL_ALL, &[]);
+        let since = plan(&conn, TAIL_SINCE, &[&10_i64]);
+        let latest = plan(&conn, TAIL_LATEST, &[&5_i64]);
+        let sessions = plan(&conn, &tail_of_sessions("?,?"), &id_params);
+
+        assert!(all.contains("usage_events_by_time"), "{all}");
+        assert!(since.contains("usage_events_by_time"), "{since}");
+        assert!(latest.contains("usage_events_by_time"), "{latest}");
+        assert!(sessions.contains("usage_events_by_session"), "{sessions}");
+        for (name, text) in [("all", &all), ("since", &since), ("latest", &latest)] {
+            assert!(!text.contains("TEMP B-TREE"), "{name} sorts: {text}");
+        }
         let _ = fs::remove_dir_all(dir);
     }
 

@@ -179,17 +179,46 @@ fn load(paths: &Paths, request: Api) -> Result<String, Failure> {
         // Only the guard runs here; the stream computes its own summaries.
         return Ok(String::new());
     }
+    let (conn, _) = super::run::ingest_new(paths).map_err(Failure::Internal)?;
+    render(&conn, request, now_secs())
+}
+
+/// The events a ranged response is built from. `data_json` and `sessions_json`
+/// both drop everything before the first day of the range, so all time is the
+/// only range that needs every row.
+fn load_window(
+    conn: &rusqlite::Connection,
+    range: Range,
+    now: i64,
+) -> Result<Vec<super::UsageEvent>, String> {
+    match range.days(now) {
+        Some((first_day, _)) => super::db::load_usage_events_since(
+            conn,
+            first_day.saturating_mul(super::aggregate::SECONDS_PER_DAY),
+        ),
+        None => super::db::load_usage_events(conn),
+    }
+}
+
+/// Build the JSON for one data request from what the store holds at `now`.
+fn render(conn: &rusqlite::Connection, request: Api, now: i64) -> Result<String, Failure> {
+    use super::db;
     let internal = Failure::Internal;
-    let (conn, _) = super::run::ingest_new(paths).map_err(internal)?;
-    let usage = super::db::load_usage_events(&conn).map_err(Failure::Internal)?;
-    let now = now_secs();
     let value = match request {
         Api::Data(range) => {
-            let tools = super::db::load_tool_events(&conn).map_err(Failure::Internal)?;
+            let usage = load_window(conn, range, now).map_err(internal)?;
+            let tools = db::load_tool_events(conn).map_err(Failure::Internal)?;
             super::api::data_json(&usage, &tools, now, range)
         }
-        Api::Sessions(range) => super::api::sessions_json(&usage, now, range),
-        Api::Session(id) => super::api::session_json(&usage, &id).ok_or(Failure::NotFound)?,
+        Api::Sessions(range) => {
+            let usage = load_window(conn, range, now).map_err(internal)?;
+            super::api::sessions_json(&usage, now, range)
+        }
+        Api::Session(id) => {
+            let usage = db::load_usage_events_of_sessions(conn, std::slice::from_ref(&id))
+                .map_err(internal)?;
+            super::api::session_json(&usage, &id).ok_or(Failure::NotFound)?
+        }
         Api::Live => return Ok(String::new()),
     };
     serde_json::to_string(&value)
@@ -457,6 +486,7 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage::UsageEvent;
 
     fn tok() -> Token {
         Token::parse(&"ab".repeat(32)).expect("64 hex characters")
@@ -687,5 +717,270 @@ mod tests {
                 assert!(!body.contains(leaked), "{path} has {leaked}");
             }
         }
+    }
+
+    const PINNED: &[u64] = &[
+        17484291421679850613,
+        3730294920132424157,
+        1033622341910043654,
+        10862299611591569038,
+        17588408457794840280,
+        2494723156773533385,
+        11994428673198853629,
+        2431074417907975038,
+        4008528684616667504,
+        3262773478835288402,
+        12295639343689629795,
+        17375345325142460155,
+        11946032276010068899,
+        4632317121851229859,
+        17650650940913503287,
+        7820942360683494649,
+        1916967026913426392,
+    ];
+    const PINNED_EMPTY: &[u64] = &[
+        10774984880922801611,
+        50327236147303898,
+        6045690372409743390,
+        4881509650723624483,
+        7216419771988443760,
+        10397446657680869382,
+    ];
+
+    // 2026-10-08 12:00 UTC.
+    const NOW: i64 = 1_791_460_800;
+    const DAY: i64 = 86_400;
+
+    fn usage_event(id: &str, session: &str, at: i64, model: &str, agent: &str) -> UsageEvent {
+        UsageEvent {
+            event_id: id.into(),
+            timestamp: at,
+            session_id: session.into(),
+            account: "dev@example.com".into(),
+            agent: agent.into(),
+            model: model.into(),
+            effort: "high".into(),
+            repo: format!("acme/{agent}"),
+            branch: format!("b-{session}"),
+            input_tokens: 1000 + at as u64 % 7,
+            output_tokens: 500,
+            cache_creation_tokens: 200,
+            cache_read_tokens: 3000,
+            ..UsageEvent::default()
+        }
+    }
+
+    /// Sessions: `old` (far past), `edge` (spans the 30 day boundary),
+    /// `recent`, a Codex one, an unpriced model, an unusable id, a future one.
+    fn fixture() -> rusqlite::Connection {
+        let conn = empty_store();
+        let window_start = (NOW / DAY - 29) * DAY;
+        let events = [
+            usage_event(
+                "o1",
+                "old",
+                NOW - 200 * DAY,
+                "claude-opus-4-1",
+                "claude-code",
+            ),
+            usage_event(
+                "o2",
+                "old",
+                NOW - 199 * DAY,
+                "claude-opus-4-1",
+                "claude-code",
+            ),
+            usage_event(
+                "e1",
+                "edge",
+                window_start - 1,
+                "claude-sonnet-4-5",
+                "claude-code",
+            ),
+            usage_event(
+                "e2",
+                "edge",
+                window_start,
+                "claude-sonnet-4-5",
+                "claude-code",
+            ),
+            usage_event(
+                "e3",
+                "edge",
+                window_start + 60,
+                "claude-haiku-4-5",
+                "claude-code",
+            ),
+            usage_event(
+                "r1",
+                "recent",
+                NOW - 3600,
+                "claude-sonnet-4-5",
+                "claude-code",
+            ),
+            usage_event("r2", "recent", NOW - 60, "claude-opus-4-1", "claude-code"),
+            usage_event("c1", "codex-1", NOW - 5 * DAY, "gpt-5-codex", "codex"),
+            usage_event("c2", "codex-1", NOW - 5 * DAY + 90, "gpt-5-codex", "codex"),
+            usage_event(
+                "u1",
+                "mystery",
+                NOW - 2 * DAY,
+                "mystery-model",
+                "claude-code",
+            ),
+            usage_event(
+                "b1",
+                "bad id!",
+                NOW - DAY,
+                "claude-sonnet-4-5",
+                "claude-code",
+            ),
+            usage_event(
+                "f1",
+                "future",
+                NOW + 2 * DAY,
+                "claude-sonnet-4-5",
+                "claude-code",
+            ),
+            usage_event(
+                "m1",
+                "monthly",
+                (NOW / DAY - 7) * DAY,
+                "claude-sonnet-4-5",
+                "claude-code",
+            ),
+            usage_event(
+                "m0",
+                "monthly",
+                (NOW / DAY - 8) * DAY - 1,
+                "claude-sonnet-4-5",
+                "claude-code",
+            ),
+        ];
+        for e in &events {
+            super::super::db::upsert_usage_event(&conn, e).unwrap();
+        }
+        for (id, session, at, kind, name) in [
+            (
+                "t1",
+                "edge",
+                NOW - DAY,
+                super::super::ToolKind::Skill,
+                "commit",
+            ),
+            (
+                "t2",
+                "recent",
+                NOW - 60,
+                super::super::ToolKind::Agent,
+                "reviewer",
+            ),
+            (
+                "t3",
+                "old",
+                NOW - 200 * DAY,
+                super::super::ToolKind::Skill,
+                "ancient",
+            ),
+        ] {
+            let tool = super::super::ToolInvocationEvent {
+                event_id: id.into(),
+                timestamp: at,
+                session_id: session.into(),
+                account: "dev@example.com".into(),
+                kind,
+                name: name.into(),
+            };
+            super::super::db::insert_tool_event(&conn, &tool).unwrap();
+        }
+        conn
+    }
+
+    fn empty_store() -> rusqlite::Connection {
+        let dir = crate::common::test_support::scratch_dir("usage-render");
+        super::super::db::open_db(&dir.join("usage.db")).unwrap()
+    }
+
+    fn fnv(body: &str) -> u64 {
+        body.bytes().fold(0xcbf29ce484222325, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+        })
+    }
+
+    fn pinned(request: Api) -> Result<u64, Failure> {
+        render(&fixture(), request, NOW).map(|body| fnv(&body))
+    }
+
+    #[test]
+    fn every_data_endpoint_keeps_its_exact_json_on_a_fixed_fixture() {
+        let ranges = [
+            Range::All,
+            Range::LastDays(30),
+            Range::LastDays(60),
+            Range::LastDays(90),
+            Range::CurrentMonth,
+        ];
+        let mut got = Vec::new();
+        for range in ranges {
+            got.push(pinned(Api::Data(range)).unwrap());
+            got.push(pinned(Api::Sessions(range)).unwrap());
+        }
+        for id in [
+            "old", "edge", "recent", "codex-1", "mystery", "monthly", "future",
+        ] {
+            got.push(pinned(Api::Session(id.to_string())).unwrap());
+        }
+        assert_eq!(got.as_slice(), PINNED);
+        assert_eq!(pinned(Api::Session("nope".into())), Err(Failure::NotFound));
+    }
+
+    #[test]
+    fn an_empty_store_renders_every_endpoint_without_error() {
+        let conn = empty_store();
+        let mut got = Vec::new();
+        for range in [Range::All, Range::LastDays(30), Range::CurrentMonth] {
+            got.push(fnv(&render(&conn, Api::Data(range), NOW).unwrap()));
+            got.push(fnv(&render(&conn, Api::Sessions(range), NOW).unwrap()));
+        }
+        assert_eq!(got.as_slice(), PINNED_EMPTY);
+        assert_eq!(
+            render(&conn, Api::Session("x".into()), NOW),
+            Err(Failure::NotFound)
+        );
+    }
+
+    #[test]
+    fn a_window_with_no_events_is_empty_but_well_formed() {
+        let conn = fixture();
+        let far = NOW + 400 * DAY;
+        let data: serde_json::Value =
+            serde_json::from_str(&render_at(&conn, Api::Data(Range::LastDays(30)), far)).unwrap();
+        assert_eq!(data["totals"]["messages"], 0);
+        let sessions: serde_json::Value =
+            serde_json::from_str(&render_at(&conn, Api::Sessions(Range::LastDays(30)), far))
+                .unwrap();
+        assert_eq!(sessions["total"], 0);
+    }
+
+    fn render_at(conn: &rusqlite::Connection, request: Api, now: i64) -> String {
+        render(conn, request, now).unwrap()
+    }
+
+    #[test]
+    fn the_edge_session_keeps_its_whole_cost_in_its_own_view_but_only_the_window_in_the_list() {
+        let conn = fixture();
+        let one: serde_json::Value =
+            serde_json::from_str(&render_at(&conn, Api::Session("edge".into()), NOW)).unwrap();
+        assert_eq!(one["total"], 3);
+        let list: serde_json::Value =
+            serde_json::from_str(&render_at(&conn, Api::Sessions(Range::LastDays(30)), NOW))
+                .unwrap();
+        let edge = list["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == "edge")
+            .unwrap();
+        assert_eq!(edge["messages"], 2);
     }
 }
