@@ -872,7 +872,8 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
         if path.is_dir() {
-            if !name.starts_with('.') {
+            // `staging` holds unapproved learn-project candidates, never live facts.
+            if !name.starts_with('.') && name != "staging" {
                 walk_markdown_files_into(&path, out)?;
             }
         } else if name.to_ascii_lowercase().ends_with(".md")
