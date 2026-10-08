@@ -464,7 +464,7 @@ fn effort_cap_step(home: &Path, claude_home: &Path) -> StepReport {
             StepReport::wired("effort", "removed the effort cap, defaults apply")
         }
         Ok(crate::effort::Synced::Unchanged) if level == "auto" => {
-            StepReport::already_correct("effort", "no cap set, playbook defaults apply")
+            StepReport::skipped("effort", "no cap set, playbook defaults apply")
         }
         Ok(crate::effort::Synced::Unchanged) => {
             StepReport::already_correct("effort", format!("already capped at {level}"))
