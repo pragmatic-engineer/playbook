@@ -62,6 +62,57 @@ impl Scratch {
     }
 }
 
+/// A `git` shim that logs each call to a file and answers every call with the
+/// `acme/widgets` origin URL, plus the PATH that puts it first.
+#[cfg(unix)]
+pub struct GitShim {
+    pub path: String,
+    pub log: PathBuf,
+}
+
+#[cfg(unix)]
+impl GitShim {
+    pub fn calls(&self) -> usize {
+        fs::read_to_string(&self.log).map_or(0, |log| log.lines().count())
+    }
+}
+
+#[cfg(unix)]
+pub fn git_shim(scratch: &Scratch) -> GitShim {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = scratch.home.join("shim-bin");
+    fs::create_dir_all(&bin).expect("shim dir should be creatable");
+    let log = scratch.home.join("git-calls.log");
+    let script = format!(
+        "#!/bin/sh\necho \"$@\" >> '{}'\necho git@github.com:acme/widgets.git\n",
+        log.display()
+    );
+    let shim = bin.join("git");
+    fs::write(&shim, script).expect("shim should be writable");
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).expect("shim should be exec");
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    GitShim { path, log }
+}
+
+impl Scratch {
+    /// Plant `{"mode": <mode>}` as the repo tier config for `owner/repo`.
+    pub fn seed_repo_mode_config(&self, owner: &str, repo: &str, mode: &str) {
+        let dir = self
+            .home
+            .join(".config/playbook/repos")
+            .join(owner)
+            .join(repo)
+            .join(".config");
+        fs::create_dir_all(&dir).expect("repo config dir should be creatable");
+        fs::write(dir.join("config.json"), format!(r#"{{"mode":"{mode}"}}"#))
+            .expect("repo config should be writable");
+    }
+}
+
 /// `playbook hook <hook>` with the environment isolated; callers add the
 /// per-case variables (for example `PLAYBOOK_MODE`) afterwards.
 pub fn hook_command(scratch: &Scratch, hook: &str) -> Command {

@@ -116,10 +116,21 @@ pub fn value_text(value: &Value) -> String {
 
 /// `resolve_for_hook_at` reading the real process environment and `$HOME`.
 pub fn resolve_for_hook() -> Resolved {
-    let slug = repo_slug();
+    let home = home_dir();
+    let slug = hook_slug(&home);
     resolve_for_hook_at(
         std::env::var("PLAYBOOK_MODE").ok().as_deref(),
-        &home_dir(),
-        (!slug.is_empty()).then_some(slug.as_str()),
+        &home,
+        slug.as_deref(),
     )
+}
+
+/// The repo slug for config lookups, `None` when empty or when no org or repo
+/// tier file exists (the slug then cannot change any resolved value, so the
+/// `git` spawn behind it is skipped).
+pub fn hook_slug(home: &Path) -> Option<String> {
+    if !config::any_scoped_config(&crate::common::paths::playbook_root_from(home)) {
+        return None;
+    }
+    Some(repo_slug()).filter(|slug| !slug.is_empty())
 }

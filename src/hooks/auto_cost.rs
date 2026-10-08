@@ -16,13 +16,11 @@
 //! own guard: the `mode`, `auto.*` and `fix.*` settings and the config files.
 
 use crate::common::atomic::{remove_stale_lock_dir, with_dir_lock, STALE_LOCK_AGE};
-use crate::common::mode::{resolve, resolve_for_hook_at, Mode, Source};
+use crate::common::mode::{hook_slug, resolve, resolve_for_hook_at, Mode, Source};
 use crate::common::paths::playbook_root_from;
 use crate::common::payload::Payload;
 use crate::common::shell::{program_index, program_name, simple_commands};
-use crate::common::{
-    emit_pre_context, emit_pre_deny, home_dir, repo_slug, session_dir, session_id,
-};
+use crate::common::{emit_pre_context, emit_pre_deny, home_dir, session_dir, session_id};
 use crate::config;
 use crate::usage::claude_code::{one_hour_cache_tokens, token};
 use crate::usage::UsageEvent;
@@ -116,8 +114,8 @@ pub fn run(payload: &Payload) {
         return;
     }
     let home = home_dir();
-    let slug = repo_slug();
-    let slug = (!slug.is_empty()).then_some(slug.as_str());
+    let slug = hook_slug(&home);
+    let slug = slug.as_deref();
     let root = playbook_root_from(&home);
     let is_auto = resolve_for_hook_at(env.as_deref(), &home, slug).mode == Mode::Auto;
     if is_auto || config_broke_mid_session(payload, &root, &home, slug) {

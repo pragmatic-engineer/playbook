@@ -13,12 +13,16 @@
 use crate::common::emit_pre_deny;
 use crate::common::payload::Payload;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 /// Matches LINE_LIMIT in the retired shell original.
 const LINE_LIMIT: u64 = 1000;
 /// Matches BYTE_LIMIT in the retired shell original (200 KB).
 const BYTE_LIMIT: u64 = 204_800;
+/// Most bytes scanned for a file already over `BYTE_LIMIT`, where the count
+/// only fills the message. Files at or under the limit are always counted whole.
+const SCAN_CAP: u64 = 4 * 1024 * 1024;
 
 /// Matches ALLOWLIST in the retired shell original.
 const ALLOWLIST: [&str; 26] = [
@@ -75,19 +79,22 @@ pub fn run(payload: &Payload) {
         return;
     }
 
-    // Line count = newline count (matches `wc -l`); byte size from stat.
-    // Two independent reads, matching the python port: a read failure
-    // (an unreadable target) never panics and defaults the line count to 0,
-    // but `fs::metadata` is a separate call that still succeeds for an
-    // existing, unreadable file, so a large unreadable file is still
-    // correctly denied on byte size, matching python.
-    let lines = count_newlines(file_path);
+    // Line count = newline count (matches `wc -l`); byte size from stat. A
+    // read failure never panics and counts 0 lines, but `fs::metadata` still
+    // succeeds for an unreadable file, so a large one is still denied on bytes.
     let num_bytes = fs::metadata(file_path).map(|meta| meta.len()).unwrap_or(0);
+    let counted = count_newlines(file_path, num_bytes);
+    let lines = counted.lines;
 
     // Files at or below either threshold pass.
     if lines <= LINE_LIMIT && num_bytes <= BYTE_LIMIT {
         return;
     }
+    let lines = match (counted.complete, lines > LINE_LIMIT) {
+        (true, _) => lines.to_string(),
+        (false, true) => format!("over {LINE_LIMIT}"),
+        (false, false) => format!("at least {lines}"),
+    };
 
     // Built as one literal line (rather than backslash-newline continuations)
     // so the significant leading spaces on the numbered list below cannot be
@@ -98,10 +105,52 @@ pub fn run(payload: &Payload) {
     emit_pre_deny(&reason);
 }
 
-fn count_newlines(path: &Path) -> u64 {
-    fs::read(path)
-        .map(|data| data.iter().filter(|&&byte| byte == b'\n').count() as u64)
-        .unwrap_or(0)
+struct Counted {
+    lines: u64,
+    /// False when the scan stopped early, so `lines` is a lower bound.
+    complete: bool,
+}
+
+/// Newlines in `path`, streamed in constant memory. Under `BYTE_LIMIT` the
+/// count is exact; above it the scan stops once the line limit is passed or
+/// `SCAN_CAP` bytes are read, since the file is denied either way.
+fn count_newlines(path: &Path, size: u64) -> Counted {
+    let Ok(file) = fs::File::open(path) else {
+        return Counted {
+            lines: 0,
+            complete: true,
+        };
+    };
+    if size <= BYTE_LIMIT {
+        return count_newlines_in(file, None, u64::MAX);
+    }
+    count_newlines_in(file, Some(LINE_LIMIT), SCAN_CAP)
+}
+
+/// Streams `reader` in 64 KiB chunks, stopping early once the count passes
+/// `stop_after` or `byte_cap` bytes were read.
+fn count_newlines_in(mut reader: impl Read, stop_after: Option<u64>, byte_cap: u64) -> Counted {
+    let mut buf = [0u8; 64 * 1024];
+    let (mut lines, mut read) = (0u64, 0u64);
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) | Err(_) => {
+                return Counted {
+                    lines,
+                    complete: true,
+                }
+            }
+            Ok(n) => n,
+        };
+        read += n as u64;
+        lines += buf[..n].iter().filter(|&&b| b == b'\n').count() as u64;
+        if stop_after.is_some_and(|limit| lines > limit) || read >= byte_cap {
+            return Counted {
+                lines,
+                complete: false,
+            };
+        }
+    }
 }
 
 /// Minimal case-sensitive glob match supporting `*` (any run of characters,
@@ -135,4 +184,79 @@ fn glob_match(pattern: &str, text: &str) -> bool {
         pi += 1;
     }
     pi == p.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Serves `total` bytes of 80-byte lines and records how many it handed out.
+    struct Counting {
+        total: u64,
+        served: u64,
+    }
+
+    impl Read for Counting {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            let n = out.len().min((self.total - self.served) as usize);
+            for (i, b) in out[..n].iter_mut().enumerate() {
+                *b = if (self.served + i as u64) % 80 == 79 {
+                    b'\n'
+                } else {
+                    b'a'
+                };
+            }
+            self.served += n as u64;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn counts_every_newline_exactly_without_a_stop() {
+        // Arrange
+        let mut reader = Counting {
+            total: 80 * 3000,
+            served: 0,
+        };
+
+        // Act
+        let got = count_newlines_in(&mut reader, None, u64::MAX);
+
+        // Assert
+        assert_eq!((got.lines, got.complete), (3000, true));
+        assert_eq!(reader.served, 80 * 3000);
+    }
+
+    #[test]
+    fn stops_reading_soon_after_the_line_limit_is_passed() {
+        // Arrange: a virtual 10 GB file that must never be read in full.
+        let mut reader = Counting {
+            total: 10 * 1024 * 1024 * 1024,
+            served: 0,
+        };
+
+        // Act
+        let got = count_newlines_in(&mut reader, Some(LINE_LIMIT), SCAN_CAP);
+
+        // Assert
+        assert!(!got.complete);
+        assert!(got.lines > LINE_LIMIT);
+        assert!(reader.served <= 128 * 1024, "read {} bytes", reader.served);
+    }
+
+    #[test]
+    fn a_scan_that_never_hits_the_line_stop_ends_at_the_byte_cap() {
+        // Arrange
+        let mut reader = Counting {
+            total: 1 << 40,
+            served: 0,
+        };
+
+        // Act
+        let got = count_newlines_in(&mut reader, Some(u64::MAX), SCAN_CAP);
+
+        // Assert
+        assert!(!got.complete);
+        assert!(reader.served < SCAN_CAP + 64 * 1024);
+    }
 }

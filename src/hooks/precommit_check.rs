@@ -49,9 +49,7 @@ pub fn run(payload: &Payload) {
     if cmd.is_empty() || !is_commit(&cmd) {
         return;
     }
-    if git(&["rev-parse", "--git-dir"]).is_none() {
-        return;
-    }
+    // Outside a repo this exits non-zero, which is the same silent return.
     let Some(staged) = git(&["diff", "--cached", "--name-only"]) else {
         return;
     };
