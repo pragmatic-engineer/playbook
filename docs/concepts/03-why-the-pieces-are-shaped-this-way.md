@@ -59,14 +59,23 @@ The `Agent` tool takes a `model` on each call but has no per-call effort. An age
 
 You do not edit the variants by hand. `playbook agents gen` writes them from the base agent, and `playbook agents check` fails CI when a variant drifts from its base. The orchestrator picks the variant by diff size and risk, following the `delegating-subagents` skill.
 
-### Who decides the effort today
+### Who decides the effort
 
-Playbook does. The values are fixed in the files. You can override a session with Claude Code's own `/effort`, but playbook does not yet let you set a ceiling. Planned work:
+Playbook sets the defaults, in each file. You set the ceiling.
 
-- A global ceiling, so `medium` means nothing runs above medium (#572).
+`playbook effort <level>` stores the config key `effort.max` and writes it to `maxEffortLevel` in `~/.claude/settings.json`. Claude Code applies that setting to every session, including the effort a command, skill or agent sets in its own frontmatter. So with `playbook effort medium`, `fact-checker-xhigh` runs at `medium`, and an agent that ships at `low` still runs at `low`. A cap never raises anything.
+
+- `auto` is the default. Playbook sets no cap and the shipped values apply.
+- `playbook init` reapplies the cap, and `playbook effort auto` removes it. Playbook removes a cap only when it wrote it. A `maxEffortLevel` you set by hand is never touched.
+- The setting needs Claude Code 2.1.267 or later. On an older version the cap has no effect.
+- Claude Code's own `/effort` and `--effort` still work, below the cap.
+
+Planned work:
+
 - A ceiling per skill, command and agent (#573).
 - A shared rule for which tier a task goes to, and when to ask you first (#575).
 - A rule that every model is the 5.5 generation, with a fallback to the previous one (#574).
+- Measured, then auto tuned, effort values (#576, #578).
 
 ## Why hooks are in Rust and wired by `init`
 
@@ -91,6 +100,7 @@ When you want to know why something is the way it is, start with this page, then
 |---|---|
 | Which model a command or agent uses | The `model:` line in its file, then [Model routing](../internals/02-model-routing-and-memory.md) |
 | How hard it thinks | The `effort:` line in its file, or pick a `-low` or `-xhigh` variant |
+| The most effort anything may use | `playbook effort <level>` |
 | How far the PR flow goes | [Config keys](../guides/04-config-keys.md) |
 | Whether playbook asks or decides | `playbook mode`, and the Auto mode section of the README |
 | What a hook blocks | [Launcher and hooks](../internals/01-launcher-and-hooks.md) |
