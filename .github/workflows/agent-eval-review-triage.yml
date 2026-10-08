@@ -1,15 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: MIT
 #
-# Runs shell/eval-review-triage.sh, the real, live-call regression eval for
+# Runs `playbook eval review-triage`, the real, live-call regression eval for
 # the review-triage classifier (agents/review-triage.md), automatically on
 # any PR that touches the classifier or its eval inputs.
 # It costs one live `claude -p --model haiku` call plus one `gh pr diff`
-# fetch per fixture in shell/fixtures/review-triage-eval-set.json (11
+# fetch per fixture in tests/fixtures/review-triage-eval-set.json (11
 # fixtures as of writing), real money and real GitHub API calls every run,
 # so the `paths` filter below keeps it scoped to changes that can actually
-# move the classifier's accuracy (per the script's own "RE-RUN whenever
-# agents/review-triage.md's classification logic changes" header), and
+# move the classifier's accuracy (re-run whenever
+# agents/review-triage.md's classification logic changes), and
 # draft PRs are skipped so it doesn't re-run on every WIP push.
 #
 # This is an ADVISORY check only: it is not in the branch ruleset's required
@@ -38,8 +38,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - agents/review-triage.md
-      - shell/eval-review-triage.sh
-      - shell/fixtures/review-triage-eval-set.json
+      - src/eval/**
+      - tests/fixtures/review-triage-eval-set.json
       # Editing this workflow runs it, so a change to it tests itself.
       - .github/workflows/agent-eval-review-triage.yml
   # Manual run from the Actions tab, e.g. to re-run the eval without touching the watched files.
@@ -100,8 +100,6 @@ jobs:
             echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not set (expected on fork PR runs, which get no repository secrets); skipping the live eval."
             exit 0
           fi
-          # shell/eval-review-triage.sh calls `playbook json ...`, so the binary has to be on PATH.
           # Built after the token check so runs that skip the live eval don't pay for the compile.
           cargo build
-          export PATH="$PWD/target/debug:$PATH"
-          bash shell/eval-review-triage.sh
+          ./target/debug/playbook eval review-triage
