@@ -1,25 +1,22 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook effort`: the user's ceiling on effort.
+//! `playbook effort`: playbook's own ceiling on effort.
 //!
 //! The config key `effort.max` (`auto`, `low`, `medium`, `high`, `xhigh`,
-//! `max`) is written to the `maxEffortLevel` setting in
-//! `~/.claude/settings.json`. Claude Code applies that cap to every session,
-//! including the effort a command, skill or agent sets in its own
-//! frontmatter, so an `xhigh` agent runs at `medium` under a `medium` cap.
-//! `auto` means playbook sets no cap and the shipped defaults apply. Claude
-//! Code 2.1.267 or later is needed for the setting to take effect.
+//! `max`) is playbook's setting. Claude Code has its own, `maxEffortLevel`,
+//! and playbook only ever reads it. Playbook never writes to Claude Code's
+//! settings files.
 //!
-//! Playbook removes the cap on `auto` only when it wrote the value itself. A
-//! `maxEffortLevel` the user set by hand is never touched.
+//! The effective ceiling is the lower of the two. When playbook's is lower,
+//! the launcher (`pb`, `cc`) passes it to that one session with `--settings`,
+//! which Claude Code applies to command, skill and agent effort alike. When
+//! Claude Code's is as low or lower, or playbook is `auto`, the launcher adds
+//! nothing. A session started without the launcher gets no playbook ceiling.
 
-use crate::common::atomic::write_atomic;
-use crate::common::paths::playbook_root_from;
 use crate::config::{self, write};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 /// The config key.
@@ -28,19 +25,57 @@ pub const KEY: &str = "effort.max";
 /// Every accepted value, `auto` first.
 pub const LEVELS: [&str; 6] = ["auto", "low", "medium", "high", "xhigh", "max"];
 
-/// What `sync` did to `settings.json`.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Synced {
-    /// The cap was written or changed.
-    Set(String),
-    /// A cap that playbook wrote earlier was removed.
-    Cleared,
-    /// Nothing needed to change.
-    Unchanged,
+/// Position of `level` from lowest to highest, `None` for `auto` or unknown.
+fn rank(level: &str) -> Option<usize> {
+    LEVELS.iter().skip(1).position(|l| *l == level)
 }
 
-fn marker_path(home: &Path) -> PathBuf {
-    playbook_root_from(home).join(".effort-owned")
+/// The lower of two levels. An unknown or missing side loses.
+fn lower<'a>(a: Option<&'a str>, b: Option<&'a str>) -> Option<&'a str> {
+    let ra = a.and_then(|l| rank(l).map(|r| (l, r)));
+    let rb = b.and_then(|l| rank(l).map(|r| (l, r)));
+    match (ra, rb) {
+        (Some((la, ra)), Some((lb, rb))) => Some(if ra <= rb { la } else { lb }),
+        (Some((l, _)), None) | (None, Some((l, _))) => Some(l),
+        (None, None) => None,
+    }
+}
+
+/// Who sets the effective ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Winner {
+    Playbook,
+    ClaudeCode,
+    /// Neither sets one, so each command, skill and agent keeps its own effort.
+    Neither,
+}
+
+/// Both ceilings and the one that applies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ceiling {
+    pub playbook: String,
+    pub claude: Option<String>,
+    pub effective: Option<String>,
+    pub winner: Winner,
+}
+
+impl Ceiling {
+    pub fn new(playbook: &str, claude: Option<&str>) -> Self {
+        let effective = lower(Some(playbook), claude).map(str::to_string);
+        let winner = match (rank(playbook), claude.and_then(rank)) {
+            (None, None) => Winner::Neither,
+            (Some(_), None) => Winner::Playbook,
+            (None, Some(_)) => Winner::ClaudeCode,
+            (Some(p), Some(c)) if p < c => Winner::Playbook,
+            _ => Winner::ClaudeCode,
+        };
+        Ceiling {
+            playbook: playbook.to_string(),
+            claude: claude.map(str::to_string),
+            effective,
+            winner,
+        }
+    }
 }
 
 /// The configured level, `auto` when no tier sets one.
@@ -51,77 +86,58 @@ pub fn configured(home: &Path) -> String {
     }
 }
 
-/// Make `settings.json` agree with `level`.
-pub fn sync(home: &Path, claude_home: &Path, level: &str) -> io::Result<Synced> {
-    let settings_path = claude_home.join("settings.json");
-    let marker = marker_path(home);
-    let owned = fs::read_to_string(&marker)
-        .ok()
-        .map(|s| s.trim().to_string());
-
-    let mut root = match fs::read_to_string(&settings_path) {
-        Ok(text) => match serde_json::from_str::<Value>(&text) {
-            Ok(Value::Object(map)) => map,
-            _ => {
-                return Err(io::Error::other(format!(
-                    "{} is not a JSON object, left unchanged",
-                    settings_path.display()
-                )))
-            }
-        },
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Map::new(),
-        Err(err) => return Err(err),
-    };
-    let current = root
-        .get("maxEffortLevel")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-
-    if level == "auto" {
-        let ours = owned.is_some() && owned == current;
-        if owned.is_some() {
-            let _ = fs::remove_file(&marker);
-        }
-        if !ours {
-            return Ok(Synced::Unchanged);
-        }
-        root.remove("maxEffortLevel");
-        write_settings(&settings_path, root)?;
-        return Ok(Synced::Cleared);
-    }
-
-    if current.as_deref() == Some(level) {
-        write_marker(&marker, level)?;
-        return Ok(Synced::Unchanged);
-    }
-    root.insert(
-        "maxEffortLevel".to_string(),
-        Value::String(level.to_string()),
-    );
-    write_settings(&settings_path, root)?;
-    write_marker(&marker, level)?;
-    Ok(Synced::Set(level.to_string()))
+fn cap_in(path: &Path) -> Option<String> {
+    let v: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    v.get("maxEffortLevel")?.as_str().map(str::to_string)
 }
 
-fn write_marker(marker: &Path, level: &str) -> io::Result<()> {
-    if let Some(dir) = marker.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    write_atomic(marker, &format!("{level}\n"))
+/// The project root Claude Code would use for `cwd`: the nearest ancestor
+/// holding `.git`, else `cwd` itself.
+fn project_root(cwd: &Path) -> PathBuf {
+    cwd.ancestors()
+        .find(|d| d.join(".git").exists())
+        .unwrap_or(cwd)
+        .to_path_buf()
 }
 
-fn write_settings(path: &Path, root: Map<String, Value>) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let body = serde_json::to_string_pretty(&Value::Object(root)).map_err(io::Error::other)?;
-    // A symlinked settings.json (stow, chezmoi) stays a symlink.
-    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    write_atomic(&target, &format!("{body}\n"))
+/// Claude Code's own `maxEffortLevel`, read from the user, project and local
+/// settings files. The lowest one wins, as it does inside Claude Code.
+/// Managed settings are not read here: Claude Code applies those itself.
+pub fn claude_cap(claude_home: &Path, cwd: &Path) -> Option<String> {
+    let root = project_root(cwd);
+    let found = [
+        claude_home.join("settings.json"),
+        root.join(".claude").join("settings.json"),
+        root.join(".claude").join("settings.local.json"),
+    ]
+    .iter()
+    .filter_map(|p| cap_in(p))
+    .collect::<Vec<_>>();
+    found
+        .iter()
+        .filter_map(|l| rank(l).map(|r| (l, r)))
+        .min_by_key(|(_, r)| *r)
+        .map(|(l, _)| l.clone())
 }
 
-/// `playbook effort <level>`: store the level, then apply it.
-pub fn run_set(home: &Path, claude_home: &Path, level: &str) -> Result<String, String> {
+/// Both ceilings for a session started in `cwd`.
+pub fn ceiling(home: &Path, claude_home: &Path, cwd: &Path) -> Ceiling {
+    Ceiling::new(&configured(home), claude_cap(claude_home, cwd).as_deref())
+}
+
+/// The inline `--settings` value the launcher passes, or `None` when it has
+/// nothing to add: playbook is `auto`, or Claude Code's ceiling is as low or
+/// lower.
+pub fn launcher_settings(home: &Path, claude_home: &Path, cwd: &Path) -> Option<String> {
+    let c = ceiling(home, claude_home, cwd);
+    if c.winner != Winner::Playbook {
+        return None;
+    }
+    Some(serde_json::json!({ "maxEffortLevel": c.playbook }).to_string())
+}
+
+/// `playbook effort <level>`: store playbook's level. Nothing else is written.
+pub fn run_set(home: &Path, level: &str) -> Result<String, String> {
     if !LEVELS.contains(&level) {
         return Err(format!(
             "unknown effort level '{level}', use one of: {}",
@@ -136,39 +152,41 @@ pub fn run_set(home: &Path, claude_home: &Path, level: &str) -> Result<String, S
         None,
     )
     .map_err(|err| err.to_string())?;
-    let synced = sync(home, claude_home, level).map_err(|err| err.to_string())?;
-    Ok(match (level, synced) {
-        ("auto", Synced::Cleared) => "effort cap removed, playbook defaults apply".to_string(),
-        ("auto", _) => "effort set to auto, playbook defaults apply".to_string(),
-        (l, Synced::Set(_)) => format!(
-            "effort capped at {l}: anything set higher runs at {l} (needs Claude Code 2.1.267 or later)"
-        ),
-        (l, _) => format!("effort already capped at {l}"),
+    Ok(if level == "auto" {
+        "effort set to auto, shipped defaults apply".to_string()
+    } else {
+        format!(
+            "playbook effort.max set to {level}. Sessions started with pb or cc stay at or below it, \
+             and never above your Claude Code maxEffortLevel. Claude Code's settings are not changed."
+        )
     })
 }
 
-/// `playbook effort` with no level: what is configured and what is applied.
-pub fn run_status(home: &Path, claude_home: &Path) -> String {
-    let level = configured(home);
-    let applied = fs::read_to_string(claude_home.join("settings.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| {
-            v.get("maxEffortLevel")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
-    let applied_text = applied.as_deref().unwrap_or("none");
-    let mut out = format!("effort.max: {level}\nmaxEffortLevel in settings.json: {applied_text}");
-    let in_sync = match (level.as_str(), applied.as_deref()) {
-        ("auto", _) => true,
-        (l, Some(a)) => l == a,
-        _ => false,
+/// `playbook effort` with no level: both ceilings and the one that wins.
+pub fn run_status(home: &Path, claude_home: &Path, cwd: &Path, json: bool) -> String {
+    let c = ceiling(home, claude_home, cwd);
+    let winner = match c.winner {
+        Winner::Playbook => "playbook",
+        Winner::ClaudeCode => "claude-code",
+        Winner::Neither => "neither",
     };
-    if !in_sync {
-        out.push_str("\nnot applied yet, run `playbook init` or `playbook effort <level>`");
+    if json {
+        return serde_json::json!({
+            "playbook": c.playbook,
+            "claudeCode": c.claude,
+            "effective": c.effective,
+            "winner": winner,
+        })
+        .to_string();
     }
-    out
+    format!(
+        "playbook effort.max: {}\nClaude Code maxEffortLevel: {}\neffective ceiling: {} ({winner})",
+        c.playbook,
+        c.claude.as_deref().unwrap_or("none"),
+        c.effective
+            .as_deref()
+            .unwrap_or("none, shipped defaults apply"),
+    )
 }
 
 #[cfg(test)]
@@ -176,84 +194,133 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
 
-    fn read_cap(claude: &Path) -> Option<String> {
-        let text = fs::read_to_string(claude.join("settings.json")).ok()?;
-        let v: Value = serde_json::from_str(&text).ok()?;
-        v.get("maxEffortLevel")?.as_str().map(str::to_string)
-    }
-
-    #[test]
-    fn a_level_is_written_and_other_settings_survive() {
-        let home = scratch_dir("effort-set");
+    fn setup(tag: &str) -> (PathBuf, PathBuf) {
+        let home = scratch_dir(tag);
         let claude = home.join(".claude");
         fs::create_dir_all(&claude).unwrap();
-        fs::write(claude.join("settings.json"), r#"{"theme":"dark"}"#).unwrap();
-
-        let out = sync(&home, &claude, "medium").unwrap();
-
-        assert_eq!(out, Synced::Set("medium".into()));
-        assert_eq!(read_cap(&claude).as_deref(), Some("medium"));
-        let v: Value =
-            serde_json::from_str(&fs::read_to_string(claude.join("settings.json")).unwrap())
-                .unwrap();
-        assert_eq!(v["theme"], "dark");
+        (home, claude)
     }
 
     #[test]
-    fn the_same_level_twice_changes_nothing() {
-        let home = scratch_dir("effort-twice");
-        let claude = home.join(".claude");
-        sync(&home, &claude, "high").unwrap();
-        assert_eq!(sync(&home, &claude, "high").unwrap(), Synced::Unchanged);
+    fn the_lower_of_two_levels_wins() {
+        assert_eq!(lower(Some("xhigh"), Some("max")), Some("xhigh"));
+        assert_eq!(lower(Some("xhigh"), Some("medium")), Some("medium"));
+        assert_eq!(lower(Some("auto"), Some("high")), Some("high"));
+        assert_eq!(lower(Some("low"), None), Some("low"));
+        assert_eq!(lower(Some("auto"), None), None);
     }
 
     #[test]
-    fn auto_removes_a_cap_playbook_wrote() {
-        let home = scratch_dir("effort-clear");
-        let claude = home.join(".claude");
-        sync(&home, &claude, "low").unwrap();
-        assert_eq!(sync(&home, &claude, "auto").unwrap(), Synced::Cleared);
-        assert_eq!(read_cap(&claude), None);
+    fn xhigh_is_below_max() {
+        assert!(rank("xhigh") < rank("max"));
+        let c = Ceiling::new("xhigh", Some("max"));
+        assert_eq!(c.effective.as_deref(), Some("xhigh"));
+        assert_eq!(c.winner, Winner::Playbook);
     }
 
     #[test]
-    fn auto_keeps_a_cap_the_user_set_by_hand() {
-        let home = scratch_dir("effort-hand");
-        let claude = home.join(".claude");
-        fs::create_dir_all(&claude).unwrap();
-        fs::write(claude.join("settings.json"), r#"{"maxEffortLevel":"high"}"#).unwrap();
-        assert_eq!(sync(&home, &claude, "auto").unwrap(), Synced::Unchanged);
-        assert_eq!(read_cap(&claude).as_deref(), Some("high"));
+    fn claude_code_medium_beats_playbook_xhigh() {
+        let c = Ceiling::new("xhigh", Some("medium"));
+        assert_eq!(c.effective.as_deref(), Some("medium"));
+        assert_eq!(c.winner, Winner::ClaudeCode);
     }
 
     #[test]
-    fn auto_after_the_user_changed_our_value_keeps_theirs() {
-        let home = scratch_dir("effort-edited");
-        let claude = home.join(".claude");
-        sync(&home, &claude, "low").unwrap();
-        fs::write(claude.join("settings.json"), r#"{"maxEffortLevel":"max"}"#).unwrap();
-        assert_eq!(sync(&home, &claude, "auto").unwrap(), Synced::Unchanged);
-        assert_eq!(read_cap(&claude).as_deref(), Some("max"));
-    }
-
-    #[test]
-    fn a_broken_settings_file_is_left_alone() {
-        let home = scratch_dir("effort-broken");
-        let claude = home.join(".claude");
-        fs::create_dir_all(&claude).unwrap();
-        fs::write(claude.join("settings.json"), "{not json").unwrap();
-        assert!(sync(&home, &claude, "medium").is_err());
+    fn equal_levels_leave_it_to_claude_code() {
         assert_eq!(
-            fs::read_to_string(claude.join("settings.json")).unwrap(),
-            "{not json"
+            Ceiling::new("high", Some("high")).winner,
+            Winner::ClaudeCode
         );
     }
 
     #[test]
+    fn auto_defers_to_claude_code_or_to_nobody() {
+        assert_eq!(Ceiling::new("auto", Some("low")).winner, Winner::ClaudeCode);
+        assert_eq!(Ceiling::new("auto", None).winner, Winner::Neither);
+        assert_eq!(Ceiling::new("auto", None).effective, None);
+    }
+
+    #[test]
+    fn the_launcher_adds_settings_only_when_playbook_is_lower() {
+        let (home, claude) = setup("effort-launcher");
+        let cwd = home.join("proj");
+        fs::create_dir_all(&cwd).unwrap();
+        run_set(&home, "xhigh").unwrap();
+
+        // No Claude Code cap: playbook's applies.
+        assert_eq!(
+            launcher_settings(&home, &claude, &cwd).as_deref(),
+            Some(r#"{"maxEffortLevel":"xhigh"}"#)
+        );
+        // Claude Code at max: still playbook's.
+        fs::write(claude.join("settings.json"), r#"{"maxEffortLevel":"max"}"#).unwrap();
+        assert!(launcher_settings(&home, &claude, &cwd).is_some());
+        // Claude Code at medium: nothing to add.
+        fs::write(
+            claude.join("settings.json"),
+            r#"{"maxEffortLevel":"medium"}"#,
+        )
+        .unwrap();
+        assert_eq!(launcher_settings(&home, &claude, &cwd), None);
+    }
+
+    #[test]
+    fn playbook_auto_adds_nothing() {
+        let (home, claude) = setup("effort-auto");
+        assert_eq!(launcher_settings(&home, &claude, &home), None);
+    }
+
+    #[test]
+    fn the_lowest_claude_code_scope_counts() {
+        let (home, claude) = setup("effort-scopes");
+        let proj = home.join("proj");
+        fs::create_dir_all(proj.join(".claude")).unwrap();
+        fs::create_dir_all(proj.join(".git")).unwrap();
+        fs::write(claude.join("settings.json"), r#"{"maxEffortLevel":"max"}"#).unwrap();
+        fs::write(
+            proj.join(".claude/settings.local.json"),
+            r#"{"maxEffortLevel":"low"}"#,
+        )
+        .unwrap();
+        let sub = proj.join("src");
+        fs::create_dir_all(&sub).unwrap();
+        assert_eq!(claude_cap(&claude, &sub).as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn setting_a_level_never_touches_claude_code_settings() {
+        let (home, claude) = setup("effort-no-write");
+        let body = r#"{"maxEffortLevel":"high","theme":"dark"}"#;
+        fs::write(claude.join("settings.json"), body).unwrap();
+        run_set(&home, "low").unwrap();
+        run_set(&home, "auto").unwrap();
+        assert_eq!(
+            fs::read_to_string(claude.join("settings.json")).unwrap(),
+            body
+        );
+    }
+
+    #[test]
+    fn status_shows_both_sides_and_the_winner() {
+        let (home, claude) = setup("effort-status");
+        fs::write(
+            claude.join("settings.json"),
+            r#"{"maxEffortLevel":"medium"}"#,
+        )
+        .unwrap();
+        run_set(&home, "xhigh").unwrap();
+        let s = run_status(&home, &claude, &home, false);
+        assert!(s.contains("playbook effort.max: xhigh"), "{s}");
+        assert!(s.contains("Claude Code maxEffortLevel: medium"), "{s}");
+        assert!(s.contains("effective ceiling: medium (claude-code)"), "{s}");
+        let j: Value = serde_json::from_str(&run_status(&home, &claude, &home, true)).unwrap();
+        assert_eq!(j["winner"], "claude-code");
+        assert_eq!(j["effective"], "medium");
+    }
+
+    #[test]
     fn an_unknown_level_is_rejected_before_any_write() {
-        let home = scratch_dir("effort-unknown");
-        let claude = home.join(".claude");
-        assert!(run_set(&home, &claude, "turbo").is_err());
-        assert!(!claude.join("settings.json").exists());
+        let (home, _) = setup("effort-unknown");
+        assert!(run_set(&home, "turbo").is_err());
     }
 }

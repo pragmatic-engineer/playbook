@@ -66,18 +66,23 @@ fn main() {
             }
             None => std::process::exit(cc::launch::run(false, &[])),
         },
-        Command::Effort { level } => {
+        Command::Effort { level, json } => {
             let home = common::home_dir();
-            let claude_home = home.join(".claude");
             match level {
-                Some(level) => match effort::run_set(&home, &claude_home, &level) {
+                Some(level) => match effort::run_set(&home, &level) {
                     Ok(msg) => println!("{msg}"),
                     Err(err) => {
                         eprintln!("error: {err}");
                         std::process::exit(1);
                     }
                 },
-                None => println!("{}", effort::run_status(&home, &claude_home)),
+                None => {
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    println!(
+                        "{}",
+                        effort::run_status(&home, &home.join(".claude"), &cwd, json)
+                    );
+                }
             }
         }
         Command::ShellInit { shell, no_cc } => {

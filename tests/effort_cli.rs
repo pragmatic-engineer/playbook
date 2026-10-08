@@ -54,16 +54,23 @@ fn text(out: &Output) -> String {
 }
 
 #[test]
-fn a_level_caps_effort_and_auto_removes_it() {
+fn setting_a_level_stores_it_and_leaves_claude_code_settings_alone() {
     let h = Home::new("roundtrip");
+    fs::create_dir_all(h.0.join(".claude")).unwrap();
+    let settings = h.0.join(".claude/settings.json");
+    fs::write(&settings, r#"{"maxEffortLevel":"max"}"#).unwrap();
 
     let out = h.run(&["effort", "medium"]);
     assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(h.cap().as_deref(), Some("medium"));
+    assert_eq!(h.cap().as_deref(), Some("max"));
+    assert_eq!(
+        fs::read_to_string(&settings).unwrap(),
+        r#"{"maxEffortLevel":"max"}"#
+    );
 
     let out = h.run(&["effort", "auto"]);
     assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(h.cap(), None);
+    assert_eq!(h.cap().as_deref(), Some("max"));
 }
 
 #[test]
@@ -76,29 +83,53 @@ fn an_unknown_level_fails_and_writes_nothing() {
         "{}",
         text(&out)
     );
+    assert!(!h.0.join(".claude/settings.json").exists());
+}
+
+#[test]
+fn init_never_writes_a_cap() {
+    let h = Home::new("init");
+    assert!(h.run(&["effort", "low"]).status.success());
+    let out = h.run(&["init"]);
+    assert!(out.status.success(), "{}", text(&out));
     assert_eq!(h.cap(), None);
 }
 
 #[test]
-fn init_reapplies_the_configured_cap() {
-    let h = Home::new("init");
-    assert!(h.run(&["effort", "low"]).status.success());
-    fs::write(h.0.join(".claude/settings.json"), "{}\n").unwrap();
-
-    let out = h.run(&["init"]);
-
-    assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(h.cap().as_deref(), Some("low"));
+fn xhigh_under_a_claude_code_max_is_playbooks_to_apply() {
+    let h = Home::new("xhigh-max");
+    fs::create_dir_all(h.0.join(".claude")).unwrap();
+    fs::write(
+        h.0.join(".claude/settings.json"),
+        r#"{"maxEffortLevel":"max"}"#,
+    )
+    .unwrap();
+    assert!(h.run(&["effort", "xhigh"]).status.success());
+    let body = text(&h.run(&["effort"]));
+    assert!(body.contains("playbook effort.max: xhigh"), "{body}");
+    assert!(body.contains("Claude Code maxEffortLevel: max"), "{body}");
+    assert!(
+        body.contains("effective ceiling: xhigh (playbook)"),
+        "{body}"
+    );
 }
 
 #[test]
-fn status_shows_the_configured_and_applied_level() {
-    let h = Home::new("status");
-    assert!(h.run(&["effort", "high"]).status.success());
-    let out = h.run(&["effort"]);
-    let body = text(&out);
-    assert!(body.contains("effort.max: high"), "{body}");
-    assert!(body.contains("settings.json: high"), "{body}");
+fn a_lower_claude_code_ceiling_wins_in_the_status() {
+    let h = Home::new("lower-claude");
+    fs::create_dir_all(h.0.join(".claude")).unwrap();
+    fs::write(
+        h.0.join(".claude/settings.json"),
+        r#"{"maxEffortLevel":"medium"}"#,
+    )
+    .unwrap();
+    assert!(h.run(&["effort", "xhigh"]).status.success());
+    let out = h.run(&["effort", "--json"]);
+    let v: Value = serde_json::from_str(String::from_utf8_lossy(&out.stdout).trim()).unwrap();
+    assert_eq!(v["effective"], "medium");
+    assert_eq!(v["winner"], "claude-code");
+    assert_eq!(v["playbook"], "xhigh");
+    assert_eq!(v["claudeCode"], "medium");
 }
 
 #[test]

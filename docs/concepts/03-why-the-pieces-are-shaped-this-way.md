@@ -63,12 +63,14 @@ You do not edit the variants by hand. `playbook agents gen` writes them from the
 
 Playbook sets the defaults, in each file. You set the ceiling.
 
-`playbook effort <level>` stores the config key `effort.max` and writes it to `maxEffortLevel` in `~/.claude/settings.json`. Claude Code applies that setting to every session, including the effort a command, skill or agent sets in its own frontmatter. So with `playbook effort medium`, `fact-checker-xhigh` runs at `medium`, and an agent that ships at `low` still runs at `low`. A cap never raises anything.
+Playbook has its own ceiling, the config key `effort.max`, set with `playbook effort <level>`. Claude Code has one too, `maxEffortLevel`, and Claude Code always has the last word. The lower of the two applies:
 
-- `auto` is the default. Playbook sets no cap and the shipped values apply.
-- `playbook init` reapplies the cap, and `playbook effort auto` removes it. Playbook removes a cap only when it wrote it. A `maxEffortLevel` you set by hand is never touched.
-- The setting needs Claude Code 2.1.267 or later. On an older version the cap has no effect.
-- Claude Code's own `/effort` and `--effort` still work, below the cap.
+- Playbook `xhigh`, Claude Code `max`: `xhigh` applies, because `xhigh` is below `max`.
+- Playbook `xhigh`, Claude Code `medium`: `medium` applies. Playbook never goes above Claude Code.
+- Playbook `auto`: playbook adds no ceiling, and Claude Code's applies if it has one.
+- A ceiling never raises anything. An agent that ships at `low` still runs at `low`.
+
+Playbook only reads Claude Code's `maxEffortLevel` (from the user, project and local settings files) and never writes it. When playbook's ceiling is the lower one, the launcher (`pb` or `cc`) passes it to that one session with `--settings`, and Claude Code applies it to command, skill and agent effort alike. A session started without the launcher gets no playbook ceiling. `playbook effort` with no level shows both values and the winner, and `--json` prints the same for scripts. Claude Code's own `/effort` and `--effort` still work below the ceiling, and the setting needs Claude Code 2.1.267 or later.
 
 Planned work:
 

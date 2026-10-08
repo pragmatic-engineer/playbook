@@ -174,18 +174,22 @@ pub enum Command {
         #[command(subcommand)]
         sub: ConfigCommand,
     },
-    /// Set the highest effort level anything may run at
+    /// Set playbook's own ceiling on effort
     ///
     /// `auto` (the default) applies the effort each skill, command and agent
-    /// ships with. `low`, `medium`, `high`, `xhigh` or `max` caps all of them:
-    /// an agent that defaults to `xhigh` runs at `medium` under `medium`.
-    /// The cap is written to `maxEffortLevel` in `~/.claude/settings.json`
-    /// (Claude Code 2.1.267 or later). With no level, shows what is set.
+    /// ships with. `low`, `medium`, `high`, `xhigh` or `max` caps them. The
+    /// effective ceiling is the lower of this and Claude Code's own
+    /// `maxEffortLevel`, which playbook only reads and never changes. Sessions
+    /// started with `pb` or `cc` get the ceiling. With no level, shows both
+    /// values and the one that wins.
     ///
-    /// Example: `playbook effort medium`
+    /// Example: `playbook effort xhigh`
     Effort {
         /// auto, low, medium, high, xhigh or max
         level: Option<String>,
+        /// Print the status as JSON (with no level)
+        #[arg(long)]
+        json: bool,
     },
     /// Launcher helpers behind the `cc` shell shortcut
     ///

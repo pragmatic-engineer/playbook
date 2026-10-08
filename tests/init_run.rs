@@ -224,7 +224,7 @@ fn fresh_config_gets_fully_wired() {
         }
         // `memory` has nothing to migrate on a fresh machine with no
         // legacy `~/.claude/memory`.
-        if step.name == "memory" || step.name == "trust" || step.name == "effort" {
+        if step.name == "memory" || step.name == "trust" {
             assert_eq!(
                 step.status,
                 StepStatus::Skipped,
@@ -688,15 +688,12 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     for step in &second.steps {
         // `system-prompt` and `memory` stay `Skipped` on both runs: neither
         // has anything to act on in this fixture.
-        let expected = if step.name == "system-prompt"
-            || step.name == "memory"
-            || step.name == "trust"
-            || step.name == "effort"
-        {
-            StepStatus::Skipped
-        } else {
-            StepStatus::AlreadyCorrect
-        };
+        let expected =
+            if step.name == "system-prompt" || step.name == "memory" || step.name == "trust" {
+                StepStatus::Skipped
+            } else {
+                StepStatus::AlreadyCorrect
+            };
         assert_eq!(
             step.status, expected,
             "expected '{}' to report no change on a second run: {}",
