@@ -274,6 +274,7 @@ Skills live in `skills/` and load on demand. See [docs/authoring/01-commands-ski
 | `session-handoff` | Decision-first handoff, saved with `playbook handoff save`, so the next session picks up cold without rereading the thread. |
 | `delegating-subagents` | When and how to dispatch subagents, which tier to pick (including the `-low` and `-xhigh` variants), and what to do when one finishes or goes quiet. |
 | `systematic-debugging` | Reproduce, isolate and root-cause a bug before proposing a fix. |
+| `finish-pull-request` | Runs right after `/playbook:create-pull-request`: the self-review `autoReview.*` selects, fixes, promotes the draft, and merges when `autoMerge.enabled` allows. |
 | `playbook-usage` | Discovery aid: which `/playbook:*` command fits a task, for sessions without the system prompt. |
 | `atlassian-cli` | Read and write Jira and Confluence through `acli`, used by `/playbook:learn-project` when no Atlassian MCP server is connected. |
 
