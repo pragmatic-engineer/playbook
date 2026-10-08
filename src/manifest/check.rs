@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 15] = [
+const ALLOW_FILES: [&str; 14] = [
     ".gitignore",
     "README.md",
     "LICENSE",
@@ -27,7 +27,6 @@ const ALLOW_FILES: [&str; 15] = [
     "install.sh",
     "settings.shared.json",
     "permissions.shared.json",
-    "statusline.sh",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
@@ -195,7 +194,6 @@ mod tests {
             "LICENSE".to_string(),
             "settings.shared.json".to_string(),
             "permissions.shared.json".to_string(),
-            "statusline.sh".to_string(),
             "shell/worktree.zsh".to_string(),
             "hooks/session-init.sh".to_string(),
             "docs/index.md".to_string(),

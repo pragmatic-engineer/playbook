@@ -16,9 +16,8 @@ README.md
 hooks/migration-check.sh
 
 # Read by `playbook init` and the hooks through CLAUDE_PLUGIN_ROOT
-# (src/init/run.rs, statusline.rs, system_prompt.rs, shim.rs, hooks/session_init.rs)
+# (src/init/run.rs, system_prompt.rs, shim.rs, hooks/session_init.rs)
 settings.shared.json
-statusline.sh
 prompts/SYSTEM_PROMPT.md
 hooks/lib/config-hash.sh
 
