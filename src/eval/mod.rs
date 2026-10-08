@@ -134,6 +134,17 @@ fn on_path(tool: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The enclosing git repo's top level, or the current directory outside one.
+fn repo_root() -> PathBuf {
+    Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
+        .unwrap_or_default()
+}
+
 fn fail(msg: &str) -> i32 {
     eprintln!("eval review-triage: {msg}");
     1
@@ -141,8 +152,9 @@ fn fail(msg: &str) -> i32 {
 
 /// Runs the eval and returns the process exit code.
 pub fn review_triage(fixtures: Option<PathBuf>, prompt: Option<PathBuf>) -> i32 {
-    let fixtures = fixtures.unwrap_or_else(|| PathBuf::from(DEFAULT_FIXTURES));
-    let prompt = prompt.unwrap_or_else(|| PathBuf::from(DEFAULT_PROMPT));
+    let root = repo_root();
+    let fixtures = fixtures.unwrap_or_else(|| root.join(DEFAULT_FIXTURES));
+    let prompt = prompt.unwrap_or_else(|| root.join(DEFAULT_PROMPT));
     if !on_path("gh") {
         return fail("gh is required");
     }
@@ -278,6 +290,10 @@ fn summarize(c: &Counts, cases: usize) -> i32 {
     println!("  non-critical mismatch:    {}", c.noncritical);
     println!("  critical false-negative:  {}", c.critical);
     println!("  errored:                  {}", c.errored);
+    if total == 0 {
+        println!("\nFAIL: no (case, lens) pairs were evaluated, so nothing was validated.");
+        return 1;
+    }
     if c.critical > 0 || c.errored > 0 {
         println!(
             "\nFAIL: {} critical false-negative(s) and {} errored pair(s). review-triage is NOT the validated default dispatch path until this is zero and zero.",

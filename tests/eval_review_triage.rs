@@ -217,3 +217,10 @@ fn the_shipped_case_file_is_a_non_empty_array_with_a_known_answer_per_lens() {
         }
     }
 }
+
+#[test]
+fn an_empty_case_file_fails_instead_of_passing_vacuously() {
+    let r = run_with("[]", SEC_FULL, true, &[]);
+    assert_eq!(r.code, 1, "{}", r.out);
+    assert!(r.out.contains("nothing was validated"));
+}
