@@ -248,12 +248,11 @@ fn run_cases(fixtures: &Path, cases: &[Value], system_prompt: &str) -> i32 {
         };
 
         let Some(tier_map) = parse_tier_map(&response) else {
-            if claude_err.is_empty() {
-                println!("  unparseable classifier response; every lens errored");
-            } else {
-                println!(
-                    "  unparseable classifier response; every lens errored. claude stderr: {claude_err}"
-                );
+            let head: String = response.trim().chars().take(300).collect();
+            println!("  unparseable classifier response; every lens errored");
+            println!("  claude stdout (first 300 chars): {head}");
+            if !claude_err.is_empty() {
+                println!("  claude stderr: {claude_err}");
             }
             let suffix = if claude_err.is_empty() {
                 String::new()
