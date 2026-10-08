@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The `playbook usage` commands' shared steps: resolve where the local data
 //! lives, ingest incrementally, render.

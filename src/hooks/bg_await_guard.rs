@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Ports the retired shell original: warns when a Bash call backgrounds an
 //! install, build or typecheck whose output a later step usually needs.

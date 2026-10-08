@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The compiled `playbook pr` subcommands: usage text and argument errors.
 //! Paths that would call the real `gh` are covered through the `GhClient`

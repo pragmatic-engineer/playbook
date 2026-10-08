@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook uninstall` against a scratch `$HOME`: it undoes what `init` and
 //! the installer placed, keeps everything the user owns, and changes nothing

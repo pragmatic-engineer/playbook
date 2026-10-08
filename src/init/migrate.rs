@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Ordered migration registry run from `playbook init` (ADR 0016). Auto
 //! migrations run once and are recorded; Manual ones only warn.

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! WorktreeCreate hook: replaces Claude Code's default worktree creation so
 //! worktrees land in the cc launcher's `<parent>/.worktrees/<repo>/<name>`.

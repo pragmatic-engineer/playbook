@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # Removes AI attribution from a pull request's title and body. It never fails
 # the pull request: when `playbook sanitize` would change the text, the job

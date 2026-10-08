@@ -1,6 +1,6 @@
 # shellcheck shell=sh
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 # Shared config hash: settings.json + hook scripts (excluding tests).
 # Hook scripts are matched in both languages (.sh and .py) so the hash keeps
 # covering every hook after the python migration; test files in either language

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Ports the retired shell original: a PostToolUse hook on Edit/Write/
 //! NotebookEdit that records the edited absolute path plus a timestamp to

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Stop / SessionEnd hook (ports the retired shell original): marks a
 //! session as having ended cleanly, so the NEXT session's session-init hook

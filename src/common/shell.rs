@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! A small, quote-aware reader for shell command lines, shared by the hooks
 //! that need to see which program a Bash call runs and with what words.

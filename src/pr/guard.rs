@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Mechanical text checks `pr create` runs before it pushes: no AI
 //! attribution anywhere, and no em or en dashes in the title or body.

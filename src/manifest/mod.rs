@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Tracked-file manifest validation, backing `playbook manifest`. A port of
 //! the now-deleted the retired shell original.

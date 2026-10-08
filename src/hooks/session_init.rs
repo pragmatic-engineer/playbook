@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! SessionStart hook (ports the retired shell original). Prepares the per-session
 //! runtime directory and zeroes its counters, warns on a resumed session

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Reads the session and GitHub PR JSON `statusline.sh` pipes to `jq -r`
 //! (`statusline.sh:350-366` and `statusline.sh:550-582`), reproducing that

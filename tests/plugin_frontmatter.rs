@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Pins one frontmatter fault that shipped in 0.9.0 and 0.9.1: an unquoted
 //! value holding a colon-space. YAML reads that as a nested mapping and

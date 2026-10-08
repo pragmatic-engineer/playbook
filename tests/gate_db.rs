@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Integration-level coverage for `playbook::gate::db`, exercised through
 //! the real `open_db` the way a future CLI caller would: reopen the same

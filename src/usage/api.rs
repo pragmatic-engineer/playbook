@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The dashboard's JSON: totals, every grouping, tool counts, and the two
 //! server-rendered charts. Built from the same aggregation the terminal

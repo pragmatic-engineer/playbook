@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! A tolerant scanner for the options of one `git` subcommand, for hooks that
 //! need an option's value, and where it sits, without running the program.

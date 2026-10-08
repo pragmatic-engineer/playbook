@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for `playbook::init::memory_migrate::migrate_memory`,
 //! focused on the legacy filename rename it performs before moving the tree.

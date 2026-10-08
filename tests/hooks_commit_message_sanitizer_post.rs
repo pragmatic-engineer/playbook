@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The PostToolUse backstop of `commit-message-sanitizer` from the real
 //! binary, against a scratch repository and a stub `gh`: an unpushed commit

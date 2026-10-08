@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Playbook's own tiered (repo < org < global < default) configuration
 //! system for keys such as `autoReview.enabled` and `autoReview.type`.

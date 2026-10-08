@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The dashboard page: three static, same-origin assets (`/`, `/app.css`,
 //! `/app.js`) with nothing inline, so the policy can forbid inline scripts and

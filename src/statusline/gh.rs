@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! GitHub-facing helpers: remote parsing, ISO-8601
 //! parsing, `PATH` lookup and the detached cache refreshes.

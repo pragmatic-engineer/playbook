@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Ports the retired shell original: a PreToolUse hook on Read that denies
 //! a full-file Read of a large file when no offset/limit was given, pushing

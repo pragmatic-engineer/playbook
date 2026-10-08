@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Differential test for `playbook::json::memorycontext::render_memory_context`
 //! against the real `jq` filter the former the retired shell original runs. Skipped when

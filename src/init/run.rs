@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Orchestrates `playbook init`: composes `merge`, `wire` and `shim`
 //! into one idempotent repair, backing `Command::Init`.

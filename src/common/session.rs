@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Session identity and per-session state paths. Ports `session_id`
 //! (the retired shell original), `session_dir` (:86), and `abspath` (:110).

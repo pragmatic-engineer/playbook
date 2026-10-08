@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! WorktreeRemove hook: removes a worktree only when nothing would be lost.
 //! Dirty trees and unpublished commits keep the worktree; it never forces.

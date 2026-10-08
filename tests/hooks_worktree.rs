@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Tests for the `worktree-create` and `worktree-remove` hooks, spawning the
 //! real binary against real scratch git repos. Env is set per child process,

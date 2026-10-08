@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Lists a JSON document's top-level keys, sorted, replacing
 //! `jq -r 'keys_unsorted[]' | sort` call sites that snapshot a document's

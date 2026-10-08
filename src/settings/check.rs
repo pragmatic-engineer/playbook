@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Port of the retired shell original, guarding what ships in
 //! `settings.shared.json`: a seed that pinned a model, carried a

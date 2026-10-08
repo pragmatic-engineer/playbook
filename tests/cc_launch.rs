@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! End-to-end tests for `playbook cc launch` and `playbook shell-init`, with a
 //! fake `claude` on PATH that records its argv. They replace the shell launcher

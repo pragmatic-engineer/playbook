@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Settings seed generation and validation, backing `playbook settings`.
 //! Both are ports: `gen` of the retired shell original, `check` of the

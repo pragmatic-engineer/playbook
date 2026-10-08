@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Claude Code replaces `$0`..`$9` in a command or skill file with the
 //! invocation's argument words before the model reads it, so a shell

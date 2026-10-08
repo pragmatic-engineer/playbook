@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Binary-spawn tests for `playbook trust`: exit code, stdout, and stderr
 //! against a scratch `$HOME`, never the real `~/.claude.json`.

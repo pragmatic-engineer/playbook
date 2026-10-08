@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Removes AI attribution from the messages a Bash call writes: a commit, tag,
 //! merge or PR title and body. It never blocks.

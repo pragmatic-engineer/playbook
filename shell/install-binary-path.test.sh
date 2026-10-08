@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # install-binary-path.test.sh: install.sh places the binary and one PATH
 # marker, hands the right flags to `playbook init`, and copes with a release

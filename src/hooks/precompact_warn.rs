@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Ports the retired shell original: a PreCompact hook that logs the
 //! compaction event and warns the user, since PreCompact has no

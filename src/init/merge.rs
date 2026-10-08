@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Three-way merge for Claude Code's settings.json, ported from
 //! the retired shell original. That file's header comment is the merge

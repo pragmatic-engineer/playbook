@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The dashboard server's PID and port lock file. The file alone proves
 //! nothing (a killed server leaves it behind), so a lock only counts as live

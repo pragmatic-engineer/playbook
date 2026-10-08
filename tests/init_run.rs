@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for `playbook::init::run`, the module that composes
 //! `merge`, `wire`, `shim` and `statusline` into `Command::Init`. Coverage

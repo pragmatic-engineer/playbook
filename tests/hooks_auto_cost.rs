@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `auto-cost` cost computation as seen from the real binary. Each call is a
 //! separate process, so every assertion reads the state the hook persists as

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `UsageSource` over Codex CLI rollout logs
 //! (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`), read-only. Format from

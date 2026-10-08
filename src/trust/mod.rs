@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Pre-trusts a directory in `~/.claude.json` so Claude Code's first-launch
 //! trust dialog never blocks `cc`/`ccd`. The write swaps a tmp file onto the

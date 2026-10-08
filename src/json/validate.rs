@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Validity check for a JSON document, replacing `jq empty`/`jq -e .` sites
 //! that only ever care whether the input parses.

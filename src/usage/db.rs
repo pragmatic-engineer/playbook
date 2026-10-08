@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The usage store: one global SQLite database (not repo-scoped, since spend
 //! is only meaningful as a total across projects). Connection setup mirrors

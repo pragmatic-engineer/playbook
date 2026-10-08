@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Behavioural tests for the `preread-edit-check` and `preread-size-check`
 //! PreToolUse hooks, Rust ports of the retired shell original and

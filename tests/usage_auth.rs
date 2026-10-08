@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Spawned-binary tests for the dashboard's session token and script policy.
 //! Scratch `$HOME`, no browser, one server at a time behind `SOCKET_LOCK`.

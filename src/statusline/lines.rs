@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Lines 2 and 3 of the status line: model and context on one, session
 //! economics on the other. Each segment is `None` when it has nothing to say.

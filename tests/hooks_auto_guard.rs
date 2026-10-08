@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `auto-guard` as seen from the real binary: in auto mode it denies
 //! `AskUserQuestion` with a take-the-recommended-option reason, and in every

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Ports the retired shell original: a PreToolUse hook on Grep/Glob/Read that
 //! tracks exploration breadth and nudges Claude toward the Explore subagent
