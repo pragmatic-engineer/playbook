@@ -2015,3 +2015,30 @@ fn empty_body_pair_does_not_count_as_a_jaccard_hit_and_does_not_crash() {
 
     let _ = fs::remove_dir_all(&home);
 }
+
+/// `/playbook:learn-project --stage` writes unapproved candidates under
+/// `<owner>/<repo>/staging/`; they must not become nodes, while sibling
+/// facts still do.
+#[test]
+fn memory_rebuild_skips_the_staging_directory_and_still_indexes_siblings() {
+    // Arrange
+    let home = scratch_home("skip-staging");
+    let fact = "---\nname: fact\ntype: reference\n---\n\nBody.\n";
+    write_fact(&home, "acme/api/live-fact.md", fact);
+    write_fact(&home, "acme/api/staging/staged-fact.md", fact);
+
+    // Act
+    let out = run_playbook(&home, &["memory", "rebuild"], "");
+
+    // Assert
+    assert!(out.status.success(), "rebuild failed: {out:?}");
+    let graph = read_graph(&home);
+    assert!(has_node(&graph, "acme/api/live-fact"));
+    assert!(
+        !nodes(&graph)
+            .iter()
+            .any(|n| n["id"].as_str().is_some_and(|id| id.contains("staging"))),
+        "a staged fact must not become a node: {graph}"
+    );
+    let _ = fs::remove_dir_all(&home);
+}
