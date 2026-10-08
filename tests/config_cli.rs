@@ -179,7 +179,7 @@ fn set_with_global_flag_writes_the_global_tier_file() {
 
 #[test]
 fn get_prints_a_string_value_unquoted_not_as_raw_json() {
-    // Arrange: prose consumers (create-pull-request.md's Step 5, doctor.md's
+    // Arrange: prose consumers (the finish-pull-request skill, doctor.md's
     // effective-config line) match this output as a bare `auto`/`quick`
     // token, not a JSON-quoted `"auto"`.
     let repo = seeded_repo("get-string-unquoted");

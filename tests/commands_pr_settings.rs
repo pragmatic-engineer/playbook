@@ -36,7 +36,15 @@ fn step_section(text: &str, step: &str) -> String {
 
 /// The self-review step, which reads the auto-review settings.
 fn self_review_step() -> String {
-    step_section(&command_text("create-pull-request"), "5")
+    skill_text("finish-pull-request")
+}
+
+fn skill_text(name: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("skills")
+        .join(name)
+        .join("SKILL.md");
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
 #[test]
@@ -159,7 +167,7 @@ fn auto_mode_with_no_review_marks_ready_but_never_merges() {
 #[test]
 fn the_merge_flow_never_bypasses_checks_or_deletes_the_branch() {
     // Arrange
-    let text = command_text("create-pull-request");
+    let text = skill_text("finish-pull-request");
     let flags = ["--admin", "--delete-branch"];
 
     for flag in flags {
@@ -340,4 +348,19 @@ fn the_self_review_step_runs_review_triage_for_auto_and_falls_back_to_deep() {
         fails_to_deep,
         "Step 5 must resolve a triage failure to deep"
     );
+}
+
+#[test]
+fn create_pull_request_hands_the_self_review_to_the_finish_skill() {
+    // Arrange
+    let text = command_text("create-pull-request");
+
+    // Act
+    let has_next_line = text.contains("Next: invoke playbook:finish-pull-request for this PR.");
+    let has_step5 = text.contains("## Step 5");
+
+    // Assert
+    assert!(has_next_line, "the final report must name the finish skill");
+    assert!(!has_step5, "the self-review step lives in the finish skill");
+    assert!(command_text("fix").contains("playbook:finish-pull-request"));
 }

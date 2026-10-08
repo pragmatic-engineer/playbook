@@ -38,6 +38,7 @@ for a yes before doing anything (see Trigger phrases, below).
 |---|---|---|
 | `/playbook:commit-and-push` | Stages, formats, and commits with a generated message (signed and signed off), then pushes, with optional rebase. | Delivering staged changes as a commit, instead of hand-running `git commit`/`git push`. |
 | `/playbook:create-pull-request` | Runs pre-flight readiness checks and opens a PR with a conventional-commit title and the team template. | Opening a pull request, instead of hand-running `gh pr create`. |
+| `playbook:finish-pull-request` (skill) | Runs right after a PR opens: the self-review the `autoReview.*` settings pick, fixes, promotes the draft, and merges when `autoMerge.enabled` allows. | A PR URL was just returned by `/playbook:create-pull-request`. |
 | `/playbook:fix` | Fixes one small bug end to end: a failing test, the smallest fix, one pull request. Escalates to /playbook:plan when the fix is not small. | A bug that is small and well understood ("fix this", "fix #123"). |
 
 ### Utilities

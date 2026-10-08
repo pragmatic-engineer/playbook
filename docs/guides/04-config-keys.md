@@ -17,7 +17,7 @@ The command rejects an unknown key, a value of the wrong type, and a number outs
 
 | Key | Default | Values | What it does |
 |---|---|---|---|
-| `autoReview.enabled` | `true` | `true`, `false` | `/playbook:create-pull-request` reviews its own PR before it goes ready. |
+| `autoReview.enabled` | `true` | `true`, `false` | `playbook:finish-pull-request` reviews the PR before it goes ready. |
 | `autoReview.type` | `auto` | `quick`, `deep`, `auto` | Which review the self-review runs. `auto` picks `quick` only when the triage agrees three times, and `deep` otherwise. |
 | `autoReview.fix` | `false` | `true`, `false` | Fixes every finding the self-review confirms, pushes the fixes, and re-runs the scoped checks. |
 | `autoMerge.enabled` | `false` | `true`, `false` | After the review and fixes, marks the PR ready, waits for green checks, then merges with `gh pr merge --auto`. |

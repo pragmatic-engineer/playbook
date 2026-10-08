@@ -89,6 +89,8 @@ In auto mode never force-push. If the push is rejected, stop and report it in th
 
 Invoke the `/playbook:create-pull-request` skill with the Skill tool. Do not run `gh pr create` yourself. Open one pull request for the fix. Link the issue when there is one.
 
+When it returns the PR URL, invoke the `playbook:finish-pull-request` skill with the Skill tool for that PR. It runs the self-review the `autoReview.*` settings select, fixes findings, promotes the draft, and merges only when `autoMerge.enabled` allows it. The create-pull-request command runs in a fork that cannot do this itself.
+
 ## Step 7: Report
 
 Print a short summary:
