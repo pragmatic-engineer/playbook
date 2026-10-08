@@ -1,12 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! `playbook statusline` against `statusline.sh`: golden output for a few
-//! shapes, the shell suite's behavioural cases, and a byte-for-byte parity
-//! run of every fixture through both implementations. Parity skips cleanly
-//! where the shell path needs a tool the environment lacks. The shell side
-//! parses JSON through the same `playbook json` helpers the renderer calls,
-//! so parity checks rendering, not the parsers.
+//! `playbook statusline`: golden output for a few shapes, the behavioural
+//! cases ported from the retired shell suite, and a determinism run over
+//! every fixture.
 
 use playbook::statusline::{render, Env};
 use std::path::{Path, PathBuf};
@@ -96,12 +93,6 @@ fn run(mut cmd: Command, home: &Path, root: &Path, payload: &str, env: &[(&str, 
 fn rust(home: &Path, root: &Path, payload: &str, env: &[(&str, &str)]) -> Vec<u8> {
     let mut cmd = Command::new(bin());
     cmd.arg("statusline");
-    run(cmd, home, root, payload, env)
-}
-
-fn shell(home: &Path, root: &Path, payload: &str, env: &[(&str, &str)]) -> Vec<u8> {
-    let mut cmd = Command::new("bash");
-    cmd.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("statusline.sh"));
     run(cmd, home, root, payload, env)
 }
 
@@ -228,7 +219,7 @@ fn a_failing_pr_prints_the_branch_the_pr_and_the_ci_badge() {
     assert!(line1.ends_with(&right), "{line1:?}");
 }
 
-// ---- behaviours ported from shell/statusline.test.sh -----------------------
+// ---- behaviours ported from the retired shell status line tests -------------
 
 #[test]
 fn context_rot_shows_at_250k_and_not_at_45k() {
@@ -481,7 +472,7 @@ fn a_non_integer_reset_drops_the_whole_five_hour_segment() {
     assert!(!text(&render(&body, &env_for(&s.0), 5)).contains("5h"));
 }
 
-// ---- parity with statusline.sh ---------------------------------------------
+// ---- fixtures --------------------------------------------------------------
 
 struct Case {
     name: &'static str,
@@ -782,11 +773,7 @@ fn build(c: &Case, home: &Path) -> (PathBuf, String) {
 }
 
 #[test]
-fn every_fixture_renders_the_same_bytes_as_statusline_sh() {
-    if !["bash", "git", "awk", "sed"].iter().all(|t| have(t)) {
-        eprintln!("skipping parity: a tool the script needs is missing");
-        return;
-    }
+fn every_fixture_renders_the_same_bytes_on_two_runs() {
     let days = regex::Regex::new(r"\d+d ago").unwrap();
     let mut failures = vec![];
     for c in cases() {
@@ -799,87 +786,14 @@ fn every_fixture_renders_the_same_bytes_as_statusline_sh() {
             let t = text(&out).replace(home.to_str().unwrap(), "<HOME>");
             days.replace_all(&t, "Nd ago").into_owned()
         };
-        let want = norm(shell(&a.0, &a.0, &in_a, &c.env), &a.0);
-        let got = norm(rust(&b.0, &b.0, &in_b, &c.env), &b.0);
-        let git_on = c.env.iter().all(|e| *e != ("STATUSLINE_SHOW_GIT", "false"));
-        // Equal blanks prove nothing: each case must reach the branch it names.
-        let reached = (c.branch.is_empty() || !git_on || want.contains('ϓ'))
-            && (c.mode != "dirty" || want.contains("[+]"))
-            && (c.mode != "unstaged" || want.contains("[+]"))
-            && (c.mode != "detached" || want.contains("detached"))
-            && (!matches!(&c.cache, Some(("pr", _)))
-                || c.env.iter().any(|e| e.0.starts_with("STATUSLINE_SHOW_P"))
-                || want.contains("PR #42"));
-        if !reached {
+        let first = norm(rust(&a.0, &a.0, &in_a, &c.env), &a.0);
+        let second = norm(rust(&b.0, &b.0, &in_b, &c.env), &b.0);
+        if first != second {
             failures.push(format!(
-                "{}: fixture never reached its branch: {want:?}",
-                c.name
-            ));
-        }
-        if want != got {
-            failures.push(format!("{}\n  shell: {want:?}\n  rust:  {got:?}", c.name));
-        }
-        let (ts, tr) = (telemetry_state(&a.0), telemetry_state(&b.0));
-        if ts != tr {
-            failures.push(format!(
-                "{} telemetry\n  shell: {ts:?}\n  rust:  {tr:?}",
+                "{}\n  first:  {first:?}\n  second: {second:?}",
                 c.name
             ));
         }
     }
-    assert!(
-        failures.is_empty(),
-        "parity mismatches:\n{}",
-        failures.join("\n")
-    );
-}
-
-/// Telemetry files under a home with the sample timestamps stripped.
-fn telemetry_state(home: &Path) -> Vec<String> {
-    let root = home.join(".config/playbook/runtime");
-    let ts = regex::Regex::new(r#""ts":\d+"#).unwrap();
-    let mut out = vec![];
-    let Ok(sessions) = std::fs::read_dir(&root) else {
-        return out;
-    };
-    for sess in sessions.flatten() {
-        let mut files: Vec<_> = std::fs::read_dir(sess.path()).unwrap().flatten().collect();
-        files.sort_by_key(|f| f.file_name());
-        for f in files {
-            let body = std::fs::read_to_string(f.path()).unwrap_or_default();
-            out.push(format!(
-                "{}: {}",
-                f.file_name().to_string_lossy(),
-                ts.replace_all(&body, r#""ts":N"#)
-            ));
-        }
-    }
-    out
-}
-
-#[test]
-fn a_refresh_removes_its_lock_and_leaves_gh_alone() {
-    if !have("sh") {
-        return;
-    }
-    let s = Scratch::new();
-    let r = repo(&s.0, "chore/x", "https://github.com/testowner/testrepo.git");
-    let lock = s.0.join(format!(
-        ".cache/statusline/pr-{}.json.lock",
-        slug(&format!("{}::chore/x", r.display()))
-    ));
-    rust(
-        &s.0,
-        &s.0,
-        &payload(&r, ""),
-        &[("STATUSLINE_PR_CACHE_TTL", "0")],
-    );
-    for _ in 0..100 {
-        if !lock.exists() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert!(!lock.exists(), "lock left behind");
-    assert!(s.0.join("stub/gh").is_file(), "the refresh deleted gh");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

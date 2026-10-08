@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Orchestrates `playbook init`: composes `merge`, `wire`, `shim` and
-//! `statusline` into one idempotent repair, backing `Command::Init`.
+//! Orchestrates `playbook init`: composes `merge`, `wire` and `shim`
+//! into one idempotent repair, backing `Command::Init`.
 
 use crate::init::merge;
 use crate::init::migrate;
 use crate::init::shim::{self, ShellKind};
-use crate::init::statusline;
 use crate::init::system_prompt;
 use crate::init::wire;
 use std::fs;
@@ -16,10 +15,10 @@ use std::path::{Path, PathBuf};
 /// Everything `run` needs to locate and repair a machine's Claude Code
 /// configuration, resolved once by the caller (`main.rs`) so this module
 /// never reads the environment itself and stays trivial to test against a
-/// scratch directory, the same split `init::shim` and `init::statusline`
+/// scratch directory, the same split `init::shim`
 /// already draw between resolving paths and acting on them.
 pub struct InitPaths {
-    /// Where the shipped template, shell runtime and `statusline.sh` live.
+    /// Where the shipped template, shell runtime and system prompt live.
     /// `None` when `CLAUDE_PLUGIN_ROOT` is unset, in which case every step
     /// that needs it is skipped rather than guessing a path.
     pub self_root: Option<PathBuf>,
@@ -143,17 +142,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let migrated = migrate::run_pending(&ctx);
 
     let shell_runtime_step = install_shell_runtime_step(self_root, &paths.home, paths.aliases);
-    let statusline_dest = statusline::playbook_statusline_path(&paths.home);
-    let matches_shipped = self_root
-        .and_then(|r| fs::read(r.join("statusline.sh")).ok())
-        .zip(fs::read(&statusline_dest).ok())
-        .is_some_and(|(shipped, placed)| shipped == placed);
-    let statusline_edited =
-        !matches_shipped && migrate::user_edited(&paths.home, "statusline", &statusline_dest);
-    let statusline_step = place_statusline_step(self_root, &paths.home, statusline_edited);
-    if !statusline_edited && step_confirmed(&statusline_step) {
-        migrate::record_statusline(&paths.home);
-    }
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
     if step_confirmed(&system_prompt_step) {
         migrate::record_system_prompt(&paths.home);
@@ -162,12 +150,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         migrate::record_skills(&paths.home, root);
     }
 
-    let statusline_confirmed = step_confirmed(&statusline_step);
-    let settings_step = if statusline_confirmed {
-        seed_or_merge_settings(self_root, &paths.claude_home, &settings_path, epoch)
-    } else {
-        StepReport::skipped("settings", "statusline copy not confirmed complete")
-    };
+    let settings_step =
+        seed_or_merge_settings(self_root, &paths.claude_home, &settings_path, epoch);
     let hooks_step = wire_hooks(&settings_path, epoch);
 
     let shell_runtime_confirmed = step_confirmed(&shell_runtime_step);
@@ -182,7 +166,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 
     let mut steps = vec![
         shell_runtime_step,
-        statusline_step,
         system_prompt_step,
         settings_step,
         hooks_step,
@@ -526,37 +509,6 @@ fn rewire_rc_file_step(
             format!("{} already loads the launcher", outcome.rc_file.display()),
         ),
         Err(err) => StepReport::failed("shim", err.to_string()),
-    }
-}
-
-/// Place `statusline.sh` at its fixed destination under `home`.
-fn place_statusline_step(self_root: Option<&Path>, home: &Path, edited: bool) -> StepReport {
-    let Some(self_root) = self_root else {
-        return StepReport::skipped(
-            "statusline",
-            "CLAUDE_PLUGIN_ROOT is not set, no statusline.sh to place",
-        );
-    };
-    let source = self_root.join("statusline.sh");
-    let dest = statusline::playbook_statusline_path(home);
-    if edited {
-        return StepReport::already_correct(
-            "statusline",
-            format!("left your edited copy at {}", dest.display()),
-        );
-    }
-    let already_current = fs::read(&source)
-        .ok()
-        .zip(fs::read(&dest).ok())
-        .is_some_and(|(shipped, placed)| shipped == placed);
-
-    match statusline::place_statusline(self_root, home) {
-        Ok(dest) if already_current => StepReport::already_correct(
-            "statusline",
-            format!("already up to date at {}", dest.display()),
-        ),
-        Ok(dest) => StepReport::wired("statusline", format!("placed at {}", dest.display())),
-        Err(err) => StepReport::failed("statusline", err.to_string()),
     }
 }
 

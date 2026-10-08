@@ -157,12 +157,11 @@ fn archive_excludes_source_tests_docs_ci_and_cargo_files() {
 fn archive_contains_every_file_the_installed_plugin_reads_at_runtime() {
     // Arrange
     let a = archive();
-    // Evidence: src/init/{run,statusline,system_prompt,shim}.rs, src/hooks/session_init.rs,
+    // Evidence: src/init/{run,system_prompt,shim}.rs, src/hooks/session_init.rs,
     // src/common/config_hash.rs, hooks/hooks.json, and the commands that run scripts.
     let mut needed: BTreeSet<String> = [
         ".claude-plugin/plugin.json",
         "settings.shared.json",
-        "statusline.sh",
         "prompts/SYSTEM_PROMPT.md",
         "output-styles/concise-direct.md",
         "hooks/hooks.json",
@@ -258,7 +257,7 @@ fn every_tracked_plugin_content_file_is_covered_by_the_allowlist() {
 }
 
 #[test]
-fn init_from_the_unpacked_archive_places_statusline_prompt_and_settings() {
+fn init_from_the_unpacked_archive_places_prompt_and_settings() {
     // Arrange
     let a = archive();
     let home = scratch("home");
@@ -289,7 +288,6 @@ fn init_from_the_unpacked_archive_places_statusline_prompt_and_settings() {
             "{rel} was not placed from the archive"
         );
     };
-    same(cfg.join("statusline.sh"), "statusline.sh");
     same(
         cfg.join("prompts/SYSTEM_PROMPT.md"),
         "prompts/SYSTEM_PROMPT.md",

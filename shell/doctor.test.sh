@@ -314,7 +314,7 @@ scenario_layer5_missing() {
   [[ "$out" == "MISSING $home/.claude/statusline.sh" ]] || { echo "  got: $out"; return 1; }
 }
 
-# G: the installed copy exists and is byte-identical to the shipped copy.
+# G: a custom command whose file exists is reported as CUSTOM.
 scenario_layer5_match() {
   local home="$WORK/l5-g" plugin="$WORK/l5-g-plugin" bin="$WORK/l5-g-bin" out
   mkdir -p "$home/.claude" "$plugin"
@@ -323,7 +323,7 @@ scenario_layer5_match() {
   write_statusline_settings "$home" '$HOME/.claude/statusline.sh'
   write_stub_binary "$bin" ""
   out="$(run_layer5 "$home" "$bin:/usr/bin:/bin" "$plugin")"
-  [[ "$out" == "MATCH" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == 'CUSTOM $HOME/.claude/statusline.sh' ]] || { echo "  got: $out"; return 1; }
 }
 
 # G2: the old bash command at $HOME/.config/playbook/statusline.sh is flagged
@@ -361,7 +361,7 @@ scenario_layer5_rust() {
   [[ "$out" == "RUST" ]] || { echo "  got: $out"; return 1; }
 }
 
-# H: the installed copy exists but its bytes differ from the shipped copy.
+# H: playbook ships no copy, so a differing plugin file does not change the result.
 scenario_layer5_differs() {
   local home="$WORK/l5-h" plugin="$WORK/l5-h-plugin" bin="$WORK/l5-h-bin" out
   mkdir -p "$home/.claude" "$plugin"
@@ -370,7 +370,7 @@ scenario_layer5_differs() {
   write_statusline_settings "$home" '$HOME/.claude/statusline.sh'
   write_stub_binary "$bin" ""
   out="$(run_layer5 "$home" "$bin:/usr/bin:/bin" "$plugin")"
-  [[ "$out" == "DIFFERS $home/.claude/statusline.sh vs $plugin/statusline.sh" ]] || { echo "  got: $out"; return 1; }
+  [[ "$out" == 'CUSTOM $HOME/.claude/statusline.sh' ]] || { echo "  got: $out"; return 1; }
 }
 
 # I: no statusLine.command at all.
@@ -404,11 +404,11 @@ scenario_layer5_playbook_too_old() {
 }
 
 run_scenario "F: statusLine.command path does not exist -> MISSING <path>" scenario_layer5_missing
-run_scenario "G: installed copy byte-identical to shipped -> MATCH"        scenario_layer5_match
+run_scenario "G: custom command, file present -> CUSTOM"        scenario_layer5_match
 run_scenario "G2: old bash command on .config/playbook path -> OUTDATED"   scenario_layer5_outdated_bash_command
 run_scenario "G2b: absolute and tilde forms of the old command -> OUTDATED" scenario_layer5_outdated_other_forms
 run_scenario "G3: playbook statusline -> RUST"                             scenario_layer5_rust
-run_scenario "H: installed copy differs from shipped -> DIFFERS"           scenario_layer5_differs
+run_scenario "H: shipped copy differs -> still CUSTOM"           scenario_layer5_differs
 run_scenario "I: no statusLine.command at all -> NOT_CONFIGURED"           scenario_layer5_not_configured
 run_scenario "U: playbook absent from PATH -> UNKNOWN"                     scenario_layer5_playbook_missing
 run_scenario "V: playbook too old for doctor subcommand -> UNKNOWN"        scenario_layer5_playbook_too_old

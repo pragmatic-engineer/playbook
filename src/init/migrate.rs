@@ -145,12 +145,7 @@ fn shell_init_rc_line(ctx: &Ctx) -> Outcome {
 fn statusline_rust_command(ctx: &Ctx) -> Outcome {
     let settings = ctx.claude_home.join("settings.json");
     let script = crate::init::statusline::playbook_statusline_path(&ctx.home);
-    let shipped = ctx
-        .self_root
-        .as_ref()
-        .and_then(|r| fs::read(r.join("statusline.sh")).ok());
-    let edited =
-        user_edited(&ctx.home, STATUSLINE_KEY, &script) && fs::read(&script).ok() != shipped;
+    let edited = user_edited(&ctx.home, STATUSLINE_KEY, &script);
     match crate::init::statusline::migrate_legacy_command(&settings, &ctx.home, edited) {
         Ok(true) => Outcome::Repeat(StepReport::wired(
             "statusline-command",
@@ -183,7 +178,7 @@ fn statusline_edited(ctx: &Ctx) -> Outcome {
     let path = crate::init::statusline::playbook_statusline_path(&ctx.home);
     if user_edited(&ctx.home, STATUSLINE_KEY, &path) {
         Outcome::Warn(format!(
-            "{} was edited after playbook installed it, so init leaves it in place; to take the shipped copy, delete it and run `playbook init`",
+            "{} was edited after playbook installed it, so init leaves it in place; init no longer ships this script, so delete it once nothing runs it",
             path.display()
         ))
     } else {
@@ -332,15 +327,6 @@ fn record_many(home: &Path, files: &[(String, PathBuf)], drop: Option<&dyn Fn(&s
             let _ = write_state(home, &lines);
         }
     });
-}
-
-/// Records the statusline placed by init so later edits are detectable.
-pub fn record_statusline(home: &Path) {
-    record_shipped(
-        home,
-        STATUSLINE_KEY,
-        &crate::init::statusline::playbook_statusline_path(home),
-    );
 }
 
 /// Records shipped skill files, never an edited one, and drops other versions' records.

@@ -126,11 +126,11 @@ fn an_edited_statusline_is_kept_and_reported() {
     let base = scratch("statusline");
     let home = base.join("home");
     let root = plugin_root(&base, "p", "s");
-    fs::write(root.join("statusline.sh"), "v1").unwrap();
     run(&paths(&home, &root, None));
     let dest = home.join(".config/playbook/statusline.sh");
+    fs::write(&dest, "v1").unwrap();
+    playbook::init::migrate::record_shipped(&home, "statusline", &dest);
     fs::write(&dest, "mine").unwrap();
-    fs::write(root.join("statusline.sh"), "v2").unwrap();
     let outcome = run(&paths(&home, &root, None));
     assert_eq!(fs::read_to_string(&dest).unwrap(), "mine");
     assert!(outcome.warnings.iter().any(|w| w.contains("statusline")));

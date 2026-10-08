@@ -267,7 +267,7 @@ fn stop_payload(extra_fields: &str) -> String {
     format!(r#"{{"hook_event_name":"Stop","session_id":"{STOP_SID}"{extra_fields}}}"#)
 }
 
-/// Writes the `capture-due` marker `statusline.sh` leaves, so the hook has a
+/// Writes the `capture-due` marker `playbook statusline` leaves, so the hook has a
 /// reason to block. Returns the session directory.
 fn arm_capture_due(w: &World) -> PathBuf {
     let dir = w

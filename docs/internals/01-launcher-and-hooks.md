@@ -142,8 +142,8 @@ It rewrites the message file in place and always exits 0, even when the file can
 ## Status line
 
 `statusLine.command` runs `playbook statusline`, the Rust renderer, which is
-byte-for-byte equal to `statusline.sh` and several times faster per refresh.
-`playbook init` rewrites the old `bash $HOME/.config/playbook/statusline.sh`
-command and leaves any custom command alone. `statusline.sh` is still placed
-for one release as a fallback; after that release it is deleted and init stops
-placing it.
+the replacement for the old `statusline.sh` and several times faster per
+refresh. `playbook init` rewrites the old `bash $HOME/.config/playbook/statusline.sh`
+command and leaves any custom command alone. The script is gone from the repo
+and init no longer places it. `playbook uninstall` still removes a copy that an
+older install placed.

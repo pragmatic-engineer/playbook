@@ -133,7 +133,7 @@ fn a_plain_run_places_settings_and_guards_and_touches_no_rc_or_launcher() {
         assert!(!sb.path(&format!(".claude/hooks/{guard}.sh")).exists());
     }
     assert!(sb.path(".claude/.settings.base.json").is_file());
-    assert!(sb.path(".config/playbook/statusline.sh").is_file());
+    assert!(!sb.path(".config/playbook/statusline.sh").exists());
     assert!(!sb.path(".zshrc").exists());
     assert!(!sb.path(".bashrc").exists());
     assert!(!sb.path(".claude/shell").exists());
@@ -230,7 +230,7 @@ fn a_plain_run_twice_is_byte_identical_and_makes_no_new_backups() {
     let backups = sb.count(".claude", "settings.json.bak.");
     let skips = sb.count(".claude", "settings-merge-skipped.");
     let again = text(&sb.init("/bin/bash", &[]));
-    for step in ["settings", "hooks", "statusline"] {
+    for step in ["settings", "hooks"] {
         assert!(
             again.contains(&format!("{step}: ok")),
             "{step} rewrote: {again}"

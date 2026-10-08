@@ -1,22 +1,17 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: MIT
 
-//! Integration tests for `playbook::init::shim` and
-//! `playbook::init::statusline`, against the launcher's fixed config home.
+//! Integration tests for `playbook::init::shim`, against the launcher's fixed config home.
 
 #![allow(dead_code)]
 
 use playbook::init::shim::{rewire_rc_file, upgrade_legacy_rc_files, ShellKind, SOURCE_LINE};
-use playbook::init::statusline::{
-    place_statusline, playbook_statusline_path, resolve_statusline_path,
-};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The repo checkout root, where the shipped launcher runtime and
-/// `statusline.sh` actually live.
+/// The repo checkout root, where the shipped launcher runtime lives.
 fn self_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -487,106 +482,4 @@ fn detect_shell_recognises_zsh_bash_and_neither() {
             "detect({shell_env:?}) should be {expected:?}"
         );
     }
-}
-
-#[test]
-fn statusline_regression_pin_command_path_exists_and_is_readable_after_init() {
-    // Arrange: no statusline.sh present yet at the fixed destination.
-    let home = temp_home("statusline-regression");
-    let expected_path = playbook_statusline_path(&home);
-    assert!(
-        !expected_path.exists(),
-        "arrange: statusline.sh should be missing before init"
-    );
-
-    // Act
-    let placed = place_statusline(&self_root(), &home)
-        .expect("place_statusline should restore the missing statusline");
-    assert_eq!(placed, expected_path);
-
-    // Assert: stat and open it directly, rather than trusting the return value.
-    let metadata = fs::metadata(&placed)
-        .unwrap_or_else(|e| panic!("statusline path should exist after init: {e}"));
-    assert!(
-        metadata.is_file(),
-        "statusline path should be a regular file"
-    );
-    fs::File::open(&placed).unwrap_or_else(|e| panic!("statusline path should be readable: {e}"));
-
-    let _ = fs::remove_dir_all(&home);
-}
-
-#[test]
-fn statusline_placement_matches_source_content_and_is_executable() {
-    // Arrange
-    let home = temp_home("statusline-content");
-    let source = self_root().join("statusline.sh");
-    let expected_content = fs::read(&source).expect("repo statusline.sh should be readable");
-
-    // Act
-    let placed = place_statusline(&self_root(), &home).expect("place_statusline should succeed");
-
-    // Assert
-    let placed_content = fs::read(&placed).expect("placed statusline.sh should be readable");
-    assert_eq!(
-        placed_content, expected_content,
-        "placed statusline.sh should match the repo source byte for byte"
-    );
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(&placed).unwrap().permissions().mode() & 0o111;
-        assert_ne!(mode, 0, "placed statusline.sh should stay executable");
-    }
-
-    let _ = fs::remove_dir_all(&home);
-}
-
-#[test]
-fn statusline_placement_is_idempotent_on_repeated_runs() {
-    // Arrange
-    let home = temp_home("statusline-idempotent");
-
-    // Act
-    let first = place_statusline(&self_root(), &home).expect("first place_statusline");
-    let second = place_statusline(&self_root(), &home).expect("second place_statusline");
-
-    // Assert
-    assert_eq!(first, second, "both runs should resolve to the same path");
-    let metadata = fs::metadata(&first).expect("statusline.sh should exist after both runs");
-    assert!(metadata.is_file());
-
-    let _ = fs::remove_dir_all(&home);
-}
-
-#[test]
-fn resolve_statusline_path_agrees_with_the_fixed_destination() {
-    // Arrange: a settings.json shaped like a freshly written one.
-    let home = temp_home("resolve-agrees");
-    let settings_path = home.join(".claude/settings.json");
-    write_file(
-        &settings_path,
-        r#"{"statusLine":{"command":"bash $HOME/.config/playbook/statusline.sh"}}"#,
-    );
-
-    // Act
-    let resolved = resolve_statusline_path(&settings_path, &home).expect("command should resolve");
-
-    // Assert: the two independent sources of truth agree.
-    assert_eq!(resolved, playbook_statusline_path(&home));
-
-    let _ = fs::remove_dir_all(&home);
-}
-
-#[test]
-fn resolve_statusline_path_fails_on_missing_settings_file() {
-    // Arrange: no settings.json at all under this home.
-    let home = temp_home("resolve-missing-settings");
-    let settings_path = home.join(".claude/settings.json");
-
-    // Act, Assert
-    assert!(resolve_statusline_path(&settings_path, &home).is_err());
-
-    let _ = fs::remove_dir_all(&home);
 }

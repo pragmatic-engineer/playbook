@@ -46,6 +46,17 @@ impl Sandbox {
     fn init(&self) {
         let out = self.run(&["init", "--aliases", "--system-prompt"]);
         assert!(out.status.success(), "init failed: {}", text(&out));
+        // Init no longer places statusline.sh. Seed the copy an older install
+        // left, recorded the way that install recorded it.
+        self.write(
+            ".config/playbook/statusline.sh",
+            "#!/bin/bash\necho shipped\n",
+        );
+        playbook::init::migrate::record_shipped(
+            &self.home,
+            "statusline",
+            &self.path(".config/playbook/statusline.sh"),
+        );
     }
 
     fn path(&self, rel: &str) -> PathBuf {
