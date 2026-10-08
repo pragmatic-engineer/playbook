@@ -55,8 +55,19 @@ pub fn run(opts: &Options) -> Report {
     let claude_home = opts.home.join(".claude");
     let stamp = wire::now_epoch_secs();
 
-    settings_step(opts, &claude_home, stamp, &mut report);
+    let settings = settings_step(opts, &claude_home, stamp, &mut report);
     rc_step(opts, stamp, &mut report);
+    if !settings.ok {
+        report.lines.push(
+            "kept the placed files and the binary, since settings.json still refers to them"
+                .to_string(),
+        );
+        remove_claude_home_files(&claude_home, verb, opts.dry_run, &mut report);
+        return report;
+    }
+    let status_line_in_use = !settings.statusline_removed
+        && fs::read_to_string(claude_home.join("settings.json"))
+            .is_ok_and(|text| text.contains("playbook/statusline.sh"));
 
     let config_dir = opts.home.join(".config").join("playbook");
     for (rel, key) in PLACED {
@@ -64,10 +75,18 @@ pub fn run(opts: &Options) -> Report {
         if !path.is_file() {
             continue;
         }
-        if key.is_some_and(|k| migrate::user_edited(&opts.home, k, &path)) {
-            report
-                .lines
-                .push(format!("kept {} (you edited it)", path.display()));
+        if key.is_some_and(|k| !migrate::placed_unchanged(&opts.home, k, &path)) {
+            report.lines.push(format!(
+                "kept {} (edited, or not recorded as placed by playbook)",
+                path.display()
+            ));
+            continue;
+        }
+        if *rel == "statusline.sh" && status_line_in_use {
+            report.lines.push(format!(
+                "kept {} (your status line still runs it)",
+                path.display()
+            ));
             continue;
         }
         remove_file(&path, verb, opts.dry_run, &mut report);
@@ -83,12 +102,7 @@ pub fn run(opts: &Options) -> Report {
             let _ = fs::remove_dir(config_dir.join(rel));
         }
     }
-    for name in CLAUDE_HOME_FILES {
-        let path = claude_home.join(name);
-        if path.is_file() {
-            remove_file(&path, verb, opts.dry_run, &mut report);
-        }
-    }
+    remove_claude_home_files(&claude_home, verb, opts.dry_run, &mut report);
 
     if opts.remove_binary {
         binary_step(opts, verb, &mut report);
@@ -96,13 +110,38 @@ pub fn run(opts: &Options) -> Report {
     report
 }
 
-fn settings_step(opts: &Options, claude_home: &Path, stamp: u64, report: &mut Report) {
+fn remove_claude_home_files(claude_home: &Path, verb: &str, dry_run: bool, report: &mut Report) {
+    for name in CLAUDE_HOME_FILES {
+        let path = claude_home.join(name);
+        if path.is_file() {
+            remove_file(&path, verb, dry_run, report);
+        }
+    }
+}
+
+/// How the `settings.json` step ended.
+struct SettingsResult {
+    /// False when the file could not be edited, so it may still name placed files.
+    ok: bool,
+    statusline_removed: bool,
+}
+
+fn settings_step(
+    opts: &Options,
+    claude_home: &Path,
+    stamp: u64,
+    report: &mut Report,
+) -> SettingsResult {
+    let done = |statusline_removed| SettingsResult {
+        ok: true,
+        statusline_removed,
+    };
     let path = claude_home.join("settings.json");
     if !path.is_file() {
-        return;
+        return done(false);
     }
     match wire::unwire_at(&path, &opts.home, stamp, opts.dry_run) {
-        Ok(out) if out.hooks_removed == 0 && !out.statusline_removed => {}
+        Ok(out) if out.hooks_removed == 0 && !out.statusline_removed => done(false),
         Ok(out) => {
             let verb = if opts.dry_run {
                 "would remove"
@@ -119,35 +158,39 @@ fn settings_step(opts: &Options, claude_home: &Path, stamp: u64, report: &mut Re
             if let Some(backup) = out.backup_path {
                 report.lines.push(format!("backup: {}", backup.display()));
             }
+            done(out.statusline_removed)
         }
-        Err(err) => report
-            .errors
-            .push(format!("settings.json left unchanged: {err}")),
+        Err(err) => {
+            report
+                .errors
+                .push(format!("settings.json left unchanged: {err}"));
+            SettingsResult {
+                ok: false,
+                statusline_removed: false,
+            }
+        }
     }
 }
 
 fn rc_step(opts: &Options, stamp: u64, report: &mut Report) {
-    match shim::strip_rc_files(&opts.home, stamp, opts.remove_binary, opts.dry_run) {
-        Ok(changes) => {
-            for change in changes {
-                let name = change.rc_file.display();
-                if change.unwritable {
-                    report.errors.push(format!(
-                        "{name} is read-only; remove the playbook lines by hand"
-                    ));
-                } else if let Some(backup) = change.backup {
-                    report.lines.push(format!(
-                        "removed the playbook lines from {name} (backup: {})",
-                        backup.display()
-                    ));
-                } else {
-                    report
-                        .lines
-                        .push(format!("would remove the playbook lines from {name}"));
-                }
-            }
+    for change in shim::strip_rc_files(&opts.home, stamp, opts.remove_binary, opts.dry_run) {
+        let name = change.rc_file.display();
+        if change.unwritable {
+            report.errors.push(format!(
+                "{name} is read-only; remove the playbook lines by hand"
+            ));
+        } else if let Some(err) = change.error {
+            report.errors.push(format!("{name} left unchanged: {err}"));
+        } else if let Some(backup) = change.backup {
+            report.lines.push(format!(
+                "removed the playbook lines from {name} (backup: {})",
+                backup.display()
+            ));
+        } else {
+            report
+                .lines
+                .push(format!("would remove the playbook lines from {name}"));
         }
-        Err(err) => report.errors.push(format!("rc files: {err}")),
     }
 }
 

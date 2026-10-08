@@ -171,18 +171,15 @@ pub struct RcStrip {
     pub backup: Option<PathBuf>,
     /// The file needs a change but lacks the owner write bit, so it was left alone.
     pub unwritable: bool,
+    /// Why the backup or the write failed; the file was left as it was.
+    pub error: Option<String>,
 }
 
 /// Remove the managed launcher block (and legacy `source` lines) from every
 /// shell's rc file under `home`, and with `binary_path` also the `PATH` block
 /// the installer appends. Anything else in the file is kept byte for byte.
 /// A changed file is first copied to `<rc>.bak-<stamp>`.
-pub fn strip_rc_files(
-    home: &Path,
-    stamp: u64,
-    binary_path: bool,
-    dry_run: bool,
-) -> io::Result<Vec<RcStrip>> {
+pub fn strip_rc_files(home: &Path, stamp: u64, binary_path: bool, dry_run: bool) -> Vec<RcStrip> {
     let mut changed = Vec::new();
     for kind in ShellKind::ALL {
         let rc_file = home.join(kind.rc_file_name());
@@ -199,19 +196,22 @@ pub fn strip_rc_files(
             rc_file: rc_file.clone(),
             backup: None,
             unwritable: false,
+            error: None,
         };
         if !owner_can_write(&rc_file) {
             entry.unwritable = true;
         } else if !dry_run {
             let name = rc_file.file_name().unwrap_or_default().to_string_lossy();
             let backup = rc_file.with_file_name(format!("{name}.bak-{stamp}"));
-            fs::copy(&rc_file, &backup)?;
-            atomic_write_rc_file(&rc_file, &content)?;
-            entry.backup = Some(backup);
+            match fs::copy(&rc_file, &backup).and_then(|_| atomic_write_rc_file(&rc_file, &content))
+            {
+                Ok(()) => entry.backup = Some(backup),
+                Err(err) => entry.error = Some(err.to_string()),
+            }
         }
         changed.push(entry);
     }
-    Ok(changed)
+    changed
 }
 
 /// `content` without the launcher line(s) and the comment right above each.

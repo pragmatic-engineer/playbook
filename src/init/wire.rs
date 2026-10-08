@@ -504,10 +504,14 @@ pub fn unwire_at(
     if rendered == original {
         return Ok(outcome);
     }
-    let backup = timestamped_backup_path(settings_path, epoch);
-    if !backup.exists() {
-        fs::copy(settings_path, &backup)?;
+    // Never reuse a name: an earlier backup holds an older state worth keeping.
+    let mut stamp = epoch;
+    let mut backup = timestamped_backup_path(settings_path, stamp);
+    while backup.exists() {
+        stamp += 1;
+        backup = timestamped_backup_path(settings_path, stamp);
     }
+    fs::copy(settings_path, &backup)?;
     outcome.backup_path = Some(backup);
     atomic_write(settings_path, &rendered)?;
     Ok(outcome)
@@ -701,11 +705,14 @@ fn timestamped_backup_path(settings_path: &Path, epoch_secs: u64) -> PathBuf {
 /// promoting `src/init/merge.rs`'s private helper to `pub(crate)` for one
 /// caller is not worth it. Duplicating a five-line function is cheaper.
 fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
-    let dir = path
+    // A symlinked settings file (stow, chezmoi) stays a symlink: only its target is replaced.
+    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let dir = target
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(dir)?;
+    let permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     let tmp_path = dir.join(format!(
         ".wire-settings-{}-{:?}.tmp",
         std::process::id(),
@@ -715,7 +722,13 @@ fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
         let _ = fs::remove_file(&tmp_path);
         return Err(err);
     }
-    if let Err(err) = fs::rename(&tmp_path, path) {
+    if let Some(permissions) = permissions {
+        if let Err(err) = fs::set_permissions(&tmp_path, permissions) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(err);
+        }
+    }
+    if let Err(err) = fs::rename(&tmp_path, &target) {
         let _ = fs::remove_file(&tmp_path);
         return Err(err);
     }

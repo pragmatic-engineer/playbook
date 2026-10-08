@@ -277,6 +277,17 @@ pub fn user_edited(home: &Path, key: &str, path: &Path) -> bool {
     edited_in(&read_state(home), key, path)
 }
 
+/// Whether a hash was recorded for `key` and `path` still matches it: the
+/// only proof that the file at `path` is the one playbook placed, untouched.
+pub fn placed_unchanged(home: &Path, key: &str, path: &Path) -> bool {
+    let prefix = format!("shipped {key} ");
+    read_state(home)
+        .iter()
+        .find_map(|l| l.strip_prefix(&prefix).map(str::to_string))
+        .zip(fs::read(path).ok())
+        .is_some_and(|(recorded, bytes)| content_hash(&bytes) == recorded)
+}
+
 fn edited_in(lines: &[String], key: &str, path: &Path) -> bool {
     let prefix = format!("shipped {key} ");
     let Some(recorded) = lines

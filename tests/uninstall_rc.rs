@@ -11,22 +11,36 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn home(tag: &str) -> PathBuf {
+/// A scratch `$HOME` that derefs to its path and is removed on drop.
+struct Home(PathBuf);
+
+impl std::ops::Deref for Home {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl Drop for Home {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn home(tag: &str) -> Home {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("playbook-rc-{tag}-{}-{n}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("scratch home");
-    dir
+    Home(dir)
 }
 
 /// Strip `before` from `.zshrc` and return what is left.
 fn strip_zsh(tag: &str, before: &[u8]) -> Vec<u8> {
     let h = home(tag);
     fs::write(h.join(".zshrc"), before).expect("rc file");
-    strip_rc_files(&h, 1, false, false).expect("strip");
-    let after = fs::read(h.join(".zshrc")).expect("rc file");
-    let _ = fs::remove_dir_all(&h);
-    after
+    strip_rc_files(&h, 1, false, false);
+    fs::read(h.join(".zshrc")).expect("rc file")
 }
 
 #[test]
@@ -80,7 +94,7 @@ fn a_file_without_the_block_is_not_touched_or_backed_up() {
     let h = home("untouched");
     let before = b"export A=1\n\n\n\nexport B=2\n";
     fs::write(h.join(".zshrc"), before).unwrap();
-    let changed = strip_rc_files(&h, 1, true, false).unwrap();
+    let changed = strip_rc_files(&h, 1, true, false);
     assert!(changed.is_empty());
     assert_eq!(fs::read(h.join(".zshrc")).unwrap(), before);
     assert!(!h.join(".zshrc.bak-1").exists());
@@ -97,11 +111,47 @@ fn bash_loses_only_its_own_block_and_zsh_keeps_its_own() {
     let h = home("trap");
     let before = b"# BEFORE\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/bash/cc.sh\"\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/zsh/cc.zsh\"\n# AFTER\n";
     fs::write(h.join(".bashrc"), before).unwrap();
-    strip_rc_files(&h, 1, false, false).unwrap();
-    let after = fs::read_to_string(h.join(".bashrc")).unwrap();
-    assert!(!after.contains("cc.sh"));
-    assert!(after.contains("shell/zsh/cc.zsh"));
-    assert!(after.contains("# BEFORE") && after.contains("# AFTER"));
+    strip_rc_files(&h, 1, false, false);
+    assert_eq!(
+        fs::read(h.join(".bashrc")).unwrap(),
+        b"# BEFORE\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/zsh/cc.zsh\"\n# AFTER\n"
+    );
+}
+
+#[test]
+fn bash_old_form_and_shell_init_blocks_are_stripped_from_bashrc() {
+    let h = home("bash-forms");
+    fs::write(
+        h.join(".bashrc"),
+        b"# BEFORE\n\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/cc.sh\"\n# AFTER\n",
+    )
+    .unwrap();
+    strip_rc_files(&h, 1, false, false);
+    assert_eq!(
+        fs::read(h.join(".bashrc")).unwrap(),
+        b"# BEFORE\n\n# AFTER\n"
+    );
+
+    let current = b"x=1\n\n# playbook launchers (cc/ccd)\ncommand -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"\n";
+    fs::write(h.join(".bashrc"), current).unwrap();
+    strip_rc_files(&h, 2, false, false);
+    assert_eq!(fs::read(h.join(".bashrc")).unwrap(), b"x=1\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_read_only_rc_file_is_reported_and_left_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = home("readonly");
+    let before = b"# playbook launchers (cc/ccd)\neval \"$(playbook shell-init)\"\n";
+    let rc = h.join(".zshrc");
+    fs::write(&rc, before).unwrap();
+    fs::set_permissions(&rc, fs::Permissions::from_mode(0o444)).unwrap();
+    let changed = strip_rc_files(&h, 1, false, false);
+    assert_eq!(changed.len(), 1);
+    assert!(changed[0].unwritable);
+    assert_eq!(fs::read(&rc).unwrap(), before);
+    assert!(!h.join(".zshrc.bak-1").exists());
 }
 
 #[test]
@@ -115,13 +165,13 @@ fn the_binary_path_block_goes_only_when_asked_and_a_users_path_edit_stays() {
     let before = b"export PATH=\"/opt/mytools:$PATH\"\n\n# playbook binary\nexport PATH=\"/h/.local/bin:$PATH\"\n";
     let h = home("path");
     fs::write(h.join(".zshrc"), before).unwrap();
-    assert!(strip_rc_files(&h, 1, false, false).unwrap().is_empty());
-    strip_rc_files(&h, 2, true, false).unwrap();
+    assert!(strip_rc_files(&h, 1, false, false).is_empty());
+    strip_rc_files(&h, 2, true, false);
     assert_eq!(
         fs::read(h.join(".zshrc")).unwrap(),
         b"export PATH=\"/opt/mytools:$PATH\"\n"
     );
-    assert!(h.join(".zshrc.bak-2").is_file());
+    assert_eq!(fs::read(h.join(".zshrc.bak-2")).unwrap(), before);
 }
 
 #[test]
@@ -129,7 +179,7 @@ fn a_dry_run_reports_the_file_and_writes_nothing() {
     let h = home("dry");
     let before = b"# playbook launchers (cc/ccd)\neval \"$(playbook shell-init)\"\n";
     fs::write(h.join(".zshrc"), before).unwrap();
-    let changed = strip_rc_files(&h, 1, false, true).unwrap();
+    let changed = strip_rc_files(&h, 1, false, true);
     assert_eq!(changed.len(), 1);
     assert_eq!(fs::read(h.join(".zshrc")).unwrap(), before);
     assert!(!h.join(".zshrc.bak-1").exists());

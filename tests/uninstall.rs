@@ -121,7 +121,10 @@ fn removes_everything_init_placed_and_keeps_the_users_own_content() {
     );
     sb.write(".config/playbook/memory/fact.md", "keep me\n");
     sb.write(".claude/backups/old/settings.json", "{}\n");
+    sb.write(".config/playbook/shell/zsh/cc.zsh", "old launcher\n");
     sb.init();
+    let settings_after_init = sb.read(".claude/settings.json");
+    let backups_after_init = sb.backups(&sb.path(".claude"), "settings.json.bak.");
     assert!(sb.read(".zshrc").contains("playbook shell-init"));
     assert!(sb.path(".config/playbook/statusline.sh").is_file());
 
@@ -143,7 +146,39 @@ fn removes_everything_init_placed_and_keeps_the_users_own_content() {
     assert!(sb.path(".config/playbook/memory/fact.md").is_file());
     assert!(sb.path(".claude/backups/old/settings.json").is_file());
     assert_eq!(sb.backups(&sb.home, ".zshrc.bak-"), 1);
-    assert!(sb.backups(&sb.path(".claude"), "settings.json.bak.") >= 1);
+    assert!(!sb.path(".config/playbook/shell").exists());
+    let backups = sb.backups(&sb.path(".claude"), "settings.json.bak.");
+    assert!(
+        backups >= backups_after_init,
+        "uninstall must not drop an earlier backup"
+    );
+    let newest = newest_backup(&sb.path(".claude"));
+    assert_eq!(fs::read_to_string(newest).unwrap(), settings_after_init);
+    let rc_backup = fs::read_dir(&sb.home)
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().starts_with(".zshrc.bak-"))
+        .expect("rc backup");
+    assert!(fs::read_to_string(rc_backup.path())
+        .unwrap()
+        .contains("playbook shell-init"));
+}
+
+/// The settings backup written last, by file name (an epoch suffix).
+fn newest_backup(dir: &Path) -> PathBuf {
+    let mut backups: Vec<PathBuf> = fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("settings.json.bak.")
+        })
+        .collect();
+    backups.sort();
+    backups.pop().expect("a settings backup")
 }
 
 #[test]
@@ -166,9 +201,12 @@ fn dry_run_lists_the_plan_and_changes_nothing() {
     let sb = Sandbox::new("dry-run");
     sb.init();
     sb.write("bin/playbook", "#!/bin/sh\n");
+    sb.write(".config/playbook/shell/cc.zsh", "old\n");
     let rc_before = sb.read(".zshrc");
+    let settings_before = sb.read(".claude/settings.json");
+    let settings_backups = sb.backups(&sb.path(".claude"), "settings.json.bak.");
 
-    let out = sb.run(&["uninstall", "--dry-run", "--remove-binary"]);
+    let out = sb.run(&["uninstall", "--yes", "--dry-run", "--remove-binary"]);
     assert!(out.status.success(), "{}", text(&out));
     let listed = text(&out);
     assert!(listed.contains("would remove"), "{listed}");
@@ -177,6 +215,12 @@ fn dry_run_lists_the_plan_and_changes_nothing() {
     assert!(sb.path("bin/playbook").is_file());
     assert!(sb.path(".config/playbook/statusline.sh").is_file());
     assert_eq!(sb.backups(&sb.home, ".zshrc.bak-"), 0);
+    assert_eq!(sb.read(".claude/settings.json"), settings_before);
+    assert_eq!(
+        sb.backups(&sb.path(".claude"), "settings.json.bak."),
+        settings_backups
+    );
+    assert!(sb.path(".config/playbook/shell/cc.zsh").is_file());
 }
 
 #[test]
@@ -218,6 +262,87 @@ fn an_edited_statusline_script_is_kept() {
     assert!(sb
         .read(".config/playbook/statusline.sh")
         .contains("echo mine"));
+}
+
+#[test]
+fn an_edited_system_prompt_is_kept() {
+    let sb = Sandbox::new("edited-prompt");
+    sb.init();
+    sb.write(".config/playbook/prompts/SYSTEM_PROMPT.md", "my prompt\n");
+
+    let out = sb.run(&["uninstall", "--yes"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        sb.read(".config/playbook/prompts/SYSTEM_PROMPT.md"),
+        "my prompt\n"
+    );
+}
+
+#[test]
+fn files_with_no_placement_record_are_kept() {
+    let sb = Sandbox::new("unrecorded");
+    sb.write(
+        ".config/playbook/statusline.sh",
+        "#!/bin/bash\necho theirs\n",
+    );
+    sb.write(".config/playbook/prompts/SYSTEM_PROMPT.md", "theirs\n");
+
+    let out = sb.run(&["uninstall", "--yes"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(sb.path(".config/playbook/statusline.sh").is_file());
+    assert!(sb
+        .path(".config/playbook/prompts/SYSTEM_PROMPT.md")
+        .is_file());
+}
+
+#[test]
+fn a_custom_status_line_that_runs_the_placed_script_keeps_it() {
+    let sb = Sandbox::new("status-in-use");
+    sb.init();
+    sb.write(
+        ".claude/settings.json",
+        r#"{"statusLine":{"type":"command","command":"bash ~/.config/playbook/statusline.sh --compact"}}"#,
+    );
+    let out = sb.run(&["uninstall", "--yes"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(sb.path(".config/playbook/statusline.sh").is_file());
+    assert!(sb.read(".claude/settings.json").contains("--compact"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_settings_file_stays_a_symlink_and_keeps_its_mode() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let sb = Sandbox::new("symlink");
+    sb.write(
+        "dotfiles/settings.json",
+        r#"{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"playbook hook session-clean-exit"}]}]}}"#,
+    );
+    fs::set_permissions(
+        sb.path("dotfiles/settings.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    symlink(
+        sb.path("dotfiles/settings.json"),
+        sb.path(".claude/settings.json"),
+    )
+    .unwrap();
+
+    let out = sb.run(&["uninstall", "--yes"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(fs::symlink_metadata(sb.path(".claude/settings.json"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    let target = sb.read("dotfiles/settings.json");
+    assert!(!target.contains("playbook hook"), "{target}");
+    assert!(target.contains("dark"));
+    let mode = fs::metadata(sb.path("dotfiles/settings.json"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
 }
 
 #[test]
