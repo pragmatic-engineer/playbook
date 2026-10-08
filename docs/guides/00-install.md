@@ -34,7 +34,7 @@ If the old binary could not report its version, the backup is named `playbook.un
 Pass `--yes` to accept every default without prompting. Pin a version:
 
 ```bash
-PLAYBOOK_REF=v0.17.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+PLAYBOOK_REF=v0.18.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
 
 Skip the plugin (the binary, guards, settings and shell wiring still run). Same as `--skip-plugin`:
