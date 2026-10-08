@@ -84,7 +84,7 @@ Do this first, after the `--help` check above and before anything else. Read the
 playbook mode status --json
 ```
 
-If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, run in ask mode and say why in one line.
+If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, do not stop and do not retry. Run in ask mode and print one line. When the error is `unrecognized subcommand 'mode'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
 
 - **`ask` mode:** behave exactly as this file describes for an interactive run. Every prompt below stays.
 - **`auto` mode:** take the recommended answer at each decision instead of prompting, and record every answer you chose yourself in an Assumptions list. Print that list in the final output.
