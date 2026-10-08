@@ -419,8 +419,7 @@ warn_if_shadowed() {
 }
 
 # Puts $PLAYBOOK_BIN_DIR on PATH for future shells via one idempotent rc-file
-# line, using the same grep -qF guard and comment-marker idiom as
-# shell/setup-local.sh:263-268, so `playbook uninstall --remove-binary` can find
+# line behind a grep -qF guard and a `# playbook binary` comment marker, so `playbook uninstall --remove-binary` can find
 # and strip this exact line later.
 ensure_bin_dir_on_path() {
     local shell_bin rc_file
@@ -644,8 +643,7 @@ fi
 
 # Re-running install is the documented upgrade path and each run past the first
 # copies the whole previous tree here, so unpruned this grows without bound:
-# nine installs measured 13M. Keeps the newest 5, as setup-local.sh does for
-# its own setup-* dirs.
+# nine installs measured 13M. Keeps the newest 5.
 find "$CLAUDE_HOME/backups" -maxdepth 1 -type d -name 'install-*' \
     2>/dev/null | sort -r | tail -n +6 \
     | while IFS= read -r _old; do [ -n "$_old" ] && rm -rf "$_old"; done \

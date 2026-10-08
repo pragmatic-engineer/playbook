@@ -152,7 +152,7 @@ jobs:
   # `playbook hook --help`, so a new hook is covered automatically) are the
   # whole contract `settings.json` and hooks.json invoke as a bare
   # `playbook hook <name>` command; if any of them needed something
-  # setup-local.sh or install.sh used to provide (a shared library, a Python interpreter, anything beyond
+  # the old shell installers used to provide (a shared library, a Python interpreter, anything beyond
   # `git`), this job is where that would show up, on the platform the tool
   # actually ships for, not on the dev machine that already has everything
   # installed.

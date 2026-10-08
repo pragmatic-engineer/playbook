@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Places `prompts/SYSTEM_PROMPT.md` under `$HOME/.config/playbook/prompts/`,
-//! porting `shell/setup-local.sh:278-295`, the only prior installer of it.
+//! porting the retired `setup-local.sh`, the only prior installer of it.
 //!
 //! WU-14 deletes that script. Without this module the `--system-prompt` flag
 //! and `/playbook:doctor`'s Layer 4 would both outlive the code that makes
@@ -24,8 +24,8 @@
 //!   later runs omitted the flag.
 //! - `opt_in` false and no file: do nothing, and say so.
 //!
-//! A missing source is reported, not an error: `setup-local.sh:293` warns and
-//! continues, because an absent optional prompt must not fail an install that
+//! A missing source is reported, not an error: the retired `setup-local.sh` warned and
+//! continued, because an absent optional prompt must not fail an install that
 //! is otherwise fine.
 
 use std::fs;
@@ -81,7 +81,7 @@ pub fn place_system_prompt(
 
 /// Whether `dest` already holds exactly `src`'s bytes. Unlike
 /// `init::guards`, no executable bit is checked: this is documentation read
-/// by Claude Code, never executed, and `setup-local.sh:287` compares with a
+/// by Claude Code, never executed, and the retired `setup-local.sh` compared with a
 /// plain `cmp -s` for the same reason.
 fn already_current(src: &Path, dest: &Path) -> bool {
     match (fs::read(src), fs::read(dest)) {

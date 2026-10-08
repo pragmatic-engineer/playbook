@@ -845,7 +845,7 @@ fn unrecognised_shell_skips_shim_only() {
 }
 
 /// `aliases: false` (the default, absent `--aliases`) must skip the `shim`
-/// step entirely, so a caller like `setup-local.sh` can call `playbook init`
+/// step entirely, so a caller like `/playbook:setup` can call `playbook init`
 /// for guards and settings without silently installing a shell launcher the
 /// user did not opt into this run.
 #[test]

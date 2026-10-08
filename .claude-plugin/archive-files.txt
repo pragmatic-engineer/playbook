@@ -24,5 +24,4 @@ hooks/lib/config-hash.sh
 
 # Run by slash commands through CLAUDE_PLUGIN_ROOT
 # (/playbook:setup, quick-review, deep-review, plan, adr, implement, learn-project)
-shell/setup-local.sh
 Brewfile

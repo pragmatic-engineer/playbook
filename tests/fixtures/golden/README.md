@@ -65,15 +65,15 @@ substring "warning", so the normalisation changes nothing the tests verify.
 | `gen-shared-settings.non-ascii.json` | `shell/gen-shared-settings.py` | `{"customUnknownKey":"café ☃"}` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
 | `gen-shared-settings.model-present.json` | `shell/gen-shared-settings.py` | `SRC_OPUS` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
 | `gen-shared-settings.hooks-filter.json` | `shell/gen-shared-settings.py` | `SRC_HOOKS` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
-| `setup-local.clean-install.json` | today's `shell/setup-local.sh` (its Step 2 python merge, before the `playbook init` cutover) | a fresh install: empty `CLAUDE_HOME`, no pre-existing `settings.json` | 2026-09-07, at v0.14.0 (regenerated, see note below) |
-| `setup-local.skip-triggering.json` | today's `shell/setup-local.sh`, same as above | an existing `settings.json` seeded with a `cleanupPeriodDays` collision against the template | 2026-09-07, at v0.14.0 (regenerated, see note below) |
+| `init.clean-install.json` | `playbook init`, first captured from the retired `shell/setup-local.sh` (renamed from `setup-local.clean-install.json` when that script was deleted) | a fresh install: empty `CLAUDE_HOME`, no pre-existing `settings.json` | 2026-09-07, at v0.14.0 (regenerated, see note below) |
+| `init.skip-triggering.json` | the same pipeline, as `playbook init` (checked by `tests/init_cli.rs`) | an existing `settings.json` seeded with a `cleanupPeriodDays` collision against the template | 2026-09-07, at v0.14.0 (regenerated, see note below) |
 
 **Do not regenerate a golden to make a failing test pass.** The whole point is
 that it does not move. If Rust output legitimately changes, that is a
 behaviour change: say so explicitly and record why the divergence from the
 original implementation is intended.
 
-**Note (2026-09-07):** the two `setup-local.*.json` fixtures above are a
+**Note (2026-09-07):** the two `init.*.json` fixtures above are a
 different kind of golden than the rest of this file: they pin the CURRENT
 live install pipeline's output, not a deleted implementation's frozen
 output. Regenerated because the product-hardening-audit-remediation wrap-up
@@ -86,19 +86,19 @@ maintainer-personal home-directory write grant and narrowed
 documented in their own PRs; this is the recorded reason for the divergence
 the paragraph above asks for.
 
-**Note (2026-10-02):** the two `setup-local.*.json` fixtures were regenerated
+**Note (2026-10-02):** the two `init.*.json` fixtures were regenerated
 again, by removing the single `Bash(jq:*)` allowlist line from the captured
 `settings_json` and `settings_base_json` strings. `jq` is no longer a
 dependency (every call site moved to `playbook json`, and the installer now
 uses `playbook trust`), so the shared settings and permissions templates no
 longer grant it. This is an intentional behaviour change, not a drift to hide.
 
-**Note (2026-10-06):** the two `setup-local.*.json` fixtures were regenerated
+**Note (2026-10-06):** the two `init.*.json` fixtures were regenerated
 again to add what auto mode ships: the `auto-guard` hook on `AskUserQuestion`
 and on `UserPromptSubmit`, the `auto-cost` hook on every `PreToolUse`, and the
 `Bash(playbook mode status:*)` and `Bash(playbook mode ask)` allowlist
 entries. These are intentional additions, not a drift to hide.
 
-**Note (2026-10-07):** the two `setup-local.*.json` fixtures were regenerated
+**Note (2026-10-07):** the two `init.*.json` fixtures were regenerated
 again to add the `commit-message-sanitizer` hook to the `Bash` `PreToolUse` group
 and a `Bash` `PostToolUse` group. Intentional additions, not a drift to hide.
