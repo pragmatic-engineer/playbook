@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! PATH checks: find every `playbook` on PATH, warn when an earlier one hides
 //! the updated binary, and compare the Claude Code plugin to the binary.

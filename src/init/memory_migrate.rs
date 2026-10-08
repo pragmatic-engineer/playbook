@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Migrates the whole memory store as a single reported step named `memory`:
 //! renames `~/.claude/memory/graph.json` to `memory.graph.json` if the old

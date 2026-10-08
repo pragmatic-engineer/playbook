@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Behavioural tests for `memory_signals`, the `memory.signals.json` data
 //! layer. Unlike every other hook test file, there is no `HookName`/CLI

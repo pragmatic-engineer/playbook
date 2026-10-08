@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `~/.config/playbook/memory/memory.signals.json` data layer: hit counters, staleness
 //! stamps, and a consolidation cursor. Every reader/writer of this file goes through this module's lock, so no caller's update is silently dropped by another's.

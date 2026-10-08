@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Spawned-binary tests for the live stream (`/api/live`): the guard, the first
 //! event, new data, the stream cap, a freed slot, and the rest of the server

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! One module per hook name, matching hooks.json's `HookName` set exactly.
 //! Each module owns its hook's behaviour, and `dispatch` below is exhaustive

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Validated, locked writes to playbook's own tiered config files: the
 //! write-side counterpart to `resolve` in `config::mod`.

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Reads a JSONL Claude Code session transcript, one JSON object per line.
 //! Both functions here operate line by line so a change to one line never

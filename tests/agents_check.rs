@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Every scenario in the retired shell test (24 scenarios), ported,
 //! plus CLI-wiring cases the shell suite never exercises as an automated

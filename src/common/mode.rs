@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The single resolver for whether playbook runs in `ask` or `auto` mode.
 //! Precedence, highest first: `--auto`/`--ask` flag, `PLAYBOOK_MODE` env, the `mode`

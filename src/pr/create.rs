@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `pr create`: everything after the title and body are written (validate,
 //! push, confirm the push landed, open the PR, confirm its base).

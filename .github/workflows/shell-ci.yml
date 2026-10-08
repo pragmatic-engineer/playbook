@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # CI gate for the repo's own shell code. Runs on ubuntu-latest and macos-latest
 # so the BSD code paths (date -j, stat -f, cp -c, md5) execute too. Validates:

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Soft, non-blocking staleness marker, cached in `memory.signals.json` so
 //! a repeat check costs only one read.

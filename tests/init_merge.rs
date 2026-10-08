@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for `playbook::init::merge`, ported from
 //! the retired shell test's 19 scenarios (s1 through s19). The real

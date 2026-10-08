@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # install-resolve.test.sh: hermetic tests for install.sh's resolve_tarball_url
 # and its release-binary fetch/verify/install pipeline.

@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 [package]
 name = "playbook"
 version = "0.18.0"
 edition = "2021"
 description = "Claude Code plugin toolkit: hooks, launcher and installer in one binary"
-license = "MIT"
+license = "Apache-2.0"
 
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Shared fixtures for the `pr prepare` / `pr create` integration tests: a
 //! real work repo with a local bare `origin`, and a fake `GhClient`.

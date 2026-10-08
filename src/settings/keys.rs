@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Single-sourced allowlist for `settings.shared.json`: the only keys `gen`
 //! may keep and `check` may accept, so both agree on what ships.

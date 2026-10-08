@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `pr prepare` against real scratch git repos with a local bare `origin`,
 //! and a fake `GhClient` so no test needs GitHub. `prepare` runs git in the

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Wires the rc file to load the `cc`/`ccd` launcher with
 //! `eval "$(playbook shell-init)"`, and upgrades the legacy `source` lines.

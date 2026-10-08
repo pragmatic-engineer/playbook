@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Wires the ported `cc::worktree` library into the `cc worktree <branch>
 //! [env-base]` subcommand, the Rust replacement for the retired shell launcher's

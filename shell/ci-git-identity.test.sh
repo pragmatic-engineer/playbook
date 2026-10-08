@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # ci-git-identity.test.sh: .github/workflows/shell-ci.yml must not impose a
 # git identity that overrides a fixture's own.

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Walks a shell command, finds the `git` and `gh` calls that write a message
 //! and rewrites the command so those messages carry no AI attribution.

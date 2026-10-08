@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Usage tracking: a `UsageSource` adapter turns one coding agent's local
 //! session history into normalized events. Aggregation and storage never see

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `strip_rc_files`: the launcher block comes out of the rc files, in every
 //! form an install of any generation wrote, and nothing else does.

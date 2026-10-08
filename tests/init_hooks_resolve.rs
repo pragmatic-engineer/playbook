@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The central invariant a `settings.json` command must satisfy: it
 //! RESOLVES. Two defects shipped, or nearly shipped, while every existing

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Replaces the transcript half of the retired shell clean-resume: clone a
 //! transcript, drop the config-override entries, and give the clone a fresh

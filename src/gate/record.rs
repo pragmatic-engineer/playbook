@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook gate record` CLI entry point: parse a phase agent's raw output
 //! for a `VERDICT: PASS|FAIL|WARN|INCONCLUSIVE` line and upsert it into the

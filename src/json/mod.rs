@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Hand-written Rust replacements for real `jq` call sites across this repo,
 //! named per shape/operation rather than one generic query command,

@@ -10,6 +10,7 @@ skills
 output-styles
 hooks/hooks.json
 LICENSE
+NOTICE
 README.md
 
 # SessionStart hook script (hooks/hooks.json runs it through CLAUDE_PLUGIN_ROOT)

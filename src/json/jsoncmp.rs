@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Structural JSON equality, replacing `diff <(jq -S ...) <(jq -S ...)` call
 //! sites that compare two files while ignoring key order and, optionally, a

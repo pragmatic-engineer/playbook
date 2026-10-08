@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Generates the effort-tier variants of an agent (`reviewer-low`,
 //! `reviewer-xhigh`). The base `agents/<name>.md` is the single source: a

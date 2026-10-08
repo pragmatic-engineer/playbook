@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook mode auto|ask|status`, spawning the real compiled binary so the
 //! CLI parsing, exit codes, and repo-tier config write are proven end to end.

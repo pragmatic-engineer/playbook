@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Plain-text usage report for the terminal. Structured on purpose: whatever
 //! agent is driving the session can read it and give the insights itself.

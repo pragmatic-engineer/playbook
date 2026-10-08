@@ -321,4 +321,4 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md); that page covers disc
 
 ## License
 
-MIT. See `LICENSE`.
+Apache License 2.0. See `LICENSE`.

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Renders the repo-scoped markdown slice of the graph-first memory store
 //! that the retired shell original (now `playbook memory context`) built with

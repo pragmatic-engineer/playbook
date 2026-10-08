@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Binary-spawn tests for `playbook gate check`. `gate check` needs
 //! pre-existing rows to query, so each fixture seeds them directly through

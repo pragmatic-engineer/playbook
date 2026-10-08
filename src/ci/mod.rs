@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook ci`: the model-free repo checks in one step, for CI and other
 //! unattended runs. It calls the same functions as `manifest check`,

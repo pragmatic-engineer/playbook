@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! The `git` calls that write a message: `commit`, `tag`, `merge` and
 //! `commit-tree`. Reads the message from every form git accepts and from the

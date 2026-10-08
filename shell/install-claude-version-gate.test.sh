@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Igor Santos
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # install-claude-version-gate.test.sh: install.sh must skip the plugin step,
 # with a clear upgrade message, when the installed claude CLI is older than

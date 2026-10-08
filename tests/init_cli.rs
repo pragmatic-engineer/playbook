@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `playbook init` as `/playbook:setup` runs it, against a scratch `$HOME`:
 //! the golden settings a fresh and a contested install must produce, what a

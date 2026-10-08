@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! `commit-message-sanitizer` as seen from the real binary. Each command shape
 //! is run through the hook, and the command it hands back is executed in a

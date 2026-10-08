@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! String-equality assertion against one field of a JSON document, keyed by
 //! a dotted path where a numeric segment indexes into an array. Replaces

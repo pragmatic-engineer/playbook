@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Whether playbook runs with no person at the keyboard (CI, `claude -p`).
 //! One switch for every hook: `PLAYBOOK_HEADLESS` wins when set, and

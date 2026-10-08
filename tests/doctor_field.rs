@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Binary-spawn tests for `playbook doctor plugin-version`,
 //! `playbook doctor statusline-command`, `playbook doctor hook-commands`,

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Behavioural tests for the ported safety guards.
 //!
@@ -1167,7 +1167,7 @@ mod no_slop_guard {
     #[test]
     fn a_new_file_written_with_an_unwrapped_wide_module_doc_comment_blocks() {
         let content = format!(
-            "// SPDX-FileCopyrightText: 2026 Igor Santos\n// SPDX-License-Identifier: MIT\n\n//! {}\n\nfn f() {{}}\n",
+            "// SPDX-FileCopyrightText: 2026 Igor Santos\n// SPDX-License-Identifier: Apache-2.0\n\n//! {}\n\nfn f() {{}}\n",
             "x".repeat(150)
         );
         assert!(is_denied(&run_write("src/hooks/example.rs", &content)));
@@ -1176,7 +1176,7 @@ mod no_slop_guard {
     #[test]
     fn a_normal_two_line_spdx_header_write_is_allowed() {
         let content =
-            "// SPDX-FileCopyrightText: 2026 Igor Santos\n// SPDX-License-Identifier: MIT\n\nfn f() {}\n";
+            "// SPDX-FileCopyrightText: 2026 Igor Santos\n// SPDX-License-Identifier: Apache-2.0\n\nfn f() {}\n";
         assert!(!is_denied(&run_write("src/hooks/example.rs", content)));
     }
 

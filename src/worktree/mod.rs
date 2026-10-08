@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 //! Classifies a worktree by matching its path against playbook's known
 //! creation conventions (`playbook wu`, the Agent tool, `cc worktree`, and
