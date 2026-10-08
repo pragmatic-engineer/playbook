@@ -66,12 +66,12 @@ fn main() {
             }
             None => std::process::exit(cc::launch::run(false, &[])),
         },
-        Command::ShellInit { shell } => {
+        Command::ShellInit { shell, no_cc } => {
             let kind = shell
                 .or_else(|| std::env::var("SHELL").ok())
                 .and_then(|s| ShellKind::detect(&s))
                 .unwrap_or(ShellKind::Bash);
-            print!("{}", init::shell_init::script(kind));
+            print!("{}", init::shell_init::script(kind, !no_cc));
         }
         Command::Uninstall {
             yes,
