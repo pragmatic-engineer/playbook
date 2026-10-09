@@ -54,6 +54,10 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 
 Effort is fixed per agent file: base agents run high, and an orchestrator picks the `-low` or `-xhigh` variant by diff size and risk. Do not request xhigh or max on your own for anything else; if a deployment rejects it, use the base agent.
 
+### Per-component ceilings
+
+A ceiling for one component is the key `effort.<agents|commands|skills>.<name>` (see [ADR-0017](../adr/0017-per-component-effort-ceilings.md)). `playbook effort list` prints every component with its shipped, configured and effective effort. `playbook effort resolve agents <name> --json` returns, for an agent, the file to dispatch under the ceilings and every file allowed at or below them. The `Agent` tool has no per-call effort, so choosing the file is how an agent's ceiling is enforced.
+
 ### Model tiers and the 5.5 rule
 
 Every model playbook picks is the 5.5 generation. Plugin files name a tier by alias (`haiku`, `sonnet`, `opus`) and never pin a model id. Claude Code resolves each alias to the newest model the provider offers (on the Anthropic API that is the 5.5 model).
