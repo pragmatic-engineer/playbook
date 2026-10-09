@@ -28,6 +28,18 @@ pub enum Source {
     Default,
 }
 
+impl Source {
+    /// The tier name `config get` prints.
+    pub fn label(self) -> &'static str {
+        match self {
+            Source::Repo => "repo",
+            Source::Org => "org",
+            Source::Global => "global",
+            Source::Default => "default",
+        }
+    }
+}
+
 /// Everything that can stop `resolve` or `write::set` from producing or
 /// storing a value. A missing tier file is not one of these cases when
 /// reading, since it is a normal "no override here" outcome handled by

@@ -625,6 +625,26 @@ fn main() {
             }
         },
         Command::Doctor { sub } => match sub {
+            DoctorCommand::Check { json } => {
+                let home = common::home_dir();
+                let claude_home = home.join(".claude");
+                let slug = common::repo_slug();
+                let env = doctor::check::Env {
+                    plugin_root: std::env::var_os("CLAUDE_PLUGIN_ROOT").map(Into::into),
+                    shell: std::env::var("SHELL").unwrap_or_default(),
+                    path_var: std::env::var_os("PATH").unwrap_or_default(),
+                    repo_root: manifest::check::toplevel(),
+                    repo_slug: (!slug.is_empty()).then_some(slug),
+                    home,
+                    claude_home,
+                };
+                let rows = doctor::check::run(&env);
+                if json {
+                    println!("{}", doctor::check::to_json(&rows));
+                } else {
+                    print!("{}", doctor::check::render(&rows));
+                }
+            }
             DoctorCommand::PluginVersion { path } => {
                 println!("{}", doctor::field::plugin_version(&path));
             }
