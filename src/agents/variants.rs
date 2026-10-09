@@ -53,6 +53,11 @@ pub const ESCALATE: [&str; 5] = [
     "reviewer",
 ];
 
+/// Haiku checking and classifying agents that ship at `low`. A session also
+/// gets their `medium` tier for a harder diff, the highest Haiku tier the
+/// model-aware cap allows (`src/effort/model_cap.rs`).
+pub const ESCALATE_MEDIUM: [&str; 3] = ["cheap-checker", "review-triage", "test-reviewer"];
+
 /// The largest `--agents` value the launcher will pass. Linux caps one
 /// argument at 128 KiB, so stay under it.
 pub const MAX_JSON_BYTES: usize = 120_000;
@@ -182,6 +187,7 @@ pub fn session_tiers(
                 Mode::Auto => {
                     r < base_rank
                         || (*t == "xhigh" && ESCALATE.contains(&base))
+                        || (*t == "medium" && ESCALATE_MEDIUM.contains(&base))
                         || crate::effort::model_cap::opt_in(base).is_some_and(|(l, _)| l == *t)
                 }
                 Mode::Off => false,
@@ -297,9 +303,18 @@ mod tests {
             session_tiers("test-reviewer", "high", None, Mode::Auto),
             vec!["low", "medium"]
         );
+        // A Haiku checker that ships at low also gets medium for a harder diff.
+        assert_eq!(
+            session_tiers("test-reviewer", "low", None, Mode::Auto),
+            vec!["medium"]
+        );
+        assert_eq!(
+            session_tiers("cheap-checker", "low", None, Mode::Auto),
+            vec!["medium"]
+        );
+        assert!(session_tiers("collector", "low", None, Mode::Auto).is_empty());
         // `git` opted in to xhigh for drafting (src/effort/model_cap.rs).
         assert_eq!(session_tiers("git", "low", None, Mode::Auto), vec!["xhigh"]);
-        assert!(session_tiers("cheap-checker", "low", None, Mode::Auto).is_empty());
     }
 
     #[test]
@@ -373,5 +388,38 @@ mod tests {
         assert!(map.contains_key("git-xhigh"), "{:?}", map.keys());
         assert!(!map.contains_key("git-max"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_shipped_auto_set_has_a_medium_tier_for_haiku_checkers_and_no_haiku_xhigh() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("agents");
+        let set = session_agents(&dir, Mode::Auto, &|_| None);
+        for name in [
+            "cheap-checker-medium",
+            "review-triage-medium",
+            "test-reviewer-medium",
+        ] {
+            assert!(
+                set.contains_key(name),
+                "{name} is missing from the auto set"
+            );
+        }
+        for (name, def) in &set {
+            let effort = def["effort"].as_str().unwrap_or("");
+            let haiku = def["model"].as_str().is_some_and(|m| m.contains("haiku"));
+            assert!(
+                !(haiku && effort == "max"),
+                "{name}: no Haiku variant may run at max"
+            );
+        }
+        // What the model sees of the set in its agent list stays small.
+        let listed: usize = set
+            .iter()
+            .map(|(k, v)| k.len() + v["description"].as_str().map_or(0, str::len))
+            .sum();
+        assert!(
+            listed < 3_000,
+            "the variant list costs {listed} bytes of context"
+        );
     }
 }

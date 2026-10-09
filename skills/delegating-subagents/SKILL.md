@@ -162,6 +162,10 @@ answer.
 - `action: downgraded`: the user set `routing.escalate` to `deny`. Dispatch the
   cheaper route the answer gives.
 
+The `routing.escalate` key is the gate. `ask` (the default) stops and asks the
+user before an escalation. `auto` proceeds without asking and logs the
+assumption in the run. `deny` never escalates and takes the cheaper route.
+
 Say the tier and a one line reason in every dispatch report so the user can
 override it. Pick the tier by judgment on each dispatch. A failure does not
 raise the tier by itself. The user's effort ceiling always wins, and the answer
