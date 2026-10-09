@@ -222,3 +222,54 @@ fn a_just_merged_branch_is_protected_while_its_worktree_is_new() {
     );
     cleanup(&f);
 }
+
+#[test]
+fn many_worktrees_are_judged_side_by_side_but_reported_in_list_order() {
+    let f = fixture("order");
+    // Eight worktrees: even ones have their own landed commit and are old
+    // enough to be reaped, odd ones are brand new and must be kept.
+    let names: Vec<String> = (0..8).map(|i| format!("agent-{i}")).collect();
+    let paths: Vec<PathBuf> = names.iter().map(|n| agent_worktree(&f, n)).collect();
+    for (i, wt) in paths.iter().enumerate() {
+        if i % 2 == 0 {
+            commit_in(wt, "own.txt");
+        }
+    }
+    for i in (0..8).step_by(2) {
+        git_ok(&f.repo, &["merge", "-q", "--no-edit", &names[i]]);
+    }
+    let head = String::from_utf8_lossy(&git(&f.repo, &["rev-parse", "HEAD"]).stdout)
+        .trim()
+        .to_string();
+    git_ok(&f.repo, &["update-ref", "refs/remotes/origin/main", &head]);
+    for i in (0..8).step_by(2) {
+        age(&paths[i], 1);
+    }
+
+    let dry = |f: &Fixture| {
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["worktree", "sweep", "--dry-run"])
+            .current_dir(&f.repo)
+            .env("HOME", &f.home)
+            .output()
+            .expect("playbook should spawn");
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let first = dry(&f);
+    // Every run reports the same lines in the same order.
+    for _ in 0..4 {
+        assert_eq!(dry(&f), first);
+    }
+    let lines: Vec<&str> = first.lines().collect();
+    assert_eq!(lines.len(), 8, "{first}");
+    for (i, line) in lines.iter().enumerate() {
+        assert!(line.contains(&format!("agent-{i}")), "line {i}: {line}");
+        if i % 2 == 0 {
+            assert!(line.contains("would remove"), "line {i}: {line}");
+        } else {
+            assert!(line.contains("not landed"), "line {i}: {line}");
+        }
+    }
+    cleanup(&f);
+}

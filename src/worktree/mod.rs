@@ -480,6 +480,21 @@ fn default_branch(repo_root: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The repo a judgment runs against and its default branch, resolved once.
+struct RepoRef<'a> {
+    root: &'a Path,
+    default: Option<&'a str>,
+}
+
+/// Whether judging a worktree of this kind compares against the default
+/// branch (a review worktree is judged by its lock and age alone).
+fn needs_default_branch(convention: Convention) -> bool {
+    matches!(
+        convention,
+        Convention::Wu | Convention::AgentTool | Convention::CcLauncher
+    )
+}
+
 /// Unix seconds `worktree_path`'s own linked-worktree `.git` file was
 /// written, a stand-in for when the worktree itself was created: `git
 /// worktree add` writes that file once and never touches it again, unlike
@@ -582,10 +597,11 @@ fn is_landed(
     convention: Convention,
     lock: &LockState,
     policy: &SweepPolicy,
-    repo_root: &Path,
+    repo: &RepoRef<'_>,
     now_epoch: i64,
     never_locked_grace_secs: i64,
 ) -> bool {
+    let (repo_root, default) = (repo.root, repo.default);
     if matches!(
         convention,
         Convention::Wu | Convention::AgentTool | Convention::CcLauncher
@@ -595,12 +611,12 @@ fn is_landed(
         return false;
     }
     match convention {
-        Convention::Wu => wu_landed(entry, policy, repo_root, now_epoch),
+        Convention::Wu => wu_landed(entry, policy, repo_root, default, now_epoch),
         Convention::AgentTool | Convention::CcLauncher => match entry.branch.as_deref() {
-            Some(branch) => match default_branch(repo_root) {
+            Some(branch) => match default {
                 Some(default) => named_branch_landed(
                     branch,
-                    &default,
+                    default,
                     policy.stale_after_days,
                     repo_root,
                     now_epoch,
@@ -636,6 +652,7 @@ fn wu_landed(
     entry: &WorktreeEntry,
     policy: &SweepPolicy,
     repo_root: &Path,
+    default: Option<&str>,
     now_epoch: i64,
 ) -> bool {
     let marker_path = entry.path.join(CONFLICT_MARKER_FILE);
@@ -648,10 +665,10 @@ fn wu_landed(
             None => false,
         };
     }
-    let (Some(head), Some(branch)) = (entry.head.as_deref(), default_branch(repo_root)) else {
+    let (Some(head), Some(branch)) = (entry.head.as_deref(), default) else {
         return false;
     };
-    wu_worktree_landed(head, &branch, repo_root)
+    wu_worktree_landed(head, branch, repo_root)
 }
 
 /// Removes `path` via `git worktree remove`, doubling `--force` when the
@@ -785,7 +802,14 @@ pub fn remove(
         ));
     }
     let lock = lock_state(&entry);
-    let landed = is_landed(&entry, convention, &lock, &policy, repo_root, now_epoch, 0);
+    let default = needs_default_branch(convention)
+        .then(|| default_branch(repo_root))
+        .flatten();
+    let repo = RepoRef {
+        root: repo_root,
+        default: default.as_deref(),
+    };
+    let landed = is_landed(&entry, convention, &lock, &policy, &repo, now_epoch, 0);
     let report = decide_and_report(&entry, landed, &lock, repo_root, false);
     if report.ends_with(": removed") {
         Ok(report)
@@ -837,28 +861,52 @@ pub fn sweep(
     // position 0 (the main worktree, per `git worktree list`'s documented
     // ordering) is not enough to protect it.
     let caller_worktree = repo_root.canonicalize().ok();
-    let mut report = Vec::new();
     // The first entry is always the main worktree; sweeping it would
     // destroy the caller's own checkout.
-    for entry in entries.into_iter().skip(1) {
-        if caller_worktree.as_deref() == entry.path.canonicalize().ok().as_deref() {
-            continue;
-        }
-        let convention = classify(&entry.path, home);
-        if convention == Convention::Unmanaged {
-            continue;
-        }
-        let lock = lock_state(&entry);
-        let landed = is_landed(
-            &entry,
-            convention,
-            &lock,
-            &policy,
-            repo_root,
-            now_epoch,
-            NEVER_LOCKED_GRACE_SECS,
-        );
-        let line = decide_and_report(&entry, landed, &lock, repo_root, dry_run);
+    let candidates: Vec<(WorktreeEntry, Convention)> = entries
+        .into_iter()
+        .skip(1)
+        .filter(|entry| caller_worktree.as_deref() != entry.path.canonicalize().ok().as_deref())
+        .filter_map(|entry| {
+            let convention = classify(&entry.path, home);
+            (convention != Convention::Unmanaged).then_some((entry, convention))
+        })
+        .collect();
+
+    // Judging a worktree only reads git state, and each judgment waits on a
+    // few `git` children, so judge them side by side. The default branch is
+    // resolved once for all of them. Acting (dirty check, removal, log) stays
+    // sequential and in list order, because `git worktree remove` takes locks
+    // and the report order must not change.
+    let default = candidates
+        .iter()
+        .any(|(_, convention)| needs_default_branch(*convention))
+        .then(|| default_branch(repo_root))
+        .flatten();
+    let repo = RepoRef {
+        root: repo_root,
+        default: default.as_deref(),
+    };
+    let judged = crate::common::par::map(
+        &candidates,
+        crate::common::par::MAX_CONCURRENT,
+        |(entry, convention)| {
+            let lock = lock_state(entry);
+            let landed = is_landed(
+                entry,
+                *convention,
+                &lock,
+                &policy,
+                &repo,
+                now_epoch,
+                NEVER_LOCKED_GRACE_SECS,
+            );
+            (lock, landed)
+        },
+    );
+    let mut report = Vec::new();
+    for ((entry, _), (lock, landed)) in candidates.iter().zip(judged) {
+        let line = decide_and_report(entry, landed, &lock, repo_root, dry_run);
         if !dry_run && (line.ends_with(": removed") || line.contains(": failed to remove")) {
             log_removal(home, now_epoch, &line);
         }
