@@ -593,6 +593,47 @@ fn main() {
                         }
                     }
                 }
+                ConfigCommand::Export => {
+                    let root = common::paths::playbook_root_from(&home);
+                    match config::store::export(&root) {
+                        Ok(doc) => println!(
+                            "{}",
+                            serde_json::to_string_pretty(&doc).expect("a JSON value serializes")
+                        ),
+                        Err(err) => {
+                            eprintln!("config export: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ConfigCommand::Import { file } => {
+                    let raw = if file == "-" {
+                        let mut buf = String::new();
+                        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf).map(|_| buf)
+                    } else {
+                        std::fs::read_to_string(&file)
+                    };
+                    let doc = raw
+                        .map_err(|err| format!("cannot read {file}: {err}"))
+                        .and_then(|raw| {
+                            serde_json::from_str::<serde_json::Value>(&raw)
+                                .map_err(|err| format!("{file} is not valid JSON: {err}"))
+                        });
+                    let root = common::paths::playbook_root_from(&home);
+                    match doc {
+                        Ok(doc) => match config::store::import(&root, &doc) {
+                            Ok(count) => println!("config import: {count} setting(s) stored"),
+                            Err(err) => {
+                                eprintln!("config import: {err}");
+                                std::process::exit(1);
+                            }
+                        },
+                        Err(err) => {
+                            eprintln!("config import: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 ConfigCommand::List => {
                     for &key in config::keys::KNOWN_KEYS {
                         match config::resolve_valid(key, &home, repo_slug) {

@@ -68,6 +68,13 @@ fn repo_config_path(home: &Path) -> PathBuf {
         .join("config.json")
 }
 
+/// The repo tier as stored, `{key: value}`, for the test repo.
+fn stored_repo(home: &Path) -> Value {
+    playbook::config::store::export(&home.join(".config").join("playbook"))
+        .expect("the store should be readable")["repos"]["test-owner/test-repo"]
+        .clone()
+}
+
 /// Plant `contents` verbatim as the repo tier config under `home`.
 fn write_repo_config(home: &Path, contents: &str) {
     let path = repo_config_path(home);
@@ -115,11 +122,7 @@ fn mode_auto_writes_the_repo_config_and_status_reports_source_config() {
 
     // Assert
     assert!(set.status.success(), "stderr: {}", stderr_of(&set));
-    let written: Value = serde_json::from_str(
-        &fs::read_to_string(repo_config_path(&home)).expect("repo config should exist"),
-    )
-    .expect("repo config should be JSON");
-    assert_eq!(written["mode"], "auto");
+    assert_eq!(stored_repo(&home)["mode"], "auto");
     assert!(status.status.success(), "stderr: {}", stderr_of(&status));
     assert!(
         stdout_of(&status).contains("mode: auto (source: config)"),
@@ -316,29 +319,26 @@ fn other_config_keys_survive_mode_auto_then_mode_ask() {
     // Assert
     assert!(auto.status.success(), "stderr: {}", stderr_of(&auto));
     assert!(ask.status.success(), "stderr: {}", stderr_of(&ask));
-    let written: Value = serde_json::from_str(
-        &fs::read_to_string(repo_config_path(&home)).expect("repo config should exist"),
-    )
-    .expect("repo config should be JSON");
+    let written = stored_repo(&home);
     assert_eq!(written["mode"], "ask");
-    assert_eq!(written["autoReview"]["enabled"], false);
-    assert_eq!(written["fix"]["maxFiles"], 7);
+    assert_eq!(written["autoReview.enabled"], false);
+    assert_eq!(written["fix.maxFiles"], 7);
 }
 
 #[test]
-fn mode_auto_twice_leaves_the_file_byte_identical() {
+fn mode_auto_twice_leaves_the_stored_values_identical() {
     // Arrange
     let repo = seeded_repo("idempotent");
     let home = scratch_dir("idempotent-home");
     let first = run_playbook(&repo, &home, &[], &["mode", "auto"]);
     assert!(first.status.success(), "stderr: {}", stderr_of(&first));
-    let after_first = fs::read(repo_config_path(&home)).expect("repo config should exist");
+    let after_first = stored_repo(&home);
 
     // Act
     let second = run_playbook(&repo, &home, &[], &["mode", "auto"]);
 
     // Assert
     assert!(second.status.success(), "stderr: {}", stderr_of(&second));
-    let after_second = fs::read(repo_config_path(&home)).expect("repo config should exist");
+    let after_second = stored_repo(&home);
     assert_eq!(after_first, after_second);
 }

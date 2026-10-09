@@ -18,7 +18,7 @@ pub fn playbook_root() -> PathBuf {
 
 /// Core of `playbook_root`, taking `home` explicitly so tests, and `init`'s
 /// own home-parameterised modules, can resolve it without the real `$HOME`.
-pub(crate) fn playbook_root_from(home: &Path) -> PathBuf {
+pub fn playbook_root_from(home: &Path) -> PathBuf {
     home.join(".config").join("playbook")
 }
 

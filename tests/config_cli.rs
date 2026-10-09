@@ -86,16 +86,19 @@ fn stderr_of(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-fn global_config_path(home: &Path) -> PathBuf {
-    home.join(".config").join("playbook").join("config.json")
+/// Everything stored, as `config export` prints it.
+fn stored(home: &Path) -> Value {
+    playbook::config::store::export(&home.join(".config").join("playbook"))
+        .expect("the store should be readable")
 }
 
-fn org_config_path(home: &Path) -> PathBuf {
-    home.join(".config")
-        .join("playbook")
-        .join("orgs")
-        .join("test-owner")
-        .join("config.json")
+/// Whether `field` (`global`, `orgs` or `repos`) holds nothing yet.
+fn empty(home: &Path, field: &str) -> bool {
+    stored(home)[field].as_object().is_none_or(|o| o.is_empty())
+}
+
+fn global_config_path(home: &Path) -> PathBuf {
+    home.join(".config").join("playbook").join("config.json")
 }
 
 fn repo_config_path(home: &Path) -> PathBuf {
@@ -162,17 +165,16 @@ fn set_with_global_flag_writes_the_global_tier_file() {
 
     // Assert
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
-    let raw = fs::read_to_string(global_config_path(&home))
-        .expect("global config file should have been written");
-    let parsed: Value =
-        serde_json::from_str(&raw).expect("global config file should be valid json");
-    assert_eq!(parsed["autoReview"]["type"], Value::String("quick".into()));
+    assert_eq!(
+        stored(&home)["global"]["autoReview.type"],
+        Value::String("quick".into())
+    );
     assert!(
-        !org_config_path(&home).exists(),
+        empty(&home, "orgs"),
         "org tier should not have been written"
     );
     assert!(
-        !repo_config_path(&home).exists(),
+        empty(&home, "repos"),
         "repo tier should not have been written"
     );
 }
@@ -221,8 +223,8 @@ fn set_with_both_org_and_global_flags_exits_non_zero_and_writes_nothing() {
     // Assert
     assert!(!out.status.success());
     assert!(!stderr_of(&out).is_empty());
-    assert!(!global_config_path(&home).exists());
-    assert!(!org_config_path(&home).exists());
+    assert!(empty(&home, "global"));
+    assert!(empty(&home, "orgs"));
 }
 
 #[test]
@@ -259,7 +261,7 @@ fn set_with_an_unparseable_bool_value_exits_non_zero_and_writes_nothing() {
     assert!(!out.status.success());
     assert!(!stderr_of(&out).is_empty());
     assert!(
-        !repo_config_path(&home).exists(),
+        empty(&home, "repos"),
         "repo tier should not have been written"
     );
 }
@@ -281,7 +283,7 @@ fn set_with_an_out_of_enum_value_exits_non_zero_and_writes_nothing() {
     assert!(!out.status.success());
     assert!(!stderr_of(&out).is_empty());
     assert!(
-        !repo_config_path(&home).exists(),
+        empty(&home, "repos"),
         "repo tier should not have been written"
     );
 }
@@ -432,7 +434,7 @@ fn set_rejects_an_out_of_range_auto_or_fix_value_with_a_clear_message_and_writes
         assert!(stderr.contains(message), "{key} {value}: {stderr}");
         assert!(!stderr.contains("panicked"), "{key} {value}: {stderr}");
         assert!(
-            !global_config_path(&home).exists(),
+            empty(&home, "global"),
             "{key} {value}: nothing may be written"
         );
     }
@@ -455,12 +457,7 @@ fn set_writes_valid_auto_and_fix_values_including_a_fractional_budget() {
 
         // Assert
         assert!(out.status.success(), "{key} {value}: {}", stderr_of(&out));
-        let stored: Value = serde_json::from_str(
-            &fs::read_to_string(global_config_path(&home)).expect("config file is written"),
-        )
-        .expect("config file is JSON");
-        let leaf = key.split('.').fold(&stored, |node, segment| &node[segment]);
-        assert_eq!(leaf.to_string(), value, "{key}");
+        assert_eq!(stored(&home)["global"][key].to_string(), value, "{key}");
     }
 }
 
@@ -543,4 +540,63 @@ fn set_accepts_auto_for_the_review_type() {
 
     // Assert
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+}
+
+#[test]
+fn export_then_import_round_trips_through_the_cli() {
+    // Arrange
+    let repo = seeded_repo("export-import");
+    let home = scratch_dir("export-import-home");
+    let other = scratch_dir("export-import-other");
+    assert!(run_playbook(
+        &repo,
+        &home,
+        &["config", "set", "pr.draft", "false", "--global"]
+    )
+    .status
+    .success());
+    assert!(
+        run_playbook(&repo, &home, &["config", "set", "fix.maxFiles", "9"])
+            .status
+            .success()
+    );
+
+    // Act
+    let exported = run_playbook(&repo, &home, &["config", "export"]);
+    let file = home.join("saved.json");
+    fs::write(&file, stdout_of(&exported)).unwrap();
+    let imported = run_playbook(&repo, &other, &["config", "import", file.to_str().unwrap()]);
+    let got = run_playbook(&repo, &other, &["config", "get", "fix.maxFiles"]);
+
+    // Assert
+    assert!(exported.status.success(), "{}", stderr_of(&exported));
+    assert!(imported.status.success(), "{}", stderr_of(&imported));
+    assert!(
+        stdout_of(&imported).contains("2 setting(s)"),
+        "{}",
+        stdout_of(&imported)
+    );
+    assert!(stdout_of(&got).contains('9'), "{}", stdout_of(&got));
+    assert!(
+        stdout_of(&got).contains("(source: repo)"),
+        "{}",
+        stdout_of(&got)
+    );
+}
+
+#[test]
+fn import_of_an_invalid_document_stores_nothing_and_exits_1() {
+    // Arrange
+    let repo = seeded_repo("import-bad");
+    let home = scratch_dir("import-bad-home");
+    let file = home.join("bad.json");
+    fs::write(&file, r#"{"global":{"mode":"chaos"}}"#).unwrap();
+
+    // Act
+    let out = run_playbook(&repo, &home, &["config", "import", file.to_str().unwrap()]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr_of(&out).contains("mode"), "{}", stderr_of(&out));
+    assert!(empty(&home, "global"));
 }
