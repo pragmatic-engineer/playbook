@@ -30,19 +30,36 @@ fn restore_sigpipe() {
 #[cfg(not(unix))]
 fn restore_sigpipe() {}
 
+/// Run one hook: read the payload from stdin, then dispatch it.
+fn run_hook(name: playbook::HookName) {
+    let raw = read_hook_input();
+    let payload = Payload::parse(&raw);
+    if matches!(name, playbook::HookName::WorktreeCreate) {
+        std::process::exit(hooks::worktree_create::execute(&payload));
+    }
+    hooks::dispatch(name, &payload);
+}
+
 fn main() {
     restore_sigpipe();
+    // Hot paths skip building the clap tree. See `fastpath`.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    match playbook::fastpath::classify(&args) {
+        Some(playbook::fastpath::Fast::Hook(name)) => {
+            run_hook(name);
+            return;
+        }
+        Some(playbook::fastpath::Fast::Statusline) => std::process::exit(statusline::run()),
+        Some(playbook::fastpath::Fast::Version) => {
+            print!("{}", playbook::fastpath::version_text());
+            return;
+        }
+        None => {}
+    }
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Hook { name } => {
-            let raw = read_hook_input();
-            let payload = Payload::parse(&raw);
-            if matches!(name, playbook::HookName::WorktreeCreate) {
-                std::process::exit(hooks::worktree_create::execute(&payload));
-            }
-            hooks::dispatch(name, &payload);
-        }
+        Command::Hook { name } => run_hook(name),
         // Launcher subcommands land in a later Work Unit; stub for now.
         Command::Cc { sub } => match sub {
             Some(CcCommand::Prune) => cc::retention::prune(&cc::logical_cwd()),
