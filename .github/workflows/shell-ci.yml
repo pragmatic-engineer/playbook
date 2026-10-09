@@ -90,7 +90,6 @@ jobs:
           if git ls-files -- \
               ':!.github/workflows/shell-ci.yml' \
               ':!docs/adr/**' \
-              ':!shell/statusline.test.sh' \
               ':!src/hooks/rm_workspace_guard.rs' \
               ':!src/hooks/commit_message_sanitizer/engine.rs' \
               ':!src/hooks/commit_message_sanitizer/git.rs' \
