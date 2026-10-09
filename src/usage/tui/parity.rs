@@ -87,7 +87,7 @@ fn model_repo_and_day_groups_match_the_web_json_for_every_range() {
         ] {
             let ours: Vec<(String, u64, f64)> = groups
                 .iter()
-                .map(|g| (g.key.clone(), g.messages as u64, g.cost_usd))
+                .map(|g| (g.key.clone(), g.messages, g.cost_usd))
                 .collect();
             assert_eq!(ours, group_rows(&web, dim), "{dim} for {range:?}");
         }
