@@ -38,7 +38,7 @@ Instruction for Claude. Reference `$ARGUMENTS` here if needed.
 Instruction for Claude.
 ```
 
-`plan.md` adds `model: opus` because the planning interview needs that capability. `commit-and-push.md` omits `model` and inherits the session default. Only set `model` when the command always needs a specific model.
+`plan.md` adds `model: opus` because the planning interview needs that capability. Use an alias (`haiku`, `sonnet`, `opus`), never a model id. `commit-and-push.md` omits `model` and inherits the session default. Only set `model` when the command always needs a specific model.
 
 A command's `description` does double duty. It is the one line a human reads in the picker, and it is the text Claude matches a plain-English request against when deciding whether to reach for the command. `adr.md` shows the shape: "Use when recording a significant, hard-to-reverse architectural decision." Name the situation, not the mechanics. The mechanics belong in the body, which only loads once the command actually runs. A description that is a feature list ("Executes X, delegating to Y, then Z") reads fine in the picker and matches nothing.
 
@@ -83,7 +83,7 @@ Events wired in this config: `SessionStart`, `PreToolUse`, `PostToolUse`, `UserP
 
 ### One binary, one module per hook
 
-All twenty hooks are Rust functions compiled into the single `playbook` binary, one module per hook under `src/hooks/<name>.rs`. `src/hooks/mod.rs` declares every module and an exhaustive `dispatch` match over the `HookName` enum in `src/lib.rs`, so adding a hook the CLI cannot invoke fails the build instead of silently doing nothing at runtime.
+Every hook is a Rust function compiled into the single `playbook` binary, one module per hook under `src/hooks/<name>.rs`. `src/hooks/mod.rs` declares every module and an exhaustive `dispatch` match over the `HookName` enum in `src/lib.rs`, so adding a hook the CLI cannot invoke fails the build instead of silently doing nothing at runtime.
 
 There is no language split left to choose between. The data-shaping hooks (memory graph rebuild, anchor lookup, frontmatter parsing) and the fast safety guards (`rm-workspace-guard`, `no-slop-guard`, `bg-await-guard`, `precommit-check`) are all plain functions sharing the same `src/common/` helpers (payload field extraction, session dir, atomic append, the `emit_*` JSON shapes) and the same compiled binary, so there is no per-hook cold start to weigh a language choice against.
 

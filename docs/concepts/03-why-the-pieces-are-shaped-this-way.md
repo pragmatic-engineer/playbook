@@ -41,7 +41,7 @@ The rule is: spend on judgment, save on routine.
 - **Haiku** runs `git`, `patch-applier`, `collector`, `cheap-checker` and `review-triage`. These apply a decision someone else already made, or classify with a safe fallback. A wrong answer is cheap to detect and rerun.
 - **Opus** runs design (`/playbook:plan`, `/playbook:adr`), every `reviewer`, and the `auditor`. A missed finding in a review, or a weak design, costs far more than the extra tokens.
 
-The routing details, including the hook that nudges design prompts toward Opus, are in [Model routing and memory](../internals/02-model-routing-and-memory.md).
+Plugin files name only the alias. `ccc` resolves each to the 5.5 model and passes the previous generation as a fallback. The table, the overrides (`models.<alias>`) and the routing details, including the hook that nudges design prompts toward Opus, are in [Model routing and memory](../internals/02-model-routing-and-memory.md).
 
 ## Why effort is a second dial
 
@@ -57,7 +57,7 @@ The rule that produced the current values: **lower effort where the work is mech
 
 The `Agent` tool takes a `model` on each call but has no per-call effort. An agent's effort is fixed by its file. When one role needs two efforts (a quick review of a small diff and a deep one of a risky diff), the role needs two agent definitions.
 
-The variants are not files. Twelve agents times four more tiers would add dozens of descriptions to every session, so `ccc` and `ccd` render only the variants a session can use from the base agents into a throwaway session plugin that they pass with `--plugin-dir`. `playbook agents check` fails CI when an agent has no `VARIANTS` entry or a tier cannot render. The orchestrator asks `playbook effort resolve` which agent to spawn, because the user's effort ceilings decide it, then picks by diff size and risk, following the `delegating-subagents` skill.
+The variants are not files. Twelve agents times four more tiers would add dozens of descriptions to every session. So `ccc` and `ccd` render only the variants a session can use, from the base agents, into a throwaway session plugin. Nothing is committed, and `agents.variants` (`auto`, `all`, `off`) controls the set. `playbook agents variants` shows what a session would get, and `playbook agents check` fails CI when an agent has no `VARIANTS` entry or a tier cannot render. The orchestrator asks `playbook effort resolve` which agent to spawn, because the user's effort ceilings decide it, then picks by diff size and risk, following the `delegating-subagents` skill.
 
 ### Who decides the effort
 
@@ -70,14 +70,14 @@ Playbook has its own ceiling, the config key `maxEffortLevel` (same name and val
 - Playbook `auto` (the default): playbook adds no ceiling, and Claude Code's applies if it has one.
 - A ceiling never raises anything. An agent that ships at `low` still runs at `low`.
 
-Playbook only reads Claude Code's `maxEffortLevel` (from the user, project and local settings files) and never writes it. When playbook's ceiling is the lower one, the launcher (`pb` or `cc`) passes it to that one session with `--settings`, and Claude Code applies it to command, skill and agent effort alike. A session started without the launcher gets no playbook ceiling. `playbook effort` with no level shows both values and the winner, and `--json` prints the same for scripts. Claude Code's own `/effort` and `--effort` still work below the ceiling, and the setting needs Claude Code 2.1.267 or later.
+Playbook only reads Claude Code's `maxEffortLevel` (from the user, project and local settings files) and never writes it. When playbook's ceiling is the lower one, the launcher (`ccc` or `ccd`) passes it to that one session with `--settings`, and Claude Code applies it to command, skill and agent effort alike. A session started without the launcher gets no playbook ceiling. `playbook effort` with no level shows both values and the winner, and `--json` prints the same for scripts. Claude Code's own `/effort` and `--effort` still work below the ceiling, and the setting needs Claude Code 2.1.267 or later.
 
-Planned work:
+Two more rules sit on top of the ceiling:
 
-- A ceiling per skill, command and agent (#573).
-- A shared rule for which tier a task goes to, and when to ask you first (#575).
-- A rule that every model is the 5.5 generation, with a fallback to the previous one (#574).
-- Measured, then auto tuned, effort values (#576, #578).
+- **Per component.** `effort.agents.<name>`, `effort.commands.<name>` and `effort.skills.<name>` cap one piece. The lowest ceiling wins, and nothing is raised above what the file ships with. See [ADR-0017](../adr/0017-per-component-effort-ceilings.md).
+- **Per model.** A component on Haiku never runs above its cap, because measured cost grows faster than pass rate. `playbook doctor models` and `playbook effort list` show the result.
+
+`playbook route <kind>` is the shared rule for which model, effort and agent a task goes to, and when to ask you first (`routing.escalate`). `playbook eval bench` measures a role across models and efforts, so the values come from data.
 
 ## Why hooks are in Rust and wired by `init`
 

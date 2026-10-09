@@ -26,7 +26,7 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions inhe
 
 - Design work uses this repo's own `/playbook:plan` and `/playbook:adr` commands, not the built-in plan mode; those already run on Opus by their own frontmatter.
 - Casual phrasing maps to the planning pipeline: any idea or feature request, whether raw or already settled, runs `/playbook:plan`, and `/playbook:implement` only runs when an approved plan or blueprint already exists.
-- Haiku for spawned subagents on mechanical or search tasks (3x cheaper than Sonnet). Escalate to Sonnet for real coding, Opus for architecture.
+- Haiku for spawned subagents on mechanical or search tasks. Escalate to Sonnet for real coding, Opus for architecture. `playbook route <kind>` gives the table.
 - Fan out independent subtasks via parallel `Agent` calls. Close agents the moment their work is done.
 - Read surrounding code and trace request paths before writing anything.
 - No magic values: a number or string a reader would have to look up, or that repeats, gets a name.
@@ -37,19 +37,14 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions inhe
 
 **Memory protocol.** One store at `~/.config/playbook/memory/`: global facts live flat at the root, org facts are namespaced under `~/.config/playbook/memory/<owner>/`, project facts under `~/.config/playbook/memory/<owner>/<repo>/`. The prompt covers when and where to save a fact, the YAML frontmatter format, edge types (`supersedes`, `depends_on`, `relates_to`, `contradicts`), traversal rules, and code anchors. See [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the full protocol.
 
-## Why a custom prompt behaves better
+## Why a custom prompt helps
 
-The default Claude session starts blank. To get consistent behavior you'd re-explain preferences, remind it not to guess, tell it to self-review. Every session. A system prompt front-loads all of that once, so the first message in a new session starts from the same baseline as the hundredth.
+The default session starts blank, so you would repeat your preferences every time. The prompt front-loads them once.
 
-**Consistent calibration from the first message.** Claude's defaults produce hedged, verbose prose with pleasantries and trailing summaries. The Output rules replace that baseline before you type a word. You don't spend the first few exchanges correcting tone or re-stating preferences you've already written down.
-
-**Guardrails the default doesn't include.** The verify-before-claiming rule, ruthless self-review, no force-push, security tier gating: Claude's training doesn't reliably enforce these. Without the verify rule, Claude asserts confidently without checking. Without self-review, it ships the first draft. Without the security tiers, it asks no questions on offensive requests. The prompt makes each of these an explicit starting constraint, not something you re-negotiate per session.
-
-**Model routing by task type.** Opus for architectural planning, Sonnet for coding, Haiku for mechanical subagents. The prompt also defines when to fan out to parallel agents vs. stay inline, and when to escalate. Without clear routing guidance, model selection is ad-hoc and costs climb with it.
-
-**Memory protocol in scope.** Claude knows the store exists, where to write facts, and how to do it correctly. Without this, durable facts get re-explained at the start of each session or lost entirely. The global root carries cross-project preferences; org facts are namespaced under `~/.config/playbook/memory/<owner>/`, shared across every repo under one owner; project facts under `~/.config/playbook/memory/<owner>/<repo>/`, isolated to a single repo and never committed.
-
-**Net effect.** Fewer wrong-default choices. Less repeated instruction. More consistent output across sessions.
+- **Calibration.** It replaces hedged, chatty defaults with the output rules before you type.
+- **Guardrails.** Verify before claiming, self-review, no force-push and security tiers become starting constraints.
+- **Model routing.** Opus for design, Sonnet for coding, Haiku for mechanical subagents, plus when to fan out.
+- **Memory.** Claude knows where the store is and how to write a fact.
 
 ## Costs and limits
 
