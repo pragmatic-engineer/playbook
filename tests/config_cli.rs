@@ -600,3 +600,47 @@ fn import_of_an_invalid_document_stores_nothing_and_exits_1() {
     assert!(stderr_of(&out).contains("mode"), "{}", stderr_of(&out));
     assert!(empty(&home, "global"));
 }
+
+#[test]
+fn a_config_json_written_after_the_import_is_adopted_when_it_agrees() {
+    // Arrange: the store exists, then a file shows up with a new key.
+    let home = scratch_dir("late-adopt");
+    let cwd = scratch_dir("late-adopt-cwd");
+    assert!(set_global(&home, "mode", "ask").status.success());
+    fs::write(
+        global_config_path(&home),
+        r#"{"mode":"ask","pr":{"draft":false}}"#,
+    )
+    .unwrap();
+
+    // Act
+    let out = run_playbook(&cwd, &home, &["config", "get", "pr.draft"]);
+
+    // Assert: adopted without a warning, file renamed.
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(stdout_of(&out).contains("false"), "{}", stdout_of(&out));
+    assert!(!stderr_of(&out).contains("warning"), "{}", stderr_of(&out));
+    assert!(!global_config_path(&home).exists());
+}
+
+#[test]
+fn a_config_json_that_disagrees_with_the_store_is_left_and_named_in_a_warning() {
+    let home = scratch_dir("late-conflict");
+    let cwd = scratch_dir("late-conflict-cwd");
+    assert!(set_global(&home, "mode", "ask").status.success());
+    fs::write(global_config_path(&home), r#"{"mode":"auto"}"#).unwrap();
+
+    let out = run_playbook(&cwd, &home, &["config", "get", "mode"]);
+
+    assert!(out.status.success());
+    assert!(stdout_of(&out).contains("ask"), "{}", stdout_of(&out));
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("config.json") && err.contains("playbook config set"),
+        "{err}"
+    );
+    assert!(
+        global_config_path(&home).exists(),
+        "the file is not touched"
+    );
+}
