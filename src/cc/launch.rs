@@ -30,6 +30,9 @@ fn takes_value(opt: &str) -> bool {
             | "--model"
             | "--fallback-model"
             | "--agents"
+            | "--plugin-dir"
+            | "--plugin-url"
+            | "--effort"
             | "--permission-mode"
             | "--name"
             | "-n"
@@ -95,16 +98,25 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     if let Some(flags) = crate::models::launcher_flags(args, &user_settings, effort.as_deref()) {
         all.extend(flags);
     }
-    if let Some((flags, names)) = super::agent_variants::flags(
+    let mut variants_dir = None;
+    if let Some(session) = super::agent_variants::session(
         args,
         &home,
         &home.join(".claude"),
         &cwd_now,
         std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
+        &std::env::temp_dir(),
     ) {
-        all.extend(flags);
-        // The orchestrator reads this through `playbook effort resolve`.
-        std::env::set_var(crate::effort::component::VARIANTS_ENV, names);
+        all.extend(session.args);
+        // The orchestrator reads these through `playbook effort resolve`.
+        std::env::set_var(crate::effort::component::VARIANTS_ENV, session.names);
+        if session.plugin_dir.is_some() {
+            std::env::set_var(
+                crate::effort::component::VARIANTS_PLUGIN_ENV,
+                super::agent_variants::PLUGIN_NAME,
+            );
+        }
+        variants_dir = session.plugin_dir;
     }
     for (var, id) in crate::models::env_overrides(&home) {
         std::env::set_var(var, id);
@@ -118,6 +130,9 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
 
     let mut cwd = cwd_now;
     let rc = dispatch(&mut cwd, &all);
+    if let Some(dir) = variants_dir {
+        let _ = std::fs::remove_dir_all(dir);
+    }
     retention::prune(&cwd.to_string_lossy());
     rc
 }
