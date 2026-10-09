@@ -51,7 +51,7 @@ pub enum Head {
 }
 
 /// Find the repo that contains `dir`. `None` when it is not certain.
-pub fn discover(dir: &Path) -> Option<Repo> {
+fn discover(dir: &Path) -> Option<Repo> {
     if UNSUPPORTED_ENV
         .iter()
         .any(|v| std::env::var_os(v).is_some())

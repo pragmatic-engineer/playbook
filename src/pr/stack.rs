@@ -10,8 +10,8 @@ use super::shared::gh;
 use serde_json::{json, Value};
 
 /// Default ceilings above which the review command asks again.
-pub const DEFAULT_MAX_PRS: u64 = 6;
-pub const DEFAULT_MAX_LINES: u64 = 3000;
+const DEFAULT_MAX_PRS: u64 = 6;
+const DEFAULT_MAX_LINES: u64 = 3000;
 
 /// Longest branch chain followed in either direction; guards against loops.
 const MAX_CHAIN: usize = 25;

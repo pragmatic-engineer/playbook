@@ -16,7 +16,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 /// How long a starter waits for the new server to write its own lock.
-pub const LOCK_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const LOCK_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCK_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -24,13 +24,13 @@ pub type Opener<'a> = &'a dyn Fn(&str) -> Result<(), String>;
 
 /// The link the browser opens. The token rides in the fragment, which a
 /// browser never sends to the server, so it stays out of requests and logs.
-pub fn ip_url(port: u16, token: &Token) -> String {
+fn ip_url(port: u16, token: &Token) -> String {
     format!("http://127.0.0.1:{port}/#{}", token.as_str())
 }
 
 /// `*.localhost` resolves to loopback on macOS and most Linux resolvers but
 /// not all, so it is only ever printed, never used to open the browser.
-pub fn alias_url(port: u16, token: &Token) -> String {
+fn alias_url(port: u16, token: &Token) -> String {
     format!("http://playbook.localhost:{port}/#{}", token.as_str())
 }
 
@@ -56,7 +56,7 @@ pub fn no_browser(_url: &str) -> Result<(), String> {
 
 /// Hosts the server answers to. A page on another origin, including a
 /// DNS-rebinding one, arrives with a different `Host`, so it gets nothing.
-pub fn host_allowed(host: Option<&str>, port: u16) -> bool {
+fn host_allowed(host: Option<&str>, port: u16) -> bool {
     let Some(host) = host else { return false };
     [
         format!("127.0.0.1:{port}"),
@@ -71,7 +71,7 @@ pub fn host_allowed(host: Option<&str>, port: u16) -> bool {
 /// `same-origin` and a typed URL is `none`; another site's page is
 /// `cross-site` or `same-site` and must not make the server ingest. A client
 /// that sends no label (curl) is not a browser page and is allowed.
-pub fn fetch_site_allowed(value: Option<&str>) -> bool {
+fn fetch_site_allowed(value: Option<&str>) -> bool {
     matches!(value, None | Some("same-origin") | Some("none"))
 }
 
@@ -104,7 +104,7 @@ const TEXT: &str = "text/plain; charset=utf-8";
 
 /// Every path that returns usage data. They all share one guard: the Host
 /// allowlist, the `Sec-Fetch-Site` check and the session token.
-pub fn is_api(path: &str) -> bool {
+fn is_api(path: &str) -> bool {
     path.starts_with("/api/")
 }
 
@@ -127,7 +127,7 @@ fn parse_api(path: &str, query: &str) -> Result<Api, (u16, &'static str, String)
 /// What the server answers for a path: (status, content type, body). The page
 /// assets carry no data and need no token. `load` runs only for a known
 /// `/api/` path, only when `token_ok`, and only with a validated request.
-pub fn respond_to(
+fn respond_to(
     path: &str,
     query: &str,
     token_ok: bool,

@@ -45,7 +45,7 @@ pub fn hook_writes_signoff(source: &str) -> bool {
 }
 
 /// Whether `--signoff` should be passed.
-pub fn wants_signoff(dir: &Path, message: &str, opts: Options, config_on: bool) -> bool {
+fn wants_signoff(dir: &Path, message: &str, opts: Options, config_on: bool) -> bool {
     if !config_on || opts.no_signoff {
         return false;
     }

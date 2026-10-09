@@ -7,7 +7,8 @@
 //! rebuilds the page. Dynamic strings reach the DOM only through `textContent`;
 //! the one `innerHTML` use is the server's escaped SVG.
 
-pub const REFRESH_MS: u32 = 5000;
+#[cfg(test)]
+const REFRESH_MS: u32 = 5000;
 
 /// Scripts and styles load only from this origin. The SVG charts carry no
 /// inline `style` attributes, so `style-src` needs no `'unsafe-inline'`.

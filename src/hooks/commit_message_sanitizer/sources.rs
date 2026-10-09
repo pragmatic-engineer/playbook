@@ -76,7 +76,7 @@ pub enum Rule {
     Prose,
 }
 
-pub fn is_stdin_path(path: &str) -> bool {
+fn is_stdin_path(path: &str) -> bool {
     STDIN_PATHS.contains(&path)
 }
 

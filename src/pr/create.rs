@@ -12,7 +12,7 @@ use std::path::Path;
 const TITLE_LIMIT: usize = 72;
 
 /// `Err` naming both SHAs when the remote does not carry local HEAD.
-pub fn verify_pushed_sha(local: &str, remote: &str) -> Result<(), String> {
+fn verify_pushed_sha(local: &str, remote: &str) -> Result<(), String> {
     if local == remote {
         return Ok(());
     }

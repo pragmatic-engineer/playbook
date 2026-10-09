@@ -89,7 +89,7 @@ fn worktree_name(payload: &Payload) -> String {
 }
 
 /// A single safe path segment: no separators, no traversal, not empty.
-pub fn sanitize_name(raw: &str) -> Result<String, String> {
+fn sanitize_name(raw: &str) -> Result<String, String> {
     let name = raw.trim();
     let bad = name.is_empty()
         || name == "."

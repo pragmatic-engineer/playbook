@@ -56,14 +56,15 @@ const OLD_GEN_REJECTS: [&str; 2] = ["xhigh", "max"];
 
 /// The value for `--fallback-model`: the previous generation of each tier,
 /// deepest first. Claude Code caps a chain at three models.
-pub fn fallback_chain() -> String {
+#[cfg(test)]
+fn fallback_chain() -> String {
     fallback_chain_for(None)
 }
 
 /// The chain for a session running at `effort`. At `xhigh` or `max` the
 /// previous Sonnet and Opus would answer 400 and Claude Code would then skip
 /// them one by one, so the chain starts at the model that accepts the level.
-pub fn fallback_chain_for(effort: Option<&str>) -> String {
+fn fallback_chain_for(effort: Option<&str>) -> String {
     let rejects = effort.is_some_and(|e| OLD_GEN_REJECTS.contains(&e));
     [TIERS[2], TIERS[1], TIERS[0]]
         .iter()
@@ -74,7 +75,7 @@ pub fn fallback_chain_for(effort: Option<&str>) -> String {
 }
 
 /// The model id `models.<alias>` overrides, if one is set and valid.
-pub fn override_for(alias: &str, home: &Path) -> Option<String> {
+fn override_for(alias: &str, home: &Path) -> Option<String> {
     let key = format!("models.{alias}");
     match config::resolve_valid(&key, home, None) {
         Ok((Value::String(id), _, None)) if !id.is_empty() => Some(id),
@@ -127,7 +128,7 @@ pub fn effort_in_force(
 
 /// Whether Claude Code already has a fallback the user chose: the flag in
 /// `args`, or `fallbackModel` in the user settings file.
-pub fn user_has_fallback(args: &[String], user_settings: &Path) -> bool {
+fn user_has_fallback(args: &[String], user_settings: &Path) -> bool {
     if args
         .iter()
         .any(|a| a == "--fallback-model" || a.starts_with("--fallback-model="))

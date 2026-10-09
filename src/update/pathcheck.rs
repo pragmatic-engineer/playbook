@@ -80,7 +80,7 @@ pub fn shadow_warning(path_var: &OsStr, updated: &Path) -> Option<String> {
 }
 
 /// The plugin version Claude Code has installed for `playbook@pragmatic-engineer`.
-pub fn installed_plugin_version(home: &Path) -> Option<String> {
+fn installed_plugin_version(home: &Path) -> Option<String> {
     let raw = fs::read_to_string(home.join(".claude/plugins/installed_plugins.json")).ok()?;
     let json: Value = serde_json::from_str(&raw).ok()?;
     json["plugins"]["playbook@pragmatic-engineer"][0]["version"]

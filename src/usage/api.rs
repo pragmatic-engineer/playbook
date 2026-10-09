@@ -326,7 +326,7 @@ fn clock(timestamp: i64) -> String {
 }
 
 /// A session counts as active when its last message is this recent.
-pub const ACTIVE_SECONDS: i64 = 15 * 60;
+const ACTIVE_SECONDS: i64 = 15 * 60;
 const BURN_MINUTES: i64 = 60;
 const ACTIVE_LIMIT: usize = 20;
 /// Messages in the live feed.

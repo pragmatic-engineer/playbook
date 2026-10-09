@@ -271,7 +271,7 @@ pub struct WorktreeEntry {
 /// Lists every worktree registered against `repo_root`. Aborts rather than
 /// treating a failed or unparseable command as "nothing to sweep": a broken
 /// `.git` state must stop the sweep, not proceed as if no worktrees existed.
-pub fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeEntry>, String> {
+fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeEntry>, String> {
     let out = git::run(
         Some(repo_root),
         &["worktree", "list", "--porcelain"],

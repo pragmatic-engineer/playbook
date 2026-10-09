@@ -18,7 +18,7 @@ const MARKER: &str = "playbook hook session-init";
 
 /// The warning text. `bin/playbook` carries a copy for the no-binary case, and
 /// a test keeps the two equal.
-pub const MESSAGE: &str = "Your playbook hooks are not wired to the installed binary yet. Re-run the installer to fix this: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash";
+const MESSAGE: &str = "Your playbook hooks are not wired to the installed binary yet. Re-run the installer to fix this: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash";
 
 /// Hook entry point.
 pub fn run(_payload: &Payload) {

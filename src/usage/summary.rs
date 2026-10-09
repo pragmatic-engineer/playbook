@@ -11,7 +11,7 @@ use std::fmt::Write;
 const RECENT_DAYS: usize = 14;
 const TOP_TOOLS: usize = 10;
 
-pub const EMPTY_MESSAGE: &str =
+const EMPTY_MESSAGE: &str =
     "No usage recorded yet. Run a Claude Code session, then run `playbook usage` again.";
 
 fn group_table(out: &mut String, title: &str, groups: &[Group]) {

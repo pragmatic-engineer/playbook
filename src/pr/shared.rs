@@ -207,7 +207,7 @@ pub(crate) fn gh(args: &[&str]) -> Result<String, String> {
 }
 
 /// The `gh pr create` arguments, with `--draft` present only when `draft`.
-pub fn pr_create_args(title: &str, body_file: &str, base: &str, draft: bool) -> Vec<String> {
+fn pr_create_args(title: &str, body_file: &str, base: &str, draft: bool) -> Vec<String> {
     let mut args: Vec<String> = [
         "pr",
         "create",

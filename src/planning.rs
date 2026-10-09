@@ -12,7 +12,7 @@ use std::time::Duration;
 use crate::common::atomic::{atomic_append, with_dir_lock, write_atomic};
 
 /// A slug is one kebab-case file stem: no separators and no leading dot.
-pub fn valid_slug(slug: &str) -> bool {
+fn valid_slug(slug: &str) -> bool {
     !slug.is_empty()
         && !slug.starts_with('.')
         && slug

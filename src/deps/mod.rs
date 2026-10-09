@@ -34,7 +34,7 @@ fn has_brew() -> bool {
 
 /// Keep `cmd` if it is on PATH, else `brew install <formula>`. False only when
 /// an attempted install fails. Without Homebrew it prints guidance and is true.
-pub fn ensure_dep(cmd: &str, formula: &str) -> bool {
+fn ensure_dep(cmd: &str, formula: &str) -> bool {
     if let Some(found) = which(cmd) {
         println!("ensure-deps: {cmd} already installed ({})", found.display());
         return true;

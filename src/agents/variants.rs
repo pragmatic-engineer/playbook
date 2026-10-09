@@ -45,7 +45,7 @@ pub const VARIANTS: [(&str, &[&str]); 12] = [
 
 /// Agents whose work gets harder with the diff, so a session also gets the
 /// `xhigh` variant. Every other agent only gets cheaper tiers.
-pub const ESCALATE: [&str; 5] = [
+const ESCALATE: [&str; 5] = [
     "analyst",
     "critic",
     "fact-checker",
@@ -56,11 +56,11 @@ pub const ESCALATE: [&str; 5] = [
 /// Haiku checking and classifying agents that ship at `low`. A session also
 /// gets their `medium` tier for a harder diff, the highest Haiku tier the
 /// model-aware cap allows (`src/effort/model_cap.rs`).
-pub const ESCALATE_MEDIUM: [&str; 3] = ["cheap-checker", "review-triage", "test-reviewer"];
+const ESCALATE_MEDIUM: [&str; 3] = ["cheap-checker", "review-triage", "test-reviewer"];
 
 /// The largest `--agents` value the launcher will pass. Linux caps one
 /// argument at 128 KiB, so stay under it.
-pub const MAX_JSON_BYTES: usize = 120_000;
+const MAX_JSON_BYTES: usize = 120_000;
 
 /// Which variants a session gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,7 +166,7 @@ pub fn render_definition(base: &str, content: &str, tier: &str) -> Result<Option
 /// The tiers a session gets for one agent. `base_effort` is the file's own
 /// effort and `ceiling` the lowest ceiling in play. Never above the ceiling,
 /// never the base tier itself.
-pub fn session_tiers(
+fn session_tiers(
     base: &str,
     base_effort: &str,
     ceiling: Option<&str>,

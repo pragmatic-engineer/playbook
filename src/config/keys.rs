@@ -38,7 +38,7 @@ pub const EFFORT_COMPONENT_KINDS: [&str; 3] = ["agents", "commands", "skills"];
 /// Whether `key` is `effort.<kind>.<name>`: a known kind and a name of
 /// lowercase letters, digits and hyphens. Whether the name exists is checked
 /// later against the plugin files, never here.
-pub fn is_effort_component_key(key: &str) -> bool {
+fn is_effort_component_key(key: &str) -> bool {
     let mut parts = key.split('.');
     let (Some("effort"), Some(kind), Some(name), None) =
         (parts.next(), parts.next(), parts.next(), parts.next())

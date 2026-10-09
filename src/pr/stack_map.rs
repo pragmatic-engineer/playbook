@@ -23,7 +23,7 @@ type Ranges = BTreeMap<String, Vec<(u64, u64)>>;
 
 /// Read the hunk headers of a unified diff. A range spans the whole hunk, so
 /// a comment may sit on an added or an unchanged line inside it.
-pub fn hunks(diff: &str) -> Ranges {
+fn hunks(diff: &str) -> Ranges {
     let mut out: Ranges = BTreeMap::new();
     let mut file: Option<String> = None;
     for line in diff.lines() {
@@ -71,7 +71,7 @@ fn unmapped(finding: &Value, reason: &str) -> Value {
 
 /// The pure mapping step. `stack` is the `pr stack --json` object, `diffs`
 /// holds each open PR's diff, `live` the current head, base and state.
-pub fn map_findings(
+fn map_findings(
     stack: &Value,
     diffs: &BTreeMap<u64, String>,
     findings: &[Value],
