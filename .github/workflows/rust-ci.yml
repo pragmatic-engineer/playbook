@@ -26,11 +26,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Classifies the change so docs-only PRs skip the heavy lanes. Required
+  # checks must still report, so the gated jobs below keep running and skip at
+  # STEP level (a skipped matrix job would leave "build-test (<os>)" pending and
+  # block the merge queue). Fails open: any error means docs_only=false.
+  #
+  # Docs-only means every changed path is a root policy file (README.md,
+  # CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, CHANGELOG.md) or a *.md
+  # under docs/. commands/, skills/, agents/, prompts/, output-styles/ and
+  # .github/ are never docs-only: tests read them.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Classify changed files
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          docs_only=false
+          case "$EVENT" in
+            pull_request) base="$PR_BASE" ;;
+            merge_group) base="$MG_BASE" ;;
+            push) base="$PUSH_BEFORE" ;;
+            *) base="" ;;
+          esac
+          if [ -n "$base" ] && [ "${base#0000000}" = "$base" ] \
+              && git fetch --no-tags --depth=1 origin "$base" 2>/dev/null \
+              && files="$(git diff --name-only "$base" HEAD)" \
+              && [ -n "$files" ]; then
+            echo "$files"
+            if ! echo "$files" | grep -qvE '^(docs/.+\.md|(README|CONTRIBUTING|SECURITY|CODE_OF_CONDUCT|CHANGELOG)\.md)$'; then
+              docs_only=true
+            fi
+          fi
+          echo "docs_only=$docs_only" | tee -a "$GITHUB_OUTPUT"
+
   build-test:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+    needs: changes
+    # Run even if `changes` failed (fail open); never let a skipped needs
+    # turn a required check into a skipped one.
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -42,7 +99,7 @@ jobs:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         # Linux-only action; it self-skips on macOS with a confusing warning
         # (same convention as shell-ci.yml).
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && needs.changes.outputs.docs_only != 'true'
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -57,8 +114,10 @@ jobs:
             static.rust-lang.org:443
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: needs.changes.outputs.docs_only != 'true'
 
       - name: Cache cargo registry and build output (build-test)
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -73,25 +132,31 @@ jobs:
       # reviewer can confirm the pin took effect from the job log instead of
       # trusting rustup's documented override behavior on faith.
       - name: rustc --version
+        if: needs.changes.outputs.docs_only != 'true'
         run: rustc --version
 
       - name: Ensure rustfmt and clippy components
+        if: needs.changes.outputs.docs_only != 'true'
         run: rustup component add rustfmt clippy
 
       - name: cargo fmt --check
+        if: needs.changes.outputs.docs_only != 'true'
         run: cargo fmt --check
 
       - name: cargo clippy
+        if: needs.changes.outputs.docs_only != 'true'
         run: cargo clippy --all-targets -- -D warnings
 
       # Non-test code must not panic on bad input: unwrap and expect are errors
       # there. Tests may use them, so this covers the library and the binary only.
       - name: cargo clippy (no unwrap or expect outside tests)
+        if: needs.changes.outputs.docs_only != 'true'
         run: cargo clippy --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
       # `tests/plugin_archive.rs` runs `claude plugin validate`, and fails in CI
       # when the CLI is missing. Pinned to a release older than two weeks.
       - name: Install the Claude Code CLI
+        if: needs.changes.outputs.docs_only != 'true'
         run: npm install --global @anthropic-ai/claude-code@2.1.282
 
       # nextest schedules every test across all test binaries, where
@@ -99,20 +164,24 @@ jobs:
       # other tools: the action to a commit SHA, the tool to a release older
       # than two weeks. It downloads a prebuilt binary from github.com.
       - name: Install cargo-nextest
+        if: needs.changes.outputs.docs_only != 'true'
         uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: nextest@0.9.145
 
       - name: cargo nextest run
+        if: needs.changes.outputs.docs_only != 'true'
         run: cargo nextest run --config-file .github/nextest.toml --profile ci
 
       # nextest does not run doctests.
       - name: cargo test --doc
+        if: needs.changes.outputs.docs_only != 'true'
         run: cargo test --doc
 
       # Moved out of shell-ci with the port: the seed validator is now a
       # subcommand, so it needs a built binary and belongs on this lane.
       - name: Validate the shipped settings seed
+        if: needs.changes.outputs.docs_only != 'true'
         run: |
           cargo build
           ./target/debug/playbook settings check \
@@ -122,10 +191,12 @@ jobs:
       # validator is now a subcommand too, so it needs the binary already
       # built by the step above.
       - name: Validate the tracked-file manifest
+        if: needs.changes.outputs.docs_only != 'true'
         run: ./target/debug/playbook manifest check .
 
       # Moved out of shell-ci for the same reason as the two validators above.
       - name: Validate agent definitions
+        if: needs.changes.outputs.docs_only != 'true'
         run: ./target/debug/playbook agents check
 
       # cargo-audit's own `cargo install --locked` compiles it from source
@@ -148,12 +219,14 @@ jobs:
       # first real run's harden-runner insights to confirm the cache
       # actually populates rather than assuming this holds forever.
       - name: Cache cargo-audit binary
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-audit
           key: cargo-audit-${{ runner.os }}-${{ env.CARGO_AUDIT_VERSION }}
 
       - name: cargo audit
+        if: needs.changes.outputs.docs_only != 'true'
         run: |
           if [ ! -x "$HOME/.cargo/bin/cargo-audit" ]; then
             cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
@@ -163,6 +236,46 @@ jobs:
           # repo at scan time, so caching the binary doesn't freeze which
           # CVEs get caught, only skips recompiling the same binary.
           cargo audit
+
+  # Cheap lane for docs-only changes: the only cargo tests that read docs
+  # (generated reference page drift, config-key coverage, README and index
+  # links, the policy table, the PR-flow wording). Runs only when the heavy
+  # lanes are skipped.
+  docs-checks:
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Cache cargo registry and build output (docs-checks)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-docs-checks-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-docs-checks-${{ runner.os }}-
+
+      - name: cargo test (doc-reading tests only)
+        run: cargo test --test reference_docs --test policy_table --test commands_pr_settings
 
   # release.yml builds five targets, but nothing else ever compiled for
   # Windows, so `std::os::unix` reached the lib unnoticed and every Windows
@@ -175,6 +288,8 @@ jobs:
   # release.yml is for. Tests are excluded on purpose; several still use
   # unix-only APIs and making them portable is separate work.
   windows-check:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: windows-latest
     permissions:
       contents: read
@@ -233,6 +348,8 @@ jobs:
   # (identical musl-tools technique, same matrix pattern) only runs on a
   # pushed tag or workflow_dispatch, never on a pull request.
   container-smoke:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     strategy:
       fail-fast: false
       matrix:
