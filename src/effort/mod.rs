@@ -3,15 +3,15 @@
 
 //! `playbook effort`: playbook's own ceiling on effort.
 //!
-//! The config key `effort.max` (`auto`, `low`, `medium`, `high`, `xhigh`,
-//! `max`) is playbook's setting. Claude Code has its own, `maxEffortLevel`,
-//! and playbook only ever reads it. Playbook never writes to Claude Code's
-//! settings files.
+//! The config key `maxEffortLevel` (`low`, `medium`, `high`, `xhigh`, `max`)
+//! is playbook's setting, with the same name and values as Claude Code's own
+//! key. `max` is the default and means playbook sets no ceiling. Playbook only
+//! ever reads Claude Code's key and never writes to its settings files.
 //!
 //! The effective ceiling is the lower of the two. When playbook's is lower,
-//! the launcher (`pb`, `cc`) passes it to that one session with `--settings`,
+//! the launcher (`ccc`, `ccd`) passes it to that one session with `--settings`,
 //! which Claude Code applies to command, skill and agent effort alike. When
-//! Claude Code's is as low or lower, or playbook is `auto`, the launcher adds
+//! Claude Code's is as low or lower, or playbook is `max`, the launcher adds
 //! nothing. A session started without the launcher gets no playbook ceiling.
 
 use crate::config::{self, write};
@@ -20,14 +20,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The config key.
-pub const KEY: &str = "effort.max";
+pub const KEY: &str = "maxEffortLevel";
 
-/// Every accepted value, `auto` first.
-pub const LEVELS: [&str; 6] = ["auto", "low", "medium", "high", "xhigh", "max"];
+/// Every accepted value, lowest first. Same set as Claude Code's key.
+pub const LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
-/// Position of `level` from lowest to highest, `None` for `auto` or unknown.
+/// Position of `level` from lowest to highest, `None` for an unknown level.
 fn rank(level: &str) -> Option<usize> {
-    LEVELS.iter().skip(1).position(|l| *l == level)
+    LEVELS.iter().position(|l| *l == level)
+}
+
+/// Playbook's `max` sets no ceiling, so it counts as unset.
+fn playbook_ceiling(level: &str) -> Option<&str> {
+    (level != "max").then_some(level)
 }
 
 /// The lower of two levels. An unknown or missing side loses.
@@ -61,8 +66,9 @@ pub struct Ceiling {
 
 impl Ceiling {
     pub fn new(playbook: &str, claude: Option<&str>) -> Self {
-        let effective = lower(Some(playbook), claude).map(str::to_string);
-        let winner = match (rank(playbook), claude.and_then(rank)) {
+        let own = playbook_ceiling(playbook);
+        let effective = lower(own, claude).map(str::to_string);
+        let winner = match (own.and_then(rank), claude.and_then(rank)) {
             (None, None) => Winner::Neither,
             (Some(_), None) => Winner::Playbook,
             (None, Some(_)) => Winner::ClaudeCode,
@@ -78,11 +84,11 @@ impl Ceiling {
     }
 }
 
-/// The configured level, `auto` when no tier sets one.
+/// The configured level, `max` (no ceiling) when no tier sets one.
 pub fn configured(home: &Path) -> String {
     match config::resolve(KEY, home, None) {
         Ok((Value::String(level), _)) => level,
-        _ => "auto".to_string(),
+        _ => "max".to_string(),
     }
 }
 
@@ -126,7 +132,7 @@ pub fn ceiling(home: &Path, claude_home: &Path, cwd: &Path) -> Ceiling {
 }
 
 /// The inline `--settings` value the launcher passes, or `None` when it has
-/// nothing to add: playbook is `auto`, or Claude Code's ceiling is as low or
+/// nothing to add: playbook is `max`, or Claude Code's ceiling is as low or
 /// lower.
 pub fn launcher_settings(home: &Path, claude_home: &Path, cwd: &Path) -> Option<String> {
     let c = ceiling(home, claude_home, cwd);
@@ -152,11 +158,11 @@ pub fn run_set(home: &Path, level: &str) -> Result<String, String> {
         None,
     )
     .map_err(|err| err.to_string())?;
-    Ok(if level == "auto" {
-        "effort set to auto, shipped defaults apply".to_string()
+    Ok(if level == "max" {
+        "maxEffortLevel set to max, playbook sets no ceiling".to_string()
     } else {
         format!(
-            "playbook effort.max set to {level}. Sessions started with pb or cc stay at or below it, \
+            "playbook maxEffortLevel set to {level}. Sessions started with ccc or ccd stay at or below it, \
              and never above your Claude Code maxEffortLevel. Claude Code's settings are not changed."
         )
     })
@@ -180,7 +186,7 @@ pub fn run_status(home: &Path, claude_home: &Path, cwd: &Path, json: bool) -> St
         .to_string();
     }
     format!(
-        "playbook effort.max: {}\nClaude Code maxEffortLevel: {}\neffective ceiling: {} ({winner})",
+        "playbook maxEffortLevel: {}\nClaude Code maxEffortLevel: {}\neffective ceiling: {} ({winner})",
         c.playbook,
         c.claude.as_deref().unwrap_or("none"),
         c.effective
@@ -205,9 +211,8 @@ mod tests {
     fn the_lower_of_two_levels_wins() {
         assert_eq!(lower(Some("xhigh"), Some("max")), Some("xhigh"));
         assert_eq!(lower(Some("xhigh"), Some("medium")), Some("medium"));
-        assert_eq!(lower(Some("auto"), Some("high")), Some("high"));
         assert_eq!(lower(Some("low"), None), Some("low"));
-        assert_eq!(lower(Some("auto"), None), None);
+        assert_eq!(lower(None, None), None);
     }
 
     #[test]
@@ -234,10 +239,10 @@ mod tests {
     }
 
     #[test]
-    fn auto_defers_to_claude_code_or_to_nobody() {
-        assert_eq!(Ceiling::new("auto", Some("low")).winner, Winner::ClaudeCode);
-        assert_eq!(Ceiling::new("auto", None).winner, Winner::Neither);
-        assert_eq!(Ceiling::new("auto", None).effective, None);
+    fn max_defers_to_claude_code_or_to_nobody() {
+        assert_eq!(Ceiling::new("max", Some("low")).winner, Winner::ClaudeCode);
+        assert_eq!(Ceiling::new("max", None).winner, Winner::Neither);
+        assert_eq!(Ceiling::new("max", None).effective, None);
     }
 
     #[test]
@@ -265,8 +270,8 @@ mod tests {
     }
 
     #[test]
-    fn playbook_auto_adds_nothing() {
-        let (home, claude) = setup("effort-auto");
+    fn playbook_max_adds_nothing() {
+        let (home, claude) = setup("effort-max");
         assert_eq!(launcher_settings(&home, &claude, &home), None);
     }
 
@@ -293,7 +298,7 @@ mod tests {
         let body = r#"{"maxEffortLevel":"high","theme":"dark"}"#;
         fs::write(claude.join("settings.json"), body).unwrap();
         run_set(&home, "low").unwrap();
-        run_set(&home, "auto").unwrap();
+        run_set(&home, "max").unwrap();
         assert_eq!(
             fs::read_to_string(claude.join("settings.json")).unwrap(),
             body
@@ -310,7 +315,7 @@ mod tests {
         .unwrap();
         run_set(&home, "xhigh").unwrap();
         let s = run_status(&home, &claude, &home, false);
-        assert!(s.contains("playbook effort.max: xhigh"), "{s}");
+        assert!(s.contains("playbook maxEffortLevel: xhigh"), "{s}");
         assert!(s.contains("Claude Code maxEffortLevel: medium"), "{s}");
         assert!(s.contains("effective ceiling: medium (claude-code)"), "{s}");
         let j: Value = serde_json::from_str(&run_status(&home, &claude, &home, true)).unwrap();

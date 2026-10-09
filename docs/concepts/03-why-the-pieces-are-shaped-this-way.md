@@ -63,11 +63,11 @@ You do not edit the variants by hand. `playbook agents gen` writes them from the
 
 Playbook sets the defaults, in each file. You set the ceiling.
 
-Playbook has its own ceiling, the config key `effort.max`, set with `playbook effort <level>`. Claude Code has one too, `maxEffortLevel`, and Claude Code always has the last word. The lower of the two applies:
+Playbook has its own ceiling, the config key `maxEffortLevel` (same name and values as Claude Code's), set with `playbook effort <level>`. Claude Code has one too, `maxEffortLevel`, and Claude Code always has the last word. The lower of the two applies:
 
 - Playbook `xhigh`, Claude Code `max`: `xhigh` applies, because `xhigh` is below `max`.
 - Playbook `xhigh`, Claude Code `medium`: `medium` applies. Playbook never goes above Claude Code.
-- Playbook `auto`: playbook adds no ceiling, and Claude Code's applies if it has one.
+- Playbook `max` (the default): playbook adds no ceiling, and Claude Code's applies if it has one.
 - A ceiling never raises anything. An agent that ships at `low` still runs at `low`.
 
 Playbook only reads Claude Code's `maxEffortLevel` (from the user, project and local settings files) and never writes it. When playbook's ceiling is the lower one, the launcher (`pb` or `cc`) passes it to that one session with `--settings`, and Claude Code applies it to command, skill and agent effort alike. A session started without the launcher gets no playbook ceiling. `playbook effort` with no level shows both values and the winner, and `--json` prints the same for scripts. Claude Code's own `/effort` and `--effort` still work below the ceiling, and the setting needs Claude Code 2.1.267 or later.
