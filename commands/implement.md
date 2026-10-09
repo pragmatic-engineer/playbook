@@ -110,23 +110,10 @@ In auto mode this command never force-pushes and never uses a forced lease. A pu
 **No task reference given (empty, or only flags)?** Run the Plan Picker:
 
 ```bash
-ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-if ! PLANS_DIR=$(playbook path plans 2>&1); then
-  echo "PLAN_PATH_ERROR: $PLANS_DIR"
-  exit 1
-fi
-found=0
-for f in "$PLANS_DIR"/*.md "$ROOT"/docs/adr/*-blueprint.md; do
-  [ -f "$f" ] || continue
-  case "$f" in *-quality.md|*.checkpoint.md|*.gate-source*.md) continue;; esac
-  found=1
-  title=$(grep -m1 '^#\{1,\} ' "$f" | sed 's/^#\{1,\} *//')
-  st=$(grep -m1 -iE 'status' "$f" | grep -ioE 'proposed|accepted|implemented' | head -1)
-  printf '%s\t[%s]\t%s\n' "${f#"$ROOT"/}" "${st:-?}" "${title:-untitled}"
-done
-[ "$found" = 0 ] && echo "NO_PLANS"
+playbook plans
 ```
 
+It prints one `path<TAB>[status]<TAB>title` row per plan file and ADR blueprint (quality, checkpoint and gate-source files are left out), or `NO_PLANS`, or `PLAN_PATH_ERROR: ...` with a non-zero exit. `playbook plans --json` prints the same rows as JSON.
 Present the rows as a numbered menu (index, status, title, path), listing unexecuted entries (`Proposed`/`Accepted`) first and `Implemented` last. Ask the user to pick a number, or to preview one first (Read it, show the summary, then re-ask). If the output is `NO_PLANS`, stop and tell the user to run `/playbook:plan` or `/playbook:adr` to create one. If the output starts with `PLAN_PATH_ERROR:`, stop and show the user that error verbatim (most likely no git `origin` remote); do NOT suggest running `/playbook:plan`, since the problem isn't an absence of plans. Use the chosen file as the task reference, then continue below. Any flags passed (e.g. `--auto`) still apply to the chosen plan.
 
 Otherwise, resolve `$ARGUMENTS` (minus flags) by format:
@@ -291,15 +278,8 @@ This is not optional when the commit looks fine. The report is the only place a 
 **Under the `land` boundary, each Segment additionally records** (nothing else in this schema changes, and a Segment under **savepoint** or **pause** omits these fields entirely rather than writing them empty): `land:` one of `NOT_STARTED | READY | CI_RUNNING | CI_FIXING | CONFLICT | MERGE_ATTEMPTED | MERGED (<merge-sha>) | PARKED | CI_UNSTABLE`; `review:` which review satisfied the ready-promotion gate, e.g. `implement-step9 (5 lenses, 3 findings fixed)`, plus a line per fix re-review, e.g. `fix-review tier-1 (correctness, 0 findings)`; `ci_fix_attempts: <n>/3` and `ci_rerun_attempts: <n>/2` as two separate counters, since a rerun is not a fix; `merge_attempts:` each attempt with its verbatim outcome, e.g. `--auto -> armed`, `--admin -> refused: <message>`; and, when parked, `parked_reason:` (the verbatim blocking field and refusal message) with `parked_at:` (ISO-8601). A resumed run reads `land:` before doing anything else with that Segment: `MERGED` skips it, `PARKED` routes to Step 10's parked-resume procedure, and anything else re-enters Step 10 at the stage that state names, never at Step 5. First use in a repo, create the dir:
 
 ```bash
-if ! IMPLEMENT_DIR=$(playbook path implement 2>&1); then
-  echo "error: playbook path implement failed: $IMPLEMENT_DIR" >&2
-  exit 1
-fi
-if ! WORKTREES_DIR=$(playbook path worktrees 2>&1); then
-  echo "error: playbook path worktrees failed: $WORKTREES_DIR" >&2
-  exit 1
-fi
-mkdir -p "$IMPLEMENT_DIR" "$WORKTREES_DIR"
+IMPLEMENT_DIR=$(playbook path implement --create) || exit 1
+WORKTREES_DIR=$(playbook path worktrees --create) || exit 1
 ```
 
 **Model tiering (MUST, never omit `model`).** Implementer Tasks spawn the `implementer` agent, which pins `model: sonnet` itself, so you don't set the model on those calls. Brief drafting (the scheduler's step 3, above) is genuine content generation delegated off the orchestrator's own turn, so it runs `model: "haiku"` explicitly on that one Agent call per wave. Ledger writes stay a direct orchestrator action: a few-line append per WU, small enough that a separate dispatch would cost more in round-trip latency than it saves in tokens. Verification and the adversarial review (Step 9) run the capable tier. An omitted `model` on a non-typed call silently inherits the priciest default, so always set it there.
@@ -499,21 +479,7 @@ gh pr ready "$BRANCH"
 **2. Gate on required checks.** Poll with a deadline; never `--watch` unbounded.
 
 ```bash
-DEADLINE=$(( $(date +%s) + 1200 ))
-while :; do
-  OUT=$(gh pr checks "$PR" --required --json name,bucket,link 2>/dev/null || echo '[]')
-  PEND=$(printf '%s' "$OUT" | playbook json bucket-counts pending | cut -d= -f2)
-  FAIL=$(printf '%s' "$OUT" | playbook json bucket-counts fail | cut -d= -f2)
-  CANC=$(printf '%s' "$OUT" | playbook json bucket-counts cancel | cut -d= -f2)
-  TOT=$(printf '%s' "$OUT" | playbook json array-length)
-  echo "checks total=$TOT pending=$PEND fail=$FAIL cancel=$CANC"
-  [ "$TOT" -eq 0 ]    && { echo "CI_VERDICT=NONE"; break; }
-  [ "$FAIL" -gt 0 ]   && { echo "CI_VERDICT=FAIL"; break; }
-  [ "$PEND" -eq 0 ] && [ "$CANC" -gt 0 ] && { echo "CI_VERDICT=CANCELLED"; break; }
-  [ "$PEND" -eq 0 ]   && { echo "CI_VERDICT=PASS"; break; }
-  [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "CI_VERDICT=TIMEOUT"; break; }
-  sleep 20
-done
+playbook pr ci-wait "$PR"
 ```
 
 `--required` is deliberate: the merge gate is what the repo enforces, not every check that exists. A failing NON-required check does not block the merge, but MUST be reported as a follow-up rather than silently dropped. `CI_VERDICT=NONE` (the repo requires no checks) is a legitimate pass; record it as `NONE`, never as `PASS`, so the ledger does not claim a gate that never ran. `CI_VERDICT=TIMEOUT` parks the Segment; do not merge a PR whose checks never finished.
@@ -565,31 +531,15 @@ Route in this order, first match wins:
 **6. Attempt the merge, then re-read.**
 
 ```bash
-set +e
-MERGE_OUT=$(gh pr merge "$PR" --auto 2>&1); MERGE_RC=$?
-set -e
-printf 'merge_rc=%s\n%s\n' "$MERGE_RC" "$MERGE_OUT"
+playbook pr merge "$PR"
 ```
 
-No strategy flag: where a merge queue is required it sets the strategy, and passing one only adds a stderr warning. If `MERGE_OUT` says auto-merge is not allowed for this repository, fall back to a synchronous `gh pr merge "$PR" --squash` (checks are already green by step 2); that is a repo-settings difference, not a permissions block, and it is discovered by attempting, not by reading `.allow_auto_merge` first.
+No strategy flag: where a merge queue is required it sets the strategy, and passing one only adds a stderr warning. If the output of `playbook pr merge` says auto-merge is not allowed for this repository, fall back to a synchronous `gh pr merge "$PR" --squash` (checks are already green by step 2); that is a repo-settings difference, not a permissions block, and it is discovered by attempting, not by reading `.allow_auto_merge` first.
 
-Then poll to a terminal state, re-reading rather than believing `$MERGE_RC`:
+Then poll to a terminal state, re-reading rather than believing `merge_rc`:
 
 ```bash
-DEADLINE=$(( $(date +%s) + 1800 ))
-while :; do
-  S=$(gh pr view "$PR" --json state,mergeStateStatus,reviewDecision,autoMergeRequest \
-        -q '[.state,.mergeStateStatus,(.reviewDecision//"-"),(if .autoMergeRequest then "armed" else "-" end)]|@tsv')
-  echo "$S"
-  case "$S" in
-    MERGED*)             echo "LAND_VERDICT=MERGED"; break;;
-    *REVIEW_REQUIRED*)   echo "LAND_VERDICT=REVIEW_GATE"; break;;
-    *CHANGES_REQUESTED*) echo "LAND_VERDICT=CHANGES_REQUESTED"; break;;
-    *DIRTY*|*BEHIND*)    echo "LAND_VERDICT=RESTATE"; break;;
-  esac
-  [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "LAND_VERDICT=TIMEOUT"; break; }
-  sleep 20
-done
+playbook pr land-wait "$PR"
 ```
 
 `RESTATE` returns to step 5. `TIMEOUT` with everything green falls through to the admin escalation below; a merge queue can hold a PR for its full batching window, so a deadline shorter than that window would escalate needlessly.
@@ -597,13 +547,10 @@ done
 **Admin escalation (MUST be gated on green checks).** Only when `LAND_VERDICT` is `REVIEW_GATE` or `TIMEOUT`, `mergeable == "MERGEABLE"`, AND step 2 returned `CI_VERDICT=PASS` or `NONE`:
 
 ```bash
-set +e
-ADMIN_OUT=$(gh pr merge "$PR" --admin --squash 2>&1); ADMIN_RC=$?
-set -e
-printf 'admin_rc=%s\n%s\n' "$ADMIN_RC" "$ADMIN_OUT"
+playbook pr merge "$PR" --admin
 ```
 
-**`--admin` bypasses required status checks, not only reviews.** Never reach it from a failing or unfinished CI state: the 3-attempt fix cap has no admin escape hatch, and "give up on CI, merge it anyway" is never a valid outcome of this loop. Re-read state afterwards, as always. If `ADMIN_OUT` says the PR must be merged using the asynchronous merge REST API, the PR's base is another open PR's branch, which `land` guarantees cannot happen: report the topology invariant as violated and STOP rather than retrying. Any permission refusal goes to step 7 with the message recorded verbatim.
+**`--admin` bypasses required status checks, not only reviews.** Never reach it from a failing or unfinished CI state: the 3-attempt fix cap has no admin escape hatch, and "give up on CI, merge it anyway" is never a valid outcome of this loop. Re-read state afterwards, as always. If the output of `playbook pr merge --admin` says the PR must be merged using the asynchronous merge REST API, the PR's base is another open PR's branch, which `land` guarantees cannot happen: report the topology invariant as violated and STOP rather than retrying. Any permission refusal goes to step 7 with the message recorded verbatim.
 
 **7. Park (a stop, not a wait).** A human approving and merging cannot happen inside one turn, so parking ends the run, the way **pause** does, but only because genuinely blocked. Record in the ledger:
 

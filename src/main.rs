@@ -508,6 +508,33 @@ fn main() {
                         }
                     }
                 }
+                PrCommand::CiWait {
+                    pr,
+                    timeout,
+                    interval,
+                } => {
+                    let verdict = pr::wait::ci_wait(
+                        std::time::Duration::from_secs(timeout),
+                        &mut || pr::wait::read_checks(&pr),
+                        &mut |line| println!("{line}"),
+                        &mut || std::thread::sleep(std::time::Duration::from_secs(interval)),
+                    );
+                    println!("CI_VERDICT={verdict}");
+                }
+                PrCommand::LandWait {
+                    pr,
+                    timeout,
+                    interval,
+                } => {
+                    let verdict = pr::wait::land_wait(
+                        std::time::Duration::from_secs(timeout),
+                        &mut || pr::wait::read_land_line(&pr),
+                        &mut |line| println!("{line}"),
+                        &mut || std::thread::sleep(std::time::Duration::from_secs(interval)),
+                    );
+                    println!("LAND_VERDICT={verdict}");
+                }
+                PrCommand::Merge { pr, admin } => println!("{}", pr::wait::merge(&pr, admin)),
                 PrCommand::ReviewTriage { pr, base, dir } => {
                     enter_dir("pr review-triage", dir.as_deref());
                     let outcome = match pr::triage::collect(pr, base.as_deref()) {
@@ -579,27 +606,50 @@ fn main() {
                 }
             }
         }
-        Command::Path { kind } => match common::repo_scoped_dir(common::RepoScope::Worktree) {
-            Some(base) => {
-                if let Some(repo_root) = playbook::manifest::check::toplevel() {
-                    if let Err(err) =
-                        playbook::gate::db::migrate_legacy_repo_local(&repo_root, &base)
-                    {
-                        eprintln!("playbook path: {err}");
-                        std::process::exit(1);
-                    }
-                }
-                println!("{}", base.join(kind.dir_name()).display());
+        Command::Plans { json } => {
+            let Some(base) = common::repo_scoped_dir(common::RepoScope::Worktree) else {
+                println!("PLAN_PATH_ERROR: could not resolve a worktree-scoped storage location; this repo needs a git 'origin' remote");
+                std::process::exit(1);
+            };
+            let root = playbook::manifest::check::toplevel()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            let plans = playbook::plans::list(&base.join("plans"), &root);
+            if json {
+                println!("{}", playbook::plans::to_json(&plans));
+            } else {
+                println!("{}", playbook::plans::render(&plans));
             }
-            None => {
-                eprintln!(
-                    "playbook path: could not resolve a worktree-scoped storage location; \
+        }
+        Command::Path { kind, create } => {
+            match common::repo_scoped_dir(common::RepoScope::Worktree) {
+                Some(base) => {
+                    if let Some(repo_root) = playbook::manifest::check::toplevel() {
+                        if let Err(err) =
+                            playbook::gate::db::migrate_legacy_repo_local(&repo_root, &base)
+                        {
+                            eprintln!("playbook path: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                    let dir = base.join(kind.dir_name());
+                    if create {
+                        if let Err(err) = std::fs::create_dir_all(&dir) {
+                            eprintln!("playbook path: could not create {}: {err}", dir.display());
+                            std::process::exit(1);
+                        }
+                    }
+                    println!("{}", dir.display());
+                }
+                None => {
+                    eprintln!(
+                        "playbook path: could not resolve a worktree-scoped storage location; \
                      this repo needs a git 'origin' remote and a resolvable worktree \
                      toplevel, refusing to fall back to a repo-local path"
-                );
-                std::process::exit(1);
+                    );
+                    std::process::exit(1);
+                }
             }
-        },
+        }
         Command::Worktree {
             sub: WorktreeCommand::Review { sub },
         } => match sub {
