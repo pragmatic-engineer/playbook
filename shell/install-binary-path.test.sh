@@ -120,9 +120,9 @@ GOOD_ASSET_BODY=$'#!/usr/bin/env bash\necho "playbook 1.2.3"\n'
 SUMS_BODY="$(_sha256 "$GOOD_ASSET_BODY")  $ASSET"
 
 run_binary_install() {
-    local home="$1" bindir="$2"
+    local home="$1" bindir="$2" shell_path="${3:-/bin/bash}"
     PATH="$BIN_STUB:$PATH" CLAUDE_HOME="$home/.claude" HOME="$home" \
-        PLAYBOOK_BIN_DIR="$bindir" SHELL=/bin/bash \
+        PLAYBOOK_BIN_DIR="$bindir" SHELL="$shell_path" \
         STUB_CODE=200 STUB_BODY="$RELEASE_BODY" \
         STUB_ASSET_BODY="$GOOD_ASSET_BODY" STUB_SUMS_BODY="$SUMS_BODY" \
         bash "$REPO_ROOT/install.sh" --no-setup --skip-plugin >/dev/null 2>&1
@@ -157,6 +157,41 @@ if [ "$(marker_count "$idem_home/.bashrc")" -eq 1 ]; then
 else
     fail "installing twice leaves exactly one PATH marker" \
         "markers: $(marker_count "$idem_home/.bashrc")"
+fi
+
+# 3. zsh gets ~/.zshenv (non-interactive hook shells skip ~/.zshrc), once, and
+# ~/.zshrc stays untouched.
+zsh_home="$(mktemp -d "$WORK/zsh-home.XXXXXX")"
+zsh_dir="$WORK/zsh-dir"
+run_binary_install "$zsh_home" "$zsh_dir" /bin/zsh
+run_binary_install "$zsh_home" "$zsh_dir" /bin/zsh
+if [ "$(marker_count "$zsh_home/.zshenv")" -eq 1 ] && [ ! -e "$zsh_home/.zshrc" ] \
+    && grep -qF "export PATH=\"$zsh_dir:\$PATH\"" "$zsh_home/.zshenv"; then
+    pass "zsh gets one PATH block in ~/.zshenv and nothing in ~/.zshrc"
+else
+    fail "zsh gets one PATH block in ~/.zshenv and nothing in ~/.zshrc" \
+        "zshenv markers: $(marker_count "$zsh_home/.zshenv"), zshrc exists: $([ -e "$zsh_home/.zshrc" ] && echo yes || echo no)"
+fi
+
+# 4. bash also gets its login file, reusing an existing ~/.profile instead of
+# creating ~/.bash_profile that would shadow it.
+login_home="$(mktemp -d "$WORK/login-home.XXXXXX")"
+printf '# mine\n' > "$login_home/.profile"
+run_binary_install "$login_home" "$WORK/login-dir"
+if [ "$(marker_count "$login_home/.profile")" -eq 1 ] && [ ! -e "$login_home/.bash_profile" ]; then
+    pass "bash PATH block goes into the existing login file, not a new shadowing one"
+else
+    fail "bash PATH block goes into the existing login file, not a new shadowing one" \
+        ".profile markers: $(marker_count "$login_home/.profile"), .bash_profile exists: $([ -e "$login_home/.bash_profile" ] && echo yes || echo no)"
+fi
+
+# 5. fish gets its own conf.d file.
+fish_home="$(mktemp -d "$WORK/fish-home.XXXXXX")"
+run_binary_install "$fish_home" "$WORK/fish-dir" /usr/bin/fish
+if grep -qF "fish_add_path -g \"$WORK/fish-dir\"" "$fish_home/.config/fish/conf.d/playbook.fish" 2>/dev/null; then
+    pass "fish gets a conf.d file with fish_add_path"
+else
+    fail "fish gets a conf.d file with fish_add_path"
 fi
 
 # --- install.sh must not assume a binary feature newer than the last release
@@ -284,6 +319,19 @@ fi
 # requested but the installed release predates the flag) is already covered
 # by the "predates an optional init flag" scenario above, which runs with
 # --yes against a stub that rejects --aliases as well as --system-prompt.
+
+# --binary-only never forwards the opt-in flags, even with --yes.
+binonly_home="$(mktemp -d "$WORK/binonly-home.XXXXXX")"
+PLAYBOOK_SRC="$SRC" CLAUDE_HOME="$binonly_home/.claude" HOME="$binonly_home" \
+    PLAYBOOK_BIN_DIR="$RECORDING_STUB_DIR" SHELL=/bin/bash \
+    bash "$REPO_ROOT/install.sh" --yes --binary-only >/dev/null 2>&1
+binonly_argv="$(cat "$WORK/init-argv.txt" 2>/dev/null || true)"
+if ! printf '%s' "$binonly_argv" | grep -q -- '--aliases\|--system-prompt'; then
+    pass "install.sh --binary-only does not opt in to the launcher or system prompt"
+else
+    fail "install.sh --binary-only does not opt in to the launcher or system prompt" \
+        "playbook init received: '$binonly_argv'"
+fi
 
 TOTAL=$(( PASS + FAIL ))
 echo ""

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# bin/playbook: bootstrap shim shipped in the marketplace plugin. Claude Code
+# puts a plugin's bin/ on the Bash tool's PATH, so `playbook` resolves even on
+# a machine that installed only the plugin and never ran install.sh.
+#
+# It runs the real binary when one exists. When none does, it runs the shipped
+# install.sh once (binary, PATH and init, no opt-in layers) pinned to this
+# plugin's version, then runs the installed binary. A guard variable stops it
+# from ever calling itself.
+set -u
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SELF_DIR/.." && pwd)"
+BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
+
+is_real() {
+    local c="$1"
+    if [ ! -x "$c" ] || [ ! -f "$c" ]; then return 1; fi
+    if [ "$(cd "$(dirname "$c")" && pwd)" = "$SELF_DIR" ]; then return 1; fi
+    return 0
+}
+
+find_real() {
+    local c dir
+    for c in "$BIN_DIR/playbook" "$HOME/.local/bin/playbook" \
+        /opt/homebrew/bin/playbook /usr/local/bin/playbook \
+        /home/linuxbrew/.linuxbrew/bin/playbook; do
+        if is_real "$c"; then printf '%s' "$c"; return 0; fi
+    done
+    local IFS=:
+    for dir in $PATH; do
+        [ -n "$dir" ] || continue
+        if is_real "$dir/playbook"; then printf '%s' "$dir/playbook"; return 0; fi
+    done
+    return 1
+}
+
+if real="$(find_real)"; then
+    exec "$real" "$@"
+fi
+
+INSTALL_HINT="curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash"
+
+if [ "${PLAYBOOK_SHIM_BOOTSTRAP:-}" = "1" ] || [ ! -f "$ROOT/install.sh" ]; then
+    echo "playbook: the binary is not installed. Run: $INSTALL_HINT" >&2
+    exit 127
+fi
+
+version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT/.claude-plugin/plugin.json" 2>/dev/null | head -n 1)"
+echo "playbook: binary not found, installing ${version:+v$version }once from the plugin's installer..." >&2
+if ! PLAYBOOK_SHIM_BOOTSTRAP=1 PLAYBOOK_REF="${version:+v$version}" \
+    bash "$ROOT/install.sh" --yes --binary-only >&2; then
+    echo "playbook: install failed. Run the installer by hand: $INSTALL_HINT" >&2
+    exit 127
+fi
+
+if real="$(find_real)"; then
+    exec "$real" "$@"
+fi
+echo "playbook: installed, but the binary is still not found in $BIN_DIR" >&2
+exit 127
