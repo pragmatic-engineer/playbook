@@ -52,6 +52,8 @@ When writing prose for human readers, invoke the `playbook:writing-style` skill 
 
 ## Memory
 
+**Never mix memories**: save and read memory only through playbook's store. Never write to Claude Code's auto memory (`~/.claude/projects/*/memory/`), its `MEMORY.md`, or any `CLAUDE.md` as a way to remember something.
+
 **Single global store** at `~/.config/playbook/memory/`. Global facts live flat. Project-scoped facts live under `~/.config/playbook/memory/<owner>/<repo>/` where `<owner>/<repo>` is derived from `git remote get-url origin` (strip protocol prefix and `.git` suffix). Both use: one fact per file, kebab-case names. Frontmatter: `name`, `description`, `type` (user|feedback|project|reference), `links:`, and optional `anchors:` (code locations the fact describes). Body for feedback/project: rule, then **Why:** and **How to apply:**.
 
 **Graph edges** (`links:` block; values are bare basenames, no path/extension): `supersedes` (new→old; act on the chain head, treat superseded as historical), `depends_on` (load the prerequisite for context), `relates_to` (symmetric; pull the neighbor), `contradicts` (symmetric; if both are live, surface the conflict, don't silently choose). Store each edge once on the authoring node; infer reverse links by scanning frontmatter at load. Traversal depth 1, except `supersedes` chains (follow fully). Edges resolve in the source's own scope, then global (org and project sources each fall back to global directly, not through each other); a fact shadows a same-basename fact in a less specific scope reached this way. A basename missing from both scopes tried is dangling (surface, don't fail). Self/cycle edges: surface, don't fail.

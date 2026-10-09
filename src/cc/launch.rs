@@ -52,6 +52,18 @@ pub fn split_flags(args: &[String]) -> (Vec<String>, Vec<String>) {
     (flags, args[i..].to_vec())
 }
 
+/// Claude Code's documented switch for its own auto memory.
+const DISABLE_AUTO_MEMORY_ENV: &str = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+
+/// Whether `memory.source` is `playbook`, so Claude Code's auto memory stays
+/// off in this session and only playbook memory is used.
+fn playbook_memory_only(home: &Path) -> bool {
+    matches!(
+        crate::config::resolve("memory.source", home, None),
+        Ok((serde_json::Value::String(v), _)) if v == "playbook"
+    )
+}
+
 /// Runs the launcher and returns the exit code of the session (or the failure).
 pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     let mut all: Vec<String> = Vec::new();
@@ -80,6 +92,11 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         all.extend(flags);
     }
     all.extend_from_slice(args);
+    if playbook_memory_only(&crate::common::home_dir()) {
+        // The session's own environment only. Claude Code's settings files
+        // and memory directories are never touched.
+        std::env::set_var(DISABLE_AUTO_MEMORY_ENV, "1");
+    }
 
     let mut cwd = cwd_now;
     let rc = dispatch(&mut cwd, &all);

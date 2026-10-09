@@ -8,6 +8,16 @@ Without persistent memory, every session rediscovers what it needs: your coding 
 
 Memory breaks that loop. Facts get written once and loaded on demand. The system knows which facts belong to one repo, which apply across every repo under one owner, and which apply everywhere.
 
+## Playbook memory and Claude Code memory
+
+Claude Code has its own memory: `CLAUDE.md` files you write and an auto memory it writes itself under `~/.claude/projects/<project>/memory/`. Playbook memory is separate, and the two never mix:
+
+- Playbook never changes Claude Code's memory. It does not write to auto memory files, `MEMORY.md` under `~/.claude`, `CLAUDE.md` files, or Claude Code's memory settings (`autoMemoryEnabled`, `autoMemoryDirectory`).
+- Every hook, command and skill that stores or loads playbook memory uses only `~/.config/playbook/memory/`.
+- You choose whether Claude Code's auto memory runs next to playbook memory. The config key `memory.source` is `both` by default. Set it to `playbook` and sessions started with `ccc` or `ccd` run with Claude Code's auto memory off. The launcher does this with the `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` environment variable for that one session, so no Claude Code file changes. Change it any time with `playbook config set --global memory.source <both|playbook>`.
+
+`tests/memory_isolation.rs` enforces the first two rules.
+
 ## Three Scopes
 
 All three scopes use the same file format and the same index structure. The only differences are scope and when the index is loaded.

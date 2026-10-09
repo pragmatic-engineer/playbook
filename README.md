@@ -322,7 +322,7 @@ Full documentation: [`docs/index.md`](docs/index.md).
 
 ## Memory
 
-One markdown store at `~/.config/playbook/memory/`, global and per-project, local-only and never committed. See [docs/concepts/02-memory-system.md](docs/concepts/02-memory-system.md).
+One markdown store at `~/.config/playbook/memory/`, global and per-project, local-only and never committed. Playbook memory never mixes with Claude Code's own memory: playbook never edits it, and `memory.source` (`both` or `playbook`) decides whether Claude Code's auto memory runs next to it in sessions started with `ccc` or `ccd`. See [docs/concepts/02-memory-system.md](docs/concepts/02-memory-system.md).
 
 ## Security
 

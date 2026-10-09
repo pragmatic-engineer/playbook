@@ -38,7 +38,7 @@ fn env(tag: &str) -> Env {
     }
     make_exec(
         &bin.join("claude"),
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nexit ${FAKE_EXIT:-0}\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nexit ${FAKE_EXIT:-0}\n",
     );
     Env { root, home, work }
 }
@@ -86,6 +86,7 @@ impl Env {
             .env("PWD", &self.work)
             .env("HOME", &self.home)
             .env("PATH", self.path())
+            .env_remove("CLAUDE_CODE_DISABLE_AUTO_MEMORY")
             .env("FAKE_LOG", self.log())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null");
@@ -487,4 +488,49 @@ fn a_fallback_the_user_chose_is_left_alone() {
     let raw = e.raw_calls();
     assert_eq!(raw[0].matches("--fallback-model").count(), 1, "{raw:?}");
     assert!(raw[0].contains("--fallback-model haiku"), "{raw:?}");
+}
+
+fn set_memory_source(e: &Env, value: &str) {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["config", "set", "--global", "memory.source", value])
+        .current_dir(&e.work)
+        .env("HOME", &e.home)
+        .output()
+        .expect("run playbook config set");
+    assert!(out.status.success(), "{out:?}");
+}
+
+fn mem_env_seen(e: &Env) -> String {
+    fs::read_to_string(e.root.join("claude.log.mem")).unwrap_or_default()
+}
+
+#[test]
+fn playbook_only_memory_turns_claude_auto_memory_off_for_the_session() {
+    let e = env("mem-playbook");
+    set_memory_source(&e, "playbook");
+    e.launch(&["fresh"]);
+    assert_eq!(mem_env_seen(&e).trim(), "1");
+}
+
+#[test]
+fn the_default_leaves_claude_auto_memory_alone() {
+    let e = env("mem-both");
+    e.launch(&["fresh"]);
+    assert_eq!(mem_env_seen(&e).trim(), "unset");
+    set_memory_source(&e, "both");
+    e.launch(&["fresh"]);
+    assert!(mem_env_seen(&e).lines().all(|l| l == "unset"));
+}
+
+#[test]
+fn choosing_a_memory_source_never_edits_claude_code_settings() {
+    let e = env("mem-no-write");
+    let settings = e.home.join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let body = r#"{"autoMemoryEnabled":true,"theme":"dark"}"#;
+    fs::write(&settings, body).unwrap();
+    set_memory_source(&e, "playbook");
+    e.launch(&["fresh"]);
+    set_memory_source(&e, "both");
+    assert_eq!(fs::read_to_string(&settings).unwrap(), body);
 }
