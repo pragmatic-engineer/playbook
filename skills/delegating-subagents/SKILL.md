@@ -5,34 +5,45 @@ description: Use before dispatching any subagent, and again the moment one finis
 
 # Delegating to Subagents
 
-A subagent's return value is not a delivery channel. Treat it as a courtesy.
-The artifact the agent writes to disk is the delivery channel.
+A return value can be lost. When the agent can write a file, the file is the
+delivery channel and the return value is a courtesy. When it cannot, the return
+value is the only channel, and silence means the agent did not run.
 
 ## The rule
 
-1. **Every brief names an output file.** Absolute path, stated in the prompt.
+1. **Every brief for an agent that can write names an output file.** Absolute
+   path, stated in the prompt.
 2. **The orchestrator reads that file** the moment the agent finishes, goes
    idle, or is given up on. Unconditionally, before drawing any conclusion.
 3. **A missing file is a distinct outcome** from an agent that found nothing.
    Say which one happened.
 
-## Why, with numbers
+## What we measured
 
-Measured across 22 delegations in one session on 2026-08-16 and 17:
+On 2026-08-16 and 17, 22 delegations in one session:
 
 | Spawn mechanism | Returned a result inline |
 |---|---|
 | Skill tool with `context: fork` and an `agent:` in frontmatter | 11 of 11 |
 | Agent tool, any `subagent_type`, plugin or built-in | 0 of 11 |
 
-The Agent-tool spawns were not hung and not idle. Four of them wrote code, ran
-their tests and committed. Two wrote full reports to the paths their briefs
-named. The only signal that came back was an idle notification carrying no
-payload.
+Re-measured on 2026-10-09 with Claude Code 2.1.293, using `claude -p` on Haiku
+and one Agent tool call per run. Each read-only agent was asked to read
+`Cargo.toml` and return a marker plus the package version:
 
-The cost of ignoring this: two blocking defects sat in a written report for a
-day while the orchestrator rediscovered them by hand, and a third finding in
-another report was never seen at all. The reports were on disk the whole time.
+- `reviewer`: 4 of 4 returned the marker.
+- `critic`: 4 of 4.
+- `fact-checker`: 3 of 3.
+- `cheap-checker`: 3 of 3.
+
+That is 14 of 14, at about $0.04 per run. Every Agent-tool spawn now returns its
+result, so the August number no longer holds. The August failure had a real
+cost: two blocking defects sat in a written report for a day, and a third
+finding was never seen. A lost return is rare now, not impossible.
+
+The limit of the new measurement: it is headless and foreground, with short
+tasks. Long interactive runs that go idle can still end with a notification and
+no payload, so the rules below stay.
 
 ## What does not work
 
@@ -103,15 +114,14 @@ example `playbook:reviewer-xhigh`. Never edit one by hand: `playbook agents
 check` fails CI when a variant is missing, stale, or edited. The set lives in
 `src/agents/variants.rs`.
 
-**For the read-only agents, variants included, there is no reliable delivery channel at all.** Their
-only route is the return value, and that is the route that fails. So:
+**For the read-only agents, variants included, the return value is the only delivery channel.** It
+worked in every run of the 2026-10-09 measurement. So:
 
-- **Do the pass inline instead.** For mechanical work this is simply better, not
-  a fallback: an ADR fact-check (path existence, line counts, graph acyclicity,
-  table agreement) runs as a handful of shell commands in about two minutes and
-  produces re-runnable output, while the delegated version returned nothing
-  across three attempts.
-- **If you do delegate one, treat silence as NOT RUN.** Never as "reviewed
+- **Delegate them.** Reviews, critiques and fact-checks run in their own
+  context, and the result comes back with the agent. For purely mechanical
+  checks (path existence, line counts, graph acyclicity) a few shell commands
+  you run yourself are still cheaper and re-runnable.
+- **If a return does not arrive, treat silence as NOT RUN.** Never as "reviewed
   clean", never as PASS. Say which lens or phase is missing, in the report and
   to the user.
 - **Do not grant them `Write` to work around this.** It breaks a CI-enforced
@@ -135,7 +145,7 @@ guess about what the agent would have said.
 **Choosing a mechanism.** When you genuinely need a result back inline and
 cannot poll a file, prefer a forked skill (`context: fork` with an `agent:` in
 the command's frontmatter) over an Agent-tool spawn. That path has been
-reliable.
+reliable in every measurement so far.
 
 **Reading the report is not optional even when the work looks obviously fine.**
 The reports that mattered most were written by agents whose commits were green,
