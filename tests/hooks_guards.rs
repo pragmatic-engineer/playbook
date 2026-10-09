@@ -770,6 +770,14 @@ mod precommit_check {
         )
         .expect("shim");
         fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).expect("chmod");
+        // The first run of a new executable can be slow on a scanning machine,
+        // longer than the hook waits for git. Pay that cost here, then clear the log.
+        let _ = Command::new(&shim)
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let _ = fs::remove_file(&log);
         let payload =
             serde_json::json!({ "tool_input": { "command": "git commit -m x" } }).to_string();
 
