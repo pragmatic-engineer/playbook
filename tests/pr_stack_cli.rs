@@ -100,3 +100,60 @@ fn the_text_form_marks_the_current_pr() {
     assert!(t.contains("#3 [open]") && t.contains("<- this PR"), "{t}");
     assert!(t.contains("merged (context only): 2"), "{t}");
 }
+
+fn sandbox(gh_body: &str) -> (PathBuf, String) {
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("pb-stack-map-{}-{n}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("bin")).unwrap();
+    let gh = root.join("bin/gh");
+    fs::write(&gh, format!("#!/bin/sh\n{gh_body}\n")).unwrap();
+    fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:/usr/bin:/bin", root.join("bin").display());
+    (root, path)
+}
+
+#[test]
+fn context_writes_a_diff_for_open_prs_only_and_map_posts_to_the_right_pr() {
+    let (root, path) = sandbox(&format!(
+        r#"FX='{fx}'
+case "$1 $2" in
+  "repo view") cat "$FX/repo.json" ;;
+  "api graphql") cat "$FX/api-middle-merged.json" ;;
+  "pr diff") printf 'diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1,2 +1,3 @@\n a\n+b\n c\n' ;;
+  "pr view")
+    case "$4" in
+      body,files) echo '{{"body":"why","files":[{{"path":"f.rs","additions":1,"deletions":0}}]}}' ;;
+      *) echo '{{"headRefOid":"sha'"$3"'","baseRefName":"b'$(($3-1))'","state":"OPEN"}}' ;;
+    esac ;;
+  *) exit 1 ;;
+esac"#,
+        fx = fixtures().display()
+    ));
+    let pb = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(args)
+            .env("HOME", &root)
+            .env("PATH", &path)
+            .current_dir(&root)
+            .output()
+            .unwrap()
+    };
+
+    let ctx = text(&pb(&["pr", "stack", "3 --context"]));
+    let stack_file = ctx
+        .lines()
+        .find_map(|l| l.strip_prefix("stack_file="))
+        .unwrap_or_else(|| panic!("no stack_file in {ctx}"));
+    assert!(
+        ctx.contains("diff_file_3=") && !ctx.contains("diff_file_1="),
+        "{ctx}"
+    );
+
+    let findings = root.join("findings.json");
+    fs::write(&findings, r#"[{"file":"f.rs","line":2,"body":"nit"}]"#).unwrap();
+    let args = format!("map --stack {stack_file} --findings {}", findings.display());
+    let o = pb(&["pr", "stack", &args]);
+    let v: serde_json::Value = serde_json::from_str(&text(&o)).expect("json");
+    assert_eq!(v["by_pr"]["4"]["comments"][0]["path"], "f.rs", "{v}");
+}
