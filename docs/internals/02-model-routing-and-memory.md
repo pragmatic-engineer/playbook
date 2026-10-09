@@ -56,6 +56,52 @@ To undo the pilot, set `model: sonnet` and `effort: high` in the two agent files
 | per-session variants such as `reviewer-low` | same as base | any tier | Not files. Rendered from the base agent by `ccc` and `ccd` into a throwaway session plugin (`--plugin-dir`), spawned as `playbook-variants:<name>`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
 | `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
 
+### Policy table: every component
+
+This table lists every agent, command and skill with the model and effort in its file. The test `tests/policy_table.rs` reads the frontmatter of `agents/*.md`, `commands/*.md` and `skills/*/SKILL.md` and fails when this table is missing a component, lists one that does not exist, or shows a model or effort that differs from the file. A dash means the file sets none. Change a file and this table in the same PR. To compare a setting on real inputs, run `playbook eval bench` (see [Effort cap per model](#effort-cap-per-model)).
+
+<!-- policy-table:start -->
+| Kind | Name | Model | Effort | Reason |
+| :- | :- | :- | :- | :- |
+| agent | `analyst` | `sonnet` | `high` | Distills collector findings into memory facts that later runs trust. |
+| agent | `auditor` | `opus` | `high` | A read-only repo audit where a missed finding is the cost. |
+| agent | `cheap-checker` | `haiku` | `low` | One narrow concern from a named reference file. A full lens covers the rest. |
+| agent | `collector` | `haiku` | `low` | Gathers and compacts raw history. The analyst does the thinking. |
+| agent | `critic` | `sonnet` | `high` | Adversarial review of plans and ADRs. A missed flaw is the cost. |
+| agent | `fact-checker` | `haiku` | `high` | Pilot (2026-10-09, 48 calls per cell): Haiku high 47/48, medium 45/48, Sonnet high 48/48, at about a tenth of the cost. |
+| agent | `git` | `haiku` | `xhigh` | Drafts commit and PR text. The commit type was right 42% of the time at low and 100% at xhigh. The one Haiku role allowed above medium (OPT_INS). |
+| agent | `implementer` | `sonnet` | `high` | Writes and commits production logic. |
+| agent | `patch-applier` | `haiku` | `low` | Applies an approved diff verbatim, with no judgment. |
+| agent | `review-triage` | `haiku` | `low` | A three-way classifier. A bad or missing answer falls back to a full lens. |
+| agent | `reviewer` | `opus` | `high` | Review is where a missed finding costs most. quick-review runs it at medium through the variant mechanism (--cap medium). |
+| agent | `test-reviewer` | `haiku` | `low` | Pilot (18 calls per cell): Haiku low, medium and high 18/18, Sonnet high 18/18, Sonnet low 16/18. |
+| command | `address-pr-comments` | `opus` | `high` | Judgment on review threads and replies that go public. |
+| command | `adr` | `opus` | `high` | A hard-to-reverse decision record. |
+| command | `commit-and-push` | - | - | Forks into the git agent, which sets the model and effort. |
+| command | `create-pull-request` | - | - | Forks into the git agent, which sets the model and effort. |
+| command | `deep-review` | `opus` | `high` | Orchestrates the reviewer swarm. A missed finding is the cost. |
+| command | `doctor` | `haiku` | `low` | Runs compiled helpers and prints the result. Mechanical. |
+| command | `fix` | `sonnet` | `high` | Small, well understood bugs, with code changes. |
+| command | `implement` | `sonnet` | `high` | Executes an approved plan and delegates edits. |
+| command | `learn-project` | `opus` | `high` | Builds durable memory from a whole repo. Mistakes persist. |
+| command | `plan` | `opus` | `high` | Design work. A weak plan is expensive. |
+| command | `quick-review` | `sonnet` | `medium` | One pass over a diff. Its reviewer runs on Opus at medium. |
+| command | `repo-audit` | - | - | Forks into the auditor agent, which sets the model and effort. |
+| command | `session-start` | `haiku` | `low` | Loads a saved handoff. Mechanical. |
+| command | `setup` | `haiku` | `low` | Runs compiled helpers and asks questions. Mechanical. |
+| skill | `atlassian-cli` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `delegating-subagents` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `engineering-standards-javascript` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `engineering-standards` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `finish-pull-request` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `grounding-research` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `grounding-review` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `playbook-usage` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `session-handoff` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `systematic-debugging` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `writing-style` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+<!-- policy-table:end -->
+
 ### Effort cap per model
 
 The Haiku 5.5 evaluation (#576) priced effort on Haiku: `xhigh` costs 2x `medium` for the same pass rate, and `max` costs 13x (about 7,100 thinking tokens and 32 s per call) and scores worst (91% against 97% at `medium`). So `src/effort/model_cap.rs` puts a ceiling on every component whose frontmatter model is Haiku:
