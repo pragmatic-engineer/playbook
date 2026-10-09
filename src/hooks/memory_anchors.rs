@@ -341,6 +341,12 @@ fn repo_relative_path(root: &str, raw_path: &str) -> String {
 }
 
 fn git_toplevel() -> String {
+    if let Some(top) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::common::gitfacts::toplevel(&cwd))
+    {
+        return top.to_string_lossy().into_owned();
+    }
     let mut command = Command::new("git");
     command.args(["--no-optional-locks", "rev-parse", "--show-toplevel"]);
     match run_with_timeout(&mut command, GIT_TIMEOUT) {

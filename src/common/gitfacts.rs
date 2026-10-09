@@ -193,6 +193,33 @@ pub fn config_origin_url(dir: &Path) -> Option<String> {
     parsed.origin_urls.last().cloned()
 }
 
+/// What `git rev-parse --abbrev-ref HEAD` prints: the branch name, or `HEAD`
+/// when detached. `None` for an unborn branch (git fails there), for a branch
+/// name that a tag shares (git prints `heads/<name>`), and when not certain.
+pub fn abbrev_head(dir: &Path) -> Option<String> {
+    let repo = discover(dir)?;
+    match head_of(&repo)? {
+        Head::Detached(_) => Some("HEAD".to_string()),
+        Head::Branch(name) => {
+            branch_sha(&repo, &name)?;
+            (!ref_exists(&repo, &format!("refs/tags/{name}"))).then_some(name)
+        }
+    }
+}
+
+fn ref_exists(repo: &Repo, name: &str) -> bool {
+    if repo.common_dir.join(name).exists() {
+        return true;
+    }
+    fs::read_to_string(repo.common_dir.join("packed-refs"))
+        .map(|packed| {
+            packed
+                .lines()
+                .any(|l| l.split_once(' ').is_some_and(|(_, r)| r == name))
+        })
+        .unwrap_or(false)
+}
+
 fn head_of(repo: &Repo) -> Option<Head> {
     let text = fs::read_to_string(repo.git_dir.join("HEAD")).ok()?;
     let line = text.trim_end_matches(['\n', '\r']);
@@ -502,6 +529,33 @@ mod tests {
             assert_matches_git(&dir);
             assert_eq!(current_branch(&dir), Some(None));
             assert_eq!(head_sha(&dir), Some(git(&dir, &["rev-parse", "HEAD"])));
+        });
+    }
+
+    #[test]
+    fn abbrev_head_matches_git() {
+        isolated(|| {
+            let dir = repo("gf-abbrev");
+            // Unborn: git fails, so the disk steps aside.
+            assert_eq!(abbrev_head(&dir), None);
+            commit(&dir, "a");
+            assert_eq!(
+                abbrev_head(&dir),
+                Some(git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]))
+            );
+            git(&dir, &["checkout", "-q", "--detach"]);
+            assert_eq!(
+                abbrev_head(&dir),
+                Some(git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]))
+            );
+            git(&dir, &["checkout", "-q", "main"]);
+            // A tag that shares the branch name makes git print `heads/main`.
+            git(&dir, &["tag", "main"]);
+            assert_eq!(abbrev_head(&dir), None);
+            assert_eq!(
+                git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]),
+                "heads/main"
+            );
         });
     }
 

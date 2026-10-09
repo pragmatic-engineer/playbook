@@ -21,7 +21,9 @@ pub fn record_head(payload: &Payload, dir: &Path) {
     let (Some(file), Some(root)) = (state_file(payload), repo_root(dir)) else {
         return;
     };
-    let head = git_output(dir, &["rev-parse", "--verify", "-q", "HEAD"]).unwrap_or_default();
+    let head = crate::common::gitfacts::head_sha(dir)
+        .or_else(|| git_output(dir, &["rev-parse", "--verify", "-q", "HEAD"]))
+        .unwrap_or_default();
     let mut heads = read(&file);
     heads.insert(root, Value::String(head.trim().to_string()));
     let _ = write_atomic(&file, &Value::Object(heads).to_string());
@@ -43,6 +45,9 @@ fn state_file(payload: &Payload) -> Option<PathBuf> {
 }
 
 fn repo_root(dir: &Path) -> Option<String> {
+    if let Some(top) = crate::common::gitfacts::toplevel(dir) {
+        return Some(top.to_string_lossy().into_owned());
+    }
     Some(
         git_output(dir, &["rev-parse", "--show-toplevel"])?
             .trim()
