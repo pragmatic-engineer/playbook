@@ -21,6 +21,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "mode",
     "maxEffortLevel",
     "memory.source",
+    "agents.variants",
     "auto.budgetUsd",
     "auto.warnPct",
     "fix.maxFiles",
@@ -67,6 +68,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "mode" => Some(Value::String("ask".to_string())),
         "maxEffortLevel" => Some(Value::String("auto".to_string())),
         "memory.source" => Some(Value::String("both".to_string())),
+        "agents.variants" => Some(Value::String("auto".to_string())),
         "auto.budgetUsd" => Some(Value::Number(5.into())),
         "auto.warnPct" => Some(Value::Number(70.into())),
         "fix.maxFiles" => Some(Value::Number(3.into())),
@@ -86,6 +88,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "mode" => Some(&["ask", "auto"]),
         "maxEffortLevel" => Some(&["auto", "low", "medium", "high", "xhigh", "max"]),
         "memory.source" => Some(&["both", "playbook"]),
+        "agents.variants" => Some(&["auto", "all", "off"]),
         _ => None,
     }
 }

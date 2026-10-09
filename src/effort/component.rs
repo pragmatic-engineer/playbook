@@ -79,6 +79,20 @@ pub fn shipped_effort(path: &Path) -> Option<String> {
     None
 }
 
+/// The variants this session can dispatch, named by the launcher in this
+/// variable (comma separated). A session started without the launcher has none.
+pub const VARIANTS_ENV: &str = "PLAYBOOK_AGENT_VARIANTS";
+
+/// The variant names in `VARIANTS_ENV`.
+pub fn available_variants() -> Vec<String> {
+    std::env::var(VARIANTS_ENV)
+        .unwrap_or_default()
+        .split(',')
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Everything known about one component's effort.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolution {
@@ -96,11 +110,13 @@ pub struct Resolution {
     pub ceiling: Option<String>,
     /// Shipped effort lowered by the ceiling.
     pub effective: Option<String>,
-    /// For an agent: the file to dispatch by default.
+    /// For an agent: the name to dispatch by default.
     pub file: Option<String>,
-    /// For an agent: every file at or below the ceiling, lowest first.
+    /// For an agent: the `subagent_type` to pass the `Agent` tool for `file`.
+    pub subagent_type: Option<String>,
+    /// For an agent: every name at or below the ceiling, lowest first.
     pub allowed: Vec<String>,
-    /// False when the ceiling is below every file the agent has, so the
+    /// False when the ceiling is below every agent the session has, so the
     /// lowest one is returned and still exceeds it.
     pub satisfied: bool,
 }
@@ -117,17 +133,15 @@ fn as_ceiling(level: &str) -> Option<&str> {
     (level != "auto" && level != "max").then_some(level)
 }
 
-/// The agent files with their efforts, lowest first: the base and each
-/// variant `VARIANTS` lists for it.
-fn agent_files(name: &str, shipped: &str, root: Option<&Path>) -> Vec<(String, String)> {
+/// The agents with their efforts, lowest first: the base and each variant
+/// the session has (`available`, from the launcher).
+fn agent_files(name: &str, shipped: &str, available: &[String]) -> Vec<(String, String)> {
     let mut files = vec![(name.to_string(), shipped.to_string())];
-    if let Some((_, tiers)) = VARIANTS.iter().find(|(base, _)| *base == name) {
-        for tier in *tiers {
+    if VARIANTS.iter().any(|(base, _)| *base == name) {
+        for tier in crate::agents::variants::TIERS {
             let variant = variant_name(name, tier);
-            let present =
-                root.is_none_or(|r| r.join("agents").join(format!("{variant}.md")).is_file());
-            if present {
-                files.push((variant, (*tier).to_string()));
+            if tier != shipped && available.contains(&variant) {
+                files.push((variant, tier.to_string()));
             }
         }
     }
@@ -144,6 +158,19 @@ pub fn resolve(
     claude: Option<&str>,
     root: Option<&Path>,
 ) -> Resolution {
+    resolve_with(kind, name, home, claude, root, &available_variants())
+}
+
+/// `resolve` with the session's variants given instead of read from the
+/// environment.
+pub fn resolve_with(
+    kind: Kind,
+    name: &str,
+    home: &Path,
+    claude: Option<&str>,
+    root: Option<&Path>,
+    available: &[String],
+) -> Resolution {
     let path = root.map(|r| kind.file(r, name));
     let known = path.as_deref().is_some_and(Path::is_file);
     let shipped = path.as_deref().and_then(shipped_effort);
@@ -159,9 +186,10 @@ pub fn resolve(
     };
 
     let (mut file, mut allowed, mut satisfied) = (None, Vec::new(), true);
+    let mut subagent_type = None;
     if kind == Kind::Agent {
         if let Some(base_effort) = shipped.as_deref() {
-            let files = agent_files(name, base_effort, root);
+            let files = agent_files(name, base_effort, available);
             let limit = ceiling.as_deref().and_then(rank);
             allowed = files
                 .iter()
@@ -177,6 +205,11 @@ pub fn resolve(
                 .or_else(|| files.first());
             if let Some((f, e)) = pick {
                 satisfied = limit.is_none_or(|l| rank(e).is_some_and(|r| r <= l));
+                subagent_type = Some(if f == name {
+                    format!("playbook:{f}")
+                } else {
+                    f.clone()
+                });
                 file = Some(f.clone());
             }
             if allowed.is_empty() {
@@ -196,6 +229,7 @@ pub fn resolve(
         ceiling,
         effective,
         file,
+        subagent_type,
         allowed,
         satisfied,
     }
@@ -214,6 +248,7 @@ impl Resolution {
             "ceiling": self.ceiling,
             "effective": self.effective,
             "file": self.file,
+            "subagentType": self.subagent_type,
             "allowed": self.allowed,
             "satisfied": self.satisfied,
         })
@@ -230,9 +265,12 @@ impl Resolution {
             show(&self.effective),
         );
         if let Some(file) = &self.file {
-            out.push_str(&format!("\ndispatch: {file}"));
+            let ty = self.subagent_type.as_deref().unwrap_or(file);
+            out.push_str(&format!("\ndispatch: {ty}"));
             if !self.satisfied {
-                out.push_str(" (no variant is low enough for the ceiling)");
+                out.push_str(
+                    " (no variant is low enough for the ceiling, or the session has none)",
+                );
             }
         }
         if !self.known {
@@ -364,16 +402,6 @@ mod tests {
         let agent =
             |effort: &str| format!("---\nname: x\ndescription: d\neffort: {effort}\n---\nBody\n");
         fs::write(root.join("agents/reviewer.md"), agent("high")).unwrap();
-        fs::write(
-            root.join("agents/reviewer-low.md"),
-            format!("{MARKER} x -->\n"),
-        )
-        .unwrap();
-        fs::write(
-            root.join("agents/reviewer-xhigh.md"),
-            format!("{MARKER} x -->\n"),
-        )
-        .unwrap();
         fs::write(root.join("agents/git.md"), agent("low")).unwrap();
         fs::write(root.join("commands/deep-review.md"), agent("high")).unwrap();
         fs::write(
@@ -382,6 +410,10 @@ mod tests {
         )
         .unwrap();
         (home, root)
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
     }
 
     fn set(home: &Path, key: &str, value: &str) {
@@ -402,7 +434,7 @@ mod tests {
     fn a_ceiling_never_raises_the_shipped_effort() {
         let (home, root) = plugin("cmp-never-raise");
         set(&home, "effort.agents.git", "xhigh");
-        let r = resolve(Kind::Agent, "git", &home, None, Some(&root));
+        let r = resolve_with(Kind::Agent, "git", &home, None, Some(&root), &[]);
         assert_eq!(r.effective.as_deref(), Some("low"));
         assert_eq!(r.file.as_deref(), Some("git"));
     }
@@ -447,8 +479,10 @@ mod tests {
     fn an_agent_resolves_to_the_variant_at_or_below_the_ceiling() {
         let (home, root) = plugin("cmp-variant");
         set(&home, "effort.agents.reviewer", "low");
-        let r = resolve(Kind::Agent, "reviewer", &home, None, Some(&root));
+        let have = names(&["reviewer-low", "reviewer-medium", "reviewer-xhigh"]);
+        let r = resolve_with(Kind::Agent, "reviewer", &home, None, Some(&root), &have);
         assert_eq!(r.file.as_deref(), Some("reviewer-low"));
+        assert_eq!(r.subagent_type.as_deref(), Some("reviewer-low"));
         assert_eq!(r.allowed, vec!["reviewer-low"]);
         assert!(r.satisfied);
     }
@@ -456,10 +490,21 @@ mod tests {
     #[test]
     fn with_no_ceiling_an_agent_keeps_its_base_and_lists_every_variant() {
         let (home, root) = plugin("cmp-base");
-        let r = resolve(Kind::Agent, "reviewer", &home, None, Some(&root));
+        let have = names(&["reviewer-low", "reviewer-medium", "reviewer-xhigh"]);
+        let r = resolve_with(Kind::Agent, "reviewer", &home, None, Some(&root), &have);
         assert_eq!(r.file.as_deref(), Some("reviewer"));
+        assert_eq!(r.subagent_type.as_deref(), Some("playbook:reviewer"));
         assert!(r.allowed.contains(&"reviewer-low".to_string()));
         assert!(r.allowed.contains(&"reviewer-xhigh".to_string()));
+    }
+
+    #[test]
+    fn a_session_without_the_launcher_has_only_the_base_agent() {
+        let (home, root) = plugin("cmp-no-launcher");
+        set(&home, "effort.agents.reviewer", "low");
+        let r = resolve_with(Kind::Agent, "reviewer", &home, None, Some(&root), &[]);
+        assert_eq!(r.file.as_deref(), Some("reviewer"));
+        assert!(!r.satisfied);
     }
 
     #[test]
@@ -471,7 +516,7 @@ mod tests {
         )
         .unwrap();
         set(&home, "effort.agents.critic", "low");
-        let r = resolve(Kind::Agent, "critic", &home, None, Some(&root));
+        let r = resolve_with(Kind::Agent, "critic", &home, None, Some(&root), &[]);
         assert_eq!(r.file.as_deref(), Some("critic"));
         assert!(!r.satisfied);
         assert!(r.to_text().contains("no variant is low enough"));
@@ -490,14 +535,14 @@ mod tests {
     fn an_unknown_component_is_reported_not_rejected() {
         let (home, root) = plugin("cmp-unknown");
         set(&home, "effort.agents.ghost", "low");
-        let r = resolve(Kind::Agent, "ghost", &home, None, Some(&root));
+        let r = resolve_with(Kind::Agent, "ghost", &home, None, Some(&root), &[]);
         assert!(!r.known);
         assert!(r.to_text().contains("no such component"));
         assert_eq!(stale_keys(&home, &root), vec!["effort.agents.ghost"]);
     }
 
     #[test]
-    fn list_skips_generated_variants_and_shows_every_kind() {
+    fn list_shows_every_kind() {
         let (home, root) = plugin("cmp-list");
         let names: Vec<String> = components(&root)
             .into_iter()
@@ -514,6 +559,5 @@ mod tests {
         );
         let text = run_list(&home, None, Some(&root), false);
         assert!(text.contains("agents/reviewer"), "{text}");
-        assert!(!text.contains("reviewer-low"), "{text}");
     }
 }
