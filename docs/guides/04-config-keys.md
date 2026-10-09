@@ -17,7 +17,7 @@ The command rejects an unknown key, a value of the wrong type, and a number outs
 
 All tiers live in one SQLite database, `~/.config/playbook/playbook.db`, not in files you edit by hand. Change values with `playbook config set`. Use `playbook config export` to print every stored value as JSON, and `playbook config import <file>` to load such a document back (it checks every key and value first, and stores nothing if one is invalid).
 
-Older versions kept `config.json` files (global, `orgs/<owner>/` and `repos/<owner>/<repo>/.config/`). The first run of this version imports them and renames each one to `config.json.migrated`. Editing a `config.json` after that has no effect. Auto mode blocks the model from running `playbook config import` and from touching the database.
+Older versions kept `config.json` files (global, `orgs/<owner>/` and `repos/<owner>/<repo>/.config/`). The first run of this version imports them and renames each one to `config.json.migrated`. Reads ignore a `config.json` written after that. `playbook init` and every `playbook config` command adopt such a file when its values agree with the stored ones (and rename it to `config.json.migrated`). When a value differs, or the file is not valid JSON, the file stays in place and `playbook config` warns with its path. Use `playbook config set` to change settings. Auto mode blocks the model from running `playbook config import` and from touching the database.
 
 ## Reference
 
