@@ -5,6 +5,7 @@
 //! `main.rs` parses and dispatches on, plus the `common` helpers and the
 //! `hooks` modules, one per hook.
 
+pub mod adr;
 pub mod agents;
 pub mod cc;
 pub mod ci;
@@ -20,6 +21,7 @@ pub mod handoff;
 pub mod hooks;
 pub mod init;
 pub mod json;
+pub mod learn;
 pub mod manifest;
 pub mod memory_import;
 pub mod mode;
@@ -373,6 +375,16 @@ pub enum Command {
         #[arg(long)]
         create: bool,
     },
+    /// ADR helpers
+    Adr {
+        #[command(subcommand)]
+        sub: AdrCommand,
+    },
+    /// Helpers for `/playbook:learn-project`
+    Learn {
+        #[command(subcommand)]
+        sub: LearnCommand,
+    },
     /// The git steps of `/playbook:commit-and-push`
     Commit {
         #[command(subcommand)]
@@ -715,6 +727,26 @@ pub enum PrCommand {
         #[arg(long)]
         dir: Option<String>,
     },
+    /// Cut the skill rules a PR title and body need
+    ///
+    /// Reads the writing-style and engineering-standards skills under
+    /// `CLAUDE_PLUGIN_ROOT`, writes four files under `/tmp`, checks each, and
+    /// prints their paths. A failed check prints `ERROR: ...` and exits 1.
+    Rules {
+        /// Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
+        #[arg(long)]
+        plugin_root: Option<PathBuf>,
+    },
+    /// Resolve a PR and fetch its review threads and comments
+    ///
+    /// Takes the command's arguments as one string (`#12 --bots --dry-run -y`).
+    /// Prints the PR, head SHA, your login and the flags, and writes the
+    /// threads and issue comments as JSON under `/tmp`.
+    Comments {
+        /// The command's arguments, as one string
+        #[arg(default_value = "")]
+        args: String,
+    },
     /// Wait for a PR's required checks to finish
     ///
     /// Prints a `checks total=.. pending=.. fail=.. cancel=..` line per read,
@@ -755,6 +787,23 @@ pub enum PrCommand {
         #[arg(long)]
         admin: bool,
     },
+}
+
+/// `playbook adr` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum AdrCommand {
+    /// Print the next ADR number and today's date
+    ///
+    /// Creates `docs/adr` in the repo if it is missing. Prints
+    /// `Next number: NNNN   Date: YYYY-MM-DD`.
+    Next,
+}
+
+/// `playbook learn` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum LearnCommand {
+    /// Name the repo and memory store, probe the tools, and tally JIRA keys
+    Preflight,
 }
 
 /// `playbook commit` subcommands.

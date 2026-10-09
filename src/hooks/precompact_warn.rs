@@ -80,7 +80,7 @@ wrap up (a session handoff), then /clear for a fresh session."
 /// Current local time as `%Y-%m-%d %H:%M:%S`, formatted in process with
 /// `localtime_r`. Empty on any failure; never panics.
 #[cfg(unix)]
-fn current_timestamp() -> String {
+pub fn current_timestamp() -> String {
     // SAFETY: `time` and `localtime_r` write only to the locals passed in, and
     // `strftime` stays within the buffer length it is given.
     unsafe {
@@ -103,7 +103,7 @@ fn current_timestamp() -> String {
 
 /// No `localtime_r` off unix, so the log line carries an empty timestamp.
 #[cfg(not(unix))]
-fn current_timestamp() -> String {
+pub fn current_timestamp() -> String {
     String::new()
 }
 

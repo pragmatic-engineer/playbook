@@ -1350,7 +1350,7 @@ fn comments_in_this_test_and_the_commands_carry_no_planning_references() {
     let mut offenders = Vec::new();
     let own_source = include_str!("commands_auto_parity.rs");
     assert!(
-        !load("learn-project").comments().is_empty(),
+        !load("implement").comments().is_empty(),
         "the comment extractor found nothing in a file full of shell comments"
     );
 

@@ -75,81 +75,16 @@ Parse `$ARGUMENTS` token-by-token:
 ## Step 1: Resolve PR and capture context
 
 ```bash
-ARGS="$ARGUMENTS"
-INCLUDE_BOTS=false
-DRY_RUN=false
-AUTO_COMMIT=false
-PR_NUMBER=""
-
-for tok in $ARGS; do
-  case "$tok" in
-    --bots) INCLUDE_BOTS=true ;;
-    --dry-run) DRY_RUN=true ;;
-    -y|--yes) AUTO_COMMIT=true ;;
-    --auto|--ask) ;;
-    \#[0-9]*) PR_NUMBER="${tok#\#}" ;;
-    [0-9]*) PR_NUMBER="$tok" ;;
-    *) echo "warning: ignoring unknown arg '$tok'" >&2 ;;
-  esac
-done
-
-if [ -z "$PR_NUMBER" ]; then
-  PR_NUMBER=$(gh pr view --json number -q .number 2>/dev/null) || { echo "error: no PR for current branch; pass a PR number" >&2; exit 1; }
-fi
-
-REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-OWNER="${REPO%/*}"
-NAME="${REPO#*/}"
-HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
-ME=$(gh api /user -q .login)
-
-echo "PR: $REPO#$PR_NUMBER"
-echo "Head SHA: $HEAD_SHA"
-echo "Me: $ME"
-echo "Flags: bots=$INCLUDE_BOTS dry-run=$DRY_RUN auto-commit=$AUTO_COMMIT"
+playbook pr comments "$ARGUMENTS"
 ```
+
+It parses the flags and the PR number, resolves the PR from the current branch when none is given, and prints `PR: owner/name#N`, `Head SHA:`, `Me:` and `Flags: bots=... dry-run=... auto-commit=...`. It also runs the Step 2 fetch. It exits 1 with `error: no PR for current branch; pass a PR number` when it cannot resolve a PR.
 
 Capture `PR_NUMBER`, `OWNER`, `NAME`, `HEAD_SHA`, `ME`, and the three flag values. You need them for every later step.
 
 ## Step 2: Fetch unresolved review threads and PR-level comments
 
-Two sources of comments: inline review threads (have a `path` and `line`) and PR-level issue comments (top of the PR page).
-
-```bash
-# Review threads. databaseId on the first comment is needed for REST replies.
-gh api graphql -f query='
-  query($owner: String!, $name: String!, $pr: Int!) {
-    repository(owner: $owner, name: $name) {
-      pullRequest(number: $pr) {
-        reviewThreads(first: 100) {
-          nodes {
-            id
-            isResolved
-            isOutdated
-            path
-            line
-            originalLine
-            comments(first: 50) {
-              nodes {
-                id
-                databaseId
-                author { login }
-                body
-                url
-                createdAt
-              }
-            }
-          }
-        }
-      }
-    }
-  }' -F owner="$OWNER" -F name="$NAME" -F pr="$PR_NUMBER" \
-  > /tmp/pr-comments-$PR_NUMBER-threads.json
-
-# PR-level issue comments (no path/line)
-gh api "/repos/$OWNER/$NAME/issues/$PR_NUMBER/comments" --paginate \
-  > /tmp/pr-comments-$PR_NUMBER-issues.json
-```
+Step 1's command already fetched both sources and wrote them to `/tmp/pr-comments-<PR>-threads.json` (inline review threads with a `path` and `line`, plus the GraphQL ids and the first comment's `databaseId` needed for REST replies) and `/tmp/pr-comments-<PR>-issues.json` (PR-level issue comments, no path or line).
 
 Now filter in Claude (not bash) so you can reason about each thread:
 

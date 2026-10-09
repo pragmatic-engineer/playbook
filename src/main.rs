@@ -6,13 +6,13 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, ci, commit, common, config, deps, doctor, effort, eval, gate, handoff, hooks, init,
-    json, manifest, memory_import, mode, pr, release, review, sanitize, settings, statusline,
-    trust, update, usage, worktree, AgentsCommand, CcCommand, Cli, Command, CommitCommand,
-    ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand, EvalCommand, GateCommand,
-    HandoffCommand, JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand,
-    ReleaseCommand, ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SettingsCommand,
-    UsageCommand, WorktreeCommand,
+    adr, agents, cc, ci, commit, common, config, deps, doctor, effort, eval, gate, handoff, hooks,
+    init, json, learn, manifest, memory_import, mode, pr, release, review, sanitize, settings,
+    statusline, trust, update, usage, worktree, AdrCommand, AgentsCommand, CcCommand, Cli, Command,
+    CommitCommand, ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand, EvalCommand,
+    GateCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand,
+    ModeArg, ModeCommand, PrCommand, ReleaseCommand, ReviewCommand, ReviewWorktreeCommand,
+    SanitizeCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -559,6 +559,27 @@ fn main() {
                         }
                     }
                 }
+                PrCommand::Comments { args } => match pr::comments::run(&args) {
+                    Ok(text) => println!("{text}"),
+                    Err(err) => {
+                        eprintln!("{err}");
+                        std::process::exit(1);
+                    }
+                },
+                PrCommand::Rules { plugin_root } => {
+                    let root = plugin_root
+                        .or_else(|| std::env::var_os("CLAUDE_PLUGIN_ROOT").map(Into::into))
+                        .unwrap_or_default();
+                    let dir = std::env::temp_dir()
+                        .join(format!("create-pr-step0-{}", std::process::id()));
+                    match pr::rules::extract(&root, &dir) {
+                        Ok(ex) => println!("{}", pr::rules::report(&ex)),
+                        Err(err) => {
+                            eprintln!("ERROR: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 PrCommand::CiWait {
                     pr,
                     timeout,
@@ -698,6 +719,35 @@ fn main() {
                             }
                         }
                     }
+                }
+            }
+        }
+        Command::Adr {
+            sub: AdrCommand::Next,
+        } => {
+            let Some(root) = manifest::check::toplevel() else {
+                eprintln!("error: not in a git repo");
+                std::process::exit(1);
+            };
+            let today = hooks::precompact_warn::current_timestamp();
+            let today = today.split(' ').next().unwrap_or("");
+            match adr::next_line(&root, today) {
+                Ok(line) => println!("{line}"),
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::Learn {
+            sub: LearnCommand::Preflight,
+        } => {
+            let dir = std::env::current_dir().unwrap_or_default();
+            match learn::preflight(&dir, &common::home_dir()) {
+                Ok(text) => println!("{text}"),
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    std::process::exit(1);
                 }
             }
         }

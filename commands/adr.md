@@ -107,15 +107,12 @@ Wait for the user to acknowledge before Stage 2.
 ### Determine the filename
 
 ```bash
-ROOT=$(git rev-parse --show-toplevel)
-DIR="$ROOT/docs/adr"
-mkdir -p "$DIR"
-N=$(ls "$DIR" 2>/dev/null | grep -oE '^[0-9]{4}' | sort -rn | head -1)
-NEXT=$(printf '%04d' $(( 10#${N:-0} + 1 )))
-echo "Next number: $NEXT   Date: $(date +%Y-%m-%d)"
+playbook adr next
 ```
 
-Filename: `{NEXT}-{kebab-title}.md` in `$DIR`. Write the record directly there (never to a temp/local scratch path).
+It creates `docs/adr` if needed and prints `Next number: NNNN   Date: YYYY-MM-DD`.
+
+Filename: `{NEXT}-{kebab-title}.md` in `docs/adr` at the repo root. Write the record directly there (never to a temp/local scratch path).
 
 ### Decision Record
 
