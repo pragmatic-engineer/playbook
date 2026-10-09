@@ -53,31 +53,10 @@ In auto mode behave as `--stage`: collect and analyse, then write the candidates
 ## Phase 0: Preflight and scope
 
 ```bash
-set -e
-ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "error: not in a git repo" >&2; exit 1; }
-cd "$ROOT"
-REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) || { u=$(git remote get-url origin 2>/dev/null); u=${u%.git}; REPO="$(basename "$(dirname "$u")")/$(basename "$u")"; }
-STORE="$HOME/.config/playbook/memory/$REPO"
-COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 0)
-echo "Repo:    $REPO"
-echo "Root:    $ROOT"
-echo "Store:   $STORE"
-echo "Commits: $COMMITS"
-
-# capability probes
-command -v gh   >/dev/null && gh auth status >/dev/null 2>&1 && echo "gh:   ok" || echo "gh:   UNAVAILABLE (PRs skipped)"
-if command -v acli >/dev/null; then
-  echo "acli: present ($(acli --version 2>/dev/null | head -1))"
-  acli jira auth status       >/dev/null 2>&1 && echo "acli jira:       authed" || echo "acli jira:       NOT authed"
-  acli confluence auth status >/dev/null 2>&1 && echo "acli confluence: authed" || echo "acli confluence: NOT authed"
-else
-  echo "acli: absent"
-fi
-
-# JIRA project keys referenced in history (histogram)
-echo "JIRA keys in history:"
-git log --oneline -500 2>/dev/null | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | sed -E 's/-[0-9]+$//' | sort | uniq -c | sort -rn | head || true
+playbook learn preflight
 ```
+
+It prints `Repo:`, `Root:`, `Store:` and `Commits:` lines, then `gh:` and `acli:` probe lines (with `acli jira:` and `acli confluence:` auth lines when `acli` is present), then the JIRA project keys found in the last 500 commits as a count histogram. It exits 1 with `error: not in a git repo` outside a repository.
 
 Then, before collecting:
 

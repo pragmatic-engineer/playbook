@@ -59,47 +59,13 @@ If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, a
 
 In auto mode, `/playbook:finish-pull-request` skips the `/clear` self-review. When `/playbook:implement` opened this PR, its review already covered the code. Any other caller gets no review there, and the finish skill's final report says that no self-review ran. If `--ready` was passed, it still promotes the draft. The `autoReview.fix` and `autoMerge.enabled` settings still apply in auto mode, except that the finish skill never merges a PR whose code no review covered.
 
-**Then load the skill rules.** This step needs four things: `playbook:writing-style`'s voice/banned-words/dash rules, its "When creating PRs" guidance, its "Prohibited GitHub Content" rules (the PR title and body are posted to GitHub, so these apply), and `playbook:engineering-standards`' PR readiness criteria and size limits (used in Step 2). Reading each full skill file to get a subset that small is most of Step 0's own cost, so extract only those sections with `sed` instead of invoking the Skill tool. A guard checks each extracted block for a marker string, and for the one range whose end-marker is exact heading text rather than a heading *level* (engineering-standards' Readiness+Size slice), also checks that a later section's heading is ABSENT, so a rename of the end-marker heading fails loudly instead of silently pulling everything through end of file:
+**Then load the skill rules.** This step needs four things: `playbook:writing-style`'s voice/banned-words/dash rules, its "When creating PRs" guidance, its "Prohibited GitHub Content" rules (the PR title and body are posted to GitHub, so these apply), and `playbook:engineering-standards`' PR readiness criteria and size limits (used in Step 2). Reading each full skill file to get a subset that small is most of Step 0's own cost, so one command extracts only those sections instead of invoking the Skill tool. It checks each extracted file for a marker string, and checks that a later section's heading is absent from the engineering-standards slice, so a renamed heading fails loudly instead of silently pulling in everything through the end of the file:
 
 ```bash
-WS="${CLAUDE_PLUGIN_ROOT}/skills/writing-style/SKILL.md"
-ES="${CLAUDE_PLUGIN_ROOT}/skills/engineering-standards/SKILL.md"
-[ -r "$WS" ] || { echo "ERROR: $WS not found under \$CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead." >&2; exit 1; }
-[ -r "$ES" ] || { echo "ERROR: $ES not found under \$CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead." >&2; exit 1; }
-
-# Process-scoped names: two runs (even against different repos) never share
-# a fixed /tmp path and overwrite each other's extracts.
-EXTRACT_DIR="/tmp/create-pr-step0-$$"
-mkdir -p "$EXTRACT_DIR"
-CORE="$EXTRACT_DIR/writing-style-core.md"
-PRS="$EXTRACT_DIR/writing-style-prs.md"
-GH="$EXTRACT_DIR/writing-style-github.md"
-ENG="$EXTRACT_DIR/eng-standards.md"
-
-sed -n '1,/^# GitHub-Specific Rules/p' "$WS" | sed '$d' > "$CORE"
-sed -n '/^### When creating PRs/,/^## /p' "$WS" | sed '$d' > "$PRS"
-sed -n '/^## Prohibited GitHub Content/,/^## Examples/p' "$WS" | sed '$d' > "$GH"
-sed -n '/^### Readiness/,/^### Review Comments/p' "$ES" | sed '$d' > "$ENG"
-
-for f in "$CORE" "$PRS" "$GH" "$ENG"; do
-  if [ ! -s "$f" ]; then
-    echo "ERROR: $f extracted empty; the source skill's heading text likely changed. Read the full skill via the Skill tool instead before continuing." >&2
-    exit 1
-  fi
-done
-grep -q "IRON RULE" "$CORE" && grep -q "Banned Words" "$CORE" \
-  || { echo "ERROR: writing-style core extraction is missing an expected rule; read the full skill via the Skill tool instead." >&2; exit 1; }
-grep -q "Readiness" "$ENG" && grep -q "Size" "$ENG" \
-  || { echo "ERROR: engineering-standards extraction is missing Readiness or Size; read the full skill via the Skill tool instead." >&2; exit 1; }
-grep -q "Automated Testing" "$ENG" \
-  && { echo "ERROR: engineering-standards extraction ran past Review Comments into Automated Testing; the end-marker heading likely changed. Read the full skill via the Skill tool instead." >&2; exit 1; }
-
-echo "Skill sections extracted and verified:"
-echo "  $CORE"
-echo "  $PRS"
-echo "  $GH"
-echo "  $ENG"
+playbook pr rules
 ```
+
+On success it prints `Skill sections extracted and verified:` and then four paths. On failure it prints `ERROR: ...` and exits 1.
 
 Read all four printed paths with the Read tool now. Together they carry the same rules Step 0 has always needed: voice, banned words, the dash rule, "When creating PRs" guidance, the Prohibited GitHub Content rules, and the PR readiness/size limits enforced in Step 2. "Natural Imperfections" (the other subsection under writing-style's GitHub-Specific Rules) is deliberately not extracted: it governs injecting casual typos/imperfections into posted *review* comments, not PR titles/bodies, so it doesn't apply here. If any guard above fails, fall back to invoking the full skill via the Skill tool for that one file rather than proceeding without its rules.
 
