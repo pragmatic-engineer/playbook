@@ -49,6 +49,6 @@ Older versions kept `config.json` files (global, `orgs/<owner>/` and `repos/<own
 ## See also
 
 - [Review and PR flow](02-review-and-pr-flow.md#pr-and-commit-settings): how the PR keys behave in detail.
-- [Auto mode](../../README.md#auto-mode): what `mode`, `auto.budgetUsd` and `auto.warnPct` turn on.
+- [Auto mode](05-auto-mode.md): what `mode`, `auto.budgetUsd` and `auto.warnPct` turn on.
 - [Plan and implement](01-plan-and-implement.md): the `/playbook:fix` limits.
 - [Worktree engine](../internals/03-worktree.md): the sweep that the `worktreeCleanup.*` keys control.

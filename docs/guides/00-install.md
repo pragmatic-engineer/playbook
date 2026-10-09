@@ -13,6 +13,62 @@ This page covers requirements, the full local install path with the curl one-lin
 | `gh` | optional | statusline PR and CI status |
 | `agent-browser` | optional | browser automation MCP used by `/playbook:plan` for web-only tickets and attachments |
 
+## Install without `curl | bash`
+
+Two routes avoid piping a script into a shell.
+
+**Route 1: plugin, then `/playbook:setup`.**
+
+```bash
+claude plugin marketplace add pragmatic-engineer/marketplace
+claude plugin install playbook@pragmatic-engineer
+```
+
+Then run `/playbook:setup` in a Claude Code session. It installs the release binary (checksum verified) when none is on `PATH`, wires the guards and settings, and offers the launchers and system prompt. Check with `/playbook:doctor`.
+
+`claude plugin install` alone gives you the skills, commands and subagents, and nothing else. Without the binary every hook is dead and the guards stay unwired, so `/playbook:doctor` reports the binary, guards and status line as missing. The plugin also ships a `bin/playbook` shim: the first `playbook` call installs the binary once (binary and `PATH` only).
+
+**Route 2: fully manual.**
+
+1. Install the plugin as above.
+2. From the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest), download the asset for your platform and `SHA256SUMS`.
+
+   | Platform | Asset |
+   |---|---|
+   | macOS, Apple silicon | `playbook-<version>-aarch64-apple-darwin` |
+   | macOS, Intel | `playbook-<version>-x86_64-apple-darwin` |
+   | Linux, x86_64 | `playbook-<version>-x86_64-unknown-linux-musl` |
+   | Linux, arm64 | `playbook-<version>-aarch64-unknown-linux-musl` |
+   | Windows | `playbook-<version>-x86_64-pc-windows-msvc.exe` |
+
+3. Verify it. `SHA256SUMS` is not signed, so treat it as a corruption check. To verify where the binary was built, use the GitHub CLI:
+
+   ```bash
+   grep "  <asset>$" SHA256SUMS | shasum -a 256 -c -
+   gh attestation verify <asset> --repo pragmatic-engineer/playbook
+   ```
+
+   `install.sh` and `playbook update` run the attestation check when `gh` is available. They warn when `gh` is missing or the release predates attestations, and abort on a real mismatch. Set `PLAYBOOK_REQUIRE_ATTESTATION=1` to abort on a missing check too.
+
+4. Put it on `PATH`:
+
+   ```bash
+   mkdir -p ~/.local/bin
+   mv <asset> ~/.local/bin/playbook
+   chmod 0755 ~/.local/bin/playbook
+   ```
+
+5. Wire the local config. `CLAUDE_PLUGIN_ROOT` is required, or `init` skips almost every step:
+
+   ```bash
+   CLAUDE_PLUGIN_ROOT=~/.claude/plugins/cache/pragmatic-engineer/playbook/<version> \
+     playbook init
+   ```
+
+   In a terminal, `playbook init` asks about hooks, shared settings, `PATH`, the launcher and the system prompt. Each has a `--x` and `--no-x` flag to skip the question. With `--yes`, or without a terminal, hooks, settings and `PATH` are on and the launcher and system prompt are off. Every step is idempotent.
+
+6. Run `/playbook:doctor`.
+
 ## Full local install with curl
 
 The `curl | bash` one-liner is a two-step install: it fetches, verifies (SHA256, then a `--version` smoke test), and installs the `playbook` binary into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`), puts that directory on `PATH` (see below), then hands off to `playbook init`, which wires the safety guards and functional hooks into `settings.json`, seeds or merges the rest of the local config, and installs the shell launcher and statusline. It also runs the plugin install and prompts for the opt-in layers. Use this if you want the full `~/.claude` file set locally (for example, to clone and edit the config).
