@@ -411,6 +411,7 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
         return Ok(());
     }
     let live_state = live::Live::new();
+    let timing = live::Timing::from_env();
     for request in server.incoming_requests() {
         let host = header_value(&request, "Host");
         let fetch_site = header_value(&request, "Sec-Fetch-Site");
@@ -419,7 +420,7 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
         let url = request.url().to_string();
         let (path, query) = url.split_once('?').unwrap_or((url.as_str(), ""));
         let path = path.to_string();
-        let (mut status, mut content_type, mut body) = if !host_allowed(host.as_deref(), port) {
+        let (status, content_type, body) = if !host_allowed(host.as_deref(), port) {
             (
                 403,
                 "text/plain; charset=utf-8",
@@ -435,28 +436,40 @@ pub fn serve(paths: &Paths) -> Result<(), String> {
             respond_to(&path, query, token_ok, |api| load(paths, api))
         };
         if status == 200 && content_type == live::EVENT_STREAM {
-            match live_state.try_acquire(live::MAX_STREAMS) {
-                Some(slot) => {
-                    let (state, owned) = (std::sync::Arc::clone(&live_state), paths.clone());
-                    // If the thread cannot start, the request and slot drop with the closure.
-                    let _ = std::thread::Builder::new()
-                        .name("usage-live".to_string())
-                        .spawn(move || {
-                            let _slot = slot;
-                            let next = || state.summary(|| live_summary(&owned));
-                            let writer = request.into_writer();
-                            let _ = live::stream(writer, next, live::TICK, live::MAX_LIFETIME);
-                        });
-                    continue;
-                }
-                None => {
-                    (status, content_type, body) = (
-                        503,
-                        "text/plain; charset=utf-8",
-                        "too many live streams are open".to_string(),
-                    );
-                }
-            }
+            // The slot is taken on the stream's own thread, which may wait a
+            // moment for a client that just left, so the accept loop never blocks.
+            let (state, owned) = (std::sync::Arc::clone(&live_state), paths.clone());
+            // If the thread cannot start, the request drops with the closure.
+            let _ = std::thread::Builder::new()
+                .name("usage-live".to_string())
+                .spawn(move || {
+                    let Some(slot) = state.acquire_within(live::MAX_STREAMS, timing.reopen_grace)
+                    else {
+                        let mut refused = tiny_http::Response::from_string(
+                            "too many live streams are open".to_string(),
+                        )
+                        .with_status_code(503);
+                        for (name, value) in [
+                            ("Content-Type", "text/plain; charset=utf-8"),
+                            ("Cache-Control", "no-store"),
+                            ("X-Content-Type-Options", "nosniff"),
+                        ] {
+                            if let Ok(header) =
+                                tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes())
+                            {
+                                refused.add_header(header);
+                            }
+                        }
+                        let _ = request.respond(refused);
+                        return;
+                    };
+                    let _slot = slot;
+                    let stuck = state.stuck();
+                    let next = || state.summary(|| live_summary(&owned));
+                    let writer = request.into_writer();
+                    let _ = live::stream_guarded(writer, next, timing, stuck);
+                });
+            continue;
         }
         let mut response = tiny_http::Response::from_string(body).with_status_code(status);
         let mut headers = vec![
