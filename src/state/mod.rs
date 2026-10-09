@@ -14,7 +14,6 @@ use crate::config::store;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
 
 pub const MIGRATIONS_APPLIED: &str = "migrations/applied/";
 pub const MIGRATIONS_SHIPPED: &str = "migrations/shipped/";
@@ -37,12 +36,6 @@ impl std::error::Error for StateError {}
 
 fn err(e: impl std::fmt::Display) -> StateError {
     StateError(e.to_string())
-}
-
-fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
 }
 
 /// Open the database under `root` and run the one-time import of the old
@@ -75,7 +68,7 @@ impl Tx<'_> {
             .execute(
                 "INSERT INTO state (key, value, updated_at) VALUES (?1, ?2, ?3)
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-                params![key, value, now()],
+                params![key, value, crate::common::time::now_secs()],
             )
             .map(|_| ())
             .map_err(err)
@@ -200,8 +193,8 @@ fn file_epoch(path: &Path, body: &str) -> i64 {
         fs::metadata(path)
             .and_then(|m| m.modified())
             .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map_or(0, |d| d.as_secs() as i64)
+            .and_then(crate::common::time::epoch_secs_of)
+            .unwrap_or(0)
     })
 }
 

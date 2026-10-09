@@ -8,17 +8,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Default age past which a review worktree's lock counts as stale.
 const DEFAULT_TTL_SECS: i64 = 86_400;
-
-fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
 
 /// `git <args>` in the current directory, trimmed stdout on success.
 fn git_out(args: &[&str]) -> Option<String> {
@@ -106,7 +98,7 @@ pub fn setup_with_url(pr: &str, head_sha: &str, known_url: Option<&str>) -> Resu
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_TTL_SECS);
-    sweep_stale(Path::new(&root), now_secs(), ttl);
+    sweep_stale(Path::new(&root), crate::common::time::now_secs(), ttl);
 
     let fetch_url = match std::env::var("GH_FETCH_URL") {
         Ok(url) if !url.is_empty() => url,
@@ -176,7 +168,7 @@ pub fn setup_with_url(pr: &str, head_sha: &str, known_url: Option<&str>) -> Resu
     let reason = format!(
         "review pr={pr} pid={} ts={}",
         std::process::id(),
-        now_secs()
+        crate::common::time::now_secs()
     );
     if !git_loud(&["worktree", "lock", "--reason", &reason, &dir_str]) {
         return Err(format!("failed to lock worktree at {dir_str}"));
@@ -218,7 +210,13 @@ pub fn teardown(path: &Path) {
     let slug = (!slug.is_empty()).then_some(slug);
     let repo_root = std::env::current_dir().unwrap_or_default();
     // A disabled cleanup policy exits Ok without removing, so check the path.
-    if let Ok(line) = super::remove(&repo_root, &home, slug.as_deref(), path, now_secs()) {
+    if let Ok(line) = super::remove(
+        &repo_root,
+        &home,
+        slug.as_deref(),
+        path,
+        crate::common::time::now_secs(),
+    ) {
         println!("{line}");
     }
     if path.exists() {

@@ -16,7 +16,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 const SCHEMA_SQL: &str = "\
 CREATE TABLE IF NOT EXISTS meta (
@@ -60,12 +60,6 @@ fn tier_str(tier: Tier) -> &'static str {
         Tier::Org => "org",
         Tier::Repo => "repo",
     }
-}
-
-fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
 }
 
 /// A database error is reported as the database path, the same shape a
@@ -225,7 +219,7 @@ fn upsert(
         "INSERT INTO config (tier, scope, key, value_json, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) \
          ON CONFLICT (tier, scope, key) DO UPDATE SET \
          value_json = excluded.value_json, updated_at = excluded.updated_at",
-        params![tier, scope, key, value.to_string(), now()],
+        params![tier, scope, key, value.to_string(), crate::common::time::now_secs()],
     )
     .map(|_| ())
 }

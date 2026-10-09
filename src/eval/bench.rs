@@ -446,10 +446,7 @@ fn run_test(
     let dir = std::env::temp_dir().join(format!(
         "playbook-bench-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
+        crate::common::time::now_nanos()
     ));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let result = (|| {

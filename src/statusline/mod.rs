@@ -65,9 +65,7 @@ pub fn run() -> i32 {
     let mut raw = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut raw);
     let input = String::from_utf8_lossy(&raw);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
+    let now = crate::common::time::now_secs();
     let out = render(&input, &Env::from_process(), now);
     let mut stdout = std::io::stdout().lock();
     let _ = stdout.write_all(&out);

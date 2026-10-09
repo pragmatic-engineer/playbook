@@ -139,7 +139,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let settings_path = paths.claude_home.join("settings.json");
     let self_root = paths.self_root.as_deref();
     // One stamp for every backup of this run, so a second boundary cannot split them.
-    let epoch = wire::now_epoch_secs();
+    let epoch = crate::common::time::now_epoch_secs();
 
     let ctx = migrate::Ctx {
         home: paths.home.clone(),

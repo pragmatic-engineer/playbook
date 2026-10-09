@@ -491,10 +491,7 @@ fn worktree_rows(env: &Env) -> Vec<Row> {
             "not in a git repo, worktrees not checked",
         )];
     };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now = crate::common::time::now_secs();
     match crate::worktree::sweep(root, &env.home, env.repo_slug.as_deref(), true, now) {
         Ok(lines) if lines.is_empty() => {
             vec![Row::new("-", Level::Info, "no stale worktrees found")]

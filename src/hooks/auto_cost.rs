@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 const INTERVAL_VAR: &str = "PLAYBOOK_AUTO_COST_INTERVAL_MS";
 const DEFAULT_INTERVAL_MS: u64 = 2000;
@@ -371,7 +371,7 @@ fn refresh(payload: &Payload) -> Option<State> {
         return None;
     }
     let state_path = dir.join(STATE_FILE);
-    let now = now_ms();
+    let now = crate::common::time::now_ms();
     if let Some(state) = load::<State>(&state_path) {
         if now.saturating_sub(state.computed_at_ms) < interval_ms() {
             return Some(state);
@@ -607,12 +607,6 @@ fn interval_ms() -> u64 {
         .ok()
         .and_then(|raw| raw.trim().parse().ok())
         .unwrap_or(DEFAULT_INTERVAL_MS)
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
 }
 
 fn load<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
