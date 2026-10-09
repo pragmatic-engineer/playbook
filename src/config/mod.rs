@@ -10,6 +10,7 @@
 //! defaults, not Claude Code's.
 
 pub mod keys;
+pub mod store;
 pub mod write;
 
 use serde_json::Value;
@@ -47,8 +48,8 @@ impl Source {
 /// as "nothing to merge into yet".
 #[derive(Debug)]
 pub enum ConfigError {
-    /// A tier file exists but is not readable as a JSON object: either it
-    /// fails to parse, or it parses to a non-object value.
+    /// The config database is unreadable, or a legacy tier file being
+    /// imported is not a JSON object. Holds the path of the offender.
     Malformed(PathBuf),
     /// `key` is not in `keys::KNOWN_KEYS`, so no tier and no default can
     /// ever supply it.
@@ -151,18 +152,14 @@ pub fn resolve(
     keys::default_value(key).ok_or_else(|| ConfigError::UnknownKey(key.to_string()))?;
 
     let root = crate::common::paths::playbook_root_from(home);
-
-    if let Some((owner, repo)) = repo_slug.and_then(|slug| slug.split_once('/')) {
-        if let Some(value) = lookup_tier(&repo_config_path(&root, owner, repo), key)? {
-            return Ok((value, Source::Repo));
-        }
-
-        if let Some(value) = lookup_tier(&org_config_path(&root, owner), key)? {
-            return Ok((value, Source::Org));
-        }
+    let found = store::lookup(&root, key, repo_slug)?;
+    if let Some(value) = found.repo {
+        return Ok((value, Source::Repo));
     }
-
-    if let Some(value) = lookup_tier(&global_config_path(&root), key)? {
+    if let Some(value) = found.org {
+        return Ok((value, Source::Org));
+    }
+    if let Some(value) = found.global {
         return Ok((value, Source::Global));
     }
 
@@ -265,31 +262,11 @@ pub(crate) fn any_scoped_config(root: &Path) -> bool {
     false
 }
 
-/// Read one tier file and look up `key` in it. `Ok(None)` means "no
-/// override here", covering both a missing file and a file that parses
-/// fine but does not contain `key`; both fall through to the next tier the
-/// same way. A file that fails to parse, or that parses to something other
-/// than a JSON object, is `Err` instead: a malformed file is never silently
-/// treated as absent.
-fn lookup_tier(path: &Path, key: &str) -> Result<Option<Value>, ConfigError> {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(ConfigError::Malformed(path.to_path_buf())),
-    };
-    let parsed: Value =
-        serde_json::from_str(&raw).map_err(|_| ConfigError::Malformed(path.to_path_buf()))?;
-    if !parsed.is_object() {
-        return Err(ConfigError::Malformed(path.to_path_buf()));
-    }
-    Ok(dotted_lookup(&parsed, key).cloned())
-}
-
 /// Look up a dotted path (`"autoReview.enabled"`) inside a JSON object,
 /// descending one segment at a time. `None` means some segment along the
 /// path is absent, distinct from a `Some(Value::Null)` found at the full
 /// path, which is a present value.
-fn dotted_lookup<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+pub(crate) fn dotted_lookup<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     let mut current = value;
     for segment in key.split('.') {
         current = current.as_object()?.get(segment)?;

@@ -346,7 +346,9 @@ fn is_config_file(path: &Path, root: &Path) -> bool {
         .collect();
     matches!(
         parts.as_slice(),
-        ["config.json"] | ["orgs", _, "config.json"] | ["repos", _, _, ".config", "config.json"]
+        ["config.json" | "playbook.db" | "playbook.db-wal" | "playbook.db-shm"]
+            | ["orgs", _, "config.json"]
+            | ["repos", _, _, ".config", "config.json"]
     )
 }
 
