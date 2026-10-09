@@ -6,14 +6,45 @@
 
 | Command | What it does |
 |---|---|
-| `playbook usage` | Reads anything new, then prints a text summary in the terminal. |
-| `playbook usage ingest` | Reads anything new into the store and prints how many events it added. |
-| `playbook usage dashboard` | Starts the local dashboard server if it is not running, then opens it in your browser. |
+| `playbook usage` | Opens the terminal view. When stdout is not a terminal, prints the text summary instead. |
+| `playbook usage --summary` | Reads anything new, then prints the text summary and exits. |
+| `playbook usage --json` | Prints the totals, the groups and the live view as JSON, for scripts. |
+| `playbook usage --range <30d\|60d\|90d\|month\|all>` | Sets the range for the terminal view and `--json`. The default is `30d`. |
+| `playbook usage --web` | Opens the web dashboard. Deprecated, removed in v0.22.0. |
+| `playbook usage ingest` | Reads anything new into the store. Deprecated, use `--summary` or `--json`. |
+| `playbook usage dashboard` | Starts the dashboard server and opens it. Deprecated, use `--web`. |
 | `playbook usage dashboard stop` | Stops the server. |
 
-Every command that shows data reads new history first, so you never need to ingest by hand. `ingest` exists for scripts and for checking what was added.
+Every command that shows data reads new history first, so you never need to ingest by hand.
 
-The dashboard is for macOS and Linux. The server prints two addresses: `http://127.0.0.1:<port>`, which it always opens, and `http://playbook.localhost:<port>`, which works where your system resolves `*.localhost` (Chrome on macOS does).
+The web dashboard is for macOS and Linux. The server prints two addresses: `http://127.0.0.1:<port>`, which it always opens, and `http://playbook.localhost:<port>`, which works where your system resolves `*.localhost` (Chrome on macOS does).
+
+## The terminal view
+
+The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. Resizing needs no handling because every redraw reads the current size. It shows six panels and a header with the range, the total cost, the message count and the token count:
+
+| Panel | Shows |
+|---|---|
+| Spend per day | Cost for each UTC day in the range, idle days at zero. |
+| Tokens per day | Tokens for each day. |
+| Models | Messages, tokens, cost and share of cost per model. |
+| Projects | The same, per repo. |
+| Live sessions | Sessions with a message in the last 15 minutes, with state, cost and age. |
+| Recent messages | The newest messages with time, project, model, tokens and cost. |
+
+Keys:
+
+| Key | Action |
+|---|---|
+| `r` | Step the range: 30d, 60d, 90d, month, all. |
+| `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. |
+| `c` | Clear the filter. |
+| `t` | Cycle the theme: dark, light, mono. `mono` uses no color. |
+| `q`, `Esc`, `Ctrl-C` | Quit. |
+
+While you type a filter every key is text, so `q` and `r` do not quit or change the range until you press `Enter` or `Esc`.
+
+The code is in `src/usage/tui/`. `data.rs` builds one immutable snapshot from the store, `worker.rs` refreshes it on a thread so a slow read never blocks a key, `app.rs` holds the state and the keys, `view.rs` and `panels.rs` draw, and `theme.rs` holds the colors. The numbers come from `src/usage/query.rs`, the same layer the web JSON uses, so the same range gives the same totals in both. The reasons for ratatui and the measured binary cost are in [ADR-0020](../adr/0020-usage-terminal-ui.md).
 
 ## Where the data comes from
 
@@ -93,9 +124,12 @@ The Codex source reads `~/.codex/sessions/**/rollout-*.jsonl` read-only and is s
 
 Tests run against hand-written transcripts in `tests/fixtures/usage/` and a scratch `HOME`, never your real `~/.claude`. Server tests (`tests/usage_dashboard.rs`, `tests/usage_auth.rs`) set `PLAYBOOK_USAGE_NO_BROWSER=1` so no browser opens, and they serialize behind a lock because they bind real sockets. One test runs `usage ingest` in a loop while polling the server, to prove reads never fail and no event is lost or doubled.
 
+Terminal view tests render into a `TestBackend` buffer, with no real terminal. `src/usage/tui/snapshots.rs` compares whole screens at fixed sizes with the text files in `tests/fixtures/usage_tui/`; after an intended layout change, regenerate them with `UPDATE_SNAPSHOTS=1 cargo test --lib usage::tui::snapshots` and review the diff. `src/usage/tui/parity.rs` checks that, for every range, the view reports the same totals and model, repo and day groups as the web JSON.
+
 ## Limits
 
 - Cost is an estimate (see above). It is the price at the published API rate, not what a subscription plan charges you.
 - It reads one machine's local history. It does not combine machines or users.
 - Live shows what the transcripts record, so a session that is thinking but has not written a message yet does not appear until it does.
+- The terminal view needs a real terminal of 80x24 or more. Use `--json` or `--summary` where there is none.
 - No LLM call is built in. The output is plain text and JSON, so the agent already running your session can read it and suggest where to cut cost.
