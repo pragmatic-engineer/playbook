@@ -38,7 +38,7 @@ fn env(tag: &str) -> Env {
     }
     make_exec(
         &bin.join("claude"),
-        "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS:-unset}\" >> \"$FAKE_LOG.var\"\nprintf '%s\\n' \"${ANTHROPIC_DEFAULT_SONNET_MODEL:-unset}\" >> \"$FAKE_LOG.env\"\nexit ${FAKE_EXIT:-0}\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS:-unset}\" >> \"$FAKE_LOG.var\"\nprintf '%s\\n' \"${ANTHROPIC_DEFAULT_SONNET_MODEL:-unset}\" >> \"$FAKE_LOG.env\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS_PLUGIN:-unset}\" >> \"$FAKE_LOG.vplug\"\nprev=; for a in \"$@\"; do if [ \"$prev\" = --plugin-dir ]; then cp -R \"$a\" \"$FAKE_LOG.plug\"; fi; prev=$a; done\nexit ${FAKE_EXIT:-0}\n",
     );
     Env { root, home, work }
 }
@@ -570,7 +570,21 @@ fn plugin_with_agents(e: &Env) -> PathBuf {
     root
 }
 
-/// The `--agents` JSON in the first call, if any.
+/// The variant agent files the first call's `--plugin-dir` held, by name:
+/// (frontmatter and body text). The fake `claude` copies the directory while
+/// it still exists, because the launcher removes it after the session.
+fn variant_files(e: &Env) -> Option<std::collections::BTreeMap<String, String>> {
+    let dir = e.root.join("claude.log.plug/agents");
+    let mut out = std::collections::BTreeMap::new();
+    for entry in fs::read_dir(dir).ok()? {
+        let path = entry.ok()?.path();
+        let name = path.file_stem()?.to_string_lossy().into_owned();
+        out.insert(name, fs::read_to_string(&path).ok()?);
+    }
+    Some(out)
+}
+
+/// The `--agents` JSON in the first call, if any (the fallback route).
 fn agents_arg(e: &Env) -> Option<serde_json::Value> {
     let line = e.raw_calls().into_iter().next()?;
     let rest = line.split_once("--agents ")?.1.to_string();
@@ -590,21 +604,45 @@ fn launch_with_plugin(e: &Env, root: &Path, args: &[&str]) {
 }
 
 #[test]
-fn the_launcher_passes_effort_variants_and_names_them_in_the_environment() {
+fn the_launcher_passes_variants_as_a_session_plugin_and_removes_it_after() {
     let e = env("variants");
     let root = plugin_with_agents(&e);
     launch_with_plugin(&e, &root, &["fresh"]);
 
-    let agents = agents_arg(&e).expect("--agents was passed");
+    let files = variant_files(&e).expect("--plugin-dir was passed");
     for name in ["reviewer-low", "reviewer-medium", "reviewer-xhigh"] {
-        assert_eq!(agents[name]["model"], "sonnet", "{name}");
-        assert_eq!(agents[name]["tools"], serde_json::json!(["Read", "Grep"]));
-        assert_eq!(agents[name]["prompt"], "Review.\n");
+        let text = &files[name];
+        assert!(text.contains(&format!("name: {name}\n")), "{text}");
+        assert!(text.contains("model: sonnet\n"), "{text}");
+        assert!(text.contains("tools: Read, Grep\n"), "{text}");
+        assert!(text.ends_with("Review.\n"), "{text}");
     }
-    assert_eq!(agents["reviewer-low"]["effort"], "low");
-    assert!(agents.get("reviewer").is_none(), "the base is not repeated");
+    assert!(files["reviewer-low"].contains("effort: low\n"));
+    assert!(!files.contains_key("reviewer"), "the base is not repeated");
+    assert!(
+        e.root
+            .join("claude.log.plug/.claude-plugin/plugin.json")
+            .is_file(),
+        "the throwaway plugin needs a manifest"
+    );
+    assert!(
+        agents_arg(&e).is_none(),
+        "no --agents when the plugin route works"
+    );
     let seen = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
     assert_eq!(seen.trim(), "reviewer-low,reviewer-medium,reviewer-xhigh");
+    let plug = fs::read_to_string(e.root.join("claude.log.vplug")).unwrap();
+    assert_eq!(plug.trim(), "playbook-variants");
+
+    let line = e.raw_calls().remove(0);
+    let dir = line
+        .split_once("--plugin-dir ")
+        .and_then(|(_, r)| r.split_whitespace().next())
+        .expect("plugin dir in the args");
+    assert!(
+        !Path::new(dir).exists(),
+        "{dir} should be removed after the session"
+    );
 }
 
 #[test]
@@ -613,9 +651,9 @@ fn a_ceiling_keeps_the_higher_variants_out() {
     let root = plugin_with_agents(&e);
     set_effort(&e, "medium");
     launch_with_plugin(&e, &root, &["fresh"]);
-    let agents = agents_arg(&e).expect("--agents was passed");
-    assert!(agents.get("reviewer-medium").is_some());
-    assert!(agents.get("reviewer-xhigh").is_none());
+    let files = variant_files(&e).expect("--plugin-dir was passed");
+    assert!(files.contains_key("reviewer-medium"));
+    assert!(!files.contains_key("reviewer-xhigh"));
 }
 
 #[test]
@@ -629,6 +667,7 @@ fn agents_variants_off_and_a_user_agents_flag_add_nothing() {
         .unwrap();
     assert!(set.status.success(), "{set:?}");
     launch_with_plugin(&e, &root, &["fresh"]);
+    assert!(variant_files(&e).is_none());
     assert!(agents_arg(&e).is_none());
 
     let e2 = env("variants-user-flag");
@@ -636,6 +675,7 @@ fn agents_variants_off_and_a_user_agents_flag_add_nothing() {
     launch_with_plugin(&e2, &root2, &["--agents", "{}", "fresh"]);
     let line = e2.raw_calls().remove(0);
     assert_eq!(line.matches("--agents").count(), 1, "{line}");
+    assert!(!line.contains("--plugin-dir"), "{line}");
 }
 
 #[test]
@@ -643,6 +683,7 @@ fn without_a_plugin_root_no_variants_are_passed() {
     let e = env("variants-no-root");
     e.launch(&["fresh"]);
     assert!(agents_arg(&e).is_none());
+    assert!(variant_files(&e).is_none());
     let seen = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
     assert_eq!(seen.trim(), "unset");
 }

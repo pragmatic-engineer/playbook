@@ -100,10 +100,10 @@ quietly drifting again.)
 
 Effort-tier variants such as `reviewer-low` and `reviewer-xhigh` are not files
 and are not in this table. `ccc` and `ccd` render them from the base agent for
-one session and pass them to Claude Code with `--agents`, so they carry the
-base agent's `tools`, `model` and body and differ only in `effort`. They have
-no `playbook:` prefix: spawn one by the plain name `playbook effort resolve`
-gives you. A session started without the launcher has the base agents only.
+one session into a throwaway plugin passed to Claude Code, so they carry the
+base agent's `tools`, `model` and body and differ only in `effort`. Their
+`subagent_type` is `playbook-variants:<name>`: spawn the exact type
+`playbook effort resolve` gives you. A session started without the launcher has the base agents only.
 The tiers and the rules are in `src/agents/variants.rs`.
 
 **For the read-only agents, variants included, the return value is the only delivery channel.** It
@@ -155,9 +155,9 @@ agent you name. Two rules decide it, in this order.
 the agent to spawn: the base agent when nothing limits it, or a variant when
 the user's ceilings (Claude Code's `maxEffortLevel`, playbook's, or the
 agent's own `effort.agents.<name>`) are below the base effort. `allowed` lists
-every name at or under the ceiling, and `satisfied: false` means no variant is
+every name at or under the ceiling and `allowedTypes` the matching `subagent_type` values (a variant is an agent of a throwaway session plugin, so its type reads `playbook-variants:reviewer-low`), and `satisfied: false` means no variant is
 low enough or the session has none, so the base agent runs above the ceiling:
-say so in your report. Never spawn a name that is not in `allowed`.
+say so in your report. Never spawn a type that is not in `allowedTypes`.
 
 **2. The diff.** Within the ceiling, pick from the size and risk of the diff,
 using the limits the repo already has rather than new ones:

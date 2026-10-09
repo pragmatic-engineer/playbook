@@ -49,7 +49,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `high` (kept) | Judgment and orchestration; mistakes propagate to every spawned agent. |
 | `commands/commit-and-push`, `create-pull-request`, `repo-audit` | fork into git (haiku) and auditor (opus) | none | They fork into `git` (`low`) and `auditor` (`high`), which set the effort. |
 | `commands/doctor`, `session-start`, `setup` | sonnet | `low` (kept) | Run a script and print the result. |
-| per-session variants such as `reviewer-low` | same as base | any tier | Not files. Rendered from the base agent by `ccc` and `ccd` and passed with `--agents`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
+| per-session variants such as `reviewer-low` | same as base | any tier | Not files. Rendered from the base agent by `ccc` and `ccd` into a throwaway session plugin (`--plugin-dir`), spawned as `playbook-variants:<name>`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
 | `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
 
 Effort is fixed per agent definition: base agents run at their own effort, and an orchestrator picks a variant by ceiling, diff size and risk. Do not request xhigh or max on your own for anything else; if a deployment rejects it, use the base agent.
