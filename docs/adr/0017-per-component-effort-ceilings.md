@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date created:** 2026-10-09
-- **Date modified:** 2026-10-09
+- **Date modified:** 2026-10-10
 
 ## Context
 
@@ -13,7 +13,8 @@ Issue #573 asks for a maximum effort per skill, command and agent, on top of the
 1. **Config keys.** One key per component: `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>`. The value is `auto`, `low`, `medium`, `high`, `xhigh` or `max`, the same enum as `maxEffortLevel`. `<name>` is lowercase letters, digits and hyphens. Set with `playbook config set --global effort.agents.fact-checker medium`. Only the global tier counts, as for `maxEffortLevel`.
 2. **Unknown names warn.** The key shape is validated when it is written. Whether the name exists is checked against the plugin files by `playbook effort list`, which flags a configured name that matches no component. A stale name never fails a command.
 3. **Precedence.** The ceiling for a component is the lowest of: Claude Code's `maxEffortLevel` (always the top authority, read only), playbook's `maxEffortLevel`, and the component's own key. `auto` and `max` add no limit. The effective effort is the lower of the component's shipped effort and that ceiling. A ceiling never raises anything. A component that ships no effort (`effort:` absent) inherits the session's effort, so only the session ceiling applies to it.
-4. **Agents: choose a variant.** `playbook effort resolve agents <name> --json` returns the shipped effort, the ceiling, the effective level and the agent file to dispatch (`reviewer`, `reviewer-medium`, `reviewer-low`, and so on): the strongest variant whose effort is at or below the ceiling. `playbook agents gen` writes `-low`, `-medium` and `-xhigh` variants. There is no `-high` variant because every base agent that has variants ships at `high`, so the base file is the high variant. The `delegating-subagents` skill tells the orchestrator to run `resolve` before a spawn and to dispatch the file it names.
+4. **Agents: variants rendered per session, not committed.** The base agents are the only files in `agents/`. `playbook agents` keeps a `VARIANTS` table that lists every tier (`low`, `medium`, `high`, `xhigh`, `max`) for every base agent, and `playbook agents check` fails when an agent has no entry or a tier cannot render. A tier equal to the agent's own effort renders nothing, so there is no `-high` variant for an agent that ships at `high`. `ccc` and `ccd` render variants in memory and pass them to Claude Code with `--agents` (supported fields: `description`, `prompt`, `tools`, `model`, `effort`; checked against the sub-agents docs, and the variant names have no `playbook:` prefix and clash with no plugin agent). Which variants a session gets is the key `agents.variants`: `auto` (default) gives the cheaper tiers to every agent and `xhigh` to `analyst`, `critic`, `fact-checker`, `implementer` and `reviewer`, `all` adds every other tier including `max`, `off` gives none. A variant above any ceiling in play is never passed. Each variant description is one short line.
+   `playbook effort resolve agents <name> --json` returns the shipped effort, the ceiling, the effective level, `subagentType` to spawn and `allowed`, the names at or under the ceiling. The launcher names the session's variants in `PLAYBOOK_AGENT_VARIANTS`, which `resolve` reads, so a session started without the launcher reports the base agent only and `satisfied: false` when the base is above the ceiling. The `delegating-subagents` skill runs `resolve` before a spawn and falls back to the base agent when a variant is not listed.
 5. **Commands and skills: a lookup.** `playbook effort resolve commands <name>` gives the allowed level. A command's own frontmatter cannot be rewritten per user, so the command text calls `resolve` in its first step and uses the result to decide which agent variants to spawn. The launcher still passes the global ceiling to the session with `--settings`.
 6. **Status.** `playbook effort list` prints every component with its shipped effort, configured ceiling and effective level, in a table or as `--json`.
 
@@ -21,11 +22,13 @@ Issue #573 asks for a maximum effort per skill, command and agent, on top of the
 
 - **Nested `effort.perComponent` object.** Rejected: `playbook config set` takes one dotted key and one scalar, and a nested object would need a second write path.
 - **Rewriting agent frontmatter at launch.** Rejected: it edits plugin files, which are replaced on every plugin update, and it cannot differ per session.
-- **A `-high` variant.** Rejected as redundant with the base file.
+- **Committing every variant as a file under `agents/`.** Tried first (`-medium` shipped in #624) and rejected. Claude Code lists every agent's description in each session. Measured on the real agents: 12 base descriptions are 6.3 KB of context, committing 48 variants adds 27 KB (5.3 times the base), while the `auto` set of 19 rendered variants adds 1.9 KB and a `medium` ceiling adds 1.4 KB. #624 was reverted by this design.
+- **A session scoped plugin directory (`--plugin-dir`).** Not needed: `--agents` accepts `effort`. It stays the fallback if the `--agents` argument grows past the 128 KiB Linux argument limit. The `auto` JSON is about 100 KB today, and the launcher drops `xhigh` and `max` variants past 120,000 bytes and passes none past that.
 - **Failing on an unknown component name.** Rejected: plugin files change between versions and a stale key must not break a session.
 
 ## Consequences
 
-- Every agent with variants gains a `-medium` file, so the agents directory grows by five files.
 - A user can hold `fact-checker` at `medium` and leave `deep-review` at `xhigh`, as long as Claude Code's own ceiling allows it.
-- Enforcement for commands and skills is advisory text plus the global launcher ceiling. The strong guarantee exists for agents only, because only agents have a selectable file.
+- Enforcement is strong for agents (the variant that runs is chosen) and advisory text plus the global launcher ceiling for commands and skills.
+- Sessions started without `ccc` or `ccd` have base agents only. Users who named `playbook:reviewer-low` and the like must switch to the plain name `reviewer-low` and start sessions with the launcher.
+- `playbook agents gen` is gone, replaced by `playbook agents variants`, which shows the set a session would get.

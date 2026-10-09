@@ -590,11 +590,26 @@ pub enum AgentsCommand {
         /// Folder of agent definitions (default: `agents` at the repo root)
         agents_dir: Option<PathBuf>,
     },
-    /// Write the effort-tier variants (`reviewer-low`, `reviewer-xhigh`, and
-    /// so on) from their base agent files. Idempotent and deterministic.
-    Gen {
+    /// Show the effort-tier variants a session would get
+    ///
+    /// Variants such as `reviewer-low` are not files. `ccc` and `ccd` render
+    /// them from the base agents and pass them to Claude Code with `--agents`.
+    /// This prints the same set, so you can see what a session would hold and
+    /// its size. Use `--json` for the full definitions.
+    ///
+    /// Example: `playbook agents variants --ceiling medium`
+    Variants {
         /// Directory holding the agent definitions, default `<repo root>/agents`.
         agents_dir: Option<PathBuf>,
+        /// Lowest effort ceiling to apply to every agent (default: none)
+        #[arg(long)]
+        ceiling: Option<String>,
+        /// auto, all or off (default: auto)
+        #[arg(long, default_value = "auto")]
+        mode: String,
+        /// Print the `--agents` JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 

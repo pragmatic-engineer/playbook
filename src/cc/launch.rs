@@ -29,6 +29,7 @@ fn takes_value(opt: &str) -> bool {
             | "--setting-sources"
             | "--model"
             | "--fallback-model"
+            | "--agents"
             | "--permission-mode"
             | "--name"
             | "-n"
@@ -90,6 +91,18 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     let user_settings = crate::common::home_dir().join(".claude/settings.json");
     if let Some(flags) = crate::models::launcher_flags(args, &user_settings) {
         all.extend(flags);
+    }
+    let home = crate::common::home_dir();
+    if let Some((flags, names)) = super::agent_variants::flags(
+        args,
+        &home,
+        &home.join(".claude"),
+        &cwd_now,
+        std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
+    ) {
+        all.extend(flags);
+        // The orchestrator reads this through `playbook effort resolve`.
+        std::env::set_var(crate::effort::component::VARIANTS_ENV, names);
     }
     all.extend_from_slice(args);
     if playbook_memory_only(&crate::common::home_dir()) {

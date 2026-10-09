@@ -38,7 +38,7 @@ fn env(tag: &str) -> Env {
     }
     make_exec(
         &bin.join("claude"),
-        "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nexit ${FAKE_EXIT:-0}\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS:-unset}\" >> \"$FAKE_LOG.var\"\nexit ${FAKE_EXIT:-0}\n",
     );
     Env { root, home, work }
 }
@@ -555,4 +555,94 @@ fn a_path_that_already_has_the_binary_is_left_alone() {
     e.launch_with(&["--"], &["fresh"], &[("PATH", path.as_str())]);
     let seen = fs::read_to_string(format!("{}.path", e.log().display())).unwrap();
     assert_eq!(seen.lines().next().unwrap(), path);
+}
+
+// --- Effort-tier variants through --agents (ADR-0017) ---
+
+fn plugin_with_agents(e: &Env) -> PathBuf {
+    let root = e.root.join("plugin");
+    fs::create_dir_all(root.join("agents")).unwrap();
+    fs::write(
+        root.join("agents/reviewer.md"),
+        "---\nname: reviewer\ndescription: d\ntools: Read, Grep\nmodel: sonnet\neffort: high\n---\n\nReview.\n",
+    )
+    .unwrap();
+    root
+}
+
+/// The `--agents` JSON in the first call, if any.
+fn agents_arg(e: &Env) -> Option<serde_json::Value> {
+    let line = e.raw_calls().into_iter().next()?;
+    let rest = line.split_once("--agents ")?.1.to_string();
+    serde_json::Deserializer::from_str(&rest)
+        .into_iter::<serde_json::Value>()
+        .next()?
+        .ok()
+}
+
+fn launch_with_plugin(e: &Env, root: &Path, args: &[&str]) {
+    let out = e.launch_with(
+        &["--"],
+        args,
+        &[("CLAUDE_PLUGIN_ROOT", root.to_str().unwrap())],
+    );
+    assert!(out.status.success(), "{out:?}");
+}
+
+#[test]
+fn the_launcher_passes_effort_variants_and_names_them_in_the_environment() {
+    let e = env("variants");
+    let root = plugin_with_agents(&e);
+    launch_with_plugin(&e, &root, &["fresh"]);
+
+    let agents = agents_arg(&e).expect("--agents was passed");
+    for name in ["reviewer-low", "reviewer-medium", "reviewer-xhigh"] {
+        assert_eq!(agents[name]["model"], "sonnet", "{name}");
+        assert_eq!(agents[name]["tools"], serde_json::json!(["Read", "Grep"]));
+        assert_eq!(agents[name]["prompt"], "Review.\n");
+    }
+    assert_eq!(agents["reviewer-low"]["effort"], "low");
+    assert!(agents.get("reviewer").is_none(), "the base is not repeated");
+    let seen = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
+    assert_eq!(seen.trim(), "reviewer-low,reviewer-medium,reviewer-xhigh");
+}
+
+#[test]
+fn a_ceiling_keeps_the_higher_variants_out() {
+    let e = env("variants-ceiling");
+    let root = plugin_with_agents(&e);
+    set_effort(&e, "medium");
+    launch_with_plugin(&e, &root, &["fresh"]);
+    let agents = agents_arg(&e).expect("--agents was passed");
+    assert!(agents.get("reviewer-medium").is_some());
+    assert!(agents.get("reviewer-xhigh").is_none());
+}
+
+#[test]
+fn agents_variants_off_and_a_user_agents_flag_add_nothing() {
+    let e = env("variants-off");
+    let root = plugin_with_agents(&e);
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["config", "set", "--global", "agents.variants", "off"])
+        .env("HOME", &e.home)
+        .output()
+        .unwrap();
+    assert!(set.status.success(), "{set:?}");
+    launch_with_plugin(&e, &root, &["fresh"]);
+    assert!(agents_arg(&e).is_none());
+
+    let e2 = env("variants-user-flag");
+    let root2 = plugin_with_agents(&e2);
+    launch_with_plugin(&e2, &root2, &["--agents", "{}", "fresh"]);
+    let line = e2.raw_calls().remove(0);
+    assert_eq!(line.matches("--agents").count(), 1, "{line}");
+}
+
+#[test]
+fn without_a_plugin_root_no_variants_are_passed() {
+    let e = env("variants-no-root");
+    e.launch(&["fresh"]);
+    assert!(agents_arg(&e).is_none());
+    let seen = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
+    assert_eq!(seen.trim(), "unset");
 }

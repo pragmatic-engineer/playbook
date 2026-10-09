@@ -352,17 +352,32 @@ fn main() {
                     }
                 }
             }
-            AgentsCommand::Gen { agents_dir } => {
+            AgentsCommand::Variants {
+                agents_dir,
+                ceiling,
+                mode,
+                json,
+            } => {
                 let Some(dir) = agents_dir.or_else(agents::check::default_dir) else {
-                    eprintln!("gen-agents: not inside a git repository and no directory given");
+                    eprintln!(
+                        "agents variants: not inside a git repository and no directory given"
+                    );
                     std::process::exit(1);
                 };
-                match agents::variants::generate(&dir) {
-                    Ok(msg) => println!("{msg}"),
-                    Err(err) => {
-                        eprintln!("gen-agents: {err}");
-                        std::process::exit(1);
-                    }
+                let Some(mode) = agents::variants::Mode::parse(&mode) else {
+                    eprintln!("agents variants: mode must be auto, all or off");
+                    std::process::exit(1);
+                };
+                let ceiling_of = |_: &str| ceiling.clone();
+                match agents::variants::session_json(&dir, mode, &ceiling_of) {
+                    Some((text, _)) if json => println!("{text}"),
+                    Some((text, names)) => println!(
+                        "{} variant(s), {} bytes of --agents JSON: {}",
+                        names.len(),
+                        text.len(),
+                        names.join(", ")
+                    ),
+                    None => println!("no variants for this ceiling and mode"),
                 }
             }
         },
