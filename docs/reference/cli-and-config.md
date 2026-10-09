@@ -29,6 +29,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `models.haiku` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
 | `models.sonnet` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
 | `models.opus` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
+| `routing.escalate` | `ask` | `ask`, `auto`, `deny` |
 | `auto.budgetUsd` | `5` | a number, see the config keys guide for the range |
 | `auto.warnPct` | `70` | a number, see the config keys guide for the range |
 | `fix.maxFiles` | `3` | a number, see the config keys guide for the range |
@@ -43,7 +44,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage dashboard, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `release`, `review`, `sanitize`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `release`, `review`, `route`, `sanitize`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -726,6 +727,19 @@ Example: `playbook review prepare deep "#4265 --self"`
 - `<KIND>`: Which review: `quick` or `deep` (one of `quick`, `deep`)
 - `<ARGS>`: The review command's arguments, as one string
 - `--auto`: Treat the run mode as auto (implies report-only)
+
+### `playbook route`
+
+Say which model, effort and agent a kind of task goes to
+
+One routing table for every command that dispatches agents. Kinds: mechanical, classify, check, review, implement, design. Only `implement` reads `--tier` (low, medium or high). The answer includes whether the user must approve first (the top model, the high tier, or a task that failed twice). `routing.escalate` decides what happens then: `ask` (default) tells you to ask the user, `auto` proceeds (auto mode and `auto.budgetUsd` still cap the spend), `deny` returns the cheaper route. Your effort ceiling always wins.
+
+Example: `playbook route implement --tier medium --json`
+
+- `<KIND>`: mechanical, classify, check, review, implement or design
+- `--tier <TIER>`: low, medium or high (implement only)
+- `--failures <FAILURES>`: How many times this task already failed
+- `--json`: Print the decision as JSON
 
 ### `playbook sanitize`
 
