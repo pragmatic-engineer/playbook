@@ -82,7 +82,7 @@ check: build
 # Run the test suite with cargo-nextest (install: `cargo install cargo-nextest --locked`),
 # which schedules tests across every test binary at once. Doctests run apart.
 test *args:
-    cargo nextest run {{ args }}
+    cargo nextest run --config-file .github/nextest.toml {{ args }}
     cargo test --doc
 
 # Run every behavioural shell suite exactly the way CI does.

@@ -97,7 +97,7 @@ jobs:
           tool: nextest@0.9.145
 
       - name: cargo nextest run
-        run: cargo nextest run --profile ci
+        run: cargo nextest run --config-file .github/nextest.toml --profile ci
 
       # nextest does not run doctests.
       - name: cargo test --doc
