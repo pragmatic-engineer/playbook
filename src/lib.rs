@@ -32,6 +32,7 @@ pub mod plans;
 pub mod pr;
 pub mod release;
 pub mod review;
+pub mod routing;
 pub mod sanitize;
 pub mod settings;
 pub mod state;
@@ -262,6 +263,31 @@ pub enum Command {
         /// auto, low, medium, high, xhigh or max
         level: Option<String>,
         /// Print the status as JSON (with no level)
+        #[arg(long)]
+        json: bool,
+    },
+    /// Say which model, effort and agent a kind of task goes to
+    ///
+    /// One routing table for every command that dispatches agents. Kinds:
+    /// mechanical, classify, check, review, implement, design. Only
+    /// `implement` reads `--tier` (low, medium or high). The answer includes
+    /// whether the user must approve first (the top model, the high tier, or a
+    /// task that failed twice). `routing.escalate` decides what happens then:
+    /// `ask` (default) tells you to ask the user, `auto` proceeds (auto mode
+    /// and `auto.budgetUsd` still cap the spend), `deny` returns the cheaper
+    /// route. Your effort ceiling always wins.
+    ///
+    /// Example: `playbook route implement --tier medium --json`
+    Route {
+        /// mechanical, classify, check, review, implement or design
+        kind: String,
+        /// low, medium or high (implement only)
+        #[arg(long, default_value = "low")]
+        tier: String,
+        /// How many times this task already failed
+        #[arg(long, default_value_t = 0)]
+        failures: u32,
+        /// Print the decision as JSON
         #[arg(long)]
         json: bool,
     },

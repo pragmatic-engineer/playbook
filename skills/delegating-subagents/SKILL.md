@@ -145,6 +145,28 @@ whose tests passed, and whose diffs looked correct. What they recorded was what
 they had chosen NOT to do, and why. That is exactly the information a passing
 test suite cannot give you.
 
+## Route the task first
+
+Before you pick an agent, run `playbook route <kind> --json`. The kinds are
+`mechanical`, `classify`, `check`, `review`, `implement` and `design`. For
+`implement`, add `--tier low|medium|high` (low for any well specified unit,
+medium for a cross-module change or an ambiguous spec, high for workflow
+determinism, concurrency or subtle architecture). Add `--failures <n>` when the
+task already failed. Read `model`, `effort`, `agent` and `action` from the
+answer.
+
+- `action: proceed`: dispatch the named agent.
+- `action: ask`: stop and ask the user about this task first. It runs on the
+  top model, uses the high tier, or has already failed twice. Do not dispatch
+  until the user says yes.
+- `action: downgraded`: the user set `routing.escalate` to `deny`. Dispatch the
+  cheaper route the answer gives.
+
+Say the tier and a one line reason in every dispatch report so the user can
+override it. Pick the tier by judgment on each dispatch. A failure does not
+raise the tier by itself. The user's effort ceiling always wins, and the answer
+already applies it (`cappedFrom` says when it did).
+
 ## Pick the tier
 
 The `Agent` tool has no per-call effort setting, so effort is chosen by which
