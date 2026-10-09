@@ -51,6 +51,7 @@ jobs:
             index.crates.io:443
             objects.githubusercontent.com:443
             registry.npmjs.org:443
+            release-assets.githubusercontent.com:443
             static.crates.io:443
             static.rust-lang.org:443
 
