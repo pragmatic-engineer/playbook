@@ -94,11 +94,11 @@
   "role": "reviewer",
   "agent": "agents/reviewer.md",
   "task": "Review focus: the logic lens (correctness bugs only). Review the change below. Return ONLY JSON: {\"findings\":[{\"file\":\"...\",\"line\":N,\"severity\":\"blocking|important|nit\",\"issue\":\"...\"}]}. Use the line numbers shown. Return {\"findings\":[]} when the code is correct.",
-  "input": "File src/effort/mod.rs (a real change in the playbook repository, shown with new-file line numbers):\n42: pub(crate) fn lower<'a>(a: Option<&'a str>, b: Option<&'a str>) -> Option<&'a str> {\n43:     let ra = a.and_then(|l| rank(l).map(|r| (l, r)));\n44:     let rb = b.and_then(|l| rank(l).map(|r| (l, r)));\n45:     match (ra, rb) {\n46:         (Some((la, ra)), Some((lb, rb))) => Some(if ra >= rb { la } else { lb }),\n47:         (Some((l, _)), None) | (None, Some((l, _))) => Some(l),\n48:         (None, None) => None,\n49:     }\n50: }",
+  "input": "File src/effort/mod.rs (a real change in the playbook repository, shown with new-file line numbers):\n43: pub(crate) fn lower<'a>(a: Option<&'a str>, b: Option<&'a str>) -> Option<&'a str> {\n44:     let ra = a.and_then(|l| rank(l).map(|r| (l, r)));\n45:     let rb = b.and_then(|l| rank(l).map(|r| (l, r)));\n46:     match (ra, rb) {\n47:         (Some((la, ra)), Some((lb, rb))) => Some(if ra >= rb { la } else { lb }),\n48:         (Some((l, _)), None) | (None, Some((l, _))) => Some(l),\n49:         (None, None) => None,\n50:     }\n51: }",
   "score": {
    "kind": "findings",
    "bug_lines": [
-    46
+    47
    ],
    "keywords": "higher|lower|invert|comparison|max|min|wrong|reverse",
    "tolerance": 1
