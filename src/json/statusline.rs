@@ -11,6 +11,7 @@
 use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::LazyLock;
 
 /// Output shape for [`graphql_ci_checks`]: a `Serialize` struct rather than
 /// a `serde_json::json!` literal, so the single field renders under its
@@ -232,10 +233,15 @@ pub fn pr_fields(json: &str) -> String {
 /// First Jira-shaped ticket key (`[A-Z][A-Z0-9]+-[0-9]+`) in `body`, or
 /// empty when none is present, matching `scan(...) | .[0] // ""`.
 pub(crate) fn jira_from_body(body: &str) -> String {
-    let re = Regex::new(r"[A-Z][A-Z0-9]+-[0-9]+").expect("jira ticket pattern is a valid regex");
-    re.find(body)
-        .map(|m| m.as_str().to_string())
-        .unwrap_or_default()
+    jira_key(body).unwrap_or_default().to_string()
+}
+
+/// First Jira-shaped ticket key in `text`. The pattern compiles once per process.
+pub(crate) fn jira_key(text: &str) -> Option<&str> {
+    static JIRA: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"[A-Z][A-Z0-9]+-[0-9]+").expect("jira ticket pattern is a valid regex")
+    });
+    JIRA.find(text).map(|m| m.as_str())
 }
 
 /// `.number // "" | tostring | if . == "null" then "" else . end`: the

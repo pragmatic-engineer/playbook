@@ -10,6 +10,7 @@ use crate::pr::shared::{gh, git, resolve_base, RealGhClient};
 use regex::Regex;
 use serde::Deserialize;
 use std::process::Command;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 /// How many independent calls must all say `quick`.
@@ -144,8 +145,9 @@ pub fn diff_facts(diff: &str) -> (Vec<String>, u64, u64) {
 
 fn build_prompt(facts: &PrFacts) -> String {
     let (files, added, removed) = diff_facts(&facts.diff);
-    let close = Regex::new(r"(?i)<\s*/\s*untrusted_pr_data\s*>").expect("static regex");
-    let safe = |s: &str| close.replace_all(s, "</untrusted_pr_data_>").to_string();
+    static CLOSE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)<\s*/\s*untrusted_pr_data\s*>").expect("static regex"));
+    let safe = |s: &str| CLOSE.replace_all(s, "</untrusted_pr_data_>").to_string();
     format!(
         "Facts computed by the tool: {} files changed, +{added} -{removed} lines.\n\n\
          <untrusted_pr_data>\nFiles: {}\n\nTitle: {}\n\nBody:\n{}\n\nDiff:\n{}\n{CLOSE_TAG}\n",

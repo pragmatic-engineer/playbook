@@ -12,6 +12,7 @@ use crate::pr::shared::{
 use regex::Regex;
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 
 /// Above this many changed lines a PR is refused outright.
 const HARD_LIMIT: u64 = 1500;
@@ -141,14 +142,18 @@ fn changed_lines(shortstat: &str) -> u64 {
 
 /// Test files in the diff plus Rust inline test blocks added.
 fn test_blocks_touched(range: &str, state_dir: &Path) -> Result<usize, String> {
-    let paths = Regex::new(TEST_PATH_PATTERN).map_err(|e| e.to_string())?;
+    static PATHS: LazyLock<Result<Regex, String>> =
+        LazyLock::new(|| Regex::new(TEST_PATH_PATTERN).map_err(|e| e.to_string()));
+    let paths = PATHS.as_ref().map_err(Clone::clone)?;
     let files = git(&["diff", "--name-only", range]).unwrap_or_default();
     let by_name = files.lines().filter(|f| paths.is_match(f)).count();
 
     // The Rust diff goes through a file: it can exceed what a pipe holds.
     let rs_diff = state_dir.join("pr-rs-diff.txt");
     git_to_file(&["diff", "-U0", range, "--", "*.rs"], &rs_diff)?;
-    let inline = Regex::new(INLINE_TEST_PATTERN).map_err(|e| e.to_string())?;
+    static INLINE: LazyLock<Result<Regex, String>> =
+        LazyLock::new(|| Regex::new(INLINE_TEST_PATTERN).map_err(|e| e.to_string()));
+    let inline = INLINE.as_ref().map_err(Clone::clone)?;
     let by_inline = fs::read_to_string(&rs_diff)
         .unwrap_or_default()
         .lines()
@@ -189,10 +194,9 @@ fn ticket(branch: &str, ticket_arg: Option<&str>) -> String {
     if let Some(arg) = ticket_arg.filter(|t| !t.is_empty()) {
         return arg.to_string();
     }
-    Regex::new(r"[A-Z][A-Z0-9]+-[0-9]+")
-        .ok()
-        .and_then(|re| re.find(branch).map(|m| m.as_str().to_string()))
+    crate::json::statusline::jira_key(branch)
         .unwrap_or_default()
+        .to_string()
 }
 
 #[cfg(test)]
