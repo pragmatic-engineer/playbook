@@ -10,7 +10,7 @@ The policy lives in `prompts/SYSTEM_PROMPT.md`. Three tiers:
 
 **Haiku** is the default for spawned subagents on mechanical, formatting, or search tasks. It's 3x cheaper. Escalate to Sonnet when the subagent does real coding, and to Opus when it needs architecture.
 
-**Opus** handles design work (`/playbook:plan`, `/playbook:adr`), every reviewer spawn (`/playbook:quick-review`, `/playbook:deep-review`, `/playbook:implement` Step 9), the auditor behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`. Sonnet stays on `/playbook:implement`, `/playbook:fix`, the implementer, critic, fact-checker and test-reviewer.
+**Opus** handles design work (`/playbook:plan`, `/playbook:adr`), every reviewer spawn (`/playbook:quick-review` at medium effort, `/playbook:deep-review` and `/playbook:implement` Step 9 at high), the auditor behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`. Sonnet stays on `/playbook:implement`, `/playbook:fix`, the implementer, critic, fact-checker and test-reviewer.
 
 ### Design work
 
@@ -43,7 +43,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `agents/collector` | haiku | `low` (was medium) | Gathers and compacts raw history; the analyst does the thinking later. |
 | `agents/cheap-checker` | haiku | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
 | `agents/review-triage` | haiku | `low` (was medium) | A three-way classifier; any bad or missing answer already falls back to `full-lens`, so a wrong call fails safe. |
-| `commands/quick-review` | sonnet (orchestrator) | `medium` (was high) | One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. |
+| `commands/quick-review` | sonnet (orchestrator); its reviewer runs on opus | `medium` for the command and for its reviewer (the reviewer's base is `high`) | One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. The reviewer is spawned as `reviewer-medium` through `playbook effort resolve agents reviewer --cap medium`, and falls back to the base reviewer in a session without variants. This is a decision, not yet backed by an Opus medium A/B (the Haiku evaluation measured Sonnet medium); issue #660 tracks the A/B. |
 | `agents/reviewer`, `critic`, `fact-checker`, `test-reviewer` | reviewer opus; critic, fact-checker, test-reviewer sonnet | `high` (kept) | A missed finding is the cost. This includes the security lens, so nothing here is lowered; the `-low` variants exist only for small diffs and are an orchestrator choice. |
 | `agents/implementer`, `analyst`, `auditor` | implementer, analyst sonnet; auditor opus | `high` (kept) | They write code or distill facts that later steps trust. |
 | `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `high` (kept) | Judgment and orchestration; mistakes propagate to every spawned agent. |

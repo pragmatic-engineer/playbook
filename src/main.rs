@@ -102,17 +102,31 @@ fn main() {
                         )
                     );
                 }
-                playbook::EffortCommand::Resolve { kind, name, json } => {
+                playbook::EffortCommand::Resolve {
+                    kind,
+                    name,
+                    cap,
+                    json,
+                } => {
+                    if let Some(level) = cap.as_deref() {
+                        if !effort::LEVELS.contains(&level) || level == "auto" {
+                            eprintln!(
+                                "error: unknown cap '{level}', use low, medium, high, xhigh or max"
+                            );
+                            std::process::exit(1);
+                        }
+                    }
                     let Some(kind) = effort::component::Kind::parse(&kind) else {
                         eprintln!("error: unknown kind '{kind}', use agents, commands or skills");
                         std::process::exit(1);
                     };
-                    let r = effort::component::resolve(
+                    let r = effort::component::resolve_capped(
                         kind,
                         &name,
                         &home,
                         claude.as_deref(),
                         root.as_deref(),
+                        cap.as_deref(),
                     );
                     if json {
                         println!("{}", r.to_json());
