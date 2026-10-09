@@ -750,12 +750,24 @@ fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
 /// `git rev-parse --show-toplevel`, trimmed. Empty outside a repo or on any
 /// failure. Never panics.
 fn git_toplevel() -> String {
+    if let Some(top) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::common::gitfacts::toplevel(&cwd))
+    {
+        return top.to_string_lossy().into_owned();
+    }
     run_git(&["--no-optional-locks", "rev-parse", "--show-toplevel"])
 }
 
 /// `git rev-parse --abbrev-ref HEAD`, trimmed. Empty outside a repo or on
 /// any failure. Never panics.
 fn git_branch() -> String {
+    if let Some(name) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::common::gitfacts::abbrev_head(&cwd))
+    {
+        return name;
+    }
     run_git(&["--no-optional-locks", "rev-parse", "--abbrev-ref", "HEAD"])
 }
 

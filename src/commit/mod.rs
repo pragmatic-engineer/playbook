@@ -35,5 +35,8 @@ pub(crate) fn git_success(dir: &Path, args: &[&str]) -> bool {
 
 /// The current branch name, or `HEAD` when detached.
 pub(crate) fn current_branch(dir: &Path) -> String {
+    if let Some(name) = crate::common::gitfacts::abbrev_head(dir) {
+        return name;
+    }
     git_text(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default()
 }

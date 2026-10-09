@@ -121,6 +121,12 @@ fn safe_roots() -> Vec<PathBuf> {
 }
 
 fn git_repo_root() -> Option<PathBuf> {
+    if let Some(top) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::common::gitfacts::toplevel(&cwd))
+    {
+        return Some(top);
+    }
     let mut command = Command::new("git");
     command.args(["rev-parse", "--show-toplevel"]);
     let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
