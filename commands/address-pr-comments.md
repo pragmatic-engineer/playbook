@@ -26,6 +26,8 @@ In `ask` mode, behave exactly as this file describes.
 
 **Effort ceiling.** Also run `playbook effort resolve commands address-pr-comments --json`. Its `ceiling` is the highest effort the user allows for this run (`null` means no limit). Hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. If the command fails, carry on with no ceiling.
 
+**Routing.** Where you choose what to spawn, also run `playbook route mechanical --json` and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on.
+
 ## Discipline: receiving review feedback
 
 Code review is technical evaluation, not emotional performance. Apply this loop to every comment before deciding fix/reply/skip:
