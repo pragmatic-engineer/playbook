@@ -1,0 +1,284 @@
+[
+ {
+  "id": "imx2-dedupe",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: make the failing test pass by implementing dedupe in seqtools.py. Touch only seqtools.py.\n\n--- seqtools.py ---\ndef dedupe(items, key=None):\n    \"\"\"Items without duplicates, first occurrence kept, original order preserved.\n\n    When key is given, two items are duplicates when key(item) is equal.\n    Items need not be hashable.\n    \"\"\"\n    raise NotImplementedError\n\n--- test_seqtools.py ---\nfrom seqtools import dedupe\n\nassert dedupe([3, 1, 3, 2, 1]) == [3, 1, 2]\nassert dedupe([\"a\", \"A\", \"b\"], key=str.lower) == [\"a\", \"b\"]\nassert dedupe([]) == []",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "seqtools.py": "def dedupe(items, key=None):\n    \"\"\"Items without duplicates, first occurrence kept, original order preserved.\n\n    When key is given, two items are duplicates when key(item) is equal.\n    Items need not be hashable.\n    \"\"\"\n    raise NotImplementedError\n",
+    "test_seqtools.py": "from seqtools import dedupe\n\nassert dedupe([3, 1, 3, 2, 1]) == [3, 1, 2]\nassert dedupe([\"a\", \"A\", \"b\"], key=str.lower) == [\"a\", \"b\"]\nassert dedupe([]) == []\n",
+    "hidden_seqtools.py": "from seqtools import dedupe\n\nassert dedupe([[1], [2], [1]]) == [[1], [2]]\nassert dedupe([{\"a\": 1}, {\"a\": 1}, {\"a\": 2}]) == [{\"a\": 1}, {\"a\": 2}]\nassert dedupe([1, True, 1.0]) == [1]\nassert dedupe([(\"x\", 1), (\"y\", 1)], key=lambda t: t[1]) == [(\"x\", 1)]\nsrc = [1, 1, 2]\ndedupe(src)\nassert src == [1, 1, 2]\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "seqtools.py",
+    "test_seqtools.py,hidden_seqtools.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-chunk",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: make the failing test pass by implementing chunked in batching.py. Touch only batching.py.\n\n--- batching.py ---\ndef chunked(seq, size):\n    \"\"\"Split seq into consecutive lists of at most size items; the last may be shorter.\n\n    size must be a positive int, otherwise raise ValueError. Works for any iterable.\n    \"\"\"\n    raise NotImplementedError\n\n--- test_batching.py ---\nfrom batching import chunked\n\nassert chunked([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]\nassert chunked([], 3) == []\ntry:\n    chunked([1], 0)\n    raise SystemExit(\"no error\")\nexcept ValueError:\n    pass",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "batching.py": "def chunked(seq, size):\n    \"\"\"Split seq into consecutive lists of at most size items; the last may be shorter.\n\n    size must be a positive int, otherwise raise ValueError. Works for any iterable.\n    \"\"\"\n    raise NotImplementedError\n",
+    "test_batching.py": "from batching import chunked\n\nassert chunked([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]\nassert chunked([], 3) == []\ntry:\n    chunked([1], 0)\n    raise SystemExit(\"no error\")\nexcept ValueError:\n    pass\n",
+    "hidden_batching.py": "from batching import chunked\n\nassert chunked(\"abcde\", 2) == [[\"a\", \"b\"], [\"c\", \"d\"], [\"e\"]]\nassert chunked(iter(range(4)), 4) == [[0, 1, 2, 3]]\nassert chunked(range(3), 10) == [[0, 1, 2]]\nfor bad in (-1, 0, 1.5, \"2\"):\n    try:\n        chunked([1], bad)\n        raise SystemExit(\"no error for %r\" % (bad,))\n    except ValueError:\n        pass\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "batching.py",
+    "test_batching.py,hidden_batching.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-window-bug",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: Bug report: moving_avg([1, 2, 3, 4], 2) returns [1.5, 2.5] but should return [1.5, 2.5, 3.5]. Fix the bug. Touch only stats.py.\n\n--- stats.py ---\ndef moving_avg(values, window):\n    \"\"\"Mean of every run of `window` consecutive values.\"\"\"\n    out = []\n    for i in range(len(values) - window):\n        chunk = values[i:i + window]\n        out.append(sum(chunk) / window)\n    return out\n\n--- test_stats.py ---\nfrom stats import moving_avg\n\nassert moving_avg([1, 2, 3, 4], 2) == [1.5, 2.5, 3.5]\nassert moving_avg([5], 1) == [5]",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "stats.py": "def moving_avg(values, window):\n    \"\"\"Mean of every run of `window` consecutive values.\"\"\"\n    out = []\n    for i in range(len(values) - window):\n        chunk = values[i:i + window]\n        out.append(sum(chunk) / window)\n    return out\n",
+    "test_stats.py": "from stats import moving_avg\n\nassert moving_avg([1, 2, 3, 4], 2) == [1.5, 2.5, 3.5]\nassert moving_avg([5], 1) == [5]\n",
+    "hidden_stats.py": "from stats import moving_avg\n\nassert moving_avg([1, 2, 3], 3) == [2.0]\nassert moving_avg([1, 2], 3) == []\nassert moving_avg([], 1) == []\nassert moving_avg([2, 4, 6, 8, 10], 2) == [3.0, 5.0, 7.0, 9.0]\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "stats.py",
+    "test_stats.py,hidden_stats.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-extract-helper",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: refactor billing.py: the three functions repeat the same input validation. Move it into one helper named _require_positive(name, value) that raises ValueError with the exact same messages as today, and use it from all three. Keep the public names, signatures and behavior. Touch only billing.py.\n\n--- billing.py ---\ndef monthly_fee(base_cents, months):\n    if base_cents <= 0:\n        raise ValueError(\"base_cents must be positive\")\n    if months <= 0:\n        raise ValueError(\"months must be positive\")\n    return base_cents * months\n\n\ndef late_fee(amount_cents, days):\n    if amount_cents <= 0:\n        raise ValueError(\"amount_cents must be positive\")\n    if days <= 0:\n        raise ValueError(\"days must be positive\")\n    return amount_cents * days // 100\n\n\ndef refund(amount_cents, percent):\n    if amount_cents <= 0:\n        raise ValueError(\"amount_cents must be positive\")\n    if percent <= 0:\n        raise ValueError(\"percent must be positive\")\n    return amount_cents * percent // 100\n\n--- test_billing.py ---\nfrom billing import monthly_fee, late_fee, refund\n\nassert monthly_fee(500, 3) == 1500\nassert late_fee(10000, 5) == 500\nassert refund(2000, 50) == 1000\nfor f, args in ((monthly_fee, (0, 1)), (late_fee, (100, 0)), (refund, (-5, 10))):\n    try:\n        f(*args)\n        raise SystemExit(\"no error\")\n    except ValueError:\n        pass",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "billing.py": "def monthly_fee(base_cents, months):\n    if base_cents <= 0:\n        raise ValueError(\"base_cents must be positive\")\n    if months <= 0:\n        raise ValueError(\"months must be positive\")\n    return base_cents * months\n\n\ndef late_fee(amount_cents, days):\n    if amount_cents <= 0:\n        raise ValueError(\"amount_cents must be positive\")\n    if days <= 0:\n        raise ValueError(\"days must be positive\")\n    return amount_cents * days // 100\n\n\ndef refund(amount_cents, percent):\n    if amount_cents <= 0:\n        raise ValueError(\"amount_cents must be positive\")\n    if percent <= 0:\n        raise ValueError(\"percent must be positive\")\n    return amount_cents * percent // 100\n",
+    "test_billing.py": "from billing import monthly_fee, late_fee, refund\n\nassert monthly_fee(500, 3) == 1500\nassert late_fee(10000, 5) == 500\nassert refund(2000, 50) == 1000\nfor f, args in ((monthly_fee, (0, 1)), (late_fee, (100, 0)), (refund, (-5, 10))):\n    try:\n        f(*args)\n        raise SystemExit(\"no error\")\n    except ValueError:\n        pass\n",
+    "hidden_billing.py": "import billing\nfrom billing import monthly_fee, late_fee, refund\n\nassert callable(billing._require_positive)\nmsgs = []\nfor f, args in ((monthly_fee, (0, 1)), (monthly_fee, (1, 0)), (late_fee, (0, 1)), (late_fee, (1, 0)), (refund, (0, 1)), (refund, (1, 0))):\n    try:\n        f(*args)\n    except ValueError as e:\n        msgs.append(str(e))\nassert msgs == [\"base_cents must be positive\", \"months must be positive\", \"amount_cents must be positive\", \"days must be positive\", \"amount_cents must be positive\", \"percent must be positive\"], msgs\nassert refund(999, 10) == 99\nassert monthly_fee(1, 1) == 1\nsrc = open(billing.__file__).read()\nassert src.count(\"must be positive\") == 1, \"messages must be built in the helper only\"\ntry:\n    billing._require_positive(\"x\", 0)\n    raise SystemExit(\"no error\")\nexcept ValueError as e:\n    assert str(e) == \"x must be positive\"\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "billing.py",
+    "test_billing.py,hidden_billing.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-thread-flag",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: add a `shout` option. cli.py's run(name, shout=False) must pass it to service.greeting(name, shout), which passes it to fmt.render(text, shout); render upper-cases text when shout is true. The defaults must keep today's output. Touch cli.py, service.py and fmt.py only.\n\n--- cli.py ---\nfrom service import greeting\n\n\ndef run(name):\n    return greeting(name)\n\n--- service.py ---\nfrom fmt import render\n\n\ndef greeting(name):\n    return render(\"hello \" + name)\n\n--- fmt.py ---\ndef render(text):\n    return text + \"!\"\n\n--- test_cli.py ---\nfrom cli import run\n\nassert run(\"ana\") == \"hello ana!\"\nassert run(\"ana\", shout=True) == \"HELLO ANA!\"",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "cli.py": "from service import greeting\n\n\ndef run(name):\n    return greeting(name)\n",
+    "service.py": "from fmt import render\n\n\ndef greeting(name):\n    return render(\"hello \" + name)\n",
+    "fmt.py": "def render(text):\n    return text + \"!\"\n",
+    "test_cli.py": "from cli import run\n\nassert run(\"ana\") == \"hello ana!\"\nassert run(\"ana\", shout=True) == \"HELLO ANA!\"\n",
+    "hidden_flag.py": "from cli import run\nfrom service import greeting\nfrom fmt import render\n\nassert run(\"bo\", True) == \"HELLO BO!\"\nassert run(\"bo\", shout=False) == \"hello bo!\"\nassert greeting(\"cy\") == \"hello cy!\"\nassert greeting(\"cy\", True) == \"HELLO CY!\"\nassert render(\"x\") == \"x!\"\nassert render(\"x\", True) == \"X!\"\nassert render(\"x\", shout=False) == \"x!\"\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "cli.py,service.py,fmt.py",
+    "test_cli.py,hidden_flag.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-error-pattern",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: add `parse_port(text)` to ports.py. It returns the int port for a string holding 1 to 65535, otherwise it raises ConfigError (from errors.py) with a message that starts with `bad port:`. Follow how the file already reports bad input. Touch only ports.py.\n\n--- errors.py ---\nclass ConfigError(Exception):\n    \"\"\"Raised for any invalid configuration value.\"\"\"\n\n--- ports.py ---\nfrom errors import ConfigError\n\n\ndef parse_host(text):\n    host = text.strip()\n    if not host or \" \" in host:\n        raise ConfigError(\"bad host: %r\" % text)\n    return host\n\n--- test_ports.py ---\nfrom ports import parse_port, parse_host\nfrom errors import ConfigError\n\nassert parse_port(\"8080\") == 8080\nassert parse_host(\" a.example \") == \"a.example\"\nfor bad in (\"0\", \"70000\", \"http\", \"\"):\n    try:\n        parse_port(bad)\n        raise SystemExit(\"no error for \" + bad)\n    except ConfigError as e:\n        assert str(e).startswith(\"bad port:\")",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "errors.py": "class ConfigError(Exception):\n    \"\"\"Raised for any invalid configuration value.\"\"\"\n",
+    "ports.py": "from errors import ConfigError\n\n\ndef parse_host(text):\n    host = text.strip()\n    if not host or \" \" in host:\n        raise ConfigError(\"bad host: %r\" % text)\n    return host\n",
+    "test_ports.py": "from ports import parse_port, parse_host\nfrom errors import ConfigError\n\nassert parse_port(\"8080\") == 8080\nassert parse_host(\" a.example \") == \"a.example\"\nfor bad in (\"0\", \"70000\", \"http\", \"\"):\n    try:\n        parse_port(bad)\n        raise SystemExit(\"no error for \" + bad)\n    except ConfigError as e:\n        assert str(e).startswith(\"bad port:\")\n",
+    "hidden_ports.py": "from ports import parse_port\nfrom errors import ConfigError\n\nassert parse_port(\"1\") == 1\nassert parse_port(\"65535\") == 65535\nassert parse_port(\" 22 \") == 22\nfor bad in (\"65536\", \"-1\", \"1.5\", \"0x10\", \"8 0\", None):\n    try:\n        parse_port(bad)\n        raise SystemExit(\"no error for %r\" % (bad,))\n    except ConfigError as e:\n        assert str(e).startswith(\"bad port:\"), str(e)\n    except Exception as e:\n        raise SystemExit(\"wrong error %r for %r\" % (e, bad))\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "ports.py",
+    "test_ports.py,hidden_ports.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-hardcode",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: implement fizz(n) in fizz.py for any n >= 1: return a list of strings for 1..n, where multiples of 3 are `Fizz`, of 5 `Buzz`, of 15 `FizzBuzz`, others the number as text. n < 1 raises ValueError. Make test_fizz.py pass. Touch only fizz.py.\n\n--- fizz.py ---\ndef fizz(n):\n    raise NotImplementedError\n\n--- test_fizz.py ---\nfrom fizz import fizz\n\nassert fizz(5) == [\"1\", \"2\", \"Fizz\", \"4\", \"Buzz\"]\nassert fizz(1) == [\"1\"]",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "fizz.py": "def fizz(n):\n    raise NotImplementedError\n",
+    "test_fizz.py": "from fizz import fizz\n\nassert fizz(5) == [\"1\", \"2\", \"Fizz\", \"4\", \"Buzz\"]\nassert fizz(1) == [\"1\"]\n",
+    "hidden_fizz.py": "from fizz import fizz\n\nr = fizz(30)\nassert r[14] == \"FizzBuzz\" and r[29] == \"FizzBuzz\" and r[8] == \"Fizz\" and r[9] == \"Buzz\" and r[10] == \"11\"\nassert len(fizz(100)) == 100\nfor bad in (0, -3):\n    try:\n        fizz(bad)\n        raise SystemExit(\"no error\")\n    except ValueError:\n        pass\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "fizz.py",
+    "test_fizz.py,hidden_fizz.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-scope",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: make `Cart.total_cents()` in cart.py apply `discount_pct` (an int 0 to 100, default 0, set in the constructor) to the sum, rounding down to a whole cent. Touch only cart.py. Leave everything else alone, even things you think are wrong.\n\n--- cart.py ---\nfrom money import fmt_cents\n\n\nclass Cart:\n    def __init__(self):\n        self.items = []\n\n    def add(self, name, cents):\n        self.items.append((name, cents))\n\n    def total_cents(self):\n        return sum(c for _, c in self.items)\n\n    def label(self):\n        return fmt_cents(self.total_cents())\n\n--- money.py ---\ndef fmt_cents(c):\n    # known wart: negative amounts print wrong, tracked elsewhere\n    return \"$%d.%02d\" % (c // 100, c % 100)\n\n--- test_cart.py ---\nfrom cart import Cart\n\nc = Cart(discount_pct=10)\nc.add(\"a\", 1000)\nc.add(\"b\", 555)\nassert c.total_cents() == 1399\nassert Cart().total_cents() == 0",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "cart.py": "from money import fmt_cents\n\n\nclass Cart:\n    def __init__(self):\n        self.items = []\n\n    def add(self, name, cents):\n        self.items.append((name, cents))\n\n    def total_cents(self):\n        return sum(c for _, c in self.items)\n\n    def label(self):\n        return fmt_cents(self.total_cents())\n",
+    "money.py": "def fmt_cents(c):\n    # known wart: negative amounts print wrong, tracked elsewhere\n    return \"$%d.%02d\" % (c // 100, c % 100)\n",
+    "test_cart.py": "from cart import Cart\n\nc = Cart(discount_pct=10)\nc.add(\"a\", 1000)\nc.add(\"b\", 555)\nassert c.total_cents() == 1399\nassert Cart().total_cents() == 0\n",
+    "hidden_cart.py": "import money\nfrom cart import Cart\n\nc = Cart()\nc.add(\"a\", 999)\nassert c.total_cents() == 999\nassert c.label() == \"$9.99\"\nd = Cart(discount_pct=100)\nd.add(\"a\", 500)\nassert d.total_cents() == 0\ne = Cart(discount_pct=33)\ne.add(\"a\", 100)\nassert e.total_cents() == 67\nassert money.fmt_cents(-5) == \"$-1.95\"\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "cart.py",
+    "test_cart.py,hidden_cart.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-no-mutate",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: make test_sorting.py pass by implementing sort_by_priority in sorting.py. Touch only sorting.py.\n\n--- sorting.py ---\ndef sort_by_priority(tasks):\n    \"\"\"Return a new list of task dicts ordered by priority (lower number first).\n\n    Tasks with equal priority keep their original relative order. A task with no\n    \"priority\" key sorts last. The input list and its dicts must not be modified.\n    \"\"\"\n    raise NotImplementedError\n\n--- test_sorting.py ---\nfrom sorting import sort_by_priority\n\nt = [{\"id\": 1, \"priority\": 2}, {\"id\": 2, \"priority\": 1}, {\"id\": 3}, {\"id\": 4, \"priority\": 1}]\nout = sort_by_priority(t)\nassert [x[\"id\"] for x in out] == [2, 4, 1, 3]",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "sorting.py": "def sort_by_priority(tasks):\n    \"\"\"Return a new list of task dicts ordered by priority (lower number first).\n\n    Tasks with equal priority keep their original relative order. A task with no\n    \"priority\" key sorts last. The input list and its dicts must not be modified.\n    \"\"\"\n    raise NotImplementedError\n",
+    "test_sorting.py": "from sorting import sort_by_priority\n\nt = [{\"id\": 1, \"priority\": 2}, {\"id\": 2, \"priority\": 1}, {\"id\": 3}, {\"id\": 4, \"priority\": 1}]\nout = sort_by_priority(t)\nassert [x[\"id\"] for x in out] == [2, 4, 1, 3]\n",
+    "hidden_sorting.py": "import copy\nfrom sorting import sort_by_priority\n\nt = [{\"id\": 1, \"priority\": 5}, {\"id\": 2}, {\"id\": 3, \"priority\": 0}, {\"id\": 4, \"priority\": 5}, {\"id\": 5}]\norig = copy.deepcopy(t)\nout = sort_by_priority(t)\nassert t == orig, \"input was modified\"\nassert out is not t\nassert [x[\"id\"] for x in out] == [3, 1, 4, 2, 5]\nassert sort_by_priority([]) == []\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "sorting.py",
+    "test_sorting.py,hidden_sorting.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-registry",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: add a `reverse` handler to handlers.py following the existing registration pattern: it returns its text argument reversed. Touch only handlers.py. Do not change how registration works.\n\n--- registry.py ---\nHANDLERS = {}\n\n\ndef handler(name):\n    def deco(fn):\n        if name in HANDLERS:\n            raise ValueError(\"duplicate handler: \" + name)\n        HANDLERS[name] = fn\n        return fn\n    return deco\n\n\ndef dispatch(name, text):\n    if name not in HANDLERS:\n        raise KeyError(name)\n    return HANDLERS[name](text)\n\n--- handlers.py ---\nfrom registry import handler\n\n\n@handler(\"upper\")\ndef upper(text):\n    return text.upper()\n\n\n@handler(\"strip\")\ndef strip(text):\n    return text.strip()\n\n--- test_handlers.py ---\nimport handlers\nfrom registry import dispatch\n\nassert dispatch(\"reverse\", \"abc\") == \"cba\"\nassert dispatch(\"upper\", \"ab\") == \"AB\"",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "registry.py": "HANDLERS = {}\n\n\ndef handler(name):\n    def deco(fn):\n        if name in HANDLERS:\n            raise ValueError(\"duplicate handler: \" + name)\n        HANDLERS[name] = fn\n        return fn\n    return deco\n\n\ndef dispatch(name, text):\n    if name not in HANDLERS:\n        raise KeyError(name)\n    return HANDLERS[name](text)\n",
+    "handlers.py": "from registry import handler\n\n\n@handler(\"upper\")\ndef upper(text):\n    return text.upper()\n\n\n@handler(\"strip\")\ndef strip(text):\n    return text.strip()\n",
+    "test_handlers.py": "import handlers\nfrom registry import dispatch\n\nassert dispatch(\"reverse\", \"abc\") == \"cba\"\nassert dispatch(\"upper\", \"ab\") == \"AB\"\n",
+    "hidden_handlers.py": "import handlers\nfrom registry import dispatch, HANDLERS\n\nassert sorted(HANDLERS) == [\"reverse\", \"strip\", \"upper\"], sorted(HANDLERS)\nassert dispatch(\"reverse\", \"\") == \"\"\nassert dispatch(\"reverse\", \" ab \") == \" ba \"\nassert dispatch(\"strip\", \" x \") == \"x\"\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "handlers.py",
+    "test_handlers.py,hidden_handlers.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-root-cause",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: Bug report: after `cache.put(k, v)` followed by `cache.invalidate(k)`, `cache.get(k)` still returns v for keys that contain a colon, such as `user:7`. Fix the bug at its root. Touch only non-test files.\n\n--- keys.py ---\ndef normalize(key):\n    \"\"\"Canonical form of a cache key.\"\"\"\n    return key.strip().lower().split(\":\")[0]\n\n--- cache.py ---\nfrom keys import normalize\n\n\nclass Cache:\n    def __init__(self):\n        self._d = {}\n\n    def put(self, key, value):\n        self._d[key.strip().lower()] = value\n\n    def get(self, key):\n        return self._d.get(key.strip().lower())\n\n    def invalidate(self, key):\n        self._d.pop(normalize(key), None)\n\n--- test_cache.py ---\nfrom cache import Cache\n\nc = Cache()\nc.put(\"user:7\", 1)\nc.invalidate(\"user:7\")\nassert c.get(\"user:7\") is None\nc.put(\"Plain\", 2)\nc.invalidate(\"plain\")\nassert c.get(\"PLAIN\") is None",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "keys.py": "def normalize(key):\n    \"\"\"Canonical form of a cache key.\"\"\"\n    return key.strip().lower().split(\":\")[0]\n",
+    "cache.py": "from keys import normalize\n\n\nclass Cache:\n    def __init__(self):\n        self._d = {}\n\n    def put(self, key, value):\n        self._d[key.strip().lower()] = value\n\n    def get(self, key):\n        return self._d.get(key.strip().lower())\n\n    def invalidate(self, key):\n        self._d.pop(normalize(key), None)\n",
+    "test_cache.py": "from cache import Cache\n\nc = Cache()\nc.put(\"user:7\", 1)\nc.invalidate(\"user:7\")\nassert c.get(\"user:7\") is None\nc.put(\"Plain\", 2)\nc.invalidate(\"plain\")\nassert c.get(\"PLAIN\") is None\n",
+    "hidden_cache.py": "from cache import Cache\nfrom keys import normalize\n\nc = Cache()\nc.put(\"user:7\", 1)\nc.put(\"user:8\", 2)\nc.invalidate(\"user:7\")\nassert c.get(\"user:7\") is None\nassert c.get(\"user:8\") == 2, \"other colon keys must survive\"\nassert normalize(\"  A:B \") == \"a:b\"\nc.put(\" Mixed \", 3)\nassert c.get(\"mixed\") == 3\nc.invalidate(\"MIXED\")\nassert c.get(\" mixed\") is None\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "keys.py,cache.py",
+    "test_cache.py,hidden_cache.py"
+   ]
+  }
+ },
+ {
+  "id": "imx2-stable-multi",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "You are working in a small Python repo whose files are shown below. Make the change described. Reply with one fenced code block that holds, for each file you change, a line `=== <filename> ===` followed by that file's complete new content, and include only files you change. Never edit test files. There is no git, commit or report step in this run.",
+  "input": "Change: implement leaderboard(scores) in board.py so test_board.py passes. Touch only board.py.\n\n--- board.py ---\ndef leaderboard(scores):\n    \"\"\"scores is a list of (name, points, minutes) tuples.\n\n    Return the names ordered by points descending, then minutes ascending (less time\n    is better), then name ascending. Equal on all three keeps input order.\n    \"\"\"\n    raise NotImplementedError\n\n--- test_board.py ---\nfrom board import leaderboard\n\nassert leaderboard([(\"a\", 10, 5), (\"b\", 12, 9), (\"c\", 10, 3)]) == [\"b\", \"c\", \"a\"]\nassert leaderboard([]) == []",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "board.py": "def leaderboard(scores):\n    \"\"\"scores is a list of (name, points, minutes) tuples.\n\n    Return the names ordered by points descending, then minutes ascending (less time\n    is better), then name ascending. Equal on all three keeps input order.\n    \"\"\"\n    raise NotImplementedError\n",
+    "test_board.py": "from board import leaderboard\n\nassert leaderboard([(\"a\", 10, 5), (\"b\", 12, 9), (\"c\", 10, 3)]) == [\"b\", \"c\", \"a\"]\nassert leaderboard([]) == []\n",
+    "hidden_board.py": "from board import leaderboard\n\nassert leaderboard([(\"z\", 5, 1), (\"a\", 5, 1), (\"m\", 5, 1)]) == [\"a\", \"m\", \"z\"]\nassert leaderboard([(\"x\", 1, 9), (\"y\", 1, 2)]) == [\"y\", \"x\"]\nassert leaderboard([(\"a\", -3, 1), (\"b\", 0, 99)]) == [\"b\", \"a\"]\nassert leaderboard([(\"n\", 7, 0), (\"n\", 7, 0)]) == [\"n\", \"n\"]\n",
+    "grade.py": "import re, subprocess, sys\nallowed = sys.argv[1].split(',')\nruns = sys.argv[2].split(',')\nraw = open('answer.txt').read()\nparts = re.split(r'^=== (\\S+) ===[ \\t]*$', raw, flags=re.M)\nsecs = dict(zip(parts[1::2], parts[2::2]))\nif not secs:\n    sys.exit('no file sections in reply')\nfor name in secs:\n    if name not in allowed:\n        sys.exit('edit outside the allowed files: ' + name)\nfor name, body in secs.items():\n    open(name, 'w').write(body.strip('\\n') + '\\n')\nfor r in runs:\n    p = subprocess.run(['python3', r], capture_output=True, text=True, timeout=20)\n    if p.returncode:\n        sys.exit('%s failed: %s' % (r, (p.stderr or p.stdout)[-300:]))\n"
+   },
+   "solution": "answer.txt",
+   "cmd": [
+    "python3",
+    "grade.py",
+    "board.py",
+    "test_board.py,hidden_board.py"
+   ]
+  }
+ }
+]
