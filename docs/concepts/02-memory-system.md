@@ -16,7 +16,9 @@ Claude Code has its own memory: `CLAUDE.md` files you write and an auto memory i
 - Every hook, command and skill that stores or loads playbook memory uses only `~/.config/playbook/memory/`.
 - You choose whether Claude Code's auto memory runs next to playbook memory. The config key `memory.source` is `both` by default. Set it to `playbook` and sessions started with `ccc` or `ccd` run with Claude Code's auto memory off. The launcher does this with the `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` environment variable for that one session, so no Claude Code file changes. Change it any time with `playbook config set --global memory.source <both|playbook>`.
 
-`tests/memory_isolation.rs` enforces the first two rules.
+Playbook may read Claude Code's auto memory once, to bring useful notes across. `playbook memory import-claude [--dry-run]` copies the notes for the current project into playbook memory as facts (project memory under `<owner>/<repo>/`). It opens Claude Code's files read-only and never changes, moves or deletes anything there, and it keeps no marker in Claude Code's directories. What it already imported is tracked by content hash under `~/.config/playbook/state/`, so a second run copies nothing, a fact you deleted does not come back, and an existing playbook fact is never overwritten.
+
+`tests/memory_isolation.rs` enforces the first two rules, and that the code reading Claude Code's memory has no write calls.
 
 ## Three Scopes
 
