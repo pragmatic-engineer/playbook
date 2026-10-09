@@ -250,7 +250,7 @@ resolve_tarball_url() {
 
 # One seam for the download transport, so adding a wget fallback later is a
 # one-function change. curl only for now: this repo already hard-requires curl
-# (see the preflight check above), and shell/install-resolve.test.sh's stub
+# (see the preflight check above), and tests/install_resolve.rs's stub
 # only implements curl.
 _fetch() {
     curl -fsSL "$1" -o "$2"
