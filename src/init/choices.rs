@@ -10,13 +10,13 @@ use std::io::{self, BufRead, IsTerminal, Write};
 /// The flags, each part as a `--x` and `--no-x` pair. The last one given wins.
 #[derive(Args, Debug, Default, Clone)]
 pub struct Flags {
-    /// Wire the hook entries into settings.json
+    /// Wire every playbook hook into settings.json (guards, session and worktree hooks)
     #[arg(long, overrides_with = "no_hooks")]
     pub hooks: bool,
-    /// Do not wire hooks
+    /// Add no playbook hook entries, including the guards in the shared settings
     #[arg(long, overrides_with = "hooks")]
     pub no_hooks: bool,
-    /// Merge playbook's shared settings (permissions, status line) into settings.json
+    /// Merge playbook's shared settings (permissions, status line, options) into settings.json
     #[arg(long, overrides_with = "no_settings")]
     pub settings: bool,
     /// Do not touch the shared settings
@@ -85,13 +85,13 @@ pub fn resolve(
         hooks: decide(
             flags.hooks,
             flags.no_hooks,
-            "Wire the playbook hooks into ~/.claude/settings.json? (safety guards, session hooks)",
+            "Wire every playbook hook into ~/.claude/settings.json? (safety guards, session and worktree hooks)",
             true,
         ),
         settings: decide(
             flags.settings,
             flags.no_settings,
-            "Merge playbook's shared settings (permissions, status line) into settings.json?",
+            "Merge playbook's shared settings (permissions, status line, options) into settings.json? Hooks are a separate question.",
             true,
         ),
         path: decide(

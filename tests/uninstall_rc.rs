@@ -62,6 +62,7 @@ fn both_older_comment_variants_and_a_missing_comment_are_handled() {
     for comment in [
         "# claude-config launchers (cc/ccd)",
         "# playbook launchers (cc/ccd)",
+        "# playbook launchers (ccc/ccd)",
     ] {
         let before =
             format!("# BEFORE\n{comment}\nsource \"$HOME/.claude/shell/cc.zsh\"\n# AFTER\n");

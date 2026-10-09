@@ -257,7 +257,7 @@ fn an_old_launcher_line_is_migrated_and_the_users_lines_and_blanks_survive() {
         let rc = sb.read(".zshrc");
         assert!(!rc.contains(old), "{rc}");
         assert_eq!(rc.matches("playbook shell-init").count(), 1, "{rc}");
-        assert_eq!(rc.matches("launchers (cc/ccd)").count(), 1, "{rc}");
+        assert_eq!(rc.matches("launchers (ccc/ccd)").count(), 1, "{rc}");
         assert!(rc.lines().any(|l| l == SHELL_INIT_LINE), "{rc}");
         assert!(rc.starts_with("export FOO=1\n\nexport BAR=2\n"), "{rc}");
 
@@ -267,12 +267,44 @@ fn an_old_launcher_line_is_migrated_and_the_users_lines_and_blanks_survive() {
 }
 
 #[test]
-fn no_hooks_leaves_hook_entries_out_and_says_so() {
+fn no_hooks_leaves_every_hook_entry_out_and_says_so() {
     let h = Sandbox::new("no-hooks");
     let out = h.init("/bin/zsh", &["--no-hooks"]);
     let t = text(&out);
     assert!(t.contains("hooks") && t.contains("skipped"), "{t}");
-    assert!(!h.read(".claude/settings.json").contains("session-init"));
+    let settings = h.read(".claude/settings.json");
+    assert!(!settings.contains("playbook hook"), "{settings}");
+    assert!(
+        settings.contains("permissions"),
+        "shared settings still merged"
+    );
+}
+
+#[test]
+fn no_hooks_keeps_the_hooks_a_user_already_has() {
+    let h = Sandbox::new("keep-hooks");
+    h.write(
+        ".claude/settings.json",
+        r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo mine"}]}]}}"#,
+    );
+    h.init("/bin/zsh", &["--no-hooks"]);
+    let settings = h.read(".claude/settings.json");
+    assert!(settings.contains("echo mine"), "{settings}");
+    assert!(!settings.contains("playbook hook"), "{settings}");
+}
+
+#[test]
+fn hooks_are_wired_by_default_and_a_rerun_with_no_hooks_is_stable() {
+    let h = Sandbox::new("hooks-default");
+    h.init("/bin/zsh", &[]);
+    assert!(h.read(".claude/settings.json").contains("playbook hook"));
+    let before = h.read(".claude/settings.json");
+    h.init("/bin/zsh", &["--no-hooks"]);
+    assert_eq!(
+        h.read(".claude/settings.json"),
+        before,
+        "existing hooks stay"
+    );
 }
 
 #[test]

@@ -63,8 +63,9 @@ impl ShellKind {
 pub const SOURCE_LINE: &str =
     "command -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"";
 
-/// Comment line that opens the managed block; uninstall keys on it too.
-const BLOCK_COMMENT: &str = "# playbook launchers (cc/ccd)";
+/// Comment line that opens the managed block; uninstall keys on it too, and
+/// still strips the older `(cc/ccd)` wording.
+const BLOCK_COMMENT: &str = "# playbook launchers (ccc/ccd)";
 
 /// What `rewire_rc_file` did, for a caller to report to the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,7 +245,9 @@ fn strip_launcher(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
         },
         |prev| {
             let prev = prev.trim_ascii();
-            prev.starts_with(b"#") && prev.windows(18).any(|w| w == b"launchers (cc/ccd)")
+            prev.starts_with(b"#")
+                && (prev.windows(18).any(|w| w == b"launchers (cc/ccd)")
+                    || prev.windows(19).any(|w| w == b"launchers (ccc/ccd)"))
         },
     )
 }
@@ -313,6 +316,12 @@ fn strip_lines(
     Some(out.concat())
 }
 
+/// Whether `line` is the managed block's comment, in its current or older wording.
+fn is_block_comment(line: &[u8]) -> bool {
+    let line = line.trim_ascii();
+    line == BLOCK_COMMENT.as_bytes() || line == b"# playbook launchers (cc/ccd)"
+}
+
 /// Whether some line of `content` trims to exactly `wanted`.
 fn has_line(content: &[u8], wanted: &str) -> bool {
     content
@@ -334,10 +343,7 @@ fn rewrite_legacy_lines(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>
             continue;
         }
         touched = true;
-        if lines
-            .last()
-            .is_some_and(|prev| prev.trim_ascii() == BLOCK_COMMENT.as_bytes())
-        {
+        if lines.last().is_some_and(|prev| is_block_comment(prev)) {
             lines.pop();
         }
     }

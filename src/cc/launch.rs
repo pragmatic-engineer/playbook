@@ -327,6 +327,17 @@ fn spawn(cwd: &Path, args: &[String], stderr: Option<Stdio>) -> i32 {
         .current_dir(cwd)
         .env("PWD", cwd)
         .env_remove(CD_FILE_ENV);
+    // Hooks inherit this PATH and read no rc file, so the session must be
+    // able to find the binary that launched it even when the shell's PATH
+    // does not list its directory.
+    if let (Ok(exe), Some(path)) = (
+        std::env::current_exe(),
+        std::env::var_os("PATH").or_else(|| Some(Default::default())),
+    ) {
+        if let Some(fixed) = crate::init::path::path_with_self(&path, &exe) {
+            cmd.env("PATH", fixed);
+        }
+    }
     if let Some(stderr) = stderr {
         cmd.stderr(stderr);
     }

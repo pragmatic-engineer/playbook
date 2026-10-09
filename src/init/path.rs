@@ -77,6 +77,25 @@ pub fn resolve_bin_dir(path_var: &OsStr, exe: &Path) -> PathBuf {
     exe.parent().map(Path::to_path_buf).unwrap_or_default()
 }
 
+/// The PATH a child process should get so that `playbook` resolves to the
+/// running binary: `None` when `path_var` already does, else `path_var` with
+/// the binary's directory first. Hooks run in a non-interactive `bash -c`
+/// that never reads a rc file and inherits the PATH of the process that
+/// started Claude Code, so the launcher uses this for the sessions it starts.
+pub fn path_with_self(path_var: &OsStr, exe: &Path) -> Option<std::ffi::OsString> {
+    let real_exe = fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+    let covered = std::env::split_paths(path_var).any(|dir| {
+        dir.is_absolute() && fs::canonicalize(dir.join("playbook")).is_ok_and(|c| c == real_exe)
+    });
+    if covered {
+        return None;
+    }
+    let dir = exe.parent()?.to_path_buf();
+    let mut dirs = vec![dir];
+    dirs.extend(std::env::split_paths(path_var));
+    std::env::join_paths(dirs).ok()
+}
+
 /// The files the PATH block goes into for `shell`.
 pub fn targets(home: &Path, shell: PathShell) -> Vec<PathBuf> {
     match shell {
@@ -305,6 +324,21 @@ mod tests {
             "export A=1\n"
         );
         assert!(!fish_file(&home).exists());
+    }
+
+    #[test]
+    fn a_child_path_gets_the_binary_dir_only_when_it_is_missing() {
+        let home = scratch_dir("path-child");
+        let bin = home.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("playbook"), "x").unwrap();
+        let exe = bin.join("playbook");
+        let other = std::env::join_paths(["/usr/bin", "/bin"]).unwrap();
+        let got = path_with_self(&other, &exe).unwrap();
+        assert_eq!(std::env::split_paths(&got).next().unwrap(), bin);
+        assert_eq!(std::env::split_paths(&got).count(), 3);
+        let has = std::env::join_paths([bin.as_path(), Path::new("/usr/bin")]).unwrap();
+        assert_eq!(path_with_self(&has, &exe), None);
     }
 
     #[test]

@@ -227,7 +227,7 @@ fn rewire_rc_file_replaces_pre_layout_split_line_in_place_without_duplicating() 
             "current line should appear exactly once: {contents}"
         );
         assert_eq!(
-            contents.matches("launchers (cc/ccd)").count(),
+            contents.matches("launchers (ccc/ccd)").count(),
             1,
             "the launchers comment should not be duplicated: {contents}"
         );
@@ -306,7 +306,7 @@ fn rewire_rc_file_matches_legacy_lines_loosely() {
         let contents = fs::read_to_string(&rc_file).unwrap();
         assert_eq!(
             contents,
-            format!("{comment}\nexport A=1\n\n# playbook launchers (cc/ccd)\n{ZSH_CURRENT}\n"),
+            format!("{comment}\nexport A=1\n\n# playbook launchers (ccc/ccd)\n{ZSH_CURRENT}\n"),
             "form {form:?}"
         );
 
@@ -361,7 +361,7 @@ fn rewire_rc_file_keeps_a_symlinked_rc_and_updates_its_target() {
     );
     assert_eq!(
         fs::read_to_string(&target).unwrap(),
-        format!("# playbook launchers (cc/ccd)\n{ZSH_CURRENT}\n")
+        format!("# playbook launchers (ccc/ccd)\n{ZSH_CURRENT}\n")
     );
 
     let _ = fs::remove_dir_all(&home);
@@ -394,7 +394,7 @@ fn rewire_rc_file_preserves_a_non_utf8_rc_file() {
     rewire_rc_file(&home, ShellKind::Zsh).expect("rewire should succeed");
 
     // Assert: the legacy line is replaced by a block at the end, the Latin-1 bytes are intact.
-    let mut migrated = b"# configura\xe7\xe3o\n\n# playbook launchers (cc/ccd)\n".to_vec();
+    let mut migrated = b"# configura\xe7\xe3o\n\n# playbook launchers (ccc/ccd)\n".to_vec();
     migrated.extend_from_slice(format!("{ZSH_CURRENT}\n").as_bytes());
     assert_eq!(fs::read(&rc_file).unwrap(), migrated);
 
@@ -454,11 +454,11 @@ fn upgrade_legacy_rc_files_rewrites_every_legacy_form_and_skips_clean_files() {
     assert!(second.is_empty(), "a second run changes nothing");
     assert_eq!(
         fs::read_to_string(home.join(".zshrc")).unwrap(),
-        format!("# playbook launchers (cc/ccd)\n{SOURCE_LINE}\n")
+        format!("# playbook launchers (ccc/ccd)\n{SOURCE_LINE}\n")
     );
     assert_eq!(
         fs::read_to_string(home.join(".bashrc")).unwrap(),
-        format!("export A=1\n\n# playbook launchers (cc/ccd)\n{SOURCE_LINE}\n")
+        format!("export A=1\n\n# playbook launchers (ccc/ccd)\n{SOURCE_LINE}\n")
     );
 
     let _ = fs::remove_dir_all(&home);

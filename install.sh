@@ -17,8 +17,9 @@
 # Source of truth: the latest GitHub release by default, or PLAYBOOK_REF
 # (any tag/branch/sha). Falls back to the main branch when no release exists.
 # The release binary, unlike the source tree, can only come from a confirmed
-# release: PLAYBOOK_REF pins the source tree, not the binary, since a branch
-# or a commit has no published release to fetch one from.
+# release: a PLAYBOOK_REF shaped like a release tag (v1.2.3) installs that
+# release and its binary. Any other ref pins only the source tree, since a
+# branch or a commit has no published release to fetch a binary from.
 # Existing tracked files are backed up before being replaced; runtime state
 # (sessions/, projects/, history, plugins/) is never touched.
 set -euo pipefail
@@ -215,8 +216,17 @@ fi
 resolve_tarball_url() {
     if [ -n "$REF" ]; then
         RESOLVED_TAG="$REF"
-        RESOLVED_FROM_REF=1
         TARBALL_URL="https://codeload.github.com/$PLUGIN_REPO/tar.gz/$REF"
+        # A ref shaped like a release tag (v1.2.3, 1.2.3, v1.2.3-rc.1) is a
+        # pin to that release, so its binary is fetched from the release. If
+        # no such release exists, the binary download fails with a clear
+        # error. Any other ref is a branch or commit, which has no binary.
+        if printf '%s' "$REF" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            RESOLVED_FROM_REF=0
+            TARBALL_URL="https://codeload.github.com/$PLUGIN_REPO/tar.gz/refs/tags/$REF"
+        else
+            RESOLVED_FROM_REF=1
+        fi
         return
     fi
     local body code tag
