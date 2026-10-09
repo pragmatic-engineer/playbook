@@ -1,0 +1,61 @@
+[
+ {
+  "id": "an-arch",
+  "role": "analyst",
+  "agent": "agents/analyst.md",
+  "task": "Turn these collector findings into candidate memory facts. Return ONLY JSON: {\"facts\":[{\"title\":\"...\",\"type\":\"project|reference\",\"scope\":\"repo|global\",\"anchors\":[\"repo-relative path\", ...]}]}. One fact per concept. Use as anchors only paths that appear in the findings below; never invent a path.",
+  "input": "Findings (code-structure):\n- src/common/par.rs: bounded fan-out over std::thread::scope, results in input order, cap 4.\n- src/config/store.rs: playbook config lives in playbook.db (SQLite, WAL). Legacy config.json tiers are imported once and renamed to .migrated.\n- src/worktree/mod.rs: the sweep removes landed worktrees; a worktree under one hour old is never removed.\n- src/usage/claude_code.rs: usage ingest splits the file list across up to 8 threads and merges in file order.",
+  "score": {
+   "kind": "facts",
+   "allowed_anchors": [
+    "src/common/par.rs",
+    "src/config/store.rs",
+    "src/worktree/mod.rs",
+    "src/usage/claude_code.rs"
+   ],
+   "required_anchors": [
+    "src/common/par.rs",
+    "src/config/store.rs"
+   ]
+  }
+ },
+ {
+  "id": "an-infra",
+  "role": "analyst",
+  "agent": "agents/analyst.md",
+  "task": "Turn these collector findings into candidate memory facts. Return ONLY JSON: {\"facts\":[{\"title\":\"...\",\"type\":\"project|reference\",\"scope\":\"repo|global\",\"anchors\":[\"repo-relative path\", ...]}]}. One fact per concept. Use as anchors only paths that appear in the findings below; never invent a path.",
+  "input": "Findings (infrastructure):\n- .github/workflows/rust-ci.yml: CI runs cargo nextest run plus cargo test --doc; required checks are build-test and lint-and-test.\n- .github/nextest.toml: retries 0, a slow-test timeout, and a ci profile; it lives under .github because the repo root allowlist does not track .config.\n- justfile: just test runs nextest and the doctests.\n- Cargo.toml: release profile uses opt-level s, fat LTO, strip.",
+  "score": {
+   "kind": "facts",
+   "allowed_anchors": [
+    ".github/workflows/rust-ci.yml",
+    ".github/nextest.toml",
+    "justfile",
+    "Cargo.toml"
+   ],
+   "required_anchors": [
+    ".github/workflows/rust-ci.yml",
+    ".github/nextest.toml"
+   ]
+  }
+ },
+ {
+  "id": "an-conv",
+  "role": "analyst",
+  "agent": "agents/analyst.md",
+  "task": "Turn these collector findings into candidate memory facts. Return ONLY JSON: {\"facts\":[{\"title\":\"...\",\"type\":\"project|reference\",\"scope\":\"repo|global\",\"anchors\":[\"repo-relative path\", ...]}]}. One fact per concept. Use as anchors only paths that appear in the findings below; never invent a path.",
+  "input": "Findings (conventions):\n- commands/quick-review.md: Step 2 runs playbook effort resolve agents reviewer --cap medium and spawns the returned subagent type.\n- skills/delegating-subagents/SKILL.md: read-only agents return results inline as measured on 2026-10-09; a missing return counts as NOT RUN.\n- docs/adr/0017-effort-ceilings.md: lowest ceiling wins, Claude Code's maxEffortLevel is the top authority, a ceiling never raises effort.",
+  "score": {
+   "kind": "facts",
+   "allowed_anchors": [
+    "commands/quick-review.md",
+    "skills/delegating-subagents/SKILL.md",
+    "docs/adr/0017-effort-ceilings.md"
+   ],
+   "required_anchors": [
+    "commands/quick-review.md",
+    "docs/adr/0017-effort-ceilings.md"
+   ]
+  }
+ }
+]
