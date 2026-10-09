@@ -34,10 +34,15 @@ impl Home {
     }
 
     fn run(&self, args: &[&str]) -> Output {
+        self.run_with(args, &[])
+    }
+
+    fn run_with(&self, args: &[&str], envs: &[(&str, &str)]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(args)
             .env("HOME", &self.0)
             .env("PLAYBOOK_USAGE_NO_BROWSER", "1")
+            .envs(envs.iter().copied())
             .output()
             .unwrap()
     }
@@ -81,7 +86,11 @@ impl Home {
     }
 
     fn start(&self) -> (u16, String) {
-        let out = self.run(&["usage", "dashboard"]);
+        self.start_with(&[])
+    }
+
+    fn start_with(&self, envs: &[(&str, &str)]) -> (u16, String) {
+        let out = self.run_with(&["usage", "dashboard"], envs);
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
         let after = text.split("http://127.0.0.1:").nth(1).expect("an IP URL");
         let port = after
@@ -234,7 +243,7 @@ fn the_cap_returns_503_a_closed_stream_frees_its_slot_and_the_server_stays_respo
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("cap");
     home.say("m1", "claude-sonnet-5");
-    let (port, token) = home.start();
+    let (port, token) = home.start_with(&[("PLAYBOOK_LIVE_REOPEN_GRACE_MS", "100")]);
 
     let mut open: Vec<TcpStream> = (0..4)
         .map(|_| {
@@ -280,4 +289,81 @@ fn the_cap_returns_503_a_closed_stream_frees_its_slot_and_the_server_stays_respo
         std::thread::sleep(Duration::from_millis(500));
     };
     assert!(freed, "a disconnected client must free its slot");
+}
+
+/// Opens a stream and waits for its first event.
+fn open_stream(port: u16, token: &str) -> TcpStream {
+    let mut s = request(port, "", Some(token));
+    let first = read_until(&mut s, "event: live", Duration::from_secs(20));
+    assert!(status_line(&first).contains("200"), "{first}");
+    s
+}
+
+#[test]
+fn a_quick_reopen_after_a_client_leaves_does_not_get_a_503() {
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let home = Home::new("reopen");
+    home.say("m1", "claude-sonnet-5");
+    // A short tick so the leaving client is noticed fast, and a grace far
+    // longer than that so the test does not depend on machine load.
+    let (port, token) = home.start_with(&[
+        ("PLAYBOOK_LIVE_TICK_MS", "50"),
+        ("PLAYBOOK_LIVE_REOPEN_GRACE_MS", "20000"),
+    ]);
+    let mut open: Vec<TcpStream> = (0..4).map(|_| open_stream(port, &token)).collect();
+
+    // The page closes one stream and reopens at once, with all four slots in use.
+    drop(open.pop());
+    let mut again = request(port, "", Some(&token));
+    let reply = read_until(&mut again, "event: live", Duration::from_secs(20));
+
+    assert!(status_line(&reply).contains("200"), "{reply}");
+}
+
+#[test]
+fn a_client_that_never_reads_loses_its_slot_after_the_write_deadline() {
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let home = Home::new("stalled");
+    home.say("m1", "claude-sonnet-5");
+    // Events every millisecond fill the socket buffers of a client that never reads.
+    let (port, token) = home.start_with(&[
+        ("PLAYBOOK_LIVE_TICK_MS", "1"),
+        ("PLAYBOOK_LIVE_WRITE_DEADLINE_MS", "300"),
+        ("PLAYBOOK_LIVE_REOPEN_GRACE_MS", "50"),
+    ]);
+    // Four clients send the request and then never read: they hold every slot.
+    let stalled: Vec<TcpStream> = (0..4)
+        .map(|_| {
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.write_all(
+                format!(
+                    "GET /api/live HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Playbook-Token: {token}\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            s
+        })
+        .collect();
+
+    // The sockets stay open the whole time. A reader gets a slot once the
+    // stalled streams time out (generous bound, polled, no fixed sleeps).
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let got = loop {
+        let mut probe = request(port, "", Some(&token));
+        let reply = read_until(&mut probe, "\r\n\r\n", Duration::from_secs(3));
+        if status_line(&reply).contains("200") {
+            break true;
+        }
+        if Instant::now() > deadline {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    };
+    drop(stalled);
+    assert!(got, "stalled clients must not hold the slots forever");
 }
