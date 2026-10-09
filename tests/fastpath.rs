@@ -48,7 +48,7 @@ fn a_form_the_fast_path_skips_is_still_parsed_or_rejected_by_clap() {
 
 #[test]
 fn version_text_equals_what_clap_renders() {
-    assert_eq!(version_text(), Cli::command().render_version().to_string());
+    assert_eq!(version_text(), Cli::command().render_version());
 }
 
 fn run(args: &[&str]) -> (i32, String, String) {

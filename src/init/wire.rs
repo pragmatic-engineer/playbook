@@ -372,9 +372,7 @@ pub fn wire_at(settings_path: &Path, epoch: u64) -> Result<WireOutcome, WireErro
         }
     }
 
-    let rendered = serde_json::to_string_pretty(&Value::Object(root))
-        .expect("a JSON value built from valid JSON always re-serializes");
-    let rendered = format!("{rendered}\n");
+    let rendered = format!("{:#}\n", Value::Object(root));
 
     if rendered == original {
         return Ok(WireOutcome {
@@ -496,11 +494,7 @@ pub fn unwire_at(
     if dry_run {
         return Ok(outcome);
     }
-    let rendered = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&Value::Object(root))
-            .expect("a JSON value built from valid JSON always re-serializes")
-    );
+    let rendered = format!("{:#}\n", Value::Object(root));
     if rendered == original {
         return Ok(outcome);
     }
@@ -585,12 +579,12 @@ fn upsert_hook(
                 new_group.insert("matcher".to_string(), Value::String(matcher.to_string()));
             }
             new_group.insert("hooks".to_string(), Value::Array(Vec::new()));
+            let at = groups.len();
             groups.push(Value::Object(new_group));
-            groups
-                .last_mut()
-                .expect("just pushed")
-                .as_object_mut()
-                .expect("just built as an object")
+            match &mut groups[at] {
+                Value::Object(map) => map,
+                _ => unreachable!("the group just pushed is an object"),
+            }
         }
     };
 

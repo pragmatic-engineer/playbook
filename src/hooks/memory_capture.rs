@@ -123,9 +123,8 @@ pub fn run(payload: &Payload) {
         return release(&marker, &attempts_path);
     }
 
-    let attempts = match read_attempts(&attempts_path) {
-        Some(n) => n,
-        None => return release(&marker, &attempts_path),
+    let Some(attempts) = read_attempts(&attempts_path) else {
+        return release(&marker, &attempts_path);
     };
     if attempts >= REBLOCK_CAP {
         eprintln!("memory-capture: capture skipped, re-block cap reached");

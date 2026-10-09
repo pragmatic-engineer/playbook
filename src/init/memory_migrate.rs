@@ -792,7 +792,7 @@ mod tests {
         let result = copy_all(&old_root, &new_root, &[PathBuf::from("fact.md")]);
 
         // Assert
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         assert_eq!(
             fs::read_to_string(new_root.join("fact.md")).unwrap(),
             "destination content, must survive",
@@ -823,7 +823,7 @@ mod tests {
         let result = copy_all(&old_root, &new_root, &[PathBuf::from("fact.md")]);
 
         // Assert
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         assert_eq!(
             fs::read_to_string(new_root.join("fact.md")).unwrap(),
             "destination content, must survive",
@@ -850,7 +850,7 @@ mod tests {
         let result = copy_all(&old_root, &new_root, &[PathBuf::from("fact.md")]);
 
         // Assert
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         assert_eq!(
             fs::read_to_string(new_root.join("fact.md")).unwrap(),
             "source content, must win",

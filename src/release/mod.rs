@@ -6,7 +6,7 @@
 //! the retired shell original. Both print to stdout and never touch the
 //! network.
 
-use regex::Regex;
+use crate::common::re::static_regex;
 use serde_json::{json, Value};
 
 const FORMULA_TEMPLATE: &str = include_str!("formula.rb.tmpl");
@@ -40,10 +40,7 @@ fn sum_for(sums: &str, file: &str) -> Option<String> {
 /// Renders the Homebrew formula for `version` from the release's
 /// `SHA256SUMS` text.
 pub fn render_formula(version: &str, sums: &str) -> Result<String, String> {
-    if !Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-        .expect("static regex")
-        .is_match(version)
-    {
+    if !static_regex(r"^[0-9]+\.[0-9]+\.[0-9]+$").is_match(version) {
         return Err(format!("bad version '{version}'"));
     }
     let mut out = FORMULA_TEMPLATE.replace("@VERSION@", version);
@@ -68,17 +65,12 @@ pub fn pin_marketplace(
     repo: &str,
 ) -> Result<String, String> {
     let dots_only = |part: &str| part.chars().all(|c| c == '.');
-    if !Regex::new(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-        .expect("static regex")
-        .is_match(repo)
+    if !static_regex(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$").is_match(repo)
         || repo.split('/').any(dots_only)
     {
         return Err(format!("bad repo: {repo}"));
     }
-    if !Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+([-+.][0-9A-Za-z.+-]+)?$")
-        .expect("static regex")
-        .is_match(version)
-    {
+    if !static_regex(r"^[0-9]+\.[0-9]+\.[0-9]+([-+.][0-9A-Za-z.+-]+)?$").is_match(version) {
         return Err(format!("bad version: {version}"));
     }
     if !is_sha256(sha256) {

@@ -14,7 +14,9 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn with_repo_and_home<T>(repo: &Path, home: &Path, f: impl FnOnce() -> T) -> T {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let prev_cwd = std::env::current_dir().expect("read current dir");
     let prev_home = std::env::var_os("HOME");
     std::env::set_current_dir(repo).expect("cd into repo");

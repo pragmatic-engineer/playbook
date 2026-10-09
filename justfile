@@ -73,6 +73,7 @@ build:
 check: build
     cargo fmt --check
     cargo clippy --all-targets -- -D warnings
+    cargo clippy --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
     just test
     git ls-files '*.sh' | xargs shellcheck --severity=warning
     @for f in $(git ls-files '*.sh'); do bash -n "$f"; done

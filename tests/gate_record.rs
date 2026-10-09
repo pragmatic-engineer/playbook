@@ -22,7 +22,9 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// `CWD_LOCK` does.
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Runs `f` with the process cwd set to `repo` and `$HOME` set to `home`,

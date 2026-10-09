@@ -658,7 +658,9 @@ fn a_missing_subagents_dir_means_the_main_transcript_alone() {
     let state = session.state();
     assert_eq!(effective(&state), 40);
     assert_eq!(
-        state["transcript"]["files"].as_object().map(|f| f.len()),
+        state["transcript"]["files"]
+            .as_object()
+            .map(serde_json::Map::len),
         Some(1)
     );
 }

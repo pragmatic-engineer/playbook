@@ -216,6 +216,9 @@ fn init_adopts_a_config_json_written_after_the_sqlite_import() {
     assert!(
         out.steps.iter().any(|s| s.name == "config"),
         "{:?}",
-        out.steps.iter().map(|s| s.render()).collect::<Vec<_>>()
+        out.steps
+            .iter()
+            .map(playbook::init::run::StepReport::render)
+            .collect::<Vec<_>>()
     );
 }

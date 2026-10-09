@@ -6,7 +6,7 @@
 //! enough. Results come back in input order, so output stays deterministic.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 
 /// Most calls in flight at once: enough to overlap the waits, low enough to
 /// stay clear of `gh` rate limits and a loaded machine.
@@ -36,14 +36,16 @@ where
             });
         }
     });
-    slots
-        .into_iter()
-        .map(|slot| {
-            slot.into_inner()
-                .unwrap_or_else(|e| e.into_inner())
-                .expect("every slot is filled before the scope ends")
-        })
-        .collect()
+    #[allow(
+        clippy::expect_used,
+        reason = "every index below `items.len()` is claimed once and filled before the scope ends"
+    )]
+    let filled = |slot: Mutex<Option<T>>| {
+        slot.into_inner()
+            .unwrap_or_else(PoisonError::into_inner)
+            .expect("every slot is filled before the scope ends")
+    };
+    slots.into_iter().map(filled).collect()
 }
 
 #[cfg(test)]
