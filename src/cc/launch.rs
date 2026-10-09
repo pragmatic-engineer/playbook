@@ -88,11 +88,13 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
             all.push(json);
         }
     }
-    let user_settings = crate::common::home_dir().join(".claude/settings.json");
-    if let Some(flags) = crate::models::launcher_flags(args, &user_settings) {
+    let home = crate::common::home_dir();
+    let user_settings = home.join(".claude/settings.json");
+    let ceiling = crate::effort::ceiling(&home, &home.join(".claude"), &cwd_now);
+    let effort = crate::models::effort_in_force(args, &user_settings, ceiling.effective.as_deref());
+    if let Some(flags) = crate::models::launcher_flags(args, &user_settings, effort.as_deref()) {
         all.extend(flags);
     }
-    let home = crate::common::home_dir();
     if let Some((flags, names)) = super::agent_variants::flags(
         args,
         &home,
@@ -103,6 +105,9 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         all.extend(flags);
         // The orchestrator reads this through `playbook effort resolve`.
         std::env::set_var(crate::effort::component::VARIANTS_ENV, names);
+    }
+    for (var, id) in crate::models::env_overrides(&home) {
+        std::env::set_var(var, id);
     }
     all.extend_from_slice(args);
     if playbook_memory_only(&crate::common::home_dir()) {

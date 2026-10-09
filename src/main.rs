@@ -845,6 +845,14 @@ fn main() {
                     print!("{}", doctor::check::render(&rows));
                 }
             }
+            DoctorCommand::Models { json } => {
+                let home = common::home_dir();
+                let cwd = std::env::current_dir().unwrap_or_default();
+                println!(
+                    "{}",
+                    playbook::models::report(&home, &home.join(".claude"), &cwd, json)
+                );
+            }
             DoctorCommand::PluginVersion { path } => {
                 println!("{}", doctor::field::plugin_version(&path));
             }
