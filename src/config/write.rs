@@ -67,6 +67,15 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
             });
         }
     }
+    if let Value::String(s) = value {
+        if keys::model_override_error(key, s).is_some() {
+            return Err(ConfigError::InvalidEnumValue {
+                key: key.to_string(),
+                value: s.clone(),
+                allowed: &["empty", "claude-<tier>-<major>[-<minor>]"],
+            });
+        }
+    }
     if matches!(default, Value::Number(_)) {
         validate_number(key, value)?;
     }

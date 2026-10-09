@@ -187,6 +187,17 @@ pub fn resolve_valid(
     repo_slug: Option<&str>,
 ) -> Result<(Value, Source, Option<IgnoredValue>), ConfigError> {
     let (value, source) = resolve(key, home, repo_slug)?;
+    if let Some(problem) = value
+        .as_str()
+        .and_then(|s| keys::model_override_error(key, s))
+    {
+        let default = keys::default_value(key).expect("key was already validated as known");
+        let ignored = IgnoredValue {
+            tier: source,
+            warning: format!("ignoring invalid value {value} for config key {key}: {problem}"),
+        };
+        return Ok((default, Source::Default, Some(ignored)));
+    }
     let Some(allowed) = keys::allowed_enum_values(key) else {
         return Ok((value, source, None));
     };
