@@ -21,7 +21,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 const DEFAULT_AUTO_LEARN_MIN_EDITS: i64 = 5;
 
@@ -54,10 +54,7 @@ pub fn run(payload: &Payload) {
 /// session is genuinely abandoned. Matches
 /// the retired shell original.
 fn refresh_last_clean_ts(dir: &str) {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = crate::common::time::now_epoch_secs();
     let _ = fs::write(Path::new(dir).join("last-clean-ts"), now.to_string());
 }
 
@@ -95,10 +92,7 @@ fn queue_auto_learn(payload: &Payload, dir: &str) {
         return;
     }
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = crate::common::time::now_epoch_secs();
     let flag = AutoLearnFlag {
         repo_root: &root,
         edits,

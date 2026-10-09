@@ -22,6 +22,7 @@ pub mod re;
 pub mod repo;
 pub mod session;
 pub mod shell;
+pub mod time;
 
 pub use atomic::atomic_append;
 pub use config_hash::config_hash;

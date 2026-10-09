@@ -105,7 +105,7 @@ pub fn bump_hits(mem_dir: &Path, ids: &[String]) {
     if ids.is_empty() {
         return;
     }
-    let now = current_epoch_secs();
+    let now = crate::common::time::now_epoch_secs();
     modify_locked(mem_dir, |store| {
         for node_id in ids {
             let entry = store.nodes.entry(node_id.clone()).or_default();
@@ -136,7 +136,7 @@ pub fn cached_stale(mem_dir: &Path, node_id: &str) -> Option<bool> {
 /// Caches `node_id`'s fresh staleness verdict and signature, leaving its hit
 /// count and promotion state untouched.
 pub fn set_staleness(mem_dir: &Path, node_id: &str, stale: bool, verified_hash: Option<String>) {
-    let now = current_epoch_secs().to_string();
+    let now = crate::common::time::now_epoch_secs().to_string();
     modify_locked(mem_dir, |store| {
         let entry = store.nodes.entry(node_id.to_string()).or_default();
         entry.stale = Some(stale);
@@ -159,17 +159,10 @@ pub fn read_cursor(mem_dir: &Path) -> Option<u64> {
 /// Stamps the consolidation cursor with the current time, so the next pass
 /// only considers facts touched since.
 pub fn advance_cursor(mem_dir: &Path) {
-    let now = current_epoch_secs().to_string();
+    let now = crate::common::time::now_epoch_secs().to_string();
     modify_locked(mem_dir, |store| {
         store.cursor.last_run_at = Some(now.clone());
     });
-}
-
-fn current_epoch_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 /// Whether `node_id` has been promoted. A best-effort, unlocked read: a

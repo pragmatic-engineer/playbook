@@ -17,7 +17,7 @@ use crate::cc::worktree;
 use crate::common::run_with_timeout;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -343,10 +343,7 @@ fn gh_login() -> String {
 /// its own classification-and-landed-signal logic and its own
 /// `worktreeCleanup.*` config gate, in-process rather than as a subprocess.
 fn run_housekeep(repo_root: &Path, worktree_path: &Path, branch: &str, no_push: bool) {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now = crate::common::time::now_secs();
 
     let fetch_marker = worktree::fetch_cache_marker_path(repo_root)
         .unwrap_or_else(|| std::env::temp_dir().join("playbook-wt-fetch-scratch"));

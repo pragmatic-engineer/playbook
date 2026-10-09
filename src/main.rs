@@ -1077,10 +1077,7 @@ fn main() {
             let repo_root = std::env::current_dir().unwrap_or_default();
             match sub {
                 WorktreeCommand::Sweep { dry_run } => {
-                    let now_epoch = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0);
+                    let now_epoch = crate::common::time::now_secs();
                     match worktree::sweep(&repo_root, &home, repo_slug, dry_run, now_epoch) {
                         Ok(report) => {
                             for line in report {
@@ -1095,10 +1092,7 @@ fn main() {
                 }
                 WorktreeCommand::Review { .. } => unreachable!("handled above"),
                 WorktreeCommand::Remove { path } => {
-                    let now_epoch = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0);
+                    let now_epoch = crate::common::time::now_secs();
                     match worktree::remove(&repo_root, &home, repo_slug, &path, now_epoch) {
                         Ok(line) => println!("{line}"),
                         Err(err) => {

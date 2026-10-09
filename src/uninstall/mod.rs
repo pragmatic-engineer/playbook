@@ -53,7 +53,7 @@ pub fn run(opts: &Options) -> Report {
         "removed"
     };
     let claude_home = opts.home.join(".claude");
-    let stamp = wire::now_epoch_secs();
+    let stamp = crate::common::time::now_epoch_secs();
 
     let settings = settings_step(opts, &claude_home, stamp, &mut report);
     rc_step(opts, stamp, &mut report);

@@ -6,7 +6,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::SystemTime;
 
 /// Seconds a background `gh` call may run before its watchdog kills it.
 const REFRESH_TIMEOUT_SECS: u32 = 60;
@@ -112,8 +111,8 @@ pub fn file_mtime(p: &Path) -> i64 {
     std::fs::metadata(p)
         .and_then(|m| m.modified())
         .ok()
-        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_secs() as i64)
+        .and_then(crate::common::time::epoch_secs_of)
+        .unwrap_or(0)
 }
 
 /// Age of `p` in seconds, or `missing` when the file does not exist.

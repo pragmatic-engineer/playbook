@@ -163,11 +163,7 @@ fn recorded_at_now() -> String {
             }
         }
     }
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-        .to_string()
+    crate::common::time::now_epoch_secs().to_string()
 }
 
 #[cfg(test)]

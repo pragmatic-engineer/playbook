@@ -13,7 +13,7 @@ use crate::common::repo_slug;
 use crate::common::run_with_timeout;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
 /// Which convention created a worktree, matched purely by its path shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,10 +506,7 @@ fn worktree_created_epoch(worktree_path: &Path) -> Option<i64> {
         .ok()?
         .modified()
         .ok()?;
-    modified
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs() as i64)
+    crate::common::time::epoch_secs_of(modified)
 }
 
 /// Whether a worktree was found locked, and by which pid, per `git worktree
