@@ -26,6 +26,7 @@ pub mod manifest;
 pub mod memory_import;
 pub mod mode;
 pub mod models;
+pub mod planning;
 pub mod plans;
 pub mod pr;
 pub mod release;
@@ -374,6 +375,21 @@ pub enum Command {
         /// Create the folder when it does not exist
         #[arg(long)]
         create: bool,
+    },
+    /// Helpers for `/playbook:plan`
+    Plan {
+        #[command(subcommand)]
+        sub: PlanCommand,
+    },
+    /// Append to the repo's `GLOSSARY.md`
+    Glossary {
+        #[command(subcommand)]
+        sub: GlossaryCommand,
+    },
+    /// Print the path of a skill file or one of its references
+    Skill {
+        #[command(subcommand)]
+        sub: SkillCommand,
     },
     /// ADR helpers
     Adr {
@@ -786,6 +802,52 @@ pub enum PrCommand {
         /// Squash with admin rights instead of arming auto-merge
         #[arg(long)]
         admin: bool,
+    },
+}
+
+/// `playbook plan` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum PlanCommand {
+    /// Print a topic's checkpoint path, or save the checkpoint
+    ///
+    /// Without `--write` it creates the plans folder and prints the path, then
+    /// `found` or `not-found`. With `--write` it replaces the checkpoint with
+    /// stdin under a directory lock. A failed save prints a one-line notice and
+    /// still exits 0, so planning continues without resume safety.
+    Checkpoint {
+        /// Kebab-case topic slug, or the ticket id in lower case
+        slug: String,
+        /// Replace the checkpoint with stdin
+        #[arg(long)]
+        write: bool,
+    },
+}
+
+/// `playbook glossary` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum GlossaryCommand {
+    /// Append one entry line to `GLOSSARY.md` at the repo root
+    Add {
+        /// The entry text
+        #[arg(allow_hyphen_values = true)]
+        entry: String,
+    },
+}
+
+/// `playbook skill` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum SkillCommand {
+    /// Print the absolute path of a reference file, or of `SKILL.md`
+    ///
+    /// Falls back to `SKILL.md` when the reference is missing or not named.
+    Ref {
+        /// Skill folder name, for example `grounding-review`
+        skill: String,
+        /// Reference file name without `.md`
+        name: Option<String>,
+        /// Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
+        #[arg(long)]
+        plugin_root: Option<PathBuf>,
     },
 }
 

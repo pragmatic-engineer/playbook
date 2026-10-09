@@ -109,37 +109,27 @@ Add `--flag auto` if the arguments contain `--auto` or `--auto-design`. Add `--f
 **Check for a checkpoint.** This command's own bespoke checkpoint/resume mechanism, not the generic `/playbook:session-handoff` (that one is keyed by directory and holds a free-text summary, not a structured plan in progress keyed by topic). Resolve the plans directory and look for a matching checkpoint:
 
 ```bash
-if ! PLANS_DIR=$(playbook path plans 2>&1); then
-  echo "error: playbook path plans failed: $PLANS_DIR" >&2
-  exit 1
-fi
-CHECKPOINT="$PLANS_DIR/<topic-slug>.checkpoint.md"
+playbook plan checkpoint <topic-slug>
 ```
+
+It creates the plans folder, then prints the checkpoint path and `found` or `not-found`. It exits 1 on a bad slug or when the repo has no `origin` remote.
 
 - **Found:** read it. Show its `Goal:` line and its last-modified date (not a bare yes/no), then ask once (in auto mode, take the recommended answer, yes, and record it as an assumption): **"Found an in-progress plan for `<topic>` last touched `<date>`, goal: `<goal-line>`. Resume it? I'd recommend yes because picking up mid-session avoids redoing settled decisions."**
   - **Yes:** load its Decisions Made, Out of Scope, Open Risks, chosen Approach, `Design approved` marker, and the Work Units/Segments table as far as they got. Resume from the first step whose output the checkpoint doesn't yet have: only a Goal and no Decisions Made resumes at Step 1; an Approach with no `Design approved` marker resumes at Step 5 (the route check still needs an answer); a `Design approved` marker with no Work Units resumes at Step 7. Never resume at Step 7 on an Approach alone: Step 6's approval is a hard gate (Core Rules), and a checkpoint that hasn't recorded it hasn't cleared that gate yet, no matter how settled the approach looks.
   - **No:** start fresh. The stale checkpoint is not deleted here: it gets overwritten in place as new decisions are appended through Step 3 onward (see the write shape below), and only Step 12 deletes it, once a completed plan actually replaces it. Silently deleting a stale checkpoint the moment someone declines to resume would destroy a session's progress on a whim, on the chance they meant to resume a different topic under the same seed.
 - **Not found:** proceed to Step 1 with nothing to resume.
 
-**Checkpoint content and write shape.** The checkpoint is a single Markdown file: a `Goal:` line, `Decisions Made`, `Out of Scope`, `Open Risks`, `Approach`, a `Design approved` marker (set only once Step 6's gate clears), and the `Work Units / Segments` table as far as they've been settled, the same structured shape the final plan's condensed sections use. Rewrite it after each resolved decision, not only in Step 3 and Step 7: Step 4 (approach chosen), Step 5 (route-check answer), and Step 6 (the `Design approved` marker) each trigger a rewrite too, under the same mkdir-based advisory lock pattern this repo uses elsewhere for concurrent small-file writes, like `GLOSSARY.md`'s append (`src/common/atomic.rs`'s `with_dir_lock`), adapted here to a full rewrite rather than a one-line append, since the checkpoint's content is a structured document, not an append-only log:
+**Checkpoint content and write shape.** The checkpoint is a single Markdown file: a `Goal:` line, `Decisions Made`, `Out of Scope`, `Open Risks`, `Approach`, a `Design approved` marker (set only once Step 6's gate clears), and the `Work Units / Segments` table as far as they've been settled, the same structured shape the final plan's condensed sections use. Rewrite it after each resolved decision, not only in Step 3 and Step 7: Step 4 (approach chosen), Step 5 (route-check answer), and Step 6 (the `Design approved` marker) each trigger a rewrite too, under the same mkdir-based advisory lock pattern this repo uses elsewhere for concurrent small-file writes, like `GLOSSARY.md`'s append (`src/common/atomic.rs`'s `with_dir_lock`), adapted here to a full rewrite rather than a one-line append, since the checkpoint's content is a structured document, not an append-only log. `playbook plan checkpoint --write` does it:
 
 ```bash
-LOCK="$CHECKPOINT.lock"
-ACQUIRED=0
-for _ in $(seq 1 20); do
-  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
-  sleep 0.05
-done
-if ! cat > "$CHECKPOINT" <<'EOF' 2>/tmp/plan-checkpoint-err
+playbook plan checkpoint <topic-slug> --write <<'EOF'
 <the full updated checkpoint: Goal, last-touched date, Decisions Made,
 Out of Scope, Open Risks, Approach, and the Work Units/Segments table as
 far as they got>
 EOF
-then
-  echo "couldn't save checkpoint: $(cat /tmp/plan-checkpoint-err 2>/dev/null), continuing without resume safety this turn"
-fi
-[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
 ```
+
+It takes the lock, replaces the file whole and prints the path. When the save fails it prints `couldn't save checkpoint: <reason>, continuing without resume safety this turn` and still exits 0.
 
 A checkpoint write failure warns inline with that message and the interview keeps going. Never abort a session over a persistence hiccup: a human is present to see the warning, and losing resume safety for one turn is a far smaller cost than losing the whole session.
 
@@ -230,16 +220,10 @@ Between questions or rounds, explore further if an answer opens a new area, and 
 Append with the same mkdir-based advisory lock pattern the checkpoint's rewrite uses, matching the Rust hooks' `with_dir_lock` (`src/common/atomic.rs`). Two concurrent sessions can each resolve a term at the same moment; a plain check-then-append can silently drop one of the two lines.
 
 ```bash
-GLOSSARY_MD="$ROOT/GLOSSARY.md"
-LOCK="$GLOSSARY_MD.lock"
-ACQUIRED=0
-for _ in $(seq 1 20); do
-  mkdir "$LOCK" 2>/dev/null && { ACQUIRED=1; break; }
-  sleep 0.05
-done
-printf '%s\n' "<term entry>" >> "$GLOSSARY_MD"
-[ "$ACQUIRED" = 1 ] && rmdir "$LOCK" 2>/dev/null
+playbook glossary add "<term entry>"
 ```
+
+It appends one line to `GLOSSARY.md` at the repo root, creating the file on the first entry, and prints the file path.
 
 Scale the depth: 2-4 questions for a small idea, more for a broad one. Don't over-interview a simple thing (see Adapting to Complexity).
 

@@ -192,9 +192,10 @@ For each lens in a wave, read its Step 2d tier from the captured tier map before
   Path resolution: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real bash step before building the string, inside an executed bash block, not prose that merely names the variable, for example:
 
   ```bash
-  REF_FILE="${CLAUDE_PLUGIN_ROOT}/skills/grounding-review/references/<file>.md"
-  [[ -f "$REF_FILE" ]] || REF_FILE="${CLAUDE_PLUGIN_ROOT}/skills/grounding-review/SKILL.md"
+  playbook skill ref grounding-review <file>
   ```
+
+  It prints the absolute path of `references/<file>.md` (give `<file>` without `.md`), or of the full `SKILL.md` when the file is missing or no name is given.
 
   If the lens has a mapped file, resolve it to an absolute path this way and confirm that file exists. If a lens has no mapped file (`test`, `docs`), or the resolved file doesn't exist for some reason (defensive fallback), resolve the full `SKILL.md` path instead: the same fallback mechanism either way (no reference file to hand over), so it is one rule, not two. Hand `cheap-checker` the resolved ABSOLUTE path this bash step produced, never the unexpanded `${CLAUDE_PLUGIN_ROOT}` placeholder or a bare repo-relative string: `cheap-checker` has no `Bash`, so it cannot expand `$CLAUDE_PLUGIN_ROOT` itself, and a repo-relative path never resolves against the diff's own target repo (which is not this plugin's repo). The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern, never the full skill's breadth.
 - **`skip`:** dispatch nothing for that lens. Track it explicitly as skipped, e.g. in the same one-line summary Step 2d already reports ("Triage: security=full-lens, docs=cheap-check, perf=skip"). A skipped lens is never conflated with "returned nothing" below: it was never dispatched at all, so it has no return value to lose.

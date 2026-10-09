@@ -7,12 +7,13 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     adr, agents, cc, ci, commit, common, config, deps, doctor, effort, eval, gate, handoff, hooks,
-    init, json, learn, manifest, memory_import, mode, pr, release, review, sanitize, settings,
-    statusline, trust, update, usage, worktree, AdrCommand, AgentsCommand, CcCommand, Cli, Command,
-    CommitCommand, ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand, EvalCommand,
-    GateCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand,
-    ModeArg, ModeCommand, PrCommand, ReleaseCommand, ReviewCommand, ReviewWorktreeCommand,
-    SanitizeCommand, SettingsCommand, UsageCommand, WorktreeCommand,
+    init, json, learn, manifest, memory_import, mode, planning, pr, release, review, sanitize,
+    settings, statusline, trust, update, usage, worktree, AdrCommand, AgentsCommand, CcCommand,
+    Cli, Command, CommitCommand, ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand,
+    EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand,
+    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ReleaseCommand,
+    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, SkillCommand,
+    UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -735,6 +736,68 @@ fn main() {
                     }
                 }
             }
+        }
+        Command::Plan {
+            sub: PlanCommand::Checkpoint { slug, write },
+        } => {
+            let Some(base) = common::repo_scoped_dir(common::RepoScope::Worktree) else {
+                eprintln!(
+                    "error: playbook path plans failed: this repo needs a git 'origin' remote"
+                );
+                std::process::exit(1);
+            };
+            let dir = base.join("plans");
+            let path = match planning::checkpoint_path(&dir, &slug) {
+                Ok(path) => path,
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    std::process::exit(1);
+                }
+            };
+            if write {
+                let mut content = String::new();
+                let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut content);
+                let saved = std::fs::create_dir_all(&dir)
+                    .and_then(|()| planning::write_checkpoint(&path, &content));
+                match saved {
+                    Ok(()) => println!("{}", path.display()),
+                    Err(err) => println!(
+                        "couldn't save checkpoint: {err}, continuing without resume safety this turn"
+                    ),
+                }
+            } else {
+                if let Err(err) = std::fs::create_dir_all(&dir) {
+                    eprintln!("error: could not create {}: {err}", dir.display());
+                    std::process::exit(1);
+                }
+                println!("{}", path.display());
+                println!("{}", if path.is_file() { "found" } else { "not-found" });
+            }
+        }
+        Command::Glossary {
+            sub: GlossaryCommand::Add { entry },
+        } => {
+            let Some(root) = manifest::check::toplevel() else {
+                eprintln!("error: not in a git repo");
+                std::process::exit(1);
+            };
+            println!("{}", planning::glossary_add(&root, &entry).display());
+        }
+        Command::Skill {
+            sub:
+                SkillCommand::Ref {
+                    skill,
+                    name,
+                    plugin_root,
+                },
+        } => {
+            let root = plugin_root
+                .or_else(|| std::env::var_os("CLAUDE_PLUGIN_ROOT").map(std::path::PathBuf::from))
+                .unwrap_or_default();
+            println!(
+                "{}",
+                planning::skill_ref(&root, &skill, name.as_deref()).display()
+            );
         }
         Command::Adr {
             sub: AdrCommand::Next,
