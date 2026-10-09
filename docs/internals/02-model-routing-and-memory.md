@@ -70,6 +70,14 @@ Every model playbook picks is the 5.5 generation. Plugin files name a tier by al
 
 The table lives in `src/models/mod.rs`. When the preferred model is overloaded or unavailable (including a Bedrock or Vertex account that cannot invoke it), Claude Code switches to a fallback for that turn. `ccc` and `ccd` pass the chain `claude-opus-5,claude-sonnet-5,claude-haiku-4-5` with `--fallback-model`. They add nothing when you pass `--fallback-model` yourself or set `fallbackModel` in `~/.claude/settings.json`. A session started without the launcher gets no playbook fallback.
 
+Measured on Claude Code 2.1.293 (2026-10-09): all six ids answer, and the aliases resolve to the 5.5 ids. With an unknown primary id and `--fallback-model`, Claude Code runs the fallback. Without it the call fails with `api_error`. Claude Code accepts a chain of more than three models without a flag error, so the three-model cap is only a documented limit.
+
+**Effort and the fallback.** The previous Sonnet and Opus reject `xhigh` and `max` with HTTP 400 `Invalid effort level`. They accept `low`, `medium` and `high`. Haiku 4.5 accepts all four. A 400 also triggers the fallback, so a session at `xhigh` would walk the chain and end at Haiku anyway. When the effort in force is `xhigh` or `max` (from `--effort`, or `effortLevel` in your user settings, lowered to the effective ceiling), `ccc` therefore passes only `claude-haiku-4-5`. When no effort is stated, the model default applies and the full chain is passed. Playbook never changes your effort to suit a fallback.
+
+**Overrides.** `playbook config set --global models.sonnet claude-sonnet-5` (also `models.haiku` and `models.opus`) points an alias at another model of the same tier. The value is empty (no override) or `claude-<tier>-<major>[-<minor>]` for its own tier, and anything else is refused. `ccc` and `ccd` export `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for each override, so subagents and skills that name the alias follow it. A variable you exported yourself wins. Shipped plugin files still name only aliases, so the pin check in `tests/model_pins.rs` is unchanged.
+
+`playbook doctor models` (add `--json`) prints the table, any override, the chain `ccc` passes, whether your own fallback replaces it, and whether the effort in force trimmed the chain.
+
 `tests/model_pins.rs` fails when an agent, command, skill, prompt, output style, workflow or `settings.shared.json` names a model id outside this table, or when an agent uses anything but a tier alias.
 
 ## Memory Protocol
