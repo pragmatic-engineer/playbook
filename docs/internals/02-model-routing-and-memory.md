@@ -54,6 +54,20 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 
 Effort is fixed per agent file: base agents run high, and an orchestrator picks the `-low` or `-xhigh` variant by diff size and risk. Do not request xhigh or max on your own for anything else; if a deployment rejects it, use the base agent.
 
+### Model tiers and the 5.5 rule
+
+Every model playbook picks is the 5.5 generation. Plugin files name a tier by alias (`haiku`, `sonnet`, `opus`) and never pin a model id. Claude Code resolves each alias to the newest model the provider offers (on the Anthropic API that is the 5.5 model).
+
+| Tier | Alias | Preferred (5.5) | Falls back to |
+|---|---|---|---|
+| fast | `haiku` | `claude-haiku-5-5` | `claude-haiku-4-5` |
+| balanced | `sonnet` | `claude-sonnet-5-5` | `claude-sonnet-5` |
+| deep | `opus` | `claude-opus-5-5` | `claude-opus-5` |
+
+The table lives in `src/models/mod.rs`. When the preferred model is overloaded or unavailable (including a Bedrock or Vertex account that cannot invoke it), Claude Code switches to a fallback for that turn. `ccc` and `ccd` pass the chain `claude-opus-5,claude-sonnet-5,claude-haiku-4-5` with `--fallback-model`. They add nothing when you pass `--fallback-model` yourself or set `fallbackModel` in `~/.claude/settings.json`. A session started without the launcher gets no playbook fallback.
+
+`tests/model_pins.rs` fails when an agent, command, skill, prompt, output style, workflow or `settings.shared.json` names a model id outside this table, or when an agent uses anything but a tier alias.
+
 ## Memory Protocol
 
 Memory is a typed graph. Both scopes share the same file format.

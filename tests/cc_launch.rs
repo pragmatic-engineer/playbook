@@ -47,11 +47,24 @@ impl Env {
     fn log(&self) -> PathBuf {
         self.root.join("claude.log")
     }
-    fn calls(&self) -> Vec<String> {
+    /// Every call, as the fake `claude` saw it.
+    fn raw_calls(&self) -> Vec<String> {
         fs::read_to_string(self.log())
             .unwrap_or_default()
             .lines()
             .map(String::from)
+            .collect()
+    }
+    /// Every call without the fallback pair the launcher always adds, so the
+    /// other tests keep reading the flags they care about.
+    fn calls(&self) -> Vec<String> {
+        const PAIR: &str = "--fallback-model claude-opus-5,claude-sonnet-5,claude-haiku-4-5";
+        self.raw_calls()
+            .into_iter()
+            .map(|l| {
+                let l = l.replacen(&format!("{PAIR} "), "", 1);
+                l.replacen(&format!(" {PAIR}"), "", 1).replacen(PAIR, "", 1)
+            })
             .collect()
     }
     fn path(&self) -> String {
@@ -461,4 +474,24 @@ fn max_and_an_own_settings_flag_add_nothing() {
     set_effort(&e, "low");
     e.launch_with(&["--settings", "my.json", "--"], &["fresh"], &[]);
     assert!(!e.calls()[1].contains("maxEffortLevel"), "{:?}", e.calls());
+}
+
+#[test]
+fn the_launcher_passes_the_previous_generation_as_the_fallback() {
+    let e = env("fallback");
+    e.launch(&["fresh"]);
+    let raw = e.raw_calls();
+    assert!(
+        raw[0].contains("--fallback-model claude-opus-5,claude-sonnet-5,claude-haiku-4-5"),
+        "{raw:?}"
+    );
+}
+
+#[test]
+fn a_fallback_the_user_chose_is_left_alone() {
+    let e = env("fallback-own");
+    e.launch_with(&["--fallback-model", "haiku", "--"], &["fresh"], &[]);
+    let raw = e.raw_calls();
+    assert_eq!(raw[0].matches("--fallback-model").count(), 1, "{raw:?}");
+    assert!(raw[0].contains("--fallback-model haiku"), "{raw:?}");
 }

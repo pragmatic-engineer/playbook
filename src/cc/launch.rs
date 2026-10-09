@@ -28,6 +28,7 @@ fn takes_value(opt: &str) -> bool {
             | "--settings"
             | "--setting-sources"
             | "--model"
+            | "--fallback-model"
             | "--permission-mode"
             | "--name"
             | "-n"
@@ -73,6 +74,10 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
             all.push("--settings".into());
             all.push(json);
         }
+    }
+    let user_settings = crate::common::home_dir().join(".claude/settings.json");
+    if let Some(flags) = crate::models::launcher_flags(args, &user_settings) {
+        all.extend(flags);
     }
     all.extend_from_slice(args);
 
