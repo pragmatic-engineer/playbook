@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS config (
     value_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (tier, scope, key)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
 ) WITHOUT ROWID;";
 
 /// The meta row that records the legacy JSON import ran.

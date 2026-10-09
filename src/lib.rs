@@ -34,6 +34,7 @@ pub mod release;
 pub mod review;
 pub mod sanitize;
 pub mod settings;
+pub mod state;
 pub mod statusline;
 pub mod trust;
 pub mod uninstall;
@@ -59,6 +60,19 @@ Docs: https://github.com/pragmatic-engineer/playbook"
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
+}
+
+/// `playbook state` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum StateCommand {
+    /// Print the state rows, sorted by key
+    List {
+        /// Only keys that start with this prefix
+        prefix: Option<String>,
+        /// Print the rows as one JSON object
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 // Variant order is the order users see in `--help`; nothing else depends on it.
@@ -211,6 +225,17 @@ pub enum Command {
     Config {
         #[command(subcommand)]
         sub: ConfigCommand,
+    },
+    /// Inspect playbook's own bookkeeping (migration record, sweep markers)
+    ///
+    /// `list` prints the rows of the `state` table in `playbook.db`, sorted by
+    /// key, optionally only those under a prefix. Read only: use `playbook
+    /// init` to repair and `playbook config export` to back up the config.
+    ///
+    /// Example: `playbook state list migrations/`
+    State {
+        #[command(subcommand)]
+        sub: StateCommand,
     },
     /// Set playbook's own ceiling on effort, or inspect one component's
     ///

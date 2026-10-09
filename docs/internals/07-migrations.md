@@ -32,13 +32,13 @@ No Auto migration ships today. The current entries are:
 
 ## How playbook knows you edited a file
 
-When playbook places a file (the system prompt, a status line script), it records a hash of what it wrote in `~/.config/playbook/migrations.state`, on a line `shipped <key> <hash>`. If the file's hash later differs, you edited it. A file with no record is never reported as edited. The hash is FNV-1a 64. It detects edits and does not protect against tampering.
+When playbook places a file (the system prompt, a status line script), it records a hash of what it wrote in the `state` table (see [State store](08-state-store.md)), under a `migrations/shipped/<key>` key. If the file's hash later differs, you edited it. A file with no record is never reported as edited. The hash is FNV-1a 64. It detects edits and does not protect against tampering.
 
 Playbook does not overwrite a file you edited. It leaves it, prints a warning, and tells you how to take the shipped copy (delete the file, then run `playbook init` again). Skills are checked per plugin version folder, and a dev checkout (a folder with `.git`) is skipped.
 
 ## State and locking
 
-- The record is `~/.config/playbook/migrations.state`: one `applied <id>` line per finished Auto migration, and one `shipped <key> <hash>` line per placed file.
+- The record is the `state` table: one `migrations/applied/<id>` row per finished Auto migration, and one `migrations/shipped/<key>` row per placed file. Migration 0010 imports the old `migrations.state` file.
 - Pending Auto migrations run under the directory lock `~/.config/playbook/migrations.lock`. The record is read again under the lock, so two sessions apply a migration once. A lock older than 300 seconds counts as stale.
 - If the lock cannot be taken, Auto migrations are skipped and `init` says so. If the record cannot be read (anything except a missing file), the run is skipped and never treated as empty.
 

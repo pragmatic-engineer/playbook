@@ -40,6 +40,7 @@ How the machine works.
 - [Headless mode](internals/05-headless-mode.md): what runs without a person at the keyboard, real `claude -p` exit codes, how the hooks behave headless, and a first CI use case.
 - [Release channels](internals/06-release-channels.md): how a tagged release reaches GitHub assets, the Homebrew tap and the marketplace, the trimmed plugin archive, and the secret it needs.
 - [Migrations](internals/07-migrations.md): how `playbook init` carries an install across breaking changes, the three migration kinds, and how edits to placed files are detected.
+- [State store](internals/08-state-store.md): where playbook keeps its internal state, how to inspect it with `playbook state list`, and the one-time import of the old files.
 
 ## Decisions
 
