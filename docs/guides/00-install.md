@@ -59,7 +59,7 @@ If the old binary could not report its version, the backup is named `playbook.un
 Pass `--yes` to accept every default without prompting. Pin a version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.19.0 bash
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.20.0 bash
 ```
 
 A version tag installs that release and its binary. A branch or commit pins only the source and installs no binary.
