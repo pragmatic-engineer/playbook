@@ -288,25 +288,23 @@ pub fn components(root: &Path) -> Vec<(Kind, String)> {
 /// Component keys set in the global config that match no component under
 /// `root`, as `effort.<kind>.<name>`.
 pub fn stale_keys(home: &Path, root: &Path) -> Vec<String> {
-    let path = config::global_config_path(&crate::common::paths::playbook_root_from(home));
-    let Ok(text) = fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&text) else {
-        return Vec::new();
-    };
-    let Some(Value::Object(kinds)) = map.get("effort") else {
+    let store_root = crate::common::paths::playbook_root_from(home);
+    let Ok(keys) = config::store::global_keys(&store_root) else {
         return Vec::new();
     };
     let mut stale = Vec::new();
-    for (kind_name, entries) in kinds {
-        let (Some(kind), Value::Object(entries)) = (Kind::parse(kind_name), entries) else {
+    for key in keys {
+        let mut parts = key.splitn(3, '.');
+        let (Some("effort"), Some(kind_name), Some(name)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
             continue;
         };
-        for name in entries.keys() {
-            if !kind.file(root, name).is_file() {
-                stale.push(config_key(kind, name));
-            }
+        let Some(kind) = Kind::parse(kind_name) else {
+            continue;
+        };
+        if !kind.file(root, name).is_file() {
+            stale.push(config_key(kind, name));
         }
     }
     stale.sort();

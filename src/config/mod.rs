@@ -246,18 +246,6 @@ pub(crate) fn any_scoped_config(root: &Path) -> bool {
     false
 }
 
-/// Look up a dotted path (`"autoReview.enabled"`) inside a JSON object,
-/// descending one segment at a time. `None` means some segment along the
-/// path is absent, distinct from a `Some(Value::Null)` found at the full
-/// path, which is a present value.
-pub(crate) fn dotted_lookup<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    let mut current = value;
-    for segment in key.split('.') {
-        current = current.as_object()?.get(segment)?;
-    }
-    Some(current)
-}
-
 #[cfg(test)]
 mod tests {
     use super::write::Tier;

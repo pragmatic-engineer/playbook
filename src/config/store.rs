@@ -377,6 +377,39 @@ fn legacy_files(root: &Path) -> Vec<LegacyFile> {
     out
 }
 
+/// Every non-object value in `node` with its dotted path.
+fn flatten_leaves(node: &Value, prefix: &str, out: &mut Vec<(String, Value)>) {
+    match node.as_object() {
+        Some(obj) => {
+            for (k, v) in obj {
+                let key = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                flatten_leaves(v, &key, out);
+            }
+        }
+        None if !prefix.is_empty() => out.push((prefix.to_string(), node.clone())),
+        None => {}
+    }
+}
+
+/// The keys the global tier holds, sorted. Empty when there is no database.
+pub fn global_keys(root: &Path) -> Result<Vec<String>, ConfigError> {
+    if !has_data(root) {
+        return Ok(Vec::new());
+    }
+    let conn = open(root)?;
+    let mut stmt = conn
+        .prepare("SELECT key FROM config WHERE tier = 'global' AND scope = '' ORDER BY key")
+        .map_err(broken(root))?;
+    let rows = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(broken(root))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(broken(root))
+}
+
 /// Import the legacy JSON files once. The flag is checked again inside the
 /// write transaction, so two processes opening a fresh database at the same
 /// time import exactly once. A file that is not a JSON object fails the whole
@@ -410,9 +443,13 @@ fn import_legacy_once(conn: &Connection, root: &Path) -> Result<(), ConfigError>
             if !parsed.is_object() {
                 return Err(ConfigError::Malformed(file.path.clone()));
             }
-            for &key in keys::KNOWN_KEYS {
-                if let Some(value) = super::dotted_lookup(&parsed, key) {
-                    upsert(conn, file.tier, &file.scope, key, value).map_err(broken(root))?;
+            let mut leaves = Vec::new();
+            flatten_leaves(&parsed, "", &mut leaves);
+            for (key, value) in leaves {
+                // Known keys and `effort.<kind>.<name>` keys; stale or future
+                // keys stay in the `.migrated` file.
+                if keys::default_value(&key).is_some() {
+                    upsert(conn, file.tier, &file.scope, &key, &value).map_err(broken(root))?;
                 }
             }
             done.push(file.path);
@@ -546,6 +583,23 @@ mod tests {
         assert!(r
             .join("repos/acme/widgets/.config/config.json.migrated")
             .exists());
+    }
+
+    #[test]
+    fn effort_component_keys_are_imported_and_listed() {
+        let r = root("store-effort-keys");
+        write_json(
+            &r.join("config.json"),
+            r#"{"effort":{"agents":{"reviewer":"low"},"skills":{"x":"high"},"bogus":{"a":"low"}}}"#,
+        );
+        assert_eq!(
+            lookup(&r, "effort.agents.reviewer", None).unwrap().global,
+            Some(json!("low"))
+        );
+        assert_eq!(
+            global_keys(&r).unwrap(),
+            vec!["effort.agents.reviewer", "effort.skills.x"]
+        );
     }
 
     #[test]
