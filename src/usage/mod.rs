@@ -13,6 +13,7 @@ pub mod claude_code;
 pub mod codex;
 pub mod dashboard;
 pub mod db;
+pub mod entry;
 pub mod ingest;
 pub mod live;
 pub mod lock;
@@ -23,6 +24,7 @@ pub mod repo;
 pub mod run;
 pub mod summary;
 pub mod svg;
+pub mod tui;
 
 /// One assistant message's token usage and derived cost. `event_id` is the
 /// source's own unique message id, the dedup key (a message can span several
