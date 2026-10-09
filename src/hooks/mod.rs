@@ -31,6 +31,7 @@ pub mod session_init;
 pub mod staleness;
 pub mod worktree_create;
 pub mod worktree_remove;
+pub mod worktree_setup;
 
 /// Dispatch a parsed hook payload to the named hook's entry point.
 /// Exhaustive over `HookName`, so adding a new variant fails the build here

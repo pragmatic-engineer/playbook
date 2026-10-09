@@ -381,3 +381,163 @@ fn remove_never_deletes_a_branch_the_hook_did_not_create() {
         .trim()
         .is_empty());
 }
+
+fn ignore_env_files(repo: &Path) {
+    fs::write(repo.join(".gitignore"), ".env*\nnode_cache/\n").unwrap();
+    git_ok(repo, &["add", ".gitignore"]);
+    git_ok(repo, &["commit", "-q", "-m", "ignore"]);
+}
+
+#[test]
+fn create_copies_ignored_files_named_by_worktreeinclude() {
+    let f = fixture("include");
+    ignore_env_files(&f.repo);
+    fs::write(f.repo.join(".env"), "A=1\n").unwrap();
+    fs::create_dir_all(f.repo.join("node_cache/sub")).unwrap();
+    fs::write(f.repo.join("node_cache/sub/x.bin"), "bin").unwrap();
+    fs::write(f.repo.join("plain.txt"), "not ignored\n").unwrap();
+    fs::write(
+        f.repo.join(".worktreeinclude"),
+        ".env*\nnode_cache/\nplain.txt\nREADME.md\n",
+    )
+    .unwrap();
+    let out = create(&f.repo, "inc");
+    let path = created_path(&out);
+    assert_eq!(fs::read_to_string(path.join(".env")).unwrap(), "A=1\n");
+    assert!(path.join("node_cache/sub/x.bin").exists());
+    // Not ignored by git, so never duplicated.
+    assert!(!path.join("plain.txt").exists());
+    assert!(stderr(&out).contains("copied 2 file(s)"));
+    assert_eq!(stdout(&out), format!("{}\n", path.display()));
+}
+
+#[test]
+fn create_without_worktreeinclude_copies_nothing() {
+    let f = fixture("noinclude");
+    ignore_env_files(&f.repo);
+    fs::write(f.repo.join(".env"), "A=1\n").unwrap();
+    let path = created_path(&create(&f.repo, "none"));
+    assert!(!path.join(".env").exists());
+}
+
+#[test]
+fn reused_worktree_keeps_its_own_included_files() {
+    let f = fixture("include-reuse");
+    ignore_env_files(&f.repo);
+    fs::write(f.repo.join(".env"), "A=1\n").unwrap();
+    fs::write(f.repo.join(".worktreeinclude"), ".env\n").unwrap();
+    let first = created_path(&create(&f.repo, "again"));
+    fs::write(first.join(".env"), "A=changed\n").unwrap();
+    let second = created_path(&create(&f.repo, "again"));
+    assert_eq!(
+        fs::read_to_string(second.join(".env")).unwrap(),
+        "A=changed\n"
+    );
+}
+
+#[test]
+fn worktreeinclude_cannot_escape_through_parent_patterns() {
+    let f = fixture("include-escape");
+    ignore_env_files(&f.repo);
+    fs::write(f.root.join("proj/secret.env"), "S=1\n").unwrap();
+    fs::write(
+        f.repo.join(".worktreeinclude"),
+        "../secret.env\n/../secret.env\n",
+    )
+    .unwrap();
+    let path = created_path(&create(&f.repo, "esc"));
+    assert!(!path.join("secret.env").exists());
+    assert!(!f.root.join("proj/.worktrees/secret.env").exists());
+}
+
+fn push_new_commit_from_other_clone(f: &Fixture, file: &str) {
+    let other = f.root.join("other");
+    let origin = f.root.join("origin.git");
+    git_ok(
+        &f.root,
+        &[
+            "clone",
+            "-q",
+            origin.to_str().unwrap(),
+            other.to_str().unwrap(),
+        ],
+    );
+    fs::write(other.join(file), "x\n").unwrap();
+    git_ok(&other, &["add", "."]);
+    git_ok(&other, &["commit", "-q", "-m", "upstream"]);
+    git_ok(&other, &["push", "-q", "origin", "main"]);
+}
+
+#[test]
+fn create_fetches_origin_once_a_day_and_bases_on_it() {
+    let f = fixture("fetch");
+    push_new_commit_from_other_clone(&f, "upstream1.txt");
+    let first = created_path(&create(&f.repo, "one"));
+    assert!(
+        first.join("upstream1.txt").exists(),
+        "stale origin should be refreshed"
+    );
+    // The stamp is fresh now, so a second create must not hit the network.
+    push_new_commit_from_other_clone_again(&f);
+    let second = created_path(&create(&f.repo, "two"));
+    assert!(!second.join("upstream2.txt").exists());
+    // An old stamp allows the next refresh.
+    let common = git_ok(
+        &f.repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    );
+    let common = PathBuf::from(common.trim());
+    for name in ["playbook-origin-fetch", "FETCH_HEAD"] {
+        let _ = fs::remove_file(common.join(name));
+    }
+    let third = created_path(&create(&f.repo, "three"));
+    assert!(third.join("upstream2.txt").exists());
+}
+
+fn push_new_commit_from_other_clone_again(f: &Fixture) {
+    let other = f.root.join("other");
+    fs::write(other.join("upstream2.txt"), "y\n").unwrap();
+    git_ok(&other, &["add", "."]);
+    git_ok(&other, &["commit", "-q", "-m", "upstream2"]);
+    git_ok(&other, &["push", "-q", "origin", "main"]);
+}
+
+#[test]
+fn create_falls_back_to_the_cached_ref_when_origin_is_unreachable() {
+    let f = fixture("offline");
+    git_ok(&f.repo, &["remote", "set-head", "origin", "main"]);
+    git_ok(
+        &f.repo,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            f.root.join("missing.git").to_str().unwrap(),
+        ],
+    );
+    let out = create(&f.repo, "off");
+    let path = created_path(&out);
+    assert!(path.join("README.md").exists());
+    assert!(stderr(&out).contains("using the cached ref"));
+    assert_eq!(stdout(&out), format!("{}\n", path.display()));
+}
+
+#[test]
+fn payload_base_commit_skips_the_origin_refresh() {
+    let f = fixture("nofetch");
+    push_new_commit_from_other_clone(&f, "upstream1.txt");
+    let seed = git_ok(&f.repo, &["rev-parse", "HEAD"]).trim().to_string();
+    let payload = format!(
+        r#"{{"cwd":"{}","worktree_name":"pinned","base_commit":"{seed}"}}"#,
+        f.repo.display()
+    );
+    let path = created_path(&run_hook("worktree-create", &payload));
+    assert!(!path.join("upstream1.txt").exists());
+    let common = git_ok(
+        &f.repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    );
+    assert!(!PathBuf::from(common.trim())
+        .join("playbook-origin-fetch")
+        .exists());
+}
