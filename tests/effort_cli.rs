@@ -295,3 +295,14 @@ fn the_plain_effort_status_still_works_next_to_the_subcommands() {
     assert!(text(&out).contains("playbook maxEffortLevel"));
     assert!(h.run(&["effort", "high"]).status.success());
 }
+
+#[test]
+fn resolve_cap_validates_the_level() {
+    let h = Home::new("cap-bad");
+    fs::create_dir_all(h.0.join(".claude")).unwrap();
+    let out = h.run(&["effort", "resolve", "agents", "reviewer", "--cap", "turbo"]);
+    assert!(!out.status.success());
+    assert!(text(&out).contains("unknown cap"), "{}", text(&out));
+    let auto = h.run(&["effort", "resolve", "agents", "reviewer", "--cap", "auto"]);
+    assert!(!auto.status.success());
+}
