@@ -149,7 +149,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     };
     let migrated = migrate::run_pending(&ctx);
 
-    let shell_runtime_step = install_shell_runtime_step(self_root, &paths.home, paths.aliases);
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
     if step_confirmed(&system_prompt_step) {
         migrate::record_system_prompt(&paths.home);
@@ -170,18 +169,11 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     };
 
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
-    let shell_runtime_confirmed = step_confirmed(&shell_runtime_step);
-    let shim_step = rewire_rc_file_step(
-        &paths.home,
-        paths.shell_kind,
-        paths.aliases,
-        shell_runtime_confirmed,
-    );
+    let shim_step = rewire_rc_file_step(&paths.home, paths.shell_kind, paths.aliases);
 
     let trust_step = trust_config_dir_step(&paths.home);
 
     let mut steps = vec![
-        shell_runtime_step,
         system_prompt_step,
         settings_step,
         hooks_step,
@@ -512,32 +504,8 @@ fn wire_hooks(settings_path: &Path, epoch: u64) -> StepReport {
     }
 }
 
-/// Place `config-hash.sh` for the launcher, skipped when `aliases` is false or
-/// `CLAUDE_PLUGIN_ROOT` is unset.
-fn install_shell_runtime_step(self_root: Option<&Path>, home: &Path, aliases: bool) -> StepReport {
-    if !aliases {
-        return StepReport::skipped("shell-runtime", "not installed; pass --aliases to opt in");
-    }
-    let Some(self_root) = self_root else {
-        return StepReport::skipped(
-            "shell-runtime",
-            "CLAUDE_PLUGIN_ROOT is not set, no config-hash.sh to place",
-        );
-    };
-    match shim::place_config_hash(self_root, home) {
-        Ok(true) => StepReport::wired("shell-runtime", "placed config-hash.sh"),
-        Ok(false) => StepReport::already_correct("shell-runtime", "already up to date"),
-        Err(err) => StepReport::failed("shell-runtime", err.to_string()),
-    }
-}
-
-/// Patch the rc file. Gated on `aliases`, `$SHELL`, then the copy step.
-fn rewire_rc_file_step(
-    home: &Path,
-    shell_kind: Option<ShellKind>,
-    aliases: bool,
-    shell_runtime_confirmed: bool,
-) -> StepReport {
+/// Patch the rc file. Gated on `aliases`, then `$SHELL`.
+fn rewire_rc_file_step(home: &Path, shell_kind: Option<ShellKind>, aliases: bool) -> StepReport {
     if !aliases {
         return StepReport::skipped("shim", "not installed; pass --aliases to opt in");
     }
@@ -547,9 +515,6 @@ fn rewire_rc_file_step(
             "$SHELL is neither bash nor zsh; add `eval \"$(playbook shell-init)\"` to your rc file by hand",
         );
     };
-    if !shell_runtime_confirmed {
-        return StepReport::skipped("shim", "config-hash.sh copy not confirmed complete");
-    }
     match shim::rewire_rc_file(home, shell_kind) {
         Ok(outcome) if outcome.unwritable => StepReport::skipped(
             "shim",

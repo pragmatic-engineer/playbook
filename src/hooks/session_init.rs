@@ -7,9 +7,7 @@
 //! additionalContext: the project memory slice, an auto-learn nudge, a
 //! skills/commands primer, and the async/deferred-tool discipline reminder.
 //!
-//! The config hash shells out to `hooks/lib/config-hash.sh` under
-//! `CLAUDE_PLUGIN_ROOT`; that failing degrades quietly rather than breaking
-//! the hook. The memory slice is rendered in process.
+//! The config hash and the memory slice are both computed in process.
 
 use crate::common::mode::{resolve_for_hook, Mode, Source};
 use crate::common::{config_hash, home_dir, repo_slug, run_with_timeout, session_dir, Payload};
@@ -75,7 +73,6 @@ const ASYNC_DISCIPLINE_TEXT: &str = "Async and deferred-tool discipline. (1) Def
 /// nothing" rather than breaking the session.
 pub fn run(payload: &Payload) {
     let home = home_dir().to_string_lossy().into_owned();
-    let plugin_root = std::env::var("CLAUDE_PLUGIN_ROOT").unwrap_or_default();
     let dir = session_dir(payload);
     let repo_root = git_toplevel();
 
@@ -89,7 +86,7 @@ pub fn run(payload: &Payload) {
         maybe_sweep_worktrees(&home, &repo_root);
     }
 
-    let (system_message, mut extra_context) = check_config_drift(payload, &dir, &plugin_root);
+    let (system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
     append_auto_mode_note(&mut extra_context);
 
     if !headless || crate::common::headless::headless_memory_enabled() {
@@ -195,14 +192,14 @@ fn clear_statusline_cache() {
     }
 }
 
-/// Resume-only config-drift check: computes the current config hash by
-/// shelling out to `hooks/lib/config-hash.sh`, compares it against the hash
+/// Resume-only config-drift check: computes the current config hash,
+/// compares it against the hash
 /// stored at session creation, and returns the `(system_message,
 /// extra_context)` warning pair to emit if they differ. Always refreshes
 /// the stored hash on a `startup` source, which becomes the new baseline.
 /// Matches the retired shell original.
-fn check_config_drift(payload: &Payload, dir: &str, plugin_root: &str) -> (String, String) {
-    let current_hash = config_hash(Path::new(plugin_root), SUBPROCESS_TIMEOUT);
+fn check_config_drift(payload: &Payload, dir: &str, home: &str) -> (String, String) {
+    let current_hash = config_hash(&Path::new(home).join(".claude"));
     if current_hash.is_empty() || dir.is_empty() {
         return (String::new(), String::new());
     }

@@ -116,7 +116,7 @@ playbook uninstall --dry-run   # list what would be removed, change nothing
 playbook uninstall --yes       # remove it
 ```
 
-It removes only what playbook placed: the hook entries and status line `playbook init` wrote into `~/.claude/settings.json`, the launcher block in `~/.zshrc` and `~/.bashrc`, the files playbook copied under `~/.config/playbook` (``prompts/SYSTEM_PROMPT.md`, `hooks/lib/config-hash.sh`), and `install.sh` and `uninstall.sh` in `~/.claude`. Without `--yes` it only lists the plan and exits with status 1.
+It removes only what playbook placed: the hook entries and status line `playbook init` wrote into `~/.claude/settings.json`, the launcher block in `~/.zshrc` and `~/.bashrc`, the files playbook copied under `~/.config/playbook` (`prompts/SYSTEM_PROMPT.md`), and `install.sh` and `uninstall.sh` in `~/.claude`. Without `--yes` it only lists the plan and exits with status 1.
 
 Everything else stays: the rest of `settings.json` (including any hook or status line you added yourself), the rest of your rc files, `.settings.base.json`, `backups/`, memory, and all runtime state. Each changed file is backed up first, as `settings.json.bak.<epoch>` and `<rc file>.bak-<epoch>`. A `statusline.sh` or system prompt you edited by hand, or that playbook has no record of placing, is kept, and so is `statusline.sh` while your own status line still runs it. If `settings.json` cannot be edited (invalid JSON, for example), the placed files and the binary stay too, because the hooks in it still need them.
 

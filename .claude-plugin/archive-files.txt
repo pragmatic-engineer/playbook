@@ -20,13 +20,11 @@ bin/playbook
 install.sh
 
 # SessionStart hook script (hooks/hooks.json runs it through CLAUDE_PLUGIN_ROOT)
-hooks/migration-check.sh
 
 # Read by `playbook init` and the hooks through CLAUDE_PLUGIN_ROOT
 # (src/init/run.rs, system_prompt.rs, shim.rs, hooks/session_init.rs)
 settings.shared.json
 prompts/SYSTEM_PROMPT.md
-hooks/lib/config-hash.sh
 
 # Run by slash commands through CLAUDE_PLUGIN_ROOT
 # (/playbook:setup, quick-review, deep-review, plan, adr, implement, learn-project)

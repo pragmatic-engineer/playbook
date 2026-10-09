@@ -44,6 +44,15 @@ fi
 
 INSTALL_HINT="curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash"
 
+# The SessionStart hook runs `playbook hook migration-check` through this shim.
+# With no binary it must neither install anything nor fail the session: print
+# the same warning the binary would and stop. (src/hooks/migration_check.rs
+# holds the canonical text; a test keeps the two equal.)
+if [ "${1:-}" = "hook" ] && [ "${2:-}" = "migration-check" ]; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Your playbook hooks are not wired to the installed binary yet. Re-run the installer to fix this: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash"}}'
+    exit 0
+fi
+
 if [ "${PLAYBOOK_SHIM_BOOTSTRAP:-}" = "1" ] || [ ! -f "$ROOT/install.sh" ]; then
     echo "playbook: the binary is not installed. Run: $INSTALL_HINT" >&2
     exit 127

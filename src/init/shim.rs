@@ -4,7 +4,6 @@
 //! Wires the rc file to load the `ccc`/`ccd` launcher with
 //! `eval "$(playbook shell-init)"`, and upgrades the legacy `source` lines.
 
-use crate::common::paths::playbook_root_from;
 use std::fs;
 use std::io;
 use std::io::Write;
@@ -77,22 +76,6 @@ pub struct ShimOutcome {
     /// The rc file needed a change but lacks the owner write bit, so it was
     /// left untouched.
     pub unwritable: bool,
-}
-
-/// Place `hooks/lib/config-hash.sh`, which `cc::config_drift` runs from the
-/// config dir outside any plugin context. A partial checkout without it is skipped.
-pub fn place_config_hash(self_root: &Path, home: &Path) -> io::Result<bool> {
-    let src = self_root.join("hooks/lib/config-hash.sh");
-    if !src.is_file() {
-        return Ok(false);
-    }
-    let dst = playbook_root_from(home).join("hooks/lib/config-hash.sh");
-    if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let before = fs::read(&dst).ok();
-    fs::copy(&src, &dst)?;
-    Ok(before.as_deref() != Some(fs::read(&dst)?.as_slice()))
 }
 
 /// Make sure `home`'s rc file for `shell_kind` sources the current launcher

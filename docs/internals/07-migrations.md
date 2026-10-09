@@ -27,6 +27,7 @@ No Auto migration ships today. The current entries are:
 | `0005-statusline-edited` | Manual | Warns when you edited the old status line script. |
 | `0006-statusline-rust-command` | Idempotent | Points `statusLine.command` at `playbook statusline`. |
 | `0007-shell-init-rc-line` | Idempotent | Rewrites an old `source .../cc.sh` rc line to `eval "$(playbook shell-init)"`. |
+| `0008-remove-config-hash-script` | Idempotent | Removes the `hooks/lib/config-hash.sh` copy older installs placed under `~/.config/playbook`. The hash is computed inside the binary now. |
 
 ## How playbook knows you edited a file
 
