@@ -13,6 +13,12 @@ LICENSE
 NOTICE
 README.md
 
+# Bootstrap shim: Claude Code puts a plugin's bin/ on the Bash tool's PATH, so
+# `playbook` resolves with only the plugin installed. It runs install.sh when
+# the binary is missing, so the installer ships too.
+bin/playbook
+install.sh
+
 # SessionStart hook script (hooks/hooks.json runs it through CLAUDE_PLUGIN_ROOT)
 hooks/migration-check.sh
 

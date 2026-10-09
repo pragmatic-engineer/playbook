@@ -15,13 +15,30 @@ This page covers requirements, the full local install path with the curl one-lin
 
 ## Full local install with curl
 
-The `curl | bash` one-liner is a two-step install: it fetches, verifies (SHA256, then a `--version` smoke test), and installs the `playbook` binary into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`), puts that directory on `PATH`, then hands off to `playbook init`, which wires the safety guards and functional hooks into `settings.json`, seeds or merges the rest of the local config, and installs the shell launcher and statusline. It also runs the plugin install and prompts for the opt-in layers. Use this if you want the full `~/.claude` file set locally (for example, to clone and edit the config).
+The `curl | bash` one-liner is a two-step install: it fetches, verifies (SHA256, then a `--version` smoke test), and installs the `playbook` binary into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`), puts that directory on `PATH` (see below), then hands off to `playbook init`, which wires the safety guards and functional hooks into `settings.json`, seeds or merges the rest of the local config, and installs the shell launcher and statusline. It also runs the plugin install and prompts for the opt-in layers. Use this if you want the full `~/.claude` file set locally (for example, to clone and edit the config).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
 
 Open a new terminal (or source your rc file) afterwards so the binary resolves on `PATH`.
+
+### How the binary gets on PATH
+
+Every install route ends with `playbook` on `PATH` for every shell start, including the non-interactive shells Claude Code uses to run hooks:
+
+| Shell | File that gets the `# playbook binary` block |
+|---|---|
+| zsh | `~/.zshenv` (non-interactive shells skip `~/.zshrc`) |
+| bash | `~/.bashrc` and the login file (`~/.bash_profile`, `~/.bash_login` or `~/.profile`, whichever exists first, else `~/.bash_profile`) |
+| fish | `~/.config/fish/conf.d/playbook.fish` |
+| other | `~/.profile` |
+
+`install.sh` and `playbook init` write the same block and skip a file that already names the directory, so running both never doubles it. `playbook uninstall --remove-binary` removes it.
+
+- **Installer:** puts the binary in `PLAYBOOK_BIN_DIR`, adds the block, then runs `playbook init`.
+- **Claude Code marketplace:** the plugin ships a `bin/playbook` shim, and Claude Code puts a plugin's `bin/` on the Bash tool's `PATH`. The shim runs the real binary when it finds one. When it finds none, it runs the shipped `install.sh --yes --binary-only`, pinned to the plugin version, which installs the binary, the `PATH` block, the guards and the settings, but not the launcher or the system prompt. It tries once and never loops.
+- **Homebrew:** `brew install pragmatic-engineer/tap/playbook` puts the binary in the Homebrew `bin`. Run `playbook init` once afterwards. It wires the hooks and adds the `PATH` block, so hook shells find the binary even when Homebrew's directory is not on their `PATH`. The formula prints this as a caveat.
 
 Re-running the installer upgrades in place. It keeps the binary it replaces as `playbook.<version>.bak` next to it (for example `~/.local/bin/playbook.0.17.0.bak`), and the newest three are kept. To roll back, move the backup over the binary:
 
@@ -52,6 +69,7 @@ Flags (pass after `-s --` when piping):
 | `--skip-deps` | accepted, ignored: `playbook init` installs no deps itself |
 | `--aliases` | install the shell launchers without prompting |
 | `--system-prompt` | install the custom system prompt without prompting (implies `--aliases`) |
+| `--binary-only` | binary, `PATH`, guards and settings only: no plugin, no launcher, no system prompt, no prompts |
 | `--no-setup` | skip the plugin only; guards, settings, and shell wiring still run |
 | `--ref <ref>` | source ref (same as `PLAYBOOK_REF`) |
 

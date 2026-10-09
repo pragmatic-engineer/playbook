@@ -37,7 +37,8 @@ const ALLOW_FILES: [&str; 15] = [
 ];
 
 /// Top-level directories any tracked file may live under.
-const ALLOW_DIRS: [&str; 12] = [
+const ALLOW_DIRS: [&str; 13] = [
+    "bin",
     "prompts",
     "skills",
     "commands",
@@ -152,6 +153,12 @@ mod tests {
     #[test]
     fn rust_toolchain_toml_is_allowlisted() {
         let tracked = vec!["rust-toolchain.toml".to_string()];
+        assert!(violations(&tracked).is_empty());
+    }
+
+    #[test]
+    fn the_plugin_bin_directory_is_allowlisted() {
+        let tracked = vec!["bin/playbook".to_string()];
         assert!(violations(&tracked).is_empty());
     }
 

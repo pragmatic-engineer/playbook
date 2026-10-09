@@ -42,6 +42,7 @@ SKIP_PLUGIN=0
 OPT_ALIASES=0
 OPT_SYSTEM_PROMPT=0
 ASSUME_YES=0
+BINARY_ONLY=0
 PLUGIN_SKIPPED_FOR_VERSION=0
 
 # Component dirs the plugin owns: never copied into ~/.claude directly, so the
@@ -143,7 +144,7 @@ What it does:
     and functional hooks;
   - installs the always-on safety guards (rm, background-await, dash guards) and
     the other local configs (settings.json, statusline, deps);
-  - optionally installs the shell launchers (cc/ccd) and the custom system prompt.
+  - optionally installs the shell launchers (ccc/ccd) and the custom system prompt.
 
 Env:
   PLAYBOOK_REF=<tag|branch|sha>  source ref (default: latest release, else main)
@@ -155,8 +156,9 @@ Flags:
   --yes              non-interactive: accept every step's default
   --skip-plugin      don't add the marketplace or install the plugin
   --skip-deps        accepted, ignored: `playbook init` installs no deps itself
-  --aliases          install the shell launchers (cc/ccd) without prompting
+  --aliases          install the shell launchers (ccc/ccd) without prompting
   --system-prompt    install the custom system prompt without prompting (implies --aliases)
+  --binary-only      binary, PATH, guards and settings only: no plugin, no launcher, no system prompt, no prompts
   --no-setup         skip the plugin only: guards, settings, and shell wiring still run
   --ref <ref>        same as PLAYBOOK_REF
   -h, --help         show this help
@@ -172,6 +174,7 @@ while [ $# -gt 0 ]; do
         --aliases)       OPT_ALIASES=1 ;;
         --system-prompt) OPT_SYSTEM_PROMPT=1; OPT_ALIASES=1 ;;
         --no-setup)      SKIP_PLUGIN=1 ;;
+        --binary-only)   BINARY_ONLY=1; SKIP_PLUGIN=1 ;;
         --ref)           shift; REF="${1:-}" ;;
         --ref=*)         REF="${1#--ref=}" ;;
         -h|--help)       print_help; exit 0 ;;
@@ -418,29 +421,49 @@ warn_if_shadowed() {
     warn "$first runs before the new $PLAYBOOK_BIN_DIR/playbook on PATH, so hooks keep using the old binary; remove it (Homebrew: brew uninstall playbook) or put $PLAYBOOK_BIN_DIR first on PATH"
 }
 
-# Puts $PLAYBOOK_BIN_DIR on PATH for future shells via one idempotent rc-file
-# line behind a grep -qF guard and a `# playbook binary` comment marker, so `playbook uninstall --remove-binary` can find
-# and strip this exact line later.
-ensure_bin_dir_on_path() {
-    local shell_bin rc_file
-    shell_bin="$(basename "${SHELL:-}")"
-    case "$shell_bin" in
-        zsh)  rc_file="$HOME/.zshrc" ;;
-        bash) rc_file="$HOME/.bashrc" ;;
-        *)
-            rc_file=""
-            warn "Shell '$shell_bin' not recognised; add $PLAYBOOK_BIN_DIR to PATH manually."
-            ;;
-    esac
-
-    if [ -n "$rc_file" ]; then
-        if grep -qF "$PLAYBOOK_BIN_DIR" "$rc_file" 2>/dev/null; then
-            log "$rc_file already has $PLAYBOOK_BIN_DIR on PATH"
-        else
-            printf '\n# playbook binary\nexport PATH="%s:$PATH"\n' "$PLAYBOOK_BIN_DIR" >> "$rc_file"
-            log "Added $PLAYBOOK_BIN_DIR to PATH in $rc_file"
-        fi
+# Puts $PLAYBOOK_BIN_DIR on PATH for future shells, mirroring the `path` step of
+# `playbook init` (src/init/path.rs) so the two never double up: same files,
+# same `# playbook binary` marker, same "directory already named" guard. zsh
+# gets ~/.zshenv (hooks run in non-interactive shells, which skip ~/.zshrc),
+# bash gets ~/.bashrc plus its login file, fish gets a conf.d file, any other
+# shell gets ~/.profile. This runs here as well as in `init` because the
+# binary just installed may predate the init step.
+_add_path_block() {
+    local file="$1" fish="${2:-0}"
+    if grep -v '^[[:space:]]*#' "$file" 2>/dev/null | grep -qF "$PLAYBOOK_BIN_DIR"; then
+        log "$file already has $PLAYBOOK_BIN_DIR on PATH"
+        return 0
     fi
+    mkdir -p "$(dirname "$file")"
+    if [ "$fish" = "1" ]; then
+        printf '\n# playbook binary\nfish_add_path -g "%s"\n' "$PLAYBOOK_BIN_DIR" >> "$file"
+    else
+        printf '\n# playbook binary\nexport PATH="%s:$PATH"\n' "$PLAYBOOK_BIN_DIR" >> "$file"
+    fi
+    log "Added $PLAYBOOK_BIN_DIR to PATH in $file"
+}
+
+ensure_bin_dir_on_path() {
+    case "$PLAYBOOK_BIN_DIR" in
+        /usr/bin|/bin|/usr/sbin|/sbin) return 0 ;;
+        *\"*|*\$*|*\`*|*\\*)
+            warn "$PLAYBOOK_BIN_DIR has characters a shell line cannot quote; add it to PATH by hand."
+            return 0 ;;
+    esac
+    local login f
+    case "$(basename "${SHELL:-}")" in
+        zsh) _add_path_block "$HOME/.zshenv" ;;
+        bash)
+            login="$HOME/.bash_profile"
+            for f in .bash_profile .bash_login .profile; do
+                if [ -e "$HOME/$f" ]; then login="$HOME/$f"; break; fi
+            done
+            _add_path_block "$HOME/.bashrc"
+            _add_path_block "$login"
+            ;;
+        fish) _add_path_block "$HOME/.config/fish/conf.d/playbook.fish" 1 ;;
+        *) _add_path_block "$HOME/.profile" ;;
+    esac
 
     warn "playbook is installed to $PLAYBOOK_BIN_DIR. Open a new terminal (or source your rc file) so it resolves on PATH."
 }
@@ -532,12 +555,12 @@ fi
 # `init` prints one line per step, so its output is not redirected.
 #
 # Interactive prompts for the opt-in layers (skip when --yes or no tty):
-if [ "$OPT_ALIASES" -eq 0 ]; then
-    if ask "Install the shell launchers (cc/ccd)? Bash and zsh both supported." Y; then
+if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_ALIASES" -eq 0 ]; then
+    if ask "Install the shell launchers (ccc/ccd)? Bash and zsh both supported." Y; then
         OPT_ALIASES=1
     fi
 fi
-if [ "$OPT_ALIASES" -eq 1 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ]; then
+if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_ALIASES" -eq 1 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ]; then
     if ask "Install the custom system prompt? (recommended)" Y; then
         OPT_SYSTEM_PROMPT=1
     fi
@@ -664,7 +687,7 @@ else
 fi
 printf '  - Safety guards (rm, background-await, dash) are always on via settings.json.\n'
 if [ "$OPT_ALIASES" -eq 1 ]; then
-    printf '  - Shell launchers installed. Open a new terminal or source the rc file to activate cc/ccd.\n'
+    printf '  - Shell launchers installed. Open a new terminal or source the rc file to activate ccc/ccd.\n'
 fi
 
 # Drop into a fresh login shell so the new config is active immediately.

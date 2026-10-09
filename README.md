@@ -24,7 +24,10 @@ nothing else. It does **not** install the `playbook` binary, and every ported
 hook is a bare `playbook hook <name>` command, so without the binary all 20 are
 dead and the guards stay unwired.
 
-`/playbook:setup` closes that gap: it installs the release binary into
+The plugin ships a `bin/playbook` shim that Claude Code puts on the Bash
+tool's `PATH`. When no binary exists, the first `playbook` call runs the
+shipped installer once (binary and `PATH` only, no launcher or system prompt).
+`/playbook:setup` also closes that gap: it installs the release binary into
 `~/.local/bin` when one is not already on `PATH`, verifying it against the
 release's `SHA256SUMS` first. So plugin-install followed by `/playbook:setup`
 also reaches a working state; the one-liner above is simply the shorter route
@@ -123,11 +126,14 @@ you have not read.
    chmod 0755 ~/.local/bin/playbook
    ```
 
-   Add `~/.local/bin` to `PATH` in your shell rc if it is not already there.
+   Add `~/.local/bin` to `PATH` in your shell rc if it is not already there. Step 5's
+   `playbook init` also adds it for every shell start, so hooks can find the binary.
 
    On macOS or Linux, `brew install pragmatic-engineer/tap/playbook`
    does steps 2-4 for you: it fetches the same checksummed release binary
-   and puts it on `PATH`. No separate build, no separate release pipeline.
+   and puts it on `PATH`. Run `playbook init` once afterwards (the formula says
+   so) to wire the hooks and the `PATH` block for every shell. No separate build,
+   no separate release pipeline.
 
 5. Wire the local configuration. **`CLAUDE_PLUGIN_ROOT` is required**: without
    it `init` has no template to copy from and skips almost every step, reporting
