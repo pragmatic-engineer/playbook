@@ -8,6 +8,7 @@
 
 use crate::cc::worktree::{main_worktree, resolve_base};
 use crate::common::{run_with_timeout, Payload};
+use crate::hooks::worktree_setup;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -52,17 +53,30 @@ fn create(payload: &Payload) -> Result<PathBuf, String> {
     }
     let base_commit = payload.field(".base_commit");
 
+    // The base is ours to choose only when the payload gave none: refresh the
+    // cached `origin/HEAD` first so a new worktree does not start from an old default branch.
+    if base_commit.is_empty() {
+        worktree_setup::refresh_origin_head(&main_root);
+    }
     let primary = primary_target(&main_root, &name)?;
-    match add_worktree(&main_root, &primary, &branch, &base_commit) {
-        Ok(()) => Ok(primary),
+    let placed = match add_worktree(&main_root, &primary, &branch, &base_commit) {
+        Ok(created) => Ok((primary, created)),
         Err(why) => {
             eprintln!("playbook worktree-create: {why}; falling back to .claude/worktrees/{name}");
             let fallback = main_root.join(".claude").join("worktrees").join(&name);
             add_worktree(&main_root, &fallback, &branch, &base_commit)
-                .map(|()| fallback)
+                .map(|created| (fallback, created))
                 .map_err(|e| format!("fallback also failed: {e}"))
         }
+    };
+    let (path, created) = placed?;
+    if created {
+        let copied = worktree_setup::copy_worktreeinclude(&main_root, &path);
+        if copied > 0 {
+            eprintln!("playbook worktree-create: copied {copied} file(s) from .worktreeinclude");
+        }
     }
+    Ok(path)
 }
 
 fn worktree_name(payload: &Payload) -> String {
@@ -98,15 +112,16 @@ fn primary_target(main_root: &Path, name: &str) -> Result<PathBuf, String> {
 }
 
 /// Reuses `target` when it is already a registered worktree, else adds it.
+/// Returns whether a new worktree was created (false when one was reused).
 fn add_worktree(
     main_root: &Path,
     target: &Path,
     branch: &str,
     base_commit: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     if is_registered(main_root, target) {
         if target.is_dir() {
-            return Ok(());
+            return Ok(false);
         }
         // Registered but its folder is gone: drop the stale entry, then re-add.
         git(main_root, &["worktree", "prune"])?;
@@ -138,7 +153,7 @@ fn add_worktree(
     } else {
         vec!["worktree", "add", "-b", branch, &target_s, &base]
     };
-    git(main_root, &args).map(|_| ())
+    git(main_root, &args).map(|_| true)
 }
 
 /// Payload `base_commit`, else the cached `origin/HEAD`, else local `HEAD`.
