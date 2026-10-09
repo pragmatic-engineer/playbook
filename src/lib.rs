@@ -693,6 +693,16 @@ pub enum ConfigCommand {
 /// `playbook doctor` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum DoctorCommand {
+    /// Check the seven playbook layers and print a status table
+    ///
+    /// Reads your settings, shell files and PATH, and lists a PASS, INFO, WARN or
+    /// FAIL row for each layer, then the review config, stale worktrees and
+    /// pending migration notices. Always exits 0 when it could run the checks.
+    Check {
+        /// Print the rows as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List files you edited after playbook placed them
     ///
     /// Prints one line per finding, or nothing when none is pending.
