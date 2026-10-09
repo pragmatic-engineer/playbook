@@ -34,6 +34,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `auto.warnPct` | `70` | a number, see the config keys guide for the range |
 | `fix.maxFiles` | `3` | a number, see the config keys guide for the range |
 | `fix.maxLines` | `500` | a number, see the config keys guide for the range |
+| `review.stackMaxPrs` | `6` | a number, see the config keys guide for the range |
+| `review.stackMaxLines` | `3000` | a number, see the config keys guide for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands

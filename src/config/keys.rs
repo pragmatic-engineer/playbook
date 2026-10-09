@@ -30,6 +30,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "auto.warnPct",
     "fix.maxFiles",
     "fix.maxLines",
+    "review.stackMaxPrs",
+    "review.stackMaxLines",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -79,6 +81,8 @@ pub fn default_value(key: &str) -> Option<Value> {
         "auto.warnPct" => Some(Value::Number(70.into())),
         "fix.maxFiles" => Some(Value::Number(3.into())),
         "fix.maxLines" => Some(Value::Number(500.into())),
+        "review.stackMaxPrs" => Some(Value::Number(6.into())),
+        "review.stackMaxLines" => Some(Value::Number(3000.into())),
         _ => None,
     }
 }
@@ -140,6 +144,17 @@ mod tests {
         assert!(model_override_error("models.sonnet", "sonnet").is_some());
         assert!(model_override_error("models.sonnet", "claude-sonnet-5-5-1").is_some());
         assert_eq!(model_override_error("mode", "anything"), None);
+    }
+
+    #[test]
+    fn the_stack_review_limits_are_known_keys_with_defaults() {
+        assert!(KNOWN_KEYS.contains(&"review.stackMaxPrs"));
+        assert!(KNOWN_KEYS.contains(&"review.stackMaxLines"));
+        assert_eq!(default_value("review.stackMaxPrs"), Some(Value::from(6)));
+        assert_eq!(
+            default_value("review.stackMaxLines"),
+            Some(Value::from(3000))
+        );
     }
 
     #[test]

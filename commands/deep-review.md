@@ -1,7 +1,7 @@
 ---
 description: Use for substantial, risky, or cross-cutting PRs. A swarm of specialist reviewer subagents (logic, test, security, data, types, perf, plus conditional) run in parallel, consolidated and fact-checked, then posted as a pending GitHub review. Heavier than /playbook:quick-review.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--auto] [--ask] [--help]"
+argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--this-pr] [--whole-stack] [--auto] [--ask] [--help]"
 model: opus
 effort: high
 ---
@@ -30,6 +30,8 @@ OPTIONS:
   --preset <name>   Named reviewer set: security | architecture | data | docs
   --self            Local self-review, never posts to GitHub (default when no
                     PR number is given, or when the PR is yours)
+  --this-pr         When the PR is in a stack, review only this PR
+  --whole-stack     When the PR is in a stack, review the whole stack
   --auto            Run unattended; implies --self
   --ask             Force the interactive mode
 
@@ -120,6 +122,16 @@ gh pr diff <PR_NUMBER>
 Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, when `--self` is passed explicitly, when no PR number/branch was given in `$ARGUMENTS` at all (nothing named to post to), when the run mode is auto, or when `SELF_REVIEW` is true (the resolved PR is authored by the caller). `SELF_REVIEW` stays a separate fact purely for logging (the status line prints it independently), but it never leaves posting partially enabled on its own: once it is true, `SELF_MODE` is true too, so Step 6 never reaches the submit-verb question in the first place.
 
 In worktree mode, `WT` holds the absolute path to the isolated checkout. In in-place mode it is empty. Subagents use `$WT` for all reads; if empty, they read from the local working tree.
+
+## Step 1b: Stack check
+
+Right after Step 1, run:
+
+```bash
+playbook skill ref grounding-review stack-review
+```
+
+Read the file it prints and follow it. A PR that is not in a stack gets no question and nothing changes in this file. When the PR is in a stack, that file decides the scope (this PR only, the whole stack, or the whole stack with deep review), builds one shared context, and says how Steps 2 to 4 and the posting step differ for a whole stack. Strip `--this-pr` and `--whole-stack` before reading the other arguments.
 
 ## Step 2: Select reviewers
 
