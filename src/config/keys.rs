@@ -22,6 +22,9 @@ pub const KNOWN_KEYS: &[&str] = &[
     "maxEffortLevel",
     "memory.source",
     "agents.variants",
+    "models.haiku",
+    "models.sonnet",
+    "models.opus",
     "auto.budgetUsd",
     "auto.warnPct",
     "fix.maxFiles",
@@ -69,6 +72,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "maxEffortLevel" => Some(Value::String("auto".to_string())),
         "memory.source" => Some(Value::String("both".to_string())),
         "agents.variants" => Some(Value::String("auto".to_string())),
+        "models.haiku" | "models.sonnet" | "models.opus" => Some(Value::String(String::new())),
         "auto.budgetUsd" => Some(Value::Number(5.into())),
         "auto.warnPct" => Some(Value::Number(70.into())),
         "fix.maxFiles" => Some(Value::Number(3.into())),
@@ -93,9 +97,47 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
     }
 }
 
+/// The problem with a `models.<tier>` value, or `None` when it is fine.
+/// Fine is empty (no override) or `claude-<tier>-<major>[-<minor>]`, so a
+/// `models.sonnet` value can only name a Sonnet model. `None` for other keys.
+pub fn model_override_error(key: &str, value: &str) -> Option<String> {
+    let tier = key.strip_prefix("models.")?;
+    if !["haiku", "sonnet", "opus"].contains(&tier) || value.is_empty() {
+        return None;
+    }
+    let digits = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    let valid = value
+        .strip_prefix(&format!("claude-{tier}-"))
+        .is_some_and(|rest| {
+            let parts: Vec<&str> = rest.split('-').collect();
+            (1..=2).contains(&parts.len()) && parts.iter().all(|p| digits(p))
+        });
+    if valid {
+        return None;
+    }
+    Some(format!(
+        "expected empty or claude-{tier}-<major>[-<minor>], for example claude-{tier}-5-5"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_overrides_must_name_a_model_of_their_own_tier() {
+        assert_eq!(model_override_error("models.sonnet", ""), None);
+        assert_eq!(
+            model_override_error("models.sonnet", "claude-sonnet-5-5"),
+            None
+        );
+        assert_eq!(model_override_error("models.opus", "claude-opus-5"), None);
+        assert!(model_override_error("models.sonnet", "claude-opus-5").is_some());
+        assert!(model_override_error("models.sonnet", "claude-sonnet-x").is_some());
+        assert!(model_override_error("models.sonnet", "sonnet").is_some());
+        assert!(model_override_error("models.sonnet", "claude-sonnet-5-5-1").is_some());
+        assert_eq!(model_override_error("mode", "anything"), None);
+    }
 
     #[test]
     fn default_value_for_auto_review_enabled_is_true() {

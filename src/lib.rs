@@ -923,6 +923,15 @@ pub enum DoctorCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Show the model tiers, any overrides and the fallback chain in use
+    ///
+    /// Also says whether your own fallback replaces playbook's, and when the
+    /// effort in force makes the chain start at Haiku.
+    Models {
+        /// Print the report as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List files you edited after playbook placed them
     ///
     /// Prints one line per finding, or nothing when none is pending.
