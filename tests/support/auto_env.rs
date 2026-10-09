@@ -62,6 +62,20 @@ impl Scratch {
     }
 }
 
+/// Run a freshly written executable once, outside any timeout under test.
+/// Some machines scan a new executable on its first run, which can take
+/// longer than the hook's own 5 second wait for `git`. Without this the hook
+/// gives up, reads an empty slug, and the test fails for reasons unrelated to
+/// what it checks. Later runs of the same file take milliseconds.
+#[cfg(unix)]
+pub fn warm_up(executable: &std::path::Path) {
+    let _ = Command::new(executable)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
 /// A `git` shim that logs each call to a file and answers every call with the
 /// `acme/widgets` origin URL, plus the PATH that puts it first.
 #[cfg(unix)]
@@ -90,6 +104,8 @@ pub fn git_shim(scratch: &Scratch) -> GitShim {
     let shim = bin.join("git");
     fs::write(&shim, script).expect("shim should be writable");
     fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).expect("shim should be exec");
+    warm_up(&shim);
+    let _ = fs::remove_file(&log);
     let path = format!(
         "{}:{}",
         bin.display(),
