@@ -7,7 +7,6 @@
 
 use crate::common::atomic::with_dir_lock;
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
@@ -43,23 +42,7 @@ pub fn incr_counter(file: &str) -> i64 {
 /// rename, so a reader never observes a partially written file. Never
 /// panics; a failed write leaves the previous file content in place.
 fn write_atomically(path: &Path, contents: &str) {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let tmp_path = parent.join(format!(
-        ".tmp-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let Ok(mut tmp_file) = fs::File::create(&tmp_path) else {
-        return;
-    };
-    if tmp_file.write_all(contents.as_bytes()).is_ok() {
-        let _ = fs::rename(&tmp_path, path);
-    } else {
-        let _ = fs::remove_file(&tmp_path);
-    }
+    let _ = crate::common::atomic::write_atomic(path, contents);
 }
 
 #[cfg(test)]

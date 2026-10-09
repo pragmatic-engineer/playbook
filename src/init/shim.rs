@@ -422,27 +422,7 @@ pub(crate) fn owner_can_write(path: &Path) -> bool {
 /// symlink: only the file it points at is replaced.
 fn atomic_write_rc_file(rc_file: &Path, content: &[u8]) -> io::Result<()> {
     let target = fs::canonicalize(rc_file)?;
-    let dir = target
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let original_permissions = fs::metadata(&target).ok().map(|m| m.permissions());
-    let tmp_path = dir.join(format!(".rc-rewire-{}.tmp", std::process::id()));
-    if let Err(err) = fs::write(&tmp_path, content) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    if let Some(permissions) = original_permissions {
-        if let Err(err) = fs::set_permissions(&tmp_path, permissions) {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(err);
-        }
-    }
-    if let Err(err) = fs::rename(&tmp_path, &target) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    Ok(())
+    crate::common::atomic::write_atomic(&target, content)
 }
 
 /// Append the `shell-init` line to `rc_file`, creating it if needed.

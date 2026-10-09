@@ -151,7 +151,7 @@ pub fn run(p: &Params) -> io::Result<Report> {
         }
         if !p.dry_run {
             fs::create_dir_all(&p.dest_dir)?;
-            write_atomic(&dest, &to_playbook_fact(&fact))?;
+            write_atomic(&dest, to_playbook_fact(&fact))?;
             imported.insert(fact.hash.clone(), Value::String(dest_name.clone()));
             state.insert(fact.hash.clone());
         }

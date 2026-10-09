@@ -1315,7 +1315,7 @@ fn memory_rebuild_subcommand_fails_loud_on_a_write_failure() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("write temp graph file"),
+        stderr.contains("write memory.graph.json"),
         "stderr should contain the RebuildError wrapper text: {stderr}"
     );
     let after = fs::read_to_string(graph_path(&home)).unwrap();
@@ -1361,7 +1361,7 @@ fn memory_rebuild_subcommand_fails_loud_on_a_rename_failure() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("rename temp graph file into place"),
+        stderr.contains("write memory.graph.json"),
         "stderr should contain the RebuildError wrapper text: {stderr}"
     );
 

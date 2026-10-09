@@ -61,7 +61,7 @@ pub fn migrate_legacy_command(
     let body = serde_json::to_string_pretty(&value).map_err(io::Error::other)?;
     // A symlinked settings.json (stow, chezmoi) stays a symlink.
     let target = fs::canonicalize(settings_path)?;
-    crate::common::atomic::write_atomic(&target, &format!("{body}\n"))?;
+    crate::common::atomic::write_atomic(&target, format!("{body}\n"))?;
     Ok(true)
 }
 
@@ -77,5 +77,5 @@ fn unpin_base_status_line(base_path: &Path) -> io::Result<()> {
         return Ok(());
     }
     let body = serde_json::to_string_pretty(&base).map_err(io::Error::other)?;
-    crate::common::atomic::write_atomic(base_path, &format!("{body}\n"))
+    crate::common::atomic::write_atomic(base_path, format!("{body}\n"))
 }
