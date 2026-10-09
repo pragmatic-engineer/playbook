@@ -89,7 +89,7 @@ Findings are plain: a label, `file:line`, the exact evidence, a short failure sc
 
 1. Run every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive). Don't simulate.
 2. The `reviewer` subagent reads every file it cites at the PR's head SHA (grounding-review evidence rule). It can still be wrong, so the orchestrator sweeps every finding in Step 3b before anything is shown or posted, reading the cited lines plus what the trace needs.
-3. Combine independent bash calls into a single tool call.
+3. Combine independent `Bash` calls into a single tool call.
 4. Anchor every inline comment to a real `file:line` in the diff. If the line isn't in the diff (e.g. a referenced helper), make it a report-level finding instead.
 5. Never auto-submit. Always create the review in `PENDING` state and ask the user how to submit.
 6. Never post findings in the review body. The body is for a short human-voiced framing sentence or blank. All findings go inline.

@@ -421,7 +421,7 @@ A `cheap-check` lens dispatches a `cheap-checker` agent (`subagent_type: playboo
 
 `behaviour-drift` (did a refactor change observable behaviour) also has no matching category: none of the 7 reference files ask whether a simplification changed behaviour, that is a distinct concern from the bug-pattern checks `correctness.md` covers, so it falls back to the full `SKILL.md` too rather than reusing a file that only partially fits.
 
-Path resolution and fallback follow the same single rule as `/playbook:deep-review`'s Step 3 mapping: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real bash step before building the string, inside an executed bash block, for example:
+Path resolution and fallback follow the same single rule as `/playbook:deep-review`'s Step 3 mapping: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real `Bash` step before building the string, inside an executed bash block, for example:
 
 ```bash
 playbook skill ref grounding-review <file>
@@ -429,7 +429,7 @@ playbook skill ref grounding-review <file>
 
 It prints the absolute path of `references/<file>.md` (give `<file>` without `.md`), or of the full `SKILL.md` when the file is missing or no name is given.
 
-If the lens has a mapped file, resolve it this way and confirm it exists; if a lens has no mapped file (`principles`, `behaviour-drift`, `tests`) or the resolved file doesn't exist, resolve the full `SKILL.md` path instead, one rule either way, not two. Hand `cheap-checker` the resolved ABSOLUTE path this bash step produced, never the unexpanded placeholder or a bare repo-relative string: it has no `Bash` to expand `$CLAUDE_PLUGIN_ROOT` itself. The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern.
+If the lens has a mapped file, resolve it this way and confirm it exists; if a lens has no mapped file (`principles`, `behaviour-drift`, `tests`) or the resolved file doesn't exist, resolve the full `SKILL.md` path instead, one rule either way, not two. Hand `cheap-checker` the resolved ABSOLUTE path this `Bash` step produced, never the unexpanded placeholder or a bare repo-relative string: it has no `Bash` to expand `$CLAUDE_PLUGIN_ROOT` itself. The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern.
 
 A `skip` lens dispatches nothing. Track it explicitly as skipped in the triage summary above, e.g. "Triage: correctness=full-lens, tests=cheap-check, scope=skip"; a skipped lens is never conflated with a dispatched lens that returned nothing below, since it was never dispatched at all and so has no return value to lose.
 
