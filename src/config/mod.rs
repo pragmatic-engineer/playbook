@@ -152,6 +152,15 @@ pub fn adopt_late_config(home: &Path) -> Vec<String> {
     }
 }
 
+/// The default of a key that `resolve` already proved is known.
+#[allow(
+    clippy::expect_used,
+    reason = "callers validate the key against KNOWN_KEYS first, so a default always exists"
+)]
+fn known_default(key: &str) -> Value {
+    keys::default_value(key).expect("key was already validated as known")
+}
+
 /// Resolve `key` through the repo, org, global, then built-in default tier,
 /// in that order, returning the value and which tier supplied it. `home`
 /// stands in for `$HOME` so callers (and tests) can point resolution at a
@@ -185,10 +194,7 @@ pub fn resolve(
 
     // Never `None` here: the top-of-function check already proved `key` is
     // known, so a default value always exists.
-    Ok((
-        keys::default_value(key).expect("key was already validated as known"),
-        Source::Default,
-    ))
+    Ok((known_default(key), Source::Default))
 }
 
 /// A value `resolve_valid` dropped: the tier that held it and why it was
@@ -213,7 +219,7 @@ pub fn resolve_valid(
         .as_str()
         .and_then(|s| keys::model_override_error(key, s))
     {
-        let default = keys::default_value(key).expect("key was already validated as known");
+        let default = known_default(key);
         let ignored = IgnoredValue {
             tier: source,
             warning: format!("ignoring invalid value {value} for config key {key}: {problem}"),
@@ -230,7 +236,7 @@ pub fn resolve_valid(
         "ignoring invalid value {value} for config key {key}, valid values are: {}",
         allowed.join(", ")
     );
-    let default = keys::default_value(key).expect("key was already validated as known");
+    let default = known_default(key);
     let ignored = IgnoredValue {
         tier: source,
         warning,

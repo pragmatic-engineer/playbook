@@ -27,7 +27,9 @@ static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// A fresh scratch directory standing in for `$HOME`, unique per call.
@@ -990,6 +992,7 @@ struct UmaskGuard(RawMode);
 #[cfg(unix)]
 impl Drop for UmaskGuard {
     fn drop(&mut self) {
+        // SAFETY: umask only reads and replaces the process mask, no memory is touched.
         unsafe {
             umask(self.0);
         }
@@ -1002,6 +1005,7 @@ impl Drop for UmaskGuard {
 /// full lifetime.
 #[cfg(unix)]
 fn pin_umask(new_mask: RawMode) -> UmaskGuard {
+    // SAFETY: umask only reads and replaces the process mask, no memory is touched.
     let original = unsafe { umask(new_mask) };
     UmaskGuard(original)
 }

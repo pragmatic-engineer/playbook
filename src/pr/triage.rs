@@ -146,7 +146,7 @@ pub fn diff_facts(diff: &str) -> (Vec<String>, u64, u64) {
 fn build_prompt(facts: &PrFacts) -> String {
     let (files, added, removed) = diff_facts(&facts.diff);
     static CLOSE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)<\s*/\s*untrusted_pr_data\s*>").expect("static regex"));
+        LazyLock::new(|| crate::common::re::static_regex(r"(?i)<\s*/\s*untrusted_pr_data\s*>"));
     let safe = |s: &str| CLOSE.replace_all(s, "</untrusted_pr_data_>").to_string();
     format!(
         "Facts computed by the tool: {} files changed, +{added} -{removed} lines.\n\n\
@@ -275,8 +275,10 @@ pub fn collect(number: Option<u64>, base_arg: Option<&str>) -> Result<PrFacts, S
             let mut results =
                 crate::common::par::map(&calls, crate::common::par::MAX_CONCURRENT, |a| gh(a))
                     .into_iter();
-            let meta = results.next().expect("two results")?;
-            let diff = results.next().expect("two results")?;
+            let (Some(meta), Some(diff)) = (results.next(), results.next()) else {
+                return Err("gh returned fewer results than calls".to_string());
+            };
+            let (meta, diff) = (meta?, diff?);
             let meta: serde_json::Value = serde_json::from_str(&meta)
                 .map_err(|e| format!("gh pr view returned bad JSON: {e}"))?;
             let text = |k: &str| meta[k].as_str().unwrap_or_default().to_string();

@@ -379,7 +379,7 @@ fn the_real_agents_dir_has_only_base_files_and_every_agent_has_every_tier() {
         .collect();
     files.sort();
     let table: Vec<String> = VARIANTS.iter().map(|(b, _)| format!("{b}.md")).collect();
-    let mut sorted = table.clone();
+    let mut sorted = table;
     sorted.sort();
     assert_eq!(
         files, sorted,

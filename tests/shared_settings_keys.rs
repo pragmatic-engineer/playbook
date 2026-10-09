@@ -43,7 +43,10 @@ fn keys_of(value: &Value) -> BTreeSet<String> {
 }
 
 fn expected() -> BTreeSet<String> {
-    EXPECTED.iter().map(|s| s.to_string()).collect()
+    EXPECTED
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect()
 }
 
 fn seed() -> Value {

@@ -10,11 +10,12 @@
 //! is never `feat`, `fix`, `refactor` or `perf`, and so on. A mixed change is
 //! never checked, and `--no-type-check` skips the guard.
 
+use crate::common::re::static_regex;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static HEADER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(?P<type>[a-zA-Z]+)(\([^)]*\))?!?:").expect("header regex"));
+    LazyLock::new(|| static_regex(r"^(?P<type>[a-zA-Z]+)(\([^)]*\))?!?:"));
 
 /// What every changed file is, when they all are the same kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -242,8 +242,15 @@ pub fn sessions_json(usage: &[UsageEvent], now: i64, range: Range) -> Value {
             }
             let mut models: Vec<(&str, u64)> = per_model.into_iter().collect();
             models.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-            let latest = events.iter().max_by_key(|e| e.timestamp).copied();
-            let latest = latest.expect("a session has at least one event");
+            #[allow(
+                clippy::expect_used,
+                reason = "a session entry is only created by pushing its first event"
+            )]
+            let latest = events
+                .iter()
+                .max_by_key(|e| e.timestamp)
+                .copied()
+                .expect("a session has at least one event");
             let row = json!({
                 "id": id,
                 "start": start,

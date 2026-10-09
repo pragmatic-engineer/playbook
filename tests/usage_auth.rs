@@ -121,7 +121,9 @@ fn get(port: u16, path: &str, token: Option<&str>) -> (u16, String) {
 
 #[test]
 fn the_data_route_answers_401_without_a_token_and_with_a_wrong_one() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("denied");
     home.seed();
     let (port, token) = start(&home);
@@ -139,7 +141,9 @@ fn the_data_route_answers_401_without_a_token_and_with_a_wrong_one() {
 
 #[test]
 fn the_right_token_gets_the_data() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("granted");
     home.seed();
     let (port, token) = start(&home);
@@ -154,7 +158,9 @@ fn the_right_token_gets_the_data() {
 
 #[test]
 fn a_right_token_with_a_foreign_host_still_gets_the_host_refusal() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("host");
     home.seed();
     let (port, token) = start(&home);
@@ -177,7 +183,9 @@ fn a_right_token_with_a_foreign_host_still_gets_the_host_refusal() {
 
 #[test]
 fn a_right_token_with_a_cross_site_label_is_still_refused() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("site");
     home.seed();
     let (port, token) = start(&home);
@@ -200,7 +208,9 @@ fn a_right_token_with_a_cross_site_label_is_still_refused() {
 
 #[test]
 fn the_reuse_path_prints_a_working_link_with_the_token_from_the_lock() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("reuse");
     home.seed();
     let first = stdout(&home.run(&["usage", "dashboard"]));
@@ -218,7 +228,9 @@ fn the_reuse_path_prints_a_working_link_with_the_token_from_the_lock() {
 
 #[test]
 fn the_token_appears_only_in_the_two_links() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("print");
     let out = home.run(&["usage", "dashboard"]);
     let text = stdout(&out);
@@ -232,7 +244,9 @@ fn the_token_appears_only_in_the_two_links() {
 
 #[test]
 fn an_old_two_field_lock_is_retired_and_replaced_by_a_tokened_server() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("legacy");
     fs::create_dir_all(home.lock_path().parent().unwrap()).unwrap();
     fs::write(home.lock_path(), "2147483646 9\n").unwrap();
@@ -249,7 +263,9 @@ fn an_old_two_field_lock_is_retired_and_replaced_by_a_tokened_server() {
 
 #[test]
 fn the_lock_file_and_its_directory_are_owner_only() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("mode");
     start(&home);
 
@@ -266,7 +282,9 @@ fn the_lock_file_and_its_directory_are_owner_only() {
 
 #[test]
 fn each_server_start_gets_a_fresh_token() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("fresh");
     let (_, first) = start(&home);
     home.run(&["usage", "dashboard", "stop"]);
@@ -278,7 +296,9 @@ fn each_server_start_gets_a_fresh_token() {
 
 #[test]
 fn the_page_and_its_assets_serve_without_a_token_and_carry_no_data_or_token() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("assets");
     home.seed();
     let (port, token) = start(&home);
@@ -301,7 +321,9 @@ fn the_page_and_its_assets_serve_without_a_token_and_carry_no_data_or_token() {
 
 #[test]
 fn assets_carry_the_strict_policy_and_the_right_content_types() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("headers");
     let (port, _) = start(&home);
 
@@ -329,7 +351,9 @@ fn assets_carry_the_strict_policy_and_the_right_content_types() {
 
 #[test]
 fn a_hostile_branch_name_reaches_the_data_and_the_svg_only_as_escaped_text() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("xss");
     let project = home.0.join(".claude/projects/proj-xss");
     fs::create_dir_all(&project).unwrap();
@@ -362,7 +386,9 @@ const GUARDED: [&str; 3] = [
 
 #[test]
 fn every_data_route_answers_401_without_a_token_and_json_with_one() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("guarded");
     home.seed();
     let (port, token) = start(&home);
@@ -382,7 +408,9 @@ fn every_data_route_answers_401_without_a_token_and_json_with_one() {
 
 #[test]
 fn the_sessions_route_lists_sessions_and_the_session_route_returns_the_timeline() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("sessions");
     home.seed();
     let (port, token) = start(&home);
@@ -416,7 +444,9 @@ fn the_sessions_route_lists_sessions_and_the_session_route_returns_the_timeline(
 
 #[test]
 fn a_foreign_host_or_a_cross_site_label_is_refused_on_every_data_route() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("guard-all");
     home.seed();
     let (port, token) = start(&home);

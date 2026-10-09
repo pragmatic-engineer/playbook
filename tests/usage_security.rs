@@ -114,7 +114,9 @@ fn get(port: u16, path: &str, site: Option<&str>, token: &str) -> (u16, Option<S
 
 #[test]
 fn another_sites_page_cannot_make_the_server_ingest_but_the_page_itself_can() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("fetch-site");
     home.seed();
     let port = start(&home);
@@ -136,7 +138,9 @@ fn another_sites_page_cannot_make_the_server_ingest_but_the_page_itself_can() {
 
 #[test]
 fn the_page_forbids_being_framed() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("csp");
     let port = start(&home);
 
@@ -149,7 +153,9 @@ fn the_page_forbids_being_framed() {
 
 #[test]
 fn the_usage_directory_database_and_lock_are_owner_only() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("modes");
     home.seed();
     let port = start(&home);
@@ -164,7 +170,9 @@ fn the_usage_directory_database_and_lock_are_owner_only() {
 
 #[test]
 fn stop_ignores_a_lock_that_names_pid_one_or_zero() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("stop-low-pid");
     fs::create_dir_all(home.usage_dir()).unwrap();
 
@@ -181,7 +189,9 @@ fn stop_ignores_a_lock_that_names_pid_one_or_zero() {
 
 #[test]
 fn the_session_routes_refuse_another_sites_page_like_the_data_route() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("fetch-site-sessions");
     home.seed();
     let port = start(&home);

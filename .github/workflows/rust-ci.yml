@@ -6,6 +6,7 @@
 # Validates:
 #   - cargo fmt --check
 #   - cargo clippy --all-targets -- -D warnings
+#   - cargo clippy --lib --bins with unwrap_used and expect_used denied
 #   - cargo test
 #   - cargo audit, closing the CVE gap flagged when clap, serde and
 #     serde_json were approved as dependencies
@@ -82,6 +83,11 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
+
+      # Non-test code must not panic on bad input: unwrap and expect are errors
+      # there. Tests may use them, so this covers the library and the binary only.
+      - name: cargo clippy (no unwrap or expect outside tests)
+        run: cargo clippy --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
       # `tests/plugin_archive.rs` runs `claude plugin validate`, and fails in CI
       # when the CLI is missing. Pinned to a release older than two weeks.

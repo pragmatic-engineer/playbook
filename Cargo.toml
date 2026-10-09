@@ -23,6 +23,14 @@ ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
 # strip and thin LTO at opt-level 3, 5.8 MB with opt-level s and fat LTO, with no
 # slowdown on the hooks. panic stays unwind: abort would change the exit code of
 # a panicking hook from 101 to 134.
+# Curated lints, run with `-D warnings` in CI. Deliberately not all of
+# `clippy::pedantic`. The `unwrap_used` and `expect_used` lints cover only
+# non-test code, so they run from the justfile and CI as a separate step.
+[lints.clippy]
+uninlined_format_args = "warn"
+manual_let_else = "warn"
+undocumented_unsafe_blocks = "warn"
+
 [profile.release]
 opt-level = "s"
 strip = true

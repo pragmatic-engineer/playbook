@@ -1723,8 +1723,7 @@ fn rebuild_succeeds_when_the_lock_directory_is_already_held() {
     // Assert
     assert!(
         out.status.success(),
-        "rebuild must fail open, not hang or error, when the lock is already held: {:?}",
-        out
+        "rebuild must fail open, not hang or error, when the lock is already held: {out:?}"
     );
     let graph = read_graph(&home);
     assert!(

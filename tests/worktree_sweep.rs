@@ -21,7 +21,9 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// like `src/common/paths.rs`'s own tests do.
 static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn lock_cwd() -> std::sync::MutexGuard<'static, ()> {
-    CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn scratch(tag: &str) -> PathBuf {

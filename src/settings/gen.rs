@@ -263,20 +263,15 @@ pub fn generate(src_path: &Path, perms_path: &Path) -> Result<String, GenError> 
     // outcome as every other guard: nonzero exit, nothing on stdout. This
     // port names that outcome explicitly instead of relying on an incidental
     // exception; no ported scenario exercises this shape.
-    let src = match src_value {
-        Value::Object(map) => map,
-        _ => {
-            return Err(GenError(format!(
-                "source settings is not a JSON object: {}",
-                src_path.display()
-            )))
-        }
+    let Value::Object(src) = src_value else {
+        return Err(GenError(format!(
+            "source settings is not a JSON object: {}",
+            src_path.display()
+        )));
     };
 
     validate_hooks_shape(&src, src_path)?;
 
     let result = build(src, perms_value);
-    let json = serde_json::to_string_pretty(&Value::Object(result))
-        .expect("a JSON value parsed from valid JSON always re-serializes");
-    Ok(format!("{json}\n"))
+    Ok(format!("{:#}\n", Value::Object(result)))
 }
