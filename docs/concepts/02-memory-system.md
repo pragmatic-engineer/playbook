@@ -4,9 +4,7 @@ Each new Claude Code session starts cold: no memory of the project, your convent
 
 ## The Problem It Solves
 
-Without persistent memory, every session rediscovers what it needs: your coding style, the team's architectural decisions, the quirks in a particular codebase. That works for one-off tasks. For ongoing work across many sessions, the cost compounds: corrections given once need to be given again, decisions get relitigated, patterns re-explained.
-
-Memory breaks that loop. Facts get written once and loaded on demand. The system knows which facts belong to one repo, which apply across every repo under one owner, and which apply everywhere.
+Without memory, every session rediscovers your style, your team's decisions and a codebase's quirks. Corrections repeat and decisions get relitigated. Memory breaks that loop: facts are written once and loaded on demand, scoped to one repo, one owner or everywhere.
 
 ## Playbook memory and Claude Code memory
 
@@ -16,7 +14,7 @@ Claude Code has its own memory: `CLAUDE.md` files you write and an auto memory i
 - Every hook, command and skill that stores or loads playbook memory uses only `~/.config/playbook/memory/`.
 - You choose whether Claude Code's auto memory runs next to playbook memory. The config key `memory.source` is `both` by default. Set it to `playbook` and sessions started with `ccc` or `ccd` run with Claude Code's auto memory off. The launcher does this with the `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` environment variable for that one session, so no Claude Code file changes. Change it any time with `playbook config set --global memory.source <both|playbook>`.
 
-Playbook may read Claude Code's auto memory once, to bring useful notes across. `playbook memory import-claude [--dry-run]` copies the notes for the current project into playbook memory as facts (project memory under `<owner>/<repo>/`). It opens Claude Code's files read-only and never changes, moves or deletes anything there, and it keeps no marker in Claude Code's directories. What it already imported is tracked by content hash under `~/.config/playbook/state/`, so a second run copies nothing, a fact you deleted does not come back, and an existing playbook fact is never overwritten.
+Playbook may read Claude Code's auto memory once, to bring useful notes across. `playbook memory import-claude [--dry-run]` copies the notes for the current project into playbook memory as facts (project memory under `<owner>/<repo>/`). It opens Claude Code's files read-only and never changes, moves or deletes anything there, and it keeps no marker in Claude Code's directories. What it already imported is tracked by content hash in a small state file under playbook's own state folder, so a second run copies nothing, a fact you deleted does not come back, and an existing playbook fact is never overwritten.
 
 `tests/memory_isolation.rs` enforces the first two rules, and that the code reading Claude Code's memory has no write calls.
 
@@ -112,17 +110,11 @@ This loop is nudge-and-approve by design. Memory is durable. A bad fact, a dupli
 
 ## Design Rationale
 
-A few principles shaped the system.
-
-**Durable over re-learned.** The cost of rediscovery is real. Write once, load on demand.
-
-**Three scopes.** Global preferences, org conventions, and project facts are different things. They live in different parts of the store for good reason.
-
-**Typed edges.** Each relationship between facts carries a specific action. The type tells the system what to do. A bare, untyped link says nothing about the action to take.
-
-**Human-approve.** Memory writes are permanent. The confirmation gate exists to catch duplicates, errors, and outdated facts before they propagate.
-
-**Local-only.** The whole memory store is git-ignored by design. It lives on your machine, and project facts never surface in a repo's commit history.
+- **Durable over re-learned.** Write once, load on demand.
+- **Three scopes.** Preferences, org conventions and project facts live in different parts of the store.
+- **Typed edges.** Each link type tells the system what to do.
+- **Human approve.** Memory writes are permanent, so a gate catches duplicates and stale facts.
+- **Local only.** The store is never committed.
 
 ## See also
 

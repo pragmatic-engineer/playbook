@@ -45,9 +45,9 @@ subagent_type: playbook:reviewer
 
 ## Model and tool policy
 
-The tiers follow the session-wide policy in [Model routing and memory](../internals/02-model-routing-and-memory.md): `haiku` is the default for spawned subagents doing mechanical, formatting, or search work, it's three times cheaper. Escalate to `sonnet` when the agent does real reasoning or implementation, and to `opus` for PR review or deep architectural judgment, kept under 20 percent of total usage.
+Name a tier alias (`haiku`, `sonnet`, `opus`) and never a model id. `ccc` resolves the alias to the 5.5 model and passes the previous generation as a fallback. `tests/model_pins.rs` fails on anything else.
 
-The agents on disk show the range: `git` runs on `haiku` for mechanical staging and push work, `reviewer` runs on `opus` for PR review, `auditor` runs on `opus` at effort `high` for full-repo audits.
+Pick the cheapest tier that does the job. `git` runs on `haiku` for mechanical work, `implementer` on `sonnet`, and `reviewer` and `auditor` on `opus`, where a missed finding costs more than the tokens. The full policy is in [Model routing and memory](../internals/02-model-routing-and-memory.md). When you add or change an agent, update the policy table there too, because a test compares it with the file.
 
 Grant the smallest `tools` allowlist the role needs, and say so in the `description`. There are two read-only tiers, and the wording you pick decides which one the lint applies:
 
@@ -87,8 +87,8 @@ Effort is fixed per agent file because the `Agent` tool takes no per-call effort
 
 - Only the base files are committed. A variant keeps the base's `tools`, `model` and body, and differs in `name`, a one-line `description` and `effort`. `ccc` and `ccd` write the set into a throwaway plugin directory in the temp dir for the session and remove it afterwards, so no plugin file or Claude Code config changes.
 - Every base agent lists every tier (`low`, `medium`, `high`, `xhigh`, `max`) in the `VARIANTS` table in `src/agents/variants.rs`. A tier equal to the agent's own effort renders nothing, so there is no `-high` variant for an agent that ships at `high`.
-- A session gets only the useful variants (`agents.variants`, default `auto`): the cheaper tiers for every agent, plus `xhigh` for `analyst`, `critic`, `fact-checker`, `implementer` and `reviewer`, and never a tier above the user's effort ceilings. `all` adds the rest including `max`, and `off` passes none. Measured on the real agents: the 12 base descriptions are 6.3 KB of session context, `auto` adds 1.9 KB (19 variants), a `medium` ceiling adds 1.4 KB, and committing every variant as a file would have added 27 KB.
-- Sessions started without the launcher have the base agents only. `playbook effort resolve agents <name> --json` reports what the session has, and the `delegating-subagents` skill falls back to the base agent when a variant is not there.
+- A session gets only the useful variants (`agents.variants`, default `auto`): the cheaper tiers for every agent, plus `xhigh` for `analyst`, `critic`, `fact-checker`, `implementer` and `reviewer`, and never a tier above the user's effort ceilings. `all` adds the rest including `max`, and `off` passes none. Committing every variant as a file would add about 27 KB to every session, which is why they are rendered instead.
+- Sessions started without the launcher have the base agents only. `playbook agents variants` lists what a session gets, `playbook effort resolve agents <name> --json` reports the file to dispatch, and the `delegating-subagents` skill falls back to the base agent when a variant is not there.
 - Spawn a variant by its plain name, for example `reviewer-xhigh`, with no `playbook:` prefix. The base agents keep it (`playbook:reviewer`).
 - `playbook agents check`, and so `playbook ci`, fails when an agent has no `VARIANTS` entry, a tier cannot render, or a generated variant file is left in `agents/`. Variants are built from the base, so they follow every normal check, including the read-only tool rules.
 
