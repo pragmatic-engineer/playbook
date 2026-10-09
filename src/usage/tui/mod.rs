@@ -8,6 +8,7 @@
 pub mod app;
 pub mod data;
 pub mod fmt;
+pub mod panels;
 pub mod view;
 pub mod worker;
 
