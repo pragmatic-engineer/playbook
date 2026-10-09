@@ -1,6 +1,6 @@
 ---
 name: session-handoff
-description: Use at the end of a working session, before /clear or context compaction, or when the user asks to wrap up or summarize for next time.
+description: Writes a four-part handoff (where we are, decisions, next steps, open questions) for the next session. Use when wrapping up, before /clear or compaction, or when asked to summarize for next time.
 ---
 
 # Session Handoff

@@ -1,6 +1,6 @@
 ---
 name: engineering-standards
-description: Use when designing or writing code, working on pull requests, planning a testing approach, or thinking about deployment under the team engineering standards.
+description: Team standards for code design, commits, pull requests, testing, and deployment. Use when designing or writing code, preparing a PR, planning tests, or planning a deploy.
 ---
 
 # Engineering Standards

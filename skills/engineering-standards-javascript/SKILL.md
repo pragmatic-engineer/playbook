@@ -1,6 +1,6 @@
 ---
 name: engineering-standards-javascript
-description: Use when writing or reviewing JavaScript or TypeScript code and tests under the team engineering standards, especially when validating input or setting up mocks in a Jest or Vitest test.
+description: JavaScript and TypeScript rules for code and tests, including input validation and Jest or Vitest mocks. Use when writing or reviewing JS or TS under the team standards.
 ---
 
 # Engineering Standards: JavaScript and TypeScript

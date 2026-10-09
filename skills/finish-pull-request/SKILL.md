@@ -1,6 +1,6 @@
 ---
 name: finish-pull-request
-description: "Use when /playbook:create-pull-request has just returned a PR URL. Reads the autoReview.* and autoMerge.enabled settings, runs the chosen self-review, fixes findings, promotes the draft, and merges when allowed."
+description: Finishes a freshly opened PR by running the configured self-review, fixes findings, promotes the draft, and merges when allowed. Use right after /playbook:create-pull-request returns a PR URL.
 ---
 
 # Finish Pull Request

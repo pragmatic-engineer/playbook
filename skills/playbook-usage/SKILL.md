@@ -1,6 +1,6 @@
 ---
 name: playbook-usage
-description: Use when a session doesn't have prompts/SYSTEM_PROMPT.md installed and needs to discover what /playbook:* commands exist and when to reach for one, or when asked what this plugin does, how to use it, or which command fits a task.
+description: Lists the /playbook:* commands and when to use each. Use when prompts/SYSTEM_PROMPT.md is not installed, or when asked what the plugin does or which command fits a task.
 ---
 
 # Playbook Usage
