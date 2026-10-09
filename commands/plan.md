@@ -97,6 +97,8 @@ playbook mode status --json
 
 Add `--flag auto` if the arguments contain `--auto` or `--auto-design`. Add `--flag ask` if they contain `--ask`. If `--ask` comes with either auto flag, stop with one line: "--ask and --auto conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, do not stop and do not retry. Run in ask mode and print one line. When the error is `unrecognized subcommand 'mode'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
 
+**Effort ceiling.** Also run `playbook effort resolve commands plan --json`. Its `ceiling` is the highest effort the user allows for this run (`null` means no limit). Hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. If the command fails, carry on with no ceiling.
+
 - **`ask` mode:** behave exactly as this file describes. Every question below stays.
 - **`auto` mode:** take the recommended answer at each decision instead of asking, within the limits in Autonomous Mode below, and record every answer you chose yourself in an **Assumptions** list. Print that list in the final output. Auto mode that comes from the environment or the repo config acts like plain `--auto`. Only the `--auto-design` flag, given on the command line, self-answers the design.
 
