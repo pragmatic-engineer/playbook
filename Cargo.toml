@@ -18,3 +18,10 @@ serde_json = { version = "=1.0.151", features = ["preserve_order"] }
 sha2 = "=0.10.9"
 tiny_http = "=0.12.0"
 ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
+
+# Measured 2026-10-09: 10.0 MB, 42 s clean build without this profile; 7.8 MB, 76 s with it.
+# panic stays unwind: abort would change the hooks exit code from 101 to 134.
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
