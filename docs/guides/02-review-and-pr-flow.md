@@ -1,60 +1,56 @@
 # Review and PR Flow
 
-Once a branch is ready, this config gives you three commands to get it reviewed and shipped: `/playbook:commit-and-push` to commit and push, `/playbook:quick-review` or `/playbook:deep-review` to review, and `/playbook:address-pr-comments` to work through feedback.
+Four commands take a ready branch to a merged PR: `/playbook:commit-and-push`, `/playbook:create-pull-request`, `/playbook:quick-review` or `/playbook:deep-review`, and `/playbook:address-pr-comments`.
 
-## `/playbook:commit-and-push`
+## Commit and push
 
-Generates a commit message from the staged diff, commits signed (always `--gpg-sign`, with the key and format from git config) with a `Signed-off-by` trailer (see [PR and commit settings](#pr-and-commit-settings)), rebases onto the base branch if you're behind, then pushes. It runs in an isolated subagent (`context: fork`) on Haiku, so the diff and drafting stay out of your main context. There is no confirmation gate: it commits and pushes end to end.
+`/playbook:commit-and-push` writes a commit message from the staged diff, commits signed with a `Signed-off-by` trailer (see [PR and commit settings](#pr-and-commit-settings)), rebases if you are behind, then pushes. It runs in a forked `git` subagent, so the diff stays out of your main context. There is no confirmation gate.
 
 ```bash
-/playbook:commit-and-push           # commit staged changes and push
-/playbook:commit-and-push -A        # stage all files (git add -A), then commit
-/playbook:commit-and-push -u        # stage tracked files only (git add -u), then commit
-/playbook:commit-and-push -a        # amend the previous commit instead of creating a new one
-/playbook:commit-and-push --no-signoff  # leave the Signed-off-by trailer off this commit
+/playbook:commit-and-push               # commit staged changes and push
+/playbook:commit-and-push -A            # git add -A first
+/playbook:commit-and-push -u            # git add -u first
+/playbook:commit-and-push -a            # amend the previous commit
+/playbook:commit-and-push --no-signoff  # no Signed-off-by on this commit
 ```
 
-Flags combine: `-Au`, `-a -u`, and so on.
+Flags combine (`-Au`). After a rebase or amend it pushes with `--force-with-lease`. Hooks run normally: if one fails, fix the issue and commit again.
 
-If the branch is behind the base, it rebases automatically before pushing. After a rebase or amend, it uses `--force-with-lease` so the push fails safely if the remote moved unexpectedly. Hooks run normally; if one fails, fix the issue and commit again rather than skipping it.
+## Create a pull request
 
-## `/playbook:quick-review`
+`/playbook:create-pull-request` runs pre-flight checks, drafts a conventional-commit title and the team template body, then opens the PR. It opens a draft unless `pr.draft` is `false`.
 
-A single-pass PR review under the grounding-review discipline, posted as a pending GitHub review for you to submit.
+## Quick review
+
+A single-pass review under the `grounding-review` discipline, posted as a pending GitHub review for you to submit.
 
 ```bash
-/playbook:quick-review              # self-review: resolves the PR for the current branch
-/playbook:quick-review 4265         # review PR #4265
-/playbook:quick-review #4265        # same
+/playbook:quick-review              # the PR for the current branch
+/playbook:quick-review 4265         # PR #4265
 ```
 
-Reviewers return plain findings. When something can be posted, it loads `playbook:writing-style` after the verification sweep and shows the report with a drafted comment under each finding. Then it asks two questions: which findings to post, then which submit verb to use (`approve`, `comment`, `request-changes`, or `skip`). The drafts you saw are posted as they are, and it never auto-submits. A self-review or report-only run never loads `playbook:writing-style`.
+It shows a report with a drafted comment under each finding. Then it asks which findings to post and which verb to use (`approve`, `comment`, `request-changes` or `skip`). It never submits on its own. A PR you authored gets a local report only.
 
-A PR you authored gets a local report only; nothing is posted.
+## Deep review
 
-## `/playbook:deep-review`
-
-Fans out a swarm of specialist reviewer subagents in parallel (logic, test, security, data, types, perf by default), consolidates their findings, deduplicates and fact-checks, then posts the same way `/playbook:quick-review` does.
+A swarm of specialist reviewers runs in parallel (logic, test, security, data, types and perf by default). The command consolidates, deduplicates and fact-checks the findings, then posts the way quick review does.
 
 ```bash
-/playbook:deep-review               # current branch's PR, auto-selects reviewers from the diff
-/playbook:deep-review 123           # PR #123
-/playbook:deep-review 123 --all     # every reviewer regardless of diff content
+/playbook:deep-review                     # the current branch's PR, reviewers picked from the diff
+/playbook:deep-review 123 --all           # every reviewer
 /playbook:deep-review --preset security   # security + data + types + logic
-/playbook:deep-review --self        # local self-review, never posts to GitHub
+/playbook:deep-review --self              # local report, never posts
 ```
 
-Available presets: `security`, `architecture`, `data`, `docs`.
+Presets are `security`, `architecture`, `data` and `docs`. Conditional reviewers (architecture, migration, docs, complexity) switch on from what the diff contains. Full reviewers run on Opus. A lens that triage marks narrow gets a cheap Haiku checker. See [Model routing](../internals/02-model-routing-and-memory.md).
 
-By default, conditional reviewers (architecture, migration, docs, complexity, and others) activate based on what the diff contains. The command and its full-lens `reviewer` subagents run on Opus; a lens the triage step marks narrow gets a `cheap-checker` on Haiku. See [Model routing and memory](../internals/02-model-routing-and-memory.md) for why.
+Use quick review for everyday PRs. Use deep review for large, risky or cross-layer changes.
 
-Use `/playbook:quick-review` for everyday PRs. Reach for `/playbook:deep-review` when the change is large, risky, or touches multiple layers.
+## Review a stack
 
-## Reviewing a pull request stack
+A stack is a series of PRs where each one targets the branch of the PR below it. Playbook finds GitHub native stacks, and stacks made with Graphite, ghstack, git-town or by hand, by following the branch chain. Design: [ADR-0019](../adr/0019-pr-stack-review.md).
 
-A stack is a series of PRs where each one targets the branch of the PR below it. Playbook finds stacks made with GitHub's native stacked PRs, and also stacks made with Graphite, ghstack, git-town or by hand, by following the branch chain. See [ADR-0019](../adr/0019-pr-stack-review.md) for the design.
-
-A PR that is not in a stack is reviewed as before, with no extra question. When the PR sits in a stack, even one with a single open PR, both review commands first print the size (PR count and changed lines) and ask:
+A PR outside a stack is reviewed with no extra question. When the PR sits in a stack, even with a single open PR, both commands print the size and always ask:
 
 1. This PR only.
 2. Whole stack, quick review. This is the default.
@@ -76,13 +72,11 @@ What a whole-stack review does:
 - **Safe against change.** If a PR was pushed to, retargeted or closed after the review started, its findings are held back and listed as stale.
 - **Cost guard.** The command asks again before it starts when the open PRs exceed `review.stackMaxPrs` (default 6) or `review.stackMaxLines` (default 3000). See [Config keys](04-config-keys.md).
 
-Merged PRs in the stack are never reviewed. They are always read as background.
+## How findings are graded
 
-## The grounding-review discipline
+Both commands follow the `grounding-review` discipline.
 
-Both review commands follow the same discipline, which covers:
-
-**Severity levels:**
+**Severity**
 
 | Level | Meaning |
 |---|---|
@@ -91,13 +85,13 @@ Both review commands follow the same discipline, which covers:
 | `medium` | May merge; address soon. Maintainability or minor correctness. |
 | `low` | Informational. Style, naming. Safe to defer. |
 
-**Conventional Comments labels** go on every finding in plain text (no bold): `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. `blocking` replaces `issue` for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. Every finding is one sentence when possible, two at most.
+**Labels** are Conventional Comments in plain text: `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. Use `blocking` for must-fix before merge and `issue` for a real problem that does not block. Each finding is one or two sentences.
 
-Every review ends with a **Verification Summary** table listing each file, whether it was read, which lines were checked, and which findings it carries. Confidence is HIGH (every finding verified), MEDIUM (1-2 unverified), or LOW (multiple unverified).
+Every review ends with a **Verification Summary**: each file, whether it was read, which lines were checked, and its findings. Confidence is HIGH (all verified), MEDIUM (1 or 2 unverified) or LOW (more).
 
-## `/playbook:address-pr-comments`
+## Address review comments
 
-Walks unresolved review threads one at a time. For each one it reads the code, proposes a fix or reply, waits for your approval, then applies it.
+`/playbook:address-pr-comments` walks unresolved threads one at a time. It reads the code, proposes a fix or reply, waits for your approval, then applies it.
 
 ```bash
 /playbook:address-pr-comments           # current branch's PR
@@ -107,15 +101,11 @@ Walks unresolved review threads one at a time. For each one it reads the code, p
 /playbook:address-pr-comments -y        # skip the final commit confirmation
 ```
 
-For each comment, you choose: `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit`, or `[E]dit-then-fix`. Reply-only comments post immediately. Fix-and-reply comments queue the reply until after commit.
-
-At the end it invokes `commit-and-push -A`, then posts any queued replies. It never resolves threads; resolving is the reviewer's call.
-
-Bot authors (CodeRabbit, Copilot review, Greptile, github-actions, and others) are skipped by default. Pass `--bots` to include them.
+For each comment you choose `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit` or `[E]dit-then-fix`. Replies queue until after the commit. At the end it runs `commit-and-push -A`, then posts the replies. It never resolves threads. Bot authors are skipped unless you pass `--bots`.
 
 ## Auto mode
 
-These commands read the run mode first. In `ask` mode, which is the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](05-auto-mode.md) for how the mode is set.
+In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](05-auto-mode.md).
 
 - `/playbook:commit-and-push` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
 - `/playbook:quick-review` and `/playbook:deep-review` run as `--self`. They report locally and never post a review to GitHub, because a posted review speaks as you.
@@ -123,7 +113,7 @@ These commands read the run mode first. In `ask` mode, which is the default, not
 
 ## PR and commit settings
 
-Six config keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`, and set it with `playbook config set [--global|--org] <key> <value>`. Without a flag it writes the repo tier; `--org` writes the org tier and `--global` writes your own, for every repo. The repo tier wins over org, and org over global. The full list of keys is in [Config keys](04-config-keys.md).
+Six keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`. Set it with `playbook config set [--global|--org] <key> <value>`: no flag writes the repo tier. Repo wins over org, and org over global. All keys: [Config keys](04-config-keys.md).
 
 | Key | Default | What it does |
 |---|---|---|
@@ -140,31 +130,27 @@ playbook config set --global autoMerge.enabled true
 playbook config set --global pr.draft false
 ```
 
-The merge step is cautious on purpose. It waits two minutes after marking the PR ready, so checks have registered and a run skipped while the PR was a draft can't read as green. It then polls every check on the PR (not only the required ones, since a repo may require none and a merge queue would merge at once) every 30 seconds, for up to 45 minutes. `pass` and `skipping` are fine, `fail` and `cancel` stop it, and a check still pending at the deadline stops it without merging. A PR with no checks at all merges once that two-minute look finds none.
+### How auto-merge behaves
 
-It then runs `gh pr merge <n> --auto --match-head-commit <sha>` with the head commit it recorded, so a commit pushed during the wait is never merged unseen. It passes no method flag first, so a merge queue picks how the PR lands. If `gh` says a method is required, it reads which methods the repo allows and retries with the one allowed, preferring squash. It never passes `--admin` or `--delete-branch`. Afterwards it reads the PR and reports one of: merged, queued or auto-merge armed, rejected or auto-merge cleared, or closed.
+The merge step is cautious on purpose.
 
-A stacked PR whose base is another open PR is not merged before its base: the command says so and stops. In auto mode, a PR that no review covered (any caller other than `/playbook:implement`) is marked ready but never merged, even with `autoMerge.enabled` on. The settings work the same in `ask` and `auto` mode, and neither asks a question, because setting the key is your opt-in.
+- It waits two minutes after marking the PR ready, so checks have registered. A PR with no checks at all merges once that look finds none.
+- It polls every check on the PR every 30 seconds, for up to 45 minutes. `pass` and `skipping` are fine. `fail`, `cancel` or a check still pending at the deadline stops it without merging.
+- It runs `gh pr merge <n> --auto --match-head-commit <sha>`, so a commit pushed during the wait is never merged unseen. With no method flag, a merge queue picks how the PR lands. If `gh` asks for a method, it retries with the one the repo allows, preferring squash. It never passes `--admin` or `--delete-branch`.
+- It then reads the PR and reports one of: merged, queued, rejected, or closed.
 
-`commit.signOff` stands down when the message already has the trailer, when you pass `--no-signoff` on purpose, or when the repo's `prepare-commit-msg` or `commit-msg` hook writes the trailer itself (through `git interpret-trailers`, `--signoff`, or an appended `Signed-off-by:` line). A hook that only checks for the trailer does not count, so the command still adds it. It does not control cryptographic signing: commits are signed whenever your git config has a `user.signingkey` (`--gpg-sign`), using the key and format from that config.
+A stacked PR whose base is another open PR is not merged before its base. In auto mode, a PR that no review covered is marked ready but never merged, even with `autoMerge.enabled` on. The settings work the same in `ask` and `auto` mode and ask no question, because setting the key is your opt-in.
 
-## A typical review cycle
+`commit.signOff` stands down when the message already has the trailer, when you pass `--no-signoff`, or when the repo's `prepare-commit-msg` or `commit-msg` hook writes the trailer itself. A hook that only checks for it does not count. It does not control cryptographic signing: commits are signed whenever your git config has a `user.signingkey` (`--gpg-sign`), using the key and format from that config.
+
+## A typical cycle
 
 ```bash
-# 1. Branch is ready. Stage and commit.
-/playbook:commit-and-push -A
-
-# 2. Self-review before asking others.
-/playbook:quick-review           # or /playbook:deep-review for a bigger change
-
-# 3. Pick findings to post and choose a submit verb.
-# The command asks; you answer.
-
-# 4. Reviewer leaves comments. Address them.
-/playbook:address-pr-comments    # walks each thread, fixes and replies, then commits and posts
+/playbook:commit-and-push -A          # commit and push
+/playbook:create-pull-request         # open the PR
+/playbook:quick-review                # self-review; or deep-review for a bigger change
+/playbook:address-pr-comments         # after a reviewer leaves comments
 ```
-
-That's the full loop. Run `/playbook:quick-review` again after a round of feedback if you want a second pass before merging.
 
 ## See also
 
