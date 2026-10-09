@@ -4,7 +4,7 @@ A tagged release reaches users through three channels: the GitHub release assets
 (built by the `build` and `checksums` jobs), the Homebrew tap
 `pragmatic-engineer/homebrew-tap`, and the plugin marketplace
 `pragmatic-engineer/marketplace`. This repo does not push to the last two. Each
-of those repos runs its own daily `bump` workflow that reads this repo's latest
+of those repos runs its own daily `release` workflow that reads this repo's latest
 release and updates itself:
 
 1. The tap rewrites the URLs and checksums in `Formula/playbook.rb` from the
@@ -15,7 +15,7 @@ release and updates itself:
 
 Both create their commit through the GitHub API, so GitHub signs it. A release
 can take up to a day to reach the tap and the marketplace. To update sooner, run
-the `bump` workflow by hand in each repo.
+the `release` workflow by hand in each repo.
 
 ## The plugin archive
 
