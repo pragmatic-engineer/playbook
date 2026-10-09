@@ -8,6 +8,7 @@
 pub mod agents;
 pub mod cc;
 pub mod ci;
+pub mod commit;
 pub mod common;
 pub mod config;
 pub mod deps;
@@ -371,6 +372,11 @@ pub enum Command {
         /// Create the folder when it does not exist
         #[arg(long)]
         create: bool,
+    },
+    /// The git steps of `/playbook:commit-and-push`
+    Commit {
+        #[command(subcommand)]
+        sub: CommitCommand,
     },
     /// Setup for the review commands
     Review {
@@ -748,6 +754,45 @@ pub enum PrCommand {
         /// Squash with admin rights instead of arming auto-merge
         #[arg(long)]
         admin: bool,
+    },
+}
+
+/// `playbook commit` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum CommitCommand {
+    /// Stage, format, and print what a commit message is drafted from
+    ///
+    /// Refuses the repo's default branch. Prints `NO_STAGED_CHANGES` when there
+    /// is nothing to commit, else `BRANCH=`, the changed files and the diff.
+    Prepare {
+        /// Stage everything first (`git add -A`)
+        #[arg(short = 'A')]
+        all: bool,
+        /// Stage tracked changes first (`git add -u`)
+        #[arg(short = 'u')]
+        update: bool,
+        /// Replace the last commit
+        #[arg(short = 'a')]
+        amend: bool,
+    },
+    /// Commit, rebase when behind, and push
+    ///
+    /// Reads the message from stdin, or from `--message-file`. Adds a
+    /// sign-off per `commit.signOff` and signs when `user.signingkey` is set.
+    /// A rejected push is never forced. Exits 1 on any failure.
+    Run {
+        /// File with the commit message (default: read stdin)
+        #[arg(long)]
+        message_file: Option<PathBuf>,
+        /// Replace the last commit
+        #[arg(short = 'a')]
+        amend: bool,
+        /// Auto mode: never force a push
+        #[arg(long)]
+        auto: bool,
+        /// Leave the sign-off trailer off
+        #[arg(long)]
+        no_signoff: bool,
     },
 }
 
