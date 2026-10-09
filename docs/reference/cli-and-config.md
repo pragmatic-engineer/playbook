@@ -39,728 +39,286 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 
 ### `playbook`
 
-```text
 Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage dashboard, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Usage: playbook <COMMAND>
-
-Commands:
-  init        Install or repair your local Claude Code setup
-  uninstall   Remove what playbook installed from this machine
-  shell-init  Print the shell functions `ccc` and `ccd`
-  update      Update playbook to a published release
-  version     Print the installed version, same as `--version`
-  deps        Install the tools a Brewfile lists, keeping any already on PATH
-  doctor      Read single facts that the health check uses
-  mode        Choose whether playbook asks questions or decides on its own
-  config      Read and change playbook settings
-  state       Inspect playbook's own bookkeeping (migration record, sweep markers)
-  effort      Set playbook's own ceiling on effort, or inspect one component's
-  cc          Launcher helpers behind the `ccc` shell shortcut
-  usage       Show token and cost usage across your sessions
-  release     Render the files the release job pushes to the Homebrew tap and marketplace
-  eval        Check how well the review triage classifier sorts real pull requests
-  pr          Prepare and open pull requests, and pick a review depth
-  worktree    Clean up git worktrees whose branches have landed
-  memory      Manage the memory graph that sessions read from
-  handoff     Save and show notes that carry a session over to the next one
-  statusline  Print the Claude Code status line
-  settings    Create or check the shared settings template
-  manifest    Check that tracked files sit in allowed top-level paths
-  agents      Check agent definition files
-  gate        Record and check plan verdicts used as gates
-  sanitize    Remove AI attribution lines from message text
-  ci          Run the repo checks that need no model (manifest, agents, settings)
-  path        Print the path of one of this repo's playbook storage folders
-  plan        Helpers for `/playbook:plan`
-  glossary    Append to the repo's `GLOSSARY.md`
-  skill       Print the path of a skill file or one of its references
-  adr         ADR helpers
-  learn       Helpers for `/playbook:learn-project`
-  commit      The git steps of `/playbook:commit-and-push`
-  review      Setup for the review commands
-  plans       List the plans and ADR blueprints `/playbook:implement` can run
-  trust       Mark a directory as trusted in Claude Code
-  help        Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-
-  -V, --version
-          Print version
-
-Run `playbook <command> --help` for details on one command.
-Check your setup with `/playbook:doctor` inside Claude Code (`playbook doctor --help` lists its helpers).
-Docs: https://github.com/pragmatic-engineer/playbook
-```
+Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `release`, `review`, `sanitize`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
-```text
 ADR helpers
 
-Usage: playbook adr <COMMAND>
-
-Commands:
-  next  Print the next ADR number and today's date
-  help  Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `next`
 
 ### `playbook adr next`
 
-```text
 Print the next ADR number and today's date
 
 Creates `docs/adr` in the repo if it is missing. Prints `Next number: NNNN   Date: YYYY-MM-DD`.
 
-Usage: playbook adr next
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
 ### `playbook agents`
 
-```text
 Check agent definition files
 
-Usage: playbook agents <COMMAND>
-
-Commands:
-  check     Check every agent definition follows the agent rules
-  variants  Show the effort-tier variants a session would get
-  help      Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `check`, `variants`
 
 ### `playbook agents check`
 
-```text
 Check every agent definition follows the agent rules
 
 Exits 0 when all pass and 1 otherwise.
 
-Usage: playbook agents check [AGENTS_DIR]
-
-Arguments:
-  [AGENTS_DIR]
-          Folder of agent definitions (default: `agents` at the repo root)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<AGENTS_DIR>`: Folder of agent definitions (default: `agents` at the repo root)
 
 ### `playbook agents variants`
 
-```text
 Show the effort-tier variants a session would get
 
 Variants such as `reviewer-low` are not files. `ccc` and `ccd` render them from the base agents and pass them to Claude Code with `--agents`. This prints the same set, so you can see what a session would hold and its size. Use `--json` for the full definitions.
 
 Example: `playbook agents variants --ceiling medium`
 
-Usage: playbook agents variants [OPTIONS] [AGENTS_DIR]
-
-Arguments:
-  [AGENTS_DIR]
-          Directory holding the agent definitions, default `<repo root>/agents`
-
-Options:
-      --ceiling <CEILING>
-          Lowest effort ceiling to apply to every agent (default: none)
-
-      --mode <MODE>
-          auto, all or off (default: auto)
-
-          [default: auto]
-
-      --json
-          Print the `--agents` JSON
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<AGENTS_DIR>`: Directory holding the agent definitions, default `<repo root>/agents`
+- `--ceiling <CEILING>`: Lowest effort ceiling to apply to every agent (default: none)
+- `--mode <MODE>`: auto, all or off (default: auto)
+- `--json`: Print the `--agents` JSON
 
 ### `playbook cc`
 
-```text
 Launcher helpers behind the `ccc` shell shortcut
 
 Sessions are started by the `ccc` shell shortcut (install it with `playbook init --aliases`). These subcommands do its housekeeping: list sessions, prune state, clear caches, and create worktrees.
 
 Example: `playbook cc worktree my-branch`
 
-Usage: playbook cc [COMMAND]
-
-Commands:
-  clean       Mode of the `ccc` shortcut: clean up and resume (no action by itself)
-  fresh       Mode of the `ccc` shortcut: start a fresh session (no action by itself)
-  raw         Mode of the `ccc` shortcut: resume a session as it was (no action by itself)
-  list        List sessions for the current project
-  prune       Remove stale runtime state
-  bust-cache  Clear caches that would freeze old settings into a session
-  launch      Run the launcher the `ccc` and `ccd` shell functions call
-  worktree    Create a git worktree for a branch and print its path
-  help        Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `bust-cache`, `clean`, `fresh`, `launch`, `list`, `prune`, `raw`, `worktree`
 
 ### `playbook cc bust-cache`
 
-```text
 Clear caches that would freeze old settings into a session
-
-Usage: playbook cc bust-cache
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook cc clean`
 
-```text
 Mode of the `ccc` shortcut: clean up and resume (no action by itself)
-
-Usage: playbook cc clean
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook cc fresh`
 
-```text
 Mode of the `ccc` shortcut: start a fresh session (no action by itself)
-
-Usage: playbook cc fresh
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook cc launch`
 
-```text
 Run the launcher the `ccc` and `ccd` shell functions call
 
-Usage: playbook cc launch [OPTIONS] [ARGS]...
-
-Arguments:
-  [ARGS]...
-          Subcommand and arguments, passed through to claude
-
-Options:
-      --skip-permissions
-          Pass `--dangerously-skip-permissions` to claude (the `ccd` form)
-
-  -h, --help
-          Print help
-```
+- `--skip-permissions`: Pass `--dangerously-skip-permissions` to claude (the `ccd` form)
+- `<ARGS>`: Subcommand and arguments, passed through to claude
 
 ### `playbook cc list`
 
-```text
 List sessions for the current project
-
-Usage: playbook cc list
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook cc prune`
 
-```text
 Remove stale runtime state
-
-Usage: playbook cc prune
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook cc raw`
 
-```text
 Mode of the `ccc` shortcut: resume a session as it was (no action by itself)
 
 The `ccc` shortcut handles these modes. Running this command directly does nothing and exits 0.
 
-Usage: playbook cc raw [SID]
-
-Arguments:
-  [SID]
-          Session id to resume (default: the most recent)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<SID>`: Session id to resume (default: the most recent)
 
 ### `playbook cc worktree`
 
-```text
 Create a git worktree for a branch and print its path
 
 Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"`.
 
-Usage: playbook cc worktree <BRANCH> [ENV_BASE]
-
-Arguments:
-  <BRANCH>
-          Branch to create the worktree for
-
-  [ENV_BASE]
-          Folder (relative to the repo root) holding the `.env` to copy in
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<BRANCH>`: Branch to create the worktree for
+- `<ENV_BASE>`: Folder (relative to the repo root) holding the `.env` to copy in
 
 ### `playbook ci`
 
-```text
 Run the repo checks that need no model (manifest, agents, settings)
 
 Prints one line per check. Exits 0 when all pass and 1 if any fails, so it is safe in CI. A skipped check passes unless `--strict` is set.
 
 Example: `playbook ci --strict`
 
-Usage: playbook ci [OPTIONS]
-
-Options:
-      --json
-          Print one JSON object instead of text
-
-      --strict
-          Also exit 1 when a check is skipped (for example in the wrong directory)
-
-      --dir <DIR>
-          Run in this directory instead of the current one
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--json`: Print one JSON object instead of text
+- `--strict`: Also exit 1 when a check is skipped (for example in the wrong directory)
+- `--dir <DIR>`: Run in this directory instead of the current one
 
 ### `playbook commit`
 
-```text
 The git steps of `/playbook:commit-and-push`
 
-Usage: playbook commit <COMMAND>
-
-Commands:
-  prepare  Stage, format, and print what a commit message is drafted from
-  run      Commit, rebase when behind, and push
-  help     Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `prepare`, `run`
 
 ### `playbook commit prepare`
 
-```text
 Stage, format, and print what a commit message is drafted from
 
 Refuses the repo's default branch. Prints `NO_STAGED_CHANGES` when there is nothing to commit, else `BRANCH=`, the changed files and the diff.
 
-Usage: playbook commit prepare [OPTIONS]
-
-Options:
-  -A
-          Stage everything first (`git add -A`)
-
-  -u
-          Stage tracked changes first (`git add -u`)
-
-  -a
-          Replace the last commit
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `-A`: Stage everything first (`git add -A`)
+- `-u`: Stage tracked changes first (`git add -u`)
+- `-a`: Replace the last commit
 
 ### `playbook commit run`
 
-```text
 Commit, rebase when behind, and push
 
 Reads the message from stdin, or from `--message-file`. Adds a sign-off per `commit.signOff` and signs when `user.signingkey` is set. A rejected push is never forced. Exits 1 on any failure.
 
-Usage: playbook commit run [OPTIONS]
-
-Options:
-      --message-file <MESSAGE_FILE>
-          File with the commit message (default: read stdin)
-
-  -a
-          Replace the last commit
-
-      --auto
-          Auto mode: never force a push
-
-      --no-signoff
-          Leave the sign-off trailer off
-
-      --no-type-check
-          Skip the check that the commit type fits the files (a docs-only change is not `feat`, a lock-file bump is not `fix`)
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--message-file <MESSAGE_FILE>`: File with the commit message (default: read stdin)
+- `-a`: Replace the last commit
+- `--auto`: Auto mode: never force a push
+- `--no-signoff`: Leave the sign-off trailer off
+- `--no-type-check`: Skip the check that the commit type fits the files (a docs-only change is not `feat`, a lock-file bump is not `fix`)
 
 ### `playbook config`
 
-```text
 Read and change playbook settings
 
 Settings come from tiers, highest first: repo, org, global, then the built-in default. `get` and `list` show which tier supplied a value.
 
 Example: `playbook config set autoReview.enabled true`
 
-Usage: playbook config <COMMAND>
-
-Commands:
-  get     Show a setting's value and which tier it came from
-  set     Change a setting
-  list    List every setting with its value and source tier
-  export  Print every stored setting as one JSON document
-  import  Load settings from a JSON document made by `config export`
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `export`, `get`, `import`, `list`, `set`
 
 ### `playbook config export`
 
-```text
 Print every stored setting as one JSON document
 
 Settings live in a database, not hand-editable files. Export gives you a readable copy, and `config import` loads one back.
 
 Example: `playbook config export > playbook-config.json`
 
-Usage: playbook config export
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
 ### `playbook config get`
 
-```text
 Show a setting's value and which tier it came from
 
-Usage: playbook config get <KEY>
-
-Arguments:
-  <KEY>
-          Dotted setting name, such as `autoReview.enabled`
-
-Options:
-  -h, --help
-          Print help
-```
+- `<KEY>`: Dotted setting name, such as `autoReview.enabled`
 
 ### `playbook config import`
 
-```text
 Load settings from a JSON document made by `config export`
 
 Every key and value is checked first, and nothing is stored if any is invalid. Use `-` to read standard input.
 
 Example: `playbook config import playbook-config.json`
 
-Usage: playbook config import <FILE>
-
-Arguments:
-  <FILE>
-          The JSON file to read, or `-` for standard input
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<FILE>`: The JSON file to read, or `-` for standard input
 
 ### `playbook config list`
 
-```text
 List every setting with its value and source tier
-
-Usage: playbook config list
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook config set`
 
-```text
 Change a setting
 
 Writes to the repo tier unless you pass `--org` or `--global`.
 
-Usage: playbook config set [OPTIONS] <KEY> <VALUE>
-
-Arguments:
-  <KEY>
-          Dotted setting name, such as `autoReview.enabled`
-
-  <VALUE>
-          New value; it is read as the type the setting expects
-
-Options:
-      --org
-          Write to the org tier instead of the repo tier
-
-      --global
-          Write to the global tier instead of the repo tier
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<KEY>`: Dotted setting name, such as `autoReview.enabled`
+- `<VALUE>`: New value; it is read as the type the setting expects
+- `--org`: Write to the org tier instead of the repo tier
+- `--global`: Write to the global tier instead of the repo tier
 
 ### `playbook deps`
 
-```text
 Install the tools a Brewfile lists, keeping any already on PATH
 
 Example: `playbook deps ensure Brewfile`
 
-Usage: playbook deps <COMMAND>
-
-Commands:
-  ensure  Keep each tool on PATH and install only the missing ones with Homebrew, from the `brew` and `tap` lines of a Brewfile
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `ensure`
 
 ### `playbook deps ensure`
 
-```text
 Keep each tool on PATH and install only the missing ones with Homebrew, from the `brew` and `tap` lines of a Brewfile
 
-Usage: playbook deps ensure [BREWFILE]
-
-Arguments:
-  [BREWFILE]
-          Brewfile to read; defaults to `Brewfile` in the current directory
-
-Options:
-  -h, --help
-          Print help
-```
+- `<BREWFILE>`: Brewfile to read; defaults to `Brewfile` in the current directory
 
 ### `playbook doctor`
 
-```text
 Read single facts that the health check uses
 
 The full health check is the `/playbook:doctor` command inside Claude Code. These subcommands print one fact each, such as pending migrations, plugin version or hook wiring, and help when a layer reports a miss.
 
 Example: `playbook doctor pending-migrations`
 
-Usage: playbook doctor <COMMAND>
-
-Commands:
-  check                    Check the seven playbook layers and print a status table
-  models                   Show the model tiers, any overrides and the fallback chain in use
-  pending-migrations       List files you edited after playbook placed them
-  plugin-version           Print the version from a plugin manifest
-  statusline-command       Print the status line command from a settings.json
-  hook-commands            List every hook command in a settings.json, one per line
-  hook-commands-for-event  Count the commands wired to each named guard for one event
-  hook-commands-matching   Count hook commands that match a pattern
-  help                     Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `check`, `hook-commands`, `hook-commands-for-event`, `hook-commands-matching`, `models`, `pending-migrations`, `plugin-version`, `statusline-command`
 
 ### `playbook doctor check`
 
-```text
 Check the seven playbook layers and print a status table
 
 Reads your settings, shell files and PATH, and lists a PASS, INFO, WARN or FAIL row for each layer, then the review config, stale worktrees and pending migration notices. Always exits 0 when it could run the checks.
 
-Usage: playbook doctor check [OPTIONS]
-
-Options:
-      --json
-          Print the rows as JSON
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--json`: Print the rows as JSON
 
 ### `playbook doctor hook-commands`
 
-```text
 List every hook command in a settings.json, one per line
 
 Prints nothing if the file is unreadable, invalid, or has no hooks.
 
-Usage: playbook doctor hook-commands <PATH>
-
-Arguments:
-  <PATH>
-          settings.json to read
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PATH>`: settings.json to read
 
 ### `playbook doctor hook-commands-for-event`
 
-```text
 Count the commands wired to each named guard for one event
 
 Prints one `guard=count` line per guard.
 
-Usage: playbook doctor hook-commands-for-event <PATH> <EVENT> [GUARDS]...
-
-Arguments:
-  <PATH>
-          settings.json to read
-
-  <EVENT>
-          Event name, such as `PreToolUse`
-
-  [GUARDS]...
-          Guard names, such as `rm-workspace-guard`
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PATH>`: settings.json to read
+- `<EVENT>`: Event name, such as `PreToolUse`
+- `<GUARDS>`: Guard names, such as `rm-workspace-guard`
 
 ### `playbook doctor hook-commands-matching`
 
-```text
 Count hook commands that match a pattern
 
 Counts across every event, or only one if you name it.
 
-Usage: playbook doctor hook-commands-matching <PATH> <PATTERN> [EVENT]
-
-Arguments:
-  <PATH>
-          settings.json to read
-
-  <PATTERN>
-          Regex to look for anywhere in a command
-
-  [EVENT]
-          Only count this event (default: every event)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PATH>`: settings.json to read
+- `<PATTERN>`: Regex to look for anywhere in a command
+- `<EVENT>`: Only count this event (default: every event)
 
 ### `playbook doctor models`
 
-```text
 Show the model tiers, any overrides and the fallback chain in use
 
 Also says whether your own fallback replaces playbook's, and when the effort in force makes the chain start at Haiku.
 
-Usage: playbook doctor models [OPTIONS]
-
-Options:
-      --json
-          Print the report as JSON
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--json`: Print the report as JSON
 
 ### `playbook doctor pending-migrations`
 
-```text
 List files you edited after playbook placed them
 
 Prints one line per finding, or nothing when none is pending.
 
-Usage: playbook doctor pending-migrations
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
 ### `playbook doctor plugin-version`
 
-```text
 Print the version from a plugin manifest
 
 Prints an empty line if the file is missing, unreadable, or has no version.
 
-Usage: playbook doctor plugin-version <PATH>
-
-Arguments:
-  <PATH>
-          Plugin manifest to read
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PATH>`: Plugin manifest to read
 
 ### `playbook doctor statusline-command`
 
-```text
 Print the status line command from a settings.json
 
 Prints an empty line if the file is missing, unreadable, or has none.
 
-Usage: playbook doctor statusline-command <PATH>
-
-Arguments:
-  <PATH>
-          settings.json to read
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PATH>`: settings.json to read
 
 ### `playbook effort`
 
-```text
 Set playbook's own ceiling on effort, or inspect one component's
 
 `playbook effort list` shows every command, skill and agent with its shipped effort and effective level. `playbook effort resolve agents reviewer` says which agent file to dispatch under the ceilings. Set a per-component ceiling with `playbook config set --global effort.agents.reviewer medium`.
@@ -769,44 +327,19 @@ Set playbook's own ceiling on effort, or inspect one component's
 
 Example: `playbook effort xhigh`
 
-Usage: playbook effort [OPTIONS] [LEVEL]
-       playbook effort <COMMAND>
+- `<LEVEL>`: auto, low, medium, high, xhigh or max
+- `--json`: Print the status as JSON (with no level)
 
-Commands:
-  resolve  Show one component's shipped effort, ceiling and effective level
-  list     List every component with its shipped effort and effective level
-  help     Print this message or the help of the given subcommand(s)
-
-Arguments:
-  [LEVEL]
-          auto, low, medium, high, xhigh or max
-
-Options:
-      --json
-          Print the status as JSON (with no level)
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `list`, `resolve`
 
 ### `playbook effort list`
 
-```text
 List every component with its shipped effort and effective level
 
-Usage: playbook effort list [OPTIONS]
-
-Options:
-      --json
-          Print JSON
-
-  -h, --help
-          Print help
-```
+- `--json`: Print JSON
 
 ### `playbook effort resolve`
 
-```text
 Show one component's shipped effort, ceiling and effective level
 
 For an agent it also names the file to dispatch and every file allowed under the ceiling.
@@ -815,1453 +348,579 @@ For an agent it also names the file to dispatch and every file allowed under the
 
 Example: `playbook effort resolve agents reviewer --cap medium --json`
 
-Usage: playbook effort resolve [OPTIONS] <KIND> <NAME>
-
-Arguments:
-  <KIND>
-          agents, commands or skills
-
-  <NAME>
-          The component name, such as `reviewer` or `deep-review`
-
-Options:
-      --cap <CAP>
-          An extra ceiling from the caller: low, medium, high, xhigh or max
-
-      --json
-          Print JSON
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<KIND>`: agents, commands or skills
+- `<NAME>`: The component name, such as `reviewer` or `deep-review`
+- `--cap <CAP>`: An extra ceiling from the caller: low, medium, high, xhigh or max
+- `--json`: Print JSON
 
 ### `playbook eval`
 
-```text
 Check how well the review triage classifier sorts real pull requests
 
 Each case is a pull request with a known answer per review lens. Costs one `gh pr diff` fetch and one live `claude` call per case, so run it by hand or on a schedule.
 
 Example: `playbook eval review-triage`
 
-Usage: playbook eval <COMMAND>
-
-Commands:
-  review-triage  Run the review triage classifier on each case and compare with the known answers
-  bench          Benchmark agent roles across models and effort levels
-  help           Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `bench`, `review-triage`
 
 ### `playbook eval bench`
 
-```text
 Benchmark agent roles across models and effort levels
 
 Each case is a fixed prompt with an objective check (a planted bug found, a claim judged right, a test that passes), so no judge model is involved. It prints pass rate, cost and time per role, model and effort. It estimates the cost first and refuses to start above `--max-cost-usd`, and stops mid run when the spend reaches it. Needs a logged-in `claude`; it makes real API calls.
 
 Example: `playbook eval bench --role fact-checker --model haiku,sonnet --effort low,medium --runs 2`
 
-Usage: playbook eval bench [OPTIONS]
-
-Options:
-      --cases <CASES>
-          Case file or directory; defaults to the cases shipped in the playbook repo
-
-      --role <ROLE>
-          Only these roles (comma separated)
-
-      --id <ID>
-          Only cases whose id starts with one of these (comma separated)
-
-      --model <MODEL>
-          Models to try (aliases such as haiku, sonnet, opus)
-
-          [default: haiku]
-
-      --effort <EFFORT>
-          Effort levels to try
-
-          [default: medium]
-
-      --runs <RUNS>
-          Calls per case, model and effort
-
-          [default: 1]
-
-      --max-cost-usd <MAX_COST_USD>
-          Spend cap in US dollars; the run is refused above it
-
-          [default: 5]
-
-      --jobs <JOBS>
-          Calls in flight at once
-
-          [default: 4]
-
-      --json
-          Print JSON instead of a table
-
-      --list
-          List the cases and exit
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--cases <CASES>`: Case file or directory; defaults to the cases shipped in the playbook repo
+- `--role <ROLE>`: Only these roles (comma separated)
+- `--id <ID>`: Only cases whose id starts with one of these (comma separated)
+- `--model <MODEL>`: Models to try (aliases such as haiku, sonnet, opus)
+- `--effort <EFFORT>`: Effort levels to try
+- `--runs <RUNS>`: Calls per case, model and effort
+- `--max-cost-usd <MAX_COST_USD>`: Spend cap in US dollars; the run is refused above it
+- `--jobs <JOBS>`: Calls in flight at once
+- `--json`: Print JSON instead of a table
+- `--list`: List the cases and exit
 
 ### `playbook eval review-triage`
 
-```text
 Run the review triage classifier on each case and compare with the known answers
 
 Needs network access, a logged-in `gh`, and a working `claude` with a live API key. Exits 0 when no lens was wrongly skipped and no case errored, and 1 otherwise. Re-run it whenever the triage prompt changes.
 
 Example: `playbook eval review-triage`
 
-Usage: playbook eval review-triage [OPTIONS] [FIXTURES]
-
-Arguments:
-  [FIXTURES]
-          Case file to run; defaults to the cases shipped in the playbook repo
-
-Options:
-      --prompt <PROMPT>
-          Triage prompt to send; defaults to the one shipped in the playbook repo
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<FIXTURES>`: Case file to run; defaults to the cases shipped in the playbook repo
+- `--prompt <PROMPT>`: Triage prompt to send; defaults to the one shipped in the playbook repo
 
 ### `playbook gate`
 
-```text
 Record and check plan verdicts used as gates
 
 Verdicts are stored per worktree, keyed by plan.
 
-Usage: playbook gate <COMMAND>
-
-Commands:
-  record  Save a phase verdict for a plan
-  check   Check that recorded phase verdicts still pass
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `check`, `record`
 
 ### `playbook gate check`
 
-```text
 Check that recorded phase verdicts still pass
 
 Exits 0 only if every named phase is PASS or WARN and its source is unchanged. Exits 1 on any other verdict, a stale one, or no phases.
 
-Usage: playbook gate check [OPTIONS] --source <SOURCE> <PLAN_SLUG> <COMMAND> [PHASES]...
-
-Arguments:
-  <PLAN_SLUG>
-          Plan slug to check
-
-  <COMMAND>
-          Command running this check
-
-  [PHASES]...
-          Phase names to check
-
-Options:
-      --source <SOURCE>
-          File with the current source content, compared against what each verdict saw
-
-      --json
-          Print one JSON object instead of text (exit codes stay the same)
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PLAN_SLUG>`: Plan slug to check
+- `<COMMAND>`: Command running this check
+- `<PHASES>`: Phase names to check
+- `--source <SOURCE>`: File with the current source content, compared against what each verdict saw
+- `--json`: Print one JSON object instead of text (exit codes stay the same)
 
 ### `playbook gate record`
 
-```text
 Save a phase verdict for a plan
 
 Reads a phase agent's output, finds its `VERDICT:` line, and stores it.
 
-Usage: playbook gate record --source <SOURCE> <PLAN_SLUG> <COMMAND> <PHASE> <INPUT>
-
-Arguments:
-  <PLAN_SLUG>
-          Plan slug the phase belongs to
-
-  <COMMAND>
-          Command that produced this verdict
-
-  <PHASE>
-          Which phase this verdict is for
-
-  <INPUT>
-          File with the phase agent's output, or "-" to read stdin
-
-Options:
-      --source <SOURCE>
-          File with the source content the verdict covers, used to spot a stale verdict later
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PLAN_SLUG>`: Plan slug the phase belongs to
+- `<COMMAND>`: Command that produced this verdict
+- `<PHASE>`: Which phase this verdict is for
+- `<INPUT>`: File with the phase agent's output, or "-" to read stdin
+- `--source <SOURCE>`: File with the source content the verdict covers, used to spot a stale verdict later
 
 ### `playbook glossary`
 
-```text
 Append to the repo's `GLOSSARY.md`
 
-Usage: playbook glossary <COMMAND>
-
-Commands:
-  add   Append one entry line to `GLOSSARY.md` at the repo root
-  help  Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `add`
 
 ### `playbook glossary add`
 
-```text
 Append one entry line to `GLOSSARY.md` at the repo root
 
-Usage: playbook glossary add <ENTRY>
-
-Arguments:
-  <ENTRY>
-          The entry text
-
-Options:
-  -h, --help
-          Print help
-```
+- `<ENTRY>`: The entry text
 
 ### `playbook handoff`
 
-```text
 Save and show notes that carry a session over to the next one
 
 A handoff is a markdown note for one directory. The next session started there loads it.
 
-Usage: playbook handoff <COMMAND>
-
-Commands:
-  save    Save the handoff note read from stdin for the next session
-  show    Print this directory's handoff without using it up
-  status  Show recent session starts and this directory's handoff counts
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `save`, `show`, `status`
 
 ### `playbook handoff save`
 
-```text
 Save the handoff note read from stdin for the next session
 
-Usage: playbook handoff save [OPTIONS]
-
-Options:
-      --dir <DIR>
-          Directory the handoff belongs to (default: the current one)
-
-  -h, --help
-          Print help
-```
+- `--dir <DIR>`: Directory the handoff belongs to (default: the current one)
 
 ### `playbook handoff show`
 
-```text
 Print this directory's handoff without using it up
 
-Usage: playbook handoff show [OPTIONS]
-
-Options:
-      --all
-          Print every waiting handoff, not just the newest
-
-      --dir <DIR>
-          Directory to show (default: the current one)
-
-  -h, --help
-          Print help
-```
+- `--all`: Print every waiting handoff, not just the newest
+- `--dir <DIR>`: Directory to show (default: the current one)
 
 ### `playbook handoff status`
 
-```text
 Show recent session starts and this directory's handoff counts
-
-Usage: playbook handoff status
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook init`
 
-```text
 Install or repair your local Claude Code setup
 
 Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, settings, PATH, the `ccc` launcher, the system prompt) unless you answer with a flag. Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`, unanswered parts use their defaults: hooks, settings and PATH on, the launcher and system prompt off.
 
 Example: `playbook init --no-hooks --aliases`
 
-Usage: playbook init [OPTIONS]
-
-Options:
-      --hooks
-          Wire every playbook hook into settings.json (guards, session and worktree hooks)
-
-      --no-hooks
-          Add no playbook hook entries, including the guards in the shared settings
-
-      --settings
-          Merge playbook's shared settings (permissions, status line, options) into settings.json
-
-      --no-settings
-          Do not touch the shared settings
-
-      --path
-          Put the playbook binary on PATH for every shell start
-
-      --no-path
-          Do not edit shell files for PATH
-
-      --aliases
-          Install the `ccc` and `ccd` launcher shortcuts and wire your rc file
-
-      --no-aliases
-          Do not install the launcher
-
-      --system-prompt
-          Install the playbook system prompt (an existing copy is refreshed either way)
-
-      --no-system-prompt
-          Do not install the system prompt
-
-  -y, --yes
-          Never ask: use the default for every part you did not answer with a flag
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--hooks`: Wire every playbook hook into settings.json (guards, session and worktree hooks)
+- `--no-hooks`: Add no playbook hook entries, including the guards in the shared settings
+- `--settings`: Merge playbook's shared settings (permissions, status line, options) into settings.json
+- `--no-settings`: Do not touch the shared settings
+- `--path`: Put the playbook binary on PATH for every shell start
+- `--no-path`: Do not edit shell files for PATH
+- `--aliases`: Install the `ccc` and `ccd` launcher shortcuts and wire your rc file
+- `--no-aliases`: Do not install the launcher
+- `--system-prompt`: Install the playbook system prompt (an existing copy is refreshed either way)
+- `--no-system-prompt`: Do not install the system prompt
+- `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 
 ### `playbook learn`
 
-```text
 Helpers for `/playbook:learn-project`
 
-Usage: playbook learn <COMMAND>
-
-Commands:
-  preflight  Name the repo and memory store, probe the tools, and tally JIRA keys
-  help       Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `preflight`
 
 ### `playbook learn preflight`
 
-```text
 Name the repo and memory store, probe the tools, and tally JIRA keys
-
-Usage: playbook learn preflight
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook manifest`
 
-```text
 Check that tracked files sit in allowed top-level paths
 
-Usage: playbook manifest <COMMAND>
-
-Commands:
-  check  Check every tracked file is at an allowed top-level path
-  help   Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `check`
 
 ### `playbook manifest check`
 
-```text
 Check every tracked file is at an allowed top-level path
 
 Exits 0 when all pass and 1 otherwise.
 
-Usage: playbook manifest check [REPO_ROOT]
-
-Arguments:
-  [REPO_ROOT]
-          Repo root to check (default: the repo you are in)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<REPO_ROOT>`: Repo root to check (default: the repo you are in)
 
 ### `playbook memory`
 
-```text
 Manage the memory graph that sessions read from
 
-Usage: playbook memory <COMMAND>
-
-Commands:
-  rebuild        Rebuild the memory graph from every fact on disk
-  import-claude  Copy notes from Claude Code's auto memory into playbook memory
-  context        Print the repo-scoped markdown slice of the memory graph (facts in scope, typed edges, anchor index). Prints nothing, exit 0, when the graph is missing or unreadable
-  help           Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `context`, `import-claude`, `rebuild`
 
 ### `playbook memory context`
 
-```text
 Print the repo-scoped markdown slice of the memory graph (facts in scope, typed edges, anchor index). Prints nothing, exit 0, when the graph is missing or unreadable
 
-Usage: playbook memory context [OPTIONS]
-
-Options:
-      --repo <REPO>
-          Repo slug (`owner/name`); defaults to the origin remote's slug
-
-      --graph <GRAPH>
-          Graph file; defaults to `~/.config/playbook/memory/memory.graph.json`
-
-  -h, --help
-          Print help
-```
+- `--repo <REPO>`: Repo slug (`owner/name`); defaults to the origin remote's slug
+- `--graph <GRAPH>`: Graph file; defaults to `~/.config/playbook/memory/memory.graph.json`
 
 ### `playbook memory import-claude`
 
-```text
 Copy notes from Claude Code's auto memory into playbook memory
 
 One way and opt in. It only reads Claude Code's memory for this project (`~/.claude/projects/<project>/memory/*.md`) and never changes, moves or deletes anything there. Each note becomes a playbook fact in this repo's project memory. A note already imported (tracked by content hash on the playbook side) and a fact that already exists are skipped, so running it again copies nothing.
 
 Example: `playbook memory import-claude --dry-run`
 
-Usage: playbook memory import-claude [OPTIONS]
-
-Options:
-      --dry-run
-          Show what would be copied and write nothing
-
-      --from <FROM>
-          Read this directory instead of the project's Claude Code memory
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--dry-run`: Show what would be copied and write nothing
+- `--from <FROM>`: Read this directory instead of the project's Claude Code memory
 
 ### `playbook memory rebuild`
 
-```text
 Rebuild the memory graph from every fact on disk
 
 Memory is rebuilt on its own when a fact is saved, so you only need this after editing fact files by hand.
 
-Usage: playbook memory rebuild
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
 ### `playbook mode`
 
-```text
 Choose whether playbook asks questions or decides on its own
 
 `ask` is the default. `auto` lets commands pick the recommended option and keep going. The choice is stored per repo.
 
 Example: `playbook mode auto`
 
-Usage: playbook mode <COMMAND>
-
-Commands:
-  auto    Turn auto mode on for this repo
-  ask     Turn auto mode off for this repo, so playbook asks again
-  status  Show the current mode and where it came from
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `ask`, `auto`, `status`
 
 ### `playbook mode ask`
 
-```text
 Turn auto mode off for this repo, so playbook asks again
-
-Usage: playbook mode ask
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook mode auto`
 
-```text
 Turn auto mode on for this repo
-
-Usage: playbook mode auto
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook mode status`
 
-```text
 Show the current mode and where it came from
 
-Usage: playbook mode status [OPTIONS]
-
-Options:
-      --json
-          Print one JSON object instead of a line of text
-
-      --flag <FLAG>
-          Report as if a command ran with `--auto` or `--ask`, and warn when the hooks would disagree
-
-          [possible values: ask, auto]
-
-  -h, --help
-          Print help
-```
+- `--json`: Print one JSON object instead of a line of text
+- `--flag <FLAG>`: Report as if a command ran with `--auto` or `--ask`, and warn when the hooks would disagree (one of `ask`, `auto`)
 
 ### `playbook path`
 
-```text
 Print the path of one of this repo's playbook storage folders
 
 First moves any legacy folders from the old repo-local location.
 
-Usage: playbook path [OPTIONS] <KIND>
-
-Arguments:
-  <KIND>
-          Which folder to print
-
-          [possible values: plans, implement, worktrees]
-
-Options:
-      --create
-          Create the folder when it does not exist
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<KIND>`: Which folder to print (one of `plans`, `implement`, `worktrees`)
+- `--create`: Create the folder when it does not exist
 
 ### `playbook plan`
 
-```text
 Helpers for `/playbook:plan`
 
-Usage: playbook plan <COMMAND>
-
-Commands:
-  checkpoint  Print a topic's checkpoint path, or save the checkpoint
-  help        Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `checkpoint`
 
 ### `playbook plan checkpoint`
 
-```text
 Print a topic's checkpoint path, or save the checkpoint
 
 Without `--write` it creates the plans folder and prints the path, then `found` or `not-found`. With `--write` it replaces the checkpoint with stdin under a directory lock. A failed save prints a one-line notice and still exits 0, so planning continues without resume safety.
 
-Usage: playbook plan checkpoint [OPTIONS] <SLUG>
-
-Arguments:
-  <SLUG>
-          Kebab-case topic slug, or the ticket id in lower case
-
-Options:
-      --write
-          Replace the checkpoint with stdin
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<SLUG>`: Kebab-case topic slug, or the ticket id in lower case
+- `--write`: Replace the checkpoint with stdin
 
 ### `playbook plans`
 
-```text
 List the plans and ADR blueprints `/playbook:implement` can run
 
 Prints `path<TAB>[status]<TAB>title` per file, or `NO_PLANS`.
 
-Usage: playbook plans [OPTIONS]
-
-Options:
-      --json
-          Print JSON instead of text
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--json`: Print JSON instead of text
 
 ### `playbook pr`
 
-```text
 Prepare and open pull requests, and pick a review depth
 
 These are the mechanical steps behind `/playbook:create-pull-request`.
 
 Example: `playbook pr prepare --base main`
 
-Usage: playbook pr <COMMAND>
-
-Commands:
-  prepare        Run pre-flight checks and gather what a PR draft needs
-  create         Push the branch and open a PR from a drafted title and body
-  review-triage  Choose a quick or deep self-review for a PR
-  rules          Cut the skill rules a PR title and body need
-  comments       Resolve a PR and fetch its review threads and comments
-  ci-wait        Wait for a PR's required checks to finish
-  land-wait      Wait for a PR to merge or hit a gate
-  merge          Merge a PR with auto-merge, or as an admin squash
-  help           Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `ci-wait`, `comments`, `create`, `land-wait`, `merge`, `prepare`, `review-triage`, `rules`
 
 ### `playbook pr ci-wait`
 
-```text
 Wait for a PR's required checks to finish
 
 Prints a `checks total=.. pending=.. fail=.. cancel=..` line per read, then `CI_VERDICT=` one of NONE, FAIL, CANCELLED, PASS or TIMEOUT.
 
-Usage: playbook pr ci-wait [OPTIONS] <PR>
-
-Arguments:
-  <PR>
-          PR number
-
-Options:
-      --timeout <TIMEOUT>
-          Give up after this many seconds
-
-          [default: 1200]
-
-      --interval <INTERVAL>
-          Seconds between reads
-
-          [default: 20]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PR>`: PR number
+- `--timeout <TIMEOUT>`: Give up after this many seconds
+- `--interval <INTERVAL>`: Seconds between reads
 
 ### `playbook pr comments`
 
-```text
 Resolve a PR and fetch its review threads and comments
 
 Takes the command's arguments as one string (`#12 --bots --dry-run -y`). Prints the PR, head SHA, your login and the flags, and writes the threads and issue comments as JSON under `/tmp`.
 
-Usage: playbook pr comments [ARGS]
-
-Arguments:
-  [ARGS]
-          The command's arguments, as one string
-
-          [default: ""]
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<ARGS>`: The command's arguments, as one string
 
 ### `playbook pr create`
 
-```text
 Push the branch and open a PR from a drafted title and body
 
 Opens a draft unless the `pr.draft` setting is `false`.
 
-Usage: playbook pr create [OPTIONS] --title <TITLE> --body-file <BODY_FILE>
-
-Options:
-      --title <TITLE>
-          PR title, at most 72 characters
-
-      --body-file <BODY_FILE>
-          File holding the PR body
-
-      --base <BASE>
-          Base branch for the PR (default: the repo's default branch)
-
-      --dir <DIR>
-          Work in this directory instead of the current one
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--title <TITLE>`: PR title, at most 72 characters
+- `--body-file <BODY_FILE>`: File holding the PR body
+- `--base <BASE>`: Base branch for the PR (default: the repo's default branch)
+- `--dir <DIR>`: Work in this directory instead of the current one
 
 ### `playbook pr land-wait`
 
-```text
 Wait for a PR to merge or hit a gate
 
 Prints a status line per read (state, merge state, review, auto-merge), then `LAND_VERDICT=` one of MERGED, REVIEW_GATE, CHANGES_REQUESTED, RESTATE or TIMEOUT.
 
-Usage: playbook pr land-wait [OPTIONS] <PR>
-
-Arguments:
-  <PR>
-          PR number
-
-Options:
-      --timeout <TIMEOUT>
-          Give up after this many seconds
-
-          [default: 1800]
-
-      --interval <INTERVAL>
-          Seconds between reads
-
-          [default: 20]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PR>`: PR number
+- `--timeout <TIMEOUT>`: Give up after this many seconds
+- `--interval <INTERVAL>`: Seconds between reads
 
 ### `playbook pr merge`
 
-```text
 Merge a PR with auto-merge, or as an admin squash
 
 Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said. Always exits 0, so the caller reads the code.
 
-Usage: playbook pr merge [OPTIONS] <PR>
-
-Arguments:
-  <PR>
-          PR number
-
-Options:
-      --admin
-          Squash with admin rights instead of arming auto-merge
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PR>`: PR number
+- `--admin`: Squash with admin rights instead of arming auto-merge
 
 ### `playbook pr prepare`
 
-```text
 Run pre-flight checks and gather what a PR draft needs
 
 Finds the branch and base, checks the repo is ready, writes the diff to a scratch file, and prints labeled lines for the PR drafter.
 
-Usage: playbook pr prepare [OPTIONS]
-
-Options:
-      --base <BASE>
-          Base branch for the PR (default: the repo's default branch)
-
-      --ticket <TICKET>
-          Ticket id to cite (default: one found in the branch name)
-
-      --dir <DIR>
-          Work in this directory instead of the current one
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--base <BASE>`: Base branch for the PR (default: the repo's default branch)
+- `--ticket <TICKET>`: Ticket id to cite (default: one found in the branch name)
+- `--dir <DIR>`: Work in this directory instead of the current one
 
 ### `playbook pr review-triage`
 
-```text
 Choose a quick or deep self-review for a PR
 
 Asks a small model three times. Anything but a unanimous `quick` becomes `deep`.
 
-Usage: playbook pr review-triage [OPTIONS]
-
-Options:
-      --pr <PR>
-          PR number (default: the current branch against its base)
-
-      --base <BASE>
-          Base branch when no PR number is given (default: the repo's default branch)
-
-      --dir <DIR>
-          Work in this directory instead of the current one
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--pr <PR>`: PR number (default: the current branch against its base)
+- `--base <BASE>`: Base branch when no PR number is given (default: the repo's default branch)
+- `--dir <DIR>`: Work in this directory instead of the current one
 
 ### `playbook pr rules`
 
-```text
 Cut the skill rules a PR title and body need
 
 Reads the writing-style and engineering-standards skills under `CLAUDE_PLUGIN_ROOT`, writes four files under `/tmp`, checks each, and prints their paths. A failed check prints `ERROR: ...` and exits 1.
 
-Usage: playbook pr rules [OPTIONS]
-
-Options:
-      --plugin-root <PLUGIN_ROOT>
-          Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--plugin-root <PLUGIN_ROOT>`: Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
 
 ### `playbook release`
 
-```text
 Render the files the release job pushes to the Homebrew tap and marketplace
 
 Run by the release workflow after a tag. Prints the file to stdout and never touches the network.
 
-Usage: playbook release <COMMAND>
-
-Commands:
-  render-formula   Print the Homebrew formula for VERSION, filled from a SHA256SUMS file
-  pin-marketplace  Print marketplace.json with the playbook plugin pinned to VERSION's archive
-  help             Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `pin-marketplace`, `render-formula`
 
 ### `playbook release pin-marketplace`
 
-```text
 Print marketplace.json with the playbook plugin pinned to VERSION's archive
 
-Usage: playbook release pin-marketplace [OPTIONS] <VERSION> <MARKETPLACE> <SHA256>
-
-Arguments:
-  <VERSION>
-
-
-  <MARKETPLACE>
-
-
-  <SHA256>
-
-
-Options:
-      --repo <REPO>
-          The `owner/name` repository the archive URL points at
-
-          [default: pragmatic-engineer/playbook]
-
-  -h, --help
-          Print help
-```
+- `<MARKETPLACE>`
+- `<SHA256>`
+- `--repo <REPO>`: The `owner/name` repository the archive URL points at
 
 ### `playbook release render-formula`
 
-```text
 Print the Homebrew formula for VERSION, filled from a SHA256SUMS file
 
-Usage: playbook release render-formula <VERSION> <SUMS>
-
-Arguments:
-  <VERSION>
-
-
-  <SUMS>
-
-
-Options:
-  -h, --help
-          Print help
-```
+- `<SUMS>`
 
 ### `playbook review`
 
-```text
 Setup for the review commands
 
-Usage: playbook review <COMMAND>
-
-Commands:
-  prepare  Resolve the PR, report-only or posting, and in-place or worktree
-  checks   Run a project's own type check, lint and tests in a directory
-  help     Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `checks`, `prepare`
 
 ### `playbook review checks`
 
-```text
 Run a project's own type check, lint and tests in a directory
 
 Prints their output. A failing check is output, not an error.
 
-Usage: playbook review checks <DIR>
-
-Arguments:
-  <DIR>
-          The review worktree to run in
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<DIR>`: The review worktree to run in
 
 ### `playbook review prepare`
 
-```text
 Resolve the PR, report-only or posting, and in-place or worktree
 
 Takes the raw arguments of the review command as one string. Prints `KEY=value` lines: PR, REPO, PR_NUMBER, HEAD_SHA, AUTHOR, SELF_REVIEW, SELF_MODE, MODE, WT and REVIEW_JSON. On a problem it prints `error: ...` and exits 1.
 
 Example: `playbook review prepare deep "#4265 --self"`
 
-Usage: playbook review prepare [OPTIONS] <KIND> [ARGS]
-
-Arguments:
-  <KIND>
-          Which review: `quick` or `deep`
-
-          [possible values: quick, deep]
-
-  [ARGS]
-          The review command's arguments, as one string
-
-          [default: ""]
-
-Options:
-      --auto
-          Treat the run mode as auto (implies report-only)
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<KIND>`: Which review: `quick` or `deep` (one of `quick`, `deep`)
+- `<ARGS>`: The review command's arguments, as one string
+- `--auto`: Treat the run mode as auto (implies report-only)
 
 ### `playbook sanitize`
 
-```text
 Remove AI attribution lines from message text
 
 For callers that are not an agent hook, such as a git `commit-msg` hook or CI. Each subcommand rewrites FILE in place unless `--check` is given, and prints one line per removed line to stderr: its number and the shape of the attribution, never its text. Without `--check` the exit code is always 0, even when FILE cannot be read or written.
 
-Usage: playbook sanitize <COMMAND>
-
-Commands:
-  commit-msg  Clean a commit message file, such as git's `.git/COMMIT_EDITMSG`
-  pr-text     Clean a PR title or body saved to a file
-  help        Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `commit-msg`, `pr-text`
 
 ### `playbook sanitize commit-msg`
 
-```text
 Clean a commit message file, such as git's `.git/COMMIT_EDITMSG`
 
-Usage: playbook sanitize commit-msg [OPTIONS] <FILE>
-
-Arguments:
-  <FILE>
-          File holding the message
-
-Options:
-      --check
-          Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
-
-  -h, --help
-          Print help
-```
+- `<FILE>`: File holding the message
+- `--check`: Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
 
 ### `playbook sanitize pr-text`
 
-```text
 Clean a PR title or body saved to a file
 
-Usage: playbook sanitize pr-text [OPTIONS] <FILE>
-
-Arguments:
-  <FILE>
-          File holding the text
-
-Options:
-      --check
-          Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
-
-  -h, --help
-          Print help
-```
+- `<FILE>`: File holding the text
+- `--check`: Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
 
 ### `playbook settings`
 
-```text
 Create or check the shared settings template
 
-Usage: playbook settings <COMMAND>
-
-Commands:
-  gen    Create the shared settings template from a live settings.json
-  check  Check the shared settings template is valid
-  help   Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `check`, `gen`
 
 ### `playbook settings check`
 
-```text
 Check the shared settings template is valid
 
 Exits 0 when valid and 1 with a message when not.
 
-Usage: playbook settings check <TEMPLATE> <PERMS> <REPO_ROOT>
-
-Arguments:
-  <TEMPLATE>
-          Shared settings template to check
-
-  <PERMS>
-          Shared permissions file
-
-  <REPO_ROOT>
-          Repo root that every hook command must resolve inside
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<TEMPLATE>`: Shared settings template to check
+- `<PERMS>`: Shared permissions file
+- `<REPO_ROOT>`: Repo root that every hook command must resolve inside
 
 ### `playbook settings gen`
 
-```text
 Create the shared settings template from a live settings.json
 
-Usage: playbook settings gen <SRC> <PERMS>
-
-Arguments:
-  <SRC>
-          Live settings.json to start from
-
-  <PERMS>
-          File holding the default permissions
-
-Options:
-  -h, --help
-          Print help
-```
+- `<SRC>`: Live settings.json to start from
+- `<PERMS>`: File holding the default permissions
 
 ### `playbook shell-init`
 
-```text
 Print the shell functions `ccc` and `ccd`
 
 `ccc` starts a session (named so it does not shadow the C compiler, `cc`), and `ccd` does the same with permission prompts skipped. Load them from your rc file with `eval "$(playbook shell-init)"`.
 
-Usage: playbook shell-init [OPTIONS]
-
-Options:
-      --shell <SHELL>
-          Target shell (default: the one named by `$SHELL`)
-
-          [possible values: bash, zsh]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--shell <SHELL>`: Target shell (default: the one named by `$SHELL`) (one of `bash`, `zsh`)
 
 ### `playbook skill`
 
-```text
 Print the path of a skill file or one of its references
 
-Usage: playbook skill <COMMAND>
-
-Commands:
-  ref   Print the absolute path of a reference file, or of `SKILL.md`
-  help  Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `ref`
 
 ### `playbook skill ref`
 
-```text
 Print the absolute path of a reference file, or of `SKILL.md`
 
 Falls back to `SKILL.md` when the reference is missing or not named.
 
-Usage: playbook skill ref [OPTIONS] <SKILL> [NAME]
-
-Arguments:
-  <SKILL>
-          Skill folder name, for example `grounding-review`
-
-  [NAME]
-          Reference file name without `.md`
-
-Options:
-      --plugin-root <PLUGIN_ROOT>
-          Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<SKILL>`: Skill folder name, for example `grounding-review`
+- `<NAME>`: Reference file name without `.md`
+- `--plugin-root <PLUGIN_ROOT>`: Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
 
 ### `playbook state`
 
-```text
 Inspect playbook's own bookkeeping (migration record, sweep markers)
 
 `list` prints the rows of the `state` table in `playbook.db`, sorted by key, optionally only those under a prefix. Read only: use `playbook init` to repair and `playbook config export` to back up the config.
 
 Example: `playbook state list migrations/`
 
-Usage: playbook state <COMMAND>
-
-Commands:
-  list  Print the state rows, sorted by key
-  help  Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `list`
 
 ### `playbook state list`
 
-```text
 Print the state rows, sorted by key
 
-Usage: playbook state list [OPTIONS] [PREFIX]
-
-Arguments:
-  [PREFIX]
-          Only keys that start with this prefix
-
-Options:
-      --json
-          Print the rows as one JSON object
-
-  -h, --help
-          Print help
-```
+- `<PREFIX>`: Only keys that start with this prefix
+- `--json`: Print the rows as one JSON object
 
 ### `playbook statusline`
 
-```text
 Print the Claude Code status line
 
 Claude Code runs this to draw the line at the bottom of a session.
 
-Usage: playbook statusline
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
 ### `playbook trust`
 
-```text
 Mark a directory as trusted in Claude Code
 
 Writes to `~/.claude.json` so Claude Code's first-launch trust prompt does not block `ccc` or `ccd`. Always exits 0, even on failure, so a script can call it without checking.
 
-Usage: playbook trust <PATH>
-
-Arguments:
-  <PATH>
-          Absolute path of the directory to trust
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `<PATH>`: Absolute path of the directory to trust
 
 ### `playbook uninstall`
 
-```text
 Remove what playbook installed from this machine
 
 Takes out the hook entries and status line that `playbook init` wrote into `settings.json`, the launcher block in your shell rc files, and the files playbook placed under `~/.config/playbook`. Everything else in `settings.json` and the rc files stays, each changed file is backed up first, and memory, sessions and history are never touched. The `playbook` binary stays unless you pass `--remove-binary`. It changes nothing without `--yes`; `--dry-run` lists what would go.
 
 Example: `playbook uninstall --dry-run`
 
-Usage: playbook uninstall [OPTIONS]
-
-Options:
-      --yes
-          Go ahead and remove (without it, nothing is changed)
-
-      --dry-run
-          List what would be removed and change nothing
-
-      --remove-binary
-          Also remove the `playbook` binary, its backups and the PATH line the installer added
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--yes`: Go ahead and remove (without it, nothing is changed)
+- `--dry-run`: List what would be removed and change nothing
+- `--remove-binary`: Also remove the `playbook` binary, its backups and the PATH line the installer added
 
 ### `playbook update`
 
-```text
 Update playbook to a published release
 
 Downloads the release, checks its SHA256 sum and, when `gh` is installed, its build attestation, then swaps the binary and keeps the old one as a backup. In auto mode it refuses unless you pass `--yes`. `--check` and `--list` change nothing. `--check` exits 0 whether or not an update exists, and 1 on an error such as an unreachable release list or an unknown version.
 
 Example: `playbook update --check`
 
-Usage: playbook update [OPTIONS] [VERSION]
-
-Arguments:
-  [VERSION]
-          Version to install (default: the latest stable release)
-
-Options:
-      --check
-          Only report whether an update is available
-
-      --list
-          List published releases
-
-      --pre
-          Consider pre-releases when picking the latest
-
-      --yes
-          Confirm the update when auto mode is on
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--check`: Only report whether an update is available
+- `--list`: List published releases
+- `--pre`: Consider pre-releases when picking the latest
+- `--yes`: Confirm the update when auto mode is on
 
 ### `playbook usage`
 
-```text
 Show token and cost usage across your sessions
 
 With no subcommand, prints a summary of estimated cost across all recorded sessions.
 
 Example: `playbook usage dashboard`
 
-Usage: playbook usage [COMMAND]
-
-Commands:
-  ingest     Read new session history into the usage store without printing a summary
-  dashboard  Open the local usage dashboard in your browser
-  help       Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `dashboard`, `ingest`
 
 ### `playbook usage dashboard`
 
-```text
 Open the local usage dashboard in your browser
 
 Starts the dashboard server if it is not running. Stop it with `playbook usage dashboard stop`.
 
-Usage: playbook usage dashboard [COMMAND]
-
-Commands:
-  stop  Stop the running dashboard server
-  help  Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `stop`
 
 ### `playbook usage dashboard stop`
 
-```text
 Stop the running dashboard server
-
-Usage: playbook usage dashboard stop
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook usage ingest`
 
-```text
 Read new session history into the usage store without printing a summary
-
-Usage: playbook usage ingest
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook version`
 
-```text
 Print the installed version, same as `--version`
-
-Usage: playbook version
-
-Options:
-  -h, --help
-          Print help
-```
 
 ### `playbook worktree`
 
-```text
 Clean up git worktrees whose branches have landed
 
 Locked worktrees are kept unless the process that locked them is gone.
 
 Example: `playbook worktree sweep --dry-run`
 
-Usage: playbook worktree <COMMAND>
-
-Commands:
-  sweep   Remove every landed worktree that is not in use
-  remove  Remove one worktree if it has landed and is not in use
-  review  Create or remove the locked review worktrees `/playbook:quick-review` and `/playbook:deep-review` run in
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
+Subcommands: `remove`, `review`, `sweep`
 
 ### `playbook worktree remove`
 
-```text
 Remove one worktree if it has landed and is not in use
 
-Usage: playbook worktree remove <PATH>
-
-Arguments:
-  <PATH>
-          Worktree path, as shown by `git worktree list`
-
-Options:
-  -h, --help
-          Print help
-```
+- `<PATH>`: Worktree path, as shown by `git worktree list`
 
 ### `playbook worktree review`
 
-```text
 Create or remove the locked review worktrees `/playbook:quick-review` and `/playbook:deep-review` run in
 
-Usage: playbook worktree review <COMMAND>
-
-Commands:
-  setup     Fetch a PR head, add a locked detached worktree for it, and print its absolute path on stdout (warnings go to stderr)
-  teardown  Remove a review worktree, even a dirty one. Always exits 0
-  help      Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
+Subcommands: `setup`, `teardown`
 
 ### `playbook worktree review setup`
 
-```text
 Fetch a PR head, add a locked detached worktree for it, and print its absolute path on stdout (warnings go to stderr)
 
-Usage: playbook worktree review setup <PR> <HEAD_SHA>
-
-Arguments:
-  <PR>
-          Pull request number
-
-  <HEAD_SHA>
-          Head commit the review was resolved against
-
-Options:
-  -h, --help
-          Print help
-```
+- `<PR>`: Pull request number
+- `<HEAD_SHA>`: Head commit the review was resolved against
 
 ### `playbook worktree review teardown`
 
-```text
 Remove a review worktree, even a dirty one. Always exits 0
 
-Usage: playbook worktree review teardown <PATH>
-
-Arguments:
-  <PATH>
-          Worktree path printed by `setup`
-
-Options:
-  -h, --help
-          Print help
-```
+- `<PATH>`: Worktree path printed by `setup`
 
 ### `playbook worktree sweep`
 
-```text
 Remove every landed worktree that is not in use
 
 Scans all worktrees of this repo, whichever tool made them. Keeps locked ones unless the locking process is dead.
 
-Usage: playbook worktree sweep [OPTIONS]
-
-Options:
-      --dry-run
-          Show what would be removed without removing anything
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
+- `--dry-run`: Show what would be removed without removing anything

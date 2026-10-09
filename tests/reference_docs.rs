@@ -24,23 +24,79 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn help_of(cmd: &Command) -> String {
-    let mut c = cmd.clone().term_width(88).max_term_width(88);
-    let text = c.render_long_help().to_string();
-    text.lines()
-        .map(str::trim_end)
-        .collect::<Vec<_>>()
-        .join("\n")
+fn arg_line(arg: &clap::Arg) -> String {
+    let help = arg
+        .get_help()
+        .map(|h| h.to_string().replace('\n', " "))
+        .unwrap_or_default();
+    let name = if arg.is_positional() {
+        let value = arg
+            .get_value_names()
+            .and_then(|v| v.first().map(|n| n.to_string()))
+            .unwrap_or_else(|| arg.get_id().to_string().to_uppercase());
+        format!("<{value}>")
+    } else {
+        let mut parts = Vec::new();
+        if let Some(short) = arg.get_short() {
+            parts.push(format!("-{short}"));
+        }
+        if let Some(long) = arg.get_long() {
+            parts.push(format!("--{long}"));
+        }
+        let mut label = parts.join(", ");
+        if arg.get_action().takes_values() {
+            let value = arg
+                .get_value_names()
+                .and_then(|v| v.first().map(|n| n.to_string()))
+                .unwrap_or_else(|| arg.get_id().to_string().to_uppercase());
+            label.push_str(&format!(" <{value}>"));
+        }
+        label
+    };
+    let possible: Vec<String> = arg
+        .get_possible_values()
+        .iter()
+        .filter(|v| !v.is_hide_set())
+        .map(|v| format!("`{}`", v.get_name()))
+        .collect();
+    let mut line = format!("- `{name}`");
+    if !help.is_empty() {
+        line.push_str(&format!(": {help}"));
+    }
+    if !possible.is_empty() {
+        line.push_str(&format!(" (one of {})", possible.join(", ")));
+    }
+    line
 }
 
 fn walk(cmd: &Command, path: &str, out: &mut String) {
     let _ = writeln!(out, "### `{path}`\n");
-    let _ = writeln!(out, "```text\n{}\n```\n", help_of(cmd));
+    if let Some(about) = cmd.get_long_about().or_else(|| cmd.get_about()) {
+        let text = about.to_string();
+        let _ = writeln!(out, "{}\n", text.trim());
+    }
+    let args: Vec<&clap::Arg> = cmd
+        .get_arguments()
+        .filter(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
+        .collect();
+    for arg in args {
+        let _ = writeln!(out, "{}", arg_line(arg));
+    }
     let mut subs: Vec<&Command> = cmd
         .get_subcommands()
         .filter(|s| !s.is_hide_set() && s.get_name() != "help")
         .collect();
     subs.sort_by_key(|s| s.get_name().to_string());
+    if cmd
+        .get_arguments()
+        .any(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
+    {
+        out.push('\n');
+    }
+    if !subs.is_empty() {
+        let names: Vec<String> = subs.iter().map(|s| format!("`{}`", s.get_name())).collect();
+        let _ = writeln!(out, "Subcommands: {}\n", names.join(", "));
+    }
     for sub in subs {
         walk(sub, &format!("{path} {}", sub.get_name()), out);
     }
