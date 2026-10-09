@@ -89,6 +89,9 @@ fn init_connection(root: &Path) -> rusqlite::Result<Connection> {
         // default busy timeout is 0.
         conn.busy_timeout(Duration::from_millis(5000))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // In WAL mode NORMAL cannot corrupt the file, and it skips an fsync
+        // per commit. A power cut can lose the last write, never the store.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA_SQL)?;
         Ok(conn)
     };
