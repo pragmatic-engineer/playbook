@@ -619,6 +619,9 @@ fn main() {
         }
         Command::Config { sub } => {
             let home = common::home_dir();
+            for warning in config::adopt_late_config(&home) {
+                eprintln!("config: warning: {warning}");
+            }
             let slug = common::repo_slug();
             let repo_slug = if slug.is_empty() {
                 None

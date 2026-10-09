@@ -28,6 +28,7 @@ No Auto migration ships today. The current entries are:
 | `0006-statusline-rust-command` | Idempotent | Points `statusLine.command` at `playbook statusline`. |
 | `0007-shell-init-rc-line` | Idempotent | Rewrites an old `source .../cc.sh` rc line to `eval "$(playbook shell-init)"`. |
 | `0008-remove-config-hash-script` | Idempotent | Removes the `hooks/lib/config-hash.sh` copy older installs placed under `~/.config/playbook`. The hash is computed inside the binary now. |
+| `0009-adopt-late-config-json` | Idempotent | Adopts a `config.json` written after the SQLite import when it agrees with the store, and warns with its path when it does not. |
 
 ## How playbook knows you edited a file
 

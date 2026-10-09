@@ -410,6 +410,71 @@ pub fn global_keys(root: &Path) -> Result<Vec<String>, ConfigError> {
     rows.collect::<Result<Vec<_>, _>>().map_err(broken(root))
 }
 
+/// What `adopt_late_files` did with `config.json` files that appeared after
+/// the one-time import (an older binary, or an old doc, wrote them).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct LateReport {
+    /// Files whose values were all new or equal: imported and renamed.
+    pub imported: Vec<PathBuf>,
+    /// Files left in place: malformed, or a key differs from the stored value.
+    pub conflicts: Vec<PathBuf>,
+}
+
+/// Adopt `config.json` files that appeared after the import. A file whose
+/// known keys are all absent from the store, or equal to it, is imported and
+/// renamed to `config.json.migrated`. A file that disagrees with a stored
+/// value, or does not parse, is left as it is and reported, so nothing is
+/// overwritten silently. Does nothing before the first import.
+pub fn adopt_late_files(root: &Path) -> Result<LateReport, ConfigError> {
+    let mut report = LateReport::default();
+    let files = legacy_files(root);
+    if files.is_empty() || !db_path(root).exists() {
+        return Ok(report);
+    }
+    let conn = open(root)?;
+    // `open` imports on a first run; whatever is still on disk now is late.
+    for file in legacy_files(root) {
+        let parsed = fs::read_to_string(&file.path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .filter(Value::is_object);
+        let Some(parsed) = parsed else {
+            report.conflicts.push(file.path);
+            continue;
+        };
+        let mut leaves = Vec::new();
+        flatten_leaves(&parsed, "", &mut leaves);
+        leaves.retain(|(key, _)| keys::default_value(key).is_some());
+        let mut differs = false;
+        for (key, value) in &leaves {
+            let stored: Option<String> = conn
+                .query_row(
+                    "SELECT value_json FROM config WHERE tier = ?1 AND scope = ?2 AND key = ?3",
+                    params![file.tier, file.scope, key],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(broken(root))?;
+            if let Some(stored) = stored {
+                if serde_json::from_str::<Value>(&stored).ok().as_ref() != Some(value) {
+                    differs = true;
+                    break;
+                }
+            }
+        }
+        if differs {
+            report.conflicts.push(file.path);
+            continue;
+        }
+        for (key, value) in &leaves {
+            upsert(&conn, file.tier, &file.scope, key, value).map_err(broken(root))?;
+        }
+        let _ = fs::rename(&file.path, file.path.with_extension("json.migrated"));
+        report.imported.push(file.path);
+    }
+    Ok(report)
+}
+
 /// Import the legacy JSON files once. The flag is checked again inside the
 /// write transaction, so two processes opening a fresh database at the same
 /// time import exactly once. A file that is not a JSON object fails the whole
@@ -603,11 +668,59 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_file_appearing_after_the_import_is_left_alone() {
+    fn a_legacy_file_appearing_after_the_import_is_left_alone_by_reads() {
         let r = root("store-late");
         put(&r, Tier::Global, None, "mode", &json!("ask")).unwrap();
         write_json(&r.join("config.json"), r#"{"mode":"auto"}"#);
         assert_eq!(lookup(&r, "mode", None).unwrap().global, Some(json!("ask")));
+        assert!(r.join("config.json").exists());
+    }
+
+    #[test]
+    fn a_late_file_with_no_conflict_is_adopted_and_renamed() {
+        let r = root("store-late-adopt");
+        put(&r, Tier::Global, None, "mode", &json!("ask")).unwrap();
+        write_json(
+            &r.join("config.json"),
+            r#"{"mode":"ask","pr":{"draft":false}}"#,
+        );
+        let report = adopt_late_files(&r).unwrap();
+        assert_eq!(report.imported.len(), 1);
+        assert!(report.conflicts.is_empty());
+        assert!(r.join("config.json.migrated").exists());
+        assert!(!r.join("config.json").exists());
+        assert_eq!(
+            lookup(&r, "pr.draft", None).unwrap().global,
+            Some(json!(false))
+        );
+    }
+
+    #[test]
+    fn a_late_file_that_disagrees_is_left_in_place_and_reported() {
+        let r = root("store-late-conflict");
+        put(&r, Tier::Global, None, "mode", &json!("ask")).unwrap();
+        write_json(&r.join("config.json"), r#"{"mode":"auto"}"#);
+        let report = adopt_late_files(&r).unwrap();
+        assert!(report.imported.is_empty());
+        assert_eq!(report.conflicts, vec![r.join("config.json")]);
+        assert!(r.join("config.json").exists());
+        assert_eq!(lookup(&r, "mode", None).unwrap().global, Some(json!("ask")));
+    }
+
+    #[test]
+    fn a_malformed_late_file_is_reported_not_fatal() {
+        let r = root("store-late-bad");
+        put(&r, Tier::Global, None, "mode", &json!("ask")).unwrap();
+        write_json(&r.join("config.json"), "{not json");
+        let report = adopt_late_files(&r).unwrap();
+        assert_eq!(report.conflicts.len(), 1);
+    }
+
+    #[test]
+    fn with_no_database_nothing_is_adopted() {
+        let r = root("store-late-nodb");
+        write_json(&r.join("config.json"), r#"{"mode":"auto"}"#);
+        assert_eq!(adopt_late_files(&r).unwrap(), LateReport::default());
         assert!(r.join("config.json").exists());
     }
 
