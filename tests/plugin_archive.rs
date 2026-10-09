@@ -165,8 +165,6 @@ fn archive_contains_every_file_the_installed_plugin_reads_at_runtime() {
         "prompts/SYSTEM_PROMPT.md",
         "output-styles/concise-direct.md",
         "hooks/hooks.json",
-        "hooks/migration-check.sh",
-        "hooks/lib/config-hash.sh",
         "Brewfile",
         "LICENSE",
         "README.md",
@@ -306,10 +304,6 @@ fn init_from_the_unpacked_archive_places_prompt_and_settings() {
             "settings.json lacks the template key {key}\n{stdout}"
         );
     }
-    same(
-        cfg.join("hooks/lib/config-hash.sh"),
-        "hooks/lib/config-hash.sh",
-    );
 }
 
 #[test]

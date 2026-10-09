@@ -140,13 +140,6 @@ fn an_existing_titled_session_is_resumed_and_forks_only_on_drift() {
 fn config_drift_forks_the_resume_once_per_change() {
     let e = env("drift");
     e.session();
-    let hash_script = e.home.join(".config/playbook/hooks/lib/config-hash.sh");
-    fs::create_dir_all(hash_script.parent().unwrap()).unwrap();
-    fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("hooks/lib/config-hash.sh"),
-        &hash_script,
-    )
-    .unwrap();
     let settings = e.home.join(".claude/settings.json");
     fs::create_dir_all(settings.parent().unwrap()).unwrap();
     fs::write(&settings, "{\"a\":1}").unwrap();

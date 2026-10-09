@@ -16,6 +16,7 @@ pub mod commit_message_sanitizer;
 pub mod memory_anchors;
 pub mod memory_capture;
 pub mod memory_signals;
+pub mod migration_check;
 pub mod no_slop_guard;
 pub mod post_edit_track;
 pub mod precommit_check;
@@ -56,6 +57,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::AutoCost => auto_cost::run(payload),
         HookName::WorktreeCreate => worktree_create::run(payload),
         HookName::WorktreeRemove => worktree_remove::run(payload),
+        HookName::MigrationCheck => migration_check::run(payload),
     }
 }
 

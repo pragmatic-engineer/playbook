@@ -152,15 +152,15 @@ test_memory_anchors() {
   local sid="fire-memory-anchors" home target out
   home="$(mktemp -d)"
   mkdir -p "$home/.config/playbook/memory"
-  target="$REPO_ROOT/hooks/lib/config-hash.sh"
+  target="$REPO_ROOT/install.sh"
   cat > "$home/.config/playbook/memory/memory.graph.json" <<EOF
 {
   "nodes": [
     {"id": "global/fire-anchor-fact", "file": "fire-anchor-fact.md", "scope": "global", "type": "project", "name": "fire-anchor-fact", "description": "fixture fact"},
-    {"id": "code:hooks/lib/config-hash.sh", "file": "hooks/lib/config-hash.sh", "scope": "code", "type": "code"}
+    {"id": "code:install.sh", "file": "install.sh", "scope": "code", "type": "code"}
   ],
   "edges": [
-    {"from": "global/fire-anchor-fact", "to": "code:hooks/lib/config-hash.sh", "relation": "anchors"}
+    {"from": "global/fire-anchor-fact", "to": "code:install.sh", "relation": "anchors"}
   ]
 }
 EOF

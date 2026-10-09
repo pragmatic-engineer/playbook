@@ -51,9 +51,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The repo checkout root, where `settings.shared.json`, `hooks/lib/config-hash.sh`
-/// actually live, standing in for `CLAUDE_PLUGIN_ROOT` on a
-/// real install.
+/// The repo checkout root, where `settings.shared.json` lives, standing in for
+/// `CLAUDE_PLUGIN_ROOT` on a real install.
 fn self_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -817,9 +816,10 @@ fn missing_self_root_skips_template_dependent_steps() {
     // `hooks` still runs since `wire::wire` needs no template at all.
     assert!(outcome.ok());
     assert_eq!(find_step(&outcome, "settings").status, StepStatus::Skipped);
-    assert_eq!(find_step(&outcome, "shim").status, StepStatus::Skipped);
+    // The launcher is `playbook shell-init`, so the rc line needs no plugin files.
+    assert_eq!(find_step(&outcome, "shim").status, StepStatus::Wired);
     assert_eq!(find_step(&outcome, "hooks").status, StepStatus::Wired);
-    assert!(!home.join(".bashrc").is_file());
+    assert!(home.join(".bashrc").is_file());
 }
 
 #[test]
@@ -911,21 +911,15 @@ fn read_only_rc_file_is_reported_as_a_skipped_shim_step() {
     assert_eq!(fs::read_to_string(&rc_file).unwrap(), before);
 }
 
-/// `cc::config_drift` runs this file from the playbook config dir, so a fresh
-/// `init --aliases` must leave it there.
+/// The config hash runs inside the binary now, so init places no shell script.
 #[test]
-fn fresh_init_with_aliases_places_config_hash() {
-    // Arrange
+fn init_with_aliases_places_no_config_hash_script() {
     let home = scratch_home("config-hash");
-
-    // Act
     let outcome = run(&base_paths(&home, Some(ShellKind::Zsh)));
-
-    // Assert
     assert!(outcome.ok());
-    assert!(home
+    assert!(!home
         .join(".config/playbook/hooks/lib/config-hash.sh")
-        .is_file());
+        .exists());
 }
 
 /// Spawns the real compiled binary rather than calling `run` directly: the

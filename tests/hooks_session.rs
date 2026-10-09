@@ -22,7 +22,7 @@ fn playbook_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_playbook"))
 }
 
-/// The repo checkout root: where `hooks/lib/config-hash.sh` lives, so tests can point `CLAUDE_PLUGIN_ROOT` at them
+/// The repo checkout root: where the plugin files live, so tests can point `CLAUDE_PLUGIN_ROOT` at them
 /// the same way Claude Code would.
 fn plugin_root() -> &'static str {
     env!("CARGO_MANIFEST_DIR")
@@ -1219,27 +1219,11 @@ fn session_init_toolkit_primer_points_at_playbook_plan() {
 // session-init: resume-only config drift warning
 // ---------------------------------------------------------------------
 
-/// The config-hash value `hooks/lib/config-hash.sh` computes for an empty
-/// `$HOME/.claude` tree, by running the exact same script the hook shells
-/// out to. Avoids hard-coding a sha256 constant in the test.
+/// The config-hash value for an empty `$HOME/.claude` tree, computed by the
+/// same function the hook calls. The known-answer test in
+/// `src/common/config_hash.rs` pins the algorithm itself.
 fn empty_config_hash(home: &Path) -> String {
-    let script = Path::new(plugin_root())
-        .join("hooks")
-        .join("lib")
-        .join("config-hash.sh");
-    let output = Command::new("bash")
-        .arg("-c")
-        .arg(". \"$1\"; config_hash")
-        .arg("_")
-        .arg(&script)
-        .env("HOME", home)
-        .output()
-        .expect("bash should run config-hash.sh");
-    assert!(output.status.success(), "config-hash.sh should succeed");
-    String::from_utf8(output.stdout)
-        .expect("config-hash.sh output should be UTF-8")
-        .trim()
-        .to_string()
+    playbook::common::config_hash(&home.join(".claude"))
 }
 
 #[test]
@@ -1354,13 +1338,12 @@ fn session_init_resume_with_matching_hash_emits_no_drift_warning() {
 }
 
 // ---------------------------------------------------------------------
-// session-init: shell-out failure degrades quietly
+// session-init: an unreachable plugin root degrades quietly
 // ---------------------------------------------------------------------
 
 #[test]
 fn session_init_degrades_quietly_when_both_shell_outs_are_unreachable() {
-    // Arrange: a plugin root that does not exist, so both
-    // hooks/lib/config-hash.sh is unreachable.
+    // Arrange: a plugin root that does not exist.
     // Every other additionalContext source is disabled so the only thing
     // left that could emit is the (failed) memory slice, proving the
     // failure produces nothing rather than malformed output.

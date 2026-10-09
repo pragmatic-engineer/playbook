@@ -31,7 +31,7 @@ PLUGIN="playbook@pragmatic-engineer"
 CLAUDE_MIN_VERSION="2.1.224"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 # Root for every directory playbook itself writes (memory, runtime state,
-# the statusline script, config-hash.sh); mirrors playbook_root_from() in
+# the statusline script); mirrors playbook_root_from() in
 # src/common/paths.rs. Not currently overridable by env var, unlike
 # CLAUDE_HOME: nothing downstream of this script reads a PLAYBOOK_CONFIG_DIR
 # override yet, so introducing one here would be a knob with no effect.
@@ -524,21 +524,6 @@ for rel in $CONFIG_FILES; do
     mkdir -p "$(dirname "$dest")"
     cp "$src" "$dest"
 done
-
-# config-hash.sh: sourced by the launcher outside any plugin context, so it
-# lives under $HOME/.config/playbook, not $CLAUDE_HOME.
-CONFIG_HASH_SRC="$SRC/hooks/lib/config-hash.sh"
-if [ -e "$CONFIG_HASH_SRC" ]; then
-    config_hash_dest="$PLAYBOOK_CONFIG_DIR/hooks/lib/config-hash.sh"
-    if [ -e "$config_hash_dest" ]; then
-        mkdir -p "$BACKUP/hooks/lib"
-        cp -R "$config_hash_dest" "$BACKUP/hooks/lib/config-hash.sh"
-        rm -rf "$config_hash_dest"
-        backed_up=1
-    fi
-    mkdir -p "$(dirname "$config_hash_dest")"
-    cp "$CONFIG_HASH_SRC" "$config_hash_dest"
-fi
 
 # Wire the always-on guards, seed/merge settings.json, and install the shell
 # launcher and statusline, via `playbook init`. IMPORTANT: this runs

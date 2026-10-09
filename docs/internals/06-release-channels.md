@@ -50,8 +50,8 @@ What the zip holds: the plugin content (`.claude-plugin/plugin.json`,
 `commands/`, `skills/`, `agents/`, `output-styles/`, `hooks/hooks.json`,
 `LICENSE`, `README.md`) and the files `playbook init` and the commands read
 through `CLAUDE_PLUGIN_ROOT` (`settings.shared.json`,
-`prompts/SYSTEM_PROMPT.md`, `hooks/migration-check.sh`, `hooks/lib/config-hash.sh`,
-`Brewfile`). It holds no `src/`, `tests/`,
+`prompts/SYSTEM_PROMPT.md`, `Brewfile`). The plugin also ships `bin/playbook` and `install.sh`, so a
+plugin-only install can bootstrap the binary. It holds no `src/`, `tests/`,
 `docs/`, `.github/`, `Cargo.*` or `*.test.sh`. The binary is not in it: it
 still comes from `install.sh`, Homebrew or `playbook update`.
 

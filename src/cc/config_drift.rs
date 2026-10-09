@@ -8,15 +8,9 @@
 //! The baseline is one file per project under `~/.config/playbook/cc-state/`.
 
 use super::project_slug;
-use crate::common::{config_hash, paths};
+use crate::common::{config_hash, home_dir, paths};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-
-/// The shell ran the hash unbounded. A wedged `git` inside config-hash.sh would
-/// have stalled every launch, so the port bounds it and treats a timeout as an
-/// unknown hash.
-const HASH_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn marker_path(cwd: &str) -> PathBuf {
     paths::cc_state_dir().join(project_slug(cwd))
@@ -44,7 +38,7 @@ pub fn drifted(cwd: &str) -> bool {
 }
 
 fn current_hash() -> String {
-    config_hash(&paths::playbook_root(), HASH_TIMEOUT)
+    config_hash(&home_dir().join(".claude"))
 }
 
 /// Trailing newline included, because the shell wrote with `printf '%s\n'` and

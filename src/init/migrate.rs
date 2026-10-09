@@ -102,6 +102,11 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Idempotent,
             run: shell_init_rc_line,
         },
+        Migration {
+            id: "0008-remove-config-hash-script",
+            kind: Kind::Idempotent,
+            run: remove_config_hash_script,
+        },
     ]
 }
 
@@ -122,6 +127,27 @@ fn gate_repo_local_move(ctx: &Ctx) -> Outcome {
         Ok(()) => Outcome::Quiet,
         Err(err) => Outcome::Failed(StepReport::failed("gate-repo-local", err)),
     }
+}
+
+/// The config hash is computed in Rust now. Remove the shell copy that older
+/// installs placed under the playbook root, and its directories when they end
+/// up empty.
+fn remove_config_hash_script(ctx: &Ctx) -> Outcome {
+    let root = crate::common::paths::playbook_root_from(&ctx.home);
+    let script = root.join("hooks/lib/config-hash.sh");
+    if !script.is_file() {
+        return Outcome::Quiet;
+    }
+    if let Err(err) = std::fs::remove_file(&script) {
+        return Outcome::Failed(StepReport::failed("config-hash", err.to_string()));
+    }
+    for dir in [root.join("hooks/lib"), root.join("hooks")] {
+        let _ = std::fs::remove_dir(&dir);
+    }
+    Outcome::Repeat(StepReport::wired(
+        "config-hash",
+        "removed the placed config-hash.sh, the hash now runs inside playbook",
+    ))
 }
 
 fn shell_init_rc_line(ctx: &Ctx) -> Outcome {
@@ -541,6 +567,24 @@ mod tests {
         let v: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
         v["statusLine"]["command"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn the_placed_config_hash_script_is_removed_once() {
+        let h = home("cfg-hash");
+        let lib = crate::common::paths::playbook_root_from(&h).join("hooks/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("config-hash.sh"), "config_hash() { :; }\n").unwrap();
+        assert!(matches!(
+            remove_config_hash_script(&ctx(&h)),
+            Outcome::Repeat(_)
+        ));
+        assert!(!lib.join("config-hash.sh").exists());
+        assert!(!lib.exists(), "empty lib dir goes too");
+        assert!(matches!(
+            remove_config_hash_script(&ctx(&h)),
+            Outcome::Quiet
+        ));
     }
 
     #[test]

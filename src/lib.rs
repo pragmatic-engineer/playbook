@@ -922,6 +922,7 @@ pub enum HookName {
     AutoCost,
     WorktreeCreate,
     WorktreeRemove,
+    MigrationCheck,
 }
 
 /// `playbook cc` subcommands.
