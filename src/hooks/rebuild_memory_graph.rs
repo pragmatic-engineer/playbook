@@ -1035,25 +1035,8 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()
 fn write_graph_atomically(mem_dir: &Path, graph: &Graph) -> Result<(), RebuildError> {
     let rendered = serde_json::to_string_pretty(graph)
         .map_err(|e| RebuildError(format!("serialize graph: {e}")))?;
-    let tmp_path = mem_dir.join(format!(
-        ".graph-{}-{:?}.json.tmp",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    if let Err(e) = fs::write(&tmp_path, rendered) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(RebuildError(format!(
-            "write temp graph file {}: {e}",
-            tmp_path.display()
-        )));
-    }
-    if let Err(e) = fs::rename(&tmp_path, mem_dir.join("memory.graph.json")) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(RebuildError(format!(
-            "rename temp graph file into place: {e}"
-        )));
-    }
-    Ok(())
+    crate::common::atomic::write_atomic(&mem_dir.join("memory.graph.json"), rendered)
+        .map_err(|e| RebuildError(format!("write memory.graph.json: {e}")))
 }
 
 #[cfg(test)]

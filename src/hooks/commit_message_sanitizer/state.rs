@@ -26,7 +26,7 @@ pub fn record_head(payload: &Payload, dir: &Path) {
         .unwrap_or_default();
     let mut heads = read(&file);
     heads.insert(root, Value::String(head.trim().to_string()));
-    let _ = write_atomic(&file, &Value::Object(heads).to_string());
+    let _ = write_atomic(&file, Value::Object(heads).to_string());
 }
 
 /// The HEAD recorded for the repository `dir` is in, which is then forgotten
@@ -35,7 +35,7 @@ pub fn take_head(payload: &Payload, dir: &Path) -> Option<String> {
     let (file, root) = (state_file(payload)?, repo_root(dir)?);
     let mut heads = read(&file);
     let head = heads.remove(&root)?;
-    let _ = write_atomic(&file, &Value::Object(heads).to_string());
+    let _ = write_atomic(&file, Value::Object(heads).to_string());
     head.as_str().map(str::to_string)
 }
 

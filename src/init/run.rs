@@ -513,16 +513,7 @@ fn backup_then_write(
     }
 
     fs::create_dir_all(dir)?;
-    let tmp_path = dir.join(format!(".init-settings-{}.tmp", std::process::id()));
-    if let Err(err) = fs::write(&tmp_path, content) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    if let Err(err) = fs::rename(&tmp_path, path) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    Ok(())
+    crate::common::atomic::write_atomic(path, content)
 }
 
 /// The retain-5 pruning policy for both of `backup_then_write`'s file

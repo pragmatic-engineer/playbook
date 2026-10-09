@@ -666,14 +666,7 @@ fn write_index_atomically(idx_path: &Path, rows: &[String]) {
         content.push_str(row);
         content.push('\n');
     }
-    let tmp_path = PathBuf::from(format!("{}.tmp.{}", idx_path.display(), std::process::id()));
-    if fs::write(&tmp_path, content).is_err() {
-        let _ = fs::remove_file(&tmp_path);
-        return;
-    }
-    if fs::rename(&tmp_path, idx_path).is_err() {
-        let _ = fs::remove_file(&tmp_path);
-    }
+    let _ = crate::common::atomic::write_atomic(idx_path, content);
 }
 
 #[cfg(test)]

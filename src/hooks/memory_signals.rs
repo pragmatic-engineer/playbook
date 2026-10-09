@@ -210,16 +210,5 @@ fn write_store_atomically(mem_dir: &Path, store: &SignalsStore) {
     let Ok(rendered) = serde_json::to_string_pretty(store) else {
         return;
     };
-    let tmp_path = mem_dir.join(format!(
-        ".signals-{}-{:?}.json.tmp",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    if fs::write(&tmp_path, rendered).is_err() {
-        let _ = fs::remove_file(&tmp_path);
-        return;
-    }
-    if fs::rename(&tmp_path, mem_dir.join("memory.signals.json")).is_err() {
-        let _ = fs::remove_file(&tmp_path);
-    }
+    let _ = crate::common::atomic::write_atomic(&mem_dir.join("memory.signals.json"), rendered);
 }

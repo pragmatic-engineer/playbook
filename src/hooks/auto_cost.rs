@@ -620,10 +620,5 @@ fn write_atomic(path: &Path, value: &impl Serialize) -> bool {
     let Ok(bytes) = serde_json::to_vec(value) else {
         return false;
     };
-    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-    if fs::write(&tmp, bytes).is_err() || fs::rename(&tmp, path).is_err() {
-        let _ = fs::remove_file(&tmp);
-        return false;
-    }
-    true
+    crate::common::atomic::write_atomic(path, bytes).is_ok()
 }

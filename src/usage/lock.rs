@@ -204,40 +204,20 @@ fn write_atomically(path: &Path, lock: Lock) -> bool {
             return false;
         }
     }
-    let tmp = PathBuf::from(format!("{}.tmp.{}", path.display(), lock.pid));
-    if write_private(
-        &tmp,
-        &format!("{} {} {}\n", lock.pid, lock.port, lock.token.as_str()),
-    )
-    .is_err()
-    {
-        let _ = fs::remove_file(&tmp);
-        return false;
-    }
-    if fs::rename(&tmp, path).is_err() {
-        let _ = fs::remove_file(&tmp);
-        return false;
-    }
-    true
+    let body = format!(
+        "{} {} {}
+",
+        lock.pid,
+        lock.port,
+        lock.token.as_str()
+    );
+    crate::common::atomic::write_atomic_private(path, body).is_ok()
 }
 
 /// Serializes unit tests that bind loopback sockets: a just-dropped ephemeral
 /// port could otherwise be rebound by a sibling test.
 #[cfg(test)]
 pub(crate) static SOCKET_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Writes `text` to `path` owner-only on unix.
-fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path)?.write_all(text.as_bytes())
-}
 
 #[cfg(test)]
 mod tests {

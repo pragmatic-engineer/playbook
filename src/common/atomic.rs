@@ -31,6 +31,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -121,10 +122,26 @@ pub fn atomic_append(file: &str, line: &str) {
     }
 }
 
+/// Distinguishes temp files of two writers in one process (threads, or two
+/// calls racing on one path), which a process id alone does not.
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
 /// Replaces the contents of `path` with `content` through a temp file in the
-/// same directory and a rename, so a reader never sees a partial file. The
-/// file keeps its permissions, and a failed write leaves it as it was.
-pub fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
+/// same directory and a rename, so a reader never sees a partial file. An
+/// existing file keeps its permissions, and a failed write leaves it as it
+/// was. The caller creates the directory.
+pub fn write_atomic(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
+    write_through_tmp(path, content.as_ref(), false)
+}
+
+/// Like [`write_atomic`], for a file that holds account or session data: a
+/// new file is owner-only on unix, and the content is flushed to disk before
+/// the rename.
+pub fn write_atomic_private(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
+    write_through_tmp(path, content.as_ref(), true)
+}
+
+fn write_through_tmp(path: &Path, content: &[u8], private: bool) -> std::io::Result<()> {
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -132,8 +149,9 @@ pub fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     let name = path
         .file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
-    let result = fs::write(&tmp, content)
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!(".{name}.{}.{seq}.tmp", std::process::id()));
+    let result = stage(&tmp, content, private)
         .and_then(|()| match fs::metadata(path) {
             Ok(meta) => fs::set_permissions(&tmp, meta.permissions()),
             Err(_) => Ok(()),
@@ -143,6 +161,22 @@ pub fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
         let _ = fs::remove_file(&tmp);
     }
     result
+}
+
+fn stage(tmp: &Path, content: &[u8], private: bool) -> std::io::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(tmp)?;
+    file.write_all(content)?;
+    if private {
+        file.sync_all()?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -300,5 +334,46 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!root.exists());
+    }
+
+    #[test]
+    fn concurrent_writers_to_one_path_never_tear_the_file() {
+        let root = scratch_dir("atomic-race");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("shared.json");
+        let handles: Vec<_> = (0..8)
+            .map(|n| {
+                let file = file.clone();
+                thread::spawn(move || {
+                    let body = format!("{n}").repeat(4096);
+                    for _ in 0..50 {
+                        write_atomic(&file, &body).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let text = fs::read_to_string(&file).unwrap();
+        assert_eq!(text.len(), 4096);
+        assert!(text.chars().all(|c| c == text.chars().next().unwrap()));
+        let leftovers = fs::read_dir(&root).unwrap().count();
+        assert_eq!(leftovers, 1, "no temp file may remain");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_private_creates_an_owner_only_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = scratch_dir("atomic-private");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("secret");
+        write_atomic_private(&file, b"data").unwrap();
+        assert_eq!(fs::read(&file).unwrap(), b"data");
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }

@@ -130,17 +130,7 @@ fn cap_lines(path: &Path, limit: usize) {
         return;
     }
     let kept = &lines[lines.len() - limit..];
-    let tmp_path = PathBuf::from(format!("{}.tmp.{}", path.display(), std::process::id()));
-    let Ok(mut tmp_file) = fs::File::create(&tmp_path) else {
-        return;
-    };
-    for line in kept {
-        if tmp_file.write_all(line.as_bytes()).is_err() {
-            let _ = fs::remove_file(&tmp_path);
-            return;
-        }
-    }
-    let _ = fs::rename(&tmp_path, path);
+    let _ = crate::common::atomic::write_atomic(path, kept.concat());
 }
 
 #[cfg(all(test, unix))]

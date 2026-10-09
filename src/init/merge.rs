@@ -269,20 +269,7 @@ fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(dir)?;
-    let tmp_path = dir.join(format!(
-        ".merge-settings-{}-{:?}.tmp",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    if let Err(err) = fs::write(&tmp_path, content) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    if let Err(err) = fs::rename(&tmp_path, path) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    Ok(())
+    crate::common::atomic::write_atomic(path, content)
 }
 
 /// What a caller (eventually `playbook init`, wired in WU-8) does with a

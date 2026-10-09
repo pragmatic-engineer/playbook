@@ -134,26 +134,6 @@ fn cutoff(now: SystemTime) -> SystemTime {
         .unwrap_or(UNIX_EPOCH)
 }
 
-#[cfg(unix)]
-fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
-    let mut file = fs::File::create(path)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()
-}
-
 /// Writes `text` for `slug`. A temp file in the same directory plus a rename
 /// keeps a reader from ever seeing half a handoff. Never overwrites: a name
 /// already taken moves the epoch forward by one second.
@@ -181,12 +161,8 @@ pub fn save_in(
         }
         stamp += 1;
     };
-    let tmp = dir.join(format!(".{pid}.tmp"));
-    write_private(&tmp, text).map_err(|e| format!("could not write {}: {e}", tmp.display()))?;
-    fs::rename(&tmp, &target).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("could not save {}: {e}", target.display())
-    })?;
+    crate::common::atomic::write_atomic_private(&target, text)
+        .map_err(|e| format!("could not save {}: {e}", target.display()))?;
     Ok(target)
 }
 
@@ -419,10 +395,7 @@ pub fn log_start_in(
     let lines: Vec<&str> = text.lines().collect();
     if lines.len() > LOG_TRIM_AT {
         let kept = lines[lines.len() - LOG_KEEP..].join("\n") + "\n";
-        let tmp = path.with_extension("log.tmp");
-        if write_private(&tmp, &kept).is_ok() && fs::rename(&tmp, path).is_err() {
-            let _ = fs::remove_file(&tmp);
-        }
+        let _ = crate::common::atomic::write_atomic_private(path, kept);
     }
 }
 
