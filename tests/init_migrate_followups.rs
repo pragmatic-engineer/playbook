@@ -185,3 +185,33 @@ fn doctor_prints_pending_items_only_when_something_is_pending() {
     let out = pending(&home, &root);
     assert!(out.contains("0004-skills-edited") && out.contains("demo"));
 }
+
+#[test]
+fn init_adopts_a_config_json_written_after_the_sqlite_import() {
+    let base = scratch("late-config");
+    let home = base.join("home");
+    let root = plugin_root(&base, "p", "shipped");
+    let cfg = home.join(".config/playbook");
+    fs::create_dir_all(&cfg).unwrap();
+    // First run creates the store; then an older tool writes a JSON file.
+    run(&paths(&home, &root, None));
+    playbook::config::write::set(
+        playbook::config::write::Tier::Global,
+        "mode",
+        serde_json::json!("ask"),
+        &home,
+        None,
+    )
+    .unwrap();
+    fs::write(cfg.join("config.json"), r#"{"pr":{"draft":false}}"#).unwrap();
+
+    let out = run(&paths(&home, &root, None));
+
+    assert!(!cfg.join("config.json").exists());
+    assert!(cfg.join("config.json.migrated").exists());
+    assert!(
+        out.steps.iter().any(|s| s.name == "config"),
+        "{:?}",
+        out.steps.iter().map(|s| s.render()).collect::<Vec<_>>()
+    );
+}

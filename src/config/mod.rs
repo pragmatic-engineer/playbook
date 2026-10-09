@@ -130,6 +130,28 @@ impl std::fmt::Display for ConfigError {
     }
 }
 
+/// Adopt a `config.json` that appeared after playbook moved its config into
+/// SQLite. Returns one warning line per file that could not be adopted.
+/// Files with no conflict are imported silently. Never fails the caller.
+pub fn adopt_late_config(home: &Path) -> Vec<String> {
+    let root = crate::common::paths::playbook_root_from(home);
+    match store::adopt_late_files(&root) {
+        Ok(report) => report
+            .conflicts
+            .iter()
+            .map(|path| {
+                format!(
+                    "{} was written after playbook moved its config into SQLite and is ignored: \
+                     it differs from the stored values or is not valid JSON. \
+                     Change settings with `playbook config set`, or move the file away.",
+                    path.display()
+                )
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Resolve `key` through the repo, org, global, then built-in default tier,
 /// in that order, returning the value and which tier supplied it. `home`
 /// stands in for `$HOME` so callers (and tests) can point resolution at a
