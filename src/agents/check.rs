@@ -407,52 +407,37 @@ fn entries_names(dir: &Path) -> Vec<String> {
     names
 }
 
-/// A variant must exist and equal what the generator renders from its
-/// base: missing, stale, hand-edited, and orphaned generated files all fail.
-/// A base absent from `dir` is skipped, so partial fixture dirs stay valid.
+/// Variants are rendered per session, so none may be committed, every agent
+/// file needs a `VARIANTS` entry, and every tier must render from its base. A
+/// missing entry or a tier that cannot render fails, naming the file.
 fn check_variants(dir: &Path, files: &[String]) -> Vec<String> {
     let mut violations = Vec::new();
-    let mut expected: Vec<String> = Vec::new();
-    let mut baseless: Vec<String> = Vec::new();
-    for (base, tiers) in variants::VARIANTS {
-        let Ok(content) = fs::read_to_string(dir.join(format!("{base}.md"))) else {
-            for tier in tiers {
-                baseless.push(format!("{}.md", variants::variant_name(base, tier)));
-            }
+    for file in files {
+        if file == TEMPLATE_NAME {
+            continue;
+        }
+        let stem = file.strip_suffix(".md").unwrap_or(file);
+        let text = fs::read_to_string(dir.join(file)).unwrap_or_default();
+        if text.lines().any(|l| l.starts_with(variants::MARKER)) {
+            violations.push(format!(
+                "{file}: a generated variant file, delete it: variants are now rendered for each session"
+            ));
+            continue;
+        }
+        let Some((base, tiers)) = variants::VARIANTS.iter().find(|(b, _)| *b == stem) else {
+            violations.push(format!(
+                "{file}: no entry in VARIANTS (src/agents/variants.rs), every agent needs every tier"
+            ));
             continue;
         };
-        for tier in tiers {
-            let file = format!("{}.md", variants::variant_name(base, tier));
-            expected.push(file.clone());
-            let rendered = match variants::render_variant(base, &content, tier) {
-                Ok(text) => text,
-                Err(err) => {
-                    violations.push(format!("{file}: cannot generate: {err}"));
-                    continue;
-                }
-            };
-            match fs::read_to_string(dir.join(&file)) {
-                Err(_) => violations.push(format!(
-                    "{file}: missing variant of {base}.md, run `playbook agents gen`"
-                )),
-                Ok(actual) if actual != rendered => violations.push(format!(
-                    "{file}: stale or hand-edited, run `playbook agents gen`"
-                )),
-                Ok(_) => {}
+        for tier in variants::TIERS {
+            if !tiers.contains(&tier) {
+                violations.push(format!(
+                    "{file}: VARIANTS lacks the '{tier}' tier for {base}"
+                ));
+            } else if let Err(err) = variants::render_definition(base, &text, tier) {
+                violations.push(format!("{file}: cannot render the '{tier}' variant: {err}"));
             }
-        }
-    }
-    for file in files {
-        let generated = fs::read_to_string(dir.join(file))
-            .is_ok_and(|text| text.lines().any(|l| l.starts_with(variants::MARKER)));
-        if generated && baseless.contains(file) {
-            violations.push(format!(
-                "{file}: its base agent file is missing, restore it or drop the VARIANTS entry"
-            ));
-        } else if generated && !expected.contains(file) {
-            violations.push(format!(
-                "{file}: generated file with no entry in VARIANTS, delete it"
-            ));
         }
     }
     violations

@@ -81,17 +81,18 @@ ADR 0003 works the same rule through a second example. A `critic` takes a focus 
 
 The trade-off in one line each: parametrizing keeps behaviour consistent and the file count low. Splitting keeps each checklist honest, at the cost of another file to maintain.
 
-## Effort tiers and generated variants
+## Effort tiers and per-session variants
 
-Effort is fixed per agent file because the `Agent` tool takes no per-call effort. When an orchestrator spawns one role at different difficulty (a one-line docs diff and a 200 KB security diff), keep one base agent and let `playbook agents gen` write variants named `<base>-<tier>`, such as `reviewer-low` and `reviewer-xhigh`.
+Effort is fixed per agent file because the `Agent` tool takes no per-call effort. When an orchestrator spawns one role at different difficulty (a one-line docs diff and a 200 KB security diff), keep one base agent and let the launcher render variants named `<base>-<tier>`, such as `reviewer-low` and `reviewer-xhigh`, for one session.
 
-- The base file is the single source. A variant differs only in `name`, a `Low-effort variant of reviewer.` style prefix on the `description`, and `effort`. A generated comment sits right after the frontmatter.
-- The set lives in the `VARIANTS` table in `src/agents/variants.rs`. To add a tier or an agent, edit the table, run `playbook agents gen`, and commit the generated files. Never edit a variant: change the base and rerun.
-- `gen` is idempotent and deterministic. `playbook agents check`, and so `playbook ci`, fails when a variant is missing, stale, hand-edited, or left behind after its table entry was removed. Variants still go through every normal check, including the read-only tool rules.
-- Spawn a variant with its `playbook:` prefix, for example `playbook:reviewer-xhigh`. The roster in `skills/delegating-subagents/SKILL.md` lists them, and its "Pick the tier" section says when to use each.
-- Variants ship in the plugin because the archive includes all of `agents/`.
+- Only the base files are committed. A variant keeps the base's `tools`, `model` and body, and differs in `name`, a one-line `description` and `effort`. `ccc` and `ccd` pass the set to Claude Code with `--agents`, so nothing is written to disk and no plugin file changes.
+- Every base agent lists every tier (`low`, `medium`, `high`, `xhigh`, `max`) in the `VARIANTS` table in `src/agents/variants.rs`. A tier equal to the agent's own effort renders nothing, so there is no `-high` variant for an agent that ships at `high`.
+- A session gets only the useful variants (`agents.variants`, default `auto`): the cheaper tiers for every agent, plus `xhigh` for `analyst`, `critic`, `fact-checker`, `implementer` and `reviewer`, and never a tier above the user's effort ceilings. `all` adds the rest including `max`, and `off` passes none. Measured on the real agents: the 12 base descriptions are 6.3 KB of session context, `auto` adds 1.9 KB (19 variants), a `medium` ceiling adds 1.4 KB, and committing every variant as a file would have added 27 KB.
+- Sessions started without the launcher have the base agents only. `playbook effort resolve agents <name> --json` reports what the session has, and the `delegating-subagents` skill falls back to the base agent when a variant is not there.
+- Spawn a variant by its plain name, for example `reviewer-xhigh`, with no `playbook:` prefix. The base agents keep it (`playbook:reviewer`).
+- `playbook agents check`, and so `playbook ci`, fails when an agent has no `VARIANTS` entry, a tier cannot render, or a generated variant file is left in `agents/`. Variants are built from the base, so they follow every normal check, including the read-only tool rules.
 
-Current set: `reviewer`, `critic`, `implementer`, and `analyst` get `-low`, `-medium` and `-xhigh`. `fact-checker` gets `-medium` and `-xhigh`, and no `-low`, because a verifier that misses a wrong claim defeats its purpose. There is no `-high` variant: every base agent that has variants ships at `high`, so the base file is the high one. The `-medium` files exist so a per-component ceiling of `medium` can be met (see [ADR-0017](../adr/0017-per-component-effort-ceilings.md)). `test-reviewer` gets none: it runs once per quality gate, so nothing varies. The policy for base efforts is in [Model routing and memory](../internals/02-model-routing-and-memory.md#effort-policy).
+The policy for base efforts is in [Model routing and memory](../internals/02-model-routing-and-memory.md#effort-policy), and the design is in [ADR-0017](../adr/0017-per-component-effort-ceilings.md).
 
 ## The check
 
@@ -114,7 +115,7 @@ Run it before committing a new or edited agent:
 playbook agents check
 ```
 
-It also compares every generated variant with what `playbook agents gen` would write. It reports every offending file at once rather than stopping at the first one.
+It also checks the variants: every agent has a `VARIANTS` entry, every tier renders from its base, and no generated variant file is left in `agents/`. It reports every offending file at once rather than stopping at the first one.
 
 ## See also
 

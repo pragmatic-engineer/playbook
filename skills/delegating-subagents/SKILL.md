@@ -80,20 +80,6 @@ reviews.
 | `analyst` | `playbook:analyst` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `cheap-checker` | `playbook:cheap-checker` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `review-triage` | `playbook:review-triage` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `reviewer-low` | `playbook:reviewer-low` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `reviewer-medium` | `playbook:reviewer-medium` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `reviewer-xhigh` | `playbook:reviewer-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `critic-low` | `playbook:critic-low` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `critic-medium` | `playbook:critic-medium` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `critic-xhigh` | `playbook:critic-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `fact-checker-medium` | `playbook:fact-checker-medium` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `fact-checker-xhigh` | `playbook:fact-checker-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `analyst-low` | `playbook:analyst-low` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `analyst-medium` | `playbook:analyst-medium` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `analyst-xhigh` | `playbook:analyst-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
-| `implementer-low` | `playbook:implementer-low` | Read, Grep, Glob, Edit, Write, Bash, Skill | Yes, has `Write`/`Bash` |
-| `implementer-medium` | `playbook:implementer-medium` | Read, Grep, Glob, Edit, Write, Bash, Skill | Yes, has `Write`/`Bash` |
-| `implementer-xhigh` | `playbook:implementer-xhigh` | Read, Grep, Glob, Edit, Write, Bash, Skill | Yes, has `Write`/`Bash` |
 
 **Always pass the `playbook:` prefix as the `subagent_type` value**, not the
 bare name in the first column: these are plugin-provided agents, and a bare
@@ -112,12 +98,13 @@ this table stays in sync with `agents/*.md` and that every row's `subagent_type`
 carries the `playbook:` prefix, so the next agent addition fails CI instead of
 quietly drifting again.)
 
-The `-low` and `-xhigh` rows are effort-tier variants, generated from the base
-agent by `playbook agents gen` and identical to it except for `name`, the
-`description` prefix, and `effort`. They need the same `playbook:` prefix, for
-example `playbook:reviewer-xhigh`. Never edit one by hand: `playbook agents
-check` fails CI when a variant is missing, stale, or edited. The set lives in
-`src/agents/variants.rs`.
+Effort-tier variants such as `reviewer-low` and `reviewer-xhigh` are not files
+and are not in this table. `ccc` and `ccd` render them from the base agent for
+one session and pass them to Claude Code with `--agents`, so they carry the
+base agent's `tools`, `model` and body and differ only in `effort`. They have
+no `playbook:` prefix: spawn one by the plain name `playbook effort resolve`
+gives you. A session started without the launcher has the base agents only.
+The tiers and the rules are in `src/agents/variants.rs`.
 
 **For the read-only agents, variants included, the return value is the only delivery channel.** It
 worked in every run of the 2026-10-09 measurement. So:
@@ -161,20 +148,35 @@ test suite cannot give you.
 ## Pick the tier
 
 The `Agent` tool has no per-call effort setting, so effort is chosen by which
-agent you name. Pick it from the size and risk of the diff, using the limits
-the repo already has rather than new ones:
+agent you name. Two rules decide it, in this order.
+
+**1. The ceiling.** Before a spawn, run
+`playbook effort resolve agents <name> --json` and read `subagentType`. It is
+the agent to spawn: the base agent when nothing limits it, or a variant when
+the user's ceilings (Claude Code's `maxEffortLevel`, playbook's, or the
+agent's own `effort.agents.<name>`) are below the base effort. `allowed` lists
+every name at or under the ceiling, and `satisfied: false` means no variant is
+low enough or the session has none, so the base agent runs above the ceiling:
+say so in your report. Never spawn a name that is not in `allowed`.
+
+**2. The diff.** Within the ceiling, pick from the size and risk of the diff,
+using the limits the repo already has rather than new ones:
 
 | Diff | Spawn | Why |
 |---|---|---|
-| At most 300 changed lines (the `dedup` trigger in `/playbook:deep-review`), and no security-sensitive path | the `-low` variant | Little to reason about, so extra effort is spend with no extra findings. |
+| At most 300 changed lines (the `dedup` trigger in `/playbook:deep-review`), and no security-sensitive path | the `-low` variant, if `allowed` has it | Little to reason about, so extra effort is spend with no extra findings. |
 | Anything between, or when unsure | the base agent | The default, tuned for ordinary diffs. |
-| Over 60 KB (`MAX_DIFF_BYTES` in `src/pr/triage.rs`, the size past which `review-triage` never calls a PR quick), or the lens is `security`, or the diff touches auth, secrets, crypto, or untrusted input | the `-xhigh` variant | A missed finding here is expensive and the diff is big enough to hide one. |
+| Over 60 KB (`MAX_DIFF_BYTES` in `src/pr/triage.rs`, the size past which `review-triage` never calls a PR quick), or the lens is `security`, or the diff touches auth, secrets, crypto, or untrusted input | the `-xhigh` variant, if `allowed` has it | A missed finding here is expensive and the diff is big enough to hide one. |
+
+If the variant you want is not in `allowed`, spawn the base agent. That is the
+normal case outside the launcher, and it is never an error.
 
 Narrow `cheap-check` lenses go to `cheap-checker`, which is already pinned to
-low effort, so they need no variant. `fact-checker` has an `-xhigh` variant
-only: a verifier that misses a wrong claim defeats its purpose, so there is no
-`-low` for it. Every tier keeps the base agent's `tools`, so the read-only
-guarantees and the file-delivery limits in the table above apply unchanged.
+low effort. A verifier that misses a wrong claim defeats its purpose, so do
+not pick a cheaper `fact-checker` variant on your own for diff size: use one
+only when the ceiling requires it. Every tier keeps the base agent's `tools`,
+so the read-only guarantees and the file-delivery limits in the table above
+apply unchanged.
 
 ## Re-dispatching (a second pass is a new agent, not a continuation)
 

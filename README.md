@@ -301,7 +301,7 @@ Skills live in `skills/` and load on demand. See [docs/authoring/01-commands-ski
 | `engineering-standards-javascript` | JS/TS companion to `engineering-standards`; covers Zod validation and Jest/Vitest mocking. |
 | `writing-style` | Voice rules for human-facing prose; spartan, active voice, contractions, no dashes. |
 | `session-handoff` | Decision-first handoff, saved with `playbook handoff save`, so the next session picks up cold without rereading the thread. |
-| `delegating-subagents` | When and how to dispatch subagents, which tier to pick (including the `-low` and `-xhigh` variants), and what to do when one finishes or goes quiet. |
+| `delegating-subagents` | When and how to dispatch subagents, which tier to pick (including effort variants, which `ccc` renders per session), and what to do when one finishes or goes quiet. |
 | `systematic-debugging` | Reproduce, isolate and root-cause a bug before proposing a fix. |
 | `finish-pull-request` | Runs right after `/playbook:create-pull-request`: the self-review `autoReview.*` selects, fixes, promotes the draft, and merges when `autoMerge.enabled` allows. |
 | `playbook-usage` | Discovery aid: which `/playbook:*` command fits a task, for sessions without the system prompt. |

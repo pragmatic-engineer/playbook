@@ -173,19 +173,20 @@ fn pick_the_tier_names_the_real_limits_and_the_variants() {
 }
 
 #[test]
-fn every_configured_variant_is_in_the_roster_table() {
+fn variants_are_not_in_the_roster_because_they_are_not_files() {
     use playbook::agents::variants::{variant_name, VARIANTS};
     let tabled: BTreeSet<String> = table_rows().into_iter().map(|(name, _)| name).collect();
-    let mut count = 0;
     for (base, tiers) in VARIANTS {
+        assert!(
+            tabled.contains(base),
+            "base agent '{base}' is not in the roster table"
+        );
         for tier in tiers {
             let name = variant_name(base, tier);
             assert!(
-                tabled.contains(&name),
-                "variant '{name}' is not in the roster table"
+                !tabled.contains(&name),
+                "variant '{name}' is rendered per session, so it must not be a roster row"
             );
-            count += 1;
         }
     }
-    assert!(count > 0, "VARIANTS is empty");
 }

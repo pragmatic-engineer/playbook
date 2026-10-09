@@ -53,11 +53,11 @@ Model choice sets how capable the work is. Effort sets how long it thinks. They 
 
 The rule that produced the current values: **lower effort where the work is mechanical or already decided, and never where a missed finding is costly.** A model that is wrong costs a rerun. A reviewer that stops looking costs a bug in production. The table of every value and its reason is in [Effort policy](../internals/02-model-routing-and-memory.md#effort-policy).
 
-### Why there are `-low` and `-xhigh` agent variants
+### Why there are effort variants of every agent, and why they are not files
 
-The `Agent` tool takes a `model` on each call but has no per-call effort. An agent's effort is fixed by its file. When one role needs two efforts (a quick review of a small diff and a deep one of a risky diff), playbook ships two files for the role.
+The `Agent` tool takes a `model` on each call but has no per-call effort. An agent's effort is fixed by its file. When one role needs two efforts (a quick review of a small diff and a deep one of a risky diff), the role needs two agent definitions.
 
-You do not edit the variants by hand. `playbook agents gen` writes them from the base agent, and `playbook agents check` fails CI when a variant drifts from its base. The orchestrator picks the variant by diff size and risk, following the `delegating-subagents` skill.
+The variants are not files. Twelve agents times four more tiers would add dozens of descriptions to every session, so `ccc` and `ccd` render only the variants a session can use from the base agents and pass them to Claude Code with `--agents`. `playbook agents check` fails CI when an agent has no `VARIANTS` entry or a tier cannot render. The orchestrator asks `playbook effort resolve` which agent to spawn, because the user's effort ceilings decide it, then picks by diff size and risk, following the `delegating-subagents` skill.
 
 ### Who decides the effort
 
@@ -101,7 +101,7 @@ When you want to know why something is the way it is, start with this page, then
 | You want to change | Look at |
 |---|---|
 | Which model a command or agent uses | The `model:` line in its file, then [Model routing](../internals/02-model-routing-and-memory.md) |
-| How hard it thinks | The `effort:` line in its file, or pick a `-low` or `-xhigh` variant |
+| How hard it thinks | The `effort:` line in its file, or ask `playbook effort resolve agents <name>` for the variant |
 | The most effort anything may use | `playbook effort <level>` |
 | How far the PR flow goes | [Config keys](../guides/04-config-keys.md) |
 | Whether playbook asks or decides | `playbook mode`, and the Auto mode section of the README |
