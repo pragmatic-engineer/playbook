@@ -273,7 +273,7 @@ fn parse_pr(v: &Value) -> Option<StackPr> {
     })
 }
 
-type Gh<'a> = &'a dyn Fn(&[&str]) -> Result<String, String>;
+pub(super) type Gh<'a> = &'a (dyn Fn(&[&str]) -> Result<String, String> + Sync);
 
 fn json_of(raw: &str, what: &str) -> Result<Value, String> {
     serde_json::from_str(raw).map_err(|e| format!("could not read {what} from gh: {e}"))
@@ -455,6 +455,7 @@ pub struct Parsed {
     pub json: bool,
     pub max_prs: Option<u64>,
     pub max_lines: Option<u64>,
+    pub context: bool,
     pub warnings: Vec<String>,
 }
 
@@ -464,6 +465,7 @@ pub fn parse(args: &str) -> Parsed {
     while let Some(tok) = toks.next() {
         match tok {
             "--json" => p.json = true,
+            "--context" => p.context = true,
             "--max-prs" => p.max_prs = toks.next().and_then(|v| v.parse().ok()),
             "--max-lines" => p.max_lines = toks.next().and_then(|v| v.parse().ok()),
             "--auto" | "--ask" => {}
@@ -480,6 +482,11 @@ pub fn parse(args: &str) -> Parsed {
 
 /// Run the command; `Err` is the text for stderr (exit 1).
 pub fn run(args: &str) -> Result<String, String> {
+    if let Some(rest) = args.trim_start().strip_prefix("map") {
+        if rest.is_empty() || rest.starts_with(char::is_whitespace) {
+            return super::stack_map::run(rest);
+        }
+    }
     let parsed = parse(args);
     for w in &parsed.warnings {
         eprintln!("{w}");
@@ -489,6 +496,9 @@ pub fn run(args: &str) -> Result<String, String> {
         max_lines: parsed.max_lines.unwrap_or(DEFAULT_MAX_LINES),
     };
     let stack = detect(&|a| gh(a), parsed.pr)?;
+    if parsed.context {
+        return super::stack_context::write(&|a| gh(a), &stack, limits);
+    }
     if parsed.json {
         serde_json::to_string_pretty(&stack.to_json(limits)).map_err(|e| e.to_string())
     } else {

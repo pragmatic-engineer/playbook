@@ -868,7 +868,9 @@ pub enum PrCommand {
     ///
     /// Reads the GitHub stack API, then falls back to the branch chain. Takes
     /// the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`).
-    /// Prints a summary, or JSON with `--json`.
+    /// Prints a summary, or JSON with `--json`. `--context` writes one shared
+    /// review context under `/tmp/pr-stack-<pr>`. `map --stack <file> --findings
+    /// <file>` gives each finding to the PR whose diff holds the line.
     Stack {
         /// The command's arguments, as one string
         #[arg(default_value = "")]
