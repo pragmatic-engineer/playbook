@@ -40,6 +40,14 @@ pub fn repo_slug() -> String {
 }
 
 fn spawn_slug() -> String {
+    // Read `.git/config` directly. A layout the reader does not model falls
+    // through to `git`, which also applies URL rewrites.
+    if let Some(url) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::common::gitfacts::origin_url(&cwd))
+    {
+        return normalize_remote_url(&url);
+    }
     #[cfg(test)]
     SPAWNS.with(|n| n.set(n.get() + 1));
     let mut command = Command::new("git");
@@ -165,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn two_calls_in_one_directory_spawn_git_once() {
+    fn two_calls_in_one_directory_read_the_disk_and_spawn_nothing() {
         // Arrange
         let _guard = crate::common::test_support::lock_cwd();
         let repo = repo_with_origin("slug-memo", "git@github.com:acme/widgets.git");
@@ -185,6 +193,30 @@ mod tests {
             (first.as_str(), second.as_str()),
             ("acme/widgets", "acme/widgets")
         );
+        assert_eq!(spawned, 0);
+    }
+
+    #[test]
+    fn a_rewrite_rule_falls_back_to_one_git_spawn_that_applies_it() {
+        // Arrange
+        let _guard = crate::common::test_support::lock_cwd();
+        let repo = repo_with_origin("slug-instead", "gh:acme/widgets");
+        git_in(
+            &repo,
+            &["config", "url.https://github.com/.insteadOf", "gh:"],
+        );
+        let previous = std::env::current_dir().expect("read cwd");
+        std::env::set_current_dir(&repo).expect("cd into repo");
+        let before = SPAWNS.with(|n| n.get());
+
+        // Act
+        let slug = repo_slug();
+        let spawned = SPAWNS.with(|n| n.get()) - before;
+
+        // Assert
+        std::env::set_current_dir(&previous).expect("restore cwd");
+        let _ = std::fs::remove_dir_all(&repo);
+        assert_eq!(slug, "acme/widgets");
         assert_eq!(spawned, 1);
     }
 
