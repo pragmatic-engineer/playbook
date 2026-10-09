@@ -134,10 +134,10 @@ impl Stack {
         self.prs.iter().filter(|p| p.state == State::Open)
     }
 
-    /// True when the PR sits in a stack with at least two open PRs, so the
-    /// whole-stack choice differs from the single-PR one.
+    /// True whenever the PR belongs to a stack, even one with a single open
+    /// PR: the user always chooses the scope and the review depth.
     pub fn ask(&self) -> bool {
-        self.source != Source::None && self.open().count() >= 2
+        self.source != Source::None
     }
 
     pub fn to_json(&self, limits: Limits) -> Value {
@@ -627,6 +627,14 @@ mod tests {
         assert_eq!(roles, ["context", "context", "review", "review"]);
         assert_eq!(j["merged_count"], 2);
         assert_eq!(j["open_count"], 2);
+    }
+
+    #[test]
+    fn a_stack_with_one_open_pr_still_asks() {
+        let mut s = detect(&fake(Some("api-middle-merged")), Some(3)).unwrap();
+        s.prs.retain(|p| p.number != 4);
+        assert_eq!(s.open().count(), 1);
+        assert!(s.ask());
     }
 
     #[test]

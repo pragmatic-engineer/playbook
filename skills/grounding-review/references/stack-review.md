@@ -22,7 +22,7 @@ If the PR you were given is `context` or `skip`, say so in one line and stop: th
 
 ## 2. Choose the scope
 
-If `ask` is false (one open PR, with or without merged PRs below it), the scope is this PR only, and there is no question. When `merged_count` is above zero, still build the context in step 3 so the merged PRs are read as background.
+If `ask` is false, the PR is not in a stack: there is no question and nothing changes. A PR in a stack always gets the question, even when only one PR in the stack is still open. Merged PRs are never reviewed, but are always read as background context.
 
 If `ask` is true, print one line first: `Stack of <n> PRs (<open_count> open, <merged_count> merged), <open_lines> changed lines in the open PRs.` Then pick the scope:
 
