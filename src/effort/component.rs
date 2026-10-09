@@ -83,6 +83,22 @@ pub fn shipped_effort(path: &Path) -> Option<String> {
 /// variable (comma separated). A session started without the launcher has none.
 pub const VARIANTS_ENV: &str = "PLAYBOOK_AGENT_VARIANTS";
 
+/// Set by the launcher to the plugin name when the variants are agents of a
+/// throwaway plugin, so their `subagent_type` carries that prefix.
+pub const VARIANTS_PLUGIN_ENV: &str = "PLAYBOOK_AGENT_VARIANTS_PLUGIN";
+
+/// The `subagent_type` for variant `file` of the session's variants.
+fn variant_type(file: &str) -> String {
+    prefixed(file, std::env::var(VARIANTS_PLUGIN_ENV).ok().as_deref())
+}
+
+fn prefixed(file: &str, plugin: Option<&str>) -> String {
+    match plugin {
+        Some(plugin) if !plugin.is_empty() => format!("{plugin}:{file}"),
+        _ => file.to_string(),
+    }
+}
+
 /// The variant names in `VARIANTS_ENV`.
 pub fn available_variants() -> Vec<String> {
     std::env::var(VARIANTS_ENV)
@@ -208,7 +224,7 @@ pub fn resolve_with(
                 subagent_type = Some(if f == name {
                     format!("playbook:{f}")
                 } else {
-                    f.clone()
+                    variant_type(f)
                 });
                 file = Some(f.clone());
             }
@@ -250,8 +266,23 @@ impl Resolution {
             "file": self.file,
             "subagentType": self.subagent_type,
             "allowed": self.allowed,
+            "allowedTypes": self.allowed_types(),
             "satisfied": self.satisfied,
         })
+    }
+
+    /// `allowed` as the `subagent_type` values to pass the `Agent` tool.
+    pub fn allowed_types(&self) -> Vec<String> {
+        self.allowed
+            .iter()
+            .map(|f| {
+                if *f == self.name {
+                    format!("playbook:{f}")
+                } else {
+                    variant_type(f)
+                }
+            })
+            .collect()
     }
 
     pub fn to_text(&self) -> String {
@@ -388,6 +419,16 @@ pub fn run_list(home: &Path, claude: Option<&str>, root: Option<&Path>, json: bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_variant_type_carries_the_session_plugin_prefix_only_when_there_is_one() {
+        assert_eq!(
+            prefixed("reviewer-low", Some("playbook-variants")),
+            "playbook-variants:reviewer-low"
+        );
+        assert_eq!(prefixed("reviewer-low", None), "reviewer-low");
+        assert_eq!(prefixed("reviewer-low", Some("")), "reviewer-low");
+    }
     use crate::common::test_support::scratch_dir;
     use crate::config::write::{self, Tier};
 
