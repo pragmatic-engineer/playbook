@@ -113,7 +113,7 @@ Reading and analysing the changed files is where main-context rot accumulates, s
 
 Before spawning, `SELF_MODE` is already settled (Step 1), so decide here whether anything can be posted. The orchestrator invokes `playbook:grounding-review` now, for the sweep and the report format, and loads no `playbook:writing-style` here.
 
-Spawn ONE `reviewer` subagent (`subagent_type: playbook:reviewer`); it pins its own model tier, so the orchestrator doesn't set `model` on this call. Because the review is single-pass, its focus is the ENTIRE diff (logic, tests, security, data, types, perf, docs), not one lens.
+Spawn ONE `reviewer` subagent at **medium effort** (Opus model, set by the agent file). Run `playbook effort resolve agents reviewer --cap medium --json` and spawn the `subagentType` it returns: `reviewer-medium` (carrying the session plugin prefix when there is one, such as `playbook-variants:reviewer-medium`) in a session started with `ccc` or `ccd`, a lower variant when the user's ceilings are lower, or `playbook:reviewer` when the session has no variants. In that last case print one line, "No reviewer-medium variant in this session, running the reviewer at its default effort (start sessions with ccc for medium)." The cap never raises anything and a lower user ceiling still wins. If the command fails, spawn `playbook:reviewer` and print the same line. The orchestrator doesn't set `model` on this call. Because the review is single-pass, its focus is the ENTIRE diff (logic, tests, security, data, types, perf, docs), not one lens.
 
 The subagent prompt MUST include:
 

@@ -68,12 +68,19 @@ pub enum EffortCommand {
     /// For an agent it also names the file to dispatch and every file allowed
     /// under the ceiling.
     ///
-    /// Example: `playbook effort resolve agents reviewer --json`
+    /// `--cap <level>` adds a ceiling from the calling command, for example
+    /// `quick-review` holding its reviewer to `medium`. The lowest of the cap
+    /// and the user's ceilings applies.
+    ///
+    /// Example: `playbook effort resolve agents reviewer --cap medium --json`
     Resolve {
         /// agents, commands or skills
         kind: String,
         /// The component name, such as `reviewer` or `deep-review`
         name: String,
+        /// An extra ceiling from the caller: low, medium, high, xhigh or max
+        #[arg(long)]
+        cap: Option<String>,
         /// Print JSON
         #[arg(long)]
         json: bool,

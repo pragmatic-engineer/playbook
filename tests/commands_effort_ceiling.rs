@@ -94,3 +94,20 @@ fn the_resolved_names_are_real_components() {
         );
     }
 }
+
+#[test]
+fn quick_review_holds_its_reviewer_to_medium_with_a_fallback_line() {
+    let text = fs::read_to_string(commands_dir().join("quick-review.md")).unwrap();
+    assert!(
+        text.contains("playbook effort resolve agents reviewer --cap medium --json"),
+        "quick-review must resolve its reviewer with a medium cap"
+    );
+    assert!(
+        text.contains("reviewer-medium"),
+        "quick-review must name the medium variant"
+    );
+    assert!(
+        text.contains("No reviewer-medium variant in this session"),
+        "quick-review must say so when the variant is missing"
+    );
+}

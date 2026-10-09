@@ -177,6 +177,20 @@ pub fn resolve(
     resolve_with(kind, name, home, claude, root, &available_variants())
 }
 
+/// `resolve` with an extra ceiling `cap` from the calling command, such as
+/// `quick-review` holding its reviewer to `medium`. The lowest of the cap and
+/// the user's ceilings applies, and a cap never raises anything.
+pub fn resolve_capped(
+    kind: Kind,
+    name: &str,
+    home: &Path,
+    claude: Option<&str>,
+    root: Option<&Path>,
+    cap: Option<&str>,
+) -> Resolution {
+    resolve_inner(kind, name, home, claude, root, &available_variants(), cap)
+}
+
 /// `resolve` with the session's variants given instead of read from the
 /// environment.
 pub fn resolve_with(
@@ -187,14 +201,29 @@ pub fn resolve_with(
     root: Option<&Path>,
     available: &[String],
 ) -> Resolution {
+    resolve_inner(kind, name, home, claude, root, available, None)
+}
+
+fn resolve_inner(
+    kind: Kind,
+    name: &str,
+    home: &Path,
+    claude: Option<&str>,
+    root: Option<&Path>,
+    available: &[String],
+    cap: Option<&str>,
+) -> Resolution {
     let path = root.map(|r| kind.file(r, name));
     let known = path.as_deref().is_some_and(Path::is_file);
     let shipped = path.as_deref().and_then(shipped_effort);
     let configured = level_of(home, &config_key(kind, name));
     let global = level_of(home, super::KEY);
 
-    let ceiling =
-        lower(lower(claude, as_ceiling(&global)), as_ceiling(&configured)).map(str::to_string);
+    let ceiling = lower(
+        lower(lower(claude, as_ceiling(&global)), as_ceiling(&configured)),
+        cap.and_then(as_ceiling),
+    )
+    .map(str::to_string);
     let effective = match (shipped.as_deref(), ceiling.as_deref()) {
         (Some(s), Some(c)) => lower(Some(s), Some(c)).map(str::to_string),
         (Some(s), None) => Some(s.to_string()),
@@ -514,6 +543,58 @@ mod tests {
         .unwrap();
         let r = resolve(Kind::Command, "deep-review", &home, None, Some(&root));
         assert_eq!(r.effective.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn a_command_cap_picks_the_variant_at_or_below_it() {
+        let (home, root) = plugin("cmp-cap");
+        let have = vec!["reviewer-low".to_string(), "reviewer-medium".to_string()];
+        let r = resolve_inner(
+            Kind::Agent,
+            "reviewer",
+            &home,
+            None,
+            Some(&root),
+            &have,
+            Some("medium"),
+        );
+        assert_eq!(r.subagent_type.as_deref(), Some("reviewer-medium"));
+        assert_eq!(r.file.as_deref(), Some("reviewer-medium"));
+        assert!(r.satisfied);
+        // No variants in the session: the base agent runs and says it is above the cap.
+        let none = resolve_inner(
+            Kind::Agent,
+            "reviewer",
+            &home,
+            None,
+            Some(&root),
+            &[],
+            Some("medium"),
+        );
+        assert_eq!(none.subagent_type.as_deref(), Some("playbook:reviewer"));
+        assert!(!none.satisfied);
+        // A lower user ceiling still wins over the cap.
+        let low = resolve_inner(
+            Kind::Agent,
+            "reviewer",
+            &home,
+            Some("low"),
+            Some(&root),
+            &have,
+            Some("medium"),
+        );
+        assert_eq!(low.subagent_type.as_deref(), Some("reviewer-low"));
+        // A cap above the shipped effort changes nothing.
+        let high = resolve_inner(
+            Kind::Agent,
+            "reviewer",
+            &home,
+            None,
+            Some(&root),
+            &have,
+            Some("max"),
+        );
+        assert_eq!(high.subagent_type.as_deref(), Some("playbook:reviewer"));
     }
 
     #[test]
