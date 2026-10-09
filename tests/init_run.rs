@@ -689,12 +689,11 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     for step in &second.steps {
         // `system-prompt` and `memory` stay `Skipped` on both runs: neither
         // has anything to act on in this fixture.
-        let expected =
-            if ["system-prompt", "memory", "trust", "path"].contains(&step.name) {
-                StepStatus::Skipped
-            } else {
-                StepStatus::AlreadyCorrect
-            };
+        let expected = if ["system-prompt", "memory", "trust", "path"].contains(&step.name) {
+            StepStatus::Skipped
+        } else {
+            StepStatus::AlreadyCorrect
+        };
         assert_eq!(
             step.status, expected,
             "expected '{}' to report no change on a second run: {}",
