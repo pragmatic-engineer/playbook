@@ -8,7 +8,6 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 
 fn command_text(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -212,8 +211,8 @@ fn commit_and_push_reads_the_sign_off_setting_and_names_the_stand_down_cases() {
 
     // Assert
     assert!(
-        text.contains("playbook config get commit.signOff"),
-        "commit-and-push must read `commit.signOff`"
+        text.contains("commit.signOff") && step4.contains("playbook commit run"),
+        "commit-and-push must hand the `commit.signOff` decision to `playbook commit run`"
     );
     for case in ["--no-signoff", "prepare-commit-msg", "commit-msg"] {
         assert!(
@@ -227,41 +226,9 @@ fn commit_and_push_reads_the_sign_off_setting_and_names_the_stand_down_cases() {
     );
 }
 
-/// The `hook_writes_signoff` shell function from commit-and-push Step 4.
-fn hook_function() -> String {
-    let text = step_section(&command_text("commit-and-push"), "4");
-    let start = text
-        .find("hook_writes_signoff() {")
-        .expect("Step 4 must define hook_writes_signoff");
-    let end = text[start..]
-        .find("\n}\n")
-        .expect("hook_writes_signoff must close with a bare brace");
-    text[start..start + end + 3].to_string()
-}
-
-/// Run the extracted function against a hook script; true when it counts the
-/// hook as writing the trailer.
+/// Whether `playbook commit run` counts the hook script as writing the trailer.
 fn hook_counts_as_signing_off(script: &str) -> bool {
-    let dir = std::env::temp_dir().join(format!(
-        "playbook-hook-{}-{}",
-        std::process::id(),
-        script.len()
-    ));
-    fs::create_dir_all(&dir).unwrap();
-    let hook = dir.join("hook");
-    fs::write(&hook, script).unwrap();
-    let status = Command::new("bash")
-        .arg("-c")
-        .arg(format!(
-            "{}\nHOOK_FILE=\"$1\"\nhook_writes_signoff",
-            hook_function()
-        ))
-        .arg("bash")
-        .arg(&hook)
-        .status()
-        .expect("bash must run");
-    fs::remove_dir_all(&dir).ok();
-    status.success()
+    playbook::commit::run::hook_writes_signoff(script)
 }
 
 #[test]
@@ -311,7 +278,7 @@ fn commit_and_push_signs_when_a_key_is_set_and_the_docs_say_so() {
     .unwrap();
 
     // Assert
-    assert!(step4.contains("git commit ${AMEND_FLAG} ${SIGNOFF_FLAG} ${GPG_FLAG}"));
+    assert!(step4.contains("playbook commit run"));
     assert!(step4.contains("user.signingkey"));
     assert!(guide.contains("signed whenever"));
     assert!(!guide.contains("already passes `-s`"));

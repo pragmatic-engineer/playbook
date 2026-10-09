@@ -6,13 +6,13 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    agents, cc, ci, common, config, deps, doctor, effort, eval, gate, handoff, hooks, init, json,
-    manifest, memory_import, mode, pr, release, review, sanitize, settings, statusline, trust,
-    update, usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand,
-    DashboardCommand, DepsCommand, DoctorCommand, EvalCommand, GateCommand, HandoffCommand,
-    JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand, ReleaseCommand,
-    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, UsageCommand,
-    WorktreeCommand,
+    agents, cc, ci, commit, common, config, deps, doctor, effort, eval, gate, handoff, hooks, init,
+    json, manifest, memory_import, mode, pr, release, review, sanitize, settings, statusline,
+    trust, update, usage, worktree, AgentsCommand, CcCommand, Cli, Command, CommitCommand,
+    ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand, EvalCommand, GateCommand,
+    HandoffCommand, JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand,
+    ReleaseCommand, ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SettingsCommand,
+    UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -693,6 +693,68 @@ fn main() {
                                 eprintln!("config list: {err}");
                                 std::process::exit(1);
                             }
+                        }
+                    }
+                }
+            }
+        }
+        Command::Commit { sub } => {
+            let dir = std::env::current_dir().unwrap_or_default();
+            match sub {
+                CommitCommand::Prepare { all, update, amend } => {
+                    let opts = commit::prepare::Options {
+                        stage_all: all,
+                        stage_update: update,
+                        amend,
+                    };
+                    match commit::prepare::run(&dir, opts) {
+                        Ok(text) => println!("{text}"),
+                        Err(err) => {
+                            eprintln!("ERROR: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                CommitCommand::Run {
+                    message_file,
+                    amend,
+                    auto,
+                    no_signoff,
+                } => {
+                    let (path, temp) = match message_file {
+                        Some(p) => (p, false),
+                        None => {
+                            let p = std::env::temp_dir()
+                                .join(format!("playbook-commit-{}.txt", std::process::id()));
+                            if let Err(e) = std::fs::write(&p, read_stdin_to_string()) {
+                                eprintln!("ERROR: could not store the message: {e}");
+                                std::process::exit(1);
+                            }
+                            (p, true)
+                        }
+                    };
+                    let slug = common::repo_slug();
+                    let signoff_on = config::resolve_valid(
+                        "commit.signOff",
+                        &common::home_dir(),
+                        (!slug.is_empty()).then_some(slug.as_str()),
+                    )
+                    .map(|(v, _, _)| v != serde_json::Value::Bool(false))
+                    .unwrap_or(true);
+                    let opts = commit::run::Options {
+                        amend,
+                        auto,
+                        no_signoff,
+                    };
+                    let result = commit::run::run(&dir, &path, opts, signoff_on);
+                    if temp {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    match result {
+                        Ok(text) => println!("{text}"),
+                        Err(err) => {
+                            eprintln!("{err}");
+                            std::process::exit(1);
                         }
                     }
                 }
