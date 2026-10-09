@@ -43,6 +43,8 @@ Older versions kept `config.json` files (global, `orgs/<owner>/` and `repos/<own
 | `auto.warnPct` | `70` | whole number, 1 to 100 | The percent of `auto.budgetUsd` at which the spend hook warns once. |
 | `fix.maxFiles` | `3` | whole number, 1 or more | `/playbook:fix` stops and hands off to `/playbook:plan` when more files than this change. |
 | `fix.maxLines` | `500` | whole number, 1 or more | `/playbook:fix` stops the same way when more lines than this change, not counting the new test. |
+| `review.stackMaxPrs` | `6` | whole number, 1 or more | The quick and deep review commands ask again before reviewing a whole PR stack with more open PRs than this. |
+| `review.stackMaxLines` | `3000` | whole number, 1 or more | They ask again when the open PRs of the stack change more lines than this. |
 
 ## See also
 

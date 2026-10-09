@@ -1,7 +1,7 @@
 ---
 description: Use for a routine PR review or a quick check of your own branch. Single pass with grounding-review discipline and Conventional Comments; posts a pending GitHub review, or only reports when no PR is named, with --self, in auto mode, or when the PR is yours.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[--help] [PR number] [--self] [--auto] [--ask]"
+argument-hint: "[--help] [PR number] [--self] [--this-pr] [--whole-stack] [--auto] [--ask]"
 model: sonnet
 effort: medium
 ---
@@ -108,6 +108,16 @@ gh pr diff <PR_NUMBER>
 ```
 
 Capture: `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. You'll need them for the API calls in Step 4. `REVIEW_JSON` resolves to `/tmp/<org>/<repo>/quick-review-<number>.json`, and its directory is created here so the Step 4 write succeeds.
+
+## Step 1b: Stack check
+
+Right after Step 1, run:
+
+```bash
+playbook skill ref grounding-review stack-review
+```
+
+Read the file it prints and follow it. A PR that is not in a stack gets no question and nothing changes in this file. When the PR is in a stack, that file decides the scope (this PR only, the whole stack, or the whole stack with deep review), builds one shared context, and says how Steps 2 to 4 and the posting step differ for a whole stack. Strip `--this-pr` and `--whole-stack` before reading the other arguments.
 
 ## Step 2: Delegate the review pass (isolated reviewer subagent)
 
