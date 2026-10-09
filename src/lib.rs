@@ -172,17 +172,18 @@ pub enum Command {
     },
     /// Set playbook's own ceiling on effort
     ///
-    /// `max` (the default) sets no ceiling, so each skill, command and agent
-    /// keeps the effort it ships with. `low`, `medium`, `high` or `xhigh` caps
-    /// them. The key is `maxEffortLevel`, named like Claude Code's. The
-    /// effective ceiling is the lower of this and Claude Code's own
+    /// `auto` (the default) sets no ceiling, so Claude Code's own
+    /// `maxEffortLevel` decides how high effort may go. Each skill, command and
+    /// agent still keeps the effort it ships with. `low`, `medium`, `high`,
+    /// `xhigh` or `max` set playbook's own ceiling. The key is
+    /// `maxEffortLevel`, named like Claude Code's. The effective ceiling is the lower of this and Claude Code's own
     /// `maxEffortLevel`, which playbook only reads and never changes. Sessions
     /// started with `ccc` or `ccd` get the ceiling. With no level, shows both
     /// values and the one that wins.
     ///
     /// Example: `playbook effort xhigh`
     Effort {
-        /// low, medium, high, xhigh or max
+        /// auto, low, medium, high, xhigh or max
         level: Option<String>,
         /// Print the status as JSON (with no level)
         #[arg(long)]
