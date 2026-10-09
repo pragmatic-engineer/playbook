@@ -88,6 +88,8 @@ If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, a
 
 **Effort ceiling.** Also run `playbook effort resolve commands implement --json`. Its `ceiling` is the highest effort the user allows for this run (`null` means no limit). Hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. If the command fails, carry on with no ceiling.
 
+**Routing.** Where you choose what to spawn, also run `playbook route implement --json` and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on. For the implement tier add `--tier low|medium|high` as the skill says.
+
 - **`ask` mode:** behave exactly as this file describes for an interactive run. Every prompt below stays.
 - **`auto` mode:** take the recommended answer at each decision instead of prompting, and record every answer you chose yourself in an Assumptions list. Print that list in the final output.
 
