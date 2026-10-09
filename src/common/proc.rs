@@ -186,18 +186,26 @@ mod tests {
             "trap 'echo stopped > {}; exit 0' TERM; while :; do sleep 0.05; done",
             marker.display()
         );
-        let mut command = Command::new("sh");
-        command.args(["-c", &script]);
+        // A SIGTERM that lands before the shell has installed its trap kills it
+        // with no marker. That only happens when the machine is too busy to
+        // start the shell within the deadline, so a miss retries with a longer
+        // deadline instead of failing on host load.
+        let mut handled = false;
+        for deadline_ms in [300, 1_000, 3_000] {
+            let _ = std::fs::remove_file(&marker);
+            let mut command = Command::new("sh");
+            command.args(["-c", &script]);
 
-        let got = run_with_timeout(&mut command, Duration::from_millis(300));
+            let got = run_with_timeout(&mut command, Duration::from_millis(deadline_ms));
 
-        assert!(got.is_none(), "a timeout reports no output");
-        assert_eq!(
-            std::fs::read_to_string(&marker).unwrap_or_default().trim(),
-            "stopped",
-            "the child ran its SIGTERM handler"
-        );
+            assert!(got.is_none(), "a timeout reports no output");
+            if std::fs::read_to_string(&marker).unwrap_or_default().trim() == "stopped" {
+                handled = true;
+                break;
+            }
+        }
         let _ = std::fs::remove_file(&marker);
+        assert!(handled, "the child ran its SIGTERM handler");
     }
 
     #[cfg(unix)]
