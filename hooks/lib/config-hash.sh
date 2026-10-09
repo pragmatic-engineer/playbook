@@ -5,7 +5,7 @@
 # Hook scripts are matched in both languages (.sh and .py) so the hash keeps
 # covering every hook after the python migration; test files in either language
 # are excluded so editing a test never trips a false config-drift warning.
-# Sourceable by both bash hooks and the zsh cc modules.
+# Sourceable by both bash hooks and the zsh ccc modules.
 config_hash() {
     {
         cat "$HOME/.claude/settings.json" 2>/dev/null

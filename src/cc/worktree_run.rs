@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wires the ported `cc::worktree` library into the `cc worktree <branch>
+//! Wires the ported `cc::worktree` library into the `ccc worktree <branch>
 //! [env-base]` subcommand, the Rust replacement for the retired shell launcher's
-//! `cc worktree`.
+//! `ccc worktree`.
 //!
 //! Every git-driving decision already lives in [`crate::cc::worktree`]; this
 //! module is composition only, keeping the order the
@@ -33,7 +33,7 @@ const EXIT_COULD_NOT_ENTER: i32 = 4;
 const EXIT_OCCUPIED_ON_REMOTE: i32 = 5;
 const EXIT_NOT_A_GIT_REPO: i32 = 10;
 
-/// Runs the whole `cc worktree <branch> [env-base]` flow starting from
+/// Runs the whole `ccc worktree <branch> [env-base]` flow starting from
 /// `start_dir`, printing the worktree path to stdout on success and returning
 /// the process exit code. `start_dir` stands in for the shell's implicit cwd
 /// at the moment `_cc_worktree` is invoked, passed explicitly rather than

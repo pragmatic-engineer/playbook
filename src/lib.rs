@@ -59,14 +59,14 @@ pub enum Command {
     /// Install or repair your local Claude Code setup
     ///
     /// Safe to run again: it only touches what is missing or out of date.
-    /// Use the flags to opt in to the system prompt and the `cc` launcher.
+    /// Use the flags to opt in to the system prompt and the `ccc` launcher.
     ///
     /// Example: `playbook init --system-prompt --aliases`
     Init {
         /// Also install the playbook system prompt (opt in; an existing copy is refreshed either way)
         #[arg(long)]
         system_prompt: bool,
-        /// Also install the `cc` and `ccd` launcher shortcuts and wire your shell rc file (opt in)
+        /// Also install the `ccc` and `ccd` launcher shortcuts and wire your shell rc file (opt in)
         #[arg(long)]
         aliases: bool,
     },
@@ -92,16 +92,12 @@ pub enum Command {
         #[arg(long)]
         remove_binary: bool,
     },
-    /// Print the shell functions `pb`, `pbd`, `cc` and `ccd`
+    /// Print the shell functions `ccc` and `ccd`
     ///
-    /// `pb` and `pbd` are the same launchers as `cc` and `ccd`, under names
-    /// that do not clash with the C compiler. Pass `--no-cc` to leave `cc` and
-    /// `ccd` undefined. Load them from your rc file with
-    /// `eval "$(playbook shell-init)"`.
+    /// `ccc` starts a session (named so it does not shadow the C compiler,
+    /// `cc`), and `ccd` does the same with permission prompts skipped. Load
+    /// them from your rc file with `eval "$(playbook shell-init)"`.
     ShellInit {
-        /// Do not define `cc` and `ccd` (they shadow the C compiler)
-        #[arg(long)]
-        no_cc: bool,
         /// Target shell (default: the one named by `$SHELL`)
         #[arg(long, value_parser = ["bash", "zsh"])]
         shell: Option<String>,
@@ -191,9 +187,9 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Launcher helpers behind the `cc` shell shortcut
+    /// Launcher helpers behind the `ccc` shell shortcut
     ///
-    /// Sessions are started by the `cc` shell shortcut (install it with
+    /// Sessions are started by the `ccc` shell shortcut (install it with
     /// `playbook init --aliases`). These subcommands do its housekeeping:
     /// list sessions, prune state, clear caches, and create worktrees.
     ///
@@ -344,7 +340,7 @@ pub enum Command {
     /// Mark a directory as trusted in Claude Code
     ///
     /// Writes to `~/.claude.json` so Claude Code's first-launch trust prompt
-    /// does not block `cc` or `ccd`. Always exits 0, even on failure, so a
+    /// does not block `ccc` or `ccd`. Always exits 0, even on failure, so a
     /// script can call it without checking.
     Trust {
         /// Absolute path of the directory to trust
@@ -925,13 +921,13 @@ pub enum HookName {
 /// `playbook cc` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum CcCommand {
-    /// Mode of the `cc` shortcut: clean up and resume (no action by itself)
+    /// Mode of the `ccc` shortcut: clean up and resume (no action by itself)
     Clean,
-    /// Mode of the `cc` shortcut: start a fresh session (no action by itself)
+    /// Mode of the `ccc` shortcut: start a fresh session (no action by itself)
     Fresh,
-    /// Mode of the `cc` shortcut: resume a session as it was (no action by itself)
+    /// Mode of the `ccc` shortcut: resume a session as it was (no action by itself)
     ///
-    /// The `cc` shortcut handles these modes. Running this command directly
+    /// The `ccc` shortcut handles these modes. Running this command directly
     /// does nothing and exits 0.
     Raw {
         /// Session id to resume (default: the most recent)
@@ -945,7 +941,7 @@ pub enum CcCommand {
     /// Clear caches that would freeze old settings into a session
     #[command(name = "bust-cache")]
     BustCache,
-    /// Run the launcher the `cc` and `ccd` shell functions call
+    /// Run the launcher the `ccc` and `ccd` shell functions call
     Launch {
         /// Pass `--dangerously-skip-permissions` to claude (the `ccd` form)
         #[arg(long)]
@@ -954,7 +950,7 @@ pub enum CcCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Background half of `cc worktree`, spawned by the launcher
+    /// Background half of `ccc worktree`, spawned by the launcher
     #[command(hide = true)]
     Housekeep {
         #[arg(long)]

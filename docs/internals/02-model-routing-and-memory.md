@@ -6,7 +6,7 @@ The session model defaults to Sonnet. Two systems shape which model handles a gi
 
 The policy lives in `prompts/SYSTEM_PROMPT.md`. Three tiers:
 
-**Sonnet** is the session default. The `cc` launcher sets it at session start and it covers most coding work.
+**Sonnet** is the session default. The `ccc` launcher sets it at session start and it covers most coding work.
 
 **Haiku** is the default for spawned subagents on mechanical, formatting, or search tasks. It's 3x cheaper. Escalate to Sonnet when the subagent does real coding, and to Opus when it needs architecture.
 
@@ -127,5 +127,5 @@ Traversal depth is 1 for all edge types except `supersedes`, which is followed f
 ## See also
 
 - [Decisions and Memory](../guides/03-decisions-and-memory.md): using memory day-to-day and the `/playbook:learn-project` command.
-- [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `cc` launcher that sets the session model.
+- [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `ccc` launcher that sets the session model.
 - [Docs index](../index.md)

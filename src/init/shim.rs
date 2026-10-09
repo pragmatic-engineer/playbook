@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wires the rc file to load the `cc`/`ccd` launcher with
+//! Wires the rc file to load the `ccc`/`ccd` launcher with
 //! `eval "$(playbook shell-init)"`, and upgrades the legacy `source` lines.
 
 use crate::common::paths::playbook_root_from;

@@ -4,7 +4,7 @@
 //! Replaces the retired shell session helpers: session lookup, enumeration and listing.
 //!
 //! A session is a UUID-named `.jsonl` transcript under the project directory.
-//! The `customTitle` embedded in its body is what `cc` resumes by, so a lookup
+//! The `customTitle` embedded in its body is what `ccc` resumes by, so a lookup
 //! that matched on filename alone would resume the wrong session.
 
 use super::project_slug;
@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// How many sessions `cc list` prints, matching the shell's `head -10`.
+/// How many sessions `ccc list` prints, matching the shell's `head -10`.
 const LIST_LIMIT: usize = 10;
 
 /// Shown when a transcript carries no customTitle, matching the shell default.
@@ -53,7 +53,7 @@ pub fn find_by_title(project_dir: &Path, name: &str) -> Option<String> {
 /// **Quirk, ported deliberately:** at most one session per whole-second mtime.
 /// The shell ended with `sort -rnu -k1,1`, and `-u` deduplicates on the sort
 /// key, which is the timestamp. Two sessions written in the same second collapse
-/// to one and the other silently disappears from `cc list`. Kept for parity;
+/// to one and the other silently disappears from `ccc list`. Kept for parity;
 /// which of the tied pair survives is unspecified in both implementations, so do
 /// not rely on it. Worth fixing in both at some point, not during a port.
 pub fn enumerate(project_dir: &Path) -> Vec<Session> {
@@ -85,7 +85,7 @@ fn epoch_secs(t: SystemTime) -> u64 {
         .unwrap_or(0)
 }
 
-/// The rendered `cc list` output, returned rather than printed so tests can
+/// The rendered `ccc list` output, returned rather than printed so tests can
 /// assert on it without capturing stdout.
 pub fn render_list(project_dir: &Path, cwd: &str) -> String {
     let project_name = cwd.rsplit('/').next().unwrap_or(cwd);

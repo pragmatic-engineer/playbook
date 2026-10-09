@@ -3,7 +3,7 @@
 
 //! Launcher internals, ported from `shell/shared/*.sh` for WU-16.
 //!
-//! These run before and after every `cc` launch, so each one degrades to a
+//! These run before and after every `ccc` launch, so each one degrades to a
 //! no-op rather than failing: a launcher that refuses to start because a cache
 //! directory is missing is worse than a stale cache.
 

@@ -143,7 +143,7 @@ you have not read.
 
 6. Verify with `/playbook:doctor` in a Claude Code session.
 
-Route 2 does not install the `cc`/`ccd` shell launchers unless you ask:
+Route 2 does not install the `ccc`/`ccd` shell launchers unless you ask:
 `playbook init --aliases` installs them and wires your rc file. You can also
 run `/playbook:setup`.
 
@@ -160,8 +160,8 @@ optional or cosmetic.
 |---|---|---|
 | 1. Plugin content | Always, after `claude plugin install` | Skills, commands and subagents load from the plugin. No files written to `~/.claude`. Only the worktree hooks and a SessionStart migration check are registered by the plugin. The 13 functional hooks and 5 guards are written into `settings.json` by `playbook init` (Layer 2) and need the binary (Layer 6). |
 | 2. Safety guards and settings | After `install.sh`, or `/playbook:setup` | Wires the guards and seeds or merges `~/.claude/settings.json`. `install.sh` wires them as `playbook hook <name>`; `/playbook:setup` still copies the legacy `~/.claude/hooks/*.sh` scripts, which `/playbook:doctor` reports as not wired. |
-| 3. Shell launchers | Opt-in (recommended) | Adds `cc` and `ccd` to `~/.bashrc` or `~/.zshrc`. Both shells work; `cc clean` and `cc raw` are zsh-only (see Usage). |
-| 4. Custom system prompt | Opt-in (recommended) | Copies `prompts/SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/`; `cc` passes it via `--system-prompt-file`. Plugin content works without it. |
+| 3. Shell launchers | Opt-in (recommended) | Adds `ccc` and `ccd` to `~/.bashrc` or `~/.zshrc`. Both shells work; `ccc clean` and `ccc raw` are zsh-only (see Usage). |
+| 4. Custom system prompt | Opt-in (recommended) | Copies `prompts/SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/`; `ccc` passes it via `--system-prompt-file`. Plugin content works without it. |
 | 5. Status line | After `install.sh` | Runs from the binary (`playbook statusline`), and `playbook init` points `statusLine.command` at it. `/playbook:doctor` checks it. `playbook init` and `install.sh` also mark `~/.config/playbook` as a trusted workspace in `~/.claude.json` (through `playbook trust`), so a `claude` session started directly in that folder doesn't hit the trust dialog and silently skip the status line. Best-effort: a missing `~/.claude.json` is left alone. |
 | 6. The `playbook` binary | `install.sh` or `/playbook:setup` | Installs the release binary to `~/.local/bin`, checksum-verified. **Every ported hook is a bare `playbook hook <name>` command, so without this all 20 are dead.** `claude plugin install` alone does not provide it. |
 | 7. No dangling hook commands | Always | Flags any `settings.json` hook command pointing at a file that no longer exists, such as a leftover pre-migration Python hook a settings merge never removed. Fails open (silent no-op) if unchecked. |
@@ -169,24 +169,24 @@ optional or cosmetic.
 ## Usage
 
 ```bash
-cc                     # resume this directory's last session, or start fresh
+ccc                     # resume this directory's last session, or start fresh
 ccd                    # same, with --dangerously-skip-permissions
-cc fresh               # new session, no history
-cc list                # recent sessions for this directory
-cc worktree <branch>   # create/enter a git worktree, then start a session there
-cc new <branch>        # alias for cc worktree
-cc prune               # prune old transcripts now
-cc clean               # resume with /model, /effort, /config, /output-style, /style stripped
-cc raw [id]            # resume verbatim, no fork or cleanup
+ccc fresh               # new session, no history
+ccc list                # recent sessions for this directory
+ccc worktree <branch>   # create/enter a git worktree, then start a session there
+ccc new <branch>        # alias for ccc worktree
+ccc prune               # prune old transcripts now
+ccc clean               # resume with /model, /effort, /config, /output-style, /style stripped
+ccc raw [id]            # resume verbatim, no fork or cleanup
 ```
 
-`pb` and `pbd` are the same two commands under names that do not clash with the C compiler (`cc`). Use them everywhere you see `cc` and `ccd` below. To stop playbook defining `cc` and `ccd` at all, load the functions with `eval "$(playbook shell-init --no-cc)"`.
+The launcher is `ccc`, not `cc`, because `cc` is the C compiler on most systems. `ccd` is the same launcher with permission prompts skipped.
 
-`cc` loads the system prompt (when installed), picks a model, and prunes old transcripts (keeps the newest 5; set `CCD_KEEP` to change, `CCD_KEEP=0` disables).
+`ccc` loads the system prompt (when installed), picks a model, and prunes old transcripts (keeps the newest 5; set `CCD_KEEP` to change, `CCD_KEEP=0` disables).
 
-**One launcher, both shells.** `cc` and `ccd` are two small shell functions printed by `playbook shell-init`, and the work happens in the binary (`playbook cc launch`). So bash and zsh behave identically: every subcommand above, the config-drift auto-fork on the default resume, and retention all work the same in either shell. The rc file holds one line, `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`; `/playbook:setup --install-aliases` (or `playbook init --aliases`) writes it, and also rewrites an older `source .../cc.sh` line to it.
+**One launcher, both shells.** `ccc` and `ccd` are two small shell functions printed by `playbook shell-init`, and the work happens in the binary (`playbook cc launch`). So bash and zsh behave identically: every subcommand above, the config-drift auto-fork on the default resume, and retention all work the same in either shell. The rc file holds one line, `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`; `/playbook:setup --install-aliases` (or `playbook init --aliases`) writes it, and also rewrites an older `source .../cc.sh` line to it.
 
-`cc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine lives in the binary (`playbook cc worktree`), and the shell function `cd`s into the new worktree afterward. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
+`ccc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine lives in the binary (`playbook cc worktree`), and the shell function `cd`s into the new worktree afterward. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
 
 ## Commands
 
@@ -305,7 +305,7 @@ Full documentation: [`docs/index.md`](docs/index.md).
 
 ## System prompt
 
-`prompts/SYSTEM_PROMPT.md` sets the persona and session rules `cc` loads on every session, when installed. See [docs/concepts/01-system-prompt.md](docs/concepts/01-system-prompt.md).
+`prompts/SYSTEM_PROMPT.md` sets the persona and session rules `ccc` loads on every session, when installed. See [docs/concepts/01-system-prompt.md](docs/concepts/01-system-prompt.md).
 
 ## Memory
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Decision and path logic for `cc worktree`, ported from the retired shell launcher.
+//! Decision and path logic for `ccc worktree`, ported from the retired shell launcher.
 //!
 //! Final slice of WU-17: every decision and git-driving action `_wt_main`
 //! takes is now ported. What is left outside this file is CLI wiring:
@@ -1595,7 +1595,7 @@ pub struct HousekeepContext<'a> {
 /// it, so there is a real design decision here (a detached child process? a
 /// thread the CLI declines to join? something else?) and it is not this
 /// slice's to make. This function is the block's BODY only, run
-/// synchronously and left for whatever wires the `cc worktree` CLI together
+/// synchronously and left for whatever wires the `ccc worktree` CLI together
 /// to background however it decides is right. That deferral is deliberate,
 /// not an oversight.
 ///
