@@ -21,6 +21,7 @@ Task-oriented workflows.
 - [Review and PR flow](guides/02-review-and-pr-flow.md): commit, review, and work through feedback.
 - [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/playbook:adr`, build project knowledge with `/playbook:learn-project`.
 - [Config keys](guides/04-config-keys.md): every `playbook config` key with its default, allowed values and what it does.
+- [CLI and config reference](reference/cli-and-config.md): every command, flag and config key, generated from the code so it cannot drift.
 
 ## Authoring
 
