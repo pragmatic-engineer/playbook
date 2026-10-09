@@ -39,6 +39,7 @@ How the machine works.
 - [Usage dashboard](internals/04-usage-dashboard.md): `playbook usage`, where the numbers come from, the store, and how the local dashboard server runs safely.
 - [Headless mode](internals/05-headless-mode.md): what runs without a person at the keyboard, real `claude -p` exit codes, how the hooks behave headless, and a first CI use case.
 - [Release channels](internals/06-release-channels.md): how a tagged release reaches GitHub assets, the Homebrew tap and the marketplace, the trimmed plugin archive, and the secret it needs.
+- [Migrations](internals/07-migrations.md): how `playbook init` carries an install across breaking changes, the three migration kinds, and how edits to placed files are detected.
 
 ## Decisions
 
