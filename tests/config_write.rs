@@ -36,16 +36,23 @@ fn repo_config_path(home: &Path, owner: &str, repo: &str) -> PathBuf {
         .join("config.json")
 }
 
-fn read_json(path: &Path) -> Value {
-    let raw = fs::read_to_string(path).expect("tier file should be readable");
-    serde_json::from_str(&raw).expect("tier file should be valid JSON")
+fn root(home: &Path) -> PathBuf {
+    home.join(".config").join("playbook")
+}
+
+fn db(home: &Path) -> PathBuf {
+    playbook::config::store::db_path(&root(home))
+}
+
+/// Everything stored, as `config export` prints it.
+fn stored(home: &Path) -> Value {
+    playbook::config::store::export(&root(home)).expect("the store should be readable")
 }
 
 #[test]
-fn writing_to_an_absent_tier_creates_its_directory_and_file() {
+fn writing_to_an_absent_tier_creates_the_database_and_the_row() {
     // Arrange
     let home = scratch_home("fresh");
-    let path = repo_config_path(&home, "owner", "repo");
 
     // Act
     let result = set(
@@ -58,18 +65,26 @@ fn writing_to_an_absent_tier_creates_its_directory_and_file() {
 
     // Assert
     assert!(result.is_ok());
-    assert_eq!(read_json(&path), json!({"autoReview": {"enabled": false}}));
+    assert_eq!(
+        stored(&home)["repos"]["owner/repo"],
+        json!({"autoReview.enabled": false})
+    );
 
     let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
-fn set_merges_a_new_key_without_dropping_existing_content() {
+fn set_keeps_the_other_keys_of_the_same_tier() {
     // Arrange
     let home = scratch_home("merge");
-    let path = repo_config_path(&home, "owner", "repo");
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path, r#"{"someFutureKey": 1}"#).unwrap();
+    set(
+        Tier::Repo,
+        "autoReview.type",
+        json!("quick"),
+        &home,
+        Some("owner/repo"),
+    )
+    .unwrap();
 
     // Act
     let result = set(
@@ -83,8 +98,8 @@ fn set_merges_a_new_key_without_dropping_existing_content() {
     // Assert
     assert!(result.is_ok());
     assert_eq!(
-        read_json(&path),
-        json!({"someFutureKey": 1, "autoReview": {"enabled": true}})
+        stored(&home)["repos"]["owner/repo"],
+        json!({"autoReview.type": "quick", "autoReview.enabled": true})
     );
 
     let _ = fs::remove_dir_all(&home);
@@ -94,7 +109,6 @@ fn set_merges_a_new_key_without_dropping_existing_content() {
 fn an_unknown_key_is_rejected_and_writes_nothing() {
     // Arrange
     let home = scratch_home("unknown-key");
-    let path = repo_config_path(&home, "owner", "repo");
 
     // Act
     let result = set(
@@ -109,14 +123,13 @@ fn an_unknown_key_is_rejected_and_writes_nothing() {
     let err = result.unwrap_err();
     assert!(matches!(&err, ConfigError::UnknownKey(k) if k == "notAKnownKey"));
     assert!(err.to_string().contains("autoReview.enabled"));
-    assert!(!path.exists());
+    assert!(!db(&home).exists());
 }
 
 #[test]
 fn a_wrong_typed_value_is_rejected_and_writes_nothing() {
     // Arrange
     let home = scratch_home("wrong-type");
-    let path = repo_config_path(&home, "owner", "repo");
 
     // Act
     let result = set(
@@ -129,14 +142,13 @@ fn a_wrong_typed_value_is_rejected_and_writes_nothing() {
 
     // Assert
     assert!(matches!(result.unwrap_err(), ConfigError::WrongType { .. }));
-    assert!(!path.exists());
+    assert!(!db(&home).exists());
 }
 
 #[test]
 fn an_out_of_enum_value_is_rejected_and_writes_nothing() {
     // Arrange
     let home = scratch_home("bad-enum");
-    let path = repo_config_path(&home, "owner", "repo");
 
     // Act
     let result = set(
@@ -152,7 +164,7 @@ fn an_out_of_enum_value_is_rejected_and_writes_nothing() {
         result.unwrap_err(),
         ConfigError::InvalidEnumValue { .. }
     ));
-    assert!(!path.exists());
+    assert!(!db(&home).exists());
 }
 
 #[test]
@@ -174,14 +186,10 @@ fn repo_tier_with_no_repo_slug_is_rejected_and_writes_nothing() {
 
 #[test]
 fn an_uncreatable_directory_is_rejected_with_a_path_naming_error() {
-    // Arrange: a regular file occupies the exact path the repo's parent
-    // directory needs to be, so `create_dir_all` cannot succeed.
+    // Arrange: a regular file occupies the playbook root, so the database
+    // directory cannot be created.
     let home = scratch_home("uncreatable-dir");
-    let blocking_path = home
-        .join(".config")
-        .join("playbook")
-        .join("repos")
-        .join("owner");
+    let blocking_path = root(&home);
     fs::create_dir_all(blocking_path.parent().unwrap()).unwrap();
     fs::write(&blocking_path, "not a directory").unwrap();
 
@@ -232,10 +240,9 @@ fn a_non_object_existing_tier_file_is_rejected_rather_than_overwritten() {
 }
 
 #[test]
-fn twenty_concurrent_writers_never_tear_the_tier_file() {
+fn twenty_concurrent_writers_keep_every_key() {
     // Arrange
     let home = scratch_home("concurrent");
-    let path = repo_config_path(&home, "owner", "repo");
     let thread_count = 20;
 
     // Act
@@ -269,26 +276,18 @@ fn twenty_concurrent_writers_never_tear_the_tier_file() {
         handle.join().unwrap().expect("each write should succeed");
     }
 
-    // Assert: valid JSON, and whichever keys survived hold a value some
-    // thread actually wrote. `with_dir_lock` is fail-open (it still runs the
-    // critical section after exhausting its retries), so an entire key
-    // dropping under sustained contention is an accepted lost update, not a
-    // defect this test rules out; only a torn or unparseable file would be.
-    let content = read_json(&path);
-    let auto_review = content.get("autoReview").and_then(|v| v.as_object());
-    if let Some(enabled) = auto_review.and_then(|o| o.get("enabled")) {
-        enabled.as_bool().expect("enabled should be a bool");
-    }
-    if let Some(kind) = auto_review.and_then(|o| o.get("type")) {
-        let kind = kind.as_str().expect("type should be a string");
-        assert!(kind == "quick" || kind == "deep");
-    }
+    // Assert: SQLite serializes the writers, so both keys are present and
+    // hold a value some thread actually wrote.
+    let content = stored(&home)["repos"]["owner/repo"].clone();
+    content["autoReview.enabled"]
+        .as_bool()
+        .expect("enabled should be a bool");
+    let kind = content["autoReview.type"]
+        .as_str()
+        .expect("type should be a string");
+    assert!(kind == "quick" || kind == "deep");
 
     let _ = fs::remove_dir_all(&home);
-}
-
-fn global_config_path(home: &Path) -> PathBuf {
-    home.join(".config").join("playbook").join("config.json")
 }
 
 /// Writes `value` to the global tier and asserts the write is refused with a
@@ -309,8 +308,8 @@ fn assert_rejected(key: &str, value: &Value, constraint: &str) {
         "{key} = {value} must explain '{constraint}': {message}"
     );
     assert!(
-        !global_config_path(&home).exists(),
-        "{key} = {value}: a rejected write must not create the file"
+        !db(&home).exists(),
+        "{key} = {value}: a rejected write must not create the database"
     );
 
     let _ = fs::remove_dir_all(&home);
@@ -326,12 +325,7 @@ fn assert_written(key: &str, value: &Value) {
 
     // Assert
     result.unwrap_or_else(|e| panic!("{key} = {value} must be accepted: {e}"));
-    let stored = read_json(&global_config_path(&home));
-    let leaf = key
-        .split('.')
-        .fold(&stored, |node, segment| &node[segment])
-        .clone();
-    assert_eq!(&leaf, value, "{key}");
+    assert_eq!(&stored(&home)["global"][key], value, "{key}");
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -406,7 +400,7 @@ fn a_non_number_for_a_numeric_auto_or_fix_key_is_rejected_and_writes_nothing() {
         // Assert
         let err = result.expect_err(&format!("{key} = banana must be rejected"));
         assert!(err.to_string().contains(key), "{err}");
-        assert!(!global_config_path(&home).exists(), "{key}");
+        assert!(!db(&home).exists(), "{key}");
 
         let _ = fs::remove_dir_all(&home);
     }
@@ -438,7 +432,7 @@ fn a_non_bool_for_the_pr_and_commit_settings_is_rejected_and_writes_nothing() {
             let err = result.expect_err(&format!("{key} = {value} must be rejected"));
             assert!(matches!(err, ConfigError::WrongType { .. }), "{key}: {err}");
             assert!(err.to_string().contains(key), "{err}");
-            assert!(!global_config_path(&home).exists(), "{key}");
+            assert!(!db(&home).exists(), "{key}");
 
             let _ = fs::remove_dir_all(&home);
         }

@@ -89,11 +89,7 @@ impl Session {
         let mode = if self.env.is_empty() { "auto" } else { "ask" };
         let config =
             json!({"mode": mode, "auto": {"budgetUsd": budget_usd, "warnPct": warn_pct.into()}});
-        fs::write(
-            self.s.home.join(".config/playbook/config.json"),
-            config.to_string(),
-        )
-        .expect("config file is writable");
+        auto_env::seed_raw_global_config(&self.s.home, &config.to_string());
     }
 
     fn park_note(&self) -> String {
@@ -1064,7 +1060,7 @@ fn ask_mode_writes_nothing_in_the_runtime_root() {
         match config {
             Some(mode) => session.s.seed_mode_config(mode),
             None => {
-                let _ = fs::remove_file(session.s.home.join(".config/playbook/config.json"));
+                auto_env::clear_config(&session.s.home);
             }
         }
         session.append_telemetry("4.0");
@@ -1751,7 +1747,7 @@ fn an_unpriced_model_is_tolerated_when_telemetry_reports_the_cost() {
 fn a_config_that_turns_unreadable_mid_session_keeps_the_cap_on() {
     // Arrange: a session at its cap whose config file then becomes garbage
     let session = Session::at_budget("config-broken", AutoFrom::Config);
-    fs::write(session.tier_files()[0].1.clone(), "{not json").expect("config rewrite");
+    auto_env::seed_raw_global_config(&session.s.home, "{not json");
 
     // Act
     let bash = session.bash("npm test");
@@ -1765,7 +1761,7 @@ fn a_config_that_turns_unreadable_mid_session_keeps_the_cap_on() {
 fn an_unreadable_config_does_not_start_enforcing_in_a_session_it_never_tracked() {
     // Arrange: no state file exists for this session
     let session = Session::auto("config-broken-fresh");
-    fs::write(session.tier_files()[0].1.clone(), "{not json").expect("config rewrite");
+    auto_env::seed_raw_global_config(&session.s.home, "{not json");
 
     // Act
     let (out, code) = session.run();
@@ -1804,12 +1800,15 @@ impl Session {
         session
     }
 
-    fn tier_files(&self) -> [(&'static str, PathBuf); 3] {
+    fn tier_files(&self) -> [(&'static str, PathBuf); 6] {
         let root = self.s.home.join(".config/playbook");
         [
             ("global", root.join("config.json")),
             ("org", root.join("orgs/acme/config.json")),
             ("repo", root.join("repos/acme/widgets/.config/config.json")),
+            ("database", root.join("playbook.db")),
+            ("database wal", root.join("playbook.db-wal")),
+            ("database shm", root.join("playbook.db-shm")),
         ]
     }
 }
@@ -1830,6 +1829,8 @@ fn mode_switches_and_guarded_config_writes_are_denied_in_auto_under_the_cap() {
         "playbook config set fix.maxFiles 99",
         "playbook config set fix.maxLines 1",
         "playbook config set mode ask",
+        "playbook config import saved.json",
+        "sqlite3 ~/.config/playbook/playbook.db 'update config set value_json=1'",
         "playbook config set mode auto",
         "playbook config set --global mode ask",
         "playbook config set mode ask --org",

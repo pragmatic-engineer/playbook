@@ -16,8 +16,6 @@ pub mod write;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::common::paths::{repo_scope_path, RepoScope};
-
 /// Which tier of the repo/org/global/default chain actually supplied a
 /// resolved value, so a caller (or a future `playbook config get` command)
 /// can report where a setting came from.
@@ -207,23 +205,9 @@ pub fn resolve_valid(
     Ok((default, Source::Default, Some(ignored)))
 }
 
-/// The global tier's config file, directly under `root`. Shared by `resolve`
-/// and `write::tier_path` so the two never drift on where this file lives.
+/// The legacy global tier JSON file, imported into the store on first open.
 pub(crate) fn global_config_path(root: &Path) -> PathBuf {
     root.join("config.json")
-}
-
-/// The org tier's config file for `owner`. Shared by `resolve` and
-/// `write::tier_path` so the two never drift on where this file lives.
-pub(crate) fn org_config_path(root: &Path, owner: &str) -> PathBuf {
-    root.join("orgs").join(owner).join("config.json")
-}
-
-/// The repo tier's config file for `owner`/`repo`, at the `RepoScope::Config`
-/// slot `src/common/paths.rs` reserves. Shared by `resolve` and
-/// `write::tier_path` so the two never drift on where this file lives.
-pub(crate) fn repo_config_path(root: &Path, owner: &str, repo: &str) -> PathBuf {
-    repo_scope_path(root, owner, repo, RepoScope::Config, "").join("config.json")
 }
 
 /// Whether any org or repo tier config file exists under `root`. When none
@@ -282,12 +266,6 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    #[test]
-    fn repo_config_path_is_pinned_under_the_repo_config_slot() {
-        let got = repo_config_path(Path::new("/r"), "o", "p");
-        assert_eq!(got, PathBuf::from("/r/repos/o/p/.config/config.json"));
-    }
 
     /// A fresh scratch directory standing in for `$HOME`, unique per call so
     /// parallel tests never collide.

@@ -12,7 +12,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -55,10 +55,7 @@ pub fn scratch(tag: &str) -> Scratch {
 impl Scratch {
     /// Plant `{"mode": <mode>}` as the global config under the scratch HOME.
     pub fn seed_mode_config(&self, mode: &str) {
-        let dir = self.home.join(".config").join("playbook");
-        fs::create_dir_all(&dir).expect("config dir should be creatable");
-        fs::write(dir.join("config.json"), format!(r#"{{"mode":"{mode}"}}"#))
-            .expect("config file should be writable");
+        seed_global_config(&self.home, &serde_json::json!({ "mode": mode }));
     }
 }
 
@@ -169,4 +166,59 @@ pub fn run_hook(scratch: &Scratch, hook: &str, stdin: &str, env: &[(&str, &str)]
         String::from_utf8_lossy(&out.stdout).into_owned(),
         out.status.code().unwrap_or(-1),
     )
+}
+
+/// Replace the global config under `home` with the leaves of `doc` (a nested
+/// object such as `{"auto": {"warnPct": 70}}`), through the config store.
+#[allow(dead_code)]
+pub fn seed_global_config(home: &Path, doc: &serde_json::Value) {
+    clear_config(home);
+    fn walk(prefix: &str, node: &serde_json::Value, home: &Path) {
+        match node.as_object() {
+            Some(obj) => {
+                for (k, v) in obj {
+                    let key = if prefix.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{prefix}.{k}")
+                    };
+                    walk(&key, v, home);
+                }
+            }
+            None => playbook::config::write::set(
+                playbook::config::write::Tier::Global,
+                prefix,
+                node.clone(),
+                home,
+                None,
+            )
+            .expect("seeded config value should be valid"),
+        }
+    }
+    walk("", doc, home);
+}
+
+/// Remove every stored config value under `home`.
+#[allow(dead_code)]
+pub fn clear_config(home: &Path) {
+    let dir = home.join(".config").join("playbook");
+    for name in [
+        "playbook.db",
+        "playbook.db-wal",
+        "playbook.db-shm",
+        "config.json",
+    ] {
+        let _ = fs::remove_file(dir.join(name));
+    }
+}
+
+/// Replace the global config with `text` written as a legacy `config.json`,
+/// which the store imports on its next open. For values `config set` refuses
+/// (an invalid budget) or a file that is not JSON at all.
+#[allow(dead_code)]
+pub fn seed_raw_global_config(home: &Path, text: &str) {
+    clear_config(home);
+    let dir = home.join(".config").join("playbook");
+    fs::create_dir_all(&dir).expect("config dir should be creatable");
+    fs::write(dir.join("config.json"), text).expect("config file should be writable");
 }

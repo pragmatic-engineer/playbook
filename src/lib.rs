@@ -812,6 +812,23 @@ pub enum ConfigCommand {
     },
     /// List every setting with its value and source tier
     List,
+    /// Print every stored setting as one JSON document
+    ///
+    /// Settings live in a database, not hand-editable files. Export gives you
+    /// a readable copy, and `config import` loads one back.
+    ///
+    /// Example: `playbook config export > playbook-config.json`
+    Export,
+    /// Load settings from a JSON document made by `config export`
+    ///
+    /// Every key and value is checked first, and nothing is stored if any is
+    /// invalid. Use `-` to read standard input.
+    ///
+    /// Example: `playbook config import playbook-config.json`
+    Import {
+        /// The JSON file to read, or `-` for standard input
+        file: String,
+    },
 }
 
 /// `playbook doctor` subcommands.

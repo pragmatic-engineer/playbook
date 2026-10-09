@@ -272,7 +272,8 @@ impl ToolCall {
 }
 
 /// True when some simple command in `command` runs `playbook` to switch the
-/// mode or to set `mode`, `auto.*` or `fix.*`. Quoted text is data, so prose
+/// mode, to set `mode`, `auto.*` or `fix.*`, to import a config document, or
+/// names the config database. Quoted text is data, so prose
 /// that merely mentions such a command is left alone.
 ///
 /// This is a guardrail against the model drifting, not a security boundary.
@@ -286,6 +287,10 @@ fn is_guarded_command(command: &str) -> bool {
 }
 
 fn is_guarded_invocation(words: &[String]) -> bool {
+    // Any program pointed at the config database can change guarded settings.
+    if words.iter().any(|word| word.contains("playbook.db")) {
+        return true;
+    }
     let Some(start) = program_index(words) else {
         return false;
     };
@@ -300,6 +305,7 @@ fn is_guarded_invocation(words: &[String]) -> bool {
     }
     match args {
         [mode, level, ..] if mode == "mode" => level == "ask" || level == "auto",
+        [config, import, ..] if config == "config" && import == "import" => true,
         [config, set, rest @ ..] if config == "config" && set == "set" => rest
             .iter()
             .find(|word| !word.starts_with('-'))
