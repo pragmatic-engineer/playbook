@@ -9,11 +9,10 @@ use playbook::{
     adr, agents, cc, ci, commit, common, config, deps, doctor, effort, eval, gate, handoff, hooks,
     init, json, learn, manifest, memory_import, mode, planning, pr, release, review, sanitize,
     settings, statusline, trust, update, usage, worktree, AdrCommand, AgentsCommand, CcCommand,
-    Cli, Command, CommitCommand, ConfigCommand, DashboardCommand, DepsCommand, DoctorCommand,
-    EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand,
-    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ReleaseCommand,
-    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, SkillCommand,
-    UsageCommand, WorktreeCommand,
+    Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DoctorCommand, EvalCommand,
+    GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand,
+    MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ReleaseCommand, ReviewCommand,
+    ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, SkillCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -426,35 +425,26 @@ fn main() {
                 }
             }
         },
-        Command::Usage { sub } => {
+        Command::Usage {
+            sub,
+            json,
+            summary,
+            web,
+            range,
+        } => {
             let paths = usage::run::Paths::real();
-            let result = match sub {
-                Some(UsageCommand::Ingest) => usage::run::run_ingest(&paths),
-                Some(UsageCommand::Dashboard { serve: true, .. }) => {
-                    usage::dashboard::serve(&paths).map(|()| String::new())
-                }
-                Some(UsageCommand::Dashboard {
-                    sub: Some(DashboardCommand::Stop),
-                    ..
-                }) => usage::dashboard::run_stop(&paths),
-                Some(UsageCommand::Dashboard { .. }) => {
-                    let exe = std::env::current_exe().unwrap_or_default();
-                    // Test seam: lets spawned-binary tests skip launching a
-                    // real browser. Never set in production.
-                    if std::env::var_os("PLAYBOOK_USAGE_NO_BROWSER").is_some() {
-                        usage::dashboard::run_dashboard(&paths, &exe, &usage::dashboard::no_browser)
-                    } else {
-                        usage::dashboard::run_dashboard(
-                            &paths,
-                            &exe,
-                            &usage::dashboard::open_in_browser,
-                        )
+            let opts = usage::entry::Opts {
+                json,
+                summary,
+                web,
+                range,
+            };
+            match usage::entry::run(sub, &opts, &paths, usage::entry::interactive()) {
+                Ok(output) => {
+                    if !output.is_empty() {
+                        println!("{}", output.trim_end());
                     }
                 }
-                None => usage::run::run_summary(&paths),
-            };
-            match result {
-                Ok(output) => println!("{}", output.trim_end()),
                 Err(err) => {
                     eprintln!("usage: {err}");
                     std::process::exit(1);

@@ -885,17 +885,22 @@ Example: `playbook update --check`
 
 Show token and cost usage across your sessions
 
-With no subcommand, prints a summary of estimated cost across all recorded sessions.
+With no subcommand, opens the terminal view. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts.
 
-Example: `playbook usage dashboard`
+Example: `playbook usage --range 90d`
+
+- `--json`: Print the totals, groupings and live view as JSON
+- `--summary`: Print the text summary of every recorded session and exit
+- `--web`: Open the web dashboard (deprecated, removed in v0.22.0)
+- `--range <RANGE>`: Date range for the terminal view and `--json`: 30d, 60d, 90d, month or all
 
 Subcommands: `dashboard`, `ingest`
 
 ### `playbook usage dashboard`
 
-Open the local usage dashboard in your browser
+Open the local usage dashboard in your browser (deprecated: use `playbook usage`)
 
-Starts the dashboard server if it is not running. Stop it with `playbook usage dashboard stop`.
+Starts the dashboard server if it is not running. Stop it with `playbook usage dashboard stop`. Removed in v0.22.0.
 
 Subcommands: `stop`
 
@@ -905,7 +910,7 @@ Stop the running dashboard server
 
 ### `playbook usage ingest`
 
-Read new session history into the usage store without printing a summary
+Read new session history into the usage store (deprecated: use `playbook usage --summary`)
 
 ### `playbook version`
 

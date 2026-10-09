@@ -149,3 +149,75 @@ fn usage_ingest_reads_codex_rollouts_when_the_sessions_dir_exists() {
         stdout(&second)
     );
 }
+
+fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+#[test]
+fn usage_json_prints_totals_and_the_live_view_without_charts() {
+    let home = Home::new("json");
+
+    let out = home.run(&["usage", "--json", "--range", "all"]);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let doc: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(doc["totals"]["messages"], 3);
+    assert!((doc["totals"]["cost_usd"].as_f64().unwrap() - 0.0973221).abs() < 1e-9);
+    assert!(doc["live"]["active"].is_array());
+    assert!(doc.get("charts").is_none());
+    assert!(doc["live"].get("burn_chart").is_none());
+}
+
+#[test]
+fn usage_summary_prints_the_text_report() {
+    let home = Home::new("summary-flag");
+
+    let out = home.run(&["usage", "--summary"]);
+
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("3 messages, $0.0973 estimated cost"));
+}
+
+#[test]
+fn an_unknown_range_is_refused_with_the_valid_values() {
+    let home = Home::new("bad-range");
+
+    let out = home.run(&["usage", "--json", "--range", "7d"]);
+
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("unknown range `7d`"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn conflicting_flags_are_refused() {
+    let home = Home::new("conflict");
+
+    for args in [
+        ["usage", "--json", "--summary"],
+        ["usage", "--web", "--json"],
+        ["usage", "--summary", "--web"],
+    ] {
+        assert!(!home.run(&args).status.success(), "{args:?}");
+    }
+}
+
+#[test]
+fn usage_ingest_still_works_and_warns_that_it_is_deprecated() {
+    let home = Home::new("ingest-deprecated");
+
+    let out = home.run(&["usage", "ingest"]);
+
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("usage ingest: added 3 usage events"));
+    let err = stderr(&out);
+    assert!(
+        err.contains("deprecated") && err.contains("v0.22.0"),
+        "{err}"
+    );
+    assert!(err.contains("playbook usage --summary"), "{err}");
+}
