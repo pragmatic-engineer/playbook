@@ -1,6 +1,6 @@
 ---
 name: grounding-review
-description: Use when reviewing a pull request or code change, whether a quick single pass or a structured deep review. Distinct from grounding-research, which is for investigating code.
+description: Evidence and labeling rules for reviewing a PR or diff (sweep, Conventional Comments, sourced findings). Use for any quick or deep code review. Distinct from grounding-research, which covers investigation.
 ---
 
 # Review Grounding

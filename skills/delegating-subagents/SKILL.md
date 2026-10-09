@@ -1,6 +1,6 @@
 ---
 name: delegating-subagents
-description: Use before dispatching any subagent, and again the moment one finishes or goes quiet.
+description: Sets the file-based handoff, roster, routing, and recovery rules for subagents. Use before dispatching any subagent, and again when one finishes, fails, or goes quiet.
 ---
 
 # Delegating to Subagents
@@ -18,44 +18,9 @@ value is the only channel, and silence means the agent did not run.
 3. **A missing file is a distinct outcome** from an agent that found nothing.
    Say which one happened.
 
-## What we measured
+## Evidence
 
-On 2026-08-16 and 17, 22 delegations in one session:
-
-| Spawn mechanism | Returned a result inline |
-|---|---|
-| Skill tool with `context: fork` and an `agent:` in frontmatter | 11 of 11 |
-| Agent tool, any `subagent_type`, plugin or built-in | 0 of 11 |
-
-Re-measured on 2026-10-09 with Claude Code 2.1.293, using `claude -p` on Haiku
-and one Agent tool call per run. Each read-only agent was asked to read
-`Cargo.toml` and return a marker plus the package version:
-
-- `reviewer`: 4 of 4 returned the marker.
-- `critic`: 4 of 4.
-- `fact-checker`: 3 of 3.
-- `cheap-checker`: 3 of 3.
-
-That is 14 of 14, at about $0.04 per run. Every Agent-tool spawn now returns its
-result, so the August number no longer holds. The August failure had a real
-cost: two blocking defects sat in a written report for a day, and a third
-finding was never seen. A lost return is rare now, not impossible.
-
-The limit of the new measurement: it is headless and foreground, with short
-tasks. Long interactive runs that go idle can still end with a notification and
-no payload, so the rules below stay.
-
-## What does not work
-
-- Waiting longer. The result is not in flight; there is nothing to wait for.
-- `SendMessage` asking for the result. Sometimes recovers it, often does not.
-  Three escalating rounds, including an explicit "call SendMessage with
-  to: main", returned nothing from four agents.
-- Telling the agent to deliver first, before finishing. Tried, no effect.
-- Reading git to infer what happened. Commits tell you whether work LANDED.
-  They never tell you what the agent OBSERVED, which is the part you delegated
-  for. Divergences it chose to preserve, quirks it found, scope it deliberately
-  left alone: all of that lives only in the report.
+Return rates measured in August and re-measured on 2026-10-09: every Agent-tool spawn now returns its result in headless, foreground runs, but a long interactive run that goes idle can still end with a notification and no payload. The rules stay. Waiting longer, asking via `SendMessage`, telling the agent to deliver first, and inferring from git all failed to recover a lost result. Details: [references/evidence.md](references/evidence.md).
 
 ## First check whether the agent CAN write a file
 
@@ -90,13 +55,7 @@ short-hand label when talking ABOUT the agent, never as literal invocation
 syntax; the second column above is the one to copy into an actual `Agent`
 tool call.
 
-(Full current roster, `agents/*.md`, cross-checked against each file's own `tools:`
-frontmatter, not assumed from memory: this table went stale once before, missing
-half the roster after `auditor`, `cheap-checker`, `patch-applier`, and
-`review-triage` were added. `tests/delegating_subagents_roster.rs` now enforces
-this table stays in sync with `agents/*.md` and that every row's `subagent_type`
-carries the `playbook:` prefix, so the next agent addition fails CI instead of
-quietly drifting again.)
+`tests/delegating_subagents_roster.rs` keeps this table in sync with `agents/*.md` and requires the `playbook:` prefix on every row.
 
 Effort-tier variants such as `reviewer-low` and `reviewer-xhigh` are not files
 and are not in this table. `ccc` and `ccd` render them from the base agent for
@@ -206,29 +165,7 @@ apply unchanged.
 
 ## Re-dispatching (a second pass is a new agent, not a continuation)
 
-Every `Agent` tool call is a fresh spawn with zero memory of any prior round,
-even one run earlier in the same session and even for the exact same
-`subagent_type`. When a quality-gate phase (`critic`, `test-reviewer`,
-`fact-checker`) FAILs, gets revised, and needs a second pass, send the
-COMPLETE current artifact again, not a "here's what changed since round 1"
-diff or changelist.
-
-**Why.** During one quality gate, round 1 of a `critic` pass found one real
-blocking defect and it got fixed. Round 2 was dispatched with only a
-"here's what changed" summary. It correctly re-verified the actual fix, then
-flagged two unrelated things as "unaddressed" that were genuinely already
-covered elsewhere in the plan, purely because the round-2 prompt never
-restated them. The agent was not lying or hallucinating: it reviewed exactly
-what it was shown, and what it was shown was incomplete. A third round with
-the full artifact confirmed both flags were false and surfaced the one thing
-that actually was new.
-
-**How to apply.** Budget for this on every re-dispatch: resend the complete,
-current version of whatever is under review, even if it feels redundant or
-the change was small. Treat a "still failing" or "new finding" from a
-partial re-prompt with suspicion; check whether the finding is actually
-already resolved somewhere in the artifact the agent wasn't shown before
-concluding it's real.
+Every `Agent` tool call is a fresh spawn with zero memory of any prior round, even for the same `subagent_type`. When a quality-gate phase (`critic`, `test-reviewer`, `fact-checker`) FAILs, gets revised, and needs a second pass, send the COMPLETE current artifact again, not a changelist. A partial re-prompt makes the agent flag things as unaddressed that the artifact already covers. Treat a "still failing" or "new finding" from a partial re-prompt with suspicion and check the full artifact before believing it. Why: [references/evidence.md](references/evidence.md).
 
 ## Verifying delegated work
 

@@ -1,6 +1,6 @@
 ---
 name: writing-style
-description: Use when writing or posting prose a human will read, including a PR description, a code review comment, a Jira work item, a Confluence page, a Slack message, an ADR, or a commit message. Posting, sending, replying, commenting, and updating all count.
+description: Voice, banned-word, and no-dash rules for prose a human reads, including PR descriptions, review comments, Jira and Confluence text, Slack, ADRs, and commit messages. Use before writing, posting, replying, or updating any of these.
 ---
 
 # Writing Style
