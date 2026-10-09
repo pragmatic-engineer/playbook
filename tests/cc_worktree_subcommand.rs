@@ -230,6 +230,12 @@ fn background_housekeeping_sweeps_a_stale_worktree_via_the_new_subcommand() {
         ],
     );
     assert!(stale.is_dir(), "stale fixture worktree should exist");
+    // A long-lived worktree: brand new ones are never swept.
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 86_400);
+    fs::File::open(stale.join(".git"))
+        .expect("open .git file")
+        .set_modified(old)
+        .expect("backdate");
 
     // Act: a fresh worktree on a different branch. `run_housekeep` runs its
     // background block synchronously, so the sweep it now performs has
