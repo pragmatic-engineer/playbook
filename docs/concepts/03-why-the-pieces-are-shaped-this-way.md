@@ -37,7 +37,7 @@ The full list of agents, their tools and how a command binds to one is in [Autho
 
 The rule is: spend on judgment, save on routine.
 
-- **Sonnet** is the session default and covers most coding. `implementer`, `critic` and `analyst` use it because they write code or check claims, and Sonnet at high effort does that well. `fact-checker` and `test-reviewer` run on Haiku after `playbook eval bench` showed no meaningful loss on real playbook code.
+- **Sonnet** is the session default and covers most coding. `implementer` and `critic` use it because they write code or check plans, and Sonnet at medium effort did as well as high in `playbook eval bench`. `fact-checker`, `test-reviewer` and `analyst` run on Haiku after the same bench showed no meaningful loss on real playbook code.
 - **Haiku** runs `git`, `patch-applier`, `collector`, `cheap-checker` and `review-triage`. These apply a decision someone else already made, or classify with a safe fallback. A wrong answer is cheap to detect and rerun.
 - **Opus** runs design (`/playbook:plan`, `/playbook:adr`), every `reviewer`, and the `auditor`. A missed finding in a review, or a weak design, costs far more than the extra tokens.
 
