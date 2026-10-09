@@ -47,7 +47,7 @@ impl Sandbox {
         let gh = format!(
             r#"#!/bin/sh
 case "$*" in
-  "repo view"*) echo o/r;;
+  "repo view"*) echo '{{"nameWithOwner":"o/r","url":"https://github.com/o/r"}}';;
   "pr view 7 --json headRefOid"*) echo {sha};;
   "pr view 7 --json author"*) echo {author};;
   "pr view --json number"*) echo 7;;
@@ -182,4 +182,95 @@ fn checks_skip_an_unknown_toolchain() {
     let s = Sandbox::new("checks", "a", "b");
     let o = s.run(&["review", "checks", s.root.join("home").to_str().unwrap()]);
     assert_eq!(text(&o).trim(), "[no recognised toolchain; checks skipped]");
+}
+
+impl Sandbox {
+    fn replace_gh(&self, script: &str) {
+        let f = self.root.join("bin/gh");
+        fs::write(&f, script).unwrap();
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[test]
+fn the_four_gh_calls_run_at_the_same_time() {
+    let s = Sandbox::new("concurrent", "alice", "bob");
+    let rendezvous = s.root.join("rv");
+    fs::create_dir_all(&rendezvous).unwrap();
+    // Each call checks in, then waits until all four have. A serial run never
+    // sees four check-ins, so `ok` is written only when the calls overlap.
+    let script = format!(
+        r#"#!/bin/sh
+D={rv}
+case "$*" in
+  "repo view"*|"pr view 7 --json headRefOid"*|"pr view 7 --json author"*|"api /user"*)
+    touch "$D/$$"
+    i=0
+    while [ "$(ls "$D" | grep -vc '^ok$')" -lt 4 ] && [ "$i" -lt 100 ]; do sleep 0.05; i=$((i+1)); done
+    [ "$(ls "$D" | grep -vc '^ok$')" -ge 4 ] && touch "$D/ok"
+    ;;
+esac
+case "$*" in
+  "repo view"*) echo '{{"nameWithOwner":"o/r","url":"https://github.com/o/r"}}';;
+  "pr view 7 --json headRefOid"*) echo {sha};;
+  "pr view 7 --json author"*) echo alice;;
+  "api /user"*) echo bob;;
+esac
+"#,
+        rv = rendezvous.display(),
+        sha = s.sha
+    );
+    s.replace_gh(&script);
+    let o = s.run(&["review", "prepare", "quick", "7"]);
+    let t = text(&o);
+    assert!(
+        o.status.success(),
+        "{t}{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(
+        rendezvous.join("ok").exists(),
+        "the gh calls ran one by one"
+    );
+    // Same output as the serial version.
+    assert_eq!(field(&t, "REPO"), "o/r");
+    assert_eq!(field(&t, "HEAD_SHA"), s.sha);
+    assert_eq!(field(&t, "AUTHOR"), "alice");
+    assert_eq!(field(&t, "SELF_REVIEW"), "false");
+}
+
+#[test]
+fn when_two_calls_fail_the_first_in_the_old_order_is_reported() {
+    let s = Sandbox::new("precedence", "alice", "bob");
+    s.replace_gh(
+        r#"#!/bin/sh
+case "$*" in
+  "repo view"*) echo '{"nameWithOwner":"o/r","url":"https://github.com/o/r"}';;
+  "pr view 7 --json headRefOid"*) sleep 0.3; echo "head failed" >&2; exit 1;;
+  "pr view 7 --json author"*) echo "author failed" >&2; exit 1;;
+  "api /user"*) echo "user failed" >&2; exit 1;;
+esac
+"#,
+    );
+    let o = s.run(&["review", "prepare", "quick", "7"]);
+    assert!(!o.status.success());
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("head failed"), "{err}");
+    assert!(!err.contains("author failed"), "{err}");
+}
+
+#[test]
+fn a_failing_repo_call_is_reported_first() {
+    let s = Sandbox::new("repo-fails", "alice", "bob");
+    s.replace_gh(
+        r#"#!/bin/sh
+case "$*" in
+  "repo view"*) echo "repo failed" >&2; exit 1;;
+  *) echo "other failed" >&2; exit 1;;
+esac
+"#,
+    );
+    let o = s.run(&["review", "prepare", "quick", "7"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("repo failed"), "{err}");
 }
