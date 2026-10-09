@@ -25,6 +25,7 @@ pub mod models;
 pub mod plans;
 pub mod pr;
 pub mod release;
+pub mod review;
 pub mod sanitize;
 pub mod settings;
 pub mod statusline;
@@ -370,6 +371,11 @@ pub enum Command {
         #[arg(long)]
         create: bool,
     },
+    /// Setup for the review commands
+    Review {
+        #[command(subcommand)]
+        sub: ReviewCommand,
+    },
     /// List the plans and ADR blueprints `/playbook:implement` can run
     ///
     /// Prints `path<TAB>[status]<TAB>title` per file, or `NO_PLANS`.
@@ -708,6 +714,37 @@ pub enum PrCommand {
         /// Squash with admin rights instead of arming auto-merge
         #[arg(long)]
         admin: bool,
+    },
+}
+
+/// `playbook review` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ReviewCommand {
+    /// Resolve the PR, report-only or posting, and in-place or worktree
+    ///
+    /// Takes the raw arguments of the review command as one string. Prints
+    /// `KEY=value` lines: PR, REPO, PR_NUMBER, HEAD_SHA, AUTHOR, SELF_REVIEW,
+    /// SELF_MODE, MODE, WT and REVIEW_JSON. On a problem it prints
+    /// `error: ...` and exits 1.
+    ///
+    /// Example: `playbook review prepare deep "#4265 --self"`
+    Prepare {
+        /// Which review: `quick` or `deep`
+        #[arg(value_parser = ["quick", "deep"])]
+        kind: String,
+        /// The review command's arguments, as one string
+        #[arg(default_value = "")]
+        args: String,
+        /// Treat the run mode as auto (implies report-only)
+        #[arg(long)]
+        auto: bool,
+    },
+    /// Run a project's own type check, lint and tests in a directory
+    ///
+    /// Prints their output. A failing check is output, not an error.
+    Checks {
+        /// The review worktree to run in
+        dir: PathBuf,
     },
 }
 

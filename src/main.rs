@@ -7,11 +7,11 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     agents, cc, ci, common, config, deps, doctor, effort, eval, gate, handoff, hooks, init, json,
-    manifest, mode, pr, release, sanitize, settings, statusline, trust, update, usage, worktree,
-    AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DashboardCommand, DepsCommand,
+    manifest, mode, pr, release, review, sanitize, settings, statusline, trust, update, usage,
+    worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DashboardCommand, DepsCommand,
     DoctorCommand, EvalCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
-    MemoryCommand, ModeArg, ModeCommand, PrCommand, ReleaseCommand, ReviewWorktreeCommand,
-    SanitizeCommand, SettingsCommand, UsageCommand, WorktreeCommand,
+    MemoryCommand, ModeArg, ModeCommand, PrCommand, ReleaseCommand, ReviewCommand,
+    ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, UsageCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -606,6 +606,23 @@ fn main() {
                 }
             }
         }
+        Command::Review { sub } => match sub {
+            ReviewCommand::Prepare { kind, args, auto } => {
+                let kind = if kind == "deep" {
+                    review::Kind::Deep
+                } else {
+                    review::Kind::Quick
+                };
+                match review::prepare(kind, &args, auto) {
+                    Ok(text) => println!("{text}"),
+                    Err(err) => {
+                        eprintln!("error: {err}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            ReviewCommand::Checks { dir } => println!("{}", review::checks::run_checks(&dir)),
+        },
         Command::Plans { json } => {
             let Some(base) = common::repo_scoped_dir(common::RepoScope::Worktree) else {
                 println!("PLAN_PATH_ERROR: could not resolve a worktree-scoped storage location; this repo needs a git 'origin' remote");
