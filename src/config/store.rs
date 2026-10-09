@@ -74,16 +74,40 @@ fn broken(root: &Path) -> impl Fn(rusqlite::Error) -> ConfigError + '_ {
 /// run the one-time legacy import.
 pub fn open(root: &Path) -> Result<Connection, ConfigError> {
     fs::create_dir_all(root).map_err(|_| ConfigError::DirectoryUnwritable(root.to_path_buf()))?;
-    let conn = Connection::open(db_path(root)).map_err(broken(root))?;
-    // Before any statement that can contend for the write lock: the default
-    // busy timeout is 0, so a concurrent first open would fail at once.
-    conn.busy_timeout(Duration::from_millis(5000))
-        .map_err(broken(root))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(broken(root))?;
-    conn.execute_batch(SCHEMA_SQL).map_err(broken(root))?;
+    let conn = init_connection(root).map_err(broken(root))?;
     import_legacy_once(&conn, root)?;
     Ok(conn)
+}
+
+/// Open the file and apply pragmas and schema. Switching a fresh file to WAL
+/// and creating tables from several processes at once can report "busy"
+/// without waiting, so that one error is retried for a short while.
+fn init_connection(root: &Path) -> rusqlite::Result<Connection> {
+    let attempt = || -> rusqlite::Result<Connection> {
+        let conn = Connection::open(db_path(root))?;
+        // Before any statement that can contend for the write lock: the
+        // default busy timeout is 0.
+        conn.busy_timeout(Duration::from_millis(5000))?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.execute_batch(SCHEMA_SQL)?;
+        Ok(conn)
+    };
+    let mut tries = 0;
+    loop {
+        match attempt() {
+            Err(rusqlite::Error::SqliteFailure(err, _))
+                if tries < 200
+                    && matches!(
+                        err.code,
+                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                    ) =>
+            {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            other => return other,
+        }
+    }
 }
 
 /// The value of `key` per tier, for the repo slug and its owner.
