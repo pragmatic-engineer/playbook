@@ -5,9 +5,11 @@
 //! server-rendered charts. Built from the same aggregation the terminal
 //! summary uses.
 
-use super::aggregate::{
-    civil_from_days, count_tools, date_key, group_usage, unpriced_models, Dimension, Group,
-    SECONDS_PER_DAY,
+use super::aggregate::{count_tools, date_key, group_usage, unpriced_models, Dimension, Group};
+pub use super::query::{active_session_ids, live_window_start, Range, FEED_LIMIT};
+use super::query::{
+    clock, day_of, in_range, in_window, live_view, total_tokens, LiveView, Spend, Totals,
+    BURN_MINUTES,
 };
 use super::svg::bar_chart;
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
@@ -16,58 +18,6 @@ use std::collections::BTreeMap;
 
 /// Days drawn in the per-day chart when the range is all time.
 const CHART_DAYS: usize = 90;
-
-/// The date window the dashboard shows. Days are UTC, like every grouping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Range {
-    LastDays(i64),
-    CurrentMonth,
-    All,
-}
-
-impl Range {
-    /// The `range` query value. No value means all time, so older callers
-    /// keep their behaviour.
-    pub fn parse(value: Option<&str>) -> Option<Range> {
-        match value {
-            None | Some("all") => Some(Range::All),
-            Some("30d") => Some(Range::LastDays(30)),
-            Some("60d") => Some(Range::LastDays(60)),
-            Some("90d") => Some(Range::LastDays(90)),
-            Some("month") => Some(Range::CurrentMonth),
-            Some(_) => None,
-        }
-    }
-
-    fn key(self) -> &'static str {
-        match self {
-            Range::LastDays(30) => "30d",
-            Range::LastDays(60) => "60d",
-            Range::LastDays(_) => "90d",
-            Range::CurrentMonth => "month",
-            Range::All => "all",
-        }
-    }
-
-    /// First and one-past-last UTC day, or `None` for all time. "Last N days"
-    /// includes today; the current month runs from its 1st to its last day.
-    pub fn days(self, now: i64) -> Option<(i64, i64)> {
-        let today = now.div_euclid(SECONDS_PER_DAY);
-        match self {
-            Range::All => None,
-            Range::LastDays(n) => Some((today - n + 1, today + 1)),
-            Range::CurrentMonth => {
-                let first = today - (civil_from_days(today).2 - 1);
-                let probe = first + 31;
-                Some((first, probe - (civil_from_days(probe).2 - 1)))
-            }
-        }
-    }
-}
-
-fn day_of(timestamp: i64) -> i64 {
-    timestamp.div_euclid(SECONDS_PER_DAY)
-}
 
 fn range_json(range: Range, now: i64, usage: &[UsageEvent]) -> Value {
     let (start, end) = match range.days(now) {
@@ -137,21 +87,10 @@ pub fn data_json(
     range: Range,
 ) -> Value {
     let window = range.days(now);
-    let inside = |timestamp: i64| {
-        window.is_none_or(|(first, past)| (first..past).contains(&day_of(timestamp)))
-    };
-    let usage: Vec<UsageEvent> = usage
-        .iter()
-        .filter(|e| inside(e.timestamp))
-        .cloned()
-        .collect();
-    let tools: Vec<ToolInvocationEvent> = tools
-        .iter()
-        .filter(|t| inside(t.timestamp))
-        .cloned()
-        .collect();
+    let (usage, tools) = in_range(usage, tools, now, range);
     let (usage, tools) = (usage.as_slice(), tools.as_slice());
 
+    let totals = Totals::of(usage);
     let days = group_usage(usage, Dimension::Day);
     let models = group_usage(usage, Dimension::Model);
     let (unpriced_messages, unpriced_model_names) = unpriced_models(usage);
@@ -176,12 +115,12 @@ pub fn data_json(
         "generated_at": now,
         "range": range_json(range, now, usage),
         "totals": {
-            "messages": usage.len(),
-            "input_tokens": usage.iter().map(|e| e.input_tokens).sum::<u64>(),
-            "output_tokens": usage.iter().map(|e| e.output_tokens).sum::<u64>(),
-            "cache_creation_tokens": usage.iter().map(|e| e.cache_creation_tokens).sum::<u64>(),
-            "cache_read_tokens": usage.iter().map(|e| e.cache_read_tokens).sum::<u64>(),
-            "cost_usd": usage.iter().map(|e| e.cost_usd).sum::<f64>(),
+            "messages": totals.messages,
+            "input_tokens": totals.input_tokens,
+            "output_tokens": totals.output_tokens,
+            "cache_creation_tokens": totals.cache_creation_tokens,
+            "cache_read_tokens": totals.cache_read_tokens,
+            "cost_usd": totals.cost_usd,
             "unpriced_messages": unpriced_messages,
             "unpriced_models": unpriced_model_names,
         },
@@ -210,14 +149,6 @@ pub fn valid_session_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-}
-
-fn in_window(window: Option<(i64, i64)>, timestamp: i64) -> bool {
-    window.is_none_or(|(first, past)| (first..past).contains(&day_of(timestamp)))
-}
-
-fn total_tokens(e: &UsageEvent) -> u64 {
-    e.input_tokens + e.output_tokens + e.cache_creation_tokens + e.cache_read_tokens
 }
 
 /// One row per openable session (a valid id) with a message in `range`, newest
@@ -322,111 +253,47 @@ pub fn session_json(usage: &[UsageEvent], id: &str) -> Option<Value> {
     }))
 }
 
-/// `HH:MM:SS` of a UTC timestamp.
-fn clock(timestamp: i64) -> String {
-    let s = timestamp.rem_euclid(SECONDS_PER_DAY);
-    format!("{:02}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60)
-}
-
-/// A session counts as active when its last message is this recent.
-const ACTIVE_SECONDS: i64 = 15 * 60;
-const BURN_MINUTES: i64 = 60;
-const ACTIVE_LIMIT: usize = 20;
-/// Messages in the live feed.
-pub const FEED_LIMIT: usize = 20;
-
-/// Start of the first of the 60 minutes the burn chart and "last hour" cover:
-/// the current minute and the 59 before it.
-fn hour_start(now: i64) -> i64 {
-    (now.div_euclid(60) - (BURN_MINUTES - 1)) * 60
-}
-
-/// The oldest timestamp the live summary needs: the start of today (UTC) or
-/// of the last hour, whichever is earlier.
-pub fn live_window_start(now: i64) -> i64 {
-    hour_start(now).min(now.div_euclid(SECONDS_PER_DAY) * SECONDS_PER_DAY)
-}
-
-/// Ids of sessions with a message in the last 15 minutes, newest first.
-pub fn active_session_ids(window: &[UsageEvent], now: i64) -> Vec<String> {
-    let mut last: BTreeMap<&str, i64> = BTreeMap::new();
-    for e in window.iter().filter(|e| e.timestamp > now - ACTIVE_SECONDS) {
-        let at = last.entry(e.session_id.as_str()).or_insert(0);
-        *at = (*at).max(e.timestamp);
-    }
-    let mut ids: Vec<(&str, i64)> = last.into_iter().collect();
-    ids.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-    ids.into_iter()
-        .take(ACTIVE_LIMIT)
-        .map(|(id, _)| id.to_string())
-        .collect()
-}
-
-fn spend_json(events: &[&UsageEvent]) -> Value {
+fn spend_json(spend: &Spend) -> Value {
     json!({
-        "messages": events.len(),
-        "tokens": events.iter().map(|e| total_tokens(e)).sum::<u64>(),
-        "cost_usd": events.iter().map(|e| e.cost_usd).sum::<f64>(),
-        "unpriced": events.iter().filter(|e| e.unpriced).count(),
+        "messages": spend.messages,
+        "tokens": spend.tokens,
+        "cost_usd": spend.cost_usd,
+        "unpriced": spend.unpriced,
     })
 }
 
-/// What the Live tab shows. `window` holds every event since
-/// `live_window_start`, `sessions` every event of the active sessions (so
-/// "spend so far" is the whole session), `latest` the newest messages, newest
-/// first.
+/// What the Live tab shows, as JSON. See `query::live_view` for the inputs.
 pub fn live_json(
     window: &[UsageEvent],
     sessions: &[UsageEvent],
     latest: &[UsageEvent],
     now: i64,
 ) -> Value {
-    let today_start = now.div_euclid(SECONDS_PER_DAY) * SECONDS_PER_DAY;
-    let hour: Vec<&UsageEvent> = window
+    let LiveView {
+        generated_at,
+        active,
+        hour,
+        today,
+        burn,
+        feed,
+    } = live_view(window, sessions, latest, now);
+    let active: Vec<Value> = active
         .iter()
-        .filter(|e| e.timestamp >= hour_start(now))
-        .collect();
-    let today: Vec<&UsageEvent> = window
-        .iter()
-        .filter(|e| e.timestamp >= today_start)
-        .collect();
-
-    let first_minute = now.div_euclid(60) - (BURN_MINUTES - 1);
-    let mut per_minute = vec![0.0_f64; BURN_MINUTES as usize];
-    for e in &hour {
-        let slot = e.timestamp.div_euclid(60) - first_minute;
-        if (0..BURN_MINUTES).contains(&slot) {
-            per_minute[slot as usize] += e.cost_usd;
-        }
-    }
-    let bars: Vec<(String, f64)> = per_minute
-        .into_iter()
-        .enumerate()
-        .map(|(i, cost)| (clock((first_minute + i as i64) * 60)[..5].to_string(), cost))
-        .collect();
-
-    let active: Vec<Value> = active_session_ids(window, now)
-        .iter()
-        .filter_map(|id| {
-            let events: Vec<&UsageEvent> =
-                sessions.iter().filter(|e| &e.session_id == id).collect();
-            let latest = events.iter().max_by_key(|e| e.timestamp).copied()?;
-            Some(json!({
-                "id": id,
-                "repo": latest.repo,
-                "agent": latest.agent,
-                "model": latest.model,
-                "last": latest.timestamp,
-                "messages": events.len(),
-                "cost_usd": events.iter().map(|e| e.cost_usd).sum::<f64>(),
-                "unpriced": events.iter().filter(|e| e.unpriced).count(),
-            }))
+        .map(|a| {
+            json!({
+                "id": a.id,
+                "repo": a.repo,
+                "agent": a.agent,
+                "model": a.model,
+                "last": a.last,
+                "messages": a.messages,
+                "cost_usd": a.cost_usd,
+                "unpriced": a.unpriced,
+            })
         })
         .collect();
-
-    let feed: Vec<Value> = latest
+    let feed: Vec<Value> = feed
         .iter()
-        .take(FEED_LIMIT)
         .map(|e| {
             json!({
                 "time": e.timestamp,
@@ -440,13 +307,16 @@ pub fn live_json(
             })
         })
         .collect();
-
     json!({
-        "generated_at": now,
+        "generated_at": generated_at,
         "active": active,
         "hour": spend_json(&hour),
         "today": spend_json(&today),
-        "burn_chart": bar_chart("Spend per minute", "USD, UTC, last 60 minutes", &bars),
+        "burn_chart": bar_chart(
+            "Spend per minute",
+            &format!("USD, UTC, last {BURN_MINUTES} minutes"),
+            &burn
+        ),
         "feed": feed,
     })
 }
@@ -454,6 +324,7 @@ pub fn live_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage::query::{hour_start, ACTIVE_SECONDS};
 
     fn event(ts: i64, model: &str, cost: f64) -> UsageEvent {
         UsageEvent {
@@ -494,7 +365,7 @@ mod tests {
         assert_eq!(sessions["sessions"][0]["unpriced"], 1);
 
         let refs: Vec<&UsageEvent> = events.iter().collect();
-        assert_eq!(spend_json(&refs)["unpriced"], 1);
+        assert_eq!(Spend::of(&refs).unpriced, 1);
         let live = live_json(&events, &events, &events, now);
         assert_eq!(live["active"][0]["unpriced"], 1);
         let flags: Vec<u64> = live["feed"]
