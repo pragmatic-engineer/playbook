@@ -38,7 +38,7 @@ fn env(tag: &str) -> Env {
     }
     make_exec(
         &bin.join("claude"),
-        "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS:-unset}\" >> \"$FAKE_LOG.var\"\nexit ${FAKE_EXIT:-0}\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS:-unset}\" >> \"$FAKE_LOG.var\"\nprintf '%s\\n' \"${ANTHROPIC_DEFAULT_SONNET_MODEL:-unset}\" >> \"$FAKE_LOG.env\"\nexit ${FAKE_EXIT:-0}\n",
     );
     Env { root, home, work }
 }
@@ -645,4 +645,45 @@ fn without_a_plugin_root_no_variants_are_passed() {
     assert!(agents_arg(&e).is_none());
     let seen = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
     assert_eq!(seen.trim(), "unset");
+}
+
+#[test]
+fn at_xhigh_the_fallback_chain_starts_at_the_model_that_accepts_it() {
+    let e = env("fallback-xhigh");
+    e.launch_with(&["--effort", "xhigh", "--"], &["fresh"], &[]);
+    let raw = e.raw_calls();
+    assert!(
+        raw[0].contains("--fallback-model claude-haiku-4-5 "),
+        "{raw:?}"
+    );
+    assert!(!raw[0].contains("claude-sonnet-5,"), "{raw:?}");
+}
+
+#[test]
+fn a_models_override_reaches_claude_as_the_alias_variable() {
+    let e = env("models-override");
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "config",
+            "set",
+            "--global",
+            "models.sonnet",
+            "claude-sonnet-5",
+        ])
+        .current_dir(&e.work)
+        .env("HOME", &e.home)
+        .output()
+        .unwrap();
+    assert!(set.status.success(), "{set:?}");
+    e.launch(&["fresh"]);
+    let logged = fs::read_to_string(format!("{}.env", e.log().display())).unwrap();
+    assert_eq!(logged.trim(), "claude-sonnet-5");
+}
+
+#[test]
+fn without_an_override_the_alias_variable_is_not_set() {
+    let e = env("models-no-override");
+    e.launch(&["fresh"]);
+    let logged = fs::read_to_string(format!("{}.env", e.log().display())).unwrap();
+    assert_eq!(logged.trim(), "unset");
 }
