@@ -20,6 +20,7 @@ pub mod hooks;
 pub mod init;
 pub mod json;
 pub mod manifest;
+pub mod memory_import;
 pub mod mode;
 pub mod models;
 pub mod plans;
@@ -536,6 +537,24 @@ pub enum MemoryCommand {
     /// Memory is rebuilt on its own when a fact is saved, so you only need
     /// this after editing fact files by hand.
     Rebuild,
+    /// Copy notes from Claude Code's auto memory into playbook memory
+    ///
+    /// One way and opt in. It only reads Claude Code's memory for this
+    /// project (`~/.claude/projects/<project>/memory/*.md`) and never changes,
+    /// moves or deletes anything there. Each note becomes a playbook fact in
+    /// this repo's project memory. A note already imported (tracked by content
+    /// hash on the playbook side) and a fact that already exists are skipped,
+    /// so running it again copies nothing.
+    ///
+    /// Example: `playbook memory import-claude --dry-run`
+    ImportClaude {
+        /// Show what would be copied and write nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Read this directory instead of the project's Claude Code memory
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
     /// Print the repo-scoped markdown slice of the memory graph (facts in
     /// scope, typed edges, anchor index). Prints nothing, exit 0, when the
     /// graph is missing or unreadable.

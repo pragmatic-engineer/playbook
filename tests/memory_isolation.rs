@@ -3,7 +3,8 @@
 
 //! Playbook memory and Claude Code memory never mix. Playbook's memory code
 //! writes only under `~/.config/playbook/memory`, and nothing playbook ships
-//! sets or edits Claude Code's own memory settings or directories.
+//! sets or edits Claude Code's own memory settings or directories. Reading
+//! Claude Code's auto memory is allowed, only from `memory_import/claude_read.rs`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -95,6 +96,31 @@ fn memory_hooks_never_write_under_claude_home() {
         assert!(
             !code.contains("claude_dir()") && !code.contains(".claude/memory"),
             "{name} must resolve memory through the playbook root, not Claude Code's directory"
+        );
+    }
+}
+
+#[test]
+fn the_claude_memory_reader_only_reads() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/memory_import/claude_read.rs");
+    let text = fs::read_to_string(path).unwrap();
+    let code = production(&text);
+    for banned in [
+        "fs::write",
+        "File::create",
+        "OpenOptions",
+        "remove_file",
+        "remove_dir",
+        "rename",
+        "fs::copy",
+        "create_dir",
+        "set_permissions",
+        "set_modified",
+        "write_atomic",
+    ] {
+        assert!(
+            !code.contains(banned),
+            "claude_read.rs must only read Claude Code's memory, found {banned}"
         );
     }
 }
