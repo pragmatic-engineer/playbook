@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
+//! `~/.claude/memory` is playbook's own OLD store location, not Claude Code's
+//! auto memory (that lives under `~/.claude/projects/<project>/memory/` and is
+//! never touched here).
+//!
 //! Migrates the whole memory store as a single reported step named `memory`:
 //! renames `~/.claude/memory/graph.json` to `memory.graph.json` if the old
 //! filename is still present, then moves the whole `~/.claude/memory` tree to
