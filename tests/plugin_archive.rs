@@ -321,6 +321,12 @@ fn claude_plugin_validate_accepts_the_unpacked_archive() {
         .arg(&a.root)
         .output()
     else {
+        // CI installs the CLI, so a missing one there means the check would
+        // pass without running. Only a local run may skip.
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "claude CLI is missing in CI, so `claude plugin validate` did not run"
+        );
         eprintln!("claude CLI not available, skipping plugin validate");
         return;
     };
@@ -336,5 +342,57 @@ fn claude_plugin_validate_accepts_the_unpacked_archive() {
     assert!(
         out.status.success(),
         "claude plugin validate failed:\n{text}"
+    );
+}
+
+/// The part of a source file before its `#[cfg(test)]` module.
+fn non_test_part(text: &str) -> &str {
+    text.find("#[cfg(test)]").map_or(text, |i| &text[..i])
+}
+
+#[test]
+fn every_plugin_root_read_in_src_is_in_the_archive() {
+    // Arrange: `self_root.join("a").join("b")` and `plugin_root.join("a/b")`.
+    let a = archive();
+    let chain = Regex::new(
+        r#"\b(?:self_root|plugin_root)\s*\.join\("([^"]+)"\)((?:\s*\.join\("[^"]+"\))*)"#,
+    )
+    .expect("regex");
+    let part = Regex::new(r#"\.join\("([^"]+)"\)"#).expect("regex");
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    for f in tracked(&["src"]) {
+        if !f.ends_with(".rs") {
+            continue;
+        }
+        let text = fs::read_to_string(repo().join(&f)).unwrap_or_default();
+        for cap in chain.captures_iter(non_test_part(&text)) {
+            let mut path = cap[1].to_string();
+            for p in part.captures_iter(&cap[2]) {
+                path = format!("{path}/{}", &p[1]);
+            }
+            found.insert(path);
+        }
+    }
+
+    // Act: a path counts when it is a shipped file or a directory holding one.
+    // `.git` is only probed, never read.
+    let missing: Vec<&String> = found
+        .iter()
+        .filter(|p| p.as_str() != ".git")
+        .filter(|p| {
+            !a.files.contains(*p) && !a.files.iter().any(|f| f.starts_with(&format!("{p}/")))
+        })
+        .collect();
+
+    // Assert: the scan itself must still see the reads it exists to guard.
+    for known in ["settings.shared.json", "prompts/SYSTEM_PROMPT.md"] {
+        assert!(
+            found.contains(known),
+            "the scan no longer finds the read of {known}: {found:?}"
+        );
+    }
+    assert!(
+        missing.is_empty(),
+        "src/ reads these through the plugin root but the archive lacks them, add them to .claude-plugin/archive-files.txt: {missing:?}"
     );
 }

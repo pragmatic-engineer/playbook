@@ -59,7 +59,22 @@ pub fn render_formula(version: &str, sums: &str) -> Result<String, String> {
 
 /// Returns `marketplace` (JSON text) with the `playbook` plugin source set to
 /// the release's plugin archive, pretty-printed with a trailing newline.
-pub fn pin_marketplace(version: &str, marketplace: &str, sha256: &str) -> Result<String, String> {
+///
+/// `repo` is the `owner/name` slug the archive URL points at.
+pub fn pin_marketplace(
+    version: &str,
+    marketplace: &str,
+    sha256: &str,
+    repo: &str,
+) -> Result<String, String> {
+    let dots_only = |part: &str| part.chars().all(|c| c == '.');
+    if !Regex::new(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+        .expect("static regex")
+        .is_match(repo)
+        || repo.split('/').any(dots_only)
+    {
+        return Err(format!("bad repo: {repo}"));
+    }
     if !Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+([-+.][0-9A-Za-z.+-]+)?$")
         .expect("static regex")
         .is_match(version)
@@ -72,7 +87,7 @@ pub fn pin_marketplace(version: &str, marketplace: &str, sha256: &str) -> Result
     let mut doc: Value =
         serde_json::from_str(marketplace).map_err(|e| format!("marketplace is not JSON: {e}"))?;
     let url = format!(
-        "https://github.com/pragmatic-engineer/playbook/releases/download/v{version}/playbook-plugin-{version}.zip"
+        "https://github.com/{repo}/releases/download/v{version}/playbook-plugin-{version}.zip"
     );
     let source = json!({"source": "archive", "url": url, "sha256": sha256});
     let plugins = doc

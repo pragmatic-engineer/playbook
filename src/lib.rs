@@ -379,6 +379,9 @@ pub enum ReleaseCommand {
         version: String,
         marketplace: PathBuf,
         sha256: String,
+        /// The `owner/name` repository the archive URL points at
+        #[arg(long, default_value = "pragmatic-engineer/playbook")]
+        repo: String,
     },
 }
 

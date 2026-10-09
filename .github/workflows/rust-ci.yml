@@ -50,6 +50,7 @@ jobs:
             github.com:443
             index.crates.io:443
             objects.githubusercontent.com:443
+            registry.npmjs.org:443
             static.crates.io:443
             static.rust-lang.org:443
 
@@ -69,6 +70,11 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
+
+      # `tests/plugin_archive.rs` runs `claude plugin validate`, and fails in CI
+      # when the CLI is missing. Pinned to a release older than two weeks.
+      - name: Install the Claude Code CLI
+        run: npm install --global @anthropic-ai/claude-code@2.1.282
 
       - name: cargo test
         run: cargo test

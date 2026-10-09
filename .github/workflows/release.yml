@@ -441,7 +441,7 @@ jobs:
           # The marketplace repo is public, so the workflow token can read it: no downloaded code runs next to the push token.
           gh api "repos/${MARKETPLACE_REPO}/contents/.claude-plugin/marketplace.json" > out/market.meta
           jq -r .content out/market.meta | base64 -d > out/marketplace.json
-          "$bin" release pin-marketplace "${VERSION}" out/marketplace.json "${ARCHIVE_SHA256}" > out/marketplace.new.json
+          "$bin" release pin-marketplace "${VERSION}" out/marketplace.json "${ARCHIVE_SHA256}" --repo "${GITHUB_REPOSITORY}" > out/marketplace.new.json
 
       - name: Push the tap formula
         if: steps.gate.outputs.enabled == 'true'

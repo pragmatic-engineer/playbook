@@ -214,6 +214,44 @@ fn pin_rejects_bad_input_with_a_specific_reason() {
 }
 
 #[test]
+fn pin_builds_the_url_from_the_repo_flag() {
+    let m = fixture("marketplace.json");
+    let out = run(&[
+        "pin-marketplace",
+        "9.8.7",
+        m.to_str().unwrap(),
+        &sha('a'),
+        "--repo",
+        "acme/fork-of-playbook",
+    ]);
+    assert!(out.ok, "{}", out.stderr);
+    assert_eq!(
+        source(&out.stdout)["url"],
+        "https://github.com/acme/fork-of-playbook/releases/download/v9.8.7/playbook-plugin-9.8.7.zip"
+    );
+}
+
+#[test]
+fn pin_rejects_a_repo_that_is_not_owner_slash_name() {
+    let m = fixture("marketplace.json");
+    for bad in ["playbook", "a/b/c", "a b/c", "../x", ""] {
+        let out = run(&[
+            "pin-marketplace",
+            "9.8.7",
+            m.to_str().unwrap(),
+            &sha('a'),
+            "--repo",
+            bad,
+        ]);
+        assert!(
+            !out.ok && out.stderr.contains("bad repo"),
+            "{bad}: {}",
+            out.stderr
+        );
+    }
+}
+
+#[test]
 fn pin_without_a_sha256_fails() {
     let m = fixture("marketplace.json");
     assert!(!run(&["pin-marketplace", "9.8.7", m.to_str().unwrap()]).ok);
