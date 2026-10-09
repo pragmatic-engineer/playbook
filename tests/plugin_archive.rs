@@ -323,6 +323,10 @@ fn init_from_the_unpacked_archive_places_prompt_and_settings() {
     )
     .expect("template parses");
     for key in template.as_object().expect("template object").keys() {
+        if key == "permissions" {
+            // The security defaults are opt-in, a plain init leaves them out.
+            continue;
+        }
         assert!(
             settings.get(key).is_some(),
             "settings.json lacks the template key {key}\n{stdout}"

@@ -122,6 +122,11 @@ pub enum Command {
     /// unanswered parts use their defaults: hooks, settings and PATH on, the
     /// launcher and system prompt off.
     ///
+    /// The security defaults (permissions rules and the autoupdater switch)
+    /// are never asked about and stay off unless you pass `--security` or set
+    /// `security.defaults` to true. Without them, `init` leaves any
+    /// permissions you already have untouched.
+    ///
     /// Example: `playbook init --no-hooks --aliases`
     Init {
         #[command(flatten)]

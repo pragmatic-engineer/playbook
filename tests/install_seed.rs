@@ -88,7 +88,7 @@ fn a_fresh_install_seeds_settings_and_wires_the_ported_hooks() {
     )
     .unwrap();
     for (key, want) in template.as_object().unwrap() {
-        if key == "hooks" {
+        if key == "hooks" || key == "permissions" || key == "env" {
             continue;
         }
         assert_eq!(
@@ -97,6 +97,13 @@ fn a_fresh_install_seeds_settings_and_wires_the_ported_hooks() {
             "key {key} differs from the template"
         );
     }
+    // The security defaults are opt-in: a default install leaves them out.
+    assert!(settings.get("permissions").is_none(), "{settings}");
+    assert!(
+        settings["env"].get("DISABLE_AUTOUPDATER").is_none(),
+        "{settings}"
+    );
+    assert_eq!(settings["env"]["DO_NOT_TRACK"], "1");
     assert!(
         ported_hooks(&settings) >= 18,
         "got {}",

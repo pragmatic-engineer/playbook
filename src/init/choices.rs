@@ -16,12 +16,18 @@ pub struct Flags {
     /// Add no playbook hook entries, including the guards in the shared settings
     #[arg(long, overrides_with = "hooks")]
     pub no_hooks: bool,
-    /// Merge playbook's shared settings (permissions, status line, options) into settings.json
+    /// Merge playbook's shared settings (status line, options) into settings.json
     #[arg(long, overrides_with = "no_settings")]
     pub settings: bool,
     /// Do not touch the shared settings
     #[arg(long, overrides_with = "settings")]
     pub no_settings: bool,
+    /// Also apply the security defaults (permissions rules, autoupdater off); off unless asked or `security.defaults` is true
+    #[arg(long, overrides_with = "no_security")]
+    pub security: bool,
+    /// Do not apply the security defaults, even when `security.defaults` is true
+    #[arg(long, overrides_with = "security")]
+    pub no_security: bool,
     /// Put the playbook binary on PATH for every shell start
     #[arg(long, overrides_with = "no_path")]
     pub path: bool,
@@ -50,6 +56,7 @@ pub struct Flags {
 pub struct Choices {
     pub hooks: bool,
     pub settings: bool,
+    pub security: bool,
     pub path: bool,
     pub aliases: bool,
     pub system_prompt: bool,
@@ -66,10 +73,13 @@ fn pick(on: bool, off: bool) -> Option<bool> {
 }
 
 /// Decide every part. `ask(question, default)` is called only for a part with
-/// no flag, and only when `interactive` is true.
+/// no flag, and only when `interactive` is true. `security_config` is the
+/// resolved `security.defaults` key: the default for the security part, which
+/// is never asked about, so a plain run stays off unless that key says on.
 pub fn resolve(
     flags: &Flags,
     interactive: bool,
+    security_config: bool,
     ask: &mut dyn FnMut(&str, bool) -> bool,
 ) -> Choices {
     let mut decide = |on: bool, off: bool, question: &str, default: bool| {
@@ -91,9 +101,10 @@ pub fn resolve(
         settings: decide(
             flags.settings,
             flags.no_settings,
-            "Merge playbook's shared settings (permissions, status line, options) into settings.json? Hooks are a separate question.",
+            "Merge playbook's shared settings (status line, options) into settings.json? Hooks are a separate question.",
             true,
         ),
+        security: pick(flags.security, flags.no_security).unwrap_or(security_config),
         path: decide(
             flags.path,
             flags.no_path,
@@ -151,12 +162,13 @@ mod tests {
 
     #[test]
     fn without_a_terminal_every_part_uses_its_default() {
-        let c = resolve(&Flags::default(), false, &mut never);
+        let c = resolve(&Flags::default(), false, false, &mut never);
         assert_eq!(
             c,
             Choices {
                 hooks: true,
                 settings: true,
+                security: false,
                 path: true,
                 aliases: false,
                 system_prompt: false
@@ -173,7 +185,7 @@ mod tests {
             ..Flags::default()
         };
         let mut asked = Vec::new();
-        let c = resolve(&flags, true, &mut |q, d| {
+        let c = resolve(&flags, true, false, &mut |q, d| {
             asked.push(q.to_string());
             d
         });
@@ -187,7 +199,9 @@ mod tests {
 
     #[test]
     fn a_terminal_asks_and_the_answer_decides() {
-        let c = resolve(&Flags::default(), true, &mut |q, _| q.contains("hooks"));
+        let c = resolve(&Flags::default(), true, false, &mut |q, _| {
+            q.contains("hooks")
+        });
         assert!(c.hooks);
         assert!(!c.settings && !c.path && !c.aliases && !c.system_prompt);
     }
@@ -198,8 +212,25 @@ mod tests {
             yes: true,
             ..Flags::default()
         };
-        let c = resolve(&flags, true, &mut never);
+        let c = resolve(&flags, true, false, &mut never);
         assert!(c.hooks && c.settings && c.path && !c.aliases && !c.system_prompt);
+    }
+
+    #[test]
+    fn security_is_off_unless_a_flag_or_the_config_key_turns_it_on() {
+        let none = Flags::default();
+        assert!(!resolve(&none, false, false, &mut never).security);
+        assert!(resolve(&none, false, true, &mut never).security);
+        let on = Flags {
+            security: true,
+            ..Flags::default()
+        };
+        assert!(resolve(&on, false, false, &mut never).security);
+        let off = Flags {
+            no_security: true,
+            ..Flags::default()
+        };
+        assert!(!resolve(&off, false, true, &mut never).security);
     }
 
     #[test]
