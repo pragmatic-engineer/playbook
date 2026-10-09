@@ -135,9 +135,18 @@ One markdown store at `~/.config/playbook/memory/`, global and per project, loca
 
 ## Security
 
-The shipped `settings.shared.json` has a conservative permissions default. It removes bare `Bash` and keychain commands from auto-allow, and moves twelve interpreters (`node`, `python3`, `npx`, `npm`, `make`, `awk`, `go`, `source`, `xargs`, `sqlite3`, `psql`, `docker`) from allow to ask.
+The security defaults are opt-in. A plain `playbook init` does not add them. Turn them on with either of:
 
-It is not a sandbox. `git`, `gh`, `find -exec` and the `sed` e-command still run without a prompt. The `Read(**/.env)` deny rules cover the `Read` tool only, so `cat .env` still runs. Autoupdates ship disabled through `DISABLE_AUTOUPDATER`.
+```bash
+playbook init --security
+playbook config set --global security.defaults true   # then every `playbook init` applies them
+```
+
+They are the `permissions` block and `env.DISABLE_AUTOUPDATER` of the shipped `settings.shared.json`. The permissions default is conservative. It removes bare `Bash` and keychain commands from auto-allow, and moves twelve interpreters (`node`, `python3`, `npx`, `npm`, `make`, `awk`, `go`, `source`, `xargs`, `sqlite3`, `psql`, `docker`) from allow to ask. It also adds `Read(**/.env)` deny rules and ships autoupdates disabled through `DISABLE_AUTOUPDATER`. Running it again changes nothing. It follows the usual settings merge, so a `permissions` block you customised wins.
+
+Without the opt-in, `init` leaves the `permissions` block and `DISABLE_AUTOUPDATER` in your `settings.json` as they are. It stops adding them and never removes ones you already have. To turn the defaults off, run `playbook init --no-security` or set `playbook config set --global security.defaults false`, then delete the `permissions` entries and `DISABLE_AUTOUPDATER` from `~/.claude/settings.json` by hand.
+
+It is not a sandbox. `git`, `gh`, `find -exec` and the `sed` e-command still run without a prompt. The `Read(**/.env)` deny rules cover the `Read` tool only, so `cat .env` still runs.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 

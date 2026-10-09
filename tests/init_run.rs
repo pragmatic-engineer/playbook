@@ -185,6 +185,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         aliases: true,
         hooks: true,
         settings: true,
+        security: false,
         path_setup: None,
         repo: None,
     }
@@ -805,6 +806,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         aliases: true,
         hooks: true,
         settings: true,
+        security: false,
         path_setup: None,
         repo: None,
     };
@@ -859,6 +861,7 @@ fn aliases_false_skips_shim_entirely() {
         aliases: false,
         hooks: true,
         settings: true,
+        security: false,
         path_setup: None,
         repo: None,
     };

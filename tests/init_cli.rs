@@ -46,6 +46,16 @@ impl Sandbox {
         out
     }
 
+    fn config_set(&self, key: &str, value: &str) {
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["config", "set", "--global", key, value])
+            .env("HOME", &self.home)
+            .current_dir(&self.home)
+            .output()
+            .expect("playbook should spawn");
+        assert!(out.status.success(), "config set failed: {}", text(&out));
+    }
+
     fn path(&self, rel: &str) -> PathBuf {
         self.home.join(rel)
     }
@@ -275,7 +285,7 @@ fn no_hooks_leaves_every_hook_entry_out_and_says_so() {
     let settings = h.read(".claude/settings.json");
     assert!(!settings.contains("playbook hook"), "{settings}");
     assert!(
-        settings.contains("permissions"),
+        settings.contains("cleanupPeriodDays"),
         "shared settings still merged"
     );
 }
@@ -321,4 +331,79 @@ fn a_no_flag_overrides_its_yes_twin() {
     let h = Sandbox::new("override");
     let t = text(&h.init("/bin/zsh", &["--aliases", "--no-aliases"]));
     assert!(t.contains("not installed"), "{t}");
+}
+
+const SECURITY_ENV: &str = "DISABLE_AUTOUPDATER";
+
+fn has_security(settings: &Value) -> bool {
+    settings.get("permissions").is_some() || settings["env"].get(SECURITY_ENV).is_some()
+}
+
+#[test]
+fn a_plain_init_applies_no_security_defaults() {
+    let sb = Sandbox::new("sec-off");
+    let out = sb.init("/bin/bash", &[]);
+    let settings = json(&sb.read(".claude/settings.json"));
+    assert!(!has_security(&settings), "{settings}");
+    assert!(settings["env"].get("DO_NOT_TRACK").is_some(), "{settings}");
+    assert!(text(&out).contains("--security"), "{}", text(&out));
+}
+
+#[test]
+fn the_security_flag_applies_the_defaults_and_a_rerun_is_stable() {
+    let sb = Sandbox::new("sec-flag");
+    sb.init("/bin/bash", &["--security"]);
+    let first = sb.read(".claude/settings.json");
+    let settings = json(&first);
+    assert_eq!(settings["env"][SECURITY_ENV], "1");
+    assert_eq!(settings["permissions"]["deny"][0], "Read(**/.env)");
+    assert!(settings["permissions"]["ask"]
+        .to_string()
+        .contains("Bash(python3:*)"));
+    let backups = sb.count(".claude", "settings.json.bak.");
+
+    sb.init("/bin/bash", &["--security"]);
+    assert_eq!(sb.read(".claude/settings.json"), first);
+    assert_eq!(sb.count(".claude", "settings.json.bak."), backups);
+}
+
+#[test]
+fn the_config_key_applies_the_defaults_and_no_security_overrides_it() {
+    let sb = Sandbox::new("sec-config");
+    sb.config_set("security.defaults", "true");
+    sb.init("/bin/bash", &[]);
+    assert!(has_security(&json(&sb.read(".claude/settings.json"))));
+
+    let other = Sandbox::new("sec-config-override");
+    other.config_set("security.defaults", "true");
+    other.init("/bin/bash", &["--no-security"]);
+    assert!(!has_security(&json(&other.read(".claude/settings.json"))));
+}
+
+#[test]
+fn a_plain_init_never_strips_security_entries_the_user_already_has() {
+    let sb = Sandbox::new("sec-keep");
+    sb.init("/bin/bash", &["--security"]);
+    let applied = sb.read(".claude/settings.json");
+    let base = sb.read(".claude/.settings.base.json");
+
+    sb.init("/bin/bash", &[]);
+    assert_eq!(sb.read(".claude/settings.json"), applied);
+    assert_eq!(sb.read(".claude/.settings.base.json"), base);
+
+    // A hand-written block survives too, and a later opt-in does not
+    // overwrite it.
+    let mine = Sandbox::new("sec-mine");
+    mine.write(
+        ".claude/settings.json",
+        r#"{"permissions":{"allow":["Read"]},"env":{"DISABLE_AUTOUPDATER":"0","MINE":"1"}}"#,
+    );
+    mine.init("/bin/bash", &[]);
+    let settings = json(&mine.read(".claude/settings.json"));
+    assert_eq!(settings["permissions"], json(r#"{"allow":["Read"]}"#));
+    assert_eq!(settings["env"][SECURITY_ENV], "0");
+    assert_eq!(settings["env"]["MINE"], "1");
+    mine.init("/bin/bash", &["--security"]);
+    let settings = json(&mine.read(".claude/settings.json"));
+    assert_eq!(settings["permissions"], json(r#"{"allow":["Read"]}"#));
 }

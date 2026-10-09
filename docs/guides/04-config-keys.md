@@ -45,6 +45,7 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `fix.maxLines` | `500` | whole number, 1 or more | `/playbook:fix` stops the same way when more lines than this change, not counting the new test. |
 | `review.stackMaxPrs` | `6` | whole number, 1 or more | The quick and deep review commands ask again before reviewing a whole PR stack with more open PRs than this. |
 | `review.stackMaxLines` | `3000` | whole number, 1 or more | They ask again when the open PRs of the stack change more lines than this. |
+| `security.defaults` | `false` | `true`, `false` | `playbook init` also merges the shipped security defaults (the `permissions` block and `DISABLE_AUTOUPDATER`) into `settings.json`. `init --security` does the same for one run and `--no-security` skips them even when this is true. Off, `init` leaves the permissions you already have as they are. See [Security](../../README.md#security). |
 
 ## See also
 

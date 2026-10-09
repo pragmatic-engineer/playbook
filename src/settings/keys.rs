@@ -47,3 +47,11 @@ pub const SHIPPABLE_ENV: &[&str] = &[
     "ENABLE_TOOL_SEARCH",
     "DO_NOT_TRACK",
 ];
+
+/// The security section of the template: the whole `permissions` key. A fresh
+/// `playbook init` leaves it out unless the user opts in, see
+/// `init::run::neutralise_security`.
+pub const SECURITY_KEYS: &[&str] = &["permissions"];
+
+/// `env` entries in the security section: autoupdates ship disabled.
+pub const SECURITY_ENV: &[&str] = &["DISABLE_AUTOUPDATER"];

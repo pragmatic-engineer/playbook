@@ -32,6 +32,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "fix.maxLines",
     "review.stackMaxPrs",
     "review.stackMaxLines",
+    "security.defaults",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -83,6 +84,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "fix.maxLines" => Some(Value::Number(500.into())),
         "review.stackMaxPrs" => Some(Value::Number(6.into())),
         "review.stackMaxLines" => Some(Value::Number(3000.into())),
+        "security.defaults" => Some(Value::Bool(false)),
         _ => None,
     }
 }
@@ -155,6 +157,13 @@ mod tests {
             default_value("review.stackMaxLines"),
             Some(Value::from(3000))
         );
+    }
+
+    #[test]
+    fn security_defaults_is_a_known_key_that_is_off_by_default() {
+        assert!(KNOWN_KEYS.contains(&"security.defaults"));
+        assert_eq!(default_value("security.defaults"), Some(Value::Bool(false)));
+        assert_eq!(allowed_enum_values("security.defaults"), None);
     }
 
     #[test]

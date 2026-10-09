@@ -217,9 +217,13 @@ fn main() {
         // switchover and stay untouched here; see `src/init/mod.rs`'s doc
         // comment for why running this wiring alone is still safe.
         Command::Init { flags } => {
+            let security_config = config::resolve("security.defaults", &common::home_dir(), None)
+                .map(|(value, _)| value.as_bool().unwrap_or(false))
+                .unwrap_or(false);
             let choices = init::choices::resolve(
                 &flags,
                 init::choices::stdio_is_interactive(),
+                security_config,
                 &mut init::choices::ask_on_terminal,
             );
             let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
@@ -259,6 +263,7 @@ fn main() {
                 path_setup,
                 hooks: choices.hooks,
                 settings: choices.settings,
+                security: choices.security,
             };
             let outcome = init::run::run(&paths);
             for step in &outcome.steps {
