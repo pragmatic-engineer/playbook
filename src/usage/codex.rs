@@ -13,7 +13,9 @@
 //! the cumulative `total_token_usage.total_tokens`, priced from
 //! `last_token_usage`. Compressed `.jsonl.zst` rollouts are not read.
 
-use super::claude_code::{collect_jsonl, modified_before, parse_iso8601_utc, read_lines, token};
+use super::claude_code::{
+    collect_jsonl, map_files, modified_before, parse_iso8601_utc, read_lines, token, worker_count,
+};
 use super::repo::RepoResolver;
 use super::{Events, UsageEvent, UsageSource};
 use serde_json::Value;
@@ -35,30 +37,45 @@ impl UsageSource for CodexSource {
     }
 
     fn events_since(&self, watermark: i64) -> Result<Events, String> {
+        Ok(self.events_since_with(watermark, worker_count()))
+    }
+}
+
+impl CodexSource {
+    /// `events_since` on `threads` worker threads. Each rollout file keeps its
+    /// own session state, so files are independent: they are read on scoped
+    /// threads and joined in file order, which makes the result the same for
+    /// any thread count.
+    pub(crate) fn events_since_with(&self, watermark: i64, threads: usize) -> Events {
         let mut files = Vec::new();
         collect_jsonl(&self.root, &mut files);
         files.retain(|f| is_rollout(f) && !modified_before(f, watermark));
         files.sort();
 
-        let mut repos = RepoResolver::default();
-        let mut usage = Vec::new();
-        for file in files {
-            let mut state = Session {
-                id: file_session_id(&file),
-                ..Session::default()
-            };
-            read_lines(&file, &mut |line| {
-                if let Ok(value) = serde_json::from_str::<Value>(line) {
-                    if let Some(event) = state.apply(&value, watermark, &mut repos) {
-                        usage.push(event);
+        let usage = map_files(
+            &files,
+            threads,
+            || (),
+            |file, repos, _| {
+                let mut state = Session {
+                    id: file_session_id(file),
+                    ..Session::default()
+                };
+                let mut out = Vec::new();
+                read_lines(file, &mut |line| {
+                    if let Ok(value) = serde_json::from_str::<Value>(line) {
+                        if let Some(event) = state.apply(&value, watermark, repos) {
+                            out.push(event);
+                        }
                     }
-                }
-            });
-        }
-        Ok(Events {
+                });
+                out
+            },
+        );
+        Events {
             usage,
             tools: Vec::new(),
-        })
+        }
     }
 }
 
@@ -305,5 +322,30 @@ mod tests {
         assert_eq!(db::count_usage_events(&conn).unwrap(), 4);
         let stored = db::load_usage_events(&conn).unwrap();
         assert!(stored.iter().all(|e| e.agent == "codex"));
+    }
+
+    #[test]
+    fn every_thread_count_gives_the_same_codex_events() {
+        let dir = crate::common::test_support::scratch_dir("codex-threads");
+        let mut originals = Vec::new();
+        collect_jsonl(&root(), &mut originals);
+        for n in 0..12 {
+            for (i, file) in originals.iter().enumerate() {
+                let name = file.file_name().unwrap().to_string_lossy().into_owned();
+                let sub = dir.join(format!("d{}", n % 3));
+                std::fs::create_dir_all(&sub).unwrap();
+                std::fs::copy(file, sub.join(format!("{name}-{n}-{i}-copy.jsonl"))).unwrap();
+            }
+        }
+        let source = CodexSource::new(dir.clone());
+        let one = source.events_since_with(0, 1);
+        for threads in [2, 3, 8, 64] {
+            assert_eq!(
+                source.events_since_with(0, threads),
+                one,
+                "{threads} threads"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
