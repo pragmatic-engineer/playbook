@@ -479,3 +479,15 @@ fn the_table_lists_review_config_and_text_mode_ends_with_a_verdict() {
     );
     assert!(text_out.contains("cannot fix layer 6"), "{text_out}");
 }
+
+#[test]
+fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
+    let b = Box::new("order");
+    b.settings("{}");
+    let dir = b.stub("bin", "1.2.3", true);
+    let first = b.run(&[&dir], "/bin/zsh", None);
+    assert!(!first.is_empty());
+    for _ in 0..5 {
+        assert_eq!(b.run(&[&dir], "/bin/zsh", None), first);
+    }
+}

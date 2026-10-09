@@ -87,18 +87,33 @@ const PRE_GUARDS: [&str; 5] = [
 
 const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash, or brew install pragmatic-engineer/tap/playbook, and make sure its directory is on PATH";
 
-/// Run every check, in table order.
+/// One probe: reads the machine and returns its rows.
+type Probe = fn(&Env) -> Vec<Row>;
+
+/// Every probe, in table order.
+const PROBES: [Probe; 10] = [
+    |env| vec![layer1(env)],
+    |env| vec![layer2(env)],
+    |env| vec![layer3(env)],
+    |env| vec![layer4(env)],
+    |env| layer5(env).into_iter().collect(),
+    layer6,
+    layer7,
+    config_rows,
+    worktree_rows,
+    migration_rows,
+];
+
+/// Run every check. The probes only read, and several wait on child processes
+/// (`claude plugin list`, `git`, the binary's own `--version`), so they run
+/// side by side. Rows are joined in table order, so the output is unchanged.
 pub fn run(env: &Env) -> Vec<Row> {
-    let mut rows = vec![layer1(env), layer2(env)];
-    rows.push(layer3(env));
-    rows.push(layer4(env));
-    rows.extend(layer5(env));
-    rows.extend(layer6(env));
-    rows.extend(layer7(env));
-    rows.extend(config_rows(env));
-    rows.extend(worktree_rows(env));
-    rows.extend(migration_rows(env));
-    rows
+    crate::common::par::map(&PROBES, crate::common::par::MAX_CONCURRENT, |probe| {
+        probe(env)
+    })
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 fn on_path(env: &Env, name: &str) -> Option<PathBuf> {
