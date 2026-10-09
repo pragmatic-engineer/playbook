@@ -47,7 +47,9 @@ The chain walk is capped at 25 PRs and guards against loops. A branch with sever
 
 - When `ask` is true, the review command always asks: this PR only, the whole stack (quick review), or the whole stack with deep review. Quick review is the default. Deep review runs only when asked. In auto mode the command takes the recommended answer (quick review of the whole stack unless a flag says otherwise) and logs the assumption.
 - The whole-stack review builds one context object: the open PRs' diffs and the merged PRs' summaries. Reviewers share it. Findings are mapped back to the PR whose diff holds the line (`playbook pr stack map`, using the diff hunks) and posted to that PR's pending review. A line that no PR holds goes in the review summary.
-- Summaries of merged PRs are routed through `playbook route` so a cheap model writes them.
+- `--this-pr` and `--whole-stack` skip the question.
+- `playbook pr stack <pr> --context` writes the shared context and one diff file per open PR. A finding carries `file`, `line`, `body` and the `pr` the reviewer was reading. With `pr`, that PR must hold the line. Without it, the topmost open PR whose diff covers the line wins.
+- Summaries of merged PRs that are too thin are written by the agent `playbook route mechanical` names, so a cheap model does that work.
 
 ### Token budget
 
@@ -76,4 +78,5 @@ Per-PR `gh` calls (diffs, summaries) run through `common::par::map`, capped at 4
 - One new module, `src/pr/stack.rs`, and one subcommand family, `playbook pr stack`. Commands change only by a small addition each.
 - Detection has two sources. Both are tested with a fake `gh` and fixtures for no stack, a 2-stack, a 5-stack, a merged middle PR, a closed top PR, a branch chain only, and the API field present.
 - The branch-chain source is best effort. A stack whose bottom PR was merged and whose branch was deleted looks like a smaller stack.
-- Delivery is in four PRs: detection, `--context` and `map`, the command integration with the config keys, then docs.
+- Delivery was in four PRs: detection, `--context` and `map`, the command integration with the config keys, then docs.
+- Not proven against a live stack: the whole-stack review flow in the two commands is instructions for the model, covered by the CLI tests for detection, context and mapping but not by an end to end run.
