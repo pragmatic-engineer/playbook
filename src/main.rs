@@ -128,10 +128,13 @@ fn main() {
         // binary-invoked form are the other two thirds of WU-11's atomic
         // switchover and stay untouched here; see `src/init/mod.rs`'s doc
         // comment for why running this wiring alone is still safe.
-        Command::Init {
-            system_prompt,
-            aliases,
-        } => {
+        Command::Init { flags } => {
+            let choices = init::choices::resolve(
+                &flags,
+                init::choices::stdio_is_interactive(),
+                &mut init::choices::ask_on_terminal,
+            );
+            let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
             let home = common::home_dir();
             let claude_home = home.join(".claude");
             let self_root = init::self_root::resolve(
@@ -142,13 +145,18 @@ fn main() {
                 .ok()
                 .and_then(|shell| ShellKind::detect(&shell));
 
-            let path_setup = std::env::current_exe().ok().map(|exe| init::path::Setup {
-                bin_dir: init::path::resolve_bin_dir(
-                    &std::env::var_os("PATH").unwrap_or_default(),
-                    &exe,
-                ),
-                shell: init::path::PathShell::detect(&std::env::var("SHELL").unwrap_or_default()),
-            });
+            let path_setup = std::env::current_exe()
+                .ok()
+                .filter(|_| choices.path)
+                .map(|exe| init::path::Setup {
+                    bin_dir: init::path::resolve_bin_dir(
+                        &std::env::var_os("PATH").unwrap_or_default(),
+                        &exe,
+                    ),
+                    shell: init::path::PathShell::detect(
+                        &std::env::var("SHELL").unwrap_or_default(),
+                    ),
+                });
             let repo = manifest::check::toplevel().zip(common::paths::repo_scoped_dir(
                 common::paths::RepoScope::Worktree,
             ));
@@ -161,6 +169,8 @@ fn main() {
                 system_prompt,
                 aliases,
                 path_setup,
+                hooks: choices.hooks,
+                settings: choices.settings,
             };
             let outcome = init::run::run(&paths);
             for step in &outcome.steps {

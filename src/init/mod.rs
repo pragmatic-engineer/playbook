@@ -28,6 +28,7 @@
 //! form. `wire` changes what a user's own `settings.json` looks like after
 //! they choose to run `playbook init`.
 
+pub mod choices;
 pub mod memory_migrate;
 pub mod merge;
 pub mod migrate;

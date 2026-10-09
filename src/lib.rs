@@ -59,16 +59,16 @@ pub enum Command {
     /// Install or repair your local Claude Code setup
     ///
     /// Safe to run again: it only touches what is missing or out of date.
-    /// Use the flags to opt in to the system prompt and the `ccc` launcher.
+    /// In a terminal it asks about each optional part (hooks, settings, PATH,
+    /// the `ccc` launcher, the system prompt) unless you answer with a flag.
+    /// Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`,
+    /// unanswered parts use their defaults: hooks, settings and PATH on, the
+    /// launcher and system prompt off.
     ///
-    /// Example: `playbook init --system-prompt --aliases`
+    /// Example: `playbook init --no-hooks --aliases`
     Init {
-        /// Also install the playbook system prompt (opt in; an existing copy is refreshed either way)
-        #[arg(long)]
-        system_prompt: bool,
-        /// Also install the `ccc` and `ccd` launcher shortcuts and wire your shell rc file (opt in)
-        #[arg(long)]
-        aliases: bool,
+        #[command(flatten)]
+        flags: init::choices::Flags,
     },
     /// Remove what playbook installed from this machine
     ///

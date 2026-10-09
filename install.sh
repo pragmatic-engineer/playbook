@@ -594,6 +594,10 @@ if [ "$OPT_SYSTEM_PROMPT" -eq 1 ]; then
         warn "the installed playbook $( "$PLAYBOOK_BIN_DIR/playbook" --version 2>/dev/null | awk '{print $NF}' ) does not support --system-prompt; skipping it. Re-run this installer once a release includes it."
     fi
 fi
+# The installer has already asked its own questions, so init must not ask again.
+if _init_supports --yes; then
+    _INIT_ARGS="$_INIT_ARGS --yes"
+fi
 log "Running playbook init"
 # shellcheck disable=SC2086
 CLAUDE_PLUGIN_ROOT="$SRC" "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \

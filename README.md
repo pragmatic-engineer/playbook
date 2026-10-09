@@ -144,8 +144,13 @@ you have not read.
      playbook init
    ```
 
-   Add `--system-prompt` to also install the custom system prompt. Every step
-   is idempotent, so re-running is safe.
+   In a terminal, `playbook init` asks about each optional part: hooks, shared
+   settings, PATH, the `ccc` launcher and the system prompt. Answer with a flag
+   to skip the question (`--hooks` or `--no-hooks`, `--settings` or
+   `--no-settings`, `--path` or `--no-path`, `--aliases` or `--no-aliases`,
+   `--system-prompt` or `--no-system-prompt`). With `--yes`, or without a
+   terminal, it uses the defaults: hooks, settings and PATH on, launcher and
+   system prompt off. Every step is idempotent, so re-running is safe.
 
 6. Verify with `/playbook:doctor` in a Claude Code session.
 

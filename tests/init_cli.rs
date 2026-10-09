@@ -265,3 +265,28 @@ fn an_old_launcher_line_is_migrated_and_the_users_lines_and_blanks_survive() {
         assert_eq!(sb.read(".zshrc"), rc);
     }
 }
+
+#[test]
+fn no_hooks_leaves_hook_entries_out_and_says_so() {
+    let h = Sandbox::new("no-hooks");
+    let out = h.init("/bin/zsh", &["--no-hooks"]);
+    let t = text(&out);
+    assert!(t.contains("hooks") && t.contains("skipped"), "{t}");
+    assert!(!h.read(".claude/settings.json").contains("session-init"));
+}
+
+#[test]
+fn a_run_without_a_terminal_uses_defaults_and_never_blocks() {
+    let h = Sandbox::new("defaults");
+    let out = h.init("/bin/zsh", &[]);
+    let t = text(&out);
+    assert!(t.contains("hooks"), "{t}");
+    assert!(t.contains("shim"), "{t}");
+}
+
+#[test]
+fn a_no_flag_overrides_its_yes_twin() {
+    let h = Sandbox::new("override");
+    let t = text(&h.init("/bin/zsh", &["--aliases", "--no-aliases"]));
+    assert!(t.contains("not installed"), "{t}");
+}
