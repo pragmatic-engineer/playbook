@@ -416,9 +416,10 @@ fn main() {
                     version,
                     marketplace,
                     sha256,
+                    repo,
                 } => std::fs::read_to_string(&marketplace)
                     .map_err(|e| format!("cannot read {}: {e}", marketplace.display()))
-                    .and_then(|text| release::pin_marketplace(&version, &text, &sha256)),
+                    .and_then(|text| release::pin_marketplace(&version, &text, &sha256, &repo)),
             };
             match result {
                 Ok(text) => print!("{text}"),
