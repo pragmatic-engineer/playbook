@@ -66,7 +66,48 @@ fn main() {
             }
             None => std::process::exit(cc::launch::run(false, &[])),
         },
-        Command::Effort { level, json } => {
+        Command::Effort { sub: Some(sub), .. } => {
+            let home = common::home_dir();
+            let claude_home = home.join(".claude");
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let claude = effort::claude_cap(&claude_home, &cwd);
+            let root = init::self_root::resolve(
+                std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
+                &claude_home,
+            );
+            match sub {
+                playbook::EffortCommand::List { json } => {
+                    println!(
+                        "{}",
+                        effort::component::run_list(
+                            &home,
+                            claude.as_deref(),
+                            root.as_deref(),
+                            json
+                        )
+                    );
+                }
+                playbook::EffortCommand::Resolve { kind, name, json } => {
+                    let Some(kind) = effort::component::Kind::parse(&kind) else {
+                        eprintln!("error: unknown kind '{kind}', use agents, commands or skills");
+                        std::process::exit(1);
+                    };
+                    let r = effort::component::resolve(
+                        kind,
+                        &name,
+                        &home,
+                        claude.as_deref(),
+                        root.as_deref(),
+                    );
+                    if json {
+                        println!("{}", r.to_json());
+                    } else {
+                        println!("{}", r.to_text());
+                    }
+                }
+            }
+        }
+        Command::Effort { level, json, .. } => {
             let home = common::home_dir();
             match level {
                 Some(level) => match effort::run_set(&home, &level) {

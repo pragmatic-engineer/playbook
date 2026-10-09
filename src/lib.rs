@@ -54,6 +54,32 @@ pub struct Cli {
 }
 
 // Variant order is the order users see in `--help`; nothing else depends on it.
+/// `playbook effort` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum EffortCommand {
+    /// Show one component's shipped effort, ceiling and effective level
+    ///
+    /// For an agent it also names the file to dispatch and every file allowed
+    /// under the ceiling.
+    ///
+    /// Example: `playbook effort resolve agents reviewer --json`
+    Resolve {
+        /// agents, commands or skills
+        kind: String,
+        /// The component name, such as `reviewer` or `deep-review`
+        name: String,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// List every component with its shipped effort and effective level
+    List {
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 /// Top-level subcommand groups.
 #[derive(Subcommand, Debug)]
 pub enum Command {
@@ -171,7 +197,13 @@ pub enum Command {
         #[command(subcommand)]
         sub: ConfigCommand,
     },
-    /// Set playbook's own ceiling on effort
+    /// Set playbook's own ceiling on effort, or inspect one component's
+    ///
+    /// `playbook effort list` shows every command, skill and agent with its
+    /// shipped effort and effective level. `playbook effort resolve agents
+    /// reviewer` says which agent file to dispatch under the ceilings. Set a
+    /// per-component ceiling with `playbook config set --global
+    /// effort.agents.reviewer medium`.
     ///
     /// `auto` (the default) sets no ceiling, so Claude Code's own
     /// `maxEffortLevel` decides how high effort may go. Each skill, command and
@@ -183,7 +215,10 @@ pub enum Command {
     /// values and the one that wins.
     ///
     /// Example: `playbook effort xhigh`
+    #[command(args_conflicts_with_subcommands = true)]
     Effort {
+        #[command(subcommand)]
+        sub: Option<EffortCommand>,
         /// auto, low, medium, high, xhigh or max
         level: Option<String>,
         /// Print the status as JSON (with no level)

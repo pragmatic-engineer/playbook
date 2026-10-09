@@ -90,7 +90,7 @@ impl std::fmt::Display for ConfigError {
             ),
             ConfigError::UnknownKey(key) => write!(
                 f,
-                "unknown config key: {key}, valid keys are: {}",
+                "unknown config key: {key}, valid keys are: {}, and effort.<agents|commands|skills>.<name>",
                 keys::KNOWN_KEYS.join(", ")
             ),
             ConfigError::WrongType { key, expected } => {
