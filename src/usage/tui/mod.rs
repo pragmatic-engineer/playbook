@@ -9,6 +9,7 @@ pub mod app;
 pub mod data;
 pub mod fmt;
 pub mod panels;
+pub mod theme;
 pub mod view;
 pub mod worker;
 
@@ -41,6 +42,7 @@ fn event_loop(
     while !app.quit {
         terminal.draw(|frame| view::render(frame, &app))?;
         if event::poll(TICK)? {
+            // A resize needs no handling: the next draw reads the new size.
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press && app.key(key) == Effect::Requery {
                     worker.ask(app.range, &app.filter);

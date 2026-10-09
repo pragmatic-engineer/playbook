@@ -6,7 +6,7 @@
 
 use super::data::{Data, DayPoint};
 use super::fmt::{bar, compact, fit, money};
-use super::view::ACCENT;
+use super::theme::Palette;
 use crate::usage::aggregate::{date_key, Group};
 use crate::usage::query::{clock, total_tokens, ActiveSession, ACTIVE_SECONDS};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -149,7 +149,7 @@ fn graph(frame: &mut Frame, area: Rect, title: String, values: Vec<u64>, color: 
 }
 
 /// Cost per day.
-pub fn spend(frame: &mut Frame, area: Rect, data: &Data) {
+pub fn spend(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
     let shown = tail(&data.series, area.width);
     if shown.is_empty() {
         return empty(frame, area, "Spend".to_string(), "No usage in this range.");
@@ -165,11 +165,11 @@ pub fn spend(frame: &mut Frame, area: Rect, data: &Data) {
         .iter()
         .map(|p| (p.cost_usd * 100.0).round() as u64)
         .collect();
-    graph(frame, area, title, values, ACCENT);
+    graph(frame, area, title, values, pal.accent);
 }
 
 /// Tokens per day.
-pub fn tokens(frame: &mut Frame, area: Rect, data: &Data) {
+pub fn tokens(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
     let shown = tail(&data.series, area.width);
     if shown.is_empty() {
         return empty(frame, area, "Tokens".to_string(), "No usage in this range.");
@@ -181,7 +181,7 @@ pub fn tokens(frame: &mut Frame, area: Rect, data: &Data) {
         area,
         title,
         shown.iter().map(|p| p.tokens).collect(),
-        Color::Magenta,
+        pal.tokens,
     );
 }
 
@@ -238,16 +238,16 @@ fn age(seconds: i64) -> String {
     }
 }
 
-fn session_state(now: i64, s: &ActiveSession) -> (&'static str, Color) {
+fn session_state(now: i64, s: &ActiveSession, pal: &Palette) -> (&'static str, Color) {
     if now - s.last < LIVE_SECONDS {
-        ("live", Color::Green)
+        ("live", pal.live)
     } else {
-        ("idle", Color::Yellow)
+        ("idle", pal.warn)
     }
 }
 
 /// Sessions with a message in the last 15 minutes, with state and cost so far.
-pub fn sessions(frame: &mut Frame, area: Rect, data: &Data) {
+pub fn sessions(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
     let live = &data.live;
     let title = format!(
         "Live sessions  hour {}  today {}",
@@ -271,7 +271,7 @@ pub fn sessions(frame: &mut Frame, area: Rect, data: &Data) {
         live.active
             .iter()
             .map(|s| {
-                let (state, color) = session_state(data.now, s);
+                let (state, color) = session_state(data.now, s, pal);
                 vec![
                     Cell::from(state).style(Style::default().fg(color)),
                     Cell::from(fit(&s.repo, w[1])),

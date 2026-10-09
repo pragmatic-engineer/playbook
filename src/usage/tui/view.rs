@@ -9,9 +9,10 @@ use super::app::App;
 use super::data::Data;
 use super::fmt::{compact, money};
 use super::panels;
+use super::theme::Palette;
 use crate::usage::aggregate::date_key;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
@@ -19,8 +20,6 @@ use ratatui::Frame;
 /// Smallest screen the layout fits.
 pub const MIN_WIDTH: u16 = 80;
 pub const MIN_HEIGHT: u16 = 24;
-
-pub const ACCENT: Color = Color::Cyan;
 
 /// Where each panel goes.
 #[derive(Debug, PartialEq, Eq)]
@@ -81,11 +80,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
     let p = layout(area);
-    render_header(frame, p.header, app);
+    let pal = app.theme.palette();
+    render_header(frame, p.header, app, &pal);
     match &app.data {
         Some(data) => {
-            panels::spend(frame, p.spend, data);
-            panels::tokens(frame, p.tokens, data);
+            panels::spend(frame, p.spend, data, &pal);
+            panels::tokens(frame, p.tokens, data, &pal);
             panels::groups(
                 frame,
                 p.models,
@@ -100,7 +100,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                 &data.repos,
                 data.totals.cost_usd,
             );
-            panels::sessions(frame, p.sessions, data);
+            panels::sessions(frame, p.sessions, data, &pal);
             panels::events(frame, p.events, data);
         }
         None => {
@@ -109,9 +109,24 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
     }
     frame.render_widget(
-        Paragraph::new(" r range   q quit").style(Style::default().add_modifier(Modifier::DIM)),
+        Paragraph::new(footer(app)).style(Style::default().add_modifier(Modifier::DIM)),
         p.footer,
     );
+}
+
+fn footer(app: &App) -> String {
+    if app.editing {
+        return format!(" filter: {}_   enter apply   esc cancel", app.draft);
+    }
+    let filter = if app.filter.is_empty() {
+        String::new()
+    } else {
+        format!("   filter: {}", app.filter)
+    };
+    format!(
+        " r range   / filter   c clear   t theme ({})   q quit{filter}",
+        app.theme.name()
+    )
 }
 
 fn range_label(data: &Data) -> String {
@@ -126,10 +141,10 @@ fn range_label(data: &Data) -> String {
     }
 }
 
-fn render_header(frame: &mut Frame, area: Rect, app: &App) {
+fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
     let block = Block::bordered().title(Span::styled(
         " playbook usage ",
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
     ));
     let line = match (&app.data, &app.error) {
         (Some(d), error) => {
@@ -138,7 +153,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
                 + d.totals.cache_creation_tokens
                 + d.totals.cache_read_tokens;
             let mut spans = vec![
-                Span::styled(range_label(d), Style::default().fg(ACCENT)),
+                Span::styled(range_label(d), Style::default().fg(pal.accent)),
                 Span::raw(format!(
                     "   {}   {} messages   {} tokens",
                     money(d.totals.cost_usd),
@@ -149,18 +164,18 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             if d.unpriced > 0 {
                 spans.push(Span::styled(
                     format!("   {} unpriced", d.unpriced),
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(pal.warn),
                 ));
             }
             if let Some(e) = error {
                 spans.push(Span::styled(
                     format!("   {e}"),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(pal.error),
                 ));
             }
             Line::from(spans)
         }
-        (None, Some(e)) => Line::styled(e.clone(), Style::default().fg(Color::Red)),
+        (None, Some(e)) => Line::styled(e.clone(), Style::default().fg(pal.error)),
         (None, None) => Line::raw("Reading usage..."),
     };
     frame.render_widget(Paragraph::new(line).block(block), area);
@@ -309,5 +324,47 @@ mod tests {
     fn before_the_first_read_the_view_says_it_is_reading() {
         let app = App::new(Range::All);
         assert!(screen(&app, 80, 24).contains("Reading usage"));
+    }
+
+    #[test]
+    fn the_footer_lists_the_keys_and_the_active_theme() {
+        let app = App::new(Range::All);
+        let text = screen(&app, 100, 30);
+        assert!(text.contains("/ filter"));
+        assert!(text.contains("t theme (dark)"));
+    }
+
+    #[test]
+    fn the_footer_shows_the_draft_while_editing_and_the_filter_once_set() {
+        let mut app = App::new(Range::All);
+        app.editing = true;
+        app.draft = "opus".into();
+        assert!(screen(&app, 100, 30).contains("filter: opus_"));
+        app.editing = false;
+        app.filter = "opus".into();
+        assert!(screen(&app, 100, 30).contains("filter: opus"));
+    }
+
+    #[test]
+    fn the_mono_theme_draws_no_foreground_color() {
+        let mut app = app_with(&[event("claude-opus-4-1", "a/b", 1.0)]);
+        app.theme = super::super::theme::Theme::Mono;
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+        let colored = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .filter(|c| c.fg != ratatui::style::Color::Reset)
+            .count();
+        assert_eq!(colored, 0);
+    }
+
+    #[test]
+    fn a_resize_redraws_to_the_new_size() {
+        let app = App::new(Range::All);
+        assert!(screen(&app, 60, 20).contains("Terminal too small"));
+        assert!(!screen(&app, 100, 30).contains("Terminal too small"));
     }
 }
