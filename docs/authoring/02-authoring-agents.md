@@ -91,7 +91,7 @@ Effort is fixed per agent file because the `Agent` tool takes no per-call effort
 - Spawn a variant with its `playbook:` prefix, for example `playbook:reviewer-xhigh`. The roster in `skills/delegating-subagents/SKILL.md` lists them, and its "Pick the tier" section says when to use each.
 - Variants ship in the plugin because the archive includes all of `agents/`.
 
-Current set: `reviewer`, `critic`, `implementer`, and `analyst` get `-low` and `-xhigh`. `fact-checker` gets `-xhigh` only, because a verifier that misses a wrong claim defeats its purpose. `test-reviewer` gets none: it runs once per quality gate, so nothing varies. The policy for base efforts is in [Model routing and memory](../internals/02-model-routing-and-memory.md#effort-policy).
+Current set: `reviewer`, `critic`, `implementer`, and `analyst` get `-low`, `-medium` and `-xhigh`. `fact-checker` gets `-medium` and `-xhigh`, and no `-low`, because a verifier that misses a wrong claim defeats its purpose. There is no `-high` variant: every base agent that has variants ships at `high`, so the base file is the high one. The `-medium` files exist so a per-component ceiling of `medium` can be met (see [ADR-0017](../adr/0017-per-component-effort-ceilings.md)). `test-reviewer` gets none: it runs once per quality gate, so nothing varies. The policy for base efforts is in [Model routing and memory](../internals/02-model-routing-and-memory.md#effort-policy).
 
 ## The check
 
