@@ -8,7 +8,7 @@ This page covers requirements, the full local install path with the curl one-lin
 |---|---|---|
 | `claude` on PATH, v2.1.224+ | recommended | Claude Code itself. The marketplace serves a trimmed plugin archive that needs 2.1.224 or later. Below that, or missing entirely, `install.sh` skips the plugin step with an upgrade hint rather than failing; the rest of the install (binary, hooks, guards, settings) still completes |
 | `bash` | required | hooks and the setup script run in bash |
-| zsh | required for `cc worktree` | the worktree subcommand is zsh-only; all other `cc` subcommands and `ccd` work in bash |
+| zsh | required for `ccc worktree` | the worktree subcommand is zsh-only; all other `ccc` subcommands and `ccd` work in bash |
 | `git`, `shasum` | required | used by hooks and the install script |
 | `gh` | optional | statusline PR and CI status |
 | `agent-browser` | optional | browser automation MCP used by `/playbook:plan` for web-only tickets and attachments |
@@ -112,10 +112,10 @@ Everything else stays: the rest of `settings.json` (including any hook or status
 
 ## Notes
 
-Config edits (`settings.json` or hooks) take effect on a fresh session only. After changing them, run `cc fresh` or plain `claude`. `cc` warns you when a resumed session runs on stale config. The repo tracks config files, not runtime state. The allowlist `.gitignore` keeps sessions, caches, plugin manifests, and credentials out of git.
+Config edits (`settings.json` or hooks) take effect on a fresh session only. After changing them, run `ccc fresh` or plain `claude`. `ccc` warns you when a resumed session runs on stale config. The repo tracks config files, not runtime state. The allowlist `.gitignore` keeps sessions, caches, plugin manifests, and credentials out of git.
 
 ## See also
 
-- [Launcher and hooks](../internals/01-launcher-and-hooks.md): what `/playbook:setup` wires and how the `cc` launcher runs.
+- [Launcher and hooks](../internals/01-launcher-and-hooks.md): what `/playbook:setup` wires and how the `ccc` launcher runs.
 - [The system prompt](../concepts/01-system-prompt.md): the optional persona `/playbook:setup` can install.
 - [Docs index](../index.md)

@@ -85,12 +85,12 @@ fn main() {
                 }
             }
         }
-        Command::ShellInit { shell, no_cc } => {
+        Command::ShellInit { shell } => {
             let kind = shell
                 .or_else(|| std::env::var("SHELL").ok())
                 .and_then(|s| ShellKind::detect(&s))
                 .unwrap_or(ShellKind::Bash);
-            print!("{}", init::shell_init::script(kind, !no_cc));
+            print!("{}", init::shell_init::script(kind));
         }
         Command::Uninstall {
             yes,

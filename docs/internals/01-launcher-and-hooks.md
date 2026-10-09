@@ -1,37 +1,37 @@
 # Internals: Launcher and Hooks
 
-The `cc` launcher is the entry point for every session. It wraps `claude` with a system prompt, transcript retention, and config-drift detection. Hooks extend the session lifecycle with guards, nudges, and state tracking. Together they're the machine the rest of the config runs on.
+The `ccc` launcher is the entry point for every session. It wraps `claude` with a system prompt, transcript retention, and config-drift detection. Hooks extend the session lifecycle with guards, nudges, and state tracking. Together they're the machine the rest of the config runs on.
 
-## The `cc`/`ccd` Launcher
+## The `ccc`/`ccd` Launcher
 
-The rc file holds one line, `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`. `playbook shell-init [--shell bash|zsh]` prints two functions, `cc` and `ccd`, that call `playbook cc launch` (`src/cc/launch.rs`). The same text works in both shells, so bash and zsh behave identically. `ccd` is `cc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
+The rc file holds one line, `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`. `playbook shell-init [--shell bash|zsh]` prints two functions, `ccc` and `ccd`, that call `playbook cc launch` (`src/cc/launch.rs`). The same text works in both shells, so bash and zsh behave identically. `ccd` is `ccc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
 
 A child process cannot change its parent's directory, so the functions carry one protocol: they create a temp file and pass its path in `PLAYBOOK_CC_CD_FILE`. When the launcher enters a worktree it writes the path there, and the function `cd`s to it after the session ends. The session itself keeps the terminal, so stdout needs no parsing.
 
-On every launch, `cc` and `ccd` first run the equivalent of `playbook trust "$PWD"`, so Claude Code's trust dialog never blocks the directory you start in. It is best-effort and never fails the launch.
+On every launch, `ccc` and `ccd` first run the equivalent of `playbook trust "$PWD"`, so Claude Code's trust dialog never blocks the directory you start in. It is best-effort and never fails the launch.
 
-On every invocation, `cc` passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` to `claude`. After `claude` exits, it prunes to keep only the newest `CCD_KEEP` transcripts (default 5, floor 2) per project. Older transcripts plus their sidecars and runtime state are deleted.
+On every invocation, `ccc` passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` to `claude`. After `claude` exits, it prunes to keep only the newest `CCD_KEEP` transcripts (default 5, floor 2) per project. Older transcripts plus their sidecars and runtime state are deleted.
 
 ### Subcommands
 
 | Command | Behavior |
 |---|---|
-| `cc` (no args) | Resumes the most recent session for `$PWD` whose `customTitle` matches the directory name. If none exists, starts fresh. Forks a new transcript on config drift. |
-| `cc fresh` | Starts a new session with no history. |
-| `cc list` | Lists recent sessions for `$PWD` with timestamps and titles. |
-| `cc clean` | Clones the latest matching transcript with `/model`, `/effort`, `/config`, `/output-style`, and `/style` overrides stripped, then resumes the clone. Conversation is preserved; runtime config resets to `settings.json`. The original transcript is untouched. |
-| `cc raw [id]` | Resumes verbatim. No fork, no cleanup. Preserves the original UUID and frozen overrides. Defaults to the latest matching session when `id` is omitted. |
-| `cc worktree <branch>` | Creates or enters a git worktree for the branch, then starts a session there. See [Worktree engine](#the-worktree-engine). |
+| `ccc` (no args) | Resumes the most recent session for `$PWD` whose `customTitle` matches the directory name. If none exists, starts fresh. Forks a new transcript on config drift. |
+| `ccc fresh` | Starts a new session with no history. |
+| `ccc list` | Lists recent sessions for `$PWD` with timestamps and titles. |
+| `ccc clean` | Clones the latest matching transcript with `/model`, `/effort`, `/config`, `/output-style`, and `/style` overrides stripped, then resumes the clone. Conversation is preserved; runtime config resets to `settings.json`. The original transcript is untouched. |
+| `ccc raw [id]` | Resumes verbatim. No fork, no cleanup. Preserves the original UUID and frozen overrides. Defaults to the latest matching session when `id` is omitted. |
+| `ccc worktree <branch>` | Creates or enters a git worktree for the branch, then starts a session there. See [Worktree engine](#the-worktree-engine). |
 
 ### Config-drift detection
 
-On every default resume, `cc` computes a SHA-256 hash of `settings.json` and every hook script, then compares it to the hash stored at session start (in `~/.config/playbook/cc-state/<project-slug>`). When they differ, `cc` forks a new transcript so the fresh copy loads the current config. A plain resume fires only when nothing changed.
+On every default resume, `ccc` computes a SHA-256 hash of `settings.json` and every hook script, then compares it to the hash stored at session start (in `~/.config/playbook/cc-state/<project-slug>`). When they differ, `ccc` forks a new transcript so the fresh copy loads the current config. A plain resume fires only when nothing changed.
 
-The `session-init` hook (`playbook hook session-init`) mirrors this: on `source=resume`, it recomputes the hash and emits a user-visible warning when the resumed session is running on the old config. The README states this directly: config or hook edits take effect on a fresh session, not a resumed one. Use `cc fresh` or `cc clean` after editing `settings.json` or any hook.
+The `session-init` hook (`playbook hook session-init`) mirrors this: on `source=resume`, it recomputes the hash and emits a user-visible warning when the resumed session is running on the old config. The README states this directly: config or hook edits take effect on a fresh session, not a resumed one. Use `ccc fresh` or `ccc clean` after editing `settings.json` or any hook.
 
 ## The Worktree Engine
 
-`cc worktree <branch>` runs `playbook cc worktree` (`src/cc/worktree_run.rs`) and then launches the session inside the new tree.
+`ccc worktree <branch>` runs `playbook cc worktree` (`src/cc/worktree_run.rs`) and then launches the session inside the new tree.
 
 What it does, in order:
 
@@ -119,7 +119,7 @@ The old shell guard scripts (`hooks/precommit-check.sh`, `hooks/no-dash-guard.sh
 
 | Event | Hook | Purpose |
 |---|---|---|
-| `WorktreeCreate` | `worktree-create` | Replaces Claude Code's default worktree creation so worktrees land in `<main-parent>/.worktrees/<repo>/<name>`, the `cc worktree` launcher convention, instead of `.claude/worktrees/`. Prints only the absolute path on stdout. Falls back to `.claude/worktrees/<name>` if the primary location fails. See [03-worktree.md](03-worktree.md). |
+| `WorktreeCreate` | `worktree-create` | Replaces Claude Code's default worktree creation so worktrees land in `<main-parent>/.worktrees/<repo>/<name>`, the `ccc worktree` launcher convention, instead of `.claude/worktrees/`. Prints only the absolute path on stdout. Falls back to `.claude/worktrees/<name>` if the primary location fails. See [03-worktree.md](03-worktree.md). |
 | `WorktreeRemove` | `worktree-remove` | Removes the worktree only when it is clean and every commit is on a remote-tracking ref or the main branch. Otherwise keeps it and says why on stderr. Never forces. |
 
 ### Optional: a git `commit-msg` hook

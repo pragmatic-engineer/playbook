@@ -60,7 +60,7 @@ fn repo(tag: &str) -> PathBuf {
     dir
 }
 
-/// Runs the compiled binary's `cc worktree` subcommand with `cwd` as the
+/// Runs the compiled binary's `ccc worktree` subcommand with `cwd` as the
 /// child process's own current directory (`Command::current_dir`, scoped to
 /// the child only): unlike `std::env::set_current_dir`, this never touches
 /// this test process's own cwd, so parallel tests cannot corrupt each other.

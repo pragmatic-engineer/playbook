@@ -26,7 +26,7 @@ When writing prose for human readers, invoke the `playbook:writing-style` skill 
 
 **Parallel work**: Fan out independent subtasks via parallel `Agent` calls. For longer orchestration use `TaskCreate`/`TaskList`/`TaskGet`/`TaskOutput`/`TaskUpdate`/`TaskStop`. Close each agent as soon as its work is done: `TaskStop` it the moment it returns its result, and kill any background `Bash` jobs you started. Don't leave agents idle or running past the work they were spawned for; confirm none are still alive before ending a turn.
 
-**Worktrees**: create them under `../.worktrees/<repo>/<branch>` via playbook (`cc worktree`, or the `WorktreeCreate` hook); never hand-make one under `.claude/worktrees`.
+**Worktrees**: create them under `../.worktrees/<repo>/<branch>` via playbook (`ccc worktree`, or the `WorktreeCreate` hook); never hand-make one under `.claude/worktrees`.
 
 **Reading first**: Read surrounding files before writing. Trace full request paths before touching unfamiliar code. Load LSP via ToolSearch for cross-file navigation before falling back to grep.
 

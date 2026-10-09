@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! WorktreeCreate hook: replaces Claude Code's default worktree creation so
-//! worktrees land in the cc launcher's `<parent>/.worktrees/<repo>/<name>`.
+//! worktrees land in the ccc launcher's `<parent>/.worktrees/<repo>/<name>`.
 //! Prints only the absolute worktree path on stdout; all git output goes to
 //! stderr. Falls back to `<repo>/.claude/worktrees/<name>` when that fails.
 

@@ -465,7 +465,7 @@ an error naming what went wrong instead.
 
 The reported path itself already names the convention: a path under
 `.claude/worktrees/agent-*` is the Agent-tool convention, one under
-`.worktrees/<repo>/` is the `cc worktree` launcher convention, one under
+`.worktrees/<repo>/` is the `ccc worktree` launcher convention, one under
 `review-worktrees/` is the PR review convention, and one under a
 `repos/<owner>/<repo>/*/worktrees/` tree is the `/playbook:implement`
 Work-Unit convention. When relaying a line, read the convention off the path

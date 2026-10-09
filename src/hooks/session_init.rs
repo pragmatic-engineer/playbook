@@ -45,11 +45,11 @@ const DEFAULT_AUTO_LEARN_MAX_AGE_DAYS: i64 = 14;
 const DRIFT_SYSTEM_MESSAGE: &str = "\u{26a0} Claude config (settings.json + hooks) has drifted \
     since this session was created. Plugins, output style, model default, and new hooks will \
     NOT take effect on this resumed session: they're frozen at the original startup snapshot. \
-    To apply current config: exit and run `cc fresh` (or `claude` without --resume).";
+    To apply current config: exit and run `ccc fresh` (or `claude` without --resume).";
 
 const DRIFT_EXTRA_CONTEXT: &str = "The user resumed this session, but the config hash has \
     changed since session creation. The harness has the OLD settings loaded. If the user asks \
-    about why a recent settings change isn't showing up, point them to 'cc fresh' or starting \
+    about why a recent settings change isn't showing up, point them to 'ccc fresh' or starting \
     a new `claude` invocation.";
 
 const TOOLKIT_PREAMBLE: &str = "Your toolkit. Before substantive work, check whether one of \
@@ -667,7 +667,7 @@ fn slugify(s: &str) -> String {
 const WORKTREE_SWEEP_INTERVAL_SECS: i64 = 86_400;
 
 /// The rate-limit marker for the periodic worktree sweep, one per repo
-/// (matching the cc launcher's own per-repo `/tmp`-based marker): the sweep
+/// (matching the ccc launcher's own per-repo `/tmp`-based marker): the sweep
 /// itself is scoped to one `repo_root` per call, so a single machine-wide
 /// marker would let whichever repo's `SessionStart` fires first after the
 /// window claims the slot for every other repo too, regardless of how long
@@ -696,9 +696,9 @@ pub fn worktree_sweep_due(marker_mtime_epoch: Option<i64>, now_epoch: i64) -> bo
 /// silently on any failure (config error, no repo, sweep error), matching
 /// this hook's own "never break the session" contract.
 ///
-/// This overlaps, deliberately, with the cc launcher's own eager sweep
+/// This overlaps, deliberately, with the ccc launcher's own eager sweep
 /// (`cc::worktree_run::run_housekeep`, unthrottled): a repo worked in
-/// through `cc worktree` gets swept on every invocation there and again
+/// through `ccc worktree` gets swept on every invocation there and again
 /// here at most daily, while a repo only ever opened directly relies on
 /// this path alone. The redundancy is accepted as defense in depth, not an
 /// oversight.

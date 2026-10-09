@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Classifies a worktree by matching its path against playbook's known
-//! creation conventions (`playbook wu`, the Agent tool, `cc worktree`, and
+//! creation conventions (`playbook wu`, the Agent tool, `ccc worktree`, and
 //! review worktrees), then decides whether an already-classified worktree is
 //! safe to reap.
 

@@ -33,9 +33,9 @@ Extend the config.
 
 How the machine works.
 
-- [Launcher and hooks](internals/01-launcher-and-hooks.md): the `cc` launcher, the worktree engine, and the hook lifecycle.
+- [Launcher and hooks](internals/01-launcher-and-hooks.md): the `ccc` launcher, the worktree engine, and the hook lifecycle.
 - [Model routing and memory](internals/02-model-routing-and-memory.md): how the session model is chosen, and the memory graph mechanics.
-- [Worktree engine](internals/03-worktree.md): the `cc worktree` background subshell, node_modules cloning, and rebase conflict resolution.
+- [Worktree engine](internals/03-worktree.md): the `ccc worktree` background subshell, node_modules cloning, and rebase conflict resolution.
 - [Usage dashboard](internals/04-usage-dashboard.md): `playbook usage`, where the numbers come from, the store, and how the local dashboard server runs safely.
 - [Headless mode](internals/05-headless-mode.md): what runs without a person at the keyboard, real `claude -p` exit codes, how the hooks behave headless, and a first CI use case.
 - [Release channels](internals/06-release-channels.md): how a tagged release reaches GitHub assets, the Homebrew tap and the marketplace, the trimmed plugin archive, and the secret it needs.

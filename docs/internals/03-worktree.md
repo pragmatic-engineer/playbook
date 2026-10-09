@@ -1,6 +1,6 @@
 # Internals: Worktree Engine
 
-`cc worktree <branch>` creates or enters a git worktree, rebases it onto the base branch, then prints `Ready:` and returns the prompt. All remaining maintenance runs in a detached background subshell. This page covers what the subshell does, how the remote branch gets created, how `node_modules` is wired up, and how conflict resolution works.
+`ccc worktree <branch>` creates or enters a git worktree, rebases it onto the base branch, then prints `Ready:` and returns the prompt. All remaining maintenance runs in a detached background subshell. This page covers what the subshell does, how the remote branch gets created, how `node_modules` is wired up, and how conflict resolution works.
 
 ## Background maintenance subshell
 
@@ -20,7 +20,7 @@ The subshell runs with `</dev/null >/dev/null 2>&1` and is disowned, so all its 
 
 The sweep in step 7 above is not the only trigger for `playbook worktree sweep`'s cleanup logic. `maybe_sweep_worktrees` (`src/hooks/session_init.rs`) runs it again on every Claude Code `SessionStart`, independent of creating a worktree at all. It checks the same `worktreeCleanup.enabled` config key, then rate-limits itself to once per 24 hours per repo using a marker file's modified time, so it does not run on every single session start, only the first one after the previous day's run.
 
-This means a repo gets swept two ways: eagerly, every time `cc worktree` creates one (step 7 above), and independently, once a day, the next time any Claude Code session opens in that repo. Both call the same underlying sweep function. The overlap is deliberate defense in depth, not duplication to fix.
+This means a repo gets swept two ways: eagerly, every time `ccc worktree` creates one (step 7 above), and independently, once a day, the next time any Claude Code session opens in that repo. Both call the same underlying sweep function. The overlap is deliberate defense in depth, not duplication to fix.
 
 The one gap neither path closes: a repo nobody opens anymore is swept by neither trigger, since both need a session or launcher event in that repo to fire. This is a known limitation, not a bug. Fixing it would mean building a real OS-level scheduler (cron, launchd, or similar), which nothing in this codebase does today for any purpose; that's a bigger decision to make only if real evidence shows disk usage from abandoned repos is actually a problem, not something to build speculatively.
 
@@ -71,5 +71,5 @@ If anything fails, the hook says why on stderr and falls back to `<repo>/.claude
 
 ## See also
 
-- [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `cc` launcher that sets up the worktree.
+- [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `ccc` launcher that sets up the worktree.
 - [Docs index](../index.md)

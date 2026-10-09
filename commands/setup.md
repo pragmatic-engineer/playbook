@@ -46,7 +46,7 @@ with these two questions:
 **Question 1**
 
 - header: "Aliases"
-- question: "Install the cc and ccd shell launchers?"
+- question: "Install the ccc and ccd shell launchers?"
 - options:
   - label: "Yes (Recommended)"
     description: "Adds cc/ccd to your shell (session resume, model routing, transcript prune). Bash and zsh both supported."
@@ -59,7 +59,7 @@ with these two questions:
 - question: "Install the custom system prompt?"
 - options:
   - label: "Yes (Recommended)"
-    description: "Installs the senior-engineer persona and rules; cc loads it each session. Recommended for the full experience."
+    description: "Installs the senior-engineer persona and rules; ccc loads it each session. Recommended for the full experience."
   - label: "No"
     description: "Skip the persona. The plugin content still works without it."
 
