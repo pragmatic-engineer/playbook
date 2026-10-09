@@ -421,7 +421,7 @@ fn parse_inline_list(val: &str) -> Vec<String> {
 
 // --- Node/edge id derivation ----------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Scope {
     Global,
     Org,
@@ -544,12 +544,39 @@ const SIMILARITY_JACCARD_THRESHOLD: f64 = 0.35;
 /// growing the public graph schema for an implementation detail.
 struct SimilarityInfo {
     id: String,
-    scope: Scope,
-    kind: String,
-    anchor_dirs: HashSet<String>,
+    /// Dense id of the (type, scope) pair, so the signal is one integer compare.
+    kind_scope: u32,
+    /// Sorted interned ids of the NON-EMPTY anchor parent directories.
+    anchor_dirs: Vec<u32>,
     /// Sorted, deduplicated interned ids of the body's words.
     body_words: Vec<u32>,
 }
+
+/// A fast, non-cryptographic hasher (FxHash style) for the word interner,
+/// whose keys are trusted memory text and never attacker-chosen map keys.
+#[derive(Default, Clone, Copy)]
+struct FastHasher(u64);
+
+impl std::hash::Hasher for FastHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        const K: u64 = 0x517c_c1b7_2722_0a95;
+        for chunk in bytes.chunks(8) {
+            let mut word = [0u8; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.0 = (self.0.rotate_left(5) ^ u64::from_le_bytes(word)).wrapping_mul(K);
+        }
+    }
+}
+
+type FastHash = std::hash::BuildHasherDefault<FastHasher>;
+
+/// Bit set for each of the three similarity signals a pair matched.
+const BIT_ANCHOR_DIR: u8 = 1;
+const BIT_TYPE_SCOPE: u8 = 2;
+const BIT_BODY_OVERLAP: u8 = 4;
 
 /// Parent directory of an anchor path, e.g. `src/foo/a.ts` -> `src/foo`. An
 /// anchor with no parent (a bare filename) yields an empty string.
@@ -569,23 +596,57 @@ fn anchor_parent_dir(anchor: &str) -> String {
 /// "directory" `""` and falsely count as a hit despite anchoring unrelated
 /// files.
 fn shares_anchor_dir(a: &SimilarityInfo, b: &SimilarityInfo) -> bool {
-    a.anchor_dirs
-        .intersection(&b.anchor_dirs)
-        .any(|dir| !dir.is_empty())
+    sorted_intersection_len(&a.anchor_dirs, &b.anchor_dirs) > 0
 }
 
-/// `|intersection| / |union|` over two sorted, deduplicated id lists. A pair
-/// where either body has zero words has an empty union, handled explicitly
-/// here so the check never divides by zero and never treats two bodyless
-/// facts as similar by default.
-fn jaccard_similarity(a: &[u32], b: &[u32]) -> f64 {
-    let intersection = sorted_intersection_len(a, b);
-    let union = a.len() + b.len() - intersection;
-    if union == 0 {
-        0.0
-    } else {
-        intersection as f64 / union as f64
+/// Whether `c` shared words out of `la` and `lb` reach the Jaccard threshold.
+/// An empty union never does, so two bodyless facts are never similar by
+/// default and the check never divides by zero.
+fn jaccard_passes(c: usize, la: usize, lb: usize) -> bool {
+    let union = la + lb - c;
+    union != 0 && c as f64 / union as f64 >= SIMILARITY_JACCARD_THRESHOLD
+}
+
+/// The smallest shared-word count that reaches the threshold for lists of
+/// `la` and `lb` words, decided with the same f64 test as `jaccard_passes`, so
+/// the answer matches a direct ratio comparison exactly. Above `min(la, lb)`
+/// means the pair cannot reach it.
+fn min_shared_words(la: usize, lb: usize) -> usize {
+    let t = SIMILARITY_JACCARD_THRESHOLD;
+    let cap = la.min(lb) + 1;
+    let mut c = ((t / (1.0 + t)) * (la + lb) as f64).floor() as usize;
+    c = c.min(cap);
+    while c > 0 && jaccard_passes(c - 1, la, lb) {
+        c -= 1;
     }
+    while c < cap && !jaccard_passes(c, la, lb) {
+        c += 1;
+    }
+    c
+}
+
+/// Whether two sorted, deduplicated id lists share at least `need` ids. Stops
+/// as soon as the answer is known: enough found, or too few left to find.
+fn shares_at_least(a: &[u32], b: &[u32], need: usize) -> bool {
+    let (mut i, mut j, mut n) = (0, 0, 0);
+    while i < a.len() && j < b.len() {
+        if n >= need {
+            return true;
+        }
+        if n + (a.len() - i).min(b.len() - j) < need {
+            return false;
+        }
+        match a[i].cmp(&b[j]) {
+            std::cmp::Ordering::Less => i += 1,
+            std::cmp::Ordering::Greater => j += 1,
+            std::cmp::Ordering::Equal => {
+                n += 1;
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    n >= need
 }
 
 /// Size of the intersection of two sorted, deduplicated id lists, by merge.
@@ -610,6 +671,94 @@ fn sorted_intersection_len(a: &[u32], b: &[u32]) -> usize {
 fn too_unequal_for_jaccard(a: &[u32], b: &[u32]) -> bool {
     let (small, large) = (a.len().min(b.len()), a.len().max(b.len()));
     small == 0 || (small as f64 / large as f64) < SIMILARITY_JACCARD_THRESHOLD
+}
+
+/// Below this many facts the pair loop runs on one thread: the pairs cost less
+/// than starting threads.
+const PARALLEL_PAIR_MIN_FACTS: usize = 256;
+
+/// The `possible_relates_to` edges of fact `i` against every later fact.
+fn similarity_edges_of(infos: &[SimilarityInfo], i: usize) -> Vec<Edge> {
+    let mut out = Vec::new();
+    let a = &infos[i];
+    for b in &infos[i + 1..] {
+        let mut mask = 0u8;
+        if shares_anchor_dir(a, b) {
+            mask |= BIT_ANCHOR_DIR;
+        }
+        if a.kind_scope == b.kind_scope {
+            mask |= BIT_TYPE_SCOPE;
+        }
+        // No signal yet: even body overlap alone cannot reach 2.
+        if mask == 0 {
+            continue;
+        }
+        // Body overlap is one signal, so with no other hit the pair cannot reach 2.
+        if !too_unequal_for_jaccard(&a.body_words, &b.body_words) {
+            let need = min_shared_words(a.body_words.len(), b.body_words.len());
+            if shares_at_least(&a.body_words, &b.body_words, need) {
+                mask |= BIT_BODY_OVERLAP;
+            }
+        }
+        if mask.count_ones() as usize >= SIMILARITY_SIGNAL_HIT_THRESHOLD {
+            let mut signals = Vec::with_capacity(3);
+            if mask & BIT_ANCHOR_DIR != 0 {
+                signals.push(SIGNAL_ANCHOR_DIR.to_string());
+            }
+            if mask & BIT_TYPE_SCOPE != 0 {
+                signals.push(SIGNAL_TYPE_SCOPE.to_string());
+            }
+            if mask & BIT_BODY_OVERLAP != 0 {
+                signals.push(SIGNAL_BODY_OVERLAP.to_string());
+            }
+            out.push(Edge {
+                from: a.id.clone(),
+                to: b.id.clone(),
+                relation: "possible_relates_to".to_string(),
+                signals: Some(signals),
+            });
+        }
+    }
+    out
+}
+
+/// Every `possible_relates_to` edge, in `(i, j)` order. `i < j` visits each
+/// unordered pair once and never compares a fact to itself. With enough facts
+/// the rows are spread over threads (row `i` costs about `n - i` pairs, so
+/// they are dealt round robin) and put back in `i` order, so the output is the
+/// same bytes as the single thread run.
+fn similarity_edges(infos: &[SimilarityInfo]) -> Vec<Edge> {
+    let n = infos.len();
+    let threads = if n < PARALLEL_PAIR_MIN_FACTS {
+        1
+    } else {
+        std::thread::available_parallelism()
+            .map_or(1, std::num::NonZeroUsize::get)
+            .min(8)
+    };
+    if threads == 1 {
+        return (0..n).flat_map(|i| similarity_edges_of(infos, i)).collect();
+    }
+    let mut rows: Vec<Vec<Edge>> = (0..n).map(|_| Vec::new()).collect();
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|t| {
+                scope.spawn(move || {
+                    (t..n)
+                        .step_by(threads)
+                        .map(|i| (i, similarity_edges_of(infos, i)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for worker in workers {
+            // A panicking worker loses its rows rather than the whole rebuild.
+            for (i, row) in worker.join().unwrap_or_default() {
+                rows[i] = row;
+            }
+        }
+    });
+    rows.into_iter().flatten().collect()
 }
 
 /// Rebuild the graph unconditionally, with no payload and no skip check.
@@ -658,7 +807,10 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
     // pairwise similarity check in pass 3, once every fact has been walked.
     let mut infos: Vec<SimilarityInfo> = Vec::new();
     // Body word to dense id, shared by every fact so overlap is an integer merge.
-    let mut interner: HashMap<String, u32> = HashMap::new();
+    let mut interner: HashMap<String, u32, FastHash> = HashMap::default();
+    // (type, scope) and anchor directory to dense ids, so those signals are integer compares.
+    let mut kind_scopes: HashMap<(String, Scope), u32> = HashMap::new();
+    let mut dir_ids: HashMap<String, u32> = HashMap::new();
 
     let files = walk_markdown_files(mem_dir)
         .map_err(|e| RebuildError(format!("read memory directory tree: {e}")))?;
@@ -698,18 +850,34 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
         let mut body_words: Vec<u32> = extract_body(&content)
             .to_lowercase()
             .split_whitespace()
-            .map(|w| {
-                let next = interner.len() as u32;
-                *interner.entry(w.to_string()).or_insert(next)
+            .map(|w| match interner.get(w) {
+                Some(&id) => id,
+                None => {
+                    let id = interner.len() as u32;
+                    interner.insert(w.to_string(), id);
+                    id
+                }
             })
             .collect();
         body_words.sort_unstable();
         body_words.dedup();
+        let next_kind = kind_scopes.len() as u32;
+        let kind_scope = *kind_scopes
+            .entry((node_type.clone(), scope))
+            .or_insert(next_kind);
+        let mut anchor_dir_ids: Vec<u32> = anchor_dirs
+            .iter()
+            .filter(|dir| !dir.is_empty())
+            .map(|dir| {
+                let next = dir_ids.len() as u32;
+                *dir_ids.entry(dir.clone()).or_insert(next)
+            })
+            .collect();
+        anchor_dir_ids.sort_unstable();
         infos.push(SimilarityInfo {
             id: nid.clone(),
-            scope,
-            kind: node_type.clone(),
-            anchor_dirs,
+            kind_scope,
+            anchor_dirs: anchor_dir_ids,
             body_words,
         });
 
@@ -725,6 +893,10 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
         });
 
         if let Some(links) = fm.dict("links") {
+            // Sorted by relation so two rebuilds of the same store write the
+            // same bytes; a HashMap walk made the edge order change per run.
+            let mut links: Vec<(&String, &SubValue)> = links.iter().collect();
+            links.sort_by(|a, b| a.0.cmp(b.0));
             for (relation, target) in links {
                 let targets = match target {
                     SubValue::List(items) => items.clone(),
@@ -806,37 +978,7 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
     // fact to itself, so no separate dedup step is needed. A pair sharing 2
     // or more of the 3 signals gets a `possible_relates_to` edge naming
     // which signals matched.
-    for i in 0..infos.len() {
-        for j in (i + 1)..infos.len() {
-            let a = &infos[i];
-            let b = &infos[j];
-            let mut signals = Vec::new();
-            if shares_anchor_dir(a, b) {
-                signals.push(SIGNAL_ANCHOR_DIR.to_string());
-            }
-            if a.kind == b.kind && a.scope == b.scope {
-                signals.push(SIGNAL_TYPE_SCOPE.to_string());
-            }
-            // Body overlap is one signal, so with no other hit the pair cannot reach 2.
-            if signals.is_empty() || too_unequal_for_jaccard(&a.body_words, &b.body_words) {
-                if signals.len() < SIMILARITY_SIGNAL_HIT_THRESHOLD {
-                    continue;
-                }
-            } else if jaccard_similarity(&a.body_words, &b.body_words)
-                >= SIMILARITY_JACCARD_THRESHOLD
-            {
-                signals.push(SIGNAL_BODY_OVERLAP.to_string());
-            }
-            if signals.len() >= SIMILARITY_SIGNAL_HIT_THRESHOLD {
-                edges.push(Edge {
-                    from: a.id.clone(),
-                    to: b.id.clone(),
-                    relation: "possible_relates_to".to_string(),
-                    signals: Some(signals),
-                });
-            }
-        }
-    }
+    edges.extend(similarity_edges(&infos));
 
     write_graph_atomically(
         mem_dir,
@@ -912,4 +1054,97 @@ fn write_graph_atomically(mem_dir: &Path, graph: &Graph) -> Result<(), RebuildEr
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod similarity_tests {
+    use super::*;
+
+    #[test]
+    fn min_shared_words_matches_a_direct_ratio_test_for_every_size() {
+        for la in 1..=80usize {
+            for lb in 1..=80usize {
+                if too_unequal_for_jaccard(&vec![0; la], &vec![0; lb]) {
+                    continue;
+                }
+                let need = min_shared_words(la, lb);
+                for c in 0..=la.min(lb) {
+                    assert_eq!(
+                        c >= need,
+                        jaccard_passes(c, la, lb),
+                        "la={la} lb={lb} c={c} need={need}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shares_at_least_agrees_with_a_full_merge() {
+        let a = [1u32, 3, 5, 7, 9, 11];
+        let b = [2u32, 3, 4, 7, 11, 12, 13];
+        let full = sorted_intersection_len(&a, &b);
+        assert_eq!(full, 3);
+        for need in 0..=7 {
+            assert_eq!(shares_at_least(&a, &b, need), full >= need, "need={need}");
+        }
+        assert!(!shares_at_least(&[], &b, 1));
+        assert!(shares_at_least(&[], &b, 0));
+    }
+
+    fn info(id: &str, kind_scope: u32, dirs: &[u32], words: &[u32]) -> SimilarityInfo {
+        SimilarityInfo {
+            id: id.to_string(),
+            kind_scope,
+            anchor_dirs: dirs.to_vec(),
+            body_words: words.to_vec(),
+        }
+    }
+
+    #[test]
+    fn the_threaded_run_returns_the_same_edges_in_the_same_order() {
+        // Enough facts to take the threaded path, with overlapping anchors,
+        // two type/scope groups and body words that overlap in blocks.
+        let infos: Vec<SimilarityInfo> = (0..PARALLEL_PAIR_MIN_FACTS + 40)
+            .map(|i| {
+                let words: Vec<u32> = (0..30).map(|k| (i as u32 / 7) * 5 + k).collect();
+                info(&format!("n{i}"), (i % 2) as u32, &[(i % 11) as u32], &words)
+            })
+            .collect();
+        let threaded = similarity_edges(&infos);
+        let single: Vec<Edge> = (0..infos.len())
+            .flat_map(|i| similarity_edges_of(&infos, i))
+            .collect();
+        assert!(!single.is_empty());
+        let key = |e: &Edge| (e.from.clone(), e.to.clone(), e.signals.clone());
+        assert_eq!(
+            threaded.iter().map(key).collect::<Vec<_>>(),
+            single.iter().map(key).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_pair_needs_two_signals_and_names_them_in_a_fixed_order() {
+        let a = info("a", 0, &[1], &[1, 2, 3, 4]);
+        let same_all = info("b", 0, &[1], &[1, 2, 3, 4]);
+        let anchor_only = info("c", 9, &[1], &[50, 51, 52, 53]);
+        let none = info("d", 9, &[], &[60, 61]);
+        let infos = [a, same_all, anchor_only, none];
+        let edges = similarity_edges_of(&infos, 0);
+        let signals: Vec<_> = edges
+            .iter()
+            .map(|e| (e.to.as_str(), e.signals.clone().unwrap()))
+            .collect();
+        assert_eq!(
+            signals,
+            vec![(
+                "b",
+                vec![
+                    "anchor_dir".to_string(),
+                    "type_scope".to_string(),
+                    "body_overlap".to_string()
+                ]
+            )]
+        );
+    }
 }
