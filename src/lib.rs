@@ -954,6 +954,10 @@ pub enum CommitCommand {
         /// Leave the sign-off trailer off
         #[arg(long)]
         no_signoff: bool,
+        /// Skip the check that the commit type fits the files (a docs-only
+        /// change is not `feat`, a lock-file bump is not `fix`)
+        #[arg(long)]
+        no_type_check: bool,
     },
 }
 

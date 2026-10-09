@@ -338,3 +338,40 @@ fn a_rejected_plain_push_is_never_forced() {
         "the remote must be untouched"
     );
 }
+
+#[test]
+fn run_refuses_a_feat_type_on_a_docs_only_change_and_commits_nothing() {
+    let r = Repo::new("typeguard");
+    r.stage("guide.md", "words\n");
+    let before = git(&r.work, &["rev-parse", "HEAD"]);
+    let o = r.pb(&["commit", "run"], "feat(docs): explain things\n");
+    assert!(!o.status.success());
+    assert!(err(&o).contains("use 'docs'"), "{}", err(&o));
+    assert!(err(&o).contains("Nothing was committed"), "{}", err(&o));
+    assert_eq!(git(&r.work, &["rev-parse", "HEAD"]), before);
+}
+
+#[test]
+fn run_accepts_the_right_type_and_the_override() {
+    let r = Repo::new("typeguard-ok");
+    r.stage("guide.md", "words\n");
+    let o = r.pb(&["commit", "run"], "docs: explain things\n");
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+
+    let r = Repo::new("typeguard-override");
+    r.stage("guide.md", "words\n");
+    let o = r.pb(
+        &["commit", "run", "--no-type-check"],
+        "feat(docs): a docs feature on purpose\n",
+    );
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+}
+
+#[test]
+fn run_refuses_a_fix_type_on_a_lock_file_bump() {
+    let r = Repo::new("typeguard-deps");
+    r.stage("Cargo.lock", "# lock\n");
+    let o = r.pb(&["commit", "run"], "fix(deps): bump serde\n");
+    assert!(!o.status.success());
+    assert!(err(&o).contains("build or chore"), "{}", err(&o));
+}
