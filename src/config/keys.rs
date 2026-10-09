@@ -26,9 +26,33 @@ pub const KNOWN_KEYS: &[&str] = &[
     "fix.maxLines",
 ];
 
+/// The component kinds an `effort.<kind>.<name>` key can name.
+pub const EFFORT_COMPONENT_KINDS: [&str; 3] = ["agents", "commands", "skills"];
+
+/// Whether `key` is `effort.<kind>.<name>`: a known kind and a name of
+/// lowercase letters, digits and hyphens. Whether the name exists is checked
+/// later against the plugin files, never here.
+pub fn is_effort_component_key(key: &str) -> bool {
+    let mut parts = key.split('.');
+    let (Some("effort"), Some(kind), Some(name), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    EFFORT_COMPONENT_KINDS.contains(&kind)
+        && !name.is_empty()
+        && !name.starts_with('-')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
 /// The default value for a known key, or `None` if `key` is not in
 /// `KNOWN_KEYS`.
 pub fn default_value(key: &str) -> Option<Value> {
+    if is_effort_component_key(key) {
+        return Some(Value::String("auto".to_string()));
+    }
     match key {
         "autoReview.enabled" => Some(Value::Bool(true)),
         "autoReview.type" => Some(Value::String("auto".to_string())),
@@ -52,6 +76,9 @@ pub fn default_value(key: &str) -> Option<Value> {
 /// The fixed set of string values `key` accepts, or `None` if `key` has no
 /// enum constraint (including an unknown key).
 pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
+    if is_effort_component_key(key) {
+        return Some(&["auto", "low", "medium", "high", "xhigh", "max"]);
+    }
     match key {
         "autoReview.type" => Some(&["quick", "deep", "auto"]),
         "mode" => Some(&["ask", "auto"]),
@@ -86,6 +113,26 @@ mod tests {
 
         // Assert
         assert_eq!(result, Some(Value::String("auto".to_string())));
+    }
+
+    #[test]
+    fn effort_component_keys_are_a_validated_family() {
+        assert!(is_effort_component_key("effort.agents.fact-checker"));
+        assert!(is_effort_component_key("effort.commands.deep-review"));
+        assert!(is_effort_component_key("effort.skills.writing-style"));
+        assert!(!is_effort_component_key("effort.agent.reviewer"));
+        assert!(!is_effort_component_key("effort.agents."));
+        assert!(!is_effort_component_key("effort.agents.Reviewer"));
+        assert!(!is_effort_component_key("effort.agents.a.b"));
+        assert!(!is_effort_component_key("effort.agents.-x"));
+        assert_eq!(
+            default_value("effort.agents.reviewer"),
+            Some(Value::String("auto".to_string()))
+        );
+        assert_eq!(
+            allowed_enum_values("effort.skills.x").map(<[&str]>::len),
+            Some(6)
+        );
     }
 
     #[test]
