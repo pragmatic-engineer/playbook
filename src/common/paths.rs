@@ -7,7 +7,6 @@
 use crate::common::repo::repo_slug;
 use crate::common::session::home_dir;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 /// `$HOME/.config/playbook`, the root for every directory playbook itself
@@ -44,10 +43,6 @@ pub fn cc_state_dir() -> PathBuf {
     playbook_root().join("cc-state")
 }
 
-/// How long to wait for a `git` invocation before giving up. Wider than
-/// `repo_slug`'s 5s since this crate's fully parallel tests flake at 5s.
-const GIT_TIMEOUT: Duration = Duration::from_secs(15);
-
 /// A stable identity for the CURRENT git worktree: `cc::project_slug`'s
 /// slugifier applied to `git rev-parse --show-toplevel`, not the raw cwd.
 pub fn worktree_id() -> String {
@@ -76,13 +71,11 @@ fn git_toplevel(dir: &Path) -> String {
         GIT_TOPLEVEL_ATTEMPTS,
         GIT_TOPLEVEL_RETRY_DELAY,
         |dir| {
-            let mut command = Command::new("git");
-            command.arg("-C").arg(dir).args([
-                "--no-optional-locks",
-                "rev-parse",
-                "--show-toplevel",
-            ]);
-            crate::common::proc::run_with_timeout(&mut command, GIT_TIMEOUT)
+            crate::common::git::run(
+                Some(dir),
+                &["--no-optional-locks", "rev-parse", "--show-toplevel"],
+                crate::common::git::SLOW_TIMEOUT,
+            )
         },
     )
 }
@@ -165,6 +158,7 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
     use std::fs;
+    use std::process::Command;
     use std::process::Output;
 
     #[test]

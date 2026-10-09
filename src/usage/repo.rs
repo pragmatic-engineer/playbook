@@ -6,13 +6,9 @@
 //! as one of its own. Order: path markers (work for deleted directories),
 //! then git, then the directory's own name.
 
-use crate::common::run_with_timeout;
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
-use std::time::Duration;
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 const CLAUDE_WORKTREES: &str = "/.claude/worktrees/";
 const GIT_DIR: &str = "/.git/";
 const GIT_DIR_END: &str = "/.git";
@@ -78,16 +74,7 @@ fn named(name: String) -> Option<String> {
 /// directory itself is gone. The common dir is shared by every worktree.
 fn repo_from_git(cwd: &Path) -> Option<String> {
     let dir = nearest_existing(cwd)?;
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(&dir)
-        .args(["rev-parse", "--git-common-dir"]);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    if !out.status.success() {
-        return None;
-    }
-    let printed = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let printed = crate::common::git::output(&dir, &["rev-parse", "--git-common-dir"])?;
     if printed.is_empty() {
         return None;
     }
@@ -116,6 +103,7 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
     use std::fs;
+    use std::process::Command;
 
     fn git(dir: &Path, args: &[&str]) {
         let status = Command::new("git")

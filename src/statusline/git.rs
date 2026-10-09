@@ -4,13 +4,6 @@
 //! Cheap, bounded git lookups. One probe decides whether `cwd` is a repo; the
 //! remaining reads then run concurrently, each under its own timeout.
 
-use crate::common::run_with_timeout;
-use std::process::Command;
-use std::time::Duration;
-
-/// Upper bound for any single git call, so a wedged repo never stalls a render.
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct GitInfo {
     /// Current branch, `detached` when HEAD is not on one.
@@ -21,9 +14,13 @@ pub struct GitInfo {
 }
 
 fn git(cwd: &str, args: &[&str]) -> Option<std::process::Output> {
-    let mut cmd = Command::new("git");
-    cmd.args(["--no-optional-locks", "-C", cwd]).args(args);
-    run_with_timeout(&mut cmd, GIT_TIMEOUT)
+    let mut full = vec!["--no-optional-locks"];
+    full.extend_from_slice(args);
+    crate::common::git::run(
+        Some(std::path::Path::new(cwd)),
+        &full,
+        crate::common::git::TIMEOUT,
+    )
 }
 
 fn text(out: Option<std::process::Output>) -> String {
@@ -101,6 +98,7 @@ mod tests {
     use crate::common::test_support::{lock_cwd, scratch_dir};
     use std::fs;
     use std::path::Path;
+    use std::process::Command;
 
     fn run(dir: &Path, args: &[&str]) {
         let out = Command::new("git")
