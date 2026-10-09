@@ -81,13 +81,18 @@ reviews.
 | `cheap-checker` | `playbook:cheap-checker` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `review-triage` | `playbook:review-triage` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `reviewer-low` | `playbook:reviewer-low` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `reviewer-medium` | `playbook:reviewer-medium` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `reviewer-xhigh` | `playbook:reviewer-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `critic-low` | `playbook:critic-low` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `critic-medium` | `playbook:critic-medium` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `critic-xhigh` | `playbook:critic-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `fact-checker-medium` | `playbook:fact-checker-medium` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `fact-checker-xhigh` | `playbook:fact-checker-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `analyst-low` | `playbook:analyst-low` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
+| `analyst-medium` | `playbook:analyst-medium` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `analyst-xhigh` | `playbook:analyst-xhigh` | Read, Grep, Glob, Skill | **No. Read, Grep, Glob, Skill only** |
 | `implementer-low` | `playbook:implementer-low` | Read, Grep, Glob, Edit, Write, Bash, Skill | Yes, has `Write`/`Bash` |
+| `implementer-medium` | `playbook:implementer-medium` | Read, Grep, Glob, Edit, Write, Bash, Skill | Yes, has `Write`/`Bash` |
 | `implementer-xhigh` | `playbook:implementer-xhigh` | Read, Grep, Glob, Edit, Write, Bash, Skill | Yes, has `Write`/`Bash` |
 
 **Always pass the `playbook:` prefix as the `subagent_type` value**, not the
