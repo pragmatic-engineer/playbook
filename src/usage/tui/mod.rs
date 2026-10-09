@@ -9,6 +9,10 @@ pub mod app;
 pub mod data;
 pub mod fmt;
 pub mod panels;
+#[cfg(test)]
+mod parity;
+#[cfg(test)]
+mod snapshots;
 pub mod theme;
 pub mod view;
 pub mod worker;

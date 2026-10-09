@@ -155,12 +155,18 @@ pub fn spend(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
         return empty(frame, area, "Spend".to_string(), "No usage in this range.");
     }
     let peak = shown.iter().map(|p| p.cost_usd).fold(0.0, f64::max);
-    let title = format!(
-        "Spend per day  peak {}  {} to {}",
-        money(peak),
+    let short = format!("Spend per day  peak {}", money(peak));
+    let dated = format!(
+        "{short}  {} to {}",
         date_key(shown[0].day),
         date_key(shown[shown.len() - 1].day)
     );
+    // The dates go only where the whole title fits between the corners.
+    let title = if dated.len() + 2 <= usize::from(area.width.saturating_sub(2)) {
+        dated
+    } else {
+        short
+    };
     let values = shown
         .iter()
         .map(|p| (p.cost_usd * 100.0).round() as u64)
