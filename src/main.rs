@@ -30,19 +30,36 @@ fn restore_sigpipe() {
 #[cfg(not(unix))]
 fn restore_sigpipe() {}
 
+/// Run one hook: read the payload from stdin, then dispatch it.
+fn run_hook(name: playbook::HookName) {
+    let raw = read_hook_input();
+    let payload = Payload::parse(&raw);
+    if matches!(name, playbook::HookName::WorktreeCreate) {
+        std::process::exit(hooks::worktree_create::execute(&payload));
+    }
+    hooks::dispatch(name, &payload);
+}
+
 fn main() {
     restore_sigpipe();
+    // Hot paths skip building the clap tree. See `fastpath`.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    match playbook::fastpath::classify(&args) {
+        Some(playbook::fastpath::Fast::Hook(name)) => {
+            run_hook(name);
+            return;
+        }
+        Some(playbook::fastpath::Fast::Statusline) => std::process::exit(statusline::run()),
+        Some(playbook::fastpath::Fast::Version) => {
+            print!("{}", playbook::fastpath::version_text());
+            return;
+        }
+        None => {}
+    }
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Hook { name } => {
-            let raw = read_hook_input();
-            let payload = Payload::parse(&raw);
-            if matches!(name, playbook::HookName::WorktreeCreate) {
-                std::process::exit(hooks::worktree_create::execute(&payload));
-            }
-            hooks::dispatch(name, &payload);
-        }
+        Command::Hook { name } => run_hook(name),
         // Launcher subcommands land in a later Work Unit; stub for now.
         Command::Cc { sub } => match sub {
             Some(CcCommand::Prune) => cc::retention::prune(&cc::logical_cwd()),
@@ -554,6 +571,34 @@ fn main() {
             EvalCommand::ReviewTriage { fixtures, prompt } => {
                 std::process::exit(eval::review_triage(fixtures, prompt));
             }
+            EvalCommand::Bench {
+                cases,
+                role,
+                id,
+                model,
+                effort,
+                runs,
+                max_cost_usd,
+                jobs,
+                json,
+                list,
+            } => {
+                let root = eval::repo_root();
+                let opts = eval::bench::Options {
+                    cases: cases.unwrap_or_else(|| root.join(eval::bench::DEFAULT_CASES)),
+                    roles: role,
+                    ids: id,
+                    models: model,
+                    efforts: effort,
+                    runs,
+                    max_cost_usd,
+                    jobs,
+                    json,
+                    list,
+                    repo_root: root,
+                };
+                std::process::exit(eval::bench::run(&opts));
+            }
         },
         Command::Pr { sub } => {
             let gh = pr::shared::RealGhClient;
@@ -889,6 +934,7 @@ fn main() {
                     amend,
                     auto,
                     no_signoff,
+                    no_type_check,
                 } => {
                     let (path, temp) = match message_file {
                         Some(p) => (p, false),
@@ -914,6 +960,7 @@ fn main() {
                         amend,
                         auto,
                         no_signoff,
+                        no_type_check,
                     };
                     let result = commit::run::run(&dir, &path, opts, signoff_on);
                     if temp {

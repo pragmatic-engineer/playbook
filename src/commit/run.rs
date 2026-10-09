@@ -21,6 +21,8 @@ pub struct Options {
     pub amend: bool,
     pub auto: bool,
     pub no_signoff: bool,
+    /// Skip the conventional commit type guard (`typecheck`).
+    pub no_type_check: bool,
 }
 
 /// Whether a hook script's source WRITES a `Signed-off-by` trailer: an
@@ -111,6 +113,13 @@ pub fn run(
     let message = std::fs::read_to_string(message_file)
         .map_err(|e| format!("could not read the message: {e}"))?;
     let mut log = Vec::new();
+
+    if !opts.amend && !opts.no_type_check {
+        let staged = git_text(dir, &["diff", "--cached", "--name-only"]).unwrap_or_default();
+        let files: Vec<&str> = staged.lines().filter(|l| !l.is_empty()).collect();
+        super::typecheck::check(&message, &files)
+            .map_err(|e| format!("{e}\nNothing was committed."))?;
+    }
 
     let mut args: Vec<String> = vec!["commit".into()];
     if opts.amend {

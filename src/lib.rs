@@ -16,6 +16,7 @@ pub mod deps;
 pub mod doctor;
 pub mod effort;
 pub mod eval;
+pub mod fastpath;
 pub mod gate;
 pub mod handoff;
 pub mod hooks;
@@ -488,6 +489,48 @@ pub enum EvalCommand {
         #[arg(long)]
         prompt: Option<PathBuf>,
     },
+    /// Benchmark agent roles across models and effort levels
+    ///
+    /// Each case is a fixed prompt with an objective check (a planted bug
+    /// found, a claim judged right, a test that passes), so no judge model is
+    /// involved. It prints pass rate, cost and time per role, model and
+    /// effort. It estimates the cost first and refuses to start above
+    /// `--max-cost-usd`, and stops mid run when the spend reaches it. Needs a
+    /// logged-in `claude`; it makes real API calls.
+    ///
+    /// Example: `playbook eval bench --role fact-checker --model haiku,sonnet --effort low,medium --runs 2`
+    Bench {
+        /// Case file or directory; defaults to the cases shipped in the playbook repo
+        #[arg(long)]
+        cases: Option<PathBuf>,
+        /// Only these roles (comma separated)
+        #[arg(long, value_delimiter = ',')]
+        role: Vec<String>,
+        /// Only cases whose id starts with one of these (comma separated)
+        #[arg(long, value_delimiter = ',')]
+        id: Vec<String>,
+        /// Models to try (aliases such as haiku, sonnet, opus)
+        #[arg(long, value_delimiter = ',', default_value = "haiku")]
+        model: Vec<String>,
+        /// Effort levels to try
+        #[arg(long, value_delimiter = ',', default_value = "medium")]
+        effort: Vec<String>,
+        /// Calls per case, model and effort
+        #[arg(long, default_value_t = 1)]
+        runs: u32,
+        /// Spend cap in US dollars; the run is refused above it
+        #[arg(long, default_value_t = 5.0)]
+        max_cost_usd: f64,
+        /// Calls in flight at once
+        #[arg(long, default_value_t = 4)]
+        jobs: usize,
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+        /// List the cases and exit
+        #[arg(long)]
+        list: bool,
+    },
 }
 
 /// `playbook release` subcommands.
@@ -936,6 +979,10 @@ pub enum CommitCommand {
         /// Leave the sign-off trailer off
         #[arg(long)]
         no_signoff: bool,
+        /// Skip the check that the commit type fits the files (a docs-only
+        /// change is not `feat`, a lock-file bump is not `fix`)
+        #[arg(long)]
+        no_type_check: bool,
     },
 }
 

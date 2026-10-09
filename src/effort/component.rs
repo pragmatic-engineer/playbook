@@ -62,6 +62,15 @@ pub fn config_key(kind: Kind, name: &str) -> String {
 
 /// The `effort:` value in a file's frontmatter, if any.
 pub fn shipped_effort(path: &Path) -> Option<String> {
+    frontmatter_value(path, "effort:")
+}
+
+/// The `model:` value in a file's frontmatter, if any.
+pub fn shipped_model(path: &Path) -> Option<String> {
+    frontmatter_value(path, "model:")
+}
+
+fn frontmatter_value(path: &Path, key: &str) -> Option<String> {
     let text = fs::read_to_string(path).ok()?;
     let mut lines = text.lines();
     if lines.next()? != "---" {
@@ -71,7 +80,7 @@ pub fn shipped_effort(path: &Path) -> Option<String> {
         if line == "---" {
             break;
         }
-        if let Some(rest) = line.strip_prefix("effort:") {
+        if let Some(rest) = line.strip_prefix(key) {
             let value = rest.trim().trim_matches(['"', '\'']);
             return (!value.is_empty()).then(|| value.to_string());
         }
@@ -117,6 +126,10 @@ pub struct Resolution {
     /// Whether the component's source file exists under the plugin root.
     pub known: bool,
     pub shipped: Option<String>,
+    /// The `model:` in the component's frontmatter.
+    pub model: Option<String>,
+    /// What that model allows for this component (see `model_cap`).
+    pub model_cap: Option<String>,
     /// The component's own key, `auto` when unset.
     pub configured: String,
     /// playbook's `maxEffortLevel`.
@@ -216,12 +229,17 @@ fn resolve_inner(
     let path = root.map(|r| kind.file(r, name));
     let known = path.as_deref().is_some_and(Path::is_file);
     let shipped = path.as_deref().and_then(shipped_effort);
+    let model = path.as_deref().and_then(shipped_model);
+    let model_cap = super::model_cap::cap_for(model.as_deref(), name);
     let configured = level_of(home, &config_key(kind, name));
     let global = level_of(home, super::KEY);
 
     let ceiling = lower(
-        lower(lower(claude, as_ceiling(&global)), as_ceiling(&configured)),
-        cap.and_then(as_ceiling),
+        lower(
+            lower(lower(claude, as_ceiling(&global)), as_ceiling(&configured)),
+            cap.and_then(as_ceiling),
+        ),
+        model_cap,
     )
     .map(str::to_string);
     let effective = match (shipped.as_deref(), ceiling.as_deref()) {
@@ -268,6 +286,8 @@ fn resolve_inner(
         name: name.to_string(),
         known,
         shipped,
+        model,
+        model_cap: model_cap.map(str::to_string),
         configured,
         global,
         claude: claude.map(str::to_string),
@@ -287,6 +307,8 @@ impl Resolution {
             "name": self.name,
             "known": self.known,
             "shipped": self.shipped,
+            "model": self.model,
+            "modelCap": self.model_cap,
             "configured": self.configured,
             "global": self.global,
             "claudeCode": self.claude,
@@ -429,16 +451,22 @@ pub fn run_list(home: &Path, claude: Option<&str>, root: Option<&Path>, json: bo
         .to_string();
     }
     let dash = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".to_string());
-    let mut out = String::from("component                         shipped  set     effective\n");
+    let mut out =
+        String::from("component                         shipped  set     effective  model cap\n");
     for r in &rows {
         out.push_str(&format!(
-            "{:<33} {:<8} {:<7} {}\n",
+            "{:<33} {:<8} {:<7} {:<10} {}\n",
             format!("{}/{}", r.kind.plural(), r.name),
             dash(&r.shipped),
             r.configured,
             dash(&r.effective),
+            dash(&r.model_cap),
         ));
     }
+    out.push_str(&format!(
+        "model cap: Haiku never runs at max, stops at {} unless a role opts in (git: xhigh)\n",
+        super::model_cap::HAIKU_DEFAULT_CAP
+    ));
     for key in &stale {
         out.push_str(&format!("warning: {key} matches no component\n"));
     }
@@ -488,6 +516,40 @@ mod tests {
 
     fn set(home: &Path, key: &str, value: &str) {
         write::set(Tier::Global, key, Value::String(value.into()), home, None).unwrap();
+    }
+
+    #[test]
+    fn a_haiku_agent_gets_the_model_cap_as_a_ceiling() {
+        let (home, root) = plugin("cmp-haiku-cap");
+        fs::write(
+            root.join("agents/cheap.md"),
+            "---\nname: c\ndescription: d\nmodel: haiku\neffort: low\n---\nBody\n",
+        )
+        .unwrap();
+        let avail = names(&["cheap-medium", "cheap-high", "cheap-xhigh"]);
+        let r = resolve_with(Kind::Agent, "cheap", &home, None, Some(&root), &avail);
+        assert_eq!(r.model.as_deref(), Some("haiku"));
+        assert_eq!(r.model_cap.as_deref(), Some("medium"));
+        assert_eq!(r.ceiling.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn the_git_agent_may_reach_xhigh_on_haiku() {
+        let (home, root) = plugin("cmp-git-optin");
+        fs::write(
+            root.join("agents/git.md"),
+            "---\nname: g\ndescription: d\nmodel: haiku\neffort: low\n---\nBody\n",
+        )
+        .unwrap();
+        let r = resolve(Kind::Agent, "git", &home, None, Some(&root));
+        assert_eq!(r.model_cap.as_deref(), Some("xhigh"));
+        set(&home, "maxEffortLevel", "medium");
+        let r = resolve(Kind::Agent, "git", &home, None, Some(&root));
+        assert_eq!(
+            r.ceiling.as_deref(),
+            Some("medium"),
+            "the user ceiling still wins"
+        );
     }
 
     #[test]

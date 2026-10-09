@@ -179,7 +179,11 @@ pub fn session_tiers(
             let within = limit.is_none_or(|l| r <= l);
             let wanted = match mode {
                 Mode::All => true,
-                Mode::Auto => r < base_rank || (*t == "xhigh" && ESCALATE.contains(&base)),
+                Mode::Auto => {
+                    r < base_rank
+                        || (*t == "xhigh" && ESCALATE.contains(&base))
+                        || crate::effort::model_cap::opt_in(base).is_some_and(|(l, _)| l == *t)
+                }
                 Mode::Off => false,
             };
             within && wanted && r != base_rank
@@ -204,7 +208,11 @@ pub fn session_agents(
         let Ok(parsed) = parse_base(base, &content) else {
             continue;
         };
-        let ceiling = ceiling_of(base);
+        let ceiling = crate::effort::lower(
+            ceiling_of(base).as_deref(),
+            crate::effort::model_cap::cap_for(parsed.model.as_deref(), base),
+        )
+        .map(str::to_string);
         for tier in session_tiers(base, &parsed.effort, ceiling.as_deref(), mode) {
             if let Ok(Some(def)) = render_definition(base, &content, tier) {
                 out.insert(variant_name(base, tier), def);
@@ -289,7 +297,9 @@ mod tests {
             session_tiers("test-reviewer", "high", None, Mode::Auto),
             vec!["low", "medium"]
         );
-        assert!(session_tiers("git", "low", None, Mode::Auto).is_empty());
+        // `git` opted in to xhigh for drafting (src/effort/model_cap.rs).
+        assert_eq!(session_tiers("git", "low", None, Mode::Auto), vec!["xhigh"]);
+        assert!(session_tiers("cheap-checker", "low", None, Mode::Auto).is_empty());
     }
 
     #[test]
@@ -335,5 +345,33 @@ mod tests {
             vec!["reviewer-low", "reviewer-medium", "reviewer-xhigh"]
         );
         assert!(session_json(&dir, Mode::Off, &|_| None).is_none());
+    }
+
+    #[test]
+    fn a_haiku_agent_never_gets_a_max_variant_even_in_all_mode() {
+        let content =
+            "---\nname: c\ndescription: d\ntools: Read\nmodel: haiku\neffort: low\n---\nBody\n";
+        let dir = std::env::temp_dir().join(format!("pb-variants-haiku-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cheap-checker.md"), content).unwrap();
+        let map = session_agents(&dir, Mode::All, &|_| None);
+        let efforts: Vec<&str> = map.values().filter_map(|d| d["effort"].as_str()).collect();
+        assert!(!efforts.contains(&"max"), "{efforts:?}");
+        assert!(!efforts.contains(&"xhigh"), "{efforts:?}");
+        assert!(efforts.contains(&"medium"), "{efforts:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_git_agent_gets_its_xhigh_variant_in_auto_mode() {
+        let content =
+            "---\nname: g\ndescription: d\ntools: Bash\nmodel: haiku\neffort: low\n---\nBody\n";
+        let dir = std::env::temp_dir().join(format!("pb-variants-git-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("git.md"), content).unwrap();
+        let map = session_agents(&dir, Mode::Auto, &|_| None);
+        assert!(map.contains_key("git-xhigh"), "{:?}", map.keys());
+        assert!(!map.contains_key("git-max"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

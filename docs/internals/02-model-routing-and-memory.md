@@ -38,7 +38,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 
 | File | Model | Effort | Reasoning |
 | --- | --- | --- | --- |
-| `agents/git` | haiku | `low` (was medium) | Runs fixed git and `gh` steps from a command that already decided what to do. |
+| `agents/git` | haiku | `xhigh` (was low) | Drafts the commit message and PR title and body, and runs fixed git and `gh` steps. The Haiku evaluation found the conventional commit type was right 42% of the time at `low` and 100% at `xhigh`; at about $0.0006 a call the extra effort costs less than a cent. This is the one Haiku role allowed above `medium` (see the effort cap below), and `playbook commit run` also refuses a type that contradicts the files. |
 | `agents/patch-applier` | haiku | `low` (was medium) | Applies a diff someone else approved, verbatim, with no judgment. |
 | `agents/collector` | haiku | `low` (was medium) | Gathers and compacts raw history; the analyst does the thinking later. |
 | `agents/cheap-checker` | haiku | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
@@ -51,6 +51,16 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `commands/doctor`, `session-start`, `setup` | sonnet | `low` (kept) | Run a script and print the result. |
 | per-session variants such as `reviewer-low` | same as base | any tier | Not files. Rendered from the base agent by `ccc` and `ccd` into a throwaway session plugin (`--plugin-dir`), spawned as `playbook-variants:<name>`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
 | `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
+
+### Effort cap per model
+
+The Haiku 5.5 evaluation (#576) priced effort on Haiku: `xhigh` costs 2x `medium` for the same pass rate, and `max` costs 13x (about 7,100 thinking tokens and 32 s per call) and scores worst (91% against 97% at `medium`). So `src/effort/model_cap.rs` puts a ceiling on every component whose frontmatter model is Haiku:
+
+- `max` is never used on Haiku, whatever a role or a variant asks for.
+- Haiku roles stop at `medium` by default.
+- A role may go up to `xhigh` only when it has an entry in `OPT_INS` with a recorded reason. Today that is the `git` agent: its conventional commit type was right 42% of the time at `low` and 100% at `xhigh`, so the `git` agent itself ships at `xhigh`. Because the fork skills `commit-and-push` and `create-pull-request` name `agent: git`, the base file is the simple place for it, and a cheaper `git-low` variant stays available for a session that wants it.
+
+The cap is a ceiling like the others. The lowest ceiling wins, your `maxEffortLevel` still beats it when lower, and it never raises anything. It applies in `playbook effort resolve`, in the variants `ccc` and `ccd` render, and it shows in `playbook effort list` and `playbook doctor models`.
 
 Effort is fixed per agent definition: base agents run at their own effort, and an orchestrator picks a variant by ceiling, diff size and risk. Do not request xhigh or max on your own for anything else; if a deployment rejects it, use the base agent.
 

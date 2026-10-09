@@ -1,0 +1,83 @@
+[
+ {
+  "id": "cr-order",
+  "role": "critic",
+  "agent": "agents/critic.md",
+  "task": "Review this implementation plan for defects before any code is written. Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"findings\":[{\"step\":N,\"severity\":\"blocking|important|nit\",\"issue\":\"...\"}]}. Cite the step number each finding is about. Return an empty findings list and PASS when the plan is sound.",
+  "input": "Plan: move reads to the new status_v2 column.\n1. Change the reader to select status_v2.\n2. Add the status_v2 column with a migration.\n3. Backfill status_v2 from status in batches of 1000.\n4. Add a test that reads rows written before and after the backfill.\n5. Drop the old status column in a later release.",
+  "score": {
+   "kind": "findings",
+   "bug_lines": [
+    1
+   ],
+   "keywords": "order|depend|before|column|exist|first|sequenc",
+   "tolerance": 0
+  }
+ },
+ {
+  "id": "cr-destructive",
+  "role": "critic",
+  "agent": "agents/critic.md",
+  "task": "Review this implementation plan for defects before any code is written. Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"findings\":[{\"step\":N,\"severity\":\"blocking|important|nit\",\"issue\":\"...\"}]}. Cite the step number each finding is about. Return an empty findings list and PASS when the plan is sound.",
+  "input": "Plan: import the legacy config.json into SQLite.\n1. Read every config.json tier and validate each key.\n2. Write all values to the database in one transaction.\n3. Delete the legacy config.json files once the import finishes.\n4. Add a test for a malformed file.\n5. Document the change.",
+  "score": {
+   "kind": "findings",
+   "bug_lines": [
+    3
+   ],
+   "keywords": "backup|rollback|irreversible|destructive|data loss|undo|recover|delete",
+   "tolerance": 0
+  }
+ },
+ {
+  "id": "cr-errorpath",
+  "role": "critic",
+  "agent": "agents/critic.md",
+  "task": "Review this implementation plan for defects before any code is written. Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"findings\":[{\"step\":N,\"severity\":\"blocking|important|nit\",\"issue\":\"...\"}]}. Cite the step number each finding is about. Return an empty findings list and PASS when the plan is sound.",
+  "input": "Plan: run the independent gh calls in parallel.\n1. Add a bounded map helper on std::thread::scope.\n2. Use it in review prepare for the four lookups.\n3. Keep the result order the same as the sequential code.\n4. Test plan: one test where all four calls succeed and the output matches the old output.\n5. Measure with hyperfine before and after.",
+  "score": {
+   "kind": "findings",
+   "bug_lines": [
+    4
+   ],
+   "keywords": "error|failure|negative|edge|malformed|invalid|happy path|timeout|only",
+   "tolerance": 0
+  }
+ },
+ {
+  "id": "cr-breaking",
+  "role": "critic",
+  "agent": "agents/critic.md",
+  "task": "Review this implementation plan for defects before any code is written. Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"findings\":[{\"step\":N,\"severity\":\"blocking|important|nit\",\"issue\":\"...\"}]}. Cite the step number each finding is about. Return an empty findings list and PASS when the plan is sound.",
+  "input": "Plan: tidy the init flags.\n1. Add --no-hooks and --no-path flags.\n2. Rename the --aliases flag to --launcher and drop the old name.\n3. Update the README flag table.\n4. Update install.sh to pass the new flag.\n5. Add tests for each flag.\n6. Release note: this change has no breaking changes for users.",
+  "score": {
+   "kind": "findings",
+   "bug_lines": [
+    2,
+    6
+   ],
+   "keywords": "breaking|rename|compat|deprecat|alias|existing users|migrat",
+   "tolerance": 0
+  }
+ },
+ {
+  "id": "cr-clean-1",
+  "role": "critic",
+  "agent": "agents/critic.md",
+  "task": "Review this implementation plan for defects before any code is written. Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"findings\":[{\"step\":N,\"severity\":\"blocking|important|nit\",\"issue\":\"...\"}]}. Cite the step number each finding is about. Return an empty findings list and PASS when the plan is sound.",
+  "input": "Plan: add a --json flag to playbook doctor models.\n1. Build the report as a struct and render it as text.\n2. Add a serde Serialize derive and render the same struct as JSON when --json is set.\n3. Keep the text output byte identical (golden test).\n4. Add tests: JSON parses, fields match the text, an unknown tier is reported.\n5. Update docs/guides and the --help text.",
+  "score": {
+   "kind": "findings"
+  }
+ },
+ {
+  "id": "cr-clean-2",
+  "role": "critic",
+  "agent": "agents/critic.md",
+  "task": "Review this implementation plan for defects before any code is written. Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"findings\":[{\"step\":N,\"severity\":\"blocking|important|nit\",\"issue\":\"...\"}]}. Cite the step number each finding is about. Return an empty findings list and PASS when the plan is sound.",
+  "input": "Plan: add a cache for parsed memory facts.\n1. Key the cache by file path and mtime.\n2. On a hit, return the parsed fact; on a miss, parse and store.\n3. Invalidate an entry when the mtime changes or the file is gone.\n4. Tests: hit, miss, changed mtime, deleted file, concurrent readers.\n5. Measure the rebuild time before and after and record it in the PR.",
+  "score": {
+   "kind": "findings"
+  }
+ }
+]

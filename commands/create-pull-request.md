@@ -99,7 +99,7 @@ If `ticket=` holds a real ID (not empty, not `none`), the body's first line is `
 Derive the title from the diff and commit log gathered in Step 1.
 
 - Format: `type(scope): summary`, e.g. `feat(auth): add SSO retry logic`. Scope is optional.
-- Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`.
+- Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`. Pick the type from what the files in the diff are, not from words in it: only docs files is `docs`, only tests is `test`, only CI files is `ci`, a dependency bump (lock files, or manifests next to a lock file) is `build` or `chore`, and a change that restructures code and keeps behavior is `refactor`, not `fix`.
 - Imperative mood ("add", not "added" or "adds"), no trailing period.
 - **Length: 72 characters maximum**, counting the entire line including the `type(scope):` prefix. This is a hard limit, not a target. If the draft exceeds it, tighten the summary (drop the scope, cut filler, shorten wording) until it fits; never open a PR with a title over 72 characters. `playbook pr create` re-checks the length and refuses a longer title before it pushes anything.
 - The summary states the **effect** of the change, not a list of files.

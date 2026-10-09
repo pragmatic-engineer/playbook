@@ -81,6 +81,7 @@ Analyse the staged diff from Step 1 and draft a commit message:
 - If the branch matches `[A-Z]{2,}-\d+` (e.g. `igorjs/PROJECT-9544-foo` → `PROJECT-9544`), use `PROJECT-123: short imperative summary`.
 - Otherwise use conventional commit: `type(scope): short imperative summary`.
   - Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`.
+  - Pick the type from what the files are, not from the words in the diff. Only documentation files: `docs`. Only tests: `test`. Only CI files: `ci`. Only lock files or manifests next to a lock file (a dependency bump): `build` or `chore`. A refactor changes structure and keeps behavior, so it is `refactor`, not `fix`. `playbook commit run` refuses a type that contradicts the files (a docs-only change typed `feat`, a lock-file bump typed `fix`). When it does, fix the first line and run again, and only pass `--no-type-check` when the type is truly intended.
 
 **Body:** only when the why is not obvious from the header. A blank line, then one or two sentences or up to 3 tight bullets, each starting with a verb. Group related file changes; never list every file.
 
