@@ -53,6 +53,14 @@ if [ "${1:-}" = "hook" ] && [ "${2:-}" = "migration-check" ]; then
     exit 0
 fi
 
+# The worktree hooks run with a timeout and Claude Code expects the new path on
+# stdout. With no binary they must fail loudly and fast, never install inside
+# the hook and never pretend to succeed.
+if [ "${1:-}" = "hook" ] && { [ "${2:-}" = "worktree-create" ] || [ "${2:-}" = "worktree-remove" ]; }; then
+    echo "playbook: the binary is not installed, so the worktree hook cannot run. Run: $INSTALL_HINT" >&2
+    exit 127
+fi
+
 if [ "${PLAYBOOK_SHIM_BOOTSTRAP:-}" = "1" ] || [ ! -f "$ROOT/install.sh" ]; then
     echo "playbook: the binary is not installed. Run: $INSTALL_HINT" >&2
     exit 127
