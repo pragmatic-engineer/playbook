@@ -54,7 +54,7 @@ Use `/playbook:quick-review` for everyday PRs. Reach for `/playbook:deep-review`
 
 A stack is a series of PRs where each one targets the branch of the PR below it. Playbook finds stacks made with GitHub's native stacked PRs, and also stacks made with Graphite, ghstack, git-town or by hand, by following the branch chain. See [ADR-0019](../adr/0019-pr-stack-review.md) for the design.
 
-A PR that is not in a stack is reviewed as before, with no extra question. When the PR sits in a stack with two or more open PRs, both review commands first print the size (PR count and changed lines) and ask:
+A PR that is not in a stack is reviewed as before, with no extra question. When the PR sits in a stack, even one with a single open PR, both review commands first print the size (PR count and changed lines) and ask:
 
 1. This PR only.
 2. Whole stack, quick review. This is the default.
@@ -76,7 +76,7 @@ What a whole-stack review does:
 - **Safe against change.** If a PR was pushed to, retargeted or closed after the review started, its findings are held back and listed as stale.
 - **Cost guard.** The command asks again before it starts when the open PRs exceed `review.stackMaxPrs` (default 6) or `review.stackMaxLines` (default 3000). See [Config keys](04-config-keys.md).
 
-A stack with a single open PR and merged PRs below it is not asked about: the merged PRs are read as background and only the open PR is reviewed.
+Merged PRs in the stack are never reviewed. They are always read as background.
 
 ## The grounding-review discipline
 

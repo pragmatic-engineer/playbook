@@ -41,7 +41,7 @@ The chain walk is capped at 25 PRs and guards against loops. A branch with sever
 - `context`: a merged PR. Read for title, description and a diff summary. Never reviewed, never commented on.
 - `skip`: a PR closed without merging. Not read, and a warning names it.
 
-`ask` is true when two or more PRs are open. A stack with one open PR and merged PRs below it has nothing to choose, so the merged PRs are read as context and no question is asked. A PR outside any stack never sees a question.
+`ask` is true whenever the PR belongs to a stack, including a stack with one open PR and merged PRs below it (the user's rule: always raise the question). A PR outside any stack never sees a question.
 
 ### Review flow (later stages)
 
@@ -71,7 +71,7 @@ Per-PR `gh` calls (diffs, summaries) run through `common::par::map`, capped at 4
 - **Require the `gh stack` extension.** Rejected. It adds an install step and does not cover Graphite or ghstack stacks.
 - **REST stacks endpoint.** Rejected for the extra requests with no extra data.
 - **Review each PR alone and merge the findings.** Rejected. It repeats the reading and still misses cross-PR context.
-- **Ask for every PR, including a lone open PR with merged PRs below.** Rejected as a question with one answer.
+- **Skip the question for a lone open PR with merged PRs below.** Rejected: the user decided that any detected stack always gets the question.
 
 ## Consequences
 
