@@ -2,7 +2,7 @@
 description: Use after install or update, or when hooks or the system prompt seem not to run. Checks the seven playbook layers and prints a status table with a fix hint for each miss.
 allowed-tools: Bash, Read
 argument-hint: ""
-model: sonnet
+model: haiku
 effort: low
 ---
 

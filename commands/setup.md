@@ -2,7 +2,7 @@
 description: Use on first install or to repair the local setup. Wires safety guards, seeds or merges settings.json, and asks whether to install the shell launchers and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
 argument-hint: "[--install-aliases] [--use-system-prompt] [--yes] [--auto] [--ask]"
-model: sonnet
+model: haiku
 effort: low
 ---
 
