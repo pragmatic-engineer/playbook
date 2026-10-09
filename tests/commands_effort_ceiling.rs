@@ -111,3 +111,66 @@ fn quick_review_holds_its_reviewer_to_medium_with_a_fallback_line() {
         "quick-review must say so when the variant is missing"
     );
 }
+
+const ROUTE_KINDS: [&str; 6] = [
+    "mechanical",
+    "classify",
+    "check",
+    "review",
+    "implement",
+    "design",
+];
+
+#[test]
+fn every_command_that_spawns_agents_calls_route_and_names_the_gate() {
+    let mut checked = 0;
+    for entry in fs::read_dir(commands_dir()).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let text = fs::read_to_string(&path).unwrap();
+        if !allowed_tools(&text).split(',').any(|t| t.trim() == "Agent") {
+            continue;
+        }
+        let step = step_zero(&text).unwrap_or_else(|| panic!("{name}: no Step 0 section"));
+        assert!(
+            ROUTE_KINDS
+                .iter()
+                .any(|k| step.contains(&format!("playbook route {k} --json"))),
+            "{name}: Step 0 must run `playbook route <kind> --json` with a known kind"
+        );
+        for word in [
+            "routing.escalate",
+            "ask",
+            "downgraded",
+            "auto",
+            "log the assumption",
+        ] {
+            assert!(
+                step.contains(word),
+                "{name}: the Step 0 routing gate sentence must mention `{word}`"
+            );
+        }
+        checked += 1;
+    }
+    assert!(
+        checked >= 7,
+        "found only {checked} commands that spawn agents"
+    );
+}
+
+#[test]
+fn the_delegating_skill_documents_the_escalation_gate() {
+    let skill =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("skills/delegating-subagents/SKILL.md");
+    let text = fs::read_to_string(skill).unwrap();
+    assert!(
+        text.contains("routing.escalate"),
+        "delegating-subagents: must name `routing.escalate`"
+    );
+    for value in ["`ask`", "`auto`", "`deny`"] {
+        assert!(
+            text.contains(value),
+            "delegating-subagents: must document {value}"
+        );
+    }
+}

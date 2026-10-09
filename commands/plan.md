@@ -99,6 +99,8 @@ Add `--flag auto` if the arguments contain `--auto` or `--auto-design`. Add `--f
 
 **Effort ceiling.** Also run `playbook effort resolve commands plan --json`. Its `ceiling` is the highest effort the user allows for this run (`null` means no limit). Hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. If the command fails, carry on with no ceiling.
 
+**Routing.** Where you choose what to spawn, also run `playbook route design --json` and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on.
+
 - **`ask` mode:** behave exactly as this file describes. Every question below stays.
 - **`auto` mode:** take the recommended answer at each decision instead of asking, within the limits in Autonomous Mode below, and record every answer you chose yourself in an **Assumptions** list. Print that list in the final output. Auto mode that comes from the environment or the repo config acts like plain `--auto`. Only the `--auto-design` flag, given on the command line, self-answers the design.
 
