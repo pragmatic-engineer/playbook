@@ -69,11 +69,12 @@ ccc prune               # prune old transcripts now
 | `/playbook:address-pr-comments` | Walks unresolved review threads, fixes or drafts replies. |
 | `/playbook:learn-project` | Reads the repo, PRs and tickets, then writes distilled facts to memory. |
 | `/playbook:repo-audit` | Read-only audit with severity-rated findings and a task plan. |
+| `/playbook:session-handoff` | Writes a handoff note (state, decisions, next steps, open questions) and saves it for the next session. Use it before `/clear` or when you stop. |
 | `/playbook:session-start` | Loads the last handoff for this directory. |
 
 Reviews are stack aware. When a PR sits in a stack, `/playbook:quick-review` and `/playbook:deep-review` always ask whether to review the whole stack or one PR (`playbook pr stack` finds it, see [ADR-0019](docs/adr/0019-pr-stack-review.md)).
 
-Skills load on demand from `skills/`: review and research discipline, engineering standards, writing style, session handoff, subagent delegation and debugging. To add your own, see [Commands, skills and hooks](docs/authoring/01-commands-skills-hooks.md).
+Skills load on demand from `skills/`: review and research discipline, engineering standards, writing style, subagent delegation and debugging. To add your own, see [Commands, skills and hooks](docs/authoring/01-commands-skills-hooks.md).
 
 ## Settings
 
