@@ -40,7 +40,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "worktreeCleanup.staleAfterDays" => Some(Value::Number(30.into())),
         "worktreeCleanup.conflictGracePeriodDays" => Some(Value::Number(90.into())),
         "mode" => Some(Value::String("ask".to_string())),
-        "maxEffortLevel" => Some(Value::String("max".to_string())),
+        "maxEffortLevel" => Some(Value::String("auto".to_string())),
         "auto.budgetUsd" => Some(Value::Number(5.into())),
         "auto.warnPct" => Some(Value::Number(70.into())),
         "fix.maxFiles" => Some(Value::Number(3.into())),
@@ -55,7 +55,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
     match key {
         "autoReview.type" => Some(&["quick", "deep", "auto"]),
         "mode" => Some(&["ask", "auto"]),
-        "maxEffortLevel" => Some(&["low", "medium", "high", "xhigh", "max"]),
+        "maxEffortLevel" => Some(&["auto", "low", "medium", "high", "xhigh", "max"]),
         _ => None,
     }
 }

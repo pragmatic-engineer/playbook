@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook effort` end to end: the ceiling reaches `maxEffortLevel` in
-//! `settings.json`, `playbook init` keeps it applied, and `max` clears only
+//! `settings.json`, `playbook init` keeps it applied, and `auto` clears only
 //! a cap playbook wrote.
 
 use serde_json::Value;
@@ -143,4 +143,20 @@ fn config_set_accepts_the_key_and_rejects_a_bad_value() {
         .run(&["config", "set", "--global", "maxEffortLevel", "huge"])
         .status
         .success());
+}
+
+#[test]
+fn auto_is_accepted_and_follows_claude_code() {
+    let h = Home::new("auto");
+    fs::create_dir_all(h.0.join(".claude")).unwrap();
+    fs::write(
+        h.0.join(".claude/settings.json"),
+        r#"{"maxEffortLevel":"medium"}"#,
+    )
+    .unwrap();
+    assert!(h.run(&["effort", "auto"]).status.success());
+    let j: serde_json::Value = serde_json::from_str(&text(&h.run(&["effort", "--json"]))).unwrap();
+    assert_eq!(j["playbook"], "auto");
+    assert_eq!(j["effective"], "medium");
+    assert_eq!(j["winner"], "claude-code");
 }

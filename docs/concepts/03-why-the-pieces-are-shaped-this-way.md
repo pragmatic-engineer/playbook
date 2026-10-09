@@ -67,7 +67,7 @@ Playbook has its own ceiling, the config key `maxEffortLevel` (same name and val
 
 - Playbook `xhigh`, Claude Code `max`: `xhigh` applies, because `xhigh` is below `max`.
 - Playbook `xhigh`, Claude Code `medium`: `medium` applies. Playbook never goes above Claude Code.
-- Playbook `max` (the default): playbook adds no ceiling, and Claude Code's applies if it has one.
+- Playbook `auto` (the default): playbook adds no ceiling, and Claude Code's applies if it has one.
 - A ceiling never raises anything. An agent that ships at `low` still runs at `low`.
 
 Playbook only reads Claude Code's `maxEffortLevel` (from the user, project and local settings files) and never writes it. When playbook's ceiling is the lower one, the launcher (`pb` or `cc`) passes it to that one session with `--settings`, and Claude Code applies it to command, skill and agent effort alike. A session started without the launcher gets no playbook ceiling. `playbook effort` with no level shows both values and the winner, and `--json` prints the same for scripts. Claude Code's own `/effort` and `--effort` still work below the ceiling, and the setting needs Claude Code 2.1.267 or later.
