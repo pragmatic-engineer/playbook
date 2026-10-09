@@ -104,10 +104,32 @@ fn pr_create_with_an_overlong_title_exits_non_zero_without_touching_anything() {
 
 mod pr_support;
 
+/// A directory holding a `gh` that exits 1 at once, put first on PATH so the
+/// run never reaches the real `gh` (its auth lookup and network calls are slow
+/// and vary with the host). The script is run once before first use: on a busy
+/// or scanned machine the first run of a new executable can take seconds.
+fn fake_gh_dir() -> &'static PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch().join("fake-gh");
+        std::fs::create_dir_all(&dir).expect("fake gh dir");
+        let gh = dir.join("gh");
+        std::fs::write(&gh, "#!/bin/sh\nexit 1\n").expect("fake gh");
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let _ = Command::new(&gh).output();
+        dir
+    })
+}
+
 fn run_in(cwd: &PathBuf, home: &PathBuf, args: &[&str]) -> Output {
+    let mut path = std::ffi::OsString::from(fake_gh_dir());
+    path.push(":");
+    path.push(std::env::var_os("PATH").unwrap_or_default());
     Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(args)
         .current_dir(cwd)
+        .env("PATH", path)
         .env("HOME", home)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
