@@ -1,0 +1,224 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
+//! Regression tests for #631: the sweep removed brand new worktrees. A new
+//! branch sits at a commit that is already an ancestor of the default branch,
+//! so it read as "merged" before any work existed.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+struct Fixture {
+    container: PathBuf,
+    repo: PathBuf,
+    home: PathBuf,
+}
+
+fn git(repo: &Path, args: &[&str]) -> Output {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git should spawn")
+}
+
+fn git_ok(repo: &Path, args: &[&str]) {
+    let out = git(repo, args);
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn fixture(tag: &str) -> Fixture {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let container =
+        std::env::temp_dir().join(format!("playbook-wt-keep-{}-{tag}-{n}", std::process::id()));
+    fs::create_dir_all(&container).unwrap();
+    let container = container.canonicalize().unwrap();
+    let repo = container.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec!["config", "user.email", "t@t"],
+        vec!["config", "user.name", "T"],
+        vec![
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/acme/widgets.git",
+        ],
+    ] {
+        git_ok(&repo, &args);
+    }
+    fs::write(repo.join("README.md"), "seed\n").unwrap();
+    git_ok(&repo, &["add", "."]);
+    git_ok(&repo, &["commit", "-q", "-m", "seed"]);
+    let head = String::from_utf8_lossy(&git(&repo, &["rev-parse", "HEAD"]).stdout)
+        .trim()
+        .to_string();
+    git_ok(&repo, &["update-ref", "refs/remotes/origin/main", &head]);
+    let home = container.join("home");
+    fs::create_dir_all(&home).unwrap();
+    Fixture {
+        container,
+        repo: repo.canonicalize().unwrap(),
+        home: home.canonicalize().unwrap(),
+    }
+}
+
+/// A worktree in the agent-tool location on a new branch from `main`.
+fn agent_worktree(f: &Fixture, name: &str) -> PathBuf {
+    let dest = f.repo.join(".claude").join("worktrees").join(name);
+    fs::create_dir_all(dest.parent().unwrap()).unwrap();
+    git_ok(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            name,
+            dest.to_str().unwrap(),
+            "main",
+        ],
+    );
+    dest.canonicalize().unwrap()
+}
+
+fn age(path: &Path, days: u64) {
+    let when = SystemTime::now() - Duration::from_secs(days * 86_400);
+    fs::File::open(path.join(".git"))
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
+}
+
+fn sweep(f: &Fixture) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["worktree", "sweep"])
+        .current_dir(&f.repo)
+        .env("HOME", &f.home)
+        .output()
+        .expect("playbook should spawn");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn commit_in(path: &Path, file: &str) {
+    fs::write(path.join(file), "work\n").unwrap();
+    git_ok(path, &["add", "."]);
+    git_ok(path, &["commit", "-q", "-m", "work"]);
+}
+
+fn cleanup(f: &Fixture) {
+    let _ = fs::remove_dir_all(&f.container);
+}
+
+#[test]
+fn a_brand_new_clean_worktree_is_kept() {
+    let f = fixture("new-clean");
+    let wt = agent_worktree(&f, "agent-new");
+    let out = sweep(&f);
+    assert!(wt.is_dir(), "a new worktree must survive the sweep: {out}");
+    cleanup(&f);
+}
+
+#[test]
+fn a_new_worktree_with_uncommitted_work_is_kept() {
+    let f = fixture("new-dirty");
+    let wt = agent_worktree(&f, "agent-dirty");
+    fs::write(wt.join("work.txt"), "in progress\n").unwrap();
+    let out = sweep(&f);
+    assert!(wt.join("work.txt").is_file(), "{out}");
+    cleanup(&f);
+}
+
+#[test]
+fn an_old_worktree_with_uncommitted_work_is_kept() {
+    let f = fixture("old-dirty");
+    let wt = agent_worktree(&f, "agent-old-dirty");
+    age(&wt, 90);
+    fs::write(wt.join("work.txt"), "in progress\n").unwrap();
+    let out = sweep(&f);
+    assert!(wt.join("work.txt").is_file(), "{out}");
+    assert!(out.contains("uncommitted"), "{out}");
+    cleanup(&f);
+}
+
+#[test]
+fn a_clean_branch_with_no_commits_is_kept_until_it_has_idled_past_the_stale_window() {
+    let f = fixture("idle");
+    let young = agent_worktree(&f, "agent-young");
+    age(&young, 10);
+    let old = agent_worktree(&f, "agent-old");
+    age(&old, 40);
+    sweep(&f);
+    assert!(young.is_dir(), "10 days idle is under the 30 day window");
+    assert!(!old.exists(), "40 days idle, clean, no commits: reaped");
+    cleanup(&f);
+}
+
+#[test]
+fn a_branch_with_commits_not_merged_is_kept() {
+    let f = fixture("unmerged");
+    let wt = agent_worktree(&f, "agent-unmerged");
+    commit_in(&wt, "feature.txt");
+    age(&wt, 5);
+    sweep(&f);
+    assert!(wt.is_dir());
+    cleanup(&f);
+}
+
+#[test]
+fn a_merged_branch_with_its_own_commits_is_removed_and_logged() {
+    let f = fixture("merged");
+    let wt = agent_worktree(&f, "agent-merged");
+    commit_in(&wt, "feature.txt");
+    // Land it: main and origin/main move to the branch tip.
+    git_ok(&f.repo, &["merge", "-q", "--ff-only", "agent-merged"]);
+    let head = String::from_utf8_lossy(&git(&f.repo, &["rev-parse", "HEAD"]).stdout)
+        .trim()
+        .to_string();
+    git_ok(&f.repo, &["update-ref", "refs/remotes/origin/main", &head]);
+    age(&wt, 1);
+    let out = sweep(&f);
+    assert!(!wt.exists(), "merged and idle over an hour: reaped: {out}");
+    let log = fs::read_to_string(f.home.join(".config/playbook/worktree-sweep.log")).unwrap();
+    assert!(
+        log.contains("agent-merged") && log.contains("removed"),
+        "{log}"
+    );
+    cleanup(&f);
+}
+
+#[test]
+fn a_just_merged_branch_is_protected_while_its_worktree_is_new() {
+    let f = fixture("merged-new");
+    let wt = agent_worktree(&f, "agent-merged-new");
+    commit_in(&wt, "feature.txt");
+    git_ok(&f.repo, &["merge", "-q", "--ff-only", "agent-merged-new"]);
+    let head = String::from_utf8_lossy(&git(&f.repo, &["rev-parse", "HEAD"]).stdout)
+        .trim()
+        .to_string();
+    git_ok(&f.repo, &["update-ref", "refs/remotes/origin/main", &head]);
+    sweep(&f);
+    assert!(
+        wt.is_dir(),
+        "created minutes ago: the grace period keeps it"
+    );
+    cleanup(&f);
+}

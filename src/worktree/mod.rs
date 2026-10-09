@@ -517,6 +517,58 @@ fn lock_state(entry: &WorktreeEntry) -> LockState {
     }
 }
 
+/// A worktree younger than this is never treated as landed, whatever git says:
+/// a brand new worktree sits at a commit that is already an ancestor of the
+/// default branch, so "merged" is true before any work exists.
+const FRESH_WORKTREE_GRACE_SECS: i64 = 3_600;
+
+/// Whether `branch` has a commit of its own: its tip differs from the commit
+/// it was created at, read from the oldest reflog entry. A branch with no
+/// reflog (or an unreadable one) counts as having none, the safe answer,
+/// because "no own commits" blocks the merged signal.
+fn branch_has_own_commits(repo_root: &Path, branch: &str) -> bool {
+    let reflog = git_stdout_at(
+        repo_root,
+        &[
+            "reflog",
+            "show",
+            "--format=%H",
+            &format!("refs/heads/{branch}"),
+        ],
+    );
+    let tip = git_stdout_at(repo_root, &["rev-parse", &format!("refs/heads/{branch}")]);
+    match (reflog, tip) {
+        (Some(log), Some(tip)) => log
+            .lines()
+            .last()
+            .is_some_and(|oldest| oldest.trim() != tip.trim()),
+        _ => false,
+    }
+}
+
+/// The reasons a worktree must not count as landed yet, however its commits
+/// compare to the default branch: too new, or a named branch that has never
+/// had a commit of its own and has not sat idle for `staleAfterDays`.
+fn too_new_to_be_landed(
+    entry: &WorktreeEntry,
+    policy: &SweepPolicy,
+    repo_root: &Path,
+    now_epoch: i64,
+) -> Option<&'static str> {
+    let age = worktree_created_epoch(&entry.path).map(|created| now_epoch - created);
+    if age.is_some_and(|age| age < FRESH_WORKTREE_GRACE_SECS) {
+        return Some("created less than an hour ago");
+    }
+    if let Some(branch) = entry.branch.as_deref() {
+        if !branch_has_own_commits(repo_root, branch)
+            && age.is_none_or(|age| age < policy.stale_after_days * SECS_PER_DAY)
+        {
+            return Some("its branch has no commits of its own yet");
+        }
+    }
+    None
+}
+
 /// Applies whichever landed-signal function matches `convention`:
 /// `wu_worktree_landed` for `Wu` (overridden by a present conflict-STOP
 /// marker's grace period), `named_branch_landed` for `AgentTool`/
@@ -534,6 +586,14 @@ fn is_landed(
     now_epoch: i64,
     never_locked_grace_secs: i64,
 ) -> bool {
+    if matches!(
+        convention,
+        Convention::Wu | Convention::AgentTool | Convention::CcLauncher
+    ) && !entry.path.join(CONFLICT_MARKER_FILE).exists()
+        && too_new_to_be_landed(entry, policy, repo_root, now_epoch).is_some()
+    {
+        return false;
+    }
     match convention {
         Convention::Wu => wu_landed(entry, policy, repo_root, now_epoch),
         Convention::AgentTool | Convention::CcLauncher => match entry.branch.as_deref() {
@@ -734,6 +794,24 @@ pub fn remove(
     }
 }
 
+/// Appends one line per removal to `~/.config/playbook/worktree-sweep.log`
+/// so a user can see what the sweep took and why. Best effort: a write
+/// failure never stops the sweep.
+fn log_removal(home: &Path, now_epoch: i64, line: &str) {
+    use std::io::Write;
+    let dir = home.join(".config").join("playbook");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("worktree-sweep.log"))
+    {
+        let _ = writeln!(file, "{now_epoch} {line} (landed, clean and idle)");
+    }
+}
+
 /// Scans every worktree registered against `repo_root`, classifies each,
 /// applies the matching landed-signal check, and removes what has landed
 /// and is not locked by a live process, per the sequence: list, classify,
@@ -780,7 +858,11 @@ pub fn sweep(
             now_epoch,
             NEVER_LOCKED_GRACE_SECS,
         );
-        report.push(decide_and_report(&entry, landed, &lock, repo_root, dry_run));
+        let line = decide_and_report(&entry, landed, &lock, repo_root, dry_run);
+        if !dry_run && (line.ends_with(": removed") || line.contains(": failed to remove")) {
+            log_removal(home, now_epoch, &line);
+        }
+        report.push(line);
     }
     Ok(report)
 }

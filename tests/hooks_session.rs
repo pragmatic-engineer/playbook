@@ -1850,6 +1850,12 @@ fn build_sweepable_wu_worktree(repo_dir: &Path, home: &Path, owner: &str, repo: 
             "HEAD",
         ],
     );
+    // A long-lived worktree: brand new ones are never swept (#631).
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86_400);
+    fs::File::open(wu_path.join(".git"))
+        .expect("open .git file")
+        .set_modified(old)
+        .expect("backdate worktree");
     wu_path.canonicalize().expect("wu worktree should resolve")
 }
 

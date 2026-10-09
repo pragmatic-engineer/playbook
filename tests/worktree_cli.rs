@@ -80,6 +80,15 @@ fn init_repo_at_epoch(dir: &Path, remote_url: &str, commit_epoch: i64) {
     );
 }
 
+/// Backdates the worktree's `.git` file, the creation time the sweep reads,
+/// so a fixture reads as a long-lived worktree. Brand new worktrees are
+/// never treated as landed (see `worktree_sweep_keeps_new_work.rs`).
+fn age_worktree(path: &Path, days: u64) {
+    let target = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400);
+    let file = fs::File::open(path.join(".git")).expect("open .git file");
+    file.set_modified(target).expect("backdate worktree");
+}
+
 fn add_worktree(repo_root: &Path, dest: &Path, branch: &str) -> PathBuf {
     fs::create_dir_all(dest.parent().expect("dest has a parent")).expect("mkdir dest parent");
     git_ok(
@@ -94,7 +103,9 @@ fn add_worktree(repo_root: &Path, dest: &Path, branch: &str) -> PathBuf {
             "main",
         ],
     );
-    dest.canonicalize().expect("worktree should resolve")
+    let path = dest.canonicalize().expect("worktree should resolve");
+    age_worktree(&path, 40);
+    path
 }
 
 fn add_detached_worktree(repo_root: &Path, dest: &Path) -> PathBuf {
@@ -110,7 +121,9 @@ fn add_detached_worktree(repo_root: &Path, dest: &Path) -> PathBuf {
             "main",
         ],
     );
-    dest.canonicalize().expect("worktree should resolve")
+    let path = dest.canonicalize().expect("worktree should resolve");
+    age_worktree(&path, 40);
+    path
 }
 
 /// Run the real compiled binary with `cwd` and `$HOME` pinned to scratch
