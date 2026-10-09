@@ -44,14 +44,7 @@
 
 use crate::common::emit_pre_deny;
 use crate::common::payload::Payload;
-use crate::common::proc::run_with_timeout;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Duration;
-
-/// The shell ran `git rev-parse` unbounded. A wedged git would have stalled the
-/// PreToolUse event, so the port bounds it and falls back to the cwd.
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Placeholder reported when `rm` is reached through `$(...)` or a backtick.
 const SUBSTITUTION_LABEL: &str = "<command substitution>";
@@ -127,13 +120,12 @@ fn git_repo_root() -> Option<PathBuf> {
     {
         return Some(top);
     }
-    let mut command = Command::new("git");
-    command.args(["rev-parse", "--show-toplevel"]);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    if !out.status.success() {
-        return None;
-    }
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let args = ["rev-parse", "--show-toplevel"];
+    let path = crate::common::git::trimmed(crate::common::git::run(
+        None,
+        &args,
+        crate::common::git::TIMEOUT,
+    ))?;
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
 

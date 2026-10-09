@@ -14,12 +14,13 @@
 //! or diagnostic, goes to stderr, on both the success and the failure paths.
 
 use crate::cc::worktree;
+use crate::common::git;
 use crate::common::run_with_timeout;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
+const GH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Every worktree lives under this remote; the shell hardcodes the same
 /// value (`local REMOTE="origin"` in `_cc_worktree`, worktree.sh:464).
@@ -112,11 +113,11 @@ pub fn setup(
 ) -> Result<(PathBuf, Housekeep), i32> {
     eprintln!("worktree: setting up '{branch_raw}'...");
 
-    if !git_ok(start_dir, &["rev-parse", "--is-inside-work-tree"]) {
+    if !git::ok(start_dir, &["rev-parse", "--is-inside-work-tree"]) {
         eprintln!("worktree: not a git repository");
         return Err(EXIT_NOT_A_GIT_REPO);
     }
-    let porcelain = git_stdout(start_dir, &["worktree", "list", "--porcelain"]).unwrap_or_default();
+    let porcelain = git::raw(start_dir, &["worktree", "list", "--porcelain"]).unwrap_or_default();
     let Some(main_wt) = worktree::main_worktree(&porcelain) else {
         eprintln!("worktree: couldn't cd to main worktree:");
         return Err(EXIT_NOT_A_GIT_REPO);
@@ -239,7 +240,7 @@ fn resolve_target(repo_root: &Path, wt_root: &Path, branch: &str) -> PathBuf {
     // one: a plain leaf folder has no collision to disambiguate.
     let occupied_by = if jira.is_some() && provisional_target.is_dir() {
         let porcelain =
-            git_stdout(repo_root, &["worktree", "list", "--porcelain"]).unwrap_or_default();
+            git::raw(repo_root, &["worktree", "list", "--porcelain"]).unwrap_or_default();
         branch_at(&porcelain, &provisional_target)
     } else {
         None
@@ -281,13 +282,13 @@ fn branch_at(porcelain: &str, target: &Path) -> Option<String> {
 /// defers it to "whatever wires the CLI", and this Work Unit is wiring for a
 /// `cd`-only shim, not an interactive resolver.
 fn run_rebase(worktree_path: &Path, branch: &str, base_ref: &str) {
-    let current_branch = git_stdout(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+    let current_branch = git::raw(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
-    let git_user = git_stdout(worktree_path, &["config", "user.name"])
+    let git_user = git::raw(worktree_path, &["config", "user.name"])
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
-    let branch_author = git_stdout(
+    let branch_author = git::raw(
         worktree_path,
         &["log", "-1", "--format=%an", &current_branch],
     )
@@ -318,7 +319,7 @@ fn run_rebase(worktree_path: &Path, branch: &str, base_ref: &str) {
 fn gh_login() -> String {
     let mut command = Command::new("gh");
     command.args(["api", "user", "--jq", ".login"]);
-    match run_with_timeout(&mut command, GIT_TIMEOUT) {
+    match run_with_timeout(&mut command, GH_TIMEOUT) {
         Some(out) if out.status.success() => {
             String::from_utf8_lossy(&out.stdout).trim().to_string()
         }
@@ -379,17 +380,4 @@ fn run_housekeep(repo_root: &Path, worktree_path: &Path, branch: &str, no_push: 
 /// (worktree.sh:486), reused here for `WORKTREE_NO_PUSH`.
 fn env_flag(name: &str) -> bool {
     matches!(std::env::var(name), Ok(v) if !v.is_empty() && v != "0")
-}
-
-fn git_stdout(dir: &Path, args: &[&str]) -> Option<String> {
-    let mut command = Command::new("git");
-    command.arg("-C").arg(dir).args(args);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).to_string())
-}
-
-fn git_ok(dir: &Path, args: &[&str]) -> bool {
-    git_stdout(dir, args).is_some()
 }

@@ -13,12 +13,6 @@
 
 use crate::common::emit_pre_context;
 use crate::common::payload::Payload;
-use crate::common::proc::run_with_timeout;
-use std::process::Command;
-use std::time::Duration;
-
-/// The shell had no timeout; a wedged git would have hung the PreToolUse event.
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// House rule is small single-concern commits. Matches the shell thresholds.
 const MAX_FILES: usize = 20;
@@ -158,10 +152,9 @@ fn changed_line_count() -> u64 {
 /// `None` when git is missing, times out, or exits non-zero, which the caller
 /// treats as "nothing to say" rather than an error.
 fn git(args: &[&str]) -> Option<String> {
-    let mut command = Command::new("git");
-    command.args(args);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).to_string())
+    crate::common::git::untrimmed(crate::common::git::run(
+        None,
+        args,
+        crate::common::git::TIMEOUT,
+    ))
 }

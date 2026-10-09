@@ -8,12 +8,11 @@
 
 pub mod review;
 
+use crate::common::git;
 use crate::common::paths::playbook_root_from;
 use crate::common::repo_slug;
-use crate::common::run_with_timeout;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
 /// Which convention created a worktree, matched purely by its path shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,10 +23,6 @@ pub enum Convention {
     Review,
     Unmanaged,
 }
-
-// Wider than a plain 5s: this crate's fully parallel tests flake at 5s under
-// load, the same reason `src/common/paths.rs` widened its own git timeout.
-const GIT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Classifies `worktree_path` against each known creation convention's path
 /// shape, resolved relative to `home`.
@@ -121,14 +116,18 @@ pub fn wu_worktree_landed(
     default_branch: &str,
     repo_root: &Path,
 ) -> bool {
-    let mut command = Command::new("git");
-    command.arg("-C").arg(repo_root).args([
-        "merge-base",
-        "--is-ancestor",
-        worktree_head_commit,
-        &format!("origin/{default_branch}"),
-    ]);
-    matches!(run_with_timeout(&mut command, GIT_TIMEOUT), Some(out) if out.status.success())
+    let upstream = format!("origin/{default_branch}");
+    git::run(
+        Some(repo_root),
+        &[
+            "merge-base",
+            "--is-ancestor",
+            worktree_head_commit,
+            &upstream,
+        ],
+        git::SLOW_TIMEOUT,
+    )
+    .is_some_and(|out| out.status.success())
 }
 
 /// Whether a branch's pull request is merged or open, the richer signal
@@ -177,16 +176,9 @@ pub fn named_branch_landed(
 /// Unix seconds of `branch`'s last commit, or `None` if the branch or its
 /// history cannot be read.
 fn branch_commit_epoch(branch: &str, repo_root: &Path) -> Option<i64> {
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(repo_root)
-        .args(["log", "-1", "--format=%ct", branch]);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .and_then(|s| s.parse().ok())
+    git::output_slow(repo_root, &["log", "-1", "--format=%ct", branch])?
+        .parse()
+        .ok()
 }
 
 /// Whether a review-convention worktree already landed, judged by its lock
@@ -263,24 +255,7 @@ fn parse_pid_after(lock_reason: &str, marker: &str) -> Option<u32> {
 /// `git_stdout`, but without a `-C <repo_root>`: `classify` has no repo root
 /// of its own, only the caller's cwd.
 fn git_stdout(args: &[&str]) -> Option<String> {
-    let mut command = Command::new("git");
-    command.args(args);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-/// `git <args>` scoped to `dir` via `-C`, trimmed stdout on success. Unlike
-/// `git_stdout` above, the caller already knows which directory to run
-/// against instead of relying on the calling process's own cwd.
-fn git_stdout_at(dir: &Path, args: &[&str]) -> Option<String> {
-    let mut command = Command::new("git");
-    command.arg("-C").arg(dir).args(args);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    git::trimmed(git::run(None, args, git::SLOW_TIMEOUT))
 }
 
 /// One worktree from `git worktree list --porcelain`'s output: its path,
@@ -297,13 +272,12 @@ pub struct WorktreeEntry {
 /// treating a failed or unparseable command as "nothing to sweep": a broken
 /// `.git` state must stop the sweep, not proceed as if no worktrees existed.
 pub fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeEntry>, String> {
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(repo_root)
-        .args(["worktree", "list", "--porcelain"]);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)
-        .ok_or_else(|| "git worktree list --porcelain timed out or failed to run".to_string())?;
+    let out = git::run(
+        Some(repo_root),
+        &["worktree", "list", "--porcelain"],
+        git::SLOW_TIMEOUT,
+    )
+    .ok_or_else(|| "git worktree list --porcelain timed out or failed to run".to_string())?;
     if !out.status.success() {
         return Err(format!(
             "git worktree list --porcelain failed: {}",
@@ -539,7 +513,7 @@ const FRESH_WORKTREE_GRACE_SECS: i64 = 3_600;
 /// reflog (or an unreadable one) counts as having none, the safe answer,
 /// because "no own commits" blocks the merged signal.
 fn branch_has_own_commits(repo_root: &Path, branch: &str) -> bool {
-    let reflog = git_stdout_at(
+    let reflog = git::output_slow(
         repo_root,
         &[
             "reflog",
@@ -548,7 +522,7 @@ fn branch_has_own_commits(repo_root: &Path, branch: &str) -> bool {
             &format!("refs/heads/{branch}"),
         ],
     );
-    let tip = git_stdout_at(repo_root, &["rev-parse", &format!("refs/heads/{branch}")]);
+    let tip = git::output_slow(repo_root, &["rev-parse", &format!("refs/heads/{branch}")]);
     match (reflog, tip) {
         (Some(log), Some(tip)) => log
             .lines()
@@ -679,9 +653,7 @@ fn remove_worktree(repo_root: &Path, path: &Path, force_twice: bool) -> Result<(
         args.push("--force");
     }
     args.push(&path_str);
-    let mut command = Command::new("git");
-    command.arg("-C").arg(repo_root).args(&args);
-    match run_with_timeout(&mut command, GIT_TIMEOUT) {
+    match git::run(Some(repo_root), &args, git::SLOW_TIMEOUT) {
         Some(out) if out.status.success() => Ok(()),
         Some(out) => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
         None => Err("git worktree remove timed out or failed to run".to_string()),
@@ -697,7 +669,7 @@ fn remove_worktree(repo_root: &Path, path: &Path, force_twice: bool) -> Result<(
 /// just-created worktree mid-Work-Unit is landed (a commit is its own
 /// ancestor) with its actual work still uncommitted.
 fn worktree_is_dirty(worktree_path: &Path) -> bool {
-    match git_stdout_at(worktree_path, &["status", "--porcelain"]) {
+    match git::output_slow(worktree_path, &["status", "--porcelain"]) {
         // The conflict-STOP marker is written directly into the worktree and
         // never committed, so its own status line must not count as dirty:
         // that would block removal once its own grace period expires, the

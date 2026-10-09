@@ -9,12 +9,14 @@
 //! gets backgrounded, and the `--ai-resolve` spawn path (see their own doc
 //! comments for why each is deliberately deferred rather than guessed at).
 
+use crate::common::git;
 use crate::common::run_with_timeout;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, UNIX_EPOCH};
 
+/// For the helper tools (`bash`, `lsof`, `gh`) this file runs besides git.
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Never collapse worktrees into the repo root, which `WORKTREE_BASE_DIR="."`
@@ -155,12 +157,7 @@ pub fn copy_env(repo_root: &Path, dest: &Path, env_base: Option<&str>) -> EnvCop
 /// direction is deliberate: the failure mode of guessing wrong here is staging
 /// a secret.
 fn is_gitignored(repo_root: &Path, rel: &str) -> bool {
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(repo_root)
-        .args(["check-ignore", "-q", rel]);
-    matches!(run_with_timeout(&mut command, GIT_TIMEOUT), Some(o) if o.status.success())
+    git::ok(repo_root, &["check-ignore", "-q", rel])
 }
 
 /// Branches tried when the remote publishes no `origin/HEAD`, in order.
@@ -186,7 +183,7 @@ const CLEANUP_INTERVAL_SECS: i64 = SECS_PER_DAY;
 /// names, so a repo whose default is `trunk` is not silently rebased onto a
 /// `main` that does not exist.
 pub fn base_branch(repo_root: &Path) -> String {
-    let published = git_stdout(
+    let published = git::raw(
         repo_root,
         &[
             "symbolic-ref",
@@ -204,7 +201,7 @@ pub fn base_branch(repo_root: &Path) -> String {
 
     for candidate in BASE_BRANCH_CANDIDATES {
         let reference = format!("refs/remotes/origin/{candidate}");
-        if git_ok(repo_root, &["show-ref", "--verify", "--quiet", &reference]) {
+        if git::ok(repo_root, &["show-ref", "--verify", "--quiet", &reference]) {
             return format!("origin/{candidate}");
         }
     }
@@ -235,7 +232,7 @@ const MAIN_BASE_REF_FALLBACK: &str = "master";
 /// route this through `base_branch` plus a prefix strip: that would also
 /// wrongly pull in the four-candidate fallback this one never had.
 pub fn main_base_ref(repo_root: &Path) -> String {
-    git_stdout(
+    git::raw(
         repo_root,
         &[
             "symbolic-ref",
@@ -261,21 +258,15 @@ pub fn main_base_ref(repo_root: &Path) -> String {
 /// `GIT_TIMEOUT` other calls in this file use, since this is a network fetch
 /// like `rebase_onto`'s, not a local read.
 pub fn initial_fetch(repo_root: &Path, remote: &str, base_ref: &str, branch: &str) {
-    let mut combined = Command::new("git");
-    combined
-        .arg("-C")
-        .arg(repo_root)
-        .args(["fetch", remote, "--quiet", base_ref, branch]);
-    if matches!(run_with_timeout(&mut combined, REBASE_TIMEOUT), Some(o) if o.status.success()) {
+    let combined = ["fetch", remote, "--quiet", base_ref, branch];
+    if git::run(Some(repo_root), &combined, REBASE_TIMEOUT).is_some_and(|o| o.status.success()) {
         return;
     }
-
-    let mut base_only = Command::new("git");
-    base_only
-        .arg("-C")
-        .arg(repo_root)
-        .args(["fetch", remote, "--quiet", base_ref]);
-    let _ = run_with_timeout(&mut base_only, REBASE_TIMEOUT);
+    let _ = git::run(
+        Some(repo_root),
+        &["fetch", remote, "--quiet", base_ref],
+        REBASE_TIMEOUT,
+    );
 }
 
 /// Everything the staleness decision needs, gathered by the caller so the
@@ -381,17 +372,17 @@ pub fn cleanup_stale_with(
     let base = base_branch(repo_root);
     let merged = merged_branches(repo_root, &base);
 
-    let Some(porcelain) = git_stdout(repo_root, &["worktree", "list", "--porcelain"]) else {
+    let Some(porcelain) = git::raw(repo_root, &["worktree", "list", "--porcelain"]) else {
         return 0;
     };
 
     let mut removed = 0;
     for path in cleanup_candidates(&porcelain) {
         let wt_path = Path::new(&path);
-        let branch = git_stdout(wt_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+        let branch = git::raw(wt_path, &["rev-parse", "--abbrev-ref", "HEAD"])
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
-        let commit_epoch = git_stdout(wt_path, &["log", "-1", "--format=%ct"])
+        let commit_epoch = git::raw(wt_path, &["log", "-1", "--format=%ct"])
             .and_then(|s| s.trim().parse().ok())
             .unwrap_or(0);
 
@@ -408,7 +399,7 @@ pub fn cleanup_stale_with(
             continue;
         }
 
-        if !git_ok(repo_root, &["worktree", "remove", "--force", path.as_str()]) {
+        if !git::ok(repo_root, &["worktree", "remove", "--force", path.as_str()]) {
             // The shell's `|| continue` (worktree.sh:236): a failed remove
             // must never be followed by a branch delete, so a branch is
             // never destroyed while its worktree still exists on disk.
@@ -416,11 +407,11 @@ pub fn cleanup_stale_with(
         }
         removed += 1;
         if branch != "HEAD" {
-            let _ = git_ok(repo_root, &["branch", "-D", branch.as_str()]);
+            let _ = git::ok(repo_root, &["branch", "-D", branch.as_str()]);
         }
     }
 
-    let _ = git_ok(repo_root, &["worktree", "prune"]);
+    let _ = git::ok(repo_root, &["worktree", "prune"]);
     removed
 }
 
@@ -549,7 +540,7 @@ pub fn main_worktree(porcelain: &str) -> Option<String> {
 /// checked out in the worktree this command ran from, `+` marks one checked
 /// out in another linked worktree, and either can mix with leading spaces.
 pub(crate) fn merged_branches(repo_root: &Path, base: &str) -> Vec<String> {
-    git_stdout(repo_root, &["branch", "--merged", base])
+    git::raw(repo_root, &["branch", "--merged", base])
         .map(|out| {
             out.lines()
                 .map(|line| strip_branch_marker(line).to_string())
@@ -621,19 +612,6 @@ fn open_pr_branches(repo_root: &Path) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
-}
-
-fn git_stdout(repo_root: &Path, args: &[&str]) -> Option<String> {
-    let mut command = Command::new("git");
-    command.arg("-C").arg(repo_root).args(args);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).to_string())
-}
-
-fn git_ok(repo_root: &Path, args: &[&str]) -> bool {
-    git_stdout(repo_root, args).is_some()
 }
 
 /// Whether the new worktree can reuse the main checkout's `node_modules`.
@@ -806,8 +784,8 @@ fn command_exists(name: &str) -> bool {
 /// tree content happens to already match the index, so collapsing to one
 /// check would miss that case.
 pub fn needs_stash(repo_root: &Path) -> bool {
-    !git_ok(repo_root, &["diff-index", "--quiet", "HEAD", "--"])
-        || !git_ok(repo_root, &["diff", "--quiet"])
+    !git::ok(repo_root, &["diff-index", "--quiet", "HEAD", "--"])
+        || !git::ok(repo_root, &["diff", "--quiet"])
 }
 
 /// The message `_wt_main` tags its auto-stash with (worktree.sh:279), so
@@ -841,7 +819,7 @@ pub fn auto_stash(repo_root: &Path) -> bool {
 }
 
 fn stash_count(repo_root: &Path) -> usize {
-    git_stdout(repo_root, &["stash", "list"])
+    git::raw(repo_root, &["stash", "list"])
         .map(|out| out.lines().filter(|line| !line.is_empty()).count())
         .unwrap_or(0)
 }
@@ -972,14 +950,14 @@ pub fn create_worktree(
         return CreateOutcome::Created(dest.to_path_buf());
     }
 
-    let _ = git_ok(repo_root, &["worktree", "prune"]);
-    let _ = git_ok(repo_root, &["worktree", "repair"]);
+    let _ = git::ok(repo_root, &["worktree", "prune"]);
+    let _ = git::ok(repo_root, &["worktree", "repair"]);
 
     if run_worktree_add(repo_root, dest, reference, new_branch, true) {
         return CreateOutcome::Created(dest.to_path_buf());
     }
 
-    let Some(porcelain) = git_stdout(repo_root, &["worktree", "list", "--porcelain"]) else {
+    let Some(porcelain) = git::raw(repo_root, &["worktree", "list", "--porcelain"]) else {
         return CreateOutcome::Failed;
     };
     let lookup_branch = fallback_lookup_branch(reference, new_branch);
@@ -1045,7 +1023,7 @@ pub fn make_plan(
 /// The two `show-ref --verify` probes use fully qualified refs so a tag or a
 /// remote ref sharing the branch's name cannot be mistaken for a local branch.
 pub fn make_worktree(repo_root: &Path, target: &Path, branch: &str, remote: &str) -> CreateOutcome {
-    let local_exists = git_ok(
+    let local_exists = git::ok(
         repo_root,
         &[
             "show-ref",
@@ -1054,7 +1032,7 @@ pub fn make_worktree(repo_root: &Path, target: &Path, branch: &str, remote: &str
             &format!("refs/heads/{branch}"),
         ],
     );
-    let remote_exists = git_ok(
+    let remote_exists = git::ok(
         repo_root,
         &[
             "show-ref",
@@ -1081,7 +1059,7 @@ pub fn make_worktree(repo_root: &Path, target: &Path, branch: &str, remote: &str
     // Only after a successful create, since the shell's `|| return $?` means a
     // failed create never reaches the unset.
     if plan.unset_upstream && !matches!(outcome, CreateOutcome::Failed) {
-        let _ = git_ok(repo_root, &["branch", "--unset-upstream", branch]);
+        let _ = git::ok(repo_root, &["branch", "--unset-upstream", branch]);
     }
     outcome
 }
@@ -1187,7 +1165,7 @@ pub fn sanitize_branch(raw: &str) -> String {
 /// git owns those rules, and a re-implementation here would just be a second
 /// copy of them to keep in sync.
 pub fn valid_branch_name(repo_root: &Path, branch: &str) -> bool {
-    git_ok(repo_root, &["check-ref-format", "--branch", branch])
+    git::ok(repo_root, &["check-ref-format", "--branch", branch])
 }
 
 /// The first JIRA-style key in the branch, uppercased.
@@ -1362,7 +1340,7 @@ pub fn rebase_onto(worktree: &Path, remote: &str, base_ref: &str) -> RebaseOutco
     let _ = run_with_timeout(&mut fetch, REBASE_TIMEOUT);
 
     let upstream = format!("{remote}/{base_ref}");
-    if git_ok(
+    if git::ok(
         worktree,
         &["merge-base", "--is-ancestor", &upstream, "HEAD"],
     ) {
@@ -1370,7 +1348,7 @@ pub fn rebase_onto(worktree: &Path, remote: &str, base_ref: &str) -> RebaseOutco
     }
 
     let range = format!("{upstream}..HEAD");
-    let has_merge_commits = git_stdout(worktree, &["log", "--merges", "--oneline", &range])
+    let has_merge_commits = git::raw(worktree, &["log", "--merges", "--oneline", &range])
         .is_some_and(|out| !out.trim().is_empty());
 
     let mut rebase = Command::new("git");
@@ -1410,14 +1388,14 @@ pub fn abort_rebase(worktree: &Path) {
 /// also prints "HEAD detached after rebase. Aborting and restoring." here;
 /// that is left to the caller, which is what the return value is for.
 pub fn recover_detached_head(worktree: &Path, current_branch: &str, wanted_branch: &str) -> bool {
-    let detached = git_stdout(worktree, &["rev-parse", "--abbrev-ref", "HEAD"])
+    let detached = git::raw(worktree, &["rev-parse", "--abbrev-ref", "HEAD"])
         .is_some_and(|head| head.trim() == "HEAD");
     if !detached {
         return false;
     }
     abort_rebase(worktree);
-    if !git_ok(worktree, &["checkout", current_branch]) {
-        git_ok(worktree, &["checkout", wanted_branch]);
+    if !git::ok(worktree, &["checkout", current_branch]) {
+        git::ok(worktree, &["checkout", wanted_branch]);
     }
     true
 }
@@ -1546,7 +1524,7 @@ fn remote_may_still_have_branch(repo_root: &Path, remote: &str, branch: &str) ->
 /// exit code anyway.
 fn apply_upstream_action(worktree: &Path, remote: &str, branch: &str, no_push: bool) {
     let expected = format!("{remote}/{branch}");
-    let current = git_stdout(
+    let current = git::raw(
         worktree,
         &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     )
@@ -1556,7 +1534,7 @@ fn apply_upstream_action(worktree: &Path, remote: &str, branch: &str, no_push: b
     match upstream_action(current.as_deref(), &expected, exists_on_remote, no_push) {
         UpstreamAction::None | UpstreamAction::SkipNoPush => {}
         UpstreamAction::SetTracking => {
-            let _ = git_ok(
+            let _ = git::ok(
                 worktree,
                 &["branch", "--set-upstream-to", &expected, branch],
             );
@@ -1633,18 +1611,18 @@ pub fn housekeep(
     // rather than collapsed into one.
     let expected = format!("{}/{}", target.remote, target.branch);
     let expected_ref = format!("refs/remotes/{expected}");
-    let remote_ref_registered = git_ok(
+    let remote_ref_registered = git::ok(
         target.worktree,
         &["show-ref", "--verify", "--quiet", &expected_ref],
     );
-    let current_upstream = git_stdout(
+    let current_upstream = git::raw(
         target.worktree,
         &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     )
     .map(|s| s.trim().to_string());
 
     if remote_ref_registered && current_upstream.as_deref() != Some(expected.as_str()) {
-        let _ = git_ok(
+        let _ = git::ok(
             target.worktree,
             &["branch", "--set-upstream-to", &expected, target.branch],
         );
@@ -1657,7 +1635,7 @@ pub fn housekeep(
         let _ = run_with_timeout(&mut pull, REBASE_TIMEOUT);
     }
 
-    let _ = git_ok(target.worktree, &["worktree", "prune"]);
+    let _ = git::ok(target.worktree, &["worktree", "prune"]);
 
     apply_upstream_action(
         target.worktree,
@@ -1699,13 +1677,13 @@ pub fn housekeep(
 /// and only ever tries `branch`. Both exist in the shell, at different
 /// moments, doing different things; do not merge them.
 pub fn attach_if_detached(worktree: &Path, branch: &str) -> bool {
-    let detached = git_stdout(worktree, &["rev-parse", "--abbrev-ref", "HEAD"])
+    let detached = git::raw(worktree, &["rev-parse", "--abbrev-ref", "HEAD"])
         .is_some_and(|head| head.trim() == "HEAD");
     if !detached {
         return false;
     }
-    if !git_ok(worktree, &["checkout", "-B", branch, "HEAD"]) {
-        let _ = git_ok(worktree, &["checkout", branch]);
+    if !git::ok(worktree, &["checkout", "-B", branch, "HEAD"]) {
+        let _ = git::ok(worktree, &["checkout", branch]);
     }
     true
 }
@@ -1776,14 +1754,14 @@ fn recover_detached_target(
     remote: &str,
 ) -> Option<String> {
     abort_rebase(target);
-    let _ = git_ok(target, &["merge", "--abort"]);
-    if !git_ok(target, &["checkout", branch]) {
+    let _ = git::ok(target, &["merge", "--abort"]);
+    if !git::ok(target, &["checkout", branch]) {
         let remote_ref = format!("refs/remotes/{remote}/{branch}");
-        if git_ok(repo_root, &["show-ref", "--verify", "--quiet", &remote_ref]) {
-            let _ = git_ok(target, &["checkout", "-b", branch, &remote_ref]);
+        if git::ok(repo_root, &["show-ref", "--verify", "--quiet", &remote_ref]) {
+            let _ = git::ok(target, &["checkout", "-b", branch, &remote_ref]);
         }
     }
-    git_stdout(target, &["rev-parse", "--abbrev-ref", "HEAD"])
+    git::raw(target, &["rev-parse", "--abbrev-ref", "HEAD"])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty() && s != "HEAD")
 }
@@ -1793,12 +1771,12 @@ fn recover_detached_target(
 /// worktree.sh:314 and worktree.sh:337.
 fn force_remove_worktree(repo_root: &Path, target: &Path) {
     let target_str = target.to_string_lossy();
-    if !git_ok(
+    if !git::ok(
         repo_root,
         &["worktree", "remove", "--force", target_str.as_ref()],
     ) {
         let _ = std::fs::remove_dir_all(target);
-        let _ = git_ok(repo_root, &["worktree", "prune"]);
+        let _ = git::ok(repo_root, &["worktree", "prune"]);
     }
 }
 
@@ -1842,7 +1820,7 @@ fn refresh_existing(
     let _ = run_with_timeout(&mut fetch, REBASE_TIMEOUT);
 
     let remote_ref = format!("refs/remotes/{remote}/{branch}");
-    if git_ok(repo_root, &["show-ref", "--verify", "--quiet", &remote_ref]) {
+    if git::ok(repo_root, &["show-ref", "--verify", "--quiet", &remote_ref]) {
         let mut pull = Command::new("git");
         pull.arg("-C")
             .arg(path)
@@ -1876,7 +1854,7 @@ pub fn prepare_worktree(
     // A failed `worktree list` reads as empty, exactly like the shell's
     // `$(...)` capturing nothing on failure: nothing downstream treats that
     // as fatal, so this doesn't either.
-    let porcelain = git_stdout(repo_root, &["worktree", "list", "--porcelain"]).unwrap_or_default();
+    let porcelain = git::raw(repo_root, &["worktree", "list", "--porcelain"]).unwrap_or_default();
 
     if target_exists {
         let (current_branch, registered) = target_worktree_info(&porcelain, target);
@@ -1917,7 +1895,7 @@ pub fn prepare_worktree(
                 }
             }
             WorktreePlan::CleanOrphanAndCreate => {
-                let _ = git_ok(repo_root, &["worktree", "prune"]);
+                let _ = git::ok(repo_root, &["worktree", "prune"]);
                 let _ = std::fs::remove_dir_all(target);
                 create_fresh(repo_root, target, branch, remote, env_base)
             }
@@ -1927,7 +1905,7 @@ pub fn prepare_worktree(
             WorktreePlan::RefuseOccupied(current) => WorktreeOutcome::Refused(current),
             WorktreePlan::RecycleTarget(current) => {
                 force_remove_worktree(repo_root, target);
-                let _ = git_ok(repo_root, &["branch", "-D", &current]);
+                let _ = git::ok(repo_root, &["branch", "-D", &current]);
                 create_fresh(repo_root, target, branch, remote, env_base)
             }
             WorktreePlan::ReuseExisting(_)
@@ -1957,7 +1935,7 @@ pub fn prepare_worktree(
             refresh_existing(repo_root, Path::new(&path), branch, remote, env_base)
         }
         WorktreePlan::PruneStaleAndCreate => {
-            let _ = git_ok(repo_root, &["worktree", "prune"]);
+            let _ = git::ok(repo_root, &["worktree", "prune"]);
             create_fresh(repo_root, target, branch, remote, env_base)
         }
         WorktreePlan::Create => create_fresh(repo_root, target, branch, remote, env_base),

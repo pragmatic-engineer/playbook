@@ -11,14 +11,11 @@
 //! heredoc instead, and the file stays as it is.
 
 use super::{gh, git, sources};
-use crate::common::proc::run_with_timeout;
 use crate::common::shell::{
     apply_edits, commands, program_index, program_name, quote, Command, Heredoc, Span,
 };
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::process::Command as Process;
-use std::time::Duration;
 
 /// How deep `bash -c "..."` strings and substitutions are followed.
 const MAX_NESTING: usize = 3;
@@ -31,8 +28,6 @@ const CARRIERS: [&str; 12] = [
 /// Carriers that run the program they are given more than once or with an
 /// input of their own, so a heredoc given to them is not the program's.
 const STDIN_CARRIERS: [&str; 4] = ["xargs", "parallel", "find", "watch"];
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
-
 /// What the walk found, in words that never carry a message's text.
 #[derive(Default)]
 pub struct Findings {
@@ -257,14 +252,4 @@ pub fn nested_word(
     if rewritten != text {
         plan.edits.push((range, quote(&rewritten)));
     }
-}
-
-/// The result of `git <args>` in `dir`, trimmed of its final newline.
-pub fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
-    let mut command = Process::new("git");
-    command.arg("-C").arg(dir).args(args);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }

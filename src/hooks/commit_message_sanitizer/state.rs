@@ -6,7 +6,6 @@
 //! PostToolUse backstop can tell a commit this call made from one that was
 //! already there. A repository with no commit yet is recorded with an empty HEAD.
 
-use super::engine::git_output;
 use crate::common::atomic::write_atomic;
 use crate::common::payload::Payload;
 use crate::common::session_dir;
@@ -22,7 +21,7 @@ pub fn record_head(payload: &Payload, dir: &Path) {
         return;
     };
     let head = crate::common::gitfacts::head_sha(dir)
-        .or_else(|| git_output(dir, &["rev-parse", "--verify", "-q", "HEAD"]))
+        .or_else(|| crate::common::git::raw(dir, &["rev-parse", "--verify", "-q", "HEAD"]))
         .unwrap_or_default();
     let mut heads = read(&file);
     heads.insert(root, Value::String(head.trim().to_string()));
@@ -49,7 +48,7 @@ fn repo_root(dir: &Path) -> Option<String> {
         return Some(top.to_string_lossy().into_owned());
     }
     Some(
-        git_output(dir, &["rev-parse", "--show-toplevel"])?
+        crate::common::git::raw(dir, &["rev-parse", "--show-toplevel"])?
             .trim()
             .to_string(),
     )

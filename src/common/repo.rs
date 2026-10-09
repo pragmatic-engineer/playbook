@@ -7,20 +7,14 @@
 //! derive it identically or facts silently fail to resolve (see
 //! the retired shell original).
 
-use crate::common::proc::run_with_timeout;
+use crate::common::git;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
-
-/// How long to wait for `git remote get-url origin` before giving up.
-/// Matches the retired shell original's `timeout=5`.
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Return the `<owner>/<repo>` slug for the current git repo's origin
 /// remote. Empty outside a repo, when no origin remote is configured, or
-/// when `git` does not finish within `GIT_TIMEOUT`. Never panics.
+/// when `git` does not finish within `git::TIMEOUT`. Never panics.
 pub fn repo_slug() -> String {
     // Keyed by cwd so a process that changes directory never sees a stale slug.
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, String>>> = OnceLock::new();
@@ -50,15 +44,10 @@ fn spawn_slug() -> String {
     }
     #[cfg(test)]
     SPAWNS.with(|n| n.set(n.get() + 1));
-    let mut command = Command::new("git");
-    command.args(["--no-optional-locks", "remote", "get-url", "origin"]);
-    let Some(output) = run_with_timeout(&mut command, GIT_TIMEOUT) else {
+    let args = ["--no-optional-locks", "remote", "get-url", "origin"];
+    let Some(url) = git::trimmed(git::run(None, &args, git::TIMEOUT)) else {
         return String::new();
     };
-    if !output.status.success() {
-        return String::new();
-    }
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
     normalize_remote_url(&url)
 }
 
@@ -106,6 +95,7 @@ fn normalize_remote_url(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn normalizes_https_url_with_git_suffix() {
