@@ -142,6 +142,13 @@ fn main() {
                 .ok()
                 .and_then(|shell| ShellKind::detect(&shell));
 
+            let path_setup = std::env::current_exe().ok().map(|exe| init::path::Setup {
+                bin_dir: init::path::resolve_bin_dir(
+                    &std::env::var_os("PATH").unwrap_or_default(),
+                    &exe,
+                ),
+                shell: init::path::PathShell::detect(&std::env::var("SHELL").unwrap_or_default()),
+            });
             let repo = manifest::check::toplevel().zip(common::paths::repo_scoped_dir(
                 common::paths::RepoScope::Worktree,
             ));
@@ -153,6 +160,7 @@ fn main() {
                 shell_kind,
                 system_prompt,
                 aliases,
+                path_setup,
             };
             let outcome = init::run::run(&paths);
             for step in &outcome.steps {

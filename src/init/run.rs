@@ -6,6 +6,7 @@
 
 use crate::init::merge;
 use crate::init::migrate;
+use crate::init::path;
 use crate::init::shim::{self, ShellKind};
 use crate::init::system_prompt;
 use crate::init::wire;
@@ -40,6 +41,9 @@ pub struct InitPaths {
     /// "refresh an existing copy" case here, since a launcher a user never
     /// asked for should not be touched at all.
     pub aliases: bool,
+    /// Where the binary lives and the shell to wire it for. `None` skips the
+    /// `path` step.
+    pub path_setup: Option<path::Setup>,
     /// `(repo_root, dest_base)` when init runs inside a repo with a resolvable slug.
     pub repo: Option<(PathBuf, PathBuf)>,
 }
@@ -154,6 +158,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         seed_or_merge_settings(self_root, &paths.claude_home, &settings_path, epoch);
     let hooks_step = wire_hooks(&settings_path, epoch);
 
+    let path_step = path_step(&paths.home, paths.path_setup.as_ref());
     let shell_runtime_confirmed = step_confirmed(&shell_runtime_step);
     let shim_step = rewire_rc_file_step(
         &paths.home,
@@ -169,6 +174,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         system_prompt_step,
         settings_step,
         hooks_step,
+        path_step,
         shim_step,
     ];
     steps.extend(migrated.steps);
@@ -176,6 +182,50 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     InitOutcome {
         steps,
         warnings: migrated.warnings,
+    }
+}
+
+/// Puts the binary's directory on PATH for every shell start. A failure is
+/// reported, never fatal: the binary still runs by absolute path.
+fn path_step(home: &Path, setup: Option<&path::Setup>) -> StepReport {
+    let Some(setup) = setup else {
+        return StepReport::skipped("path", "binary location unknown");
+    };
+    match path::ensure(home, setup) {
+        Ok(out) if !out.changed.is_empty() => {
+            let files: Vec<String> = out
+                .changed
+                .iter()
+                .map(|f| f.display().to_string())
+                .collect();
+            StepReport::wired(
+                "path",
+                format!(
+                    "added {} to PATH in {}. Open a new terminal to pick it up.",
+                    setup.bin_dir.display(),
+                    files.join(", ")
+                ),
+            )
+        }
+        Ok(out) if !out.skipped.is_empty() => {
+            let (file, why) = &out.skipped[0];
+            StepReport::skipped(
+                "path",
+                format!(
+                    "{}: {why}. Add {} to PATH by hand.",
+                    file.display(),
+                    setup.bin_dir.display()
+                ),
+            )
+        }
+        Ok(_) => StepReport::already_correct(
+            "path",
+            format!(
+                "{} is already on PATH for new shells",
+                setup.bin_dir.display()
+            ),
+        ),
+        Err(err) => StepReport::failed("path", err.to_string()),
     }
 }
 

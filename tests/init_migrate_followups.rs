@@ -38,6 +38,7 @@ fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPath
         shell_kind: None,
         system_prompt: true,
         aliases: false,
+        path_setup: None,
         repo,
     }
 }

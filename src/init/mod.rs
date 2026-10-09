@@ -7,6 +7,7 @@
 //! - `merge` is the three-way settings merge (the retired shell original).
 //! - `wire` writes the ported hook entries into `settings.json`, backing it up
 //!   first.
+//! - `path` puts the binary's directory on PATH for every shell start.
 //! - `shim` installs the bash and zsh launcher shim idempotently.
 //! - `statusline` moves a legacy `statusLine.command` to `playbook statusline`.
 //! - `system_prompt` places the opt-in `prompts/SYSTEM_PROMPT.md`.
@@ -30,6 +31,7 @@
 pub mod memory_migrate;
 pub mod merge;
 pub mod migrate;
+pub mod path;
 pub mod run;
 pub mod self_root;
 pub mod shell_init;

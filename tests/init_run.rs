@@ -184,6 +184,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         shell_kind,
         system_prompt: false,
         aliases: true,
+        path_setup: None,
         repo: None,
     }
 }
@@ -224,7 +225,7 @@ fn fresh_config_gets_fully_wired() {
         }
         // `memory` has nothing to migrate on a fresh machine with no
         // legacy `~/.claude/memory`.
-        if step.name == "memory" || step.name == "trust" {
+        if step.name == "memory" || step.name == "trust" || step.name == "path" {
             assert_eq!(
                 step.status,
                 StepStatus::Skipped,
@@ -689,7 +690,7 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
         // `system-prompt` and `memory` stay `Skipped` on both runs: neither
         // has anything to act on in this fixture.
         let expected =
-            if step.name == "system-prompt" || step.name == "memory" || step.name == "trust" {
+            if ["system-prompt", "memory", "trust", "path"].contains(&step.name) {
                 StepStatus::Skipped
             } else {
                 StepStatus::AlreadyCorrect
@@ -802,6 +803,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         shell_kind: Some(ShellKind::Bash),
         system_prompt: false,
         aliases: true,
+        path_setup: None,
         repo: None,
     };
 
@@ -852,6 +854,7 @@ fn aliases_false_skips_shim_entirely() {
         shell_kind: Some(ShellKind::Bash),
         system_prompt: false,
         aliases: false,
+        path_setup: None,
         repo: None,
     };
 
@@ -1262,4 +1265,38 @@ fn init_warns_when_the_installed_system_prompt_was_edited() {
     // Assert
     assert_eq!(second.warnings.len(), 1, "{:?}", second.warnings);
     assert!(second.warnings[0].contains("edited"));
+}
+
+#[test]
+fn the_path_step_puts_the_binary_dir_on_path_and_is_idempotent() {
+    let home = scratch_home("path-step");
+    let mut paths = base_paths(&home, Some(ShellKind::Zsh));
+    paths.path_setup = Some(playbook::init::path::Setup {
+        bin_dir: PathBuf::from("/opt/pb/bin"),
+        shell: playbook::init::path::PathShell::Zsh,
+    });
+
+    let first = run(&paths);
+    let step = find_step(&first, "path");
+    assert_eq!(step.status, StepStatus::Wired, "{}", step.detail);
+    let zshenv = fs::read_to_string(home.join(".zshenv")).unwrap();
+    assert!(
+        zshenv.contains("export PATH=\"/opt/pb/bin:$PATH\""),
+        "{zshenv}"
+    );
+
+    let second = run(&paths);
+    assert_eq!(
+        find_step(&second, "path").status,
+        StepStatus::AlreadyCorrect
+    );
+    assert_eq!(fs::read_to_string(home.join(".zshenv")).unwrap(), zshenv);
+}
+
+#[test]
+fn without_a_binary_location_the_path_step_is_skipped() {
+    let home = scratch_home("path-skip");
+    let outcome = run(&base_paths(&home, Some(ShellKind::Zsh)));
+    assert_eq!(find_step(&outcome, "path").status, StepStatus::Skipped);
+    assert!(!home.join(".zshenv").exists());
 }
