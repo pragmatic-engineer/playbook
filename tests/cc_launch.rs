@@ -38,7 +38,7 @@ fn env(tag: &str) -> Env {
     }
     make_exec(
         &bin.join("claude"),
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nexit ${FAKE_EXIT:-0}\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nexit ${FAKE_EXIT:-0}\n",
     );
     Env { root, home, work }
 }
@@ -533,4 +533,26 @@ fn choosing_a_memory_source_never_edits_claude_code_settings() {
     e.launch(&["fresh"]);
     set_memory_source(&e, "both");
     assert_eq!(fs::read_to_string(&settings).unwrap(), body);
+}
+
+#[test]
+fn the_session_can_find_the_binary_that_launched_it() {
+    let e = env("child-path");
+    e.launch(&["fresh"]);
+    let exe_dir = Path::new(env!("CARGO_BIN_EXE_playbook")).parent().unwrap();
+    let seen = fs::read_to_string(format!("{}.path", e.log().display())).unwrap();
+    let first = std::env::split_paths(seen.lines().next().unwrap())
+        .next()
+        .unwrap();
+    assert_eq!(first, exe_dir, "{seen}");
+}
+
+#[test]
+fn a_path_that_already_has_the_binary_is_left_alone() {
+    let e = env("child-path-same");
+    let exe_dir = Path::new(env!("CARGO_BIN_EXE_playbook")).parent().unwrap();
+    let path = format!("{}:{}", exe_dir.display(), e.path());
+    e.launch_with(&["--"], &["fresh"], &[("PATH", path.as_str())]);
+    let seen = fs::read_to_string(format!("{}.path", e.log().display())).unwrap();
+    assert_eq!(seen.lines().next().unwrap(), path);
 }

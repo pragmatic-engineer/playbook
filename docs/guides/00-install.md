@@ -25,16 +25,24 @@ Open a new terminal (or source your rc file) afterwards so the binary resolves o
 
 ### How the binary gets on PATH
 
-Every install route ends with `playbook` on `PATH` for every shell start, including the non-interactive shells Claude Code uses to run hooks:
+Every install route ends with `playbook` on `PATH` for every shell start:
 
 | Shell | File that gets the `# playbook binary` block |
 |---|---|
-| zsh | `~/.zshenv` (non-interactive shells skip `~/.zshrc`) |
+| zsh | `~/.zshenv` (every zsh reads it, including non-interactive ones; `~/.zshrc` is skipped by those) |
 | bash | `~/.bashrc` and the login file (`~/.bash_profile`, `~/.bash_login` or `~/.profile`, whichever exists first, else `~/.bash_profile`) |
 | fish | `~/.config/fish/conf.d/playbook.fish` |
 | other | `~/.profile` |
 
 `install.sh` and `playbook init` write the same block and skip a file that already names the directory, so running both never doubles it. `playbook uninstall --remove-binary` removes it.
+
+### How hooks find the binary
+
+Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09): a hook command runs in a non-interactive `bash -c`, reads no shell startup file, and gets exactly the `PATH` of the process that started Claude Code. So:
+
+- **Claude Code started from a terminal:** the terminal's `PATH` is inherited, and the block above put the binary on it. Hooks find `playbook`.
+- **Claude Code started with `ccc` or `ccd`:** the launcher adds the binary's directory to the session's `PATH` when it is missing. Hooks find `playbook` whatever your startup files say.
+- **Claude Code started from a desktop app, an IDE or any minimal environment:** no startup file is read, so hooks find `playbook` only if its directory is already on that environment's `PATH`. Start the session with `ccc`, or install with `PLAYBOOK_BIN_DIR` set to a directory that environment already has.
 
 - **Installer:** puts the binary in `PLAYBOOK_BIN_DIR`, adds the block, then runs `playbook init`.
 - **Claude Code marketplace:** the plugin ships a `bin/playbook` shim, and Claude Code puts a plugin's `bin/` on the Bash tool's `PATH`. The shim runs the real binary when it finds one. When it finds none, it runs the shipped `install.sh --yes --binary-only`, pinned to the plugin version, which installs the binary, the `PATH` block, the guards and the settings, but not the launcher or the system prompt. It tries once and never loops.
@@ -51,8 +59,10 @@ If the old binary could not report its version, the backup is named `playbook.un
 Pass `--yes` to accept every default without prompting. Pin a version:
 
 ```bash
-PLAYBOOK_REF=v0.19.0 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.19.0 bash
 ```
+
+A version tag installs that release and its binary. A branch or commit pins only the source and installs no binary.
 
 Skip the plugin (the binary, guards, settings and shell wiring still run). Same as `--skip-plugin`:
 

@@ -158,7 +158,13 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     }
 
     let settings_step = if paths.settings {
-        seed_or_merge_settings(self_root, &paths.claude_home, &settings_path, epoch)
+        seed_or_merge_settings(
+            self_root,
+            &paths.claude_home,
+            &settings_path,
+            epoch,
+            paths.hooks,
+        )
     } else {
         StepReport::skipped("settings", "not requested; pass --settings to opt in")
     };
@@ -312,6 +318,7 @@ fn seed_or_merge_settings(
     claude_home: &Path,
     settings_path: &Path,
     epoch: u64,
+    with_hooks: bool,
 ) -> StepReport {
     let Some(self_root) = self_root else {
         return StepReport::skipped(
@@ -339,10 +346,76 @@ fn seed_or_merge_settings(
     }
 
     let base_path = claude_home.join(".settings.base.json");
+    if !with_hooks {
+        return merge_without_hooks(
+            claude_home,
+            &template_path,
+            settings_path,
+            &base_path,
+            epoch,
+        );
+    }
     match merge::merge(&base_path, &template_path, settings_path, &base_path, None) {
         Ok(outcome) => finish_merge(settings_path, &outcome, epoch),
         Err(merge::MergeError::Validation(err)) => StepReport::failed("settings", err.to_string()),
         Err(merge::MergeError::Io(err)) => StepReport::failed("settings", err.to_string()),
+    }
+}
+
+/// The settings merge for `--no-hooks`: the template's `hooks` block (the
+/// `PreToolUse` guards) is left out, and whatever hooks the user's file
+/// already has are kept as they are. The merge runs against a hook-free copy
+/// of the template and a scratch base, so the recorded base still describes
+/// the full template and a later run with hooks on merges normally.
+fn merge_without_hooks(
+    claude_home: &Path,
+    template_path: &Path,
+    settings_path: &Path,
+    base_path: &Path,
+    epoch: u64,
+) -> StepReport {
+    let scratch = |name: &str| claude_home.join(format!(".settings.{name}.{epoch}.tmp"));
+    let (tpl_tmp, base_tmp) = (scratch("template-nohooks"), scratch("base-nohooks"));
+    let result = (|| -> Result<merge::MergeOutcome, String> {
+        let mut template: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(template_path).map_err(|e| e.to_string())?)
+                .map_err(|e| format!("{}: {e}", template_path.display()))?;
+        if let Some(map) = template.as_object_mut() {
+            map.remove("hooks");
+        }
+        fs::write(&tpl_tmp, template.to_string()).map_err(|e| e.to_string())?;
+        if base_path.is_file() {
+            fs::copy(base_path, &base_tmp).map_err(|e| e.to_string())?;
+        }
+        let mut outcome = merge::merge(&base_tmp, &tpl_tmp, settings_path, &base_tmp, None)
+            .map_err(|e| match e {
+                merge::MergeError::Validation(err) => err.to_string(),
+                merge::MergeError::Io(err) => err.to_string(),
+            })?;
+        let user: serde_json::Value = fs::read_to_string(settings_path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or(serde_json::Value::Null);
+        let mut merged: serde_json::Value =
+            serde_json::from_str(&outcome.stdout).map_err(|e| e.to_string())?;
+        if let Some(map) = merged.as_object_mut() {
+            match user.get("hooks") {
+                Some(hooks) => {
+                    map.insert("hooks".to_string(), hooks.clone());
+                }
+                None => {
+                    map.remove("hooks");
+                }
+            }
+        }
+        outcome.stdout = serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())?;
+        Ok(outcome)
+    })();
+    let _ = fs::remove_file(&tpl_tmp);
+    let _ = fs::remove_file(&base_tmp);
+    match result {
+        Ok(outcome) => finish_merge(settings_path, &outcome, epoch),
+        Err(err) => StepReport::failed("settings", err),
     }
 }
 

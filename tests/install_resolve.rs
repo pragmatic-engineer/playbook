@@ -152,13 +152,50 @@ fn a_200_without_tag_name_refuses_to_guess() {
 }
 
 #[test]
-fn a_ref_pin_skips_the_api() {
+fn a_branch_ref_pin_skips_the_api_and_refuses_a_binary() {
     let c = Ctx::new("res-pin");
-    let (_, out, ..) = c.install("a", &[("PLAYBOOK_REF", "v9.9.9"), ("STUB_CODE", "403")]);
+    let (_, out, ..) = c.install("a", &[("PLAYBOOK_REF", "my-branch"), ("STUB_CODE", "403")]);
     assert!(
-        out.contains("tar.gz/v9.9.9") && !out.contains("HTTP 403"),
+        out.contains("pins a branch or commit") && !out.contains("HTTP 403"),
         "{out}"
     );
+}
+
+#[test]
+fn a_release_tag_pin_installs_that_binary_without_the_api() {
+    let c = Ctx::new("res-tag-pin");
+    let sums = format!("{}  {ASSET}", sha256_hex(GOOD_ASSET.as_bytes()));
+    let (_, out, _, bindir) = c.install(
+        "a",
+        &[
+            ("PLAYBOOK_REF", "v1.2.3"),
+            ("STUB_CODE", "403"),
+            ("STUB_ASSET_BODY", GOOD_ASSET),
+            ("STUB_SUMS_BODY", &sums),
+        ],
+    );
+    assert!(
+        out.contains("Installed playbook 1.2.3")
+            && !out.contains("pins a branch")
+            && !out.contains("HTTP 403"),
+        "{out}"
+    );
+    assert!(bindir.join("playbook").exists());
+}
+
+#[test]
+fn a_release_tag_pin_without_a_release_installs_nothing() {
+    let c = Ctx::new("res-tag-missing");
+    let (rc, _, _, bindir) = c.install(
+        "a",
+        &[
+            ("PLAYBOOK_REF", "v9.9.9"),
+            ("STUB_ASSET_BODY", ""),
+            ("STUB_SUMS_BODY", ""),
+        ],
+    );
+    assert!(rc != 0);
+    assert!(!bindir.join("playbook").exists());
 }
 
 #[test]

@@ -9,7 +9,7 @@ effort: low
 # Setup
 
 Wire the always-on safety guards and seed or merge settings.json. Optionally
-install the shell launchers (cc/ccd) and the custom system prompt. Each step
+install the shell launchers (ccc/ccd) and the custom system prompt. Each step
 is idempotent; re-running /playbook:setup is safe and only changes what is missing.
 
 ## Step 0: Read the run mode
