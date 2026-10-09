@@ -16,6 +16,7 @@ pub mod deps;
 pub mod doctor;
 pub mod effort;
 pub mod eval;
+pub mod fastpath;
 pub mod gate;
 pub mod handoff;
 pub mod hooks;
