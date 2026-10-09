@@ -89,6 +89,12 @@ fn lock_ts(reason: &str) -> Option<i64> {
 /// Creates a locked, detached worktree for PR `pr` at `head_sha` and returns
 /// its absolute path. Warnings go to stderr so stdout stays the path alone.
 pub fn setup(pr: &str, head_sha: &str) -> Result<String, String> {
+    setup_with_url(pr, head_sha, None)
+}
+
+/// Like `setup`, with the repo URL the caller already holds so no second
+/// `gh repo view` is needed. `GH_FETCH_URL` still wins, as in `setup`.
+pub fn setup_with_url(pr: &str, head_sha: &str, known_url: Option<&str>) -> Result<String, String> {
     let short: String = head_sha.chars().take(7).collect();
     let root = git_out(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .ok_or("not in a git repo")?;
@@ -104,6 +110,7 @@ pub fn setup(pr: &str, head_sha: &str) -> Result<String, String> {
 
     let fetch_url = match std::env::var("GH_FETCH_URL") {
         Ok(url) if !url.is_empty() => url,
+        _ if known_url.is_some_and(|u| !u.is_empty()) => known_url.unwrap_or_default().to_string(),
         _ => {
             let out = Command::new("gh")
                 .args(["repo", "view", "--json", "url", "-q", ".url"])

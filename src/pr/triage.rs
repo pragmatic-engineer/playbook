@@ -266,14 +266,24 @@ pub fn collect(number: Option<u64>, base_arg: Option<&str>) -> Result<PrFacts, S
     match number {
         Some(n) => {
             let n = n.to_string();
-            let meta = gh(&["pr", "view", &n, "--json", "title,body"])?;
+            // Independent read-only calls: run both, then report the first
+            // failure in the old order (metadata before diff).
+            let calls: [Vec<&str>; 2] = [
+                vec!["pr", "view", &n, "--json", "title,body"],
+                vec!["pr", "diff", &n],
+            ];
+            let mut results =
+                crate::common::par::map(&calls, crate::common::par::MAX_CONCURRENT, |a| gh(a))
+                    .into_iter();
+            let meta = results.next().expect("two results")?;
+            let diff = results.next().expect("two results")?;
             let meta: serde_json::Value = serde_json::from_str(&meta)
                 .map_err(|e| format!("gh pr view returned bad JSON: {e}"))?;
             let text = |k: &str| meta[k].as_str().unwrap_or_default().to_string();
             Ok(PrFacts {
                 title: text("title"),
                 body: text("body"),
-                diff: gh(&["pr", "diff", &n])?,
+                diff,
             })
         }
         None => {

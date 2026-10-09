@@ -91,6 +91,14 @@ fn git_text(args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// `nameWithOwner` and `url` from one `gh repo view --json` call.
+fn parse_repo_json(raw: &str) -> Result<(String, String), String> {
+    let v: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("gh repo view returned bad JSON: {e}"))?;
+    let field = |k: &str| v[k].as_str().unwrap_or_default().to_string();
+    Ok((field("nameWithOwner"), field("url")))
+}
+
 /// Everything the command file needs, printed as `KEY=value` lines.
 pub fn prepare(kind: Kind, args: &str, run_mode_auto: bool) -> Result<String, String> {
     let parsed = parse(args);
@@ -126,33 +134,37 @@ pub fn prepare(kind: Kind, args: &str, run_mode_auto: bool) -> Result<String, St
             .filter(|n| !n.is_empty())
             .ok_or("no PR found for current branch; create one first or pass a PR number")?,
     };
-    let repo = gh(&[
-        "repo",
-        "view",
-        "--json",
-        "nameWithOwner",
-        "-q",
-        ".nameWithOwner",
-    ])?;
-    let head_sha = gh(&[
-        "pr",
-        "view",
-        &pr_number,
-        "--json",
-        "headRefOid",
-        "-q",
-        ".headRefOid",
-    ])?;
-    let author = gh(&[
-        "pr",
-        "view",
-        &pr_number,
-        "--json",
-        "author",
-        "-q",
-        ".author.login",
-    ])?;
-    let me = gh(&["api", "/user", "-q", ".login"])?;
+    // Four independent read-only calls: run them together, then read the
+    // results in the old order so the first failure reported is unchanged.
+    let calls: [Vec<&str>; 4] = [
+        vec!["repo", "view", "--json", "nameWithOwner,url"],
+        vec![
+            "pr",
+            "view",
+            &pr_number,
+            "--json",
+            "headRefOid",
+            "-q",
+            ".headRefOid",
+        ],
+        vec![
+            "pr",
+            "view",
+            &pr_number,
+            "--json",
+            "author",
+            "-q",
+            ".author.login",
+        ],
+        vec!["api", "/user", "-q", ".login"],
+    ];
+    let mut results =
+        crate::common::par::map(&calls, crate::common::par::MAX_CONCURRENT, |a| gh(a)).into_iter();
+    let repo_json = results.next().expect("four results")?;
+    let head_sha = results.next().expect("four results")?;
+    let author = results.next().expect("four results")?;
+    let me = results.next().expect("four results")?;
+    let (repo, repo_url) = parse_repo_json(&repo_json)?;
     let self_review = author == me;
     let report_only = self_mode(&parsed, run_mode_auto, self_review);
 
@@ -164,7 +176,7 @@ pub fn prepare(kind: Kind, args: &str, run_mode_auto: bool) -> Result<String, St
             String::new(),
         )
     } else {
-        let path = crate::worktree::review::setup(&pr_number, &head_sha)
+        let path = crate::worktree::review::setup_with_url(&pr_number, &head_sha, Some(&repo_url))
             .map_err(|e| format!("worktree setup failed: {e}"))?;
         if path.is_empty() {
             return Err("worktree setup failed: no path returned".to_string());
