@@ -20,6 +20,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "worktreeCleanup.conflictGracePeriodDays",
     "mode",
     "maxEffortLevel",
+    "memory.source",
     "auto.budgetUsd",
     "auto.warnPct",
     "fix.maxFiles",
@@ -65,6 +66,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "worktreeCleanup.conflictGracePeriodDays" => Some(Value::Number(90.into())),
         "mode" => Some(Value::String("ask".to_string())),
         "maxEffortLevel" => Some(Value::String("auto".to_string())),
+        "memory.source" => Some(Value::String("both".to_string())),
         "auto.budgetUsd" => Some(Value::Number(5.into())),
         "auto.warnPct" => Some(Value::Number(70.into())),
         "fix.maxFiles" => Some(Value::Number(3.into())),
@@ -83,6 +85,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "autoReview.type" => Some(&["quick", "deep", "auto"]),
         "mode" => Some(&["ask", "auto"]),
         "maxEffortLevel" => Some(&["auto", "low", "medium", "high", "xhigh", "max"]),
+        "memory.source" => Some(&["both", "playbook"]),
         _ => None,
     }
 }
