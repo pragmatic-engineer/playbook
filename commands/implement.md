@@ -97,7 +97,7 @@ In auto mode this command never force-pushes and never uses a forced lease. A pu
 
 ## Execution Rules (MUST)
 
-1. **Execute every bash block for real.** Don't simulate or predict output; drive the next step from real output.
+1. **Execute every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive).** Don't simulate or predict output; drive the next step from real output.
 2. **No caching.** Every invocation is a fresh run. Don't reuse results from prior conversations or training data.
 3. **No skipping.** Execute steps in order. The only exception: steps guarded by a flag the user didn't set.
 4. **No assumptions.** Don't guess file contents, command output, or environment state. Run it and read the result.

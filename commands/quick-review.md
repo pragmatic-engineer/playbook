@@ -92,7 +92,7 @@ Findings are plain: a label, `file:line`, the exact evidence, a short failure sc
 
 ## Execution rules
 
-1. Run every bash block for real. Don't simulate.
+1. Run every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive). Don't simulate.
 2. The `reviewer` subagent reads every file it cites at the PR's head SHA (grounding-review evidence rule). It can still be wrong, so the orchestrator sweeps every finding in Step 3b before anything is shown or posted, reading the cited lines plus what the trace needs.
 3. Combine independent bash calls into a single tool call.
 4. Anchor every inline comment to a real `file:line` in the diff. If the line isn't in the diff (e.g. a referenced helper), make it a report-level finding instead.
@@ -236,6 +236,8 @@ Now that the sweep is done and something can be posted, load `playbook:writing-s
 Relay the swept report with each draft shown under its finding as a `Draft:` block. Each draft is the final text: label, voice, no dashes, GitHub rules, all applied. Nothing is rewritten between this preview and the post, so what the user reads is exactly what posts. If the user asks for a change to a draft, redraft it with `playbook:writing-style` and show the new preview before posting.
 
 ### Ask what to post
+
+**Print every finding first (MUST).** Before asking anything, print all findings in the chat, none left out and none summarized away: a code (F1, F2, and so on), the label, severity, `file:line` and a one-line description each. With zero findings, say so. The question below comes only after this list, and its options refer to findings by code. A question with no list above it is a bug (#593).
 
 **Ask the user, one question at a time** (memory rule):
 

@@ -66,7 +66,7 @@ In `ask` mode, behave exactly as this file describes.
 
 ## Execution Rules (MUST)
 
-1. **Execute every bash block for real.** Don't simulate, summarise, or predict output; use the actual output to drive the next step.
+1. **Execute every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive).** Don't simulate, summarise, or predict output; use the actual output to drive the next step.
 2. **No caching.** Every invocation is a fresh run. Don't reuse results from prior conversations or training data.
 3. **No skipping.** Execute steps in order. The only exception: steps guarded by a flag the user didn't set.
 4. **No assumptions.** Don't guess file contents, command output, or environment state. Run the command and read the result.

@@ -12,7 +12,7 @@ Generate a commit message from the staged diff, commit, optionally rebase, and p
 
 ## Run this now
 
-Execute the steps below immediately, end to end, running every bash block for real. Do **not** narrate a plan, summarize `git status`, offer a numbered menu, or ask "what would you like me to do?" / "proceed? [Y/n]". There is **no confirmation gate**.
+Execute the steps below immediately, end to end, running every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive). Do **not** narrate a plan, summarize `git status`, offer a numbered menu, or ask "what would you like me to do?" / "proceed? [Y/n]". There is **no confirmation gate**.
 
 The flow is one pass: stage (per flags), draft the commit message, commit, rebase if behind, push. Staging flags (`-A`, `-u`, `-a`) parse from `$ARGUMENTS`; no flags means commit only what is already staged.
 
@@ -32,7 +32,7 @@ Combined flags are fine: `-Au`, `-a -u`, etc. No flags means every variable stay
 
 ## Execution rules
 
-1. Run every bash block in this command for real. Do not simulate output.
+1. Run every bash block in this command for real with the `Bash` tool (capital B, tool names are case-sensitive). Do not simulate output.
 2. Use the actual command output to drive the next step.
 3. Do not assume file contents or git state; check them.
 4. Combine independent bash operations into single tool calls.
