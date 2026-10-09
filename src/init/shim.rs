@@ -214,6 +214,39 @@ pub fn strip_rc_files(home: &Path, stamp: u64, binary_path: bool, dry_run: bool)
     changed
 }
 
+/// `strip_binary_path` over each of `files` that exists. A changed file is
+/// first copied to `<file>.bak-<stamp>`. Used for the files outside the two
+/// rc files `strip_rc_files` walks.
+pub fn strip_binary_path_files(files: &[PathBuf], stamp: u64, dry_run: bool) -> Vec<RcStrip> {
+    let mut changed = Vec::new();
+    for rc_file in files {
+        let Ok(existing) = fs::read(rc_file) else {
+            continue;
+        };
+        let Some(content) = strip_binary_path(&existing) else {
+            continue;
+        };
+        let mut entry = RcStrip {
+            rc_file: rc_file.clone(),
+            backup: None,
+            unwritable: false,
+            error: None,
+        };
+        if !owner_can_write(rc_file) {
+            entry.unwritable = true;
+        } else if !dry_run {
+            let name = rc_file.file_name().unwrap_or_default().to_string_lossy();
+            let backup = rc_file.with_file_name(format!("{name}.bak-{stamp}"));
+            match fs::copy(rc_file, &backup).and_then(|_| atomic_write_rc_file(rc_file, &content)) {
+                Ok(()) => entry.backup = Some(backup),
+                Err(err) => entry.error = Some(err.to_string()),
+            }
+        }
+        changed.push(entry);
+    }
+    changed
+}
+
 /// `content` without the launcher line(s) and the comment right above each.
 /// `None` when there was nothing to remove.
 fn strip_launcher(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
@@ -385,13 +418,13 @@ fn names_path(args: &[u8], path: &[u8]) -> bool {
 }
 
 #[cfg(unix)]
-fn owner_can_write(path: &Path) -> bool {
+pub(crate) fn owner_can_write(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o200 != 0)
 }
 
 #[cfg(not(unix))]
-fn owner_can_write(path: &Path) -> bool {
+pub(crate) fn owner_can_write(path: &Path) -> bool {
     fs::metadata(path).is_ok_and(|m| !m.permissions().readonly())
 }
 

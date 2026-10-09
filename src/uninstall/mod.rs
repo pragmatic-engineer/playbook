@@ -173,7 +173,11 @@ fn settings_step(
 }
 
 fn rc_step(opts: &Options, stamp: u64, report: &mut Report) {
-    for change in shim::strip_rc_files(&opts.home, stamp, opts.remove_binary, opts.dry_run) {
+    let mut changes = shim::strip_rc_files(&opts.home, stamp, opts.remove_binary, opts.dry_run);
+    if opts.remove_binary {
+        changes.extend(crate::init::path::strip(&opts.home, stamp, opts.dry_run));
+    }
+    for change in changes {
         let name = change.rc_file.display();
         if change.unwritable {
             report.errors.push(format!(
