@@ -3,24 +3,19 @@
 A tagged release reaches users through three channels: the GitHub release assets
 (built by the `build` and `checksums` jobs), the Homebrew tap
 `pragmatic-engineer/homebrew-tap`, and the plugin marketplace
-`pragmatic-engineer/marketplace`. The `publish-channels` job in
-`.github/workflows/release.yml` updates the last two after `checksums` succeeds.
+`pragmatic-engineer/marketplace`. This repo does not push to the last two. Each
+of those repos runs its own daily `bump` workflow that reads this repo's latest
+release and updates itself:
 
-What it does, on a tag push only and only when the tag is the repo's latest
-release (so a backport tag cannot roll users back):
+1. The tap rewrites the URLs and checksums in `Formula/playbook.rb` from the
+   release's `SHA256SUMS`, then audits, installs and tests the formula.
+2. The marketplace points the `playbook` entry at the release's plugin archive,
+   with the archive's `url` and `sha256`. It verifies the archive's build
+   provenance attestation first.
 
-1. Renders `Formula/playbook.rb` from `src/release/formula.rb.tmpl` and the
-   release's `SHA256SUMS` (`playbook release render-formula`), and pushes it to
-   the tap. The job runs the release's own `x86_64-unknown-linux-musl` binary,
-   downloaded from the release and checked against `SHA256SUMS` first.
-2. Points the `playbook` entry of the marketplace's `marketplace.json` at the
-   release's plugin archive, with the archive's `url` and `sha256`
-   (`playbook release pin-marketplace`), and pushes it. It first re-downloads the
-   archive and refuses to pin a hash that differs from the one the
-   `plugin-archive` job computed.
-3. Reads both repos back and fails with a separate `::error::` per check if the
-   tap does not show the version, or the marketplace shows the wrong archive
-   URL or the wrong `sha256`.
+Both create their commit through the GitHub API, so GitHub signs it. A release
+can take up to a day to reach the tap and the marketplace. To update sooner, run
+the `bump` workflow by hand in each repo.
 
 ## The plugin archive
 
@@ -41,9 +36,8 @@ The `plugin-archive` job runs after `verify-version`. It builds the zip with
 `git archive` from the tagged commit, limited to the pathspecs in
 `.claude-plugin/archive-files.txt`. Only tracked files can appear, and every
 entry carries the commit time, so the same commit gives the same bytes. The job
-uploads the zip (`--clobber`), attests it, and passes its sha256 to
-`publish-channels`. Only this job holds `id-token` and `attestations`
-permissions. The zip is named so it cannot match the `checksums` job's
+uploads the zip (`--clobber`) and attests it. This job and `checksums` hold
+the `id-token` and `attestations` permissions. The zip is named so it cannot match the `checksums` job's
 `playbook-<version>-*` download, which must find exactly the five binaries.
 
 What the zip holds: the plugin content (`.claude-plugin/plugin.json`,
@@ -81,19 +75,3 @@ an eighth of the size.
 
 End to end (a real marketplace install of the zip) can only be proven by a
 tagged release.
-
-## The secret
-
-The workflow token cannot write to other repos, so the job needs the secret
-`RELEASE_PUSH_TOKEN`: a fine-grained personal access token with
-`contents: write` on both `homebrew-tap` and `marketplace`. Writes go
-through the contents API, so GitHub signs the commits.
-
-Store it as an environment secret on the `release` environment (Settings,
-Environments, `release`), not as a repository secret. The job runs in that
-environment, and the environment only accepts deployments from `v*` tags, so a
-workflow on any other branch or tag cannot read the token.
-
-Without the secret the job prints a warning and passes. The release is still
-valid, but the tap and marketplace stay on the previous version until updated
-by hand.
