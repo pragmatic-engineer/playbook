@@ -1,13 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: Apache-2.0
 #
-# CI gate for the repo's own shell code. Runs on ubuntu-latest and macos-latest
-# so the BSD code paths (date -j, stat -f, cp -c, md5) execute too. Validates:
-#   - ShellCheck static analysis on all tracked .sh files (Linux only, lint once)
-#   - Bash syntax (bash -n) on all tracked .sh files
-#   - Zsh syntax (zsh -n) on all tracked .zsh files
+# CI gate for the repo's own shell code. What is left is the installer
+# (install.sh, run through curl | bash) and the plugin shim (bin/playbook),
+# which must work before any binary exists. Their behavior is tested in Rust
+# (tests/install_*.rs, tests/plugin_bin_shim.rs). Runs on ubuntu-latest and
+# macos-latest so the BSD code paths execute too. Validates:
+#   - ShellCheck static analysis on every shell script (Linux only, lint once)
+#   - Bash syntax (bash -n) on every shell script
 #   - No personal identifier or maintainer-specific string in tracked files
-#   - Every behavioral suite discovered via `git ls-files '*.test.sh'`
+#   - Any remaining `*.test.sh` suite, discovered via `git ls-files`
 
 name: shell-ci
 
@@ -48,10 +50,9 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Install shellcheck and zsh
-        # macOS runners ship zsh; only Linux needs the apt install.
+      - name: Install shellcheck
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y shellcheck zsh
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: ShellCheck (.sh files)
         # Lint once, on Linux only: shellcheck is not preinstalled on macOS
@@ -61,15 +62,11 @@ jobs:
         # which survives even `shellcheck -x`. Tightening would mean adding
         # disable directives, not fixing bugs.
         if: runner.os == 'Linux'
-        run: git ls-files '*.sh' | xargs shellcheck --severity=warning
+        run: (git ls-files '*.sh'; echo bin/playbook) | xargs shellcheck --severity=warning
 
       - name: Bash syntax check
         run: |
-          for f in $(git ls-files '*.sh'); do bash -n "$f"; done
-
-      - name: Zsh syntax check
-        run: |
-          for f in $(git ls-files '*.zsh'); do zsh -n "$f"; done
+          for f in $(git ls-files '*.sh') bin/playbook; do bash -n "$f"; done
 
       - name: Personal-identifier grep
         # Regression guard for everything S2-S4 of the product-hardening
