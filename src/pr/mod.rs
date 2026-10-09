@@ -8,3 +8,4 @@ pub mod guard;
 pub mod prepare;
 pub mod shared;
 pub mod triage;
+pub mod wait;
