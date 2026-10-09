@@ -111,3 +111,42 @@ fn agent_tool_lists_use_the_exact_case() {
         }
     }
 }
+
+#[test]
+fn agents_with_bash_name_the_capital_b_tool_in_the_body() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("agents");
+    for entry in fs::read_dir(dir).unwrap().flatten() {
+        let text = fs::read_to_string(entry.path()).unwrap();
+        let has_bash = text
+            .lines()
+            .any(|l| l.starts_with("tools:") && l.contains("Bash"));
+        if has_bash {
+            let body = text.splitn(3, "---").nth(2).unwrap_or("");
+            assert!(
+                body.contains("`Bash`"),
+                "{}: body must name the `Bash` tool",
+                entry.path().display()
+            );
+        }
+    }
+}
+
+#[test]
+fn no_prose_says_a_lowercase_bash_call_or_step() {
+    for dir in ["agents", "commands"] {
+        let d = Path::new(env!("CARGO_MANIFEST_DIR")).join(dir);
+        for entry in fs::read_dir(d).unwrap().flatten() {
+            let text = fs::read_to_string(entry.path()).unwrap();
+            for (i, line) in text.lines().enumerate() {
+                for bad in ["bash calls", "bash step", "bash tool"] {
+                    assert!(
+                        !line.contains(bad),
+                        "{}:{}: write `Bash`, not '{bad}'",
+                        entry.path().display(),
+                        i + 1
+                    );
+                }
+            }
+        }
+    }
+}
