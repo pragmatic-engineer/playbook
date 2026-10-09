@@ -140,6 +140,13 @@ function el(tag, text, className) {
 function fmt(key, value) {
   return key === "cost_usd" ? Number(value).toFixed(4) : Number(value).toLocaleString();
 }
+// A model with no price table entry (Codex, for example) is not $0: say so.
+function costText(cost, unpriced, messages) {
+  const u = Number(unpriced || 0);
+  if (!u) return fmt("cost_usd", cost);
+  if (u >= Number(messages === undefined ? 1 : messages)) return "unpriced";
+  return fmt("cost_usd", cost) + " + unpriced";
+}
 function pad(n) { return String(n).padStart(2, "0"); }
 function fmtTime(seconds) {
   const d = new Date(seconds * 1000);
@@ -197,7 +204,7 @@ function table(id, title, columns, rows, onPick, selected) {
     ordered.forEach(r => {
       const tr = el("tr");
       columns.forEach((c, i) => {
-        const text = c.show ? c.show(r[c.key], r) : c.text ? String(r[c.key]) : fmt(c.key, r[c.key]);
+        const text = c.show ? c.show(r[c.key], r) : c.text ? String(r[c.key]) : c.key === "cost_usd" ? costText(r[c.key], r.unpriced, r.messages) : fmt(c.key, r[c.key]);
         const td = el("td");
         if (i === 0 && onPick) {
           const link = el("button", text, "link");
@@ -325,7 +332,7 @@ function renderOverview(data) {
    ["Output tokens", fmt("t", data.totals.output_tokens)],
    ["Cache write tokens", fmt("t", data.totals.cache_creation_tokens)],
    ["Cache read tokens", fmt("t", data.totals.cache_read_tokens)],
-   ["Estimated cost (USD)", fmt("cost_usd", data.totals.cost_usd)]].forEach(p => {
+   ["Estimated cost (USD)", costText(data.totals.cost_usd, data.totals.unpriced_messages, data.totals.messages)]].forEach(p => {
     const box = el("div", undefined, "total");
     box.appendChild(el("span", p[0], "muted"));
     box.appendChild(el("b", p[1]));
@@ -487,9 +494,9 @@ function tile(label, value) {
 function renderLive(data) {
   const totals = el("div", undefined, "totals");
   totals.appendChild(tile("Active sessions (15 min)", fmt("n", data.active.length)));
-  totals.appendChild(tile("Spend, last hour (USD)", fmt("cost_usd", data.hour.cost_usd)));
+  totals.appendChild(tile("Spend, last hour (USD)", costText(data.hour.cost_usd, data.hour.unpriced, data.hour.messages)));
   totals.appendChild(tile("Tokens, last hour", fmt("n", data.hour.tokens)));
-  totals.appendChild(tile("Spend, today UTC (USD)", fmt("cost_usd", data.today.cost_usd)));
+  totals.appendChild(tile("Spend, today UTC (USD)", costText(data.today.cost_usd, data.today.unpriced, data.today.messages)));
   totals.appendChild(tile("Tokens, today UTC", fmt("n", data.today.tokens)));
   const charts = el("div", undefined, "charts");
   drawCharts(charts, data.burn_chart);

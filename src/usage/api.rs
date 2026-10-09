@@ -113,6 +113,7 @@ fn group_json(g: &Group) -> Value {
         "cache_creation_tokens": g.cache_creation_tokens,
         "cache_read_tokens": g.cache_read_tokens,
         "cost_usd": g.cost_usd,
+        "unpriced": g.unpriced,
     })
 }
 
@@ -264,6 +265,7 @@ pub fn sessions_json(usage: &[UsageEvent], now: i64, range: Range) -> Value {
                 "messages": events.len(),
                 "tokens": events.iter().map(|e| total_tokens(e)).sum::<u64>(),
                 "cost_usd": events.iter().map(|e| e.cost_usd).sum::<f64>(),
+                "unpriced": events.iter().filter(|e| e.unpriced).count(),
             });
             (end, id, row)
         })
@@ -299,6 +301,7 @@ pub fn session_json(usage: &[UsageEvent], id: &str) -> Option<Value> {
                 "model": e.model,
                 "tokens": total_tokens(e),
                 "cost_usd": e.cost_usd,
+                "unpriced": u64::from(e.unpriced),
             })
         })
         .collect();
@@ -364,6 +367,7 @@ fn spend_json(events: &[&UsageEvent]) -> Value {
         "messages": events.len(),
         "tokens": events.iter().map(|e| total_tokens(e)).sum::<u64>(),
         "cost_usd": events.iter().map(|e| e.cost_usd).sum::<f64>(),
+        "unpriced": events.iter().filter(|e| e.unpriced).count(),
     })
 }
 
@@ -415,6 +419,7 @@ pub fn live_json(
                 "last": latest.timestamp,
                 "messages": events.len(),
                 "cost_usd": events.iter().map(|e| e.cost_usd).sum::<f64>(),
+                "unpriced": events.iter().filter(|e| e.unpriced).count(),
             }))
         })
         .collect();
@@ -431,6 +436,7 @@ pub fn live_json(
                 "model": e.model,
                 "tokens": total_tokens(e),
                 "cost_usd": e.cost_usd,
+                "unpriced": u64::from(e.unpriced),
             })
         })
         .collect();
@@ -466,6 +472,38 @@ mod tests {
             cost_usd: cost,
             ..UsageEvent::default()
         }
+    }
+
+    #[test]
+    fn every_row_kind_carries_its_unpriced_count() {
+        let now = 1788400000;
+        let mut codex = in_session("c", now - 60, "gpt-5-codex", 0.0);
+        codex.unpriced = true;
+        let priced = in_session("c", now - 30, "sonnet", 1.0);
+        let events = vec![codex, priced];
+
+        let data = data_json(&events, &[], now, Range::All);
+        let models = data["groups"]["model"].as_array().unwrap().clone();
+        let counts: Vec<u64> = models
+            .iter()
+            .map(|r| r["unpriced"].as_u64().unwrap())
+            .collect();
+        assert_eq!(counts.iter().sum::<u64>(), 1, "{models:?}");
+
+        let sessions = sessions_json(&events, now, Range::All);
+        assert_eq!(sessions["sessions"][0]["unpriced"], 1);
+
+        let refs: Vec<&UsageEvent> = events.iter().collect();
+        assert_eq!(spend_json(&refs)["unpriced"], 1);
+        let live = live_json(&events, &events, &events, now);
+        assert_eq!(live["active"][0]["unpriced"], 1);
+        let flags: Vec<u64> = live["feed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["unpriced"].as_u64().unwrap())
+            .collect();
+        assert_eq!(flags.iter().sum::<u64>(), 1);
     }
 
     #[test]

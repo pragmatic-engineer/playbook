@@ -84,7 +84,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
 
 /// `auto.budgetUsd` takes any number of at least one cent, since the spend cap
 /// is held in whole cents, so a fractional budget works.
-/// `auto.warnPct` takes a whole number within 1 to 100, the `fix.` limits a
+/// `auto.warnPct` takes a whole number within 1 to 100, the `fix.` and `review.stack` limits a
 /// whole number of at least 1, and every other numeric key 0 or more.
 fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
     let whole = value.as_i64();
@@ -97,7 +97,9 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
             whole.is_some_and(|n| (1..=100).contains(&n)),
             "a whole number between 1 and 100",
         ),
-        "fix.maxFiles" | "fix.maxLines" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
+        "fix.maxFiles" | "fix.maxLines" | "review.stackMaxPrs" | "review.stackMaxLines" => {
+            (whole.is_some_and(|n| n >= 1), "a positive integer")
+        }
         _ => {
             return match whole {
                 Some(n) if n >= 0 => Ok(()),

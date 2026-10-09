@@ -43,6 +43,8 @@ pub struct Group {
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
     pub cost_usd: f64,
+    /// Messages whose model has no known price (counted as $0).
+    pub unpriced: u64,
 }
 
 pub const SECONDS_PER_DAY: i64 = 86_400;
@@ -113,6 +115,7 @@ pub fn group_usage(events: &[UsageEvent], dim: Dimension) -> Vec<Group> {
         group.cache_creation_tokens += event.cache_creation_tokens;
         group.cache_read_tokens += event.cache_read_tokens;
         group.cost_usd += event.cost_usd;
+        group.unpriced += u64::from(event.unpriced);
     }
     groups.into_values().collect()
 }
