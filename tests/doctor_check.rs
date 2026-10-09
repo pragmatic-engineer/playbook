@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook doctor check` end to end against a scratch HOME. These are the
-//! scenarios `shell/doctor.test.sh` used to run against the bash blocks in
+//! scenarios the retired doctor shell test used to run against the bash blocks in
 //! `commands/doctor.md`, now against the compiled check.
 
 use serde_json::Value;
