@@ -194,6 +194,8 @@ The launcher is `ccc`, not `cc`, because `cc` is the C compiler on most systems.
 
 `ccc worktree` (also `ccd worktree`) groups worktrees under `<repo-parent>/.worktrees/<repo>/<folder>` (set `WORKTREE_BASE_DIR` to change the base folder), names the folder after the JIRA key in the branch name, and copies `.env` into it. It also clones `node_modules`, pushes to set upstream, and offers AI-assisted rebase conflict resolution. The engine lives in the binary (`playbook cc worktree`), and the shell function `cd`s into the new worktree afterward. See [docs/internals/03-worktree.md](docs/internals/03-worktree.md) for the full behaviour.
 
+Sessions that Claude Code starts in a worktree (`claude --worktree`, agents with `isolation: "worktree"`) use the same location. The `WorktreeCreate` and `WorktreeRemove` hooks (`playbook hook worktree-create` and `worktree-remove`) put them at `<repo-parent>/.worktrees/<repo>/<name>` instead of `.claude/worktrees/`, and fall back to `.claude/worktrees/<name>` if that fails. The remove hook never deletes a worktree that has uncommitted changes or unpublished commits. Details: [Claude Code worktree hooks](docs/internals/03-worktree.md#claude-code-worktree-hooks).
+
 ## Commands
 
 Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usage.
@@ -307,7 +309,7 @@ Full documentation: [`docs/index.md`](docs/index.md).
 - **Concepts** (`docs/concepts/`): system prompt design, the memory system, and [why commands, skills, agents, models and effort levels are shaped the way they are](docs/concepts/03-why-the-pieces-are-shaped-this-way.md).
 - **Guides** (`docs/guides/`): install, plan-and-implement, review and PR flow, decisions and memory, config keys.
 - **Authoring** (`docs/authoring/`): writing commands, skills, and hooks.
-- **Internals** (`docs/internals/`): launcher and hooks, model routing and memory, worktree engine, usage dashboard, headless mode, release channels.
+- **Internals** (`docs/internals/`): launcher and hooks, model routing and memory, worktree engine, usage dashboard, headless mode, release channels, migrations.
 
 ## System prompt
 
