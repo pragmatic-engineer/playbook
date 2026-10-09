@@ -106,9 +106,13 @@ pub struct SkippedEntry {
 /// persist a skip report, since there the write is gated on "was this a
 /// real, non-idempotent settings.json write" rather than on whether a
 /// `skip_out` path was passed to `merge` at all.
+#[allow(
+    clippy::expect_used,
+    reason = "a list of plain structs with string fields always serializes"
+)]
 pub fn render_skip_report(skipped: &[SkippedEntry]) -> String {
-    let skip_json = serde_json::to_string_pretty(skipped)
-        .expect("a JSON value parsed from valid JSON always re-serializes");
+    let skip_json =
+        serde_json::to_string_pretty(skipped).expect("a list of skipped entries always serializes");
     format!("{skip_json}\n")
 }
 
@@ -317,16 +321,14 @@ pub fn merge(
 
     let (merged, newbase, skipped) = three_way_merge(&base, &template, &user);
 
-    let newbase_json = serde_json::to_string_pretty(&Value::Object(newbase))
-        .expect("a JSON value parsed from valid JSON always re-serializes");
+    let newbase_json = format!("{:#}", Value::Object(newbase));
     atomic_write(newbase_out, &format!("{newbase_json}\n"))?;
 
     if let Some(skip_path) = skip_out {
         atomic_write(skip_path, &render_skip_report(&skipped))?;
     }
 
-    let stdout = serde_json::to_string_pretty(&Value::Object(merged))
-        .expect("a JSON value parsed from valid JSON always re-serializes");
+    let stdout = format!("{:#}", Value::Object(merged));
 
     Ok(MergeOutcome {
         stdout,

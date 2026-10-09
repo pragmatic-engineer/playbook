@@ -5,7 +5,6 @@
 //! repo, the memory store and the commit count, probes which tools are
 //! reachable, and tallies the JIRA keys in recent history.
 
-use regex::Regex;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -46,7 +45,7 @@ pub fn repo_from_url(url: &str) -> String {
 /// `uniq -c | sort -rn | head` over the project keys in `log`: the part of
 /// each `ABC-123` before the dash, with its count, highest first.
 pub fn jira_histogram(log: &str, limit: usize) -> Vec<(usize, String)> {
-    let re = Regex::new(r"[A-Z][A-Z0-9]+-[0-9]+").unwrap();
+    let re = crate::common::re::static_regex(r"[A-Z][A-Z0-9]+-[0-9]+");
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for m in re.find_iter(log) {
         let key = m.as_str().rsplit_once('-').map_or(m.as_str(), |(k, _)| k);

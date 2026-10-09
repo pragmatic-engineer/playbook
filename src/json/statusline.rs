@@ -9,18 +9,8 @@
 //! interpolation would resolve to before quoting.
 
 use regex::Regex;
-use serde::Serialize;
 use serde_json::Value;
 use std::sync::LazyLock;
-
-/// Output shape for [`graphql_ci_checks`]: a `Serialize` struct rather than
-/// a `serde_json::json!` literal, so the single field renders under its
-/// real camelCase key without a runtime `Map` insertion.
-#[derive(Serialize)]
-struct CiChecksReshape {
-    #[serde(rename = "statusCheckRollup")]
-    status_check_rollup: Vec<Value>,
-}
 
 /// Extracts every session field `statusline.sh`'s `eval`-consumed `jq`
 /// output sets: fifteen `key=value` lines, `@sh`-quoted exactly as the real
@@ -151,10 +141,7 @@ pub fn graphql_ci_checks(json: &str) -> String {
     .cloned()
     .unwrap_or_default();
 
-    serde_json::to_string(&CiChecksReshape {
-        status_check_rollup: nodes,
-    })
-    .expect("a struct of a string key and a JSON array always serializes")
+    serde_json::json!({ "statusCheckRollup": nodes }).to_string()
 }
 
 /// Tallies a `.statusCheckRollup` array into `(state, failed, running,
@@ -238,9 +225,8 @@ pub(crate) fn jira_from_body(body: &str) -> String {
 
 /// First Jira-shaped ticket key in `text`. The pattern compiles once per process.
 pub(crate) fn jira_key(text: &str) -> Option<&str> {
-    static JIRA: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"[A-Z][A-Z0-9]+-[0-9]+").expect("jira ticket pattern is a valid regex")
-    });
+    static JIRA: LazyLock<Regex> =
+        LazyLock::new(|| crate::common::re::static_regex(r"[A-Z][A-Z0-9]+-[0-9]+"));
     JIRA.find(text).map(|m| m.as_str())
 }
 

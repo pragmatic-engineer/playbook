@@ -215,7 +215,11 @@ pub(crate) fn map_files<T: Send, S>(
             .collect();
         handles
             .into_iter()
-            .flat_map(|handle| handle.join().expect("a usage worker thread panicked"))
+            .flat_map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
             .collect()
     })
 }

@@ -20,11 +20,10 @@ const DEFAULT_KEEP: usize = 5;
 const KEEP_FLOOR: usize = 2;
 
 pub fn prune(cwd: &str) {
-    let keep = match resolve_keep() {
-        // Zero disables retention entirely, which is the documented escape
-        // hatch for anyone who wants their full history.
-        None => return,
-        Some(k) => k,
+    // Zero disables retention entirely, which is the documented escape
+    // hatch for anyone who wants their full history.
+    let Some(keep) = resolve_keep() else {
+        return;
     };
 
     let project_dir = claude_dir().join("projects").join(project_slug(cwd));

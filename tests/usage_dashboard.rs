@@ -163,7 +163,9 @@ fn serve_process_count(exe: &std::path::Path) -> usize {
 
 #[test]
 fn start_serves_http_and_a_second_call_reuses_the_same_server() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("reuse");
 
     let first = home.run(&["usage", "dashboard"]);
@@ -185,7 +187,9 @@ fn start_serves_http_and_a_second_call_reuses_the_same_server() {
 
 #[test]
 fn a_stale_lock_is_replaced_by_a_fresh_server() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("stale");
     fs::create_dir_all(home.lock_path().parent().unwrap()).unwrap();
     fs::write(home.lock_path(), "2147483646 9\n").unwrap();
@@ -202,7 +206,9 @@ fn a_stale_lock_is_replaced_by_a_fresh_server() {
 
 #[test]
 fn a_server_killed_out_of_band_is_recovered_on_the_next_call() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("crash");
     home.run(&["usage", "dashboard"]);
     let (dead_pid, _) = home.lock().unwrap();
@@ -223,7 +229,9 @@ fn a_server_killed_out_of_band_is_recovered_on_the_next_call() {
 
 #[test]
 fn two_concurrent_starts_leave_exactly_one_server() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("race");
     // A uniquely named copy of the binary, so only this test's servers match
     // the process count, whatever else is running on the machine.
@@ -271,7 +279,9 @@ fn two_concurrent_starts_leave_exactly_one_server() {
 
 #[test]
 fn stop_ends_the_server_and_clears_the_lock_and_is_safe_when_nothing_runs() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("stop");
     home.run(&["usage", "dashboard"]);
     let (pid, _) = home.lock().unwrap();
@@ -313,7 +323,9 @@ fn http_get(home: &Home, port: u16, path: &str) -> (u16, String) {
 
 #[test]
 fn api_data_ingests_transcripts_and_returns_the_fixture_totals() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("data");
     home.seed("usage/proj-one/s1.jsonl");
     let port = start(&home);
@@ -341,7 +353,9 @@ fn api_data_ingests_transcripts_and_returns_the_fixture_totals() {
 
 #[test]
 fn api_data_honours_the_range_parameter_and_refuses_an_unknown_one() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("range");
     home.seed("usage/proj-one/s1.jsonl");
     let port = start(&home);
@@ -366,7 +380,9 @@ fn api_data_honours_the_range_parameter_and_refuses_an_unknown_one() {
 
 #[test]
 fn api_data_reports_skill_and_agent_counts() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("tools");
     home.seed("tools/proj-one/s2.jsonl");
     let port = start(&home);
@@ -388,7 +404,9 @@ fn api_data_reports_skill_and_agent_counts() {
 
 #[test]
 fn a_new_transcript_shows_up_on_the_next_request_without_a_restart() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("refresh");
     let port = start(&home);
     let empty: serde_json::Value =
@@ -404,7 +422,9 @@ fn a_new_transcript_shows_up_on_the_next_request_without_a_restart() {
 
 #[test]
 fn the_page_is_served_with_security_headers() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("page");
     let port = start(&home);
 
@@ -429,7 +449,9 @@ fn the_page_is_served_with_security_headers() {
 #[test]
 fn a_request_with_a_foreign_host_header_is_refused() {
     use std::io::{Read, Write};
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("host");
     let port = start(&home);
 
@@ -449,7 +471,9 @@ fn a_request_with_a_foreign_host_header_is_refused() {
 
 #[test]
 fn ingest_running_beside_the_server_never_breaks_its_reads_or_loses_events() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("wal");
     let project = home.0.join(".claude/projects/proj-wal");
     fs::create_dir_all(&project).unwrap();

@@ -94,7 +94,9 @@ fn stored(home: &Path) -> Value {
 
 /// Whether `field` (`global`, `orgs` or `repos`) holds nothing yet.
 fn empty(home: &Path, field: &str) -> bool {
-    stored(home)[field].as_object().is_none_or(|o| o.is_empty())
+    stored(home)[field]
+        .as_object()
+        .is_none_or(serde_json::Map::is_empty)
 }
 
 fn global_config_path(home: &Path) -> PathBuf {

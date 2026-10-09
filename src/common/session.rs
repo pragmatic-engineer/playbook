@@ -170,6 +170,7 @@ mod tests {
         let root = scratch_dir("session-dir-home");
         let payload = Payload::parse(r#"{"session_id":"envsid"}"#);
         let previous_home = std::env::var("HOME").ok();
+        // SAFETY: this is the only test in the module that writes HOME, so no other test thread races with it.
         unsafe {
             std::env::set_var("HOME", &root);
         }
@@ -187,8 +188,14 @@ mod tests {
         assert!(expected.is_dir());
 
         match previous_home {
-            Some(value) => unsafe { std::env::set_var("HOME", value) },
-            None => unsafe { std::env::remove_var("HOME") },
+            Some(value) => {
+                // SAFETY: same single writer of HOME as above.
+                unsafe { std::env::set_var("HOME", value) }
+            }
+            None => {
+                // SAFETY: same single writer of HOME as above.
+                unsafe { std::env::remove_var("HOME") }
+            }
         }
         let _ = fs::remove_dir_all(&root);
     }

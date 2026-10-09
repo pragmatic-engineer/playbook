@@ -160,10 +160,15 @@ pub fn prepare(kind: Kind, args: &str, run_mode_auto: bool) -> Result<String, St
     ];
     let mut results =
         crate::common::par::map(&calls, crate::common::par::MAX_CONCURRENT, |a| gh(a)).into_iter();
-    let repo_json = results.next().expect("four results")?;
-    let head_sha = results.next().expect("four results")?;
-    let author = results.next().expect("four results")?;
-    let me = results.next().expect("four results")?;
+    let (Some(repo_json), Some(head_sha), Some(author), Some(me)) = (
+        results.next(),
+        results.next(),
+        results.next(),
+        results.next(),
+    ) else {
+        return Err("gh returned fewer results than calls".to_string());
+    };
+    let (repo_json, head_sha, author, me) = (repo_json?, head_sha?, author?, me?);
     let (repo, repo_url) = parse_repo_json(&repo_json)?;
     let self_review = author == me;
     let report_only = self_mode(&parsed, run_mode_auto, self_review);

@@ -12,7 +12,7 @@
 //! mode nothing is ever forced.
 
 use super::{current_branch, git_in, git_success, git_text};
-use regex::Regex;
+use crate::common::re::static_regex;
 use std::path::Path;
 
 /// Flags of one run.
@@ -37,10 +37,9 @@ pub fn hook_writes_signoff(source: &str) -> bool {
         .filter(|l| !l.trim_start().starts_with('#'))
         .collect::<Vec<_>>()
         .join("\n");
-    let trailers =
-        Regex::new(r#"(?i)interpret-trailers.*--trailer[ =]*["']?signed-off-by"#).unwrap();
-    let flag = Regex::new(r#"(^|[;&|{(])\s*(exec\s+)?git\s[^"']*--signoff"#).unwrap();
-    let append = Regex::new(r"(?i)signed-off-by:.*>>|>>.*signed-off-by").unwrap();
+    let trailers = static_regex(r#"(?i)interpret-trailers.*--trailer[ =]*["']?signed-off-by"#);
+    let flag = static_regex(r#"(^|[;&|{(])\s*(exec\s+)?git\s[^"']*--signoff"#);
+    let append = static_regex(r"(?i)signed-off-by:.*>>|>>.*signed-off-by");
     src.lines()
         .any(|l| trailers.is_match(l) || flag.is_match(l) || append.is_match(l))
 }

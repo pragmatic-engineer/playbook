@@ -157,7 +157,9 @@ fn status_line(reply: &str) -> &str {
 
 #[test]
 fn the_stream_needs_the_token_the_host_and_a_same_origin_label() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("guard");
     home.say("m1", "claude-sonnet-5");
     let (port, token) = home.start();
@@ -194,7 +196,9 @@ fn the_stream_needs_the_token_the_host_and_a_same_origin_label() {
 
 #[test]
 fn the_first_event_arrives_promptly_and_a_new_transcript_line_shows_in_a_later_one() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("events");
     home.say("m1", "claude-sonnet-5");
     let (port, token) = home.start();
@@ -225,7 +229,9 @@ fn the_first_event_arrives_promptly_and_a_new_transcript_line_shows_in_a_later_o
 
 #[test]
 fn the_cap_returns_503_a_closed_stream_frees_its_slot_and_the_server_stays_responsive() {
-    let _guard = SOCKET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = SOCKET_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let home = Home::new("cap");
     home.say("m1", "claude-sonnet-5");
     let (port, token) = home.start();

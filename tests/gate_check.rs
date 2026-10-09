@@ -149,7 +149,9 @@ impl Fixture {
         phases: &[String],
         source: &str,
     ) -> Result<String, String> {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let previous_dir = std::env::current_dir().expect("read current dir");
         let previous_home = std::env::var_os("HOME");
         std::env::set_current_dir(&self.repo).expect("cd into fixture repo");

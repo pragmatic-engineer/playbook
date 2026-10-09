@@ -194,7 +194,7 @@ fn archive_contains_every_file_the_installed_plugin_reads_at_runtime() {
         "README.md",
     ]
     .iter()
-    .map(|s| s.to_string())
+    .map(std::string::ToString::to_string)
     .collect();
     // Every literal ${CLAUDE_PLUGIN_ROOT}/<file> a command, skill, agent or hook names.
     let re = Regex::new(r"CLAUDE_PLUGIN_ROOT(?::-)?\}?/([A-Za-z0-9_./-]+)").expect("regex");

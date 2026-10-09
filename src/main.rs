@@ -357,16 +357,13 @@ fn main() {
             // Exit 1, not 2: the shell original used it and both CI lanes key
             // on it, matching the settings check convention above.
             ManifestCommand::Check { repo_root } => {
-                let root = match repo_root.or_else(manifest::check::toplevel) {
-                    Some(root) => root,
-                    None => {
-                        // The shell's own wording when it had neither
-                        // (check-manifest.sh:22).
-                        eprintln!(
-                            "check-manifest: not inside a git repository and no REPO_ROOT argument given"
-                        );
-                        std::process::exit(1);
-                    }
+                let Some(root) = repo_root.or_else(manifest::check::toplevel) else {
+                    // The shell's own wording when it had neither
+                    // (check-manifest.sh:22).
+                    eprintln!(
+                        "check-manifest: not inside a git repository and no REPO_ROOT argument given"
+                    );
+                    std::process::exit(1);
                 };
                 match manifest::check::check(&root) {
                     Ok(msg) => println!("{msg}"),
@@ -381,14 +378,11 @@ fn main() {
             // Exit 1, not 2: the shell original used it and CI keys on it,
             // matching the manifest and settings checks' convention above.
             AgentsCommand::Check { agents_dir } => {
-                let dir = match agents_dir.or_else(agents::check::default_dir) {
-                    Some(dir) => dir,
-                    None => {
-                        eprintln!(
-                            "check-agents: not inside a git repository and no AGENTS_DIR argument given"
-                        );
-                        std::process::exit(1);
-                    }
+                let Some(dir) = agents_dir.or_else(agents::check::default_dir) else {
+                    eprintln!(
+                        "check-agents: not inside a git repository and no AGENTS_DIR argument given"
+                    );
+                    std::process::exit(1);
                 };
                 match agents::check::check(&dir) {
                     Ok(msg) => println!("{msg}"),
@@ -770,10 +764,7 @@ fn main() {
                 ConfigCommand::Export => {
                     let root = common::paths::playbook_root_from(&home);
                     match config::store::export(&root) {
-                        Ok(doc) => println!(
-                            "{}",
-                            serde_json::to_string_pretty(&doc).expect("a JSON value serializes")
-                        ),
+                        Ok(doc) => println!("{doc:#}"),
                         Err(err) => {
                             eprintln!("config export: {err}");
                             std::process::exit(1);
@@ -1439,9 +1430,10 @@ fn parse_number(value: &str) -> Option<serde_json::Value> {
 /// would make sense, since an empty document is itself valid JSON input.
 fn read_stdin_to_string() -> String {
     let mut input = String::new();
-    std::io::stdin()
-        .read_to_string(&mut input)
-        .expect("stdin should be readable");
+    if let Err(err) = std::io::stdin().read_to_string(&mut input) {
+        eprintln!("playbook: cannot read stdin: {err}");
+        std::process::exit(1);
+    }
     input
 }
 

@@ -104,7 +104,7 @@ fn modify_locked_defaults_to_an_empty_store_when_the_file_is_missing() {
     // Assert
     let store = read_store(&mem_dir);
     assert_eq!(
-        store["nodes"].as_object().map(|o| o.len()),
+        store["nodes"].as_object().map(serde_json::Map::len),
         Some(0),
         "a missing file should default to an empty store, not panic or leave nodes populated"
     );
