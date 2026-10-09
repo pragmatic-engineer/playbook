@@ -286,13 +286,19 @@ fn pr_draft_repo_beats_global_in_both_directions() {
 fn pr_draft_false_opens_ready_and_a_broken_or_invalid_config_stays_draft() {
     // Arrange
     let home = scratch_home("pr-draft-global");
-    write_json(&global_config_path(&home), r#"{"pr": {"draft": false}}"#);
+    let reset = |legacy: &str| {
+        for name in ["playbook.db", "playbook.db-wal", "playbook.db-shm"] {
+            let _ = fs::remove_file(global_config_path(&home).with_file_name(name));
+        }
+        write_json(&global_config_path(&home), legacy);
+    };
+    reset(r#"{"pr": {"draft": false}}"#);
 
     // Act
     let auto = playbook::pr::create::draft_setting(&home, None);
-    write_json(&global_config_path(&home), r#"{"pr": {"draft": "banana"}}"#);
+    reset(r#"{"pr": {"draft": "banana"}}"#);
     let invalid = playbook::pr::create::draft_setting(&home, None);
-    write_json(&global_config_path(&home), "not json");
+    reset("not json");
     let broken = playbook::pr::create::draft_setting(&home, None);
 
     // Assert

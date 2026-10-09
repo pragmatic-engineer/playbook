@@ -7,11 +7,12 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     agents, cc, ci, common, config, deps, doctor, effort, eval, gate, handoff, hooks, init, json,
-    manifest, mode, pr, release, review, sanitize, settings, statusline, trust, update, usage,
-    worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand, DashboardCommand, DepsCommand,
-    DoctorCommand, EvalCommand, GateCommand, HandoffCommand, JsonCommand, ManifestCommand,
-    MemoryCommand, ModeArg, ModeCommand, PrCommand, ReleaseCommand, ReviewCommand,
-    ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, UsageCommand, WorktreeCommand,
+    manifest, memory_import, mode, pr, release, review, sanitize, settings, statusline, trust,
+    update, usage, worktree, AgentsCommand, CcCommand, Cli, Command, ConfigCommand,
+    DashboardCommand, DepsCommand, DoctorCommand, EvalCommand, GateCommand, HandoffCommand,
+    JsonCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PrCommand, ReleaseCommand,
+    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, UsageCommand,
+    WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -259,6 +260,41 @@ fn main() {
                     std::process::exit(1);
                 }
             },
+            MemoryCommand::ImportClaude { dry_run, from } => {
+                let root = manifest::check::toplevel()
+                    .unwrap_or_else(|| std::path::PathBuf::from(cc::logical_cwd()));
+                let claude_memory_dir = from.unwrap_or_else(|| {
+                    cc::sessions::project_dir(&cc::claude_dir(), &root.to_string_lossy())
+                        .join("memory")
+                });
+                let slug = common::repo::repo_slug();
+                let dest_dir = match slug.split_once('/') {
+                    Some((owner, repo)) => common::paths::memory_dir().join(owner).join(repo),
+                    None => common::paths::memory_dir(),
+                };
+                let params = memory_import::Params {
+                    claude_memory_dir,
+                    dest_dir,
+                    state_file: common::paths::playbook_root()
+                        .join("state")
+                        .join("claude-memory-import.json"),
+                    dry_run,
+                };
+                match memory_import::run(&params) {
+                    Ok(report) => {
+                        println!("{}", memory_import::render(&report, dry_run));
+                        if !dry_run && !report.copied.is_empty() {
+                            if let Err(err) = hooks::rebuild_memory_graph::rebuild_now() {
+                                eprintln!("memory import-claude: graph rebuild failed: {err}");
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("memory import-claude: {err}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             MemoryCommand::Context { repo, graph } => {
                 let repo = repo
                     .filter(|r| !r.is_empty())
@@ -589,6 +625,47 @@ fn main() {
                         Ok(()) => println!("config set: {key} updated"),
                         Err(err) => {
                             eprintln!("config set: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ConfigCommand::Export => {
+                    let root = common::paths::playbook_root_from(&home);
+                    match config::store::export(&root) {
+                        Ok(doc) => println!(
+                            "{}",
+                            serde_json::to_string_pretty(&doc).expect("a JSON value serializes")
+                        ),
+                        Err(err) => {
+                            eprintln!("config export: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ConfigCommand::Import { file } => {
+                    let raw = if file == "-" {
+                        let mut buf = String::new();
+                        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf).map(|_| buf)
+                    } else {
+                        std::fs::read_to_string(&file)
+                    };
+                    let doc = raw
+                        .map_err(|err| format!("cannot read {file}: {err}"))
+                        .and_then(|raw| {
+                            serde_json::from_str::<serde_json::Value>(&raw)
+                                .map_err(|err| format!("{file} is not valid JSON: {err}"))
+                        });
+                    let root = common::paths::playbook_root_from(&home);
+                    match doc {
+                        Ok(doc) => match config::store::import(&root, &doc) {
+                            Ok(count) => println!("config import: {count} setting(s) stored"),
+                            Err(err) => {
+                                eprintln!("config import: {err}");
+                                std::process::exit(1);
+                            }
+                        },
+                        Err(err) => {
+                            eprintln!("config import: {err}");
                             std::process::exit(1);
                         }
                     }

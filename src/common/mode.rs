@@ -129,7 +129,7 @@ pub fn resolve_for_hook() -> Resolved {
 /// tier file exists (the slug then cannot change any resolved value, so the
 /// `git` spawn behind it is skipped).
 pub fn hook_slug(home: &Path) -> Option<String> {
-    if !config::any_scoped_config(&crate::common::paths::playbook_root_from(home)) {
+    if !config::store::any_scoped(&crate::common::paths::playbook_root_from(home)) {
         return None;
     }
     Some(repo_slug()).filter(|slug| !slug.is_empty())
