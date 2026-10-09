@@ -2042,3 +2042,65 @@ fn memory_rebuild_skips_the_staging_directory_and_still_indexes_siblings() {
     );
     let _ = fs::remove_dir_all(&home);
 }
+
+#[test]
+fn two_rebuilds_of_the_same_store_write_the_same_bytes() {
+    // Several link relations on one fact: a HashMap walk used to change the
+    // edge order from run to run.
+    let home = scratch_home("deterministic");
+    write_fact(
+        &home,
+        "target-a.md",
+        "---\nname: a\ntype: reference\n---\nBody a\n",
+    );
+    write_fact(
+        &home,
+        "target-b.md",
+        "---\nname: b\ntype: reference\n---\nBody b\n",
+    );
+    write_fact(
+        &home,
+        "source.md",
+        "---\nname: source\ntype: reference\nlinks:\n  relates_to: target-a\n  depends_on: target-b\n  supersedes: target-a\n  contradicts: target-b\n---\nBody\n",
+    );
+    assert!(run_rebuild_for(&home, "source.md").status.success());
+    let first = fs::read(graph_path(&home)).unwrap();
+    for _ in 0..5 {
+        assert!(run_rebuild_for(&home, "source.md").status.success());
+        assert_eq!(fs::read(graph_path(&home)).unwrap(), first);
+    }
+}
+
+#[test]
+fn a_large_store_takes_the_threaded_path_and_still_finds_the_similar_pair() {
+    // 300 facts is past the point where the pair loop uses threads.
+    let home = scratch_home("threaded");
+    for i in 0..300 {
+        write_fact(
+            &home,
+            &format!("fact-{i:03}.md"),
+            &format!(
+                "---\nname: fact-{i:03}\ntype: reference\n---\nunique{i} words{i} only{i} here{i} for{i} this{i} fact{i} body{i}\n"
+            ),
+        );
+    }
+    let shared = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    write_fact(
+        &home,
+        "twin-a.md",
+        &format!("---\nname: twin-a\ntype: reference\n---\n{shared}\n"),
+    );
+    write_fact(
+        &home,
+        "twin-b.md",
+        &format!("---\nname: twin-b\ntype: reference\n---\n{shared}\n"),
+    );
+    assert!(run_rebuild_for(&home, "twin-a.md").status.success());
+    let first = fs::read(graph_path(&home)).unwrap();
+    let graph = read_graph(&home);
+    let signals = possible_relates_to_signals(&graph, "global/twin-a", "global/twin-b")
+        .expect("the twins share type_scope and body_overlap");
+    assert_eq!(signals, &vec![json!("type_scope"), json!("body_overlap")]);
+    assert!(run_rebuild_for(&home, "twin-a.md").status.success());
+    assert_eq!(fs::read(graph_path(&home)).unwrap(), first);
+}
