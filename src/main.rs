@@ -864,6 +864,7 @@ fn main() {
                     amend,
                     auto,
                     no_signoff,
+                    no_type_check,
                 } => {
                     let (path, temp) = match message_file {
                         Some(p) => (p, false),
@@ -889,6 +890,7 @@ fn main() {
                         amend,
                         auto,
                         no_signoff,
+                        no_type_check,
                     };
                     let result = commit::run::run(&dir, &path, opts, signoff_on);
                     if temp {

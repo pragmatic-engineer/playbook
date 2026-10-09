@@ -8,6 +8,7 @@
 
 pub mod prepare;
 pub mod run;
+pub mod typecheck;
 
 use std::path::Path;
 use std::process::{Command, Output};
