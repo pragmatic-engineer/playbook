@@ -45,6 +45,30 @@ fn git(args: &[&str]) -> String {
     String::from_utf8(out.stdout).expect("utf8")
 }
 
+/// The tree of the current index, written from a private copy of the index
+/// file. Run by several test processes at once (nextest starts one per test),
+/// a plain `git write-tree` fights over the repository's own `index.lock`.
+fn write_tree_from_index_copy(dir: &std::path::Path) -> String {
+    let index = git(&["rev-parse", "--path-format=absolute", "--git-path", "index"]);
+    let copy = dir.join("index-copy");
+    fs::copy(index.trim(), &copy).expect("the index should be copyable");
+    let out = Command::new("git")
+        .args(["write-tree"])
+        .env("GIT_INDEX_FILE", &copy)
+        .current_dir(repo())
+        .output()
+        .expect("git should spawn");
+    assert!(
+        out.status.success(),
+        "git write-tree failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout)
+        .expect("utf8")
+        .trim()
+        .to_string()
+}
+
 /// Pathspecs from the allowlist file: comments and blank lines dropped.
 fn pathspecs() -> Vec<String> {
     let text = fs::read_to_string(repo().join(".claude-plugin/archive-files.txt"))
@@ -75,7 +99,7 @@ fn archive() -> &'static Archive {
     ARCHIVE.get_or_init(|| {
         let dir = scratch("build");
         let zip = dir.join("playbook-plugin-test.zip");
-        let tree = git(&["write-tree"]).trim().to_string();
+        let tree = write_tree_from_index_copy(&dir);
         let mut args = vec![
             "archive".to_string(),
             "--format=zip".to_string(),
