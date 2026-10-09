@@ -178,6 +178,16 @@ pub fn report(home: &Path, claude_home: &Path, cwd: &Path, json: bool) -> String
             "chain": chain,
             "chainSource": if user_fallback { "user" } else { "playbook" },
             "effort": effort,
+            "haikuCap": {
+                "default": effort::model_cap::HAIKU_DEFAULT_CAP,
+                "ceiling": effort::model_cap::HAIKU_HARD_CEILING,
+                "optIns": effort::model_cap::OPT_INS
+                    .iter()
+                    .map(|(name, level, reason)| serde_json::json!({
+                        "component": name, "level": level, "reason": reason
+                    }))
+                    .collect::<Vec<_>>(),
+            },
         })
         .to_string();
     }
@@ -190,6 +200,14 @@ pub fn report(home: &Path, claude_home: &Path, cwd: &Path, json: bool) -> String
             "{} ({}): {}, falls back to {}{over}\n",
             t.alias, t.name, t.preferred, t.fallback
         ));
+    }
+    out.push_str(&format!(
+        "haiku effort cap: {} by default, never above {}\n",
+        effort::model_cap::HAIKU_DEFAULT_CAP,
+        effort::model_cap::HAIKU_HARD_CEILING
+    ));
+    for (name, level, reason) in effort::model_cap::OPT_INS {
+        out.push_str(&format!("  {name} may use {level}: {reason}\n"));
     }
     if user_fallback {
         out.push_str("fallback chain: set by you (flag or fallbackModel), playbook adds none\n");
