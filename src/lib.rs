@@ -22,6 +22,7 @@ pub mod json;
 pub mod manifest;
 pub mod mode;
 pub mod models;
+pub mod plans;
 pub mod pr;
 pub mod release;
 pub mod sanitize;
@@ -330,6 +331,17 @@ pub enum Command {
     Path {
         /// Which folder to print
         kind: PathKind,
+        /// Create the folder when it does not exist
+        #[arg(long)]
+        create: bool,
+    },
+    /// List the plans and ADR blueprints `/playbook:implement` can run
+    ///
+    /// Prints `path<TAB>[status]<TAB>title` per file, or `NO_PLANS`.
+    Plans {
+        /// Print JSON instead of text
+        #[arg(long)]
+        json: bool,
     },
     /// Small JSON helpers for shell scripts
     ///
@@ -621,6 +633,46 @@ pub enum PrCommand {
         /// Work in this directory instead of the current one
         #[arg(long)]
         dir: Option<String>,
+    },
+    /// Wait for a PR's required checks to finish
+    ///
+    /// Prints a `checks total=.. pending=.. fail=.. cancel=..` line per read,
+    /// then `CI_VERDICT=` one of NONE, FAIL, CANCELLED, PASS or TIMEOUT.
+    CiWait {
+        /// PR number
+        pr: String,
+        /// Give up after this many seconds
+        #[arg(long, default_value_t = 1200)]
+        timeout: u64,
+        /// Seconds between reads
+        #[arg(long, default_value_t = 20)]
+        interval: u64,
+    },
+    /// Wait for a PR to merge or hit a gate
+    ///
+    /// Prints a status line per read (state, merge state, review, auto-merge),
+    /// then `LAND_VERDICT=` one of MERGED, REVIEW_GATE, CHANGES_REQUESTED,
+    /// RESTATE or TIMEOUT.
+    LandWait {
+        /// PR number
+        pr: String,
+        /// Give up after this many seconds
+        #[arg(long, default_value_t = 1800)]
+        timeout: u64,
+        /// Seconds between reads
+        #[arg(long, default_value_t = 20)]
+        interval: u64,
+    },
+    /// Merge a PR with auto-merge, or as an admin squash
+    ///
+    /// Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said.
+    /// Always exits 0, so the caller reads the code.
+    Merge {
+        /// PR number
+        pr: String,
+        /// Squash with admin rights instead of arming auto-merge
+        #[arg(long)]
+        admin: bool,
     },
 }
 
