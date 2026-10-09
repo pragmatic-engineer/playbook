@@ -115,7 +115,7 @@ Bot authors (CodeRabbit, Copilot review, Greptile, github-actions, and others) a
 
 ## Auto mode
 
-These commands read the run mode first. In `ask` mode, which is the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](../../README.md#auto-mode) for how the mode is set.
+These commands read the run mode first. In `ask` mode, which is the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](05-auto-mode.md) for how the mode is set.
 
 - `/playbook:commit-and-push` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
 - `/playbook:quick-review` and `/playbook:deep-review` run as `--self`. They report locally and never post a review to GitHub, because a posted review speaks as you.

@@ -101,7 +101,7 @@ When headless:
 
 This section describes how auto mode is designed to work. It was not part of the tested runs above.
 
-Whether a command may ask questions is a separate setting from headless mode. `PLAYBOOK_HEADLESS` is independent of the `mode` setting: headless only quiets the session nudges and the memory Stop hook, and it never turns auto on. Auto never turns headless on either. Under `claude -p` the question tool is absent, so set `PLAYBOOK_MODE=auto` as well when a command must run with no one to answer. See [Auto mode](../../README.md#auto-mode) in the README for the setting, the spend cap, and the limits.
+Whether a command may ask questions is a separate setting from headless mode. `PLAYBOOK_HEADLESS` is independent of the `mode` setting: headless only quiets the session nudges and the memory Stop hook, and it never turns auto on. Auto never turns headless on either. Under `claude -p` the question tool is absent, so set `PLAYBOOK_MODE=auto` as well when a command must run with no one to answer. See [Auto mode](../guides/05-auto-mode.md) for the setting, the spend cap, and the limits.
 
 ### Supported in auto
 

@@ -104,5 +104,5 @@ When you want to know why something is the way it is, start with this page, then
 | How hard it thinks | The `effort:` line in its file, or ask `playbook effort resolve agents <name>` for the variant |
 | The most effort anything may use | `playbook effort <level>` |
 | How far the PR flow goes | [Config keys](../guides/04-config-keys.md) |
-| Whether playbook asks or decides | `playbook mode`, and the Auto mode section of the README |
+| Whether playbook asks or decides | `playbook mode`, and the [auto mode guide](../guides/05-auto-mode.md) |
 | What a hook blocks | [Launcher and hooks](../internals/01-launcher-and-hooks.md) |

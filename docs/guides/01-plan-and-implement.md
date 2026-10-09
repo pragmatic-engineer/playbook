@@ -143,7 +143,7 @@ Pass `--no-tdd` to write tests and implementation together instead. Pass `--no-t
 
 `--auto` executes the Segments in dependency order without pausing, committing each Work Unit as a savepoint, then opens the PR set once the adversarial review passes. It self-selects the delivery strategy (stacked topology, or independent when Segments are disjoint; savepoints) and records it as an assumption. Each Segment lands on its own branch off the default branch (or the previous Segment, when stacked). A gate FAIL blocks unless you also pass `--force` (logged to the quality report).
 
-Auto mode can also come from `PLAYBOOK_MODE` or `playbook mode auto`, not only from the flag. In auto mode `/playbook:implement` never force-pushes: a push that would need a force parks the Segment and reports. It never picks the `land` boundary on its own, so `--boundary=land` must be explicit. See [Auto mode](../../README.md#auto-mode) for the spend cap and its limits.
+Auto mode can also come from `PLAYBOOK_MODE` or `playbook mode auto`, not only from the flag. In auto mode `/playbook:implement` never force-pushes: a push that would need a force parks the Segment and reports. It never picks the `land` boundary on its own, so `--boundary=land` must be explicit. See [Auto mode](05-auto-mode.md) for the spend cap and its limits.
 
 ## Fixing a small bug with /playbook:fix
 
