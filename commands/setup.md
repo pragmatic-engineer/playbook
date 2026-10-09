@@ -84,7 +84,7 @@ non-interactive run would contradict what `--yes` says it does.
 - Add `--system-prompt` if Q2 answer is "Yes (Recommended)" OR
   `--use-system-prompt` or `--yes` was in `$ARGUMENTS`.
 
-`playbook init` always runs (guards and settings are wired regardless of the answers). It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder. Then check the tools the plugin needs and install only the missing ones:
+`playbook init` always runs. This command has no terminal, so init does not ask its own questions and uses its defaults (hooks, settings and PATH on), plus the launcher and system prompt flags you built above. It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder. Then check the tools the plugin needs and install only the missing ones:
 
 ```bash
 CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" playbook init [flags]

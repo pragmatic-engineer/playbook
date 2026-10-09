@@ -41,6 +41,10 @@ pub struct InitPaths {
     /// "refresh an existing copy" case here, since a launcher a user never
     /// asked for should not be touched at all.
     pub aliases: bool,
+    /// Whether to wire the hook entries into settings.json.
+    pub hooks: bool,
+    /// Whether to merge the shared settings template into settings.json.
+    pub settings: bool,
     /// Where the binary lives and the shell to wire it for. `None` skips the
     /// `path` step.
     pub path_setup: Option<path::Setup>,
@@ -154,9 +158,16 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         migrate::record_skills(&paths.home, root);
     }
 
-    let settings_step =
-        seed_or_merge_settings(self_root, &paths.claude_home, &settings_path, epoch);
-    let hooks_step = wire_hooks(&settings_path, epoch);
+    let settings_step = if paths.settings {
+        seed_or_merge_settings(self_root, &paths.claude_home, &settings_path, epoch)
+    } else {
+        StepReport::skipped("settings", "not requested; pass --settings to opt in")
+    };
+    let hooks_step = if paths.hooks {
+        wire_hooks(&settings_path, epoch)
+    } else {
+        StepReport::skipped("hooks", "not requested; pass --hooks to opt in")
+    };
 
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
     let shell_runtime_confirmed = step_confirmed(&shell_runtime_step);
@@ -189,7 +200,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 /// reported, never fatal: the binary still runs by absolute path.
 fn path_step(home: &Path, setup: Option<&path::Setup>) -> StepReport {
     let Some(setup) = setup else {
-        return StepReport::skipped("path", "binary location unknown");
+        return StepReport::skipped("path", "not requested, or the binary location is unknown");
     };
     match path::ensure(home, setup) {
         Ok(out) if !out.changed.is_empty() => {
