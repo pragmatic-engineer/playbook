@@ -9,5 +9,6 @@ pub mod guard;
 pub mod prepare;
 pub mod rules;
 pub mod shared;
+pub mod stack;
 pub mod triage;
 pub mod wait;

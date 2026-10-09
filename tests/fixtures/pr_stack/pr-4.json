@@ -1,0 +1,17 @@
+{
+ "number": 4,
+ "title": "Alone",
+ "state": "OPEN",
+ "isDraft": false,
+ "baseRefName": "main",
+ "headRefName": "solo",
+ "headRefOid": "sha4",
+ "additions": 3,
+ "deletions": 1,
+ "changedFiles": 1,
+ "author": {
+  "login": "ana"
+ },
+ "mergedAt": null,
+ "url": "https://github.com/o/r/pull/4"
+}

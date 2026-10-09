@@ -634,6 +634,13 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
+                PrCommand::Stack { args } => match pr::stack::run(&args) {
+                    Ok(text) => println!("{text}"),
+                    Err(err) => {
+                        eprintln!("{err}");
+                        std::process::exit(1);
+                    }
+                },
                 PrCommand::Rules { plugin_root } => {
                     let root = plugin_root
                         .or_else(|| std::env::var_os("CLAUDE_PLUGIN_ROOT").map(Into::into))
