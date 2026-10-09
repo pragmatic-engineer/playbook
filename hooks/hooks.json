@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "playbook hook worktree-create",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/playbook\" hook worktree-create",
             "timeout": 180
           }
         ]
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "playbook hook worktree-remove",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/playbook\" hook worktree-remove",
             "timeout": 120
           }
         ]
