@@ -90,8 +90,7 @@ pub fn run(payload: &Payload) {
     append_auto_mode_note(&mut extra_context);
 
     if !headless || crate::common::headless::headless_memory_enabled() {
-        append_promoted_facts(&mut extra_context, &repo_root);
-        append_memory_slice(&mut extra_context, &repo_root);
+        append_memory_context(&mut extra_context, &repo_root);
     }
     let injected = if headless {
         0
@@ -251,23 +250,13 @@ const PROMOTED_FACTS_CAP_CHARS: usize = 4000;
 /// structurally different sources, a direct graph read here versus a shell
 /// script's stdout there, for a minor cosmetic redundancy is not worth the
 /// added complexity, so this overlap is left as a known, accepted tradeoff.
-fn append_promoted_facts(extra_context: &mut String, repo_root: &str) {
-    let mem_slug = repo_slug();
-    if repo_root.is_empty() || mem_slug.is_empty() {
-        return;
-    }
+fn append_promoted_facts(
+    extra_context: &mut String,
+    mem_slug: &str,
+    graph: &crate::json::memorycontext::Graph<'_>,
+) {
     let mem_dir = crate::common::paths::memory_dir();
-    let Ok(content) = fs::read_to_string(mem_dir.join("memory.graph.json")) else {
-        return;
-    };
-    let Ok(graph) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return;
-    };
-    let nodes = graph
-        .get("nodes")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let nodes = graph.nodes.as_deref().unwrap_or(&[]);
 
     // One read of memory.signals.json for the whole pass, rather than one
     // per node: memory_signals::is_promoted re-reads and re-parses the file
@@ -276,28 +265,21 @@ fn append_promoted_facts(extra_context: &mut String, repo_root: &str) {
     let promoted = memory_signals::promoted_ids(&mem_dir);
 
     let mut lines = Vec::new();
-    for node in &nodes {
-        if !in_promotion_scope(node, &mem_slug) {
+    for node in nodes {
+        if !in_promotion_scope(node, mem_slug) {
             continue;
         }
-        let Some(id) = node.get("id").and_then(serde_json::Value::as_str) else {
+        let Some(id) = node.id.as_deref() else {
             continue;
         };
-        let pinned = node.get("pinned").and_then(serde_json::Value::as_bool) == Some(true);
-        if !pinned && !promoted.contains(id) {
+        if !node.pinned.is_true() && !promoted.contains(id) {
             continue;
         }
-        let name = node
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
+        let name = node.name.or_empty();
         if name.is_empty() {
             continue;
         }
-        let desc = node
-            .get("description")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
+        let desc = node.description.or_empty();
         lines.push(if desc.is_empty() {
             format!("- {name}")
         } else {
@@ -319,29 +301,44 @@ fn append_promoted_facts(extra_context: &mut String, repo_root: &str) {
 
 /// Whether `node` is in scope: global always, org when its owner matches, project when it belongs to `repo`.
 /// Matches `memory_anchors.rs`'s private `in_scope`, reimplemented locally per this codebase's per-module-duplication convention.
-fn in_promotion_scope(node: &serde_json::Value, repo: &str) -> bool {
-    match node.get("scope").and_then(serde_json::Value::as_str) {
+fn in_promotion_scope(node: &crate::json::memorycontext::Node<'_>, repo: &str) -> bool {
+    match node.scope.as_deref() {
         Some("global") => true,
-        Some("org") => {
-            node.get("project").and_then(serde_json::Value::as_str) == repo.split('/').next()
-        }
-        Some("project") => node.get("project").and_then(serde_json::Value::as_str) == Some(repo),
+        Some("org") => node.project.as_deref() == repo.split('/').next(),
+        Some("project") => node.project.as_deref() == Some(repo),
         _ => false,
     }
+}
+
+/// Reads `memory.graph.json` once, parses it once, and injects the promoted
+/// facts and the project memory slice from the same parse. Nothing is added
+/// when there is no repo, no slug, or no readable graph.
+fn append_memory_context(extra_context: &mut String, repo_root: &str) {
+    let mem_slug = repo_slug();
+    if repo_root.is_empty() || mem_slug.is_empty() {
+        return;
+    }
+    let path = crate::common::paths::memory_dir().join("memory.graph.json");
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
+    };
+    let Some(graph) = crate::json::memorycontext::parse_graph(&content) else {
+        return;
+    };
+    append_promoted_facts(extra_context, &mem_slug, &graph);
+    append_memory_slice(extra_context, &mem_slug, &graph);
 }
 
 /// Inject the project memory slice into `extra_context`: the repo-scoped
 /// facts, edges, and anchor index rendered from `memory.graph.json`, capped,
 /// or nothing when the graph is absent or empty.
-fn append_memory_slice(extra_context: &mut String, repo_root: &str) {
-    let mem_slug = repo_slug();
-    if repo_root.is_empty() || mem_slug.is_empty() {
-        return;
-    }
-
-    let graph = crate::common::paths::memory_dir().join("memory.graph.json");
+fn append_memory_slice(
+    extra_context: &mut String,
+    mem_slug: &str,
+    graph: &crate::json::memorycontext::Graph<'_>,
+) {
     let mem_body = cap_memory_body(
-        crate::json::memorycontext::render_for_graph_file(&graph, &mem_slug).trim_matches('\n'),
+        crate::json::memorycontext::render_graph(graph, mem_slug).trim_matches('\n'),
     );
     if mem_body.is_empty() {
         return;
