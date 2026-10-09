@@ -177,35 +177,18 @@ fn load(paths: &Paths, request: Api) -> Result<String, Failure> {
     render(&conn, request, crate::common::time::now_secs())
 }
 
-/// The events a ranged response is built from. `data_json` and `sessions_json`
-/// both drop everything before the first day of the range, so all time is the
-/// only range that needs every row.
-fn load_window(
-    conn: &rusqlite::Connection,
-    range: Range,
-    now: i64,
-) -> Result<Vec<super::UsageEvent>, String> {
-    match range.days(now) {
-        Some((first_day, _)) => super::db::load_usage_events_since(
-            conn,
-            first_day.saturating_mul(super::aggregate::SECONDS_PER_DAY),
-        ),
-        None => super::db::load_usage_events(conn),
-    }
-}
-
 /// Build the JSON for one data request from what the store holds at `now`.
 fn render(conn: &rusqlite::Connection, request: Api, now: i64) -> Result<String, Failure> {
     use super::db;
     let internal = Failure::Internal;
     let value = match request {
         Api::Data(range) => {
-            let usage = load_window(conn, range, now).map_err(internal)?;
+            let usage = super::query::load_window(conn, range, now).map_err(internal)?;
             let tools = db::load_tool_events(conn).map_err(Failure::Internal)?;
             super::api::data_json(&usage, &tools, now, range)
         }
         Api::Sessions(range) => {
-            let usage = load_window(conn, range, now).map_err(internal)?;
+            let usage = super::query::load_window(conn, range, now).map_err(internal)?;
             super::api::sessions_json(&usage, now, range)
         }
         Api::Session(id) => {
@@ -222,14 +205,11 @@ fn render(conn: &rusqlite::Connection, request: Api, now: i64) -> Result<String,
 /// Ingest anything new, then build only the live summary: the last hour and
 /// today, the active sessions and the newest messages, not the whole dataset.
 fn live_summary(paths: &Paths) -> Result<String, String> {
-    use super::{api, db};
+    use super::{api, query};
     let (conn, _) = super::run::ingest_new(paths)?;
     let now = crate::common::time::now_secs();
-    let window = db::load_usage_events_since(&conn, api::live_window_start(now))?;
-    let ids = api::active_session_ids(&window, now);
-    let sessions = db::load_usage_events_of_sessions(&conn, &ids)?;
-    let latest = db::load_latest_usage_events(&conn, api::FEED_LIMIT as i64)?;
-    serde_json::to_string(&api::live_json(&window, &sessions, &latest, now))
+    let i = query::load_live_inputs(&conn, now)?;
+    serde_json::to_string(&api::live_json(&i.window, &i.sessions, &i.latest, now))
         .map_err(|e| format!("failed to encode the live summary: {e}"))
 }
 

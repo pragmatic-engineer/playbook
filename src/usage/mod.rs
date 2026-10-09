@@ -18,6 +18,7 @@ pub mod live;
 pub mod lock;
 pub mod page;
 pub mod pricing;
+pub mod query;
 pub mod repo;
 pub mod run;
 pub mod summary;
