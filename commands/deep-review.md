@@ -89,7 +89,7 @@ Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set 
 
 ## Execution rules (MUST)
 
-1. Run every bash block for real. Don't simulate.
+1. Run every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive). Don't simulate.
 2. No caching: every invocation is a fresh run, even if you reviewed this PR earlier in the conversation. The code may have changed.
 3. No skipping (except steps guarded by a flag the user didn't set).
 4. No assumptions: run the command and read the result.
@@ -344,7 +344,9 @@ Present the report with each draft shown under its finding as a `Draft:` block. 
 
 If `SELF_MODE` (`--self` passed explicitly, no PR number/branch was given so `PR_NUMBER` came from the current-branch fallback, the run mode is auto, or the resolved PR is authored by the caller), or nothing postable, stop here: the report IS the deliverable, no GitHub posting.
 
-Otherwise ask **one question at a time**:
+Otherwise, **print every finding first (MUST).** Before asking anything, print all surviving findings in the chat, none left out and none summarized away: a code (F1, F2, and so on), the label, severity, `file:line` and a one-line description each. With zero findings, say so. The questions come only after this list, and the options refer to findings by code. A question with no list above it is a bug (#593).
+
+Then ask **one question at a time**:
 
 - **Q1:** "Post which findings as a pending review?" Offer exactly these six tiers, each a strict superset of the one before, blocking and questions take precedence, suggestions and nitpicks stay optional:
   - `only blockers` (`blocking` findings only)

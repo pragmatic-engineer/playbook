@@ -24,7 +24,7 @@ Parse `$ARGUMENTS`:
 
 ## Execution rules
 
-1. Run every bash block for real. Don't simulate.
+1. Run every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive). Don't simulate.
 2. Read files before asserting facts about them (grounding).
 3. Combine independent bash calls into a single tool call.
 4. Never edit project code or config. Writes are limited to `~/.config/playbook/memory/` files.
