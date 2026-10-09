@@ -554,6 +554,34 @@ fn main() {
             EvalCommand::ReviewTriage { fixtures, prompt } => {
                 std::process::exit(eval::review_triage(fixtures, prompt));
             }
+            EvalCommand::Bench {
+                cases,
+                role,
+                id,
+                model,
+                effort,
+                runs,
+                max_cost_usd,
+                jobs,
+                json,
+                list,
+            } => {
+                let root = eval::repo_root();
+                let opts = eval::bench::Options {
+                    cases: cases.unwrap_or_else(|| root.join(eval::bench::DEFAULT_CASES)),
+                    roles: role,
+                    ids: id,
+                    models: model,
+                    efforts: effort,
+                    runs,
+                    max_cost_usd,
+                    jobs,
+                    json,
+                    list,
+                    repo_root: root,
+                };
+                std::process::exit(eval::bench::run(&opts));
+            }
         },
         Command::Pr { sub } => {
             let gh = pr::shared::RealGhClient;
