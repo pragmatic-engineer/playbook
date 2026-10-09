@@ -57,22 +57,13 @@ With no argument (`SELF_MODE`), the in-place predicate runs the same check. If t
 
 **Worktree mode** (all other cases): set up an isolated worktree:
 
-```bash
-WT_ERR="$(mktemp)"
-WT="$(playbook worktree review setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
-if [[ $? -ne 0 || -z "$WT" ]]; then
-  echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
-  rm -f "$WT_ERR"
-  exit 1
-fi
-rm -f "$WT_ERR"
-```
+`playbook review prepare` (Step 1) does this setup. If it reports `error: worktree setup failed`, abort.
 
 On failure this prints the command's stderr and stops. No fallback, no degraded mode.
 Capture stdout only: `playbook worktree review setup` prints the worktree path on stdout and sends
 git's progress to stderr on purpose, so folding them together corrupts the path.
 
-When in worktree mode, read and grep all files under `$WT` instead of the local working tree. Store `WT_CREATED=true` for the teardown step.
+When in worktree mode, read and grep all files under `$WT` instead of the local working tree. `WT` is not empty exactly when a worktree was created: use that to decide the teardown step.
 
 ## Voice rules (mandatory)
 
@@ -102,81 +93,14 @@ Findings are plain: a label, `file:line`, the exact evidence, a short failure sc
 ## Step 1: Resolve PR and gather context
 
 ```bash
-ARGS="$ARGUMENTS"
-# Set RUN_MODE=auto here when Step 0 read auto mode; auto implies --self.
-RUN_MODE=ask
-SELF_MODE=false
-[[ "$ARGS" == *"--self"* || "$RUN_MODE" == "auto" ]] && SELF_MODE=true
-ARGS="${ARGS//--self/}"
-ARGS="${ARGS//--auto/}"
-ARGS="${ARGS//--ask/}"
-ARGS="${ARGS// /}"
+playbook review prepare quick "$ARGUMENTS"
+```
 
-if [ -z "$ARGS" ]; then
-  # Nothing named to post to: resolve current branch's PR, report-only.
-  PR_JSON=$(gh pr view --json number,headRefOid,author,headRefName 2>/dev/null) || { echo "error: no PR found for current branch; create one first or pass a PR number" >&2; exit 1; }
-  PR_NUMBER=$(echo "$PR_JSON" | playbook json field number)
-  HEAD_SHA=$(echo "$PR_JSON" | playbook json field headRefOid)
-  SELF_MODE=true
-else
-  ARGS="${ARGS#\#}"
-  if [[ "$ARGS" =~ ^[0-9]+$ ]]; then
-    # Integer: explicit PR number
-    PR_NUMBER="$ARGS"
-    HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
-  elif git check-ref-format --branch "$ARGS" 2>/dev/null; then
-    # Branch name: resolve to open PR
-    PR_NUMBER=$(gh pr list --head "$ARGS" --json number -q '.[0].number' 2>/dev/null)
-    if [ -z "$PR_NUMBER" ]; then
-      echo "error: no open PR for branch $ARGS; create one first or pass a PR number" >&2
-      exit 1
-    fi
-    HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
-  else
-    echo "error: pass an integer PR number, a branch name, --self, or no args (report-only)" >&2
-    exit 1
-  fi
-fi
+Add `--auto` when Step 0 read auto mode (auto implies report-only). The command resolves the PR as described above, works out `SELF_MODE`, decides in-place or worktree and sets the worktree up, creates the folder of `REVIEW_JSON`, and prints these lines: `PR`, `REPO`, `PR_NUMBER`, `HEAD_SHA`, `AUTHOR`, `SELF_REVIEW`, `SELF_MODE`, `MODE`, `WT` (empty when in place) and `REVIEW_JSON`. On a problem it prints `error: ...` and exits 1: stop and show it. Then read the PR with the number it printed:
 
-REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-PR_AUTHOR=$(gh pr view "$PR_NUMBER" --json author -q .author.login)
-ME=$(gh api /user -q .login)
-SELF_REVIEW=$([ "$PR_AUTHOR" = "$ME" ] && echo true || echo false)
-# A self-authored PR gets the same report-only treatment as --self: GitHub
-# blocks approve/request-changes from the author, and a comment-only review
-# of your own PR has no independent reviewer behind it.
-[[ "$SELF_REVIEW" == "true" ]] && SELF_MODE=true
-
-# Decide: review in-place or via isolated worktree
-LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null)
-DIRTY=$(git status --porcelain --untracked-files=no 2>/dev/null)
-if [[ "$LOCAL_HEAD" == "$HEAD_SHA" && -z "$DIRTY" ]]; then
-  WT=""
-  WT_CREATED=false
-  echo "Mode: in-place (HEAD matches, tree clean)"
-else
-  WT_ERR="$(mktemp)"
-  WT="$(playbook worktree review setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
-  if [[ $? -ne 0 || -z "$WT" ]]; then
-    echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
-    rm -f "$WT_ERR"
-    exit 1
-  fi
-  rm -f "$WT_ERR"
-  WT_CREATED=true
-  echo "Mode: worktree at $WT"
-fi
-
-REVIEW_JSON="/tmp/$REPO/quick-review-$PR_NUMBER.json"
-mkdir -p "$(dirname "$REVIEW_JSON")"
-
-echo "PR: $REPO#$PR_NUMBER"
-echo "Head SHA: $HEAD_SHA"
-echo "Author: $PR_AUTHOR (self-review: $SELF_REVIEW, self-mode/report-only: $SELF_MODE)"
-echo "Review JSON: $REVIEW_JSON"
-
-gh pr view "$PR_NUMBER"
-gh pr diff "$PR_NUMBER"
+```bash
+gh pr view <PR_NUMBER>
+gh pr diff <PR_NUMBER>
 ```
 
 Capture: `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. You'll need them for the API calls in Step 4. `REVIEW_JSON` resolves to `/tmp/<org>/<repo>/quick-review-<number>.json`, and its directory is created here so the Step 4 write succeeds.
@@ -302,7 +226,7 @@ Final user-facing message: one sentence per outcome.
 
 ## Step 6: Teardown (MUST run, even on failure, abort, or skip)
 
-If `WT_CREATED` is true, always run:
+If `WT` is not empty, always run:
 
 ```bash
 playbook worktree review teardown "$WT"

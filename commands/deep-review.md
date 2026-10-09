@@ -105,75 +105,19 @@ Findings are plain: label, `file:line`, evidence, a short failure scenario, and 
 ## Step 1: Resolve PR and gather context
 
 ```bash
-ARGS="$ARGUMENTS"
-# Set RUN_MODE=auto here when Step 0 read auto mode; auto implies --self.
-RUN_MODE=ask
-PR_ARG=$(echo "$ARGS" | tr ' ' '\n' | grep -E '^#?[0-9]+$' | head -1 | tr -d '#')
+playbook review prepare deep "$ARGUMENTS"
+```
 
-IMPLICIT_SELF=false
-if [[ -n "$PR_ARG" ]]; then
-  # Integer or #N: explicit PR number
-  PR_NUMBER="$PR_ARG"
-else
-  PR_ARG=$(echo "$ARGS" | tr ' ' '\n' | grep -vE '^--|^$' | grep -vE '^#?[0-9]+$' | head -1)
-  if [[ -n "$PR_ARG" ]]; then
-    # Branch name: resolve to its open PR number
-    PR_NUMBER=$(gh pr list --head "$PR_ARG" --json number -q '.[0].number' 2>/dev/null)
-    [[ -n "$PR_NUMBER" ]] || { echo "error: no open PR for branch $PR_ARG" >&2; exit 1; }
-  else
-    # Nothing left to disambiguate: current branch's PR, implicit self mode.
-    PR_NUMBER=$(gh pr view --json number -q .number 2>/dev/null) || { echo "error: no PR for current branch; pass a PR number" >&2; exit 1; }
-    IMPLICIT_SELF=true
-  fi
-fi
+Add `--auto` when Step 0 read auto mode (auto implies report-only). The command resolves the PR (a number or `#N`, else a branch name, else the current branch's PR with report-only), works out `SELF_MODE`, decides in-place or worktree and sets the worktree up, creates the folder of `REVIEW_JSON`, and prints these lines: `PR`, `REPO`, `PR_NUMBER`, `HEAD_SHA`, `AUTHOR`, `SELF_REVIEW`, `SELF_MODE`, `MODE`, `WT` (empty when in place) and `REVIEW_JSON`. On a problem it prints `error: ...` and exits 1: stop and show it. Then read the PR with the number it printed:
 
-REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
-PR_AUTHOR=$(gh pr view "$PR_NUMBER" --json author -q .author.login)
-ME=$(gh api /user -q .login)
-SELF_REVIEW=$([ "$PR_AUTHOR" = "$ME" ] && echo true || echo false)
-# SELF_MODE: never posts, report only. True when --self is explicit, when no
-# PR number/branch was given at all (nothing to post to on purpose), when the
-# run mode is auto, or when
-# the resolved PR is authored by the caller: GitHub blocks APPROVE and
-# REQUEST_CHANGES from a PR's own author, and posting COMMENT-only findings
-# on your own PR has no independent reviewer behind them, so self-authorship
-# is treated the same as an explicit --self rather than a restricted post.
-SELF_MODE=$([[ "$ARGS" == *"--self"* || "$RUN_MODE" == "auto" || "$IMPLICIT_SELF" == "true" || "$SELF_REVIEW" == "true" ]] && echo true || echo false)
-
-REVIEW_JSON="/tmp/$REPO/deep-review-$PR_NUMBER.json"
-mkdir -p "$(dirname "$REVIEW_JSON")"
-
-echo "PR: $REPO#$PR_NUMBER  head: $HEAD_SHA  self-review: $SELF_REVIEW"
-echo "Review JSON: $REVIEW_JSON"
-
-gh pr view "$PR_NUMBER"
-gh pr diff "$PR_NUMBER"
-
-# Decide: review in-place or via isolated worktree
-LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null)
-DIRTY=$(git status --porcelain --untracked-files=no 2>/dev/null)
-if [[ "$LOCAL_HEAD" == "$HEAD_SHA" && -z "$DIRTY" ]]; then
-  WT=""
-  WT_CREATED=false
-  echo "Mode: in-place (HEAD matches, tree clean)"
-else
-  WT_ERR="$(mktemp)"
-  WT="$(playbook worktree review setup "$PR_NUMBER" "$HEAD_SHA" 2>"$WT_ERR")"
-  if [[ $? -ne 0 || -z "$WT" ]]; then
-    echo "error: worktree setup failed: $(cat "$WT_ERR")" >&2
-    rm -f "$WT_ERR"
-    exit 1
-  fi
-  rm -f "$WT_ERR"
-  WT_CREATED=true
-  echo "Mode: worktree at $WT"
-fi
+```bash
+gh pr view <PR_NUMBER>
+gh pr diff <PR_NUMBER>
 ```
 
 Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, when `--self` is passed explicitly, when no PR number/branch was given in `$ARGUMENTS` at all (nothing named to post to), when the run mode is auto, or when `SELF_REVIEW` is true (the resolved PR is authored by the caller). `SELF_REVIEW` stays a separate fact purely for logging (the status line prints it independently), but it never leaves posting partially enabled on its own: once it is true, `SELF_MODE` is true too, so Step 6 never reaches the submit-verb question in the first place.
 
-In worktree mode, `WT` holds the absolute path to the isolated checkout and `WT_CREATED=true`. In in-place mode, both are empty/false. Subagents use `$WT` for all reads; if empty, they read from the local working tree.
+In worktree mode, `WT` holds the absolute path to the isolated checkout. In in-place mode it is empty. Subagents use `$WT` for all reads; if empty, they read from the local working tree.
 
 ## Step 2: Select reviewers
 
@@ -183,33 +127,15 @@ In worktree mode, `WT` holds the absolute path to the isolated checkout and `WT_
 
 ## Step 2b: Run checks in the worktree (best-effort, worktree mode only)
 
-Skip this step entirely when `WT_CREATED` is false (in-place mode).
+Skip this step entirely when `WT` is empty (in-place mode).
 
-In the worktree (`cd "$WT"`), detect the toolchain and run the full check suite once. Capture stdout+stderr:
+Run the project's own check suite once in the worktree. `playbook review checks` detects the toolchain (Node, Python, Go or Rust) and prints the combined output:
 
 ```bash
-cd "$WT"
-CHECK_OUTPUT=""
-
-if [[ -f package.json ]]; then
-  npm install --prefer-offline 2>&1 | tail -5
-  CHECK_OUTPUT=$(npm run typecheck 2>&1; npm run lint 2>&1; npm test 2>&1) || true
-elif [[ -f pyproject.toml ]] || [[ -f setup.py ]]; then
-  pip install -e . -q 2>&1 | tail -3
-  CHECK_OUTPUT=$(python -m mypy . 2>&1; python -m pytest 2>&1) || true
-elif [[ -f go.mod ]]; then
-  CHECK_OUTPUT=$(go vet ./... 2>&1; go test ./... 2>&1) || true
-elif [[ -f Cargo.toml ]]; then
-  CHECK_OUTPUT=$(cargo check 2>&1; cargo test 2>&1) || true
-else
-  CHECK_OUTPUT="[no recognised toolchain; checks skipped]"
-fi
-
-# Print so the orchestrating session can read it and embed it in subagent prompts
-printf '%s\n' "$CHECK_OUTPUT"
+playbook review checks "$WT"
 ```
 
-If install or run fails, log the error in `CHECK_OUTPUT` and continue: never block the review. The `printf` at the end makes the output visible in the tool result so Step 3 can embed it verbatim in each subagent prompt.
+A failing install or check is printed as output, never an error: never block the review. Keep the output as `CHECK_OUTPUT` so Step 3 can embed it verbatim in each subagent prompt.
 
 ## Step 2c: Load memory (best-effort)
 
@@ -387,7 +313,7 @@ Never fabricate URLs; use the `html_url` the API returns.
 
 **Stop every reviewer subagent first.** `TaskStop` each reviewer spawned in Step 3 that is still alive (any you didn't already close on return). Use `TaskList` to confirm none from this swarm are still running before you finish. A returned agent stays idle-alive for follow-ups and this review never sends any, so an unstopped reviewer lingers as a background process. Do this whether the review completed, failed, was skipped, or aborted mid-swarm.
 
-Then, if `WT_CREATED` is true, always run:
+Then, if `WT` is not empty, always run:
 
 ```bash
 playbook worktree review teardown "$WT"
