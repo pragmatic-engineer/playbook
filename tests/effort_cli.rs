@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook effort` end to end: the ceiling reaches `maxEffortLevel` in
-//! `settings.json`, `playbook init` keeps it applied, and `auto` clears only
+//! `settings.json`, `playbook init` keeps it applied, and `max` clears only
 //! a cap playbook wrote.
 
 use serde_json::Value;
@@ -68,7 +68,7 @@ fn setting_a_level_stores_it_and_leaves_claude_code_settings_alone() {
         r#"{"maxEffortLevel":"max"}"#
     );
 
-    let out = h.run(&["effort", "auto"]);
+    let out = h.run(&["effort", "max"]);
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(h.cap().as_deref(), Some("max"));
 }
@@ -106,7 +106,7 @@ fn xhigh_under_a_claude_code_max_is_playbooks_to_apply() {
     .unwrap();
     assert!(h.run(&["effort", "xhigh"]).status.success());
     let body = text(&h.run(&["effort"]));
-    assert!(body.contains("playbook effort.max: xhigh"), "{body}");
+    assert!(body.contains("playbook maxEffortLevel: xhigh"), "{body}");
     assert!(body.contains("Claude Code maxEffortLevel: max"), "{body}");
     assert!(
         body.contains("effective ceiling: xhigh (playbook)"),
@@ -136,11 +136,11 @@ fn a_lower_claude_code_ceiling_wins_in_the_status() {
 fn config_set_accepts_the_key_and_rejects_a_bad_value() {
     let h = Home::new("config");
     assert!(h
-        .run(&["config", "set", "--global", "effort.max", "xhigh"])
+        .run(&["config", "set", "--global", "maxEffortLevel", "xhigh"])
         .status
         .success());
     assert!(!h
-        .run(&["config", "set", "--global", "effort.max", "huge"])
+        .run(&["config", "set", "--global", "maxEffortLevel", "huge"])
         .status
         .success());
 }

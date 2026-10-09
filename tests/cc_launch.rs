@@ -454,8 +454,8 @@ fn a_higher_claude_code_ceiling_is_read_and_left_alone() {
 }
 
 #[test]
-fn auto_and_an_own_settings_flag_add_nothing() {
-    let e = env("effort-auto");
+fn max_and_an_own_settings_flag_add_nothing() {
+    let e = env("effort-max");
     e.launch(&["fresh"]);
     assert_eq!(e.calls()[0], "-n proj");
     set_effort(&e, "low");
