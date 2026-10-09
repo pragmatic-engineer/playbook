@@ -16,18 +16,13 @@
 //! events are told apart from inside one script.
 
 use crate::common::atomic::with_dir_lock;
-use crate::common::{run_with_timeout, session_dir, session_id, Payload};
+use crate::common::{session_dir, session_id, Payload};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 const DEFAULT_AUTO_LEARN_MIN_EDITS: i64 = 5;
-
-/// How long to wait for `git rev-parse --show-toplevel` before giving up.
-/// Matches the retired shell original's `timeout=5`.
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Run the session-clean-exit hook. Never panics; every failure along the
 /// way is swallowed, matching the retired shell original's fail-soft
@@ -135,12 +130,13 @@ fn git_toplevel() -> String {
     {
         return top.to_string_lossy().into_owned();
     }
-    let mut command = Command::new("git");
-    command.args(["--no-optional-locks", "rev-parse", "--show-toplevel"]);
-    match run_with_timeout(&mut command, GIT_TIMEOUT) {
-        Some(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => String::new(),
-    }
+    let args = ["--no-optional-locks", "rev-parse", "--show-toplevel"];
+    crate::common::git::trimmed(crate::common::git::run(
+        None,
+        &args,
+        crate::common::git::TIMEOUT,
+    ))
+    .unwrap_or_default()
 }
 
 /// Parse the digits in `path`'s contents as an integer, ignoring any other

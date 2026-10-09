@@ -9,12 +9,10 @@
 use crate::common::attribution::has_sign_off;
 use crate::common::proc::{run_with_input, run_with_timeout};
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 /// A signed commit can wait on an agent or a hardware key.
 const SIGN_TIMEOUT: Duration = Duration::from_secs(30);
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 /// The reflog line the move of HEAD leaves, which the backstop reads to tell
 /// its own rewrite from a commit.
 const REFLOG_MESSAGE: &str = "playbook: clean commit message";
@@ -44,7 +42,7 @@ pub fn rewrite_head(dir: &Path, old: &Old, message: &str, sign_off: bool) -> Opt
         true => signed_off(dir, message)?,
         false => message.to_string(),
     };
-    let mut commit = git(dir);
+    let mut commit = crate::common::git::command(dir);
     commit.args(["commit-tree", tree.trim()]);
     for parent in parents.split_whitespace() {
         commit.args(["-p", parent]);
@@ -60,25 +58,15 @@ pub fn rewrite_head(dir: &Path, old: &Old, message: &str, sign_off: bool) -> Opt
     let out = run_with_input(&mut commit, message.as_bytes(), SIGN_TIMEOUT)
         .filter(|out| out.status.success())?;
     let new = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let mut update = git(dir);
+    let mut update = crate::common::git::command(dir);
     update.args(["update-ref", "-m", REFLOG_MESSAGE, "HEAD", &new, old.sha]);
-    run_with_timeout(&mut update, GIT_TIMEOUT)
+    run_with_timeout(&mut update, crate::common::git::TIMEOUT)
         .filter(|out| out.status.success())
         .map(|_| ())
 }
 
-/// `git -C dir`.
-fn git(dir: &Path) -> Command {
-    let mut command = Command::new("git");
-    command.arg("-C").arg(dir);
-    command
-}
-
 fn read(dir: &Path, args: &[&str]) -> Option<String> {
-    let mut command = git(dir);
-    command.args(args);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT).filter(|out| out.status.success())?;
-    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+    crate::common::git::raw(dir, args)
 }
 
 /// Whether the repository signs commits: `commit.gpgSign`, as configured.
@@ -100,10 +88,14 @@ fn identity(dir: &Path) -> Option<(String, String)> {
 fn signed_off(dir: &Path, message: &str) -> Option<String> {
     let (name, email) = identity(dir)?;
     let trailer = format!("Signed-off-by: {name} <{email}>");
-    let mut command = git(dir);
+    let mut command = crate::common::git::command(dir);
     command.args(["interpret-trailers", "--no-divider", "--trailer", &trailer]);
-    let placed = run_with_input(&mut command, message.as_bytes(), GIT_TIMEOUT)
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+    let placed = run_with_input(
+        &mut command,
+        message.as_bytes(),
+        crate::common::git::TIMEOUT,
+    )
+    .filter(|out| out.status.success())
+    .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
     Some(placed.unwrap_or_else(|| format!("{}\n\n{trailer}\n", message.trim_end())))
 }

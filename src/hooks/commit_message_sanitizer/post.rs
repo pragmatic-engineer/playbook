@@ -20,7 +20,6 @@
 //! for a person to rename.
 
 use super::amend::{rewrite_head, Old};
-use super::engine::git_output;
 use super::git::{git_use, sign_off_enabled, GitUse};
 use super::state::take_head;
 use crate::common::attribution::{drop_lines, is_ai_identity, problems, prose_problems, Shape};
@@ -117,11 +116,13 @@ impl Commit {
 }
 
 fn commits(payload: &Payload, dir: &Path, used: &GitUse, notes: &mut Vec<String>) {
-    let Some(head) = git_output(dir, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string()) else {
+    let Some(head) =
+        crate::common::git::raw(dir, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string())
+    else {
         return;
     };
     let made_here = made_here(payload, dir, &head);
-    let unpushed = git_output(
+    let unpushed = crate::common::git::raw(
         dir,
         &[
             "log",
@@ -153,7 +154,7 @@ fn commits(payload: &Payload, dir: &Path, used: &GitUse, notes: &mut Vec<String>
                 Some((what, advice)) => notify_commit(payload, commit, what, advice, notes),
             }
         }
-    } else if let Some(commit) = git_output(dir, &["log", "-1", LOG_FORMAT, "HEAD"])
+    } else if let Some(commit) = crate::common::git::raw(dir, &["log", "-1", LOG_FORMAT, "HEAD"])
         .and_then(|log| parse_commits(&log).into_iter().next())
         .filter(Commit::is_dirty)
     {
@@ -170,7 +171,7 @@ fn made_here(payload: &Payload, dir: &Path, head: &str) -> bool {
         return false;
     };
     before != head
-        && git_output(dir, &["reflog", "-1", "--format=%gs"])
+        && crate::common::git::raw(dir, &["reflog", "-1", "--format=%gs"])
             .is_some_and(|subject| subject.starts_with("commit"))
 }
 
@@ -217,7 +218,7 @@ fn in_progress(dir: &Path) -> Option<&'static str> {
 }
 
 fn git_dir(dir: &Path) -> Option<PathBuf> {
-    let out = git_output(dir, &["rev-parse", "--git-dir"])?;
+    let out = crate::common::git::raw(dir, &["rev-parse", "--git-dir"])?;
     Some(dir.join(out.trim()))
 }
 
@@ -284,7 +285,7 @@ fn amend(dir: &Path, used: &GitUse, commit: &Commit, notes: &mut Vec<String>) {
 /// message of its own, so it is skipped.
 fn tags(payload: &Payload, dir: &Path, notes: &mut Vec<String>) {
     let format = format!("--format=%(refname:short){FIELD}%(objecttype){FIELD}%(contents){RECORD}");
-    let Some(out) = git_output(dir, &["tag", "--points-at", "HEAD", &format]) else {
+    let Some(out) = crate::common::git::raw(dir, &["tag", "--points-at", "HEAD", &format]) else {
         return;
     };
     for record in out.split(RECORD).filter(|r| !r.trim().is_empty()) {

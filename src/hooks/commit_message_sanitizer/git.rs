@@ -6,7 +6,7 @@
 //! message a commit reuses, drops an `--author` or `--trailer` that names an
 //! AI, and follows the script a `git rebase --exec` runs.
 
-use super::engine::{git_output, locate, nested_word, Call, Findings, Plan};
+use super::engine::{locate, nested_word, Call, Findings, Plan};
 use super::sources::{
     apply, feed, from_path, from_stdin, from_word, joined, read_message, resolve, value_span,
     Named, Rule, Source, Target,
@@ -546,7 +546,7 @@ pub fn sign_off_enabled() -> bool {
 /// hooks path git uses, adds a Signed-off-by line itself. A hook that only
 /// checks for the line, or adds another trailer, does not.
 fn hook_signs_off(dir: &Path) -> bool {
-    let Some(hooks) = git_output(dir, &["rev-parse", "--git-path", "hooks"]) else {
+    let Some(hooks) = crate::common::git::raw(dir, &["rev-parse", "--git-path", "hooks"]) else {
         return false;
     };
     let hooks = resolve(hooks.trim(), dir);
@@ -737,7 +737,7 @@ fn reuse(
     findings: &mut Findings,
 ) -> Option<String> {
     let call = &run.call;
-    let message = git_output(call.dir, &["log", "-1", "--format=%B", rev, "--"])?;
+    let message = crate::common::git::raw(call.dir, &["log", "-1", "--format=%B", rev, "--"])?;
     if !problems(&message).is_empty() {
         let spans = &call.cmd().spans;
         let (replace, opener) = match option {
@@ -759,7 +759,9 @@ fn reuse(
 
 /// `--author` and `--date` copied from `rev`, unless its author is an AI.
 fn author_flags(dir: &Path, rev: &str) -> String {
-    let Some(out) = git_output(dir, &["log", "-1", "--format=%an%n%ae%n%aI", rev, "--"]) else {
+    let Some(out) =
+        crate::common::git::raw(dir, &["log", "-1", "--format=%an%n%ae%n%aI", rev, "--"])
+    else {
         return String::new();
     };
     let mut lines = out.lines();
@@ -781,7 +783,7 @@ fn author_flags(dir: &Path, rev: &str) -> String {
 /// heredoc, and the file is left as it is.
 fn stored_message(run: &Run, plan: &mut Plan, findings: &mut Findings) -> Option<String> {
     let call = &run.call;
-    let git_dir = git_output(call.dir, &["rev-parse", "--git-dir"])?;
+    let git_dir = crate::common::git::raw(call.dir, &["rev-parse", "--git-dir"])?;
     let git_dir = resolve(git_dir.trim(), call.dir);
     let name = MESSAGE_FILES
         .iter()

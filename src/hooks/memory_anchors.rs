@@ -28,24 +28,17 @@
 
 use crate::common::paths::memory_dir;
 use crate::common::payload::Payload;
-use crate::common::{
-    emit_pre_context, emit_prompt_context, repo_slug, run_with_timeout, session_dir,
-};
+use crate::common::{emit_pre_context, emit_prompt_context, repo_slug, session_dir};
 use crate::hooks::memory_signals;
 use crate::hooks::staleness::{self, check_staleness};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, Instant};
 
-/// How long to wait for `git rev-parse --show-toplevel` before giving up.
-/// Matches the retired shell original's `timeout=5`.
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
-
 /// Total budget for `run_prompt`'s staleness-check loop across all matched
-/// facts; `GIT_TIMEOUT` only bounds one call, not the chain of them.
+/// facts; `git::TIMEOUT` only bounds one call, not the chain of them.
 const STALENESS_BUDGET: Duration = Duration::from_secs(3);
 
 /// Pure wrapper around the deadline comparison, so the boundary condition is
@@ -347,14 +340,13 @@ fn git_toplevel() -> String {
     {
         return top.to_string_lossy().into_owned();
     }
-    let mut command = Command::new("git");
-    command.args(["--no-optional-locks", "rev-parse", "--show-toplevel"]);
-    match run_with_timeout(&mut command, GIT_TIMEOUT) {
-        Some(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        }
-        _ => String::new(),
-    }
+    let args = ["--no-optional-locks", "rev-parse", "--show-toplevel"];
+    crate::common::git::trimmed(crate::common::git::run(
+        None,
+        &args,
+        crate::common::git::TIMEOUT,
+    ))
+    .unwrap_or_default()
 }
 
 /// The anchor index parsed once: rows split into columns, plus a map from
@@ -457,20 +449,16 @@ fn staleness_note(root: &str, from_id: &str, anchor_relpath: &str) -> &'static s
 /// untracked, uncommitted, or the clone has no history for that path.
 fn git_last_commit_epoch(path: &Path) -> Option<staleness::DateTime> {
     let dir = path.parent()?;
-    let mut command = Command::new("git");
-    command
-        .current_dir(dir)
-        .args(["--no-optional-locks", "log", "-1", "--format=%ct", "--"])
-        .arg(path);
-    let out = run_with_timeout(&mut command, GIT_TIMEOUT)?;
-    if !out.status.success() {
-        return None;
-    }
-    let trimmed = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if trimmed.is_empty() {
-        return None;
-    }
-    trimmed.parse::<i64>().ok()
+    let path = path.to_string_lossy();
+    let args = [
+        "--no-optional-locks",
+        "log",
+        "-1",
+        "--format=%ct",
+        "--",
+        &path,
+    ];
+    crate::common::git::output(dir, &args)?.parse::<i64>().ok()
 }
 
 /// Build the tab-separated anchor index from `memory.graph.json` for the current
