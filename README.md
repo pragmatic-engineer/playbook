@@ -224,7 +224,7 @@ Slash commands live in `commands/`. See [docs/guides](docs/guides) for full usag
 
 ### PR and commit settings
 
-Four of the config keys shape how far the PR flow goes (the full list is in [Config keys](docs/guides/04-config-keys.md), or run `playbook config list`). Each user, org or repo can set them. Set one in your global config to apply it everywhere:
+Four of the config keys shape how far the PR flow goes (the full list is in [Config keys](docs/guides/04-config-keys.md), every command and flag is in the [CLI and config reference](docs/reference/cli-and-config.md), or run `playbook config list`). Each user, org or repo can set them. Set one in your global config to apply it everywhere:
 
 ```bash
 playbook config set --global autoReview.fix true       # fix every finding the self-review confirms, then push

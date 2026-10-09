@@ -1,0 +1,220 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
+//! The CLI and config reference page is generated from the real clap
+//! definitions and the config key table, and committed. This test rebuilds it
+//! and fails when the committed copy differs, so the page cannot drift.
+//!
+//! Regenerate with: `UPDATE_REFERENCE=1 cargo test --test reference_docs`
+
+use clap::{Command, CommandFactory};
+use playbook::config::keys::{
+    allowed_enum_values, default_value, EFFORT_COMPONENT_KINDS, KNOWN_KEYS,
+};
+use playbook::Cli;
+use serde_json::Value;
+use std::fmt::Write as _;
+use std::fs;
+use std::path::PathBuf;
+
+const PAGE: &str = "docs/reference/cli-and-config.md";
+const REGEN: &str = "UPDATE_REFERENCE=1 cargo test --test reference_docs";
+
+fn root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn arg_line(arg: &clap::Arg) -> String {
+    let help = arg
+        .get_help()
+        .map(|h| h.to_string().replace('\n', " "))
+        .unwrap_or_default();
+    let name = if arg.is_positional() {
+        let value = arg
+            .get_value_names()
+            .and_then(|v| v.first().map(|n| n.to_string()))
+            .unwrap_or_else(|| arg.get_id().to_string().to_uppercase());
+        format!("<{value}>")
+    } else {
+        let mut parts = Vec::new();
+        if let Some(short) = arg.get_short() {
+            parts.push(format!("-{short}"));
+        }
+        if let Some(long) = arg.get_long() {
+            parts.push(format!("--{long}"));
+        }
+        let mut label = parts.join(", ");
+        if arg.get_action().takes_values() {
+            let value = arg
+                .get_value_names()
+                .and_then(|v| v.first().map(|n| n.to_string()))
+                .unwrap_or_else(|| arg.get_id().to_string().to_uppercase());
+            label.push_str(&format!(" <{value}>"));
+        }
+        label
+    };
+    let possible: Vec<String> = arg
+        .get_possible_values()
+        .iter()
+        .filter(|v| !v.is_hide_set())
+        .map(|v| format!("`{}`", v.get_name()))
+        .collect();
+    let mut line = format!("- `{name}`");
+    if !help.is_empty() {
+        line.push_str(&format!(": {help}"));
+    }
+    if !possible.is_empty() {
+        line.push_str(&format!(" (one of {})", possible.join(", ")));
+    }
+    line
+}
+
+fn walk(cmd: &Command, path: &str, out: &mut String) {
+    let _ = writeln!(out, "### `{path}`\n");
+    if let Some(about) = cmd.get_long_about().or_else(|| cmd.get_about()) {
+        let text = about.to_string();
+        let _ = writeln!(out, "{}\n", text.trim());
+    }
+    let args: Vec<&clap::Arg> = cmd
+        .get_arguments()
+        .filter(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
+        .collect();
+    for arg in args {
+        let _ = writeln!(out, "{}", arg_line(arg));
+    }
+    let mut subs: Vec<&Command> = cmd
+        .get_subcommands()
+        .filter(|s| !s.is_hide_set() && s.get_name() != "help")
+        .collect();
+    subs.sort_by_key(|s| s.get_name().to_string());
+    if cmd
+        .get_arguments()
+        .any(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
+    {
+        out.push('\n');
+    }
+    if !subs.is_empty() {
+        let names: Vec<String> = subs.iter().map(|s| format!("`{}`", s.get_name())).collect();
+        let _ = writeln!(out, "Subcommands: {}\n", names.join(", "));
+    }
+    for sub in subs {
+        walk(sub, &format!("{path} {}", sub.get_name()), out);
+    }
+}
+
+fn show(value: &Value) -> String {
+    match value {
+        Value::String(s) if s.is_empty() => "empty".to_string(),
+        Value::String(s) => format!("`{s}`"),
+        other => format!("`{other}`"),
+    }
+}
+
+fn config_table() -> String {
+    let mut out = String::from("| Key | Default | Allowed values |\n| :- | :- | :- |\n");
+    for key in KNOWN_KEYS {
+        let default = default_value(key).map_or_else(|| "none".to_string(), |v| show(&v));
+        let allowed = allowed_enum_values(key).map_or_else(
+            || match default_value(key) {
+                Some(Value::Bool(_)) => "`true`, `false`".to_string(),
+                Some(Value::Number(_)) => {
+                    "a number, see the config keys guide for the range".to_string()
+                }
+                _ if key.starts_with("models.") => {
+                    "empty, or `claude-<tier>-<major>[-<minor>]` for that tier".to_string()
+                }
+                _ => "see the config keys guide".to_string(),
+            },
+            |vals| {
+                vals.iter()
+                    .map(|v| format!("`{v}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
+        );
+        let _ = writeln!(out, "| `{key}` | {default} | {allowed} |");
+    }
+    let sample = |kind: &str| format!("effort.{kind}.<name>");
+    let family = EFFORT_COMPONENT_KINDS
+        .iter()
+        .map(|k| format!("`{}`", sample(k)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let levels = allowed_enum_values("effort.agents.x")
+        .map(|v| {
+            v.iter()
+                .map(|l| format!("`{l}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let _ = writeln!(out, "| {family} | `auto` | {levels} |");
+    out
+}
+
+pub fn generate() -> String {
+    let mut cmd = Cli::command();
+    cmd.build();
+    let mut out = String::new();
+    out.push_str(
+        "# CLI and config reference\n\n\
+         <!-- Generated by tests/reference_docs.rs. Do not edit by hand.\n\
+         Regenerate with: UPDATE_REFERENCE=1 cargo test --test reference_docs -->\n\n\
+         This page lists every `playbook` command, flag and config key. It is generated from the\n\
+         clap definitions and the config key table, and a test fails when it is out of date.\n\
+         For what each key means and when to change it, read the [config keys guide](../guides/04-config-keys.md).\n\n\
+         ## Config keys\n\n\
+         Set a key with `playbook config set <key> <value>` and read it with `playbook config get <key>`.\n\n",
+    );
+    out.push_str(&config_table());
+    out.push_str("\n## Commands\n\n");
+    walk(&cmd, "playbook", &mut out);
+    out.trim_end().to_string() + "\n"
+}
+
+#[test]
+fn the_reference_page_matches_the_generated_output() {
+    let path = root().join(PAGE);
+    let fresh = generate();
+    if std::env::var_os("UPDATE_REFERENCE").is_some() {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, &fresh).unwrap();
+        return;
+    }
+    let committed = fs::read_to_string(&path).unwrap_or_default();
+    assert!(
+        committed == fresh,
+        "{PAGE} is out of date with the CLI definitions or the config keys.\nRegenerate it with: {REGEN}"
+    );
+}
+
+#[test]
+fn the_generated_output_is_deterministic() {
+    assert_eq!(generate(), generate());
+}
+
+#[test]
+fn every_known_key_is_explained_in_the_config_keys_guide() {
+    let guide = fs::read_to_string(root().join("docs/guides/04-config-keys.md")).unwrap();
+    for key in KNOWN_KEYS {
+        assert!(
+            guide.contains(&format!("`{key}`")),
+            "docs/guides/04-config-keys.md does not explain the config key `{key}`"
+        );
+    }
+    assert!(
+        guide.contains("effort.agents.<name>"),
+        "the effort component keys are not explained"
+    );
+}
+
+#[test]
+fn the_page_is_linked_from_the_index_and_the_readme() {
+    for file in ["docs/index.md", "README.md"] {
+        let text = fs::read_to_string(root().join(file)).unwrap();
+        assert!(
+            text.contains("reference/cli-and-config.md"),
+            "{file} does not link to {PAGE}"
+        );
+    }
+}
