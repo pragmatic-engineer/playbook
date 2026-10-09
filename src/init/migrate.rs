@@ -107,7 +107,35 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Idempotent,
             run: remove_config_hash_script,
         },
+        Migration {
+            id: "0009-adopt-late-config-json",
+            kind: Kind::Idempotent,
+            run: adopt_late_config_json,
+        },
     ]
+}
+
+/// A `config.json` written after the SQLite import (an older binary, or old
+/// docs) would be ignored without a word. Adopt it when it agrees with the
+/// store, and warn with its path when it does not. Runs on every init.
+fn adopt_late_config_json(ctx: &Ctx) -> Outcome {
+    let root = crate::common::paths::playbook_root_from(&ctx.home);
+    match crate::config::store::adopt_late_files(&root) {
+        Ok(report) if !report.conflicts.is_empty() => Outcome::Warn(
+            crate::config::adopt_late_config(&ctx.home)
+                .first()
+                .cloned()
+                .unwrap_or_default(),
+        ),
+        Ok(report) if !report.imported.is_empty() => Outcome::Repeat(StepReport::wired(
+            "config",
+            format!(
+                "adopted {} late config.json file(s) into the SQLite store",
+                report.imported.len()
+            ),
+        )),
+        _ => Outcome::Quiet,
+    }
 }
 
 fn memory_store_move(ctx: &Ctx) -> Outcome {
