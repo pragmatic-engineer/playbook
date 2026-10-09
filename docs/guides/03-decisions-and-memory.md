@@ -1,14 +1,12 @@
 # Decisions and Memory
 
-Two commands handle durable knowledge. `/playbook:adr` records architectural decisions with an optional execution blueprint. `/playbook:learn-project` analyses the repo and stores what it learns as memory facts. Both read from the same memory system, and both write only to git-ignored directories.
+Two commands keep durable knowledge. `/playbook:adr` records an architectural decision with an optional execution blueprint. `/playbook:learn-project` reads the repo and stores what it learns as memory facts. Both read the same memory.
 
-## /playbook:adr: Recording a Decision
+## Record a decision
 
-Use `/playbook:adr` when you're making a real architectural choice and want a durable record: what you chose, why, and why the alternatives lost. Use `/playbook:plan` when a decision's already made and you need an implementation plan only.
+Use `/playbook:adr` for a real architectural choice that you want on record: what you chose, why, and why the alternatives lost. Use `/playbook:plan` when the decision is made and you only need a plan.
 
-The practical split: `/playbook:adr` produces a decision record plus an optional execution blueprint. `/playbook:plan` produces a plan with no decision record attached.
-
-### The flow
+### Flow
 
 1. **Investigate.** Before drafting, the command explores the codebase, reads the memory store (global, org, and project facts), and summarises findings. It waits for your acknowledgement before moving on.
 2. **Draft.** Writes the record and (unless you pass `--record-only`) the execution blueprint. Both go under revision until you explicitly approve.
@@ -17,7 +15,7 @@ The practical split: `/playbook:adr` produces a decision record plus an optional
 
 ### File layout
 
-Records save to `docs/adr/` and are tracked in git, because a decision record is shared history. Each record follows the naming convention `NNNN-<kebab-title>.md`, with the date in the record's own front matter. The blueprint lands at the same base name with a `-blueprint.md` suffix, and the quality report at `-quality.md`.
+Records save to `docs/adr/` and are tracked in git. Each is `NNNN-<kebab-title>.md`, with the date in its front matter. The blueprint adds `-blueprint.md` and the quality report `-quality.md`.
 
 ```
 docs/adr/
@@ -26,7 +24,7 @@ docs/adr/
   0001-replace-polling-with-websocket-quality.md
 ```
 
-The blueprint is self-contained. Run `/playbook:implement docs/adr/0001-...-blueprint.md` to execute it.
+Run `/playbook:implement docs/adr/0001-...-blueprint.md` to execute a blueprint.
 
 ### Flags
 
@@ -37,9 +35,9 @@ The blueprint is self-contained. Run `/playbook:implement docs/adr/0001-...-blue
 
 During investigation, any durable conventions or gotchas discovered get written as project memory facts. After the gate passes, the decision itself and each rejected alternative (with reasoning) land in memory so future `/playbook:plan` and `/playbook:adr` runs don't re-propose them.
 
-## /playbook:learn-project: Building Project Knowledge
+## Learn a project
 
-`/playbook:learn-project` reads the repo broadly, distils what it finds into atomic facts, and writes them to memory. It's read-only on the project: the only writes are fact files under `~/.config/playbook/memory/`.
+`/playbook:learn-project` reads the repo broadly and distils atomic facts into memory. It never changes the project. The only writes are fact files under `~/.config/playbook/memory/`.
 
 Sources it reads (when available):
 - Git history: churn hotspots, commit conventions, contributors.
@@ -51,9 +49,9 @@ It collects in parallel, then analyses findings into clusters: architecture, con
 
 The result: one fact file per topic in `~/.config/playbook/memory/<owner>/<repo>/`. The single `~/.config/playbook/memory/memory.graph.json` rebuilds automatically after each fact save. Run with `--refresh` to re-derive and supersede existing facts. Run with `--graph-only` after hand-editing facts to rebuild the graph without re-collecting.
 
-## The Memory Model
+## The memory model
 
-One store, three scopes.
+One store, three scopes. For the design, see [the memory system](../concepts/02-memory-system.md).
 
 **Global**: flat files directly in `~/.config/playbook/memory/`. Facts that apply across all repos, like preferences, cross-project conventions, and external pointers.
 
@@ -61,7 +59,7 @@ One store, three scopes.
 
 **Project**: files under `~/.config/playbook/memory/<owner>/<repo>/`, where `<owner>/<repo>` is derived from `git remote get-url origin`. Facts true only inside that repo. The project index gets injected at session start, making those facts available without manual loading.
 
-The whole `~/.config/playbook/memory/` tree lives outside any repo checkout, so no facts are ever committed.
+The tree lives outside any checkout, so facts are never committed. Playbook never writes Claude Code's own memory. `memory.source` picks whether Claude's auto memory runs next to it, and `playbook memory import-claude` copies Claude's notes in, read-only on their side.
 
 All three scopes use the same format: one fact per file, kebab-case filename, with frontmatter and a structured body.
 
@@ -101,7 +99,7 @@ Project facts win over org, which wins over global, for that repo. Contradiction
 
 Ask: "Is this fact only useful inside this repo?" Yes goes to the project store. If no, ask whether it applies to every repo under your org but isn't universal: if so, it goes to org. Otherwise it goes to global. In the project or org store, don't name the repo or owner in the fact text. It's implicit.
 
-## Worked Example: A Trimmed ADR
+## Example: a trimmed ADR
 
 A decision record for a small, realistic choice.
 
