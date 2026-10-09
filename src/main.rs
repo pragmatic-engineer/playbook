@@ -16,7 +16,21 @@ use playbook::{
 };
 use std::io::{IsTerminal, Read};
 
+/// Restore the default SIGPIPE action so `playbook ... | head` ends quietly
+/// instead of panicking on a closed pipe (Rust ignores SIGPIPE by default).
+#[cfg(unix)]
+fn restore_sigpipe() {
+    // SAFETY: resetting a signal disposition at startup, before any thread exists.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn restore_sigpipe() {}
+
 fn main() {
+    restore_sigpipe();
     let cli = Cli::parse();
 
     match cli.command {

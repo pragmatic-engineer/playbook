@@ -173,3 +173,46 @@ fn the_guard_variable_blocks_a_nested_install() {
     assert_eq!(out.status.code(), Some(127));
     assert!(p.log().is_empty(), "{}", p.log());
 }
+
+#[test]
+fn the_worktree_hooks_fail_loudly_with_no_binary_and_never_install() {
+    if has_system_binary() {
+        eprintln!("SKIP: a playbook binary exists in a fixed system location");
+        return;
+    }
+    for hook in ["worktree-create", "worktree-remove"] {
+        let p = Plugin::new(&format!("shim-wt-{hook}"));
+        let home = p.work.dir("h");
+        let out = p.run(&home, None, &[], &["hook", hook]);
+        assert_eq!(out.status.code(), Some(127), "{hook}");
+        assert!(stdout(&out).is_empty(), "{hook}: stdout must stay empty");
+        let err = stderr(&out);
+        assert!(
+            err.contains("worktree hook cannot run") && err.contains("install.sh"),
+            "{err}"
+        );
+        assert_eq!(p.calls(), 0, "{hook} must not run the installer");
+    }
+}
+
+#[test]
+fn every_playbook_command_in_hooks_json_goes_through_the_shim() {
+    let raw = fs::read_to_string(repo_root().join("hooks/hooks.json")).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let mut seen = 0;
+    for groups in json["hooks"].as_object().unwrap().values() {
+        for group in groups.as_array().unwrap() {
+            for hook in group["hooks"].as_array().unwrap() {
+                let cmd = hook["command"].as_str().unwrap();
+                if cmd.contains("playbook") {
+                    seen += 1;
+                    assert!(
+                        cmd.starts_with("\"${CLAUDE_PLUGIN_ROOT}/bin/playbook\" "),
+                        "bare playbook in hooks.json: {cmd}"
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(seen, 3);
+}
