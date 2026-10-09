@@ -64,6 +64,8 @@ If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:ad
 
 In `ask` mode, behave exactly as this file describes.
 
+**Effort ceiling.** Also run `playbook effort resolve commands adr --json`. Its `ceiling` is the highest effort the user allows for this run (`null` means no limit). Hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. If the command fails, carry on with no ceiling.
+
 ## Execution Rules (MUST)
 
 1. **Execute every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive).** Don't simulate, summarise, or predict output; use the actual output to drive the next step.

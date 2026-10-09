@@ -24,6 +24,8 @@ If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:ad
 
 In `ask` mode, behave exactly as this file describes.
 
+**Effort ceiling.** Also run `playbook effort resolve commands address-pr-comments --json`. Its `ceiling` is the highest effort the user allows for this run (`null` means no limit). Hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. If the command fails, carry on with no ceiling.
+
 ## Discipline: receiving review feedback
 
 Code review is technical evaluation, not emotional performance. Apply this loop to every comment before deciding fix/reply/skip:
