@@ -1,6 +1,6 @@
 # Playbook docs
 
-How to use and extend this Claude Code config. The [README](../README.md) covers install plus a short summary of every command and skill. These pages go deeper: why the config is shaped the way it is, real workflows end to end, how to add your own pieces, and how the machine works underneath.
+How to use and extend this Claude Code config. The [README](../README.md) covers install, the launcher and a short summary of every command. These pages go deeper: why the config is shaped the way it is, real workflows end to end, how to add your own pieces, and how the machine works underneath.
 
 Read them in order, or jump to what you need.
 
@@ -21,6 +21,7 @@ Task-oriented workflows.
 - [Review and PR flow](guides/02-review-and-pr-flow.md): commit, review, and work through feedback.
 - [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/playbook:adr`, build project knowledge with `/playbook:learn-project`.
 - [Config keys](guides/04-config-keys.md): every `playbook config` key with its default, allowed values and what it does.
+- [Auto mode](guides/05-auto-mode.md): run commands without questions, with a spend cap.
 - [CLI and config reference](reference/cli-and-config.md): every command, flag and config key, generated from the code so it cannot drift.
 
 ## Authoring
