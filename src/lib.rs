@@ -21,6 +21,7 @@ pub mod init;
 pub mod json;
 pub mod manifest;
 pub mod mode;
+pub mod models;
 pub mod pr;
 pub mod release;
 pub mod sanitize;
