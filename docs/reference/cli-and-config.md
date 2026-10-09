@@ -602,7 +602,7 @@ These are the mechanical steps behind `/playbook:create-pull-request`.
 
 Example: `playbook pr prepare --base main`
 
-Subcommands: `ci-wait`, `comments`, `create`, `land-wait`, `merge`, `prepare`, `review-triage`, `rules`
+Subcommands: `ci-wait`, `comments`, `create`, `land-wait`, `merge`, `prepare`, `review-triage`, `rules`, `stack`
 
 ### `playbook pr ci-wait`
 
@@ -679,6 +679,14 @@ Cut the skill rules a PR title and body need
 Reads the writing-style and engineering-standards skills under `CLAUDE_PLUGIN_ROOT`, writes four files under `/tmp`, checks each, and prints their paths. A failed check prints `ERROR: ...` and exits 1.
 
 - `--plugin-root <PLUGIN_ROOT>`: Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
+
+### `playbook pr stack`
+
+Find the pull requests stacked with a PR
+
+Reads the GitHub stack API, then falls back to the branch chain. Takes the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`). Prints a summary, or JSON with `--json`.
+
+- `<ARGS>`: The command's arguments, as one string
 
 ### `playbook release`
 
