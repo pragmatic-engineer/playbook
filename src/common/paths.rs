@@ -68,6 +68,9 @@ const GIT_TOPLEVEL_RETRY_DELAY: Duration = Duration::from_millis(50);
 /// `git -C <dir> rev-parse --show-toplevel`, trimmed. Empty on any failure,
 /// including a timeout. Never panics.
 fn git_toplevel(dir: &Path) -> String {
+    if let Some(top) = crate::common::gitfacts::toplevel(dir) {
+        return top.to_string_lossy().into_owned();
+    }
     git_toplevel_with(
         dir,
         GIT_TOPLEVEL_ATTEMPTS,
