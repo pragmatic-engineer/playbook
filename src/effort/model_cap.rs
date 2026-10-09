@@ -35,7 +35,7 @@ pub const OPT_INS: [(&str, &str, &str); 1] = [(
 
 /// Whether `model` (an alias such as `haiku` or an id such as
 /// `claude-haiku-5-5`) is a Haiku model.
-pub fn is_haiku(model: &str) -> bool {
+fn is_haiku(model: &str) -> bool {
     model
         .trim_matches(['"', '\''])
         .to_ascii_lowercase()

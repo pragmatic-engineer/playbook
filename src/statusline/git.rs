@@ -65,7 +65,7 @@ pub fn inspect(cwd: &str) -> Option<GitInfo> {
 }
 
 /// The same facts, every one from a `git` child process.
-pub fn inspect_with_git(cwd: &str) -> Option<GitInfo> {
+fn inspect_with_git(cwd: &str) -> Option<GitInfo> {
     if !clean(git(cwd, &["rev-parse", "--git-dir"])) {
         return None;
     }

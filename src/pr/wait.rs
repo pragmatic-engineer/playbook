@@ -39,7 +39,7 @@ impl Counts {
 /// The verdict for one read, or `None` to keep waiting. Order matters: a
 /// failure wins over pending checks, and cancelled only counts once nothing
 /// is pending.
-pub fn ci_verdict(c: Counts) -> Option<&'static str> {
+fn ci_verdict(c: Counts) -> Option<&'static str> {
     if c.total == 0 {
         Some("NONE")
     } else if c.fail > 0 {
@@ -81,7 +81,7 @@ pub fn ci_wait(
 
 /// One PR status line, `state mergeState review armed`, tab separated, as the
 /// land loop reads it.
-pub fn land_line(view: &Value) -> String {
+fn land_line(view: &Value) -> String {
     let s = |k: &str| view.get(k).and_then(Value::as_str).unwrap_or("");
     let review = match s("reviewDecision") {
         "" => "-",
@@ -102,7 +102,7 @@ pub fn land_line(view: &Value) -> String {
 }
 
 /// The verdict for one status line, or `None` to keep waiting.
-pub fn land_verdict(line: &str) -> Option<&'static str> {
+fn land_verdict(line: &str) -> Option<&'static str> {
     if line.starts_with("MERGED") {
         Some("MERGED")
     } else if line.contains("REVIEW_REQUIRED") {

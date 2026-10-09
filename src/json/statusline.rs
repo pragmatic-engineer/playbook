@@ -101,7 +101,7 @@ pub(crate) fn session_values(json: &str, pwd_env: &str) -> [(&'static str, Value
 
 /// Case-insensitive match against the failed conclusions and states the real
 /// filter's `is_failed` def names (`statusline.sh:322-324`).
-pub fn is_failed(conclusion: &str, state: &str) -> bool {
+fn is_failed(conclusion: &str, state: &str) -> bool {
     matches!(
         conclusion.to_ascii_lowercase().as_str(),
         "failure" | "cancelled" | "timed_out" | "action_required" | "startup_failure" | "stale"
@@ -110,7 +110,7 @@ pub fn is_failed(conclusion: &str, state: &str) -> bool {
 
 /// Case-insensitive match against the running statuses and states the real
 /// filter's `is_running` def names (`statusline.sh:325-327`).
-pub fn is_running(status: &str, state: &str) -> bool {
+fn is_running(status: &str, state: &str) -> bool {
     matches!(
         status.to_ascii_lowercase().as_str(),
         "in_progress" | "queued" | "pending" | "waiting"

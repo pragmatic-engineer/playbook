@@ -126,7 +126,7 @@ impl TriageRunner for ClaudeRunner {
 }
 
 /// Counts the changed files and lines from a unified diff.
-pub fn diff_facts(diff: &str) -> (Vec<String>, u64, u64) {
+fn diff_facts(diff: &str) -> (Vec<String>, u64, u64) {
     let (mut files, mut added, mut removed, mut in_hunk) = (Vec::new(), 0, 0, false);
     for line in diff.lines() {
         if let Some(rest) = line.strip_prefix("diff --git a/") {

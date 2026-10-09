@@ -14,18 +14,18 @@ use std::time::{Duration, Instant};
 pub const EVENT_STREAM: &str = "text/event-stream";
 /// Streams open at once; the next one gets a 503.
 pub const MAX_STREAMS: usize = 4;
-pub const TICK: Duration = Duration::from_secs(2);
+const TICK: Duration = Duration::from_secs(2);
 /// A stream ends after this long and the page reconnects.
-pub const MAX_LIFETIME: Duration = Duration::from_secs(30 * 60);
+const MAX_LIFETIME: Duration = Duration::from_secs(30 * 60);
 /// Younger than a tick, so each tick is fresh, yet streams ticking together share one.
 const CACHE_TTL: Duration = Duration::from_millis(1500);
 
 /// A write that has not finished after this long means the client stopped
 /// reading with the socket still open: the stream ends and its slot is freed.
-pub const WRITE_DEADLINE: Duration = Duration::from_secs(30);
+const WRITE_DEADLINE: Duration = Duration::from_secs(30);
 /// Writers still blocked on an abandoned socket. Past this many, new streams
 /// get a 503, so a client that opens and stalls streams cannot pile up threads.
-pub const MAX_STUCK: usize = 16;
+const MAX_STUCK: usize = 16;
 
 /// The clocks of one stream. Defaults are the production values; the
 /// `PLAYBOOK_LIVE_*_MS` variables shorten them so tests need not wait.

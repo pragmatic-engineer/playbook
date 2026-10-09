@@ -51,7 +51,7 @@ fn last_segment(path: &str) -> String {
 /// Rules that need no filesystem, so they also work once a worktree is gone:
 /// a `.claude/worktrees/<name>` or `.git/<anything>` path belongs to the repo
 /// above it, and playbook's own `repos/<owner>/<repo>/...` storage names it.
-pub fn repo_from_markers(cwd: &str) -> Option<String> {
+fn repo_from_markers(cwd: &str) -> Option<String> {
     for marker in [CLAUDE_WORKTREES, GIT_DIR] {
         if let Some((root, _)) = cwd.split_once(marker) {
             return named(last_segment(root));

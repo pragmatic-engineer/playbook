@@ -113,7 +113,7 @@ fn agent_file(name: &str, def: &Value) -> String {
 
 /// Write the variants as a plugin under `temp` and return its directory. The
 /// name carries the process id so two sessions never share one.
-pub fn write_plugin(map: &Map<String, Value>, temp: &Path) -> io::Result<PathBuf> {
+fn write_plugin(map: &Map<String, Value>, temp: &Path) -> io::Result<PathBuf> {
     let dir = temp.join(format!("{PLUGIN_NAME}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join(".claude-plugin"))?;

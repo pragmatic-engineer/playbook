@@ -34,7 +34,7 @@ fn ok(program: &str, args: &[&str], dir: &Path) -> bool {
 }
 
 /// `owner/name` from an origin URL such as `git@host:owner/name.git`.
-pub fn repo_from_url(url: &str) -> String {
+fn repo_from_url(url: &str) -> String {
     let url = url.trim().trim_end_matches(".git");
     let mut parts = url.rsplit(['/', ':']);
     let name = parts.next().unwrap_or("");
@@ -44,7 +44,7 @@ pub fn repo_from_url(url: &str) -> String {
 
 /// `uniq -c | sort -rn | head` over the project keys in `log`: the part of
 /// each `ABC-123` before the dash, with its count, highest first.
-pub fn jira_histogram(log: &str, limit: usize) -> Vec<(usize, String)> {
+fn jira_histogram(log: &str, limit: usize) -> Vec<(usize, String)> {
     let re = crate::common::re::static_regex(r"[A-Z][A-Z0-9]+-[0-9]+");
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for m in re.find_iter(log) {

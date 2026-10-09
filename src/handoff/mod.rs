@@ -17,11 +17,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Age past which a handoff is stale: dropped without injecting, and pruned
 /// from `used/`.
-pub const MAX_AGE_DAYS: u64 = 14;
+const MAX_AGE_DAYS: u64 = 14;
 
 /// Most handoffs one SessionStart injects, so a busy directory cannot flood
 /// the context.
-pub const MAX_INJECTED: usize = 3;
+const MAX_INJECTED: usize = 3;
 
 const USED_DIR: &str = "used";
 const SECS_PER_DAY: u64 = 86_400;
@@ -51,7 +51,7 @@ pub fn current_slug() -> String {
 
 /// The key for `--dir`: the path as given made absolute, never canonicalized,
 /// so it matches the `$PWD` a session in that directory carries.
-pub fn slug_for_dir(dir: &str) -> Result<String, String> {
+fn slug_for_dir(dir: &str) -> Result<String, String> {
     let given = Path::new(dir);
     let absolute = if given.is_absolute() {
         given.to_path_buf()
@@ -70,7 +70,7 @@ pub fn slug_for_dir(dir: &str) -> Result<String, String> {
 /// `<slug>-<epoch>-<pid>.md`. The rest after the slug must be two digit runs,
 /// so a sibling or child directory whose slug merely starts with ours never
 /// matches.
-pub fn is_handoff_for(name: &str, slug: &str) -> bool {
+fn is_handoff_for(name: &str, slug: &str) -> bool {
     let Some(rest) = name
         .strip_prefix(slug)
         .and_then(|r| r.strip_prefix('-'))
@@ -137,13 +137,7 @@ fn cutoff(now: SystemTime) -> SystemTime {
 /// Writes `text` for `slug`. A temp file in the same directory plus a rename
 /// keeps a reader from ever seeing half a handoff. Never overwrites: a name
 /// already taken moves the epoch forward by one second.
-pub fn save_in(
-    dir: &Path,
-    slug: &str,
-    text: &str,
-    epoch: u64,
-    pid: u32,
-) -> Result<PathBuf, String> {
+fn save_in(dir: &Path, slug: &str, text: &str, epoch: u64, pid: u32) -> Result<PathBuf, String> {
     if text.trim().is_empty() {
         return Err(
             "empty handoff: pipe the handoff markdown to this command on stdin".to_string(),
@@ -253,7 +247,7 @@ fn render(entry: &Entry, label: &str, now: SystemTime) -> String {
 }
 
 /// What `playbook handoff show` prints. Never deletes or moves anything.
-pub fn show_in(dir: &Path, slug: &str, all: bool, now: SystemTime) -> String {
+fn show_in(dir: &Path, slug: &str, all: bool, now: SystemTime) -> String {
     let waiting = unread(dir, slug);
     if !waiting.is_empty() {
         let shown = if all { waiting.len() } else { 1 };
@@ -366,7 +360,7 @@ fn field(value: &str) -> String {
 /// Appends one line per SessionStart: time, source, session id, directory
 /// key, handoffs injected. Best-effort and owner-only; the file is cut back
 /// to the last 200 lines once it passes 300. Never fails the hook.
-pub fn log_start_in(
+fn log_start_in(
     path: &Path,
     now_secs: u64,
     source: &str,
@@ -428,7 +422,7 @@ pub fn log_start(source: &str, session_id: &str, slug: &str, injected: usize) {
 
 /// What `playbook handoff status` prints: the last few SessionStart events
 /// and how many handoffs wait or were loaded for this directory.
-pub fn status_in(dir: &Path, log: &Path, slug: &str) -> String {
+fn status_in(dir: &Path, log: &Path, slug: &str) -> String {
     let text = fs::read_to_string(log).unwrap_or_default();
     let rows: Vec<Vec<&str>> = text
         .lines()

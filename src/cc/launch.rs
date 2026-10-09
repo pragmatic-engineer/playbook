@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Env var naming the file the launcher writes the entered worktree path to.
-pub const CD_FILE_ENV: &str = "PLAYBOOK_CC_CD_FILE";
+const CD_FILE_ENV: &str = "PLAYBOOK_CC_CD_FILE";
 
 const SYSTEM_PROMPT_REL: &str = "prompts/SYSTEM_PROMPT.md";
 
@@ -41,7 +41,7 @@ fn takes_value(opt: &str) -> bool {
 
 /// Splits leading flags (with their values) from the rest; the subcommand is
 /// the first non-flag token, so `ccd clean` works.
-pub fn split_flags(args: &[String]) -> (Vec<String>, Vec<String>) {
+fn split_flags(args: &[String]) -> (Vec<String>, Vec<String>) {
     let mut flags = Vec::new();
     let mut i = 0;
     while i < args.len() && args[i].starts_with('-') {

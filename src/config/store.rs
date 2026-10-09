@@ -48,7 +48,7 @@ pub fn db_path(root: &Path) -> PathBuf {
 /// Whether there is anything to read: a database, or legacy JSON files that
 /// the first open would import. When false, every key resolves to its default
 /// and nothing needs creating.
-pub fn has_data(root: &Path) -> bool {
+fn has_data(root: &Path) -> bool {
     db_path(root).exists()
         || super::global_config_path(root).exists()
         || super::any_scoped_config(root)

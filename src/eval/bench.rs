@@ -142,7 +142,7 @@ pub enum Outcome {
 // ---------- loading ----------
 
 /// The prompt body: everything after the second `---` line of an agent file.
-pub fn agent_body(text: &str) -> String {
+fn agent_body(text: &str) -> String {
     let mut seen = 0;
     let mut out = Vec::new();
     for line in text.lines() {
@@ -159,7 +159,7 @@ pub fn agent_body(text: &str) -> String {
 
 /// Every case under `path`: one `.json` file or a directory of them. A file
 /// holds a list of cases or `{"cases": [...]}`.
-pub fn load_cases(path: &Path, repo_root: &Path) -> Result<Vec<Loaded>, String> {
+fn load_cases(path: &Path, repo_root: &Path) -> Result<Vec<Loaded>, String> {
     let mut files = Vec::new();
     if path.is_dir() {
         let entries = std::fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -243,7 +243,7 @@ fn resolve(case: Case, dir: &Path, repo_root: &Path) -> Result<Loaded, String> {
 
 /// Parses a reply as JSON, retrying on the outermost `[...]` or `{...}` span
 /// because models wrap the answer in fences or prose.
-pub fn parse_json(text: &str) -> Option<Value> {
+fn parse_json(text: &str) -> Option<Value> {
     let t = text.trim();
     if let Ok(v) = serde_json::from_str::<Value>(t) {
         return Some(v);
@@ -269,7 +269,7 @@ pub fn parse_json(text: &str) -> Option<Value> {
 }
 
 /// The first fenced code block of a reply, else the reply itself.
-pub fn code_block(text: &str) -> String {
+fn code_block(text: &str) -> String {
     if let Some(start) = text.find("```") {
         let rest = &text[start + 3..];
         let after_lang = rest.find('\n').map(|i| &rest[i + 1..]).unwrap_or(rest);
@@ -525,7 +525,7 @@ fn expected_output_tokens(effort: &str) -> u64 {
 /// A conservative cost estimate for one call. Input tokens are about four
 /// characters each, plus a fixed system overhead. `None` for a model with no
 /// price in the table.
-pub fn estimate_call(model: &str, effort: &str, prompt_chars: usize) -> Option<f64> {
+fn estimate_call(model: &str, effort: &str, prompt_chars: usize) -> Option<f64> {
     let tokens = Tokens {
         input: (prompt_chars as u64) / 4 + 3000,
         output: expected_output_tokens(effort),
@@ -639,7 +639,7 @@ pub fn plan<'a>(cases: &'a [Loaded], opts: &Options) -> Vec<(&'a Loaded, String,
 }
 
 /// The estimated cost of `jobs`, or the first model with no price.
-pub fn estimate_total(jobs: &[(&Loaded, String, String, u32)]) -> Result<f64, String> {
+fn estimate_total(jobs: &[(&Loaded, String, String, u32)]) -> Result<f64, String> {
     let mut total = 0.0;
     for (c, m, e, _) in jobs {
         let chars = c.system.len() + c.user.len();
@@ -777,7 +777,7 @@ fn groups(cells: &[Cell]) -> BTreeMap<GroupKey, Group> {
     map
 }
 
-pub fn render_table(cells: &[Cell], spent: f64) -> String {
+fn render_table(cells: &[Cell], spent: f64) -> String {
     let mut out = String::new();
     out.push_str("role\tmodel\teffort\tpass\tcost/call\twall(s)\terrored\tskipped\n");
     for ((role, model, effort), g) in groups(cells) {
@@ -816,7 +816,7 @@ pub fn render_table(cells: &[Cell], spent: f64) -> String {
     out
 }
 
-pub fn render_json(cells: &[Cell], spent: f64, cap: f64) -> String {
+fn render_json(cells: &[Cell], spent: f64, cap: f64) -> String {
     let rows: Vec<Value> = cells
         .iter()
         .map(|c| match &c.outcome {

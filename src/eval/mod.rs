@@ -38,7 +38,7 @@ impl Verdict {
 }
 
 /// The prompt body: everything after the second `---` line of the agent file.
-pub fn prompt_body(agent_file: &str) -> String {
+fn prompt_body(agent_file: &str) -> String {
     let mut seen = 0;
     let mut body = Vec::new();
     for line in agent_file.lines() {
@@ -55,7 +55,7 @@ pub fn prompt_body(agent_file: &str) -> String {
 
 /// Parses a classifier reply as JSON, retrying on the span from the first
 /// `{` to the last `}` because models wrap the map in fences or prose.
-pub fn parse_tier_map(response: &str) -> Option<Value> {
+fn parse_tier_map(response: &str) -> Option<Value> {
     if let Ok(v) = serde_json::from_str::<Value>(response.trim()) {
         return Some(v);
     }

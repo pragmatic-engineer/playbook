@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 /// The task kinds, in the order `playbook route --help` lists them.
-pub const KINDS: [&str; 6] = [
+const KINDS: [&str; 6] = [
     "mechanical",
     "classify",
     "check",
@@ -25,7 +25,7 @@ pub const KINDS: [&str; 6] = [
 ];
 
 /// The config key that says what happens when a route needs approval.
-pub const ESCALATE_KEY: &str = "routing.escalate";
+const ESCALATE_KEY: &str = "routing.escalate";
 
 /// One row of the table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,7 +121,7 @@ pub fn escalate(home: &Path) -> Escalate {
 
 /// Why a route needs the user's approval, or `None`. Three triggers: the top
 /// model, the high implement tier, and a task that already failed twice.
-pub fn approval_reason(kind: &str, route: &Route, failures: u32) -> Option<&'static str> {
+fn approval_reason(kind: &str, route: &Route, failures: u32) -> Option<&'static str> {
     if route.model == "opus" {
         return Some("runs on the top model");
     }

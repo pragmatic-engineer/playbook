@@ -60,7 +60,7 @@ impl fmt::Display for Verdict {
 /// but carries a value outside the four keywords is not counted as a match:
 /// scanning continues and an earlier valid match still stands. `None` is
 /// returned when the whole input has no valid match at all.
-pub fn extract_verdict(raw: &str) -> Option<Verdict> {
+fn extract_verdict(raw: &str) -> Option<Verdict> {
     let mut result = None;
     for line in raw.lines() {
         let stripped: String = line.chars().filter(|c| *c != '#' && *c != '*').collect();

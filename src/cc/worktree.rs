@@ -1022,7 +1022,7 @@ pub fn make_plan(
 ///
 /// The two `show-ref --verify` probes use fully qualified refs so a tag or a
 /// remote ref sharing the branch's name cannot be mistaken for a local branch.
-pub fn make_worktree(repo_root: &Path, target: &Path, branch: &str, remote: &str) -> CreateOutcome {
+fn make_worktree(repo_root: &Path, target: &Path, branch: &str, remote: &str) -> CreateOutcome {
     let local_exists = git::ok(
         repo_root,
         &[

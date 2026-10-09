@@ -32,7 +32,7 @@ pub fn escape(text: &str) -> String {
 /// `claude-haiku-4-5-20251001` shows as `haiku-4-5` on an axis: the vendor
 /// prefix and a trailing eight digit date add nothing there. The tooltip keeps
 /// the full name.
-pub fn display_label(label: &str) -> String {
+fn display_label(label: &str) -> String {
     let name = label.strip_prefix("claude-").unwrap_or(label);
     match name.rsplit_once('-') {
         Some((head, tail)) if tail.len() == 8 && tail.bytes().all(|b| b.is_ascii_digit()) => {

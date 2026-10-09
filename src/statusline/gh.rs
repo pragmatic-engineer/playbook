@@ -107,7 +107,7 @@ fn is_executable(_: &std::fs::Metadata) -> bool {
 }
 
 /// File mtime in epoch seconds, 0 when it cannot be read.
-pub fn file_mtime(p: &Path) -> i64 {
+fn file_mtime(p: &Path) -> i64 {
     std::fs::metadata(p)
         .and_then(|m| m.modified())
         .ok()

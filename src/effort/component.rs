@@ -56,17 +56,17 @@ impl Kind {
 }
 
 /// The config key that holds a component's ceiling.
-pub fn config_key(kind: Kind, name: &str) -> String {
+fn config_key(kind: Kind, name: &str) -> String {
     format!("effort.{}.{name}", kind.plural())
 }
 
 /// The `effort:` value in a file's frontmatter, if any.
-pub fn shipped_effort(path: &Path) -> Option<String> {
+fn shipped_effort(path: &Path) -> Option<String> {
     frontmatter_value(path, "effort:")
 }
 
 /// The `model:` value in a file's frontmatter, if any.
-pub fn shipped_model(path: &Path) -> Option<String> {
+fn shipped_model(path: &Path) -> Option<String> {
     frontmatter_value(path, "model:")
 }
 
@@ -109,7 +109,7 @@ fn prefixed(file: &str, plugin: Option<&str>) -> String {
 }
 
 /// The variant names in `VARIANTS_ENV`.
-pub fn available_variants() -> Vec<String> {
+fn available_variants() -> Vec<String> {
     std::env::var(VARIANTS_ENV)
         .unwrap_or_default()
         .split(',')
@@ -407,7 +407,7 @@ pub fn components(root: &Path) -> Vec<(Kind, String)> {
 
 /// Component keys set in the global config that match no component under
 /// `root`, as `effort.<kind>.<name>`.
-pub fn stale_keys(home: &Path, root: &Path) -> Vec<String> {
+fn stale_keys(home: &Path, root: &Path) -> Vec<String> {
     let store_root = crate::common::paths::playbook_root_from(home);
     let Ok(keys) = config::store::global_keys(&store_root) else {
         return Vec::new();

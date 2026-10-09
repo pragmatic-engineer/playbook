@@ -9,7 +9,7 @@ use std::path::Path;
 
 /// The next four-digit number: one above the highest `NNNN` prefix among the
 /// names in `dir`, or `0001` when there are none.
-pub fn next_number(dir: &Path) -> String {
+fn next_number(dir: &Path) -> String {
     let highest = fs::read_dir(dir)
         .into_iter()
         .flatten()

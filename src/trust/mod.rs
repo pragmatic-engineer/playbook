@@ -26,7 +26,7 @@ pub fn run(path: &str) -> Result<(), String> {
 }
 
 /// Same as `run` with an explicit home, so tests never read the real `$HOME`.
-pub fn run_with_home(home: &Path, path: &str) -> Result<(), String> {
+fn run_with_home(home: &Path, path: &str) -> Result<(), String> {
     if home.as_os_str().is_empty() {
         return Ok(());
     }

@@ -101,7 +101,7 @@ fn one_line(s: &str) -> String {
 }
 
 /// The playbook fact text for one Claude Code note.
-pub fn to_playbook_fact(fact: &ClaudeFact) -> String {
+fn to_playbook_fact(fact: &ClaudeFact) -> String {
     let stem = fact.file_name.trim_end_matches(".md");
     let (fields, body) = split_frontmatter(&fact.content);
     let get = |k: &str| {
