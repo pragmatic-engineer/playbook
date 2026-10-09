@@ -15,6 +15,8 @@
 //! Claude Code's is as low or lower, or playbook is `auto` or `max`, the launcher adds
 //! nothing. A session started without the launcher gets no playbook ceiling.
 
+pub mod component;
+
 use crate::config::{self, write};
 use serde_json::Value;
 use std::fs;
@@ -27,7 +29,7 @@ pub const KEY: &str = "maxEffortLevel";
 pub const LEVELS: [&str; 6] = ["auto", "low", "medium", "high", "xhigh", "max"];
 
 /// Position of `level` from lowest to highest, `None` for `auto` or unknown.
-fn rank(level: &str) -> Option<usize> {
+pub(crate) fn rank(level: &str) -> Option<usize> {
     LEVELS.iter().skip(1).position(|l| *l == level)
 }
 
@@ -37,7 +39,7 @@ fn playbook_ceiling(level: &str) -> Option<&str> {
 }
 
 /// The lower of two levels. An unknown or missing side loses.
-fn lower<'a>(a: Option<&'a str>, b: Option<&'a str>) -> Option<&'a str> {
+pub(crate) fn lower<'a>(a: Option<&'a str>, b: Option<&'a str>) -> Option<&'a str> {
     let ra = a.and_then(|l| rank(l).map(|r| (l, r)));
     let rb = b.and_then(|l| rank(l).map(|r| (l, r)));
     match (ra, rb) {
