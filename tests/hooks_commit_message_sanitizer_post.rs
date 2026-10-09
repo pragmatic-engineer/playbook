@@ -407,6 +407,11 @@ fn git_spy(lab: &Lab, when: &str, before: &str) {
         real = real_git(),
     );
     lab.write_stub("git", &script);
+    // Run the new shim once before the hook does, outside the hook's own
+    // wait for git (see `warm_up`), then drop the call that warm-up logged.
+    #[cfg(unix)]
+    auto_env::warm_up(&lab.bin.join("git"));
+    let _ = fs::remove_file(&log);
 }
 
 fn git_calls(lab: &Lab) -> String {

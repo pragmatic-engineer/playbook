@@ -73,11 +73,17 @@ build:
 check: build
     cargo fmt --check
     cargo clippy --all-targets -- -D warnings
-    cargo test
+    just test
     git ls-files '*.sh' | xargs shellcheck --severity=warning
     @for f in $(git ls-files '*.sh'); do bash -n "$f"; done
     {{ bin }} settings check "{{ out }}" "{{ perms }}" .
     {{ bin }} manifest check .
+
+# Run the test suite with cargo-nextest (install: `cargo install cargo-nextest --locked`),
+# which schedules tests across every test binary at once. Doctests run apart.
+test *args:
+    cargo nextest run {{ args }}
+    cargo test --doc
 
 # Run every behavioural shell suite exactly the way CI does.
 test-shell:
