@@ -864,6 +864,16 @@ pub enum PrCommand {
         #[arg(default_value = "")]
         args: String,
     },
+    /// Find the pull requests stacked with a PR
+    ///
+    /// Reads the GitHub stack API, then falls back to the branch chain. Takes
+    /// the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`).
+    /// Prints a summary, or JSON with `--json`.
+    Stack {
+        /// The command's arguments, as one string
+        #[arg(default_value = "")]
+        args: String,
+    },
     /// Wait for a PR's required checks to finish
     ///
     /// Prints a `checks total=.. pending=.. fail=.. cancel=..` line per read,
