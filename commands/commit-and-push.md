@@ -116,7 +116,7 @@ playbook commit run [-a] [--auto] [--no-signoff] <<'MSG'
 MSG
 ```
 
-It commits, adding `--signoff` unless `commit.signOff` is `false`, `--no-signoff` was passed, the message already has a `Signed-off-by` line, or a `prepare-commit-msg` or `commit-msg` hook writes one itself (a hook that only checks for the trailer does not count). It signs whenever `user.signingkey` is set. It then rebases onto `origin/main` or `origin/master` when behind, refuses to push a branch with a merge commit, and pushes. A rejected plain push is never retried as a force. A `--force-with-lease` is used only when this run amended or rebased, and never in auto mode, where that case stops with `PARKED`. If the commit itself fails (a hook), it stops and pushes nothing. It prints `Pushed: <commit> -> origin/<branch>` on success.
+It commits, adding `--signoff` unless `commit.signOff` is `false`, `--no-signoff` was passed, the message already has a `Signed-off-by` line, or a `prepare-commit-msg` or `commit-msg` hook writes one itself (a hook that only checks for the trailer does not count). It signs (`--gpg-sign`) whenever `user.signingkey` is set, whatever `commit.signOff` says. It then rebases onto `origin/main` or `origin/master` when behind, refuses to push a branch with a merge commit, and pushes. A rejected plain push is never retried as a force. A `--force-with-lease` is used only when this run amended or rebased, and never in auto mode, where that case stops with `PARKED`. If the commit itself fails (a hook), it stops and pushes nothing. It prints `Pushed: <commit> -> origin/<branch>` on success.
 
 ## Notes
 
