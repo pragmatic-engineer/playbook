@@ -1,0 +1,68 @@
+[
+ {
+  "id": "rt-weak-order",
+  "role": "test-reviewer",
+  "agent": "agents/test-reviewer.md",
+  "task": "Evaluate the quality of this test against the engineering-standards testing requirements (regression-pinning, boundary coverage, assertion strength, mock quality, flakiness). Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"reason\":\"...\"}. FAIL when the test would not catch a realistic regression in the code under test, PASS when it would.",
+  "input": "Code under test (src/common/par.rs):\npub fn map<I, T, F>(items: &[I], cap: usize, f: F) -> Vec<T>\nwhere\n    I: Sync,\n    T: Send,\n    F: Fn(&I) -> T + Sync,\n{\n    let workers = cap.max(1).min(items.len());\n    if workers <= 1 {\n        return items.iter().map(f).collect();\n    }\n    let next = AtomicUsize::new(0);\n    let slots: Vec<Mutex<Option<T>>> = items.iter().map(|_| Mutex::new(None)).collect();\n    std::thread::scope(|scope| {\n        for _ in 0..workers {\n            scope.spawn(|| loop {\n                let i = next.fetch_add(1, Ordering::Relaxed);\n                let Some(item) = items.get(i) else { break };\n                let value = f(item);\n                *slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(value);\n            });\n        }\n    });\n    slots\n        .into_iter()\n        .map(|slot| {\n            slot.into_inner()\n                .unwrap_or_else(|e| e.into_inner())\n                .expect(\"every slot is filled before the scope ends\")\n        })\n        .collect()\n}\n\nTest (src/common/par.rs):\n    fn results_keep_input_order_whatever_the_finish_order() {\n        let items: Vec<u64> = (0..12).collect();\n        let out = map(&items, 4, |n| {\n            std::thread::sleep(Duration::from_millis((12 - n) * 2));\n            n * 10\n        });\n        assert_eq!(out.len(), 12);\n    }",
+  "score": {
+   "kind": "verdict",
+   "want": "FAIL"
+  }
+ },
+ {
+  "id": "rt-no-cap-check",
+  "role": "test-reviewer",
+  "agent": "agents/test-reviewer.md",
+  "task": "Evaluate the quality of this test against the engineering-standards testing requirements (regression-pinning, boundary coverage, assertion strength, mock quality, flakiness). Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"reason\":\"...\"}. FAIL when the test would not catch a realistic regression in the code under test, PASS when it would.",
+  "input": "Code under test (src/common/par.rs):\npub fn map<I, T, F>(items: &[I], cap: usize, f: F) -> Vec<T>\nwhere\n    I: Sync,\n    T: Send,\n    F: Fn(&I) -> T + Sync,\n{\n    let workers = cap.max(1).min(items.len());\n    if workers <= 1 {\n        return items.iter().map(f).collect();\n    }\n    let next = AtomicUsize::new(0);\n    let slots: Vec<Mutex<Option<T>>> = items.iter().map(|_| Mutex::new(None)).collect();\n    std::thread::scope(|scope| {\n        for _ in 0..workers {\n            scope.spawn(|| loop {\n                let i = next.fetch_add(1, Ordering::Relaxed);\n                let Some(item) = items.get(i) else { break };\n                let value = f(item);\n                *slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(value);\n            });\n        }\n    });\n    slots\n        .into_iter()\n        .map(|slot| {\n            slot.into_inner()\n                .unwrap_or_else(|e| e.into_inner())\n                .expect(\"every slot is filled before the scope ends\")\n        })\n        .collect()\n}\n\nTest (src/common/par.rs):\n    fn no_more_than_the_cap_run_at_once() {\n        let live = AtomicUsize::new(0);\n        let peak = AtomicUsize::new(0);\n        let items = [0u8; 16];\n        map(&items, 3, |_| {\n            let now = live.fetch_add(1, Ordering::SeqCst) + 1;\n            peak.fetch_max(now, Ordering::SeqCst);\n            std::thread::sleep(Duration::from_millis(10));\n            live.fetch_sub(1, Ordering::SeqCst);\n        });\n        assert!(peak.load(Ordering::SeqCst) >= 2, \"work never overlapped\");\n    }",
+  "score": {
+   "kind": "verdict",
+   "want": "FAIL"
+  }
+ },
+ {
+  "id": "rt-half-edit",
+  "role": "test-reviewer",
+  "agent": "agents/test-reviewer.md",
+  "task": "Evaluate the quality of this test against the engineering-standards testing requirements (regression-pinning, boundary coverage, assertion strength, mock quality, flakiness). Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"reason\":\"...\"}. FAIL when the test would not catch a realistic regression in the code under test, PASS when it would.",
+  "input": "Code under test (src/common/config_hash.rs):\npub fn config_hash(claude_home: &Path) -> String {\n    let mut hasher = Sha256::new();\n    if let Ok(settings) = fs::read(claude_home.join(\"settings.json\")) {\n        hasher.update(&settings);\n    }\n    let mut scripts = Vec::new();\n    collect_scripts(&claude_home.join(\"hooks\"), &mut scripts);\n    scripts.sort_by(|a, b| path_bytes(a).cmp(path_bytes(b)));\n    for script in scripts {\n        if let Ok(body) = fs::read(&script) {\n            hasher.update(&body);\n        }\n    }\n    let hex: String = hasher\n        .finalize()\n        .iter()\n        .map(|b| format!(\"{b:02x}\"))\n        .collect();\n    hex[..16].to_string()\n}\n\nTest (src/common/config_hash.rs):\n    fn editing_settings_or_a_hook_changes_the_hash() {\n        let h = home(\"ch-edit\");\n        fs::write(h.join(\"hooks/a.sh\"), \"x\").unwrap();\n        let base = config_hash(&h);\n        fs::write(h.join(\"settings.json\"), \"{}\").unwrap();\n        let with_settings = config_hash(&h);\n        assert_ne!(base, with_settings);\n        fs::write(h.join(\"hooks/a.sh\"), \"y\").unwrap();\n    }",
+  "score": {
+   "kind": "verdict",
+   "want": "FAIL"
+  }
+ },
+ {
+  "id": "rt-ok-order",
+  "role": "test-reviewer",
+  "agent": "agents/test-reviewer.md",
+  "task": "Evaluate the quality of this test against the engineering-standards testing requirements (regression-pinning, boundary coverage, assertion strength, mock quality, flakiness). Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"reason\":\"...\"}. FAIL when the test would not catch a realistic regression in the code under test, PASS when it would.",
+  "input": "Code under test (src/common/par.rs):\npub fn map<I, T, F>(items: &[I], cap: usize, f: F) -> Vec<T>\nwhere\n    I: Sync,\n    T: Send,\n    F: Fn(&I) -> T + Sync,\n{\n    let workers = cap.max(1).min(items.len());\n    if workers <= 1 {\n        return items.iter().map(f).collect();\n    }\n    let next = AtomicUsize::new(0);\n    let slots: Vec<Mutex<Option<T>>> = items.iter().map(|_| Mutex::new(None)).collect();\n    std::thread::scope(|scope| {\n        for _ in 0..workers {\n            scope.spawn(|| loop {\n                let i = next.fetch_add(1, Ordering::Relaxed);\n                let Some(item) = items.get(i) else { break };\n                let value = f(item);\n                *slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(value);\n            });\n        }\n    });\n    slots\n        .into_iter()\n        .map(|slot| {\n            slot.into_inner()\n                .unwrap_or_else(|e| e.into_inner())\n                .expect(\"every slot is filled before the scope ends\")\n        })\n        .collect()\n}\n\nTest (src/common/par.rs):\n    fn results_keep_input_order_whatever_the_finish_order() {\n        let items: Vec<u64> = (0..12).collect();\n        let out = map(&items, 4, |n| {\n            std::thread::sleep(Duration::from_millis((12 - n) * 2));\n            n * 10\n        });\n        assert_eq!(out, (0..12).map(|n| n * 10).collect::<Vec<_>>());\n    }",
+  "score": {
+   "kind": "verdict",
+   "want": "PASS"
+  }
+ },
+ {
+  "id": "rt-ok-cap",
+  "role": "test-reviewer",
+  "agent": "agents/test-reviewer.md",
+  "task": "Evaluate the quality of this test against the engineering-standards testing requirements (regression-pinning, boundary coverage, assertion strength, mock quality, flakiness). Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"reason\":\"...\"}. FAIL when the test would not catch a realistic regression in the code under test, PASS when it would.",
+  "input": "Code under test (src/common/par.rs):\npub fn map<I, T, F>(items: &[I], cap: usize, f: F) -> Vec<T>\nwhere\n    I: Sync,\n    T: Send,\n    F: Fn(&I) -> T + Sync,\n{\n    let workers = cap.max(1).min(items.len());\n    if workers <= 1 {\n        return items.iter().map(f).collect();\n    }\n    let next = AtomicUsize::new(0);\n    let slots: Vec<Mutex<Option<T>>> = items.iter().map(|_| Mutex::new(None)).collect();\n    std::thread::scope(|scope| {\n        for _ in 0..workers {\n            scope.spawn(|| loop {\n                let i = next.fetch_add(1, Ordering::Relaxed);\n                let Some(item) = items.get(i) else { break };\n                let value = f(item);\n                *slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(value);\n            });\n        }\n    });\n    slots\n        .into_iter()\n        .map(|slot| {\n            slot.into_inner()\n                .unwrap_or_else(|e| e.into_inner())\n                .expect(\"every slot is filled before the scope ends\")\n        })\n        .collect()\n}\n\nTest (src/common/par.rs):\n    fn no_more_than_the_cap_run_at_once() {\n        let live = AtomicUsize::new(0);\n        let peak = AtomicUsize::new(0);\n        let items = [0u8; 16];\n        map(&items, 3, |_| {\n            let now = live.fetch_add(1, Ordering::SeqCst) + 1;\n            peak.fetch_max(now, Ordering::SeqCst);\n            std::thread::sleep(Duration::from_millis(10));\n            live.fetch_sub(1, Ordering::SeqCst);\n        });\n        assert!(peak.load(Ordering::SeqCst) <= 3);\n        assert!(peak.load(Ordering::SeqCst) >= 2, \"work never overlapped\");\n    }",
+  "score": {
+   "kind": "verdict",
+   "want": "PASS"
+  }
+ },
+ {
+  "id": "rt-ok-symlink",
+  "role": "test-reviewer",
+  "agent": "agents/test-reviewer.md",
+  "task": "Evaluate the quality of this test against the engineering-standards testing requirements (regression-pinning, boundary coverage, assertion strength, mock quality, flakiness). Return ONLY JSON: {\"verdict\":\"PASS\"|\"FAIL\",\"reason\":\"...\"}. FAIL when the test would not catch a realistic regression in the code under test, PASS when it would.",
+  "input": "Code under test (src/common/config_hash.rs):\npub fn config_hash(claude_home: &Path) -> String {\n    let mut hasher = Sha256::new();\n    if let Ok(settings) = fs::read(claude_home.join(\"settings.json\")) {\n        hasher.update(&settings);\n    }\n    let mut scripts = Vec::new();\n    collect_scripts(&claude_home.join(\"hooks\"), &mut scripts);\n    scripts.sort_by(|a, b| path_bytes(a).cmp(path_bytes(b)));\n    for script in scripts {\n        if let Ok(body) = fs::read(&script) {\n            hasher.update(&body);\n        }\n    }\n    let hex: String = hasher\n        .finalize()\n        .iter()\n        .map(|b| format!(\"{b:02x}\"))\n        .collect();\n    hex[..16].to_string()\n}\n\nTest (src/common/config_hash.rs):\n    fn a_symlinked_script_is_skipped_like_find_type_f() {\n        let h = home(\"ch-link\");\n        fs::write(h.join(\"real.sh\"), \"x\").unwrap();\n        let base = config_hash(&h);\n        std::os::unix::fs::symlink(h.join(\"real.sh\"), h.join(\"hooks/link.sh\")).unwrap();\n        assert_eq!(config_hash(&h), base);\n    }",
+  "score": {
+   "kind": "verdict",
+   "want": "PASS"
+  }
+ }
+]

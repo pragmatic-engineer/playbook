@@ -1,0 +1,74 @@
+[
+ {
+  "id": "im-duration",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "Implement the function described below in solution.py. Reply with the complete file in one python code block and nothing else.",
+  "input": "Write `parse_duration(s: str) -> int` returning seconds for strings like '1h30m15s', '90s', '2h', '45m'. Units are h, m, s in that order, each at most once; an empty string, an unknown unit, a repeated or out of order unit, or a missing number raises ValueError. '0s' is 0.",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "test.py": "from solution import parse_duration as p\nimport sys\nassert p('1h30m15s') == 5415\nassert p('90s') == 90\nassert p('2h') == 7200\nassert p('45m') == 2700\nassert p('0s') == 0\nfor bad in ['', 'h', '1x', '1s1h', '1h1h', '10', '1h 30m', '-5s']:\n    try:\n        p(bad)\n    except ValueError:\n        continue\n    sys.exit('no ValueError for %r' % bad)\n"
+   },
+   "solution": "solution.py",
+   "cmd": [
+    "python3",
+    "test.py"
+   ]
+  }
+ },
+ {
+  "id": "im-intervals",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "Implement the function described below in solution.py. Reply with the complete file in one python code block and nothing else.",
+  "input": "Write `merge_intervals(items: list[list[int]]) -> list[list[int]]` that merges overlapping or touching closed intervals (so [1,4] and [4,5] merge, and [1,2] and [3,4] do not), returns them sorted by start, does not mutate its input, and returns [] for an empty list.",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "test.py": "from solution import merge_intervals as m\nx = [[8,10],[1,3],[2,6],[15,18]]\ny = [list(i) for i in x]\nassert m(x) == [[1,6],[8,10],[15,18]]\nassert x == y\nassert m([[1,4],[4,5]]) == [[1,5]]\nassert m([[1,2],[3,4]]) == [[1,2],[3,4]]\nassert m([[1,10],[2,3],[4,5]]) == [[1,10]]\nassert m([]) == []\nassert m([[5,5]]) == [[5,5]]\n"
+   },
+   "solution": "solution.py",
+   "cmd": [
+    "python3",
+    "test.py"
+   ]
+  }
+ },
+ {
+  "id": "im-slug",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "Implement the function described below in solution.py. Reply with the complete file in one python code block and nothing else.",
+  "input": "Write `slugify(s: str) -> str`: lowercase ASCII letters and digits only, runs of any other characters become a single '-', no leading or trailing '-', and an empty result is the string 'n-a'. Non-ASCII letters count as other characters.",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "test.py": "from solution import slugify as s\nassert s('Hello, World!') == 'hello-world'\nassert s('  --a__b ') == 'a-b'\nassert s('') == 'n-a'\nassert s('!!!') == 'n-a'\nassert s('Caf\\u00e9 au lait') == 'caf-au-lait'\nassert s('v2.1.3') == 'v2-1-3'\n"
+   },
+   "solution": "solution.py",
+   "cmd": [
+    "python3",
+    "test.py"
+   ]
+  }
+ },
+ {
+  "id": "im-lru",
+  "role": "implementer",
+  "agent": "agents/implementer.md",
+  "task": "Implement the function described below in solution.py. Reply with the complete file in one python code block and nothing else.",
+  "input": "Write a class `LRU` with `__init__(self, capacity)`, `get(self, key)` returning the value or None, and `put(self, key, value)`. Both get and put on an existing key make it the most recently used; putting a new key when full evicts the least recently used. A capacity of 0 stores nothing.",
+  "score": {
+   "kind": "run_test",
+   "files": {
+    "test.py": "from solution import LRU\nc = LRU(2)\nc.put('a', 1); c.put('b', 2)\nassert c.get('a') == 1\nc.put('c', 3)\nassert c.get('b') is None and c.get('a') == 1 and c.get('c') == 3\nc.put('a', 9)\nc.put('d', 4)\nassert c.get('c') is None and c.get('a') == 9\nz = LRU(0)\nz.put('x', 1)\nassert z.get('x') is None\n"
+   },
+   "solution": "solution.py",
+   "cmd": [
+    "python3",
+    "test.py"
+   ]
+  }
+ }
+]

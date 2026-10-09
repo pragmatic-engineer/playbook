@@ -8,6 +8,8 @@
 //! the case's known `found` fact. Costs real API calls, never run by tests
 //! against the live services (tests shim `gh` and `claude` on PATH).
 
+pub mod bench;
+
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -135,7 +137,7 @@ fn on_path(tool: &str) -> bool {
 }
 
 /// The enclosing git repo's top level, or the current directory outside one.
-fn repo_root() -> PathBuf {
+pub fn repo_root() -> PathBuf {
     Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .output()
