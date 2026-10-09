@@ -4,16 +4,13 @@
 //! Ordered migration registry run from `playbook init` (ADR 0016). Auto
 //! migrations run once and are recorded; Manual ones only warn.
 
-use crate::common::atomic::{
-    acquire_dir_lock, ensure_private_dir, remove_stale_lock_dir, write_atomic,
-};
+use crate::common::atomic::{acquire_dir_lock, ensure_private_dir, remove_stale_lock_dir};
 use crate::common::paths::playbook_root_from;
 use crate::init::run::{StepReport, StepStatus};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const STATE_FILE: &str = "migrations.state";
 const LOCK_DIR: &str = "migrations.lock";
 const SYSTEM_PROMPT_KEY: &str = "system-prompt";
 const STATUSLINE_KEY: &str = "statusline";
@@ -112,6 +109,11 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Idempotent,
             run: adopt_late_config_json,
         },
+        Migration {
+            id: "0010-state-files-to-sqlite",
+            kind: Kind::Idempotent,
+            run: state_files_to_sqlite,
+        },
     ]
 }
 
@@ -135,6 +137,19 @@ fn adopt_late_config_json(ctx: &Ctx) -> Outcome {
             ),
         )),
         _ => Outcome::Quiet,
+    }
+}
+
+/// The migration record and the worktree sweep markers live in the `state`
+/// table now. Opening the store imports the old files, so this only makes sure
+/// that happened and fails loudly when the store cannot be opened. The import
+/// itself is reported by `run_pending`, which sees the files before any
+/// earlier migration opens the store.
+fn state_files_to_sqlite(ctx: &Ctx) -> Outcome {
+    let root = crate::common::paths::playbook_root_from(&ctx.home);
+    match crate::state::list(&root, "") {
+        Ok(_) => Outcome::Quiet,
+        Err(err) => Outcome::Failed(StepReport::failed("state", err.to_string())),
     }
 }
 
@@ -296,28 +311,49 @@ fn content_hash(bytes: &[u8]) -> String {
     format!("{h:016x}")
 }
 
-fn state_path(home: &Path) -> PathBuf {
-    playbook_root_from(home).join(STATE_FILE)
-}
-
-/// Only a missing file counts as empty; any other error must not be
-/// treated as "nothing applied", or the next write would wipe the record.
+/// The migration record as the `applied <id>` and `shipped <key> <hash>` lines
+/// it has always had, now read from the `state` table. `None` when the store
+/// cannot be read, so a write never wipes a record it failed to load.
 fn load_state(home: &Path) -> Option<Vec<String>> {
-    match fs::read_to_string(state_path(home)) {
-        Ok(s) => Some(s.lines().map(str::to_string).collect()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
-        Err(_) => None,
-    }
+    let root = playbook_root_from(home);
+    let applied = crate::state::list(&root, crate::state::MIGRATIONS_APPLIED).ok()?;
+    let shipped = crate::state::list(&root, crate::state::MIGRATIONS_SHIPPED).ok()?;
+    let mut lines: Vec<String> = applied
+        .into_iter()
+        .map(|(k, _)| format!("applied {}", &k[crate::state::MIGRATIONS_APPLIED.len()..]))
+        .collect();
+    lines.extend(shipped.into_iter().map(|(k, v)| {
+        format!(
+            "shipped {} {v}",
+            &k[crate::state::MIGRATIONS_SHIPPED.len()..]
+        )
+    }));
+    Some(lines)
 }
 
 fn read_state(home: &Path) -> Vec<String> {
     load_state(home).unwrap_or_default()
 }
 
+/// Replaces the whole record with `lines`, in one transaction.
 fn write_state(home: &Path, lines: &[String]) -> std::io::Result<()> {
-    let mut body = lines.join("\n");
-    body.push('\n');
-    write_atomic(&state_path(home), &body)
+    use crate::state::{MIGRATIONS_APPLIED, MIGRATIONS_SHIPPED};
+    let root = playbook_root_from(home);
+    crate::state::transaction(&root, |tx| {
+        tx.delete_prefix("migrations/")?;
+        for line in lines {
+            if let Some(id) = line.strip_prefix("applied ") {
+                tx.set(&format!("{MIGRATIONS_APPLIED}{id}"), "1")?;
+            } else if let Some((key, hash)) = line
+                .strip_prefix("shipped ")
+                .and_then(|rest| rest.rsplit_once(' '))
+            {
+                tx.set(&format!("{MIGRATIONS_SHIPPED}{key}"), hash)?;
+            }
+        }
+        Ok(())
+    })
+    .map_err(|e| std::io::Error::other(e.to_string()))
 }
 
 /// Whether `path` differs from the hash recorded when playbook placed it.
@@ -444,7 +480,21 @@ fn with_lock_retry(home: &Path, retries: u32, f: impl FnOnce()) -> bool {
 
 /// Runs the shipped registry.
 pub fn run_pending(ctx: &Ctx) -> Report {
-    run_with(&registry(), ctx)
+    let root = playbook_root_from(&ctx.home);
+    let pending = crate::state::pending_legacy(&root);
+    let mut report = run_with(&registry(), ctx);
+    if pending > 0 && crate::state::pending_legacy(&root) == 0 {
+        report.steps.insert(
+            0,
+            StepReport::wired(
+                "state",
+                format!(
+                    "imported {pending} old state file(s) into the state table, each renamed to .migrated"
+                ),
+            ),
+        );
+    }
+    report
 }
 
 /// Runs `migrations` in order: Manual ones always, Auto ones once each.

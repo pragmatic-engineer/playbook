@@ -10,7 +10,7 @@
 #[path = "support/auto_env.rs"]
 mod auto_env;
 
-use playbook::hooks::session_init::worktree_sweep_marker_path;
+use playbook::hooks::session_init::worktree_sweep_marker_key;
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -484,16 +484,10 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
     // either: `git_toplevel()` reads empty there, so `maybe_sweep_worktrees`
     // must have returned before ever reaching the marker.
     let playbook_dir = home.join(".config").join("playbook");
-    let wrote_a_sweep_marker = fs::read_dir(&playbook_dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with("worktree-sweep-marker")
-        });
+    let wrote_a_sweep_marker = playbook_dir.join("playbook.db").exists()
+        && !playbook::state::list(&playbook_dir, playbook::state::SWEEP_PREFIX)
+            .unwrap_or_default()
+            .is_empty();
     assert!(
         !wrote_a_sweep_marker,
         "a non-repo SessionStart must not write any sweep rate-limit marker"
@@ -1891,9 +1885,22 @@ fn session_init_sweeps_worktrees_when_no_marker_exists() {
         "the landed worktree should have been swept on the first-ever SessionStart"
     );
     assert!(
-        worktree_sweep_marker_path(&home, &repo_dir).is_file(),
+        sweep_marker(&home, &repo_dir).is_some(),
         "the rate-limit marker should be written after a sweep runs"
     );
+}
+
+fn sweep_marker(home: &Path, repo: &Path) -> Option<i64> {
+    let root = home.join(".config").join("playbook");
+    playbook::state::get(&root, &worktree_sweep_marker_key(repo))
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse().ok())
+}
+
+fn set_sweep_marker(home: &Path, repo: &Path, epoch: i64) {
+    let root = home.join(".config").join("playbook");
+    playbook::state::set(&root, &worktree_sweep_marker_key(repo), &epoch.to_string()).unwrap();
 }
 
 #[test]
@@ -1907,18 +1914,12 @@ fn session_init_skips_sweep_when_marker_is_fresh() {
     let repo_dir = repo_dir.canonicalize().expect("repo dir should resolve");
     let home = home.canonicalize().expect("home should resolve");
     let wu_path = build_sweepable_wu_worktree(&repo_dir, &home, "acme", "sweep-b");
-    let marker = worktree_sweep_marker_path(&home, &repo_dir);
-    fs::create_dir_all(marker.parent().unwrap()).unwrap();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock should read after the unix epoch")
         .as_secs();
-    fs::write(&marker, now.to_string()).unwrap();
-    let before = marker
-        .metadata()
-        .expect("marker should exist")
-        .modified()
-        .expect("mtime should read");
+    set_sweep_marker(&home, &repo_dir, now as i64);
+    let before = sweep_marker(&home, &repo_dir);
 
     // Act
     let outcome = run_hook(
@@ -1942,11 +1943,7 @@ fn session_init_skips_sweep_when_marker_is_fresh() {
     // A skipped sweep must not touch the marker either: refreshing it here
     // would slide the window forward on every SessionStart and the sweep
     // would never actually run again after the first one.
-    let after = marker
-        .metadata()
-        .expect("marker should exist")
-        .modified()
-        .expect("mtime should read");
+    let after = sweep_marker(&home, &repo_dir);
     assert_eq!(
         after, before,
         "a skipped sweep must not refresh the rate-limit marker"
@@ -1965,20 +1962,12 @@ fn session_init_sweeps_again_when_marker_is_stale() {
     let repo_dir = repo_dir.canonicalize().expect("repo dir should resolve");
     let home = home.canonicalize().expect("home should resolve");
     let wu_path = build_sweepable_wu_worktree(&repo_dir, &home, "acme", "sweep-c");
-    let marker = worktree_sweep_marker_path(&home, &repo_dir);
-    fs::create_dir_all(marker.parent().unwrap()).unwrap();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock should read after the unix epoch")
         .as_secs() as i64;
     let stale_epoch = now - (WORKTREE_SWEEP_INTERVAL_SECS + 1);
-    fs::write(&marker, stale_epoch.to_string()).unwrap();
-    let stale = std::time::SystemTime::now()
-        - std::time::Duration::from_secs((WORKTREE_SWEEP_INTERVAL_SECS + 1) as u64);
-    fs::File::open(&marker)
-        .expect("open marker to backdate")
-        .set_modified(stale)
-        .expect("set marker mtime");
+    set_sweep_marker(&home, &repo_dir, stale_epoch);
 
     // Act
     let outcome = run_hook(
@@ -1999,15 +1988,9 @@ fn session_init_sweeps_again_when_marker_is_stale() {
         fs::symlink_metadata(&wu_path).is_err(),
         "a stale rate-limit marker should let the sweep run again"
     );
-    let refreshed_age = marker
-        .metadata()
-        .expect("marker should exist")
-        .modified()
-        .expect("mtime should read")
-        .elapsed()
-        .expect("elapsed should compute");
+    let refreshed = sweep_marker(&home, &repo_dir).expect("marker should exist");
     assert!(
-        refreshed_age.as_secs() < 60,
+        now - refreshed < 60 && refreshed > stale_epoch,
         "the marker should have been refreshed to roughly now"
     );
 }
@@ -2057,7 +2040,7 @@ fn session_init_skips_sweep_entirely_when_policy_disabled() {
         "sweep should not run at all while the policy is disabled"
     );
     assert!(
-        !worktree_sweep_marker_path(&home, &repo_dir).is_file(),
+        sweep_marker(&home, &repo_dir).is_none(),
         "no marker should be written when the sweep is skipped for being disabled"
     );
 }

@@ -646,6 +646,31 @@ fn main() {
                 }
             }
         }
+        Command::State { sub } => {
+            let root = common::paths::playbook_root_from(&common::home_dir());
+            match sub {
+                playbook::StateCommand::List { prefix, json } => {
+                    match playbook::state::list(&root, prefix.as_deref().unwrap_or("")) {
+                        Ok(rows) if json => {
+                            let map: serde_json::Map<String, serde_json::Value> = rows
+                                .into_iter()
+                                .map(|(k, v)| (k, serde_json::Value::String(v)))
+                                .collect();
+                            println!("{}", serde_json::Value::Object(map));
+                        }
+                        Ok(rows) => {
+                            for (key, value) in rows {
+                                println!("{key}\t{value}");
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("state: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+        }
         Command::Config { sub } => {
             let home = common::home_dir();
             for warning in config::adopt_late_config(&home) {

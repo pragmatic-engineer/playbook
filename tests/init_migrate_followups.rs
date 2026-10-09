@@ -102,16 +102,22 @@ fn a_dev_checkout_is_not_tracked_and_old_versions_are_pruned() {
     let home = base.join("home");
     let root = plugin_root(&base, "p", "s");
     run(&paths(&home, &root, None));
-    let state = home.join(".config/playbook/migrations.state");
-    assert!(fs::read_to_string(&state)
-        .unwrap()
-        .contains("skill:9.9.9:demo"));
+    let root = home.join(".config/playbook");
+    let state = || {
+        playbook::state::list(&root, playbook::state::MIGRATIONS_SHIPPED)
+            .unwrap()
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(state().contains("skill:9.9.9:demo"));
 
     let next = base.join("plugin").join("10.0.0");
     fs::create_dir_all(next.join("skills/demo")).unwrap();
     fs::write(next.join("skills/demo/SKILL.md"), "s").unwrap();
     run(&paths(&home, &next, None));
-    let body = fs::read_to_string(&state).unwrap();
+    let body = state();
     assert!(body.contains("skill:10.0.0:demo") && !body.contains("skill:9.9.9:"));
 
     let dev = base.join("dev");
@@ -119,9 +125,7 @@ fn a_dev_checkout_is_not_tracked_and_old_versions_are_pruned() {
     fs::create_dir_all(dev.join(".git")).unwrap();
     fs::write(dev.join("skills/demo/SKILL.md"), "s").unwrap();
     run(&paths(&home, &dev, None));
-    assert!(fs::read_to_string(&state)
-        .unwrap()
-        .contains("skill:10.0.0:demo"));
+    assert!(state().contains("skill:10.0.0:demo"));
 }
 
 #[test]

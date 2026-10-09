@@ -15,7 +15,7 @@ use crate::hooks::memory_signals;
 use crate::init::run::StepStatus;
 use serde::Serialize;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -645,30 +645,21 @@ fn push_context(ctx: &mut String, addition: &str) {
 /// Replace every character outside `[A-Za-z0-9_.-]` with `_`. Matches
 /// the retired shell original's `slugify`.
 fn slugify(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    crate::state::slugify(s)
 }
 
 /// How often the periodic sweep this hook triggers may run, matching
 /// `cc::worktree::cleanup_due`'s own daily interval.
 const WORKTREE_SWEEP_INTERVAL_SECS: i64 = 86_400;
 
-/// The rate-limit marker for the periodic worktree sweep, one per repo
-/// (matching the ccc launcher's own per-repo `/tmp`-based marker): the sweep
+/// The `state` table key of the rate-limit marker for the periodic worktree
+/// sweep, one per repo (it used to be one file per repo): the sweep
 /// itself is scoped to one `repo_root` per call, so a single machine-wide
 /// marker would let whichever repo's `SessionStart` fires first after the
 /// window claims the slot for every other repo too, regardless of how long
 /// it has actually been since each one was last swept.
-pub fn worktree_sweep_marker_path(home: &Path, repo_root: &Path) -> PathBuf {
-    let slug = slugify(&repo_root.to_string_lossy());
-    crate::common::paths::playbook_root_from(home).join(format!("worktree-sweep-marker-{slug}"))
+pub fn worktree_sweep_marker_key(repo_root: &Path) -> String {
+    crate::state::sweep_key(repo_root)
 }
 
 /// Whether the periodic sweep is due, given the marker's mtime. Mirrors
@@ -721,12 +712,12 @@ fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let marker = worktree_sweep_marker_path(home, Path::new(repo_root));
-    let marker_mtime_epoch = fs::metadata(&marker)
-        .and_then(|meta| meta.modified())
+    let root = crate::common::paths::playbook_root_from(home);
+    let marker = worktree_sweep_marker_key(Path::new(repo_root));
+    let marker_mtime_epoch = crate::state::get(&root, &marker)
         .ok()
-        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64);
+        .flatten()
+        .and_then(|v| v.trim().parse::<i64>().ok());
 
     if !worktree_sweep_due(marker_mtime_epoch, now_epoch) {
         return;
@@ -736,10 +727,7 @@ fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
     // ordering and its stated reason (src/cc/worktree.rs): a sweep killed
     // partway through still rate-limits the next run, rather than retrying
     // the same destructive pass on every SessionStart until one finishes.
-    if let Some(parent) = marker.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(&marker, now_epoch.to_string());
+    let _ = crate::state::set(&root, &marker, &now_epoch.to_string());
     if let Err(err) =
         crate::worktree::sweep(Path::new(repo_root), home, repo_slug_opt, false, now_epoch)
     {
