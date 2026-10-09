@@ -1,20 +1,31 @@
-# Internals: Model Routing and Memory
+# Model routing and memory
 
-The session model defaults to Sonnet. Two systems shape which model handles a given task: a static policy in the system prompt, and a hook that detects design intent at prompt submission. Memory is a typed graph stored in plain markdown files.
+The session model defaults to Sonnet. Four things shape which model and effort a task gets: the tier table, the policy in each file's frontmatter, `playbook route`, and a hook that nudges design prompts toward Opus. Memory is a typed graph in plain markdown files.
 
-## Model Routing
+## Model routing
 
-The policy lives in `prompts/SYSTEM_PROMPT.md`. Three tiers:
+The policy lives in `prompts/SYSTEM_PROMPT.md` and in each file's frontmatter.
 
-**Sonnet** is the session default. The `ccc` launcher sets it at session start and it covers most coding work.
+- **Sonnet** is the session default and covers most coding: `/playbook:implement`, `/playbook:fix`, the implementer and the critic.
+- **Haiku** takes mechanical, formatting and search work: `git`, `patch-applier`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, and the `doctor`, `session-start` and `setup` commands.
+- **Opus** takes design (`/playbook:plan`, `/playbook:adr`), every reviewer (`/playbook:quick-review` at medium effort, `/playbook:deep-review` and `/playbook:implement` Step 9 at high), the auditor behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`.
 
-**Haiku** is the default for spawned subagents on mechanical, formatting, or search tasks. It's 3x cheaper. Escalate to Sonnet when the subagent does real coding, and to Opus when it needs architecture.
+Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
 
-**Opus** handles design work (`/playbook:plan`, `/playbook:adr`), every reviewer spawn (`/playbook:quick-review` at medium effort, `/playbook:deep-review` and `/playbook:implement` Step 9 at high), the auditor behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`. Sonnet stays on `/playbook:implement`, `/playbook:fix`, the implementer, critic, fact-checker and test-reviewer.
+### The routing table
 
-### Design work
+`playbook route <kind>` is one table for every command that dispatches agents (`src/routing.rs`). It says which model, effort and agent a kind of task goes to, and whether you must approve first.
 
-Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode. Each runs on Opus at high effort by its own frontmatter.
+| Kind | Model and effort | Agent |
+|---|---|---|
+| `mechanical` | haiku, low | `patch-applier` |
+| `classify` | haiku, medium | `review-triage` |
+| `check` | haiku, medium | `cheap-checker` |
+| `review` | opus, high | `reviewer` |
+| `implement` (`--tier low\|medium\|high`) | sonnet, low, medium or high | `implementer` |
+| `design` | opus, xhigh | `critic` |
+
+Approval is needed for the top model, the high implement tier, and a task that has failed twice (`--failures 2`). `routing.escalate` decides what happens then: `ask` (default) tells the orchestrator to ask you, `auto` proceeds (auto mode and `auto.budgetUsd` still cap the spend), `deny` returns the next cheaper route. Your effort ceiling always wins. `--json` prints the decision for scripts.
 
 ### auto-model-detect
 
@@ -30,11 +41,11 @@ On a match, the hook emits a prompt context message reminding Claude the session
 
 ### Effort policy
 
-The reasoning behind these choices, and how skills, agents and variants fit together, is in [Why the pieces are shaped this way](../concepts/03-why-the-pieces-are-shaped-this-way.md).
+The reasoning is in [Why the pieces are shaped this way](../concepts/03-why-the-pieces-are-shaped-this-way.md).
 
-Effort is a second dial next to the model tier. Agent files, commands, and skills all accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort override, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name.
+Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
 
-The rule: lower effort where the work is mechanical or already decided, and never where a missed finding is costly. A model that is wrong costs a rerun; a reviewer that stops looking costs a bug in production.
+The rule: lower effort where the work is mechanical or already decided, and never where a missed finding is costly. A wrong model costs a rerun. A reviewer that stops looking costs a bug in production.
 
 | File | Model | Effort | Reasoning |
 | --- | --- | --- | --- |
@@ -154,6 +165,10 @@ Memory is a typed graph. Both scopes share the same file format.
 
 The `<owner>/<repo>` project index is injected at session start. The global index is read on demand.
 
+### Claude Code's memory
+
+Playbook memory and Claude Code's auto memory stay separate. Playbook never writes Claude Code's memory or settings. `memory.source` is `both` (default) or `playbook`. With `playbook`, `ccc` and `ccd` set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for that session only. `playbook memory import-claude` copies Claude Code's notes for a project into playbook memory, read-only on the Claude side.
+
 ### File format
 
 One fact per file. Filenames are kebab-case (e.g. `commits-must-be-signed.md`). Every file opens with YAML frontmatter:
@@ -213,5 +228,5 @@ Traversal depth is 1 for all edge types except `supersedes`, which is followed f
 ## See also
 
 - [Decisions and Memory](../guides/03-decisions-and-memory.md): using memory day-to-day and the `/playbook:learn-project` command.
-- [Internals: Launcher and Hooks](01-launcher-and-hooks.md): the `ccc` launcher that sets the session model.
+- [Launcher and hooks](01-launcher-and-hooks.md): the `ccc` launcher that sets the session model.
 - [Docs index](../index.md)

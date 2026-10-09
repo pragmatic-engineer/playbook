@@ -1,4 +1,4 @@
-# Internals: Usage Dashboard
+# Usage dashboard
 
 `playbook usage` shows how many tokens and how many dollars your sessions use, split by day, week, model, repo, branch, effort, account, skill and agent. It reads Claude Code's own session history, so it needs no setup and no new instrumentation.
 

@@ -35,8 +35,8 @@ Extend the config.
 
 How the machine works.
 
-- [Launcher and hooks](internals/01-launcher-and-hooks.md): the `ccc` launcher, the worktree engine, and the hook lifecycle.
-- [Model routing and memory](internals/02-model-routing-and-memory.md): how the session model is chosen, and the memory graph mechanics.
+- [Launcher and hooks](internals/01-launcher-and-hooks.md): the `ccc` launcher and the hook lifecycle.
+- [Model routing and memory](internals/02-model-routing-and-memory.md): tiers, effort policy, `playbook route` and the memory graph.
 - [Worktree engine](internals/03-worktree.md): the `ccc worktree` background subshell, node_modules cloning, and rebase conflict resolution.
 - [Usage dashboard](internals/04-usage-dashboard.md): `playbook usage`, where the numbers come from, the store, and how the local dashboard server runs safely.
 - [Headless mode](internals/05-headless-mode.md): what runs without a person at the keyboard, real `claude -p` exit codes, how the hooks behave headless, and a first CI use case.
@@ -66,3 +66,6 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0014](adr/0014-retire-memory-md-index.md) | Retire MEMORY.md as a parallel memory index | Accepted | 2026-09-09 |
 | [0015](adr/0015-multi-agent-support.md) | Multi-agent support via a thin agent-neutral core and per-agent adapters | Accepted | 2026-10-07 |
 | [0016](adr/0016-migration-framework.md) | A registry of ordered migrations run from `playbook init` | Accepted | 2026-10-07 |
+| [0017](adr/0017-per-component-effort-ceilings.md) | Per-component effort ceilings | Accepted | 2026-10-09 |
+| [0018](adr/0018-tls-platform-verifier-not-adopted.md) | Keep the bundled root certificates, do not adopt the TLS platform verifier yet | Accepted | 2026-10-09 |
+| [0019](adr/0019-pr-stack-review.md) | Review a whole pull request stack with shared context | Accepted | 2026-10-09 |

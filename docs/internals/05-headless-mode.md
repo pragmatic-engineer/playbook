@@ -1,8 +1,6 @@
 # Headless mode
 
-Can playbook run with no person at the keyboard, for example in CI? This page records what was tested on 2026-10-03 with playbook 0.16.0 and Claude Code 2.1.286. Every claim below came from a real run in a scratch `HOME` and a scratch git repo with no remote, unless it says it did not.
-
-Docs consulted (Claude Code docs: headless, hooks, plugins, authentication, GitHub Actions). Where a doc claim was wrong or incomplete, the section says so.
+Can playbook run with no person at the keyboard, for example in CI? Yes. This page records what was tested on 2026-10-03 with playbook 0.16.0 and Claude Code 2.1.286, in a scratch `HOME` and a scratch git repo with no remote. It was not rerun for 0.20.0. The `PLAYBOOK_HEADLESS` switch and the auto mode rules below are read from the current code.
 
 ## Short answer
 
@@ -68,21 +66,17 @@ Other facts:
 
 To see the worst case, a marker was created for a fixed `--session-id`. The hook blocked Stop twice, then released. The run took 3 turns instead of 1, cost about 2 cents, and ended with exit 0. It did not loop or hang (the re-block cap is 2). One side effect: the final `result` text was the model's answer to the nudge, not to the prompt. Do not trust `result` as the answer when this hook may fire.
 
-### Hook by hook, with hooks on
+### Hooks in a headless run
 
-Each hook was judged for a normal `claude -p` run in a clean CI `HOME`. The last column held the recommendation; the next section says what shipped.
+| Hook | Behavior |
+|---|---|
+| `session-init` | Writes `session-start.log`. Under `PLAYBOOK_HEADLESS` it skips every nudge, the worktree sweep and memory injection (opt in with `PLAYBOOK_HEADLESS_MEMORY=1`). |
+| `memory-capture` (Stop) | Never blocks headless. |
+| `auto-model-detect` | Silent headless. |
+| Safety guards (`preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) | Fire and stay quiet. They are the reason to run with hooks on. |
+| `search-counter`, `post-edit-track`, `session-clean-exit` | Write small files under `runtime/`. Harmless. |
 
-| Hook | Headless behavior (tested) | Recommended change |
-|---|---|---|
-| `session-init` | Exits 0 and writes `session-start.log`. On a cold `HOME` it injects about 800 bytes (an async and deferred-tool discipline note). Its nudges are switched off by `AUTO_LEARN_NUDGE=0`, `SKILLS_PRIMER=0`, and `ASYNC_DISCIPLINE=0`; with all three off it injects nothing. | Done: headless skips every nudge and injects no memory unless `PLAYBOOK_HEADLESS_MEMORY=1`. |
-| `session-init` worktree sweep | Rate limited to once a day and gated by `worktreeCleanup.enabled`. A fresh CI checkout has nothing to sweep. No harm seen. | Done: skipped headless. |
-| `session-init` config drift and memory injection | A cold `HOME` has no memory, so nothing is injected. A warm `HOME` (restored cache) would inject memory and spend tokens. | Done: opt in with `PLAYBOOK_HEADLESS_MEMORY=1`. |
-| `memory-capture` (Stop) | Blocks only when `capture-due` exists, and only the status line renderer writes it, so it does not fire headless. If forced, it adds 2 turns and ends cleanly. | Done: never blocks headless. |
-| `memory-anchors`, `auto-model-detect` (UserPromptSubmit) | Fire and print nothing on a cold `HOME`. `auto-model-detect` only suggests a model. | Done: `auto-model-detect` is silent headless. |
-| `preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check` (PreToolUse) | Fire and stay quiet. These are safety guards. | Keep them on. They are the reason to run with hooks. |
-| `search-counter`, `post-edit-track`, `session-clean-exit` | Write small files under `runtime/`. Harmless. | None, or skip the writes headless. |
-
-No hook reads a TTY or prompts: only `src/main.rs` reads stdin, to get the hook payload.
+No hook reads a TTY or prompts. Only `src/main.rs` reads stdin, for the hook payload.
 
 ## The headless switch
 
@@ -99,7 +93,7 @@ When headless:
 
 ## Auto mode and unattended runs
 
-This section describes how auto mode is designed to work. It was not part of the tested runs above.
+This section describes the design. It was not part of the tested runs above.
 
 Whether a command may ask questions is a separate setting from headless mode. `PLAYBOOK_HEADLESS` is independent of the `mode` setting: headless only quiets the session nudges and the memory Stop hook, and it never turns auto on. Auto never turns headless on either. Under `claude -p` the question tool is absent, so set `PLAYBOOK_MODE=auto` as well when a command must run with no one to answer. See [Auto mode](../guides/05-auto-mode.md) for the setting, the spend cap, and the limits.
 
@@ -145,7 +139,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install playbook
         run: |
-          V=v0.16.0; A=playbook-0.16.0-x86_64-unknown-linux-musl
+          V=v<version>; A=playbook-<version>-x86_64-unknown-linux-musl
           gh release download "$V" --repo pragmatic-engineer/playbook --pattern "$A" --pattern SHA256SUMS
           grep " $A\$" SHA256SUMS | sha256sum -c -
           install -m 0755 "$A" /usr/local/bin/playbook
@@ -156,14 +150,13 @@ jobs:
 
 `playbook ci` prints `PASS`, `FAIL`, or `SKIP` with a reason for each check, then `ci: N passed, M failed, K skipped`. Add `--strict` to fail the run when any check is skipped, so a job pointed at the wrong directory cannot pass by checking nothing. A check whose inputs are missing is skipped, so the step is safe in any repository. State between runs: these checks create nothing. A gate check needs the `state.db` under `~/.config/playbook/repos/...`, so cache that directory if a pipeline records gates in one job and checks them in another.
 
-## Next steps for unattended runs
+## Running commands under `claude -p`
 
-1. Shipped for `gate check`: `playbook gate check --json` prints one object, `{"version":1,"slug":...,"ok":...,"phases":[{"phase":...,"status":...}]}`, with the same exit codes as the text output. If the check itself errors (unreadable source, no database), stdout stays empty and the message goes to stderr. Still open for `doctor`.
-2. Only then run commands under `claude -p`, with a wrapper that fails on `permission_denials`, sets `--max-turns` and `--max-budget-usd`, and never passes `bypassPermissions`.
+Use a wrapper that fails on a non-empty `permission_denials`, sets `--max-turns` and `--max-budget-usd`, and never passes `bypassPermissions`. `playbook gate check --json` prints `{"version":1,"slug":...,"ok":...,"phases":[...]}` with the same exit codes as the text output.
 
 ## Open items
 
 - The GitHub Action itself was not run.
-- Only macOS arm64 was used. Linux runners are expected to match but were not tested.
-- Whether a `capture-due` marker can appear headless through any other path is not proven.
-- Cost of a real review run (`/playbook:quick-review`) under `-p` was not measured.
+- Only macOS arm64 was used.
+- Whether a `capture-due` marker can appear headless by another path is not proven.
+- The cost of a real review run under `-p` was not measured.

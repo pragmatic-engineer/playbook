@@ -4,7 +4,7 @@
 
 ## When it runs
 
-Only `playbook init` runs migrations. Hooks never do, so a session does not pay for them. After a plugin or binary update, run `playbook update` and then `playbook init` (the installer runs `init` for you).
+Only `playbook init` runs migrations. Hooks never do, so a session does not pay for them. After an update, run `playbook init`. The installer and `brew` caveat both say so, and `install.sh` runs it for you.
 
 ## The three kinds
 
@@ -29,6 +29,7 @@ No Auto migration ships today. The current entries are:
 | `0007-shell-init-rc-line` | Idempotent | Rewrites an old `source .../cc.sh` rc line to `eval "$(playbook shell-init)"`. |
 | `0008-remove-config-hash-script` | Idempotent | Removes the `hooks/lib/config-hash.sh` copy older installs placed under `~/.config/playbook`. The hash is computed inside the binary now. |
 | `0009-adopt-late-config-json` | Idempotent | Adopts a `config.json` written after the SQLite import when it agrees with the store, and warns with its path when it does not. |
+| `0010-state-files-to-sqlite` | Idempotent | Moves `migrations.state` and the worktree sweep markers into the `state` table. See [State store](08-state-store.md). |
 
 ## How playbook knows you edited a file
 

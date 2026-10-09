@@ -1,66 +1,53 @@
-# Internals: Launcher and Hooks
+# Launcher and hooks
 
-The `ccc` launcher is the entry point for every session. It wraps `claude` with a system prompt, transcript retention, and config-drift detection. Hooks extend the session lifecycle with guards, nudges, and state tracking. Together they're the machine the rest of the config runs on.
+`ccc` is the entry point for every session. It wraps `claude` with a system prompt, a model fallback chain, an effort ceiling, per-session agent variants, transcript retention and config-drift detection. Hooks add guards, nudges and state tracking around the session. Both are subcommands of the one `playbook` binary.
 
-## The `ccc`/`ccd` Launcher
+## The `ccc` and `ccd` launcher
 
-The rc file holds one line, `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`. `playbook shell-init [--shell bash|zsh]` prints two functions, `ccc` and `ccd`, that call `playbook cc launch` (`src/cc/launch.rs`). The same text works in both shells, so bash and zsh behave identically. `ccd` is `ccc` with `--dangerously-skip-permissions` prepended. Nothing else differs.
+The rc file holds one line: `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`. `playbook shell-init` prints two functions, `ccc` and `ccd`, that call `playbook cc launch` (`src/cc/launch.rs`). The same text works in bash and zsh. `ccd` is `ccc` with `--dangerously-skip-permissions` added. Nothing else differs.
 
-A child process cannot change its parent's directory, so the functions carry one protocol: they create a temp file and pass its path in `PLAYBOOK_CC_CD_FILE`. When the launcher enters a worktree it writes the path there, and the function `cd`s to it after the session ends. The session itself keeps the terminal, so stdout needs no parsing.
+A child process cannot change its parent's directory, so the functions create a temp file and pass its path in `PLAYBOOK_CC_CD_FILE`. When the launcher enters a worktree it writes the path there, and the function `cd`s to it after the session ends.
 
-On every launch, `ccc` and `ccd` first run the equivalent of `playbook trust "$PWD"`, so Claude Code's trust dialog never blocks the directory you start in. It is best-effort and never fails the launch.
+On every launch the launcher:
 
-On every invocation, `ccc` passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` to `claude`. After `claude` exits, it prunes to keep only the newest `CCD_KEEP` transcripts (default 5, floor 2) per project. Older transcripts plus their sidecars and runtime state are deleted.
+- Trusts `$PWD` (the equivalent of `playbook trust`), so Claude Code's trust dialog never blocks. Best effort.
+- Passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` when it is installed.
+- Passes the model fallback chain with `--fallback-model`, and exports `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for any `models.*` override. See [Model tiers](02-model-routing-and-memory.md#model-tiers-and-the-55-rule).
+- Passes your effort ceiling with `--settings` when playbook's `maxEffortLevel` is the lower one. See [Effort policy](02-model-routing-and-memory.md#effort-policy).
+- Renders the agent effort variants into a throwaway session plugin and passes it with `--plugin-dir`. Nothing is committed. `agents.variants` (`auto`, `all`, `off`) picks which, and `playbook agents variants` shows them. `src/cc/agent_variants.rs`.
+- Sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for that session when `memory.source` is `playbook`. It never edits Claude Code's settings or memory.
+- After `claude` exits, prunes to the newest `CCD_KEEP` transcripts per project (default 5, floor 2), with their sidecars and runtime state.
+
+A session started without the launcher gets none of this except the hooks.
 
 ### Subcommands
 
 | Command | Behavior |
 |---|---|
-| `ccc` (no args) | Resumes the most recent session for `$PWD` whose `customTitle` matches the directory name. If none exists, starts fresh. Forks a new transcript on config drift. |
-| `ccc fresh` | Starts a new session with no history. |
-| `ccc list` | Lists recent sessions for `$PWD` with timestamps and titles. |
-| `ccc clean` | Clones the latest matching transcript with `/model`, `/effort`, `/config`, `/output-style`, and `/style` overrides stripped, then resumes the clone. Conversation is preserved; runtime config resets to `settings.json`. The original transcript is untouched. |
-| `ccc raw [id]` | Resumes verbatim. No fork, no cleanup. Preserves the original UUID and frozen overrides. Defaults to the latest matching session when `id` is omitted. |
-| `ccc worktree <branch>` | Creates or enters a git worktree for the branch, then starts a session there. See [Worktree engine](#the-worktree-engine). |
+| `ccc` | Resumes the latest session for `$PWD` whose `customTitle` matches the directory name, or starts fresh. Forks a new transcript on config drift. |
+| `ccc fresh` | New session, no history. |
+| `ccc list` | Recent sessions for `$PWD` with timestamps and titles. |
+| `ccc clean` | Clones the latest transcript with `/model`, `/effort`, `/config`, `/output-style` and `/style` overrides stripped, then resumes the clone. The original is untouched. |
+| `ccc raw [id]` | Resumes verbatim: no fork, no cleanup. |
+| `ccc worktree <branch>` | Creates or enters a git worktree, then starts a session there. See [Worktree engine](03-worktree.md). `ccc new` is an alias. |
+| `ccc prune` | Prunes old transcripts now. |
 
 ### Config-drift detection
 
-On every default resume, `ccc` computes a SHA-256 hash of `settings.json` and every hook script, then compares it to the hash stored at session start (in `~/.config/playbook/cc-state/<project-slug>`). When they differ, `ccc` forks a new transcript so the fresh copy loads the current config. A plain resume fires only when nothing changed.
+On a default resume, the launcher hashes `settings.json` and compares it to the hash stored at session start (`~/.config/playbook/cc-state/<project-slug>`). When they differ, it forks a new transcript so the fresh copy loads the current config. The `session-init` hook does the same check on `source=resume` and warns when a resumed session runs on old config. Edits to `settings.json` or hooks take effect on a fresh session, so use `ccc fresh` or `ccc clean` after editing them. The hash lives in `src/common/config_hash.rs`.
 
-The `session-init` hook (`playbook hook session-init`) mirrors this: on `source=resume`, it recomputes the hash and emits a user-visible warning when the resumed session is running on the old config. The README states this directly: config or hook edits take effect on a fresh session, not a resumed one. Use `ccc fresh` or `ccc clean` after editing `settings.json` or any hook.
+## The hook lifecycle
 
-## The Worktree Engine
-
-`ccc worktree <branch>` runs `playbook cc worktree` (`src/cc/worktree_run.rs`) and then launches the session inside the new tree.
-
-What it does, in order:
-
-1. Detects the repo's base branch via `origin/HEAD`, falling back to `main`, `master`, `trunk`, or `develop`.
-2. Auto-stashes any dirty main worktree and restores it afterward, even when a later step fails.
-3. Derives the folder name from the JIRA key in the branch name (`PROJECT-1234-foo-bar` → `PROJECT-1234/`). Falls back to the branch leaf when there's no JIRA key.
-4. Creates the worktree at `<repo-parent>/<base>/<repo>/<folder>`, where `<base>` is `WORKTREE_BASE_DIR` (default `.worktrees`) and `<repo>` is the repo directory name, so worktrees from sibling repos that share a parent never collide. A relative `WORKTREE_BASE_DIR` sits under the repo's parent; an absolute one is used as-is. If the worktree already exists on the right branch, it fast-forward pulls instead.
-5. Copies `.env` from the base repo (no-clobber).
-6. Sets upstream tracking. Creates the remote branch via `git push -u` if it doesn't exist yet.
-7. Rebases the branch onto the latest base when the branch belongs to you. With `--ai-resolve`, rebase conflicts go to Claude haiku for resolution. Without it, a conflict aborts the rebase. This subcommand always passes `--ai-resolve`.
-8. In the background: full prune fetch, upstream sync, hardlink reuse of `node_modules` when `package-lock.json` hashes match, and a daily-rate-limited cleanup of merged or 30-day-old worktrees (skips open-PR branches and directories currently in use).
-
-## The Hook Lifecycle
-
-ADR 0007 replaced the old mix of 11 python scripts and 4 bash scripts with a single Rust binary. Every hook is now a module under `src/hooks/`, and Claude Code invokes all 20 of them the same way: `playbook hook <name>`, where `<name>` is the hook's kebab-case form (clap's default `ValueEnum` casing turns the `HookName` variant `RmWorkspaceGuard` into `rm-workspace-guard` on the CLI, and so on for the rest). `src/hooks/mod.rs`'s `dispatch` function matches the parsed `HookName` to that module's `run` entry point. The match is exhaustive, so a new `HookName` variant fails the build until `dispatch` handles it, and a hook can't be silently forgotten.
-
-Per-session state still lives in `~/.config/playbook/runtime/<session_id>/`. The session dir holds counters (`search-count`, `tool-count`, `edit-count`), an `edits.jsonl` log, a `seen-reads` list, timestamps, and the config hash baseline.
+Every hook is a module under `src/hooks/`, run as `playbook hook <name>` (see ADR 0007). `dispatch` in `src/hooks/mod.rs` matches every `HookName` exhaustively, so a new hook cannot be forgotten. Per-session state lives in `~/.config/playbook/runtime/<session_id>/`: counters, an `edits.jsonl` log, a `seen-reads` list, timestamps and the config hash baseline.
 
 ### How hooks get registered
 
-The 18 settings-wired hooks reach `~/.claude/settings.json`'s `.hooks` object through two different paths. The 2 worktree hooks (`worktree-create`, `worktree-remove`) are the exception: the plugin's `hooks/hooks.json` registers them, and `wire` never writes them to `settings.json`, so they cannot fire twice.
+- **5 always-on guards** (`rm-workspace-guard`, `bg-await-guard`, `no-slop-guard`, `precommit-check`, `commit-message-sanitizer`) are in `settings.shared.json`, which `playbook init` seeds or three-way merges into `settings.json`. All five are `PreToolUse` on `Bash`, and `no-slop-guard` is also on `Edit|Write`. `rm-workspace-guard` and `precommit-check` carry an `if` condition (`Bash(rm:*)`, `Bash(git commit:*)`).
+- **13 functional hooks** (`session-init`, `preread-edit-check`, `preread-size-check`, `search-counter`, `memory-anchors`, `post-edit-track`, `rebuild-memory-graph`, `auto-model-detect`, `auto-guard`, `auto-cost`, `precompact-warn`, `session-clean-exit`, `memory-capture`) have no static JSON. `playbook init` runs a `wire` step (`src/init/wire.rs`) that upserts them from two tables, `PORTED_HOOK_SPECS` and `GUARD_SPECS`. The `PostToolUse` backstop of `commit-message-sanitizer` lives in `GUARD_SPECS` only, so `wire` adds it on every `init`.
+- **2 worktree hooks** (`worktree-create`, `worktree-remove`) are registered by the plugin's `hooks/hooks.json`, never by `wire`, so they cannot fire twice.
+- **1 plugin check**: the plugin's `SessionStart` entry runs `bin/playbook hook migration-check`. It warns when `settings.json` has no `playbook hook session-init`, which means a plugin update without an `init` re-run. It wires nothing.
 
-**The 5 always-on safety guards** (`rm-workspace-guard`, `bg-await-guard`, `no-slop-guard`, `precommit-check`, `commit-message-sanitizer`) are wired directly inside `settings.shared.json`, the template `playbook init` seeds or three-way-merges into a user's `settings.json`. Its `PreToolUse` block already carries all five in final `playbook hook <name>` form: `rm-workspace-guard`, `bg-await-guard`, `precommit-check` and `commit-message-sanitizer` on matcher `Bash` (`rm-workspace-guard` and `precommit-check` each scoped further by an `if` condition, `Bash(rm:*)` and `Bash(git commit:*)`), and `no-slop-guard` on both `Bash` and `Edit|Write`, since it checks two different things depending on which tool fired it.
-
-**The other 13 functional hooks** (`session-init`, `preread-edit-check`, `preread-size-check`, `search-counter`, `memory-anchors`, `post-edit-track`, `rebuild-memory-graph`, `auto-model-detect`, `auto-guard`, `auto-cost`, `precompact-warn`, `session-clean-exit`, `memory-capture`) aren't declared anywhere as static JSON. `hooks/hooks.json`, the file that used to register all of them, today registers a `SessionStart` call to `hooks/migration-check.sh` plus the two worktree hooks described below. That script is a plugin-level check that runs before a `playbook` binary is guaranteed to exist; it greps the user's `settings.json` for the string `playbook hook session-init`, and if that's missing (a plugin update with no matching installer re-run) it warns the user to re-run the installer. It never wires a functional hook itself. `.claude-plugin/plugin.json` carries no `hooks` key at all.
-
-The real mechanism is Rust code. `playbook init` runs a `wire` step (`src/init/wire.rs`) that unconditionally upserts every entry from two hardcoded tables into `.hooks`: `PORTED_HOOK_SPECS` (the 13 functional hooks, 16 registration entries in total, since `memory-anchors` and `auto-guard` each fire on both `PreToolUse` and `UserPromptSubmit`, and `session-clean-exit` fires on both `Stop` and `SessionEnd`) and `GUARD_SPECS` (the 5 guards in 7 entries: `no-slop-guard` carries two since it fires on two matchers, and `commit-message-sanitizer` carries two since its PostToolUse backstop is registered next to its PreToolUse rewrite). `settings.shared.json` carries only the `PreToolUse` entries of those guards, upserted again idempotently in the same bare form; the `PostToolUse` entry for the `commit-message-sanitizer` backstop lives in `GUARD_SPECS` alone, so `wire` adds it on every `playbook init`, as the `init` golden fixtures show, and `playbook settings check` expects no more of the seed. That is deliberate: the seed stays the minimal always-on set, and the backstop arrives with the rest of the wiring. `src/init/run.rs` orders the "settings" step (seed or merge `settings.shared.json` in) before the "hooks" step (`wire`), so `wire` always has a `.hooks` object to upsert into. `wire` recognizes a hook's legacy command too, either the old `<name>.py` path or the old guard `<name>.sh` path, and rewrites that same array slot instead of appending a duplicate, so a machine mid-migration, or a repeat `playbook init` run, self-heals without drift.
-
-The old shell guard scripts (`hooks/precommit-check.sh`, `hooks/no-dash-guard.sh`, `hooks/bg-await-guard.sh`) and their shared `hooks/lib/common.sh` are gone, and so are `hooks/lib/config-hash.sh` and `hooks/migration-check.sh`. Every `GUARD_SPECS` entry points at the compiled binary. The config hash is computed in `src/common/config_hash.rs`. The plugin's one SessionStart hook runs `bin/playbook hook migration-check`: the binary when it exists, otherwise the shim, which prints the install hint and installs nothing.
+`init` runs the settings step before the hooks step, so `wire` always has a `.hooks` object. `wire` also recognises legacy `.py` and `.sh` commands and rewrites that slot, so an upgrade or a repeat `init` self-heals. All the old shell and Python scripts are gone.
 
 ### SessionStart
 
@@ -76,7 +63,7 @@ The old shell guard scripts (`hooks/precommit-check.sh`, `hooks/no-dash-guard.sh
 | `Bash` | `bg-await-guard` | Warns when a Bash call backgrounds an install, build, or typecheck whose output a later step usually needs. Warns only; never blocks. |
 | `Bash` | `no-slop-guard` | Denies a posting command that carries an em or en dash, in the command text or in a body file it references. Scoped to posting commands, the last chokepoint before prose reaches GitHub or git history. |
 | `Bash`, only `git commit` | `precommit-check` | A mechanical sanity pass over the staged diff before a commit: debug leftovers, secret-shaped filenames, an oversized commit. Warns only; never blocks. |
-| `Bash` | `commit-message-sanitizer` | Removes AI attribution (a `Claude-Session:` line, a claude.ai link, a "Generated with" footer, a session id, or a credit trailer whose display name is an AI product or whose address is a vendor or bot no-reply address) from the message of a commit, tag, merge or PR title and body, and an AI `--author`, `--trailer` or identity variable. It never blocks: when something is removed it returns the same command with the message cleaned and no permission decision, so the normal permission flow still applies. A message kept in a file (`-F`, `--body-file`, `cat`, a `<` redirect, `MERGE_MSG`, `SQUASH_MSG`) is never rewritten on disk: the command reads the cleaned text from `-F -` or a heredoc, and a file that is a symlink, over 1 MiB, not UTF-8 or changed earlier in the same call is left to the backstop. Reads `-m`, `-F`, `--body-file`, heredocs, `printf` and `echo` pipes, `$'...'` strings and the message `--amend --no-edit` or `-C` reuses, inside `bash -c`, `eval`, `git rebase --exec`, `env` and other command wrappers, and `git -C`. A recognised `git commit` also gets `-s` so it carries a Signed-off-by line, unless `-s`, `--signoff`, `--no-signoff` or `--dry-run` is given, the message already has one, `commit.signOff` is false, or the repository's own `prepare-commit-msg` or `commit-msg` hook adds it; signing (`-S`) is left to git config. The same rule backs `playbook sanitize commit-msg <file>` for a git `commit-msg` hook or CI. Best effort against an agent drifting, not a security boundary. |
+| `Bash` | `commit-message-sanitizer` | Removes AI attribution (a `Claude-Session:` line, a claude.ai link, a "Generated with" footer, an AI credit trailer or `--author`) from the message of a commit, tag, merge or PR. It never blocks: it returns the same command with the message cleaned and no permission decision. A message kept in a file is never rewritten on disk; the cleaned text is read from `-F -` or a heredoc. A recognised `git commit` also gets `-s` unless the message already has a sign-off, `commit.signOff` is false, or the repo's own hook adds it. Signing (`-S`) is left to git config. The same rule backs `playbook sanitize commit-msg <file>`. Best effort, not a security boundary. |
 | `Read` | `preread-edit-check` | When the target file was edited by this session in the last 30 minutes, injects a reminder that the post-edit state is already in context. Info only; never blocks. |
 | `Read` | `preread-size-check` | Denies a full-file read of a large file (over the line or byte limit) when no `offset`/`limit` is set, pushing toward grep-first, then a targeted read. Allowlists a small set of config and docs files usually needed whole. |
 | `AskUserQuestion` | `auto-guard` | Only when the resolved mode is `auto`: denies the question tool so the model takes the recommended option. See [Auto mode](../guides/05-auto-mode.md). |
@@ -91,7 +78,7 @@ The old shell guard scripts (`hooks/precommit-check.sh`, `hooks/no-dash-guard.sh
 |---|---|---|
 | `Edit`, `Write`, `NotebookEdit` | `post-edit-track` | Records the edited file's absolute path and a timestamp to `edits.jsonl` in the session runtime dir. Feeds `preread-edit-check` and the statusline. |
 | `Edit`, `Write`, `NotebookEdit` | `rebuild-memory-graph` | Rebuilds `~/.config/playbook/memory/memory.graph.json` after any fact-file save. No-op unless the edited file is inside `~/.config/playbook/memory`. |
-| `Bash` | `commit-message-sanitizer` | The backstop for what the PreToolUse rewrite could not see, such as a call another hook rewrote too. It runs git or gh only after a call that runs `git commit` or `git tag`, or `gh pr create`, `new` or `edit`. When that same call made an unpushed HEAD with a message of its own, did not push, and no rebase, merge, cherry-pick or bisect is under way, and its message or author still names an AI, it replaces HEAD with a commit that has the sanitised message and adds one line saying what was cleaned. "That same call made" means the PreToolUse hook recorded another HEAD for the repository (the `git -C` directory when the call names one) in a small per-session file, and the reflog subject of the new HEAD starts with `commit`, so a failed commit, a `--dry-run`, a `|| true` and a commit in another repository never touch it. The replacement uses plumbing (`git commit-tree` on the old tree and parents with the old author and date, then `git update-ref` with the old HEAD as its guard), so no git hook runs, the index is never touched and a HEAD that moved meanwhile is left alone. Only an AI author is replaced by the configured identity, the sign-off is added only when missing and not for a commit made with `--no-signoff` or while `commit.signOff` is false, and `-S` is used only when `commit.gpgSign` is true. An editor-written commit, an older unpushed commit, a pushed commit and an annotated tag are only reported, once per session. After `gh pr create` or `edit` it reads the PR back with `gh pr view` (with the `--repo` the call named) and edits a title or body that still carries attribution. A PR title that is nothing but attribution is left as it is, with a note asking for a rename (the CI job does the same), while the body is still cleaned. A git process stopped on timeout gets SIGTERM first and is killed only after a short wait. |
+| `Bash` | `commit-message-sanitizer` | Removes AI attribution (a `Claude-Session:` line, a claude.ai link, a "Generated with" footer, an AI credit trailer or `--author`) from the message of a commit, tag, merge or PR. It never blocks: it returns the same command with the message cleaned and no permission decision. A message kept in a file is never rewritten on disk; the cleaned text is read from `-F -` or a heredoc. A recognised `git commit` also gets `-s` unless the message already has a sign-off, `commit.signOff` is false, or the repo's own hook adds it. Signing (`-S`) is left to git config. The same rule backs `playbook sanitize commit-msg <file>`. Best effort, not a security boundary. |
 
 ### UserPromptSubmit
 
@@ -132,18 +119,22 @@ playbook sanitize commit-msg "$1"
 
 It rewrites the message file in place and always exits 0, even when the file cannot be read or written, so it never blocks a commit. `--check` reports instead: exit 1 for something it would remove or a missing `Signed-off-by` line, exit 2 when the file cannot be read, so CI can tell them apart.
 
+### Optional: a git `commit-msg` hook
 
-## See also
+`playbook init` installs no git hook, because a repo may already manage its hooks (`core.hooksPath`, husky, lefthook). To get the same cleanup for commits made outside an agent, add one line to the repo's own `commit-msg` hook:
 
-- [Authoring Commands, Skills, and Hooks](../authoring/01-commands-skills-hooks.md): how to write your own hook.
-- [Internals: Model Routing and Memory](02-model-routing-and-memory.md): model routing and the system prompt.
-- [Docs index](../index.md)
+```sh
+playbook sanitize commit-msg "$1"
+```
+
+It rewrites the message file in place and always exits 0. With `--check` it reports instead: exit 1 for something it would remove or a missing `Signed-off-by` line, exit 2 when the file cannot be read, so CI can tell them apart.
 
 ## Status line
 
-`statusLine.command` runs `playbook statusline`, the Rust renderer, which is
-the replacement for the old `statusline.sh` and several times faster per
-refresh. `playbook init` rewrites the old `bash $HOME/.config/playbook/statusline.sh`
-command and leaves any custom command alone. The script is gone from the repo
-and init no longer places it. `playbook uninstall` still removes a copy that an
-older install placed.
+`statusLine.command` runs `playbook statusline`, the Rust renderer. `playbook init` rewrites the old `statusline.sh` command and leaves a custom command alone. The script is gone from the repo, and `playbook uninstall` still removes a copy an older install placed.
+
+## See also
+
+- [Authoring commands, skills and hooks](../authoring/01-commands-skills-hooks.md): how to write your own hook.
+- [Model routing and memory](02-model-routing-and-memory.md): model tiers, effort and the memory graph.
+- [Docs index](../index.md)
