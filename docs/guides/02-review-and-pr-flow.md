@@ -50,6 +50,34 @@ By default, conditional reviewers (architecture, migration, docs, complexity, an
 
 Use `/playbook:quick-review` for everyday PRs. Reach for `/playbook:deep-review` when the change is large, risky, or touches multiple layers.
 
+## Reviewing a pull request stack
+
+A stack is a series of PRs where each one targets the branch of the PR below it. Playbook finds stacks made with GitHub's native stacked PRs, and also stacks made with Graphite, ghstack, git-town or by hand, by following the branch chain. See [ADR-0019](../adr/0019-pr-stack-review.md) for the design.
+
+A PR that is not in a stack is reviewed as before, with no extra question. When the PR sits in a stack with two or more open PRs, both review commands first print the size (PR count and changed lines) and ask:
+
+1. This PR only.
+2. Whole stack, quick review. This is the default.
+3. Whole stack, deep review.
+
+Pass `--this-pr` or `--whole-stack` to skip the question. In auto mode the command takes option 2 and logs the assumption. Nothing is posted in auto mode.
+
+```bash
+/playbook:quick-review 123 --whole-stack   # quick review of the stack PR #123 belongs to
+/playbook:deep-review 123 --this-pr        # only PR #123, even if it is stacked
+playbook pr stack 123 --json               # what the commands read: the PRs, their state and size
+```
+
+What a whole-stack review does:
+
+- **One shared context.** Open PRs are read in full. Merged PRs are read as a short summary (title, description, file list) so the reviewer understands the code below.
+- **Merged PRs are never reviewed or commented on.** A PR closed without merging is skipped.
+- **Findings go to the PR that holds the line.** `playbook pr stack map` matches each finding's `file:line` against the diff hunks of the open PRs and creates one pending review per PR. A finding no open PR changes is shown in the report and not posted.
+- **Safe against change.** If a PR was pushed to, retargeted or closed after the review started, its findings are held back and listed as stale.
+- **Cost guard.** The command asks again before it starts when the open PRs exceed `review.stackMaxPrs` (default 6) or `review.stackMaxLines` (default 3000). See [Config keys](04-config-keys.md).
+
+A stack with a single open PR and merged PRs below it is not asked about: the merged PRs are read as background and only the open PR is reviewed.
+
 ## The grounding-review discipline
 
 Both review commands follow the same discipline, which covers:
