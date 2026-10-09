@@ -162,10 +162,7 @@ fn zero_session_state(dir: &str) {
             .truncate(true)
             .open(base.join(name));
     }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = crate::common::time::now_epoch_secs();
     let _ = fs::write(base.join("start-ts"), now.to_string());
 }
 
@@ -708,10 +705,7 @@ fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
         return;
     }
 
-    let now_epoch = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now_epoch = crate::common::time::now_secs();
     let root = crate::common::paths::playbook_root_from(home);
     let marker = worktree_sweep_marker_key(Path::new(repo_root));
     let marker_mtime_epoch = crate::state::get(&root, &marker)

@@ -10,7 +10,6 @@ use crate::common::payload::Payload;
 use crate::common::{abspath, emit_pre_context, session_dir};
 use std::fs;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Matches WINDOW in the retired shell original (30 minutes).
 const WINDOW_SECS: i64 = 1800;
@@ -32,7 +31,7 @@ pub fn run(payload: &Payload) {
         return;
     }
     let abs_path = abspath(&path);
-    let now = now_secs();
+    let now = crate::common::time::now_secs();
 
     let Some(match_ts) = most_recent_match(&edits_path, &abs_path, now) else {
         return;
@@ -100,13 +99,6 @@ fn most_recent_match(edits_path: &Path, abs_path: &str, now: i64) -> Option<f64>
     }
 
     match_ts
-}
-
-fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }
 
 /// Matches the age-string thresholds in the retired shell original.

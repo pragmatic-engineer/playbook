@@ -167,12 +167,6 @@ pub fn respond_to(
     }
 }
 
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
-}
-
 /// Ingest anything new, then build the JSON for one guarded request.
 fn load(paths: &Paths, request: Api) -> Result<String, Failure> {
     if request == Api::Live {
@@ -180,7 +174,7 @@ fn load(paths: &Paths, request: Api) -> Result<String, Failure> {
         return Ok(String::new());
     }
     let (conn, _) = super::run::ingest_new(paths).map_err(Failure::Internal)?;
-    render(&conn, request, now_secs())
+    render(&conn, request, crate::common::time::now_secs())
 }
 
 /// The events a ranged response is built from. `data_json` and `sessions_json`
@@ -230,7 +224,7 @@ fn render(conn: &rusqlite::Connection, request: Api, now: i64) -> Result<String,
 fn live_summary(paths: &Paths) -> Result<String, String> {
     use super::{api, db};
     let (conn, _) = super::run::ingest_new(paths)?;
-    let now = now_secs();
+    let now = crate::common::time::now_secs();
     let window = db::load_usage_events_since(&conn, api::live_window_start(now))?;
     let ids = api::active_session_ids(&window, now);
     let sessions = db::load_usage_events_of_sessions(&conn, &ids)?;

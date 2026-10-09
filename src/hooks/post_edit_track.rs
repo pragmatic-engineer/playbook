@@ -9,7 +9,6 @@
 use crate::common::payload::Payload;
 use crate::common::{abspath, atomic_append, incr_counter, session_dir};
 use serde::Serialize;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize)]
 struct EditRecord<'a> {
@@ -40,7 +39,7 @@ pub fn run(payload: &Payload) {
     let abs_path = abspath(&path);
     let record = EditRecord {
         path: &abs_path,
-        ts: now_unix_seconds(),
+        ts: crate::common::time::now_secs(),
     };
     if let Ok(line) = serde_json::to_string(&record) {
         atomic_append(&format!("{dir}/edits.jsonl"), &line);
@@ -48,14 +47,4 @@ pub fn run(payload: &Payload) {
 
     // Bump human-readable edit count (used by statusline).
     incr_counter(&format!("{dir}/edit-count"));
-}
-
-/// Current unix time in whole seconds, matching python's `int(time.time())`
-/// truncation. Never panics; a clock reading before the epoch falls back to
-/// 0 rather than erroring.
-fn now_unix_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }

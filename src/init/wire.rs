@@ -33,7 +33,6 @@
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// One hook registration `wire` ensures exists in `settings.json`: which
 /// event it fires on, the matcher grouping it belongs to (`None` for events
@@ -346,7 +345,7 @@ pub struct WireOutcome {
 /// errors, because there was no pre-change snapshot to recover from or diff
 /// against.
 pub fn wire(settings_path: &Path) -> Result<WireOutcome, WireError> {
-    wire_at(settings_path, now_epoch_secs())
+    wire_at(settings_path, crate::common::time::now_epoch_secs())
 }
 
 /// `wire` with the backup stamped `epoch`, so a caller that already took a
@@ -672,14 +671,6 @@ fn canonical_entry(spec: &HookSpec) -> Value {
         entry.insert("timeout".to_string(), Value::Number(timeout.into()));
     }
     Value::Object(entry)
-}
-
-/// Seconds since the unix epoch, the stamp backups are named with.
-pub fn now_epoch_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// `settings.json.bak.<unix-seconds>` beside the original, so a bad wiring

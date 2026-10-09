@@ -22,14 +22,6 @@ pub struct IngestStats {
 /// absorbs the overlap.
 const WATERMARK_SAFETY_SECS: i64 = 900;
 
-fn now_epoch_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_secs()).ok())
-        .unwrap_or(0)
-}
-
 /// Dedup is by `event_id`, so re-reading events after a crash or through the
 /// safety overlap never double-counts. A repeat usage event only raises its
 /// token counts, never lowers them.
@@ -38,7 +30,7 @@ pub fn ingest(
     account: &str,
     conn: &Connection,
 ) -> Result<IngestStats, String> {
-    ingest_at(source, account, conn, now_epoch_secs())
+    ingest_at(source, account, conn, crate::common::time::now_secs())
 }
 
 fn ingest_at(

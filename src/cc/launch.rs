@@ -337,10 +337,7 @@ fn record_cd(path: &Path) {
 /// A fresh 0600 file that fails rather than follow a planted path, standing
 /// in for the `mktemp` the shell used.
 fn private_err_file() -> (PathBuf, Option<Stdio>) {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let nanos = crate::common::time::now_nanos();
     let path = std::env::temp_dir().join(format!("playbook-cc-err-{}-{nanos}", std::process::id()));
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);

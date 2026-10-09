@@ -319,20 +319,19 @@ pub fn show_in(dir: &Path, slug: &str, all: bool, now: SystemTime) -> String {
     out
 }
 
-fn now_epoch_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// CLI entry for `handoff save`.
 pub fn run_save(dir: Option<&str>, text: &str) -> Result<String, String> {
     let slug = match dir {
         Some(d) => slug_for_dir(d)?,
         None => current_slug(),
     };
-    let path = save_in(&root(), &slug, text, now_epoch_secs(), std::process::id())?;
+    let path = save_in(
+        &root(),
+        &slug,
+        text,
+        crate::common::time::now_epoch_secs(),
+        std::process::id(),
+    )?;
     Ok(format!("handoff saved: {}", path.display()))
 }
 
@@ -446,7 +445,7 @@ fn open_log_for_append(path: &Path) -> std::io::Result<fs::File> {
 pub fn log_start(source: &str, session_id: &str, slug: &str, injected: usize) {
     log_start_in(
         &log_path(),
-        now_epoch_secs(),
+        crate::common::time::now_epoch_secs(),
         source,
         session_id,
         slug,
