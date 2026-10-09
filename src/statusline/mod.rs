@@ -14,7 +14,6 @@ mod telemetry;
 use crate::json::statusline as pr_json;
 use fmt::*;
 use lines::{Opts, Session};
-use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -203,9 +202,8 @@ fn pr_right(
     let pending = pr_json::pending_logins(&v);
     let completed = pr_json::completed_reviews(&v, &pending);
 
-    let jira = Regex::new(r"[A-Z][A-Z0-9]+-[0-9]+")
-        .ok()
-        .and_then(|re| re.find(&repo.branch).map(|m| m.as_str().to_string()))
+    let jira = crate::json::statusline::jira_key(&repo.branch)
+        .map(str::to_string)
         .unwrap_or_else(|| pr_json::jira_from_body(&pr_json::str_field(&v, &["body"])));
 
     let label = format!("{ORANGE}PR #{number}{RESET}");

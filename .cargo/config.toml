@@ -1,0 +1,5 @@
+# Bundled SQLite compiles search, spatial and extension-loading code that
+# playbook never uses. Dropping it saves about 400 KB in the release binary.
+# Applies to every profile so tests run against the same SQLite as the release.
+[env]
+LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB -DSQLITE_OMIT_LOAD_EXTENSION"
