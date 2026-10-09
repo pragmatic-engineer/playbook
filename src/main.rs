@@ -685,6 +685,30 @@ fn main() {
                 }
             }
         }
+        Command::Route {
+            kind,
+            tier,
+            failures,
+            json,
+        } => {
+            let home = common::home_dir();
+            let cwd = std::env::current_dir().unwrap_or_default();
+            match playbook::routing::run(
+                &home,
+                &home.join(".claude"),
+                &cwd,
+                &kind,
+                &tier,
+                failures,
+                json,
+            ) {
+                Ok(out) => println!("{out}"),
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    std::process::exit(2);
+                }
+            }
+        }
         Command::State { sub } => {
             let root = common::paths::playbook_root_from(&common::home_dir());
             match sub {
