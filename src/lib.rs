@@ -1446,6 +1446,7 @@ pub enum HookName {
     BgAwaitGuard,
     NoSlopGuard,
     CommitMessageSanitizer,
+    PolicyGuard,
     PrecommitCheck,
     AutoGuard,
     AutoCost,
@@ -1551,6 +1552,7 @@ mod tests {
             "no-slop-guard",
             "precommit-check",
             "commit-message-sanitizer",
+            "policy-guard",
         ];
 
         // Act
