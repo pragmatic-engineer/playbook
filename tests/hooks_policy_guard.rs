@@ -110,7 +110,8 @@ fn writes_to_claude_memory_are_denied_and_the_playbook_store_is_not() {
     assert!(denial(&out).is_some(), "{out}");
 
     let (out, code, _) = run(&write_to("/Users/tester/.config/playbook/memory/a.md"), &[]);
-    assert_eq!((out.as_str(), code), ("", 0));
+    assert_eq!(code, 0);
+    assert!(denial(&out).is_none(), "{out}");
     let (out, _, _) = run(&bash("cat ~/.claude/projects/p/memory/a.md"), &[]);
     assert_eq!(out, "", "reads are fine");
 }
@@ -147,4 +148,43 @@ fn a_long_command_is_still_fast() {
     // Assert: generous bound, since a CI runner can be slow.
     assert_eq!((out.as_str(), code), ("", 0));
     assert!(took < Duration::from_secs(2), "{took:?}");
+}
+
+#[test]
+fn writing_a_fact_file_shows_the_memory_format_and_does_not_deny() {
+    // Arrange / Act
+    let (out, code, _) = run(
+        &write_to("/Users/tester/.config/playbook/memory/o/r/fact.md"),
+        &[],
+    );
+
+    // Assert
+    assert_eq!(code, 0);
+    assert!(denial(&out).is_none(), "{out}");
+    let v: Value = serde_json::from_str(&out).expect("json");
+    let context = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(
+        context.contains("supersedes") && context.contains("anchors:"),
+        "{context}"
+    );
+}
+
+#[test]
+fn only_a_write_of_a_fact_file_shows_the_format() {
+    // Arrange: an Edit, a graph file, and a file outside the store.
+    let edit = json!({"tool_name": "Edit", "tool_input": {"file_path": "/Users/tester/.config/playbook/memory/a.md"}}).to_string();
+
+    // Act / Assert
+    assert_eq!(run(&edit, &[]).0, "");
+    assert_eq!(
+        run(
+            &write_to("/Users/tester/.config/playbook/memory/memory.graph.json"),
+            &[]
+        )
+        .0,
+        ""
+    );
+    assert_eq!(run(&write_to("/Users/tester/repo/notes.md"), &[]).0, "");
 }

@@ -11,6 +11,9 @@
 //! - writing memory outside playbook's store: Claude Code's own auto memory
 //!   (`~/.claude/projects/*/memory/`) or the retired `~/.claude/memory/`.
 //!
+//! It also shows the memory fact format (`MEMORY_SCHEMA`) when a fact file is
+//! written to playbook's store, so the system prompt does not carry it.
+//!
 //! One hook on two matchers: Bash looks at the command, Edit and Write look at
 //! the target path. It fails safe: a payload it cannot read, a command the
 //! reader cannot split, or anything unexpected allows the call, and it never
@@ -20,10 +23,10 @@
 //! A guardrail against an agent drifting, not a security boundary: it does not
 //! expand variables, aliases or scripts, so an obfuscated spelling passes.
 
-use crate::common::emit_pre_deny;
 use crate::common::payload::Payload;
 use crate::common::shell::{program_index, program_name, simple_commands};
-use std::path::PathBuf;
+use crate::common::{emit_pre_context, emit_pre_deny};
+use std::path::{Component, Path, PathBuf};
 
 /// Subcommands that run git hooks, so `--no-verify` matters.
 const HOOKED_SUBCOMMANDS: [&str; 6] = ["commit", "push", "merge", "rebase", "cherry-pick", "am"];
@@ -72,6 +75,22 @@ const NO_SIGN_REASON: &str = "Turning off commit or tag signing (--no-gpg-sign, 
 
 const PR_CREATE_REASON: &str = "Do not hand-run `gh pr create`. Use the /playbook:create-pull-request skill: it runs the pre-flight checks, writes a conventional-commit title and the team PR template, then calls `playbook pr create`.";
 
+/// Shown when a fact file is written in playbook's store: the format the
+/// system prompt no longer carries.
+pub const MEMORY_SCHEMA: &str = "Memory fact format. One fact per file, kebab-case name, `.md`. \
+Frontmatter: `name`, `description` (start with \"Use when ...\"), `type` (user, feedback, project or \
+reference), optional `links:` and optional `anchors:`. Body for feedback and project facts: the rule, \
+then **Why:** and **How to apply:**. Edges in `links:` use bare basenames with no path or extension: \
+`supersedes` (this replaces an older fact; act on the newest in a chain, treat the rest as history), \
+`depends_on` (read the prerequisite first), `relates_to` (symmetric, pull the neighbour), \
+`contradicts` (symmetric; if both are live, surface the conflict and do not pick silently). Store \
+each edge once, on the fact that authors it. A basename that resolves in neither the fact's scope nor \
+the global scope is dangling: surface it, do not fail. `anchors:` lists the repo-relative code a fact \
+describes: a directory (`src/auth/`), a file (`src/auth/login.py`) or a symbol \
+(`src/auth/login.py#authenticate`). Scope comes from the folder: `<owner>/<repo>/` for one repo, \
+`<owner>/` for one owner's repos, the root for everything. Inside a scoped folder do not repeat the \
+owner or repo in the text.";
+
 const MEMORY_REASON: &str = "Claude Code's own memory is off limits here. Save the fact in playbook's store instead: ~/.config/playbook/memory/ for a global fact, <owner>/<repo>/ under it for a project fact.";
 
 pub fn run(payload: &Payload) {
@@ -80,14 +99,28 @@ pub fn run(payload: &Payload) {
     }
     let home = std::env::var("HOME").unwrap_or_default();
     let command = payload.field(".tool_input.command");
+    let path = payload.field(".tool_input.file_path");
     let reason = if !command.is_empty() {
         check_command(&command, &home)
     } else {
-        check_path(&payload.field(".tool_input.file_path"), &home)
+        check_path(&path, &home)
     };
     if let Some(reason) = reason {
         emit_pre_deny(reason);
+    } else if payload.field(".tool_name") == "Write"
+        && is_fact_file(&path, &crate::common::paths::memory_dir())
+    {
+        emit_pre_context("PreToolUse", MEMORY_SCHEMA);
     }
+}
+
+/// Whether `path` is a fact file (`.md`) inside playbook's memory store.
+fn is_fact_file(path: &str, memory_dir: &Path) -> bool {
+    let path = Path::new(path);
+    path.is_absolute()
+        && path.extension().is_some_and(|ext| ext == "md")
+        && path.starts_with(memory_dir)
+        && !path.components().any(|c| c == Component::ParentDir)
 }
 
 /// The reason to deny `command`, or `None` to allow it.
@@ -422,6 +455,49 @@ mod tests {
         for path in outside {
             assert_eq!(check_path(path, HOME), None, "{path}");
         }
+    }
+
+    #[test]
+    fn only_md_files_inside_the_store_are_fact_files() {
+        // Arrange
+        let store = Path::new("/Users/me/.config/playbook/memory");
+
+        // Act / Assert
+        assert!(is_fact_file(
+            "/Users/me/.config/playbook/memory/a.md",
+            store
+        ));
+        assert!(is_fact_file(
+            "/Users/me/.config/playbook/memory/o/r/a.md",
+            store
+        ));
+        assert!(!is_fact_file(
+            "/Users/me/.config/playbook/memory/memory.graph.json",
+            store
+        ));
+        assert!(!is_fact_file(
+            "/Users/me/.config/playbook/memory/../x/a.md",
+            store
+        ));
+        assert!(!is_fact_file("/Users/me/repo/a.md", store));
+        assert!(!is_fact_file("memory/a.md", store));
+    }
+
+    #[test]
+    fn the_schema_names_every_edge_type_and_the_anchor_forms() {
+        // Arrange / Act / Assert
+        for needle in [
+            "supersedes",
+            "depends_on",
+            "relates_to",
+            "contradicts",
+            "anchors:",
+            "#authenticate",
+            "Why:",
+        ] {
+            assert!(MEMORY_SCHEMA.contains(needle), "{needle}");
+        }
+        assert!(MEMORY_SCHEMA.chars().count() < 1700);
     }
 
     #[test]
