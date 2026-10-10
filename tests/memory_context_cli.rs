@@ -163,11 +163,61 @@ fn org_scope_matches_by_owner_not_by_full_repo() {
 }
 
 #[test]
-fn a_missing_graph_prints_nothing_and_exits_zero() {
+fn a_missing_graph_says_so_and_exits_zero() {
     let (out, text) = run(None, "owner/repo");
 
     assert!(out.status.success());
-    assert_eq!(text, "");
+    assert!(
+        text.starts_with("Memory context: none (no graph file at"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_corrupt_graph_says_it_is_unreadable() {
+    let (out, text) = run(Some("{not json"), "owner/repo");
+
+    assert!(out.status.success());
+    assert!(
+        text.starts_with("Memory context: none (graph file"),
+        "{text}"
+    );
+    assert!(text.contains("is unreadable"), "{text}");
+}
+
+#[test]
+fn a_graph_with_nothing_in_scope_names_the_repo() {
+    let g = graph(&[fact("p1", "project", "other", Some("acme/other"))], &[]);
+    let (_, text) = run(Some(&g), "owner/repo");
+
+    assert_eq!(
+        text.trim(),
+        "Memory context: none (no facts in scope for owner/repo)"
+    );
+}
+
+#[test]
+fn a_missing_default_graph_is_rebuilt_from_the_fact_files() {
+    let home = scratch("rebuild");
+    let dir = home.join(".config/playbook/memory");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("rebuilt-fact.md"),
+        "---\nname: rebuilt-fact\ndescription: found after a rebuild\ntype: feedback\n---\nbody\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["memory", "context", "--repo", "owner/repo"])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(home
+        .join(".config/playbook/memory/memory.graph.json")
+        .exists());
+    assert!(text.contains("rebuilt-fact"), "{text}");
 }
 
 #[test]

@@ -95,7 +95,7 @@ Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set 
 
 ## Execution rules (MUST)
 
-1. Run every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive). Don't simulate.
+1. Run every bash block for real with the `Bash` tool. Don't simulate.
 2. No caching: every invocation is a fresh run, even if you reviewed this PR earlier in the conversation. The code may have changed.
 3. No skipping (except steps guarded by a flag the user didn't set).
 4. No assumptions: run the command and read the result.
@@ -155,7 +155,7 @@ A failing install or check is printed as output, never an error: never block the
 
 ## Step 2c: Load memory (best-effort)
 
-Run `playbook memory context --repo <owner>/<repo>` (`<owner>/<repo>` from `git remote get-url origin`), and load the fact files it names on demand. If the command produces no output (empty store, or the `playbook` binary unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope). When both the command and the direct graph read produce nothing, skip this step silently; Step 3's reviewers get no memory section and that's expected, not an error. Note in the report which source produced the result (command output, direct graph read, or nothing found), so an operator can tell "nothing relevant" apart from "the command couldn't run."
+Run `playbook memory context --repo <owner>/<repo>` (`<owner>/<repo>` from `git remote get-url origin`), and load the fact files it names on demand. The command reads the memory graph itself and prints a `Memory context: none` line saying why when it has nothing. In that case skip this step silently; Step 3's reviewers get no memory section and that's expected, not an error. Note in the report whether facts were found.
 
 ## Step 2d: Haiku triage
 
@@ -177,7 +177,7 @@ Only now, with the lenses and tiers settled, load what the run needs. The orches
 
 ## Step 3: Spawn the reviewer swarm (parallel reviewer subagents)
 
-**Concurrency cap (MUST).** Dispatch at most 8 reviewers at once. When the selected set (Step 2) is 8 or fewer, dispatch it in one wave exactly as below. When it's larger (only possible under `--all`, up to 14 lenses), split into waves of at most 8: issue the first wave's `Agent` calls in one message, wait for them to return, `TaskStop` each, then issue the remaining lenses as a second wave. This bounds concurrent spawns; it never drops a lens to stay under the cap; every selected reviewer still runs, just possibly across two waves instead of one.
+**Concurrency cap (MUST).** Dispatch at most 8 reviewers at once. When the selected set (Step 2) is 8 or fewer, dispatch it in one wave exactly as below. When it's larger (only possible under `--all`, up to 14 lenses), split into waves of at most 8: issue the first wave's `Agent` calls in one message, wait for them to return, then issue the remaining lenses as a second wave. This bounds concurrent spawns; it never drops a lens to stay under the cap; every selected reviewer still runs, just possibly across two waves instead of one.
 
 For each lens in a wave, read its Step 2d tier from the captured tier map before dispatching: a lens absent from the map defaults to `full-lens`, per Step 2d's fail-open-per-lens rule (a triage dispatch that returns a partial map never silently narrows a lens's coverage). Dispatch by tier:
 
@@ -247,7 +247,7 @@ Never fold "returned nothing" into "zero findings", and **never let a swarm with
 
 After a reviewer's idle notification fires, one `SendMessage` asking for partial results is worth a single attempt. Do not spend more than one round per lens.
 
-**Close each reviewer once you have its findings or have given up (MUST).** Spawn each with a stable `name` (e.g. `dr-<focus>`: `dr-security`, `dr-logic`). The swarm is one-shot, so a finished reviewer is never reused; a spawned agent stays idle-alive for `SendMessage` follow-ups, so leaving it unstopped keeps a subagent running in the background. Track the spawned names so Step 8 can sweep any that never delivered. `TaskStop` is destructive and unrecoverable for a read-only agent, so do not use it until you have either taken the findings or made the one recovery attempt.
+**Close each reviewer once you have its findings or have given up (MUST).** Spawn each with a stable `name` (e.g. `dr-<focus>`: `dr-security`, `dr-logic`). Track the spawned names so Step 8 can sweep any that never delivered. Stopping is unrecoverable for a read-only agent, so do not stop one until you have either taken the findings or made the one recovery attempt.
 
 **Trust gate.** This tiered dispatch mechanism ships and functions as soon as this Work Unit lands: a `full-lens` tier still gets the exact reviewer it always did, a `cheap-check` tier gets a real narrow-scope pass from `cheap-checker`, and a `skip` tier is a real, tracked decision to run nothing. But a `skip` or `cheap-check` decision should not be treated as validated judgment yet: `playbook eval review-triage` (a later Work Unit in this plan) has not yet recorded a pass verdict against a real fixture set. Until it has, treat triage's tier choices as best-effort, not proven: a `skip` verdict is not yet evidence a lens truly had nothing to find, and a `cheap-check` narrow pass is not yet guaranteed to have caught everything the full lens would have.
 
@@ -328,7 +328,7 @@ Never fabricate URLs; use the `html_url` the API returns.
 
 ## Step 8: Teardown (MUST run, even on failure, abort, or skip)
 
-**Stop every reviewer subagent first.** `TaskStop` each reviewer spawned in Step 3 that is still alive (any you didn't already close on return). Use `TaskList` to confirm none from this swarm are still running before you finish. A returned agent stays idle-alive for follow-ups and this review never sends any, so an unstopped reviewer lingers as a background process. Do this whether the review completed, failed, was skipped, or aborted mid-swarm.
+**Close any reviewer subagent from Step 3 that is still alive first**, whether the review completed, failed, was skipped, or aborted mid-swarm.
 
 Then, if `WT` is not empty, always run:
 

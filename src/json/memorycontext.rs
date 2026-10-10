@@ -321,6 +321,31 @@ pub fn render_for_graph_file(graph: &std::path::Path, repo: &str) -> String {
     }
 }
 
+/// `render_for_graph_file`, but never silent: when there is nothing to show it
+/// returns a one-line `Memory context: none (<reason>)` so the caller can tell
+/// a missing graph, a corrupt graph and an empty scope apart without reading
+/// the file itself.
+pub fn render_with_source(graph: &std::path::Path, repo: &str) -> String {
+    let Ok(json) = std::fs::read_to_string(graph) else {
+        return format!(
+            "Memory context: none (no graph file at {})",
+            graph.display()
+        );
+    };
+    if parse_graph(&json).is_none() {
+        return format!(
+            "Memory context: none (graph file {} is unreadable)",
+            graph.display()
+        );
+    }
+    let out = render_memory_context(&json, repo);
+    if out.is_empty() {
+        format!("Memory context: none (no facts in scope for {repo})")
+    } else {
+        out
+    }
+}
+
 /// Renders `graph_json` (a `{"nodes": [...], "edges": [...]}` memory graph)
 /// into the same `Facts:`/`Edges:`/`Anchors:` markdown text
 /// the retired shell original's `jq` filter produced for `repo`, an

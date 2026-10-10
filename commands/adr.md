@@ -70,7 +70,7 @@ In `ask` mode, behave exactly as this file describes.
 
 ## Execution Rules (MUST)
 
-1. **Execute every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive).** Don't simulate, summarise, or predict output; use the actual output to drive the next step.
+1. **Execute every bash block for real with the `Bash` tool.** Don't simulate, summarise, or predict output; use the actual output to drive the next step.
 2. **No caching.** Every invocation is a fresh run. Don't reuse results from prior conversations or training data.
 3. **No skipping.** Execute steps in order. The only exception: steps guarded by a flag the user didn't set.
 4. **No assumptions.** Don't guess file contents, command output, or environment state. Run the command and read the result.
@@ -97,7 +97,7 @@ Build understanding before writing. Skipping this produces records that don't su
 
 1. **Read existing records** in `docs/adr/` (if it exists) for precedent and numbering.
 2. **Explore the codebase** with Read/Glob/Grep: modules and services affected by the topic, database schemas and migration history (if relevant), test patterns, configuration and deployment.
-3. **Read memory stores if present** (optional enhancement, not required): run `playbook memory context --repo <owner>/<repo>` (`<owner>/<repo>` derived from `git remote get-url origin`), then load the fact files it names on demand. Use what you find to inform Considered Alternatives (reference a named pattern where one applies) and to avoid re-proposing something already rejected. Surface any `contradicts` edge among the returned facts that bears on the decision, rather than silently choosing one side. If the command produces no output (empty store, or the `playbook` binary unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the Read tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope): a dependency-free shape, since this command is an LLM session and can parse JSON without shelling to `playbook`. Note in the digest which path actually produced the result (command output, direct graph read, or nothing found), so an operator can tell "nothing relevant" apart from "the command couldn't run." If nothing is found by either path, skip this step silently and proceed on the codebase alone.
+3. **Read memory stores if present** (optional enhancement, not required): run `playbook memory context --repo <owner>/<repo>` (`<owner>/<repo>` derived from `git remote get-url origin`), then load the fact files it names on demand. Use what you find to inform Considered Alternatives (reference a named pattern where one applies) and to avoid re-proposing something already rejected. Surface any `contradicts` edge among the returned facts that bears on the decision, rather than silently choosing one side. The command reads the memory graph itself and prints a `Memory context: none` line saying why when it has nothing, so note in the digest whether facts were found. If there are none, skip this step silently and proceed on the codebase alone.
 4. **Summarise findings to the user:** what's relevant to the topic, which areas are affected, existing patterns/constraints, and applicable patterns from memory if a memory store was present (with brief rationale).
 
 **Knowledge capture:** if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, write any durable convention or gotcha revealed by exploration as a project memory fact now. If no project store is present, skip this step silently.
@@ -216,7 +216,7 @@ After the user approves all drafts, run the three-phase gate before finalising. 
 
 **A phase that returned nothing is INCONCLUSIVE, never PASS.** On two separate gates for ADR 0007, every dispatched phase agent went idle without returning; recording those as passes would have published a gate that checked nothing. INCONCLUSIVE blocks finalisation exactly like FAIL. Either redo that phase inline or record the gap explicitly in the quality report, naming which phase did not run.
 
-Spawn each delegated agent with a stable `name`. `TaskStop` it only once you have its verdict or have made one post-idle `SendMessage` attempt; stopping is destructive and unrecoverable for a read-only agent. A spawned agent stays idle-alive for follow-ups and this flow never reuses a finished one, so an unstopped agent lingers as a background process.
+Spawn each delegated agent with a stable `name`. Stop it only once you have its verdict or have made one post-idle `SendMessage` attempt; stopping is unrecoverable for a read-only agent.
 
 Throughout this stage, `<record-slug>` is `adr-{base}`, where `{base}` is the record's filename without extension (from Stage 2's Determine the filename step, e.g. `docs/adr/0016-foo-bar.md` gives `<record-slug>` of `adr-0016-foo-bar`). Every `gate record`/`gate check` call below uses `<record-slug>` directly, already carrying its `adr-` prefix; do not prefix it again. That prefix keeps this record's gate rows distinct from `/playbook:plan` and `/playbook:implement` runs sharing the same per-repo-checkout gate database, since `gate_phases`' primary key carries no command column of its own.
 
@@ -305,4 +305,4 @@ The blueprint is a self-contained implementation plan. Run `/clear` first, then 
 
 ## Teardown (MUST run, even on failure or abort)
 
-`TaskStop` every subagent spawned in this flow that is still alive, then confirm via `TaskList` that none from this run remain before finishing.
+Close any subagent from this run that is still alive before finishing.
