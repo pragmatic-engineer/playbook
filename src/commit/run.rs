@@ -23,6 +23,8 @@ pub struct Options {
     pub no_signoff: bool,
     /// Skip the conventional commit type guard (`typecheck`).
     pub no_type_check: bool,
+    /// Skip the prose check (`common::prose`).
+    pub no_prose_check: bool,
 }
 
 /// Whether a hook script's source WRITES a `Signed-off-by` trailer: an
@@ -112,6 +114,16 @@ pub fn run(
     let message = std::fs::read_to_string(message_file)
         .map_err(|e| format!("could not read the message: {e}"))?;
     let mut log = Vec::new();
+
+    if !opts.no_prose_check {
+        let problems = crate::common::prose::check(&message);
+        if !problems.is_empty() {
+            return Err(format!(
+                "The commit message breaks the writing rules:\n{}\nFix the message and run again. Nothing was committed. Pass --no-prose-check only when the text is a quotation.",
+                problems.join("\n")
+            ));
+        }
+    }
 
     if !opts.amend && !opts.no_type_check {
         let staged = git_text(dir, &["diff", "--cached", "--name-only"]).unwrap_or_default();

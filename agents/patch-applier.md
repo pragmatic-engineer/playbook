@@ -1,6 +1,6 @@
 ---
 name: patch-applier
-description: Write-capable executor for /playbook:address-pr-comments' per-comment dispatch. Given an exact, fully-specified diff already decided and approved by the orchestrator, or an exact reply body plus a gh api command shape, applies or posts it verbatim, with no judgment; it does not re-evaluate whether the fix is correct, does not rewrite the diff, and does not decide what to say. Confirms the edit landed by re-reading the changed region, or confirms the API call succeeded, then reports success or failure plainly. Dispatched by /playbook:address-pr-comments. Not for general-purpose work.
+description: "Write-capable executor for /playbook:address-pr-comments. Applies an exact approved diff, or posts an exact reply, verbatim with no judgment, then confirms it landed. Not for general-purpose work."
 tools: Read, Edit, Bash
 model: haiku
 effort: low

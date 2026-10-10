@@ -44,14 +44,10 @@ pub const VARIANTS: [(&str, &[&str]); 12] = [
 ];
 
 /// Agents whose work gets harder with the diff, so a session also gets the
-/// `xhigh` variant. Every other agent only gets cheaper tiers.
-const ESCALATE: [&str; 5] = [
-    "analyst",
-    "critic",
-    "fact-checker",
-    "implementer",
-    "reviewer",
-];
+/// `xhigh` variant. Every other agent only gets cheaper tiers. Haiku agents are
+/// left out on purpose: the model cap (`src/effort/model_cap.rs`) stops them at
+/// `medium`, so an `xhigh` variant would never be passed.
+const ESCALATE: [&str; 3] = ["critic", "implementer", "reviewer"];
 
 /// Haiku checking and classifying agents that ship at `low`. A session also
 /// gets their `medium` tier for a harder diff, the highest Haiku tier the
