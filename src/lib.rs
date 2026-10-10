@@ -1105,6 +1105,28 @@ pub enum ReviewCommand {
         /// The review worktree to run in
         dir: PathBuf,
     },
+    /// Measure a diff and say which review path it takes
+    ///
+    /// Counts the changed lines of `BASE...HEAD` and prints
+    /// `lines=N files=M path=single|swarm`. A diff of at most 150 changed
+    /// lines takes the `single` path, one reviewer holding every lens; a
+    /// larger one, or any run with `--all-lenses`, takes `swarm`.
+    ///
+    /// Example: `playbook review size --base main`
+    Size {
+        /// The ref the diff starts from
+        #[arg(long)]
+        base: String,
+        /// The ref the diff ends at
+        #[arg(long, default_value = "HEAD")]
+        head: String,
+        /// Always take the swarm path
+        #[arg(long)]
+        all_lenses: bool,
+        /// The repository to measure in; defaults to the current directory
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
     /// Print the absolute path of the reference file a review lens reads
     ///
     /// Maps a deep-review lens or an implement Step 9 lens to its
