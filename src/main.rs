@@ -665,10 +665,13 @@ fn main() {
                     pr,
                     timeout,
                     interval,
+                    all,
+                    settle,
                 } => {
+                    std::thread::sleep(std::time::Duration::from_secs(settle));
                     let verdict = pr::wait::ci_wait(
                         std::time::Duration::from_secs(timeout),
-                        &mut || pr::wait::read_checks(&pr),
+                        &mut || pr::wait::read_checks(&pr, all),
                         &mut |line| println!("{line}"),
                         &mut || std::thread::sleep(std::time::Duration::from_secs(interval)),
                     );
@@ -687,7 +690,11 @@ fn main() {
                     );
                     println!("LAND_VERDICT={verdict}");
                 }
-                PrCommand::Merge { pr, admin } => println!("{}", pr::wait::merge(&pr, admin)),
+                PrCommand::Merge {
+                    pr,
+                    admin,
+                    match_head,
+                } => println!("{}", pr::wait::merge(&pr, admin, match_head.as_deref())),
                 PrCommand::ReviewTriage { pr, base, dir } => {
                     enter_dir("pr review-triage", dir.as_deref());
                     let outcome = match pr::triage::collect(pr, base.as_deref()) {
