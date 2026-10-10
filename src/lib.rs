@@ -709,8 +709,9 @@ pub enum MemoryCommand {
         from: Option<PathBuf>,
     },
     /// Print the repo-scoped markdown slice of the memory graph (facts in
-    /// scope, typed edges, anchor index). Prints nothing, exit 0, when the
-    /// graph is missing or unreadable.
+    /// scope, typed edges, anchor index). When there is nothing to show it
+    /// prints one `Memory context: none (<reason>)` line, exit 0. A missing
+    /// default graph is rebuilt from the fact files first.
     Context {
         /// Repo slug (`owner/name`); defaults to the origin remote's slug.
         #[arg(long)]
