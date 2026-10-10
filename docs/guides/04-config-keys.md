@@ -48,6 +48,18 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `security.defaults` | `false` | `true`, `false` | `playbook init` also merges the shipped security defaults (the `permissions` block and `DISABLE_AUTOUPDATER`) into `settings.json`. `init --security` does the same for one run and `--no-security` skips them even when this is true. Off, `init` leaves the permissions you already have as they are. See [Security](../../README.md#security). |
 | `usage.theme` | `btop` | `btop`, `dark`, `light`, `mono` | The color theme `playbook usage` starts with. `t` cycles the themes inside the view. `NO_COLOR` forces `mono`. |
 
+## Tuning effort from your usage
+
+`playbook effort suggest` lists the agents where a change to effort looks safe or needed. It reads your local usage store (the same one `playbook usage` fills) and prints, for each agent, how often it was dispatched, how often at a higher or lower variant than it ships at, repeats inside a session, and cost per effort level for its model. Add `--json` for scripts and `--range 30d|60d|90d|month|all` to change the window (default `30d`).
+
+- It only reads. It never writes your config, your memory or any Claude Code settings. To act on a suggestion, run the `playbook config set --global effort.agents.<name> <level>` command it prints, or ignore it. Setting a key back to `auto` (`playbook config set --global effort.agents.<name> auto`, or `playbook effort auto` for the global ceiling) undoes it.
+- It only proposes a lower level where a benchmark showed quality holds (the quality floor table in `src/effort/floor.rs`). Today every agent ships at its floor, so a clean report usually says no change. Agents where a missed finding is costly (the reviewer and the auditor) are never proposed for lowering.
+- It tells you when a ceiling you set sits below an agent's floor, which can make results worse.
+- With less than 7 days of history, or fewer than 20 dispatches over 5 sessions for an agent, it says there is not enough data and proposes nothing.
+- Cost is per model and effort level and includes the main session, because a usage row does not say which agent made it. Read it as a rough guide.
+
+There are no config keys for it yet. The thresholds are constants in `src/effort/suggest.rs`. Applying a patch and choosing effort per dispatch automatically are later stages (see [ADR-0022](../adr/0022-effort-auto-tune-from-evidence.md)) and do not exist yet.
+
 ## See also
 
 - [Review and PR flow](02-review-and-pr-flow.md#pr-and-commit-settings): how the PR keys behave in detail.
