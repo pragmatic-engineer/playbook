@@ -204,20 +204,9 @@ Record the resolved Segments and the chosen strategy in the progress ledger (Ste
 
 **Delegation (MUST):** this command runs on Sonnet. The orchestrating session reads the plan and delegates each implementation chunk to a subagent via the Agent tool, then reviews the result. Delegation keeps each chunk in a fresh, isolated context (no bleed between cycles); the orchestrator spends its turn reviewing, not editing. Independent Work Units run in parallel by default, each isolated in its own git worktree, with the model tier set per role (see the scheduler below). The deep design reasoning already happened in `/playbook:plan` or `/playbook:adr`, so execution doesn't need Opus.
 
-Every Agent prompt MUST include: a pointer to its Work Unit's brief file (Step 5's File-based handoff), which carries the plan content that dispatch needs, the specific cycle/step, the test-structure rules below, the design principles below, and grounding rules ("read files before modifying, match existing style, verify imports resolve, don't guess types, apply SOLID/DRY/KISS/YAGNI"). Point at the brief; don't paste the whole multi-WU plan into every prompt.
+Every Agent prompt MUST include: a pointer to its Work Unit's brief file (Step 5's File-based handoff), which carries the plan content that dispatch needs, and the specific cycle/step. The `implementer` agent already carries the design principles, the grounding rules and the test structure, so do not restate them in the prompt. Point at the brief; don't paste the whole multi-WU plan into every prompt.
 
-**Design principles (MUST).** Every change, and every Agent prompt, applies:
-- **SOLID:** one responsibility per unit, small focused interfaces, depend on abstractions only at real seams (no abstraction without a second caller).
-- **DRY:** factor out genuine duplication once it recurs (rule of three); don't couple unrelated code that only looks alike.
-- **KISS:** the simplest design that passes the tests and reads clearly; fewer moving parts wins.
-- **YAGNI:** build only what the plan requires now. No speculative hooks, flags, config, or generality.
-- **Self-explanatory over commented.** Clear names, small functions, obvious control flow, so a reader rarely needs a comment to follow it. No comments unless WHY is non-obvious; never restate WHAT the code already shows.
-- **Composable over inherited.** Prefer composition (small, combinable functions or objects) over deep inheritance, in both OOP and functional code. Inheritance only for a genuine is-a relationship, kept shallow.
-- **Model multi-step processing explicitly.** A request handler, a hook, a CLI command, or any multi-step pipeline reads as a named sequence of steps, not implicit control flow scattered across helpers. Log at each step, so a failure's exact location is visible from the logs alone, without needing to reproduce it locally first.
-- **Idempotent and retryable where the operation allows it.** Design service and API operations to be safely repeatable (idempotency keys, upserts, at-least-once-safe handlers). This is also a `playbook:grounding-review` Reliability check, so building it in avoids a review round-trip.
-- **Error messages are descriptive and assertive.** State exactly what failed and why, in plain language: "order 4471 has no shipping address", not "an error occurred". Never put PII or PHI (names, emails, government IDs, health data) in an error message or a log line; reference a record by its non-sensitive identifier instead.
-
-When SOLID's abstraction pulls against KISS/YAGNI, favour the simplest thing that meets the plan. These principles are also the lens for the refinement pass (Step 8).
+**Design principles (MUST).** The rules every change follows (SOLID, DRY, KISS, YAGNI, composition over inheritance, explicit logged steps, idempotent operations, assertive errors without PII) live in `playbook:engineering-standards` (loaded in Step 3) and in the `implementer` agent that writes the code. When SOLID's abstraction pulls against KISS/YAGNI, favour the simplest thing that meets the plan. They are also the lens for the refinement pass (Step 8) and the principles review lens (Step 9).
 
 **Execution unit (MUST): the plan's Work Units, grouped by Segment.** Execute **one Segment at a time** in dependency order (Step 4.5). Within a Segment, execute its Work Units with the wave scheduler below; each WU becomes one small savepoint commit. The scheduler, worktree isolation, TDD flow, and verify-by-diff are unchanged; they just run scoped to the current Segment's WUs. **A wave never mixes WUs from two Segments:** the outer Segment loop is strictly sequential relative to the inner wave loop, so the ready set is always drawn from the current Segment only.
 
@@ -293,8 +282,6 @@ WORKTREES_DIR=$(playbook path worktrees --create) || exit 1
 ```
 
 **Model tiering (MUST, never omit `model`).** Implementer Tasks spawn the `implementer` agent, which pins `model: sonnet` itself, so you don't set the model on those calls. Ledger writes stay a direct orchestrator action: a few-line append per WU, small enough that a separate dispatch would cost more in round-trip latency than it saves in tokens. Verification and the adversarial review (Step 9) run the capable tier. An omitted `model` on a non-typed call silently inherits the priciest default, so always set it there.
-
-**Test structure (from `playbook:engineering-standards`):** every test follows Arrange-Act-Assert with `// Arrange` / `// Act` / `// Assert` comments mapping to the scenario's Given/When/Then; one action per test; use parameterised tests (`test.each`, `pytest.mark.parametrize`, table-driven) when scenarios share AAA structure but differ in data.
 
 **With TDD (default).** A Work Unit with N test scenarios means up to 3N dispatches: for each scenario, in dependency order:
 
