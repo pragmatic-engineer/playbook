@@ -36,7 +36,7 @@ Pass `--yes` to accept every default. Flags go after `-s --` when piping:
 Pin a version with `PLAYBOOK_REF`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.21.0 bash
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.22.0 bash
 ```
 
 A release tag installs that release and its binary. A branch or commit pins only the source and installs no binary.

@@ -21,7 +21,7 @@ Then open a Claude Code session and run `/playbook:doctor`. It checks every laye
 
 The installer adds the plugin, installs the `playbook` binary (checksum verified), wires the guards and hooks, merges `settings.json` and installs the status line. It asks before adding the launcher and system prompt. Pass `--yes` to accept every default.
 
-Pin a version with `PLAYBOOK_REF=v0.21.0`. Update later with `playbook update`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
+Pin a version with `PLAYBOOK_REF=v0.22.0`. Update later with `playbook update`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
 
 **Plugin only.** `claude plugin install playbook@pragmatic-engineer` (after `claude plugin marketplace add pragmatic-engineer/marketplace`) gives you the skills, commands and subagents. Hooks need the binary, so the first `playbook` call installs it, and `/playbook:setup` finishes the wiring. The plugin needs Claude Code 2.1.224 or later.
 
