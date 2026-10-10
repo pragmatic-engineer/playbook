@@ -6,10 +6,10 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    adr, agents, cc, ci, commit, common, config, deps, doctor, effort, eval, gate, handoff, hooks,
-    init, json, learn, manifest, memory_import, mode, planning, pr, release, review, sanitize,
-    settings, statusline, trust, update, usage, worktree, AdrCommand, AgentsCommand, CcCommand,
-    Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DoctorCommand, EvalCommand,
+    adr, agents, brief, cc, ci, commit, common, config, deps, doctor, effort, eval, gate, handoff,
+    hooks, init, json, learn, manifest, memory_import, mode, planning, pr, release, review,
+    sanitize, settings, statusline, trust, update, usage, worktree, AdrCommand, AgentsCommand,
+    CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DoctorCommand, EvalCommand,
     GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand,
     MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ReleaseCommand, ReviewCommand,
     ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, SkillCommand, WorktreeCommand,
@@ -907,6 +907,50 @@ fn main() {
                             }
                         }
                     }
+                }
+            }
+        }
+        Command::Plan {
+            sub:
+                PlanCommand::Brief {
+                    plan,
+                    wus,
+                    out,
+                    worktree,
+                    worktree_base,
+                    verify,
+                    repo,
+                    graph,
+                },
+        } => {
+            let text = std::fs::read_to_string(&plan).unwrap_or_else(|err| {
+                eprintln!("error: {}: {err}", plan.display());
+                std::process::exit(1);
+            });
+            let repo = repo
+                .filter(|r| !r.is_empty())
+                .unwrap_or_else(common::repo_slug);
+            let graph =
+                graph.unwrap_or_else(|| common::paths::memory_dir().join("memory.graph.json"));
+            let graph_json = std::fs::read_to_string(graph).ok();
+            let plan_path = plan.display().to_string();
+            let ctx = brief::Context {
+                plan_path: &plan_path,
+                worktree: worktree.as_deref(),
+                worktree_base: worktree_base.as_deref(),
+                verify: verify.as_deref(),
+                repo: &repo,
+                graph_json: graph_json.as_deref(),
+            };
+            match brief::write_briefs(&text, &wus, &out, &ctx) {
+                Ok(paths) => {
+                    for p in paths {
+                        println!("{}", p.display());
+                    }
+                }
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    std::process::exit(1);
                 }
             }
         }

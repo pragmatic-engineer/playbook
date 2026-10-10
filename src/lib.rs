@@ -7,6 +7,7 @@
 
 pub mod adr;
 pub mod agents;
+pub mod brief;
 pub mod cc;
 pub mod ci;
 pub mod commit;
@@ -1006,6 +1007,40 @@ pub enum PlanCommand {
         /// Replace the checkpoint with stdin
         #[arg(long)]
         write: bool,
+    },
+    /// Write the per-Work-Unit brief files `/playbook:implement` gives its subagents
+    ///
+    /// Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree,
+    /// scoped verify), the Work Unit's own section of the plan verbatim, and a
+    /// "Relevant memory" list of the facts anchored to its files or matching
+    /// its title. Every id is checked first: a missing one writes nothing and
+    /// exits 1. Prints the paths written, one per line.
+    ///
+    /// Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 'cargo test {tests}'`
+    Brief {
+        /// The plan or blueprint file
+        plan: PathBuf,
+        /// Work Unit ids, such as `WU-1`
+        #[arg(required = true)]
+        wus: Vec<String>,
+        /// Folder to write the briefs into
+        #[arg(long)]
+        out: PathBuf,
+        /// One worktree path for every brief
+        #[arg(long, conflicts_with = "worktree_base")]
+        worktree: Option<String>,
+        /// Folder holding one worktree per Work Unit, named by its lower case id
+        #[arg(long)]
+        worktree_base: Option<String>,
+        /// Scoped verify command; `{tests}` and `{files}` become the Work Unit's paths
+        #[arg(long, allow_hyphen_values = true)]
+        verify: Option<String>,
+        /// Repo slug (`owner/name`) for the memory scope; defaults to the origin remote's
+        #[arg(long)]
+        repo: Option<String>,
+        /// Memory graph file; defaults to `~/.config/playbook/memory/memory.graph.json`
+        #[arg(long)]
+        graph: Option<PathBuf>,
     },
 }
 
