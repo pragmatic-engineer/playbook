@@ -26,7 +26,17 @@ fn scratch_dir(tag: &str) -> PathBuf {
         std::process::id()
     ));
     fs::create_dir_all(&dir).expect("scratch dir should be creatable");
-    dir
+    // Canonical, so a path under it is already what the hook resolves it to.
+    // The temp dir itself is a symlink on macOS (`/var` and `/tmp`).
+    fs::canonicalize(&dir).expect("scratch dir should resolve")
+}
+
+/// A file path inside this test's own scratch dir. The hook resolves the path
+/// through `abspath`, which canonicalises it only when its parent exists, so a
+/// shared fixed path like `/tmp/x/file.py` behaved differently depending on
+/// whether anything on the machine had ever created `/tmp/x`.
+fn target(home: &Path, name: &str) -> String {
+    home.join("proj").join(name).to_string_lossy().into_owned()
 }
 
 /// Run `playbook hook <name>` with `stdin_json` piped in and `HOME` pointed
@@ -114,13 +124,13 @@ mod preread_edit_check {
     fn recent_edit_nudges_with_age() {
         // Arrange: this exact file was edited 2 minutes ago.
         let home = scratch_dir("edit-recent");
-        seed_edits(&home, "pec", "/tmp/x/file.py", now() - 120);
+        seed_edits(&home, "pec", &target(&home, "file.py"), now() - 120);
 
         // Act
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -135,13 +145,13 @@ mod preread_edit_check {
     fn nudge_emits_a_valid_pretooluse_additional_context_object() {
         // Arrange
         let home = scratch_dir("edit-shape");
-        seed_edits(&home, "pec", "/tmp/x/file.py", now() - 120);
+        seed_edits(&home, "pec", &target(&home, "file.py"), now() - 120);
 
         // Act
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -164,13 +174,13 @@ mod preread_edit_check {
     fn edit_older_than_the_window_stays_silent() {
         // Arrange: 31 minutes ago, one minute past the 30 minute window.
         let home = scratch_dir("edit-outside-window");
-        seed_edits(&home, "pec", "/tmp/x/file.py", now() - 1860);
+        seed_edits(&home, "pec", &target(&home, "file.py"), now() - 1860);
 
         // Act
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -185,13 +195,13 @@ mod preread_edit_check {
     fn unrelated_path_stays_silent() {
         // Arrange: the only edit on record is a different file.
         let home = scratch_dir("edit-unrelated-path");
-        seed_edits(&home, "pec", "/tmp/x/other.py", now() - 60);
+        seed_edits(&home, "pec", &target(&home, "other.py"), now() - 60);
 
         // Act
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -206,13 +216,13 @@ mod preread_edit_check {
     fn seconds_scale_age_renders_as_n_seconds_ago() {
         // Arrange
         let home = scratch_dir("edit-seconds-scale");
-        seed_edits(&home, "pec", "/tmp/x/file.py", now() - 10);
+        seed_edits(&home, "pec", &target(&home, "file.py"), now() - 10);
 
         // Act
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -233,7 +243,7 @@ mod preread_edit_check {
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -248,13 +258,13 @@ mod preread_edit_check {
         // subprocesses can add enough scheduling delay between seeding and
         // the hook reading its own clock to flip a razor-thin margin.
         let home = scratch_dir("edit-window-inside");
-        seed_edits(&home, "pec", "/tmp/x/file.py", now() - 1750);
+        seed_edits(&home, "pec", &target(&home, "file.py"), now() - 1750);
 
         // Act
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -270,13 +280,13 @@ mod preread_edit_check {
         // Arrange: exactly 1800 seconds ago; the python source compares with
         // strict `<`, so the boundary itself is excluded.
         let home = scratch_dir("edit-window-boundary");
-        seed_edits(&home, "pec", "/tmp/x/file.py", now() - 1800);
+        seed_edits(&home, "pec", &target(&home, "file.py"), now() - 1800);
 
         // Act
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -297,14 +307,14 @@ mod preread_edit_check {
         seed_edits_raw(
             &home,
             "pec",
-            &format!(r#"{{"path":"/tmp/x/file.py","ts":{ts}}}"#),
+            &format!(r#"{{"path":"{}","ts":{ts}}}"#, target(&home, "file.py")),
         );
 
         // Act
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -328,7 +338,8 @@ mod preread_edit_check {
             &home,
             "pec",
             &format!(
-                "{{\"path\":\"/tmp/x/file.py\",\"ts\":\"garbage\"}}\n{{\"path\":\"/tmp/x/file.py\",\"ts\":{recent}}}\n"
+                "{{\"path\":\"{p}\",\"ts\":\"garbage\"}}\n{{\"path\":\"{p}\",\"ts\":{recent}}}\n",
+                p = target(&home, "file.py")
             ),
         );
 
@@ -336,7 +347,7 @@ mod preread_edit_check {
         let output = run_hook(
             "preread-edit-check",
             &home,
-            &payload("pec", "/tmp/x/file.py"),
+            &payload("pec", &target(&home, "file.py")),
         );
 
         // Assert
@@ -378,13 +389,13 @@ mod preread_edit_check {
                 // Arrange
                 let started = now();
                 let home = scratch_dir(&format!("edit-format-ago-{delta}-{attempt}"));
-                seed_edits(&home, "pec", "/tmp/x/file.py", started - delta);
+                seed_edits(&home, "pec", &target(&home, "file.py"), started - delta);
 
                 // Act
                 let output = run_hook(
                     "preread-edit-check",
                     &home,
-                    &payload("pec", "/tmp/x/file.py"),
+                    &payload("pec", &target(&home, "file.py")),
                 );
 
                 if now() == started {

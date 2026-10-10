@@ -166,9 +166,15 @@ fn a_clean_branch_with_no_commits_is_kept_until_it_has_idled_past_the_stale_wind
     age(&young, 10);
     let old = agent_worktree(&f, "agent-old");
     age(&old, 40);
-    sweep(&f);
-    assert!(young.is_dir(), "10 days idle is under the 30 day window");
-    assert!(!old.exists(), "40 days idle, clean, no commits: reaped");
+    let out = sweep(&f);
+    assert!(
+        young.is_dir(),
+        "10 days idle is under the 30 day window: {out}"
+    );
+    assert!(
+        !old.exists(),
+        "40 days idle, clean, no commits: reaped: {out}"
+    );
     cleanup(&f);
 }
 
