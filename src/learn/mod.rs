@@ -5,6 +5,8 @@
 //! repo, the memory store and the commit count, probes which tools are
 //! reachable, and tallies the JIRA keys in recent history.
 
+pub mod collect;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::{Command, Stdio};
