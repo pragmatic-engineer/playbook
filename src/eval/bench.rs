@@ -58,6 +58,18 @@ pub enum Score {
         solution: String,
         cmd: Vec<String>,
     },
+    /// A scratch git repo for a tool-enabled implementer run (`--strategy`,
+    /// see `wu_bench`). `files` is the starting repo, `visible` the original
+    /// test written as `test_file`, `hidden` extra checks the agent never sees.
+    TddRepo {
+        files: BTreeMap<String, String>,
+        test_file: String,
+        scenario: String,
+        visible: String,
+        hidden: BTreeMap<String, String>,
+        allowed: Vec<String>,
+        verify: String,
+    },
 }
 
 fn one() -> i64 {
@@ -104,6 +116,9 @@ pub struct Options {
     pub jobs: usize,
     pub json: bool,
     pub list: bool,
+    /// Dispatch strategies for a tool-enabled implementer run; empty for the
+    /// single turn bench.
+    pub strategies: Vec<String>,
     pub repo_root: PathBuf,
 }
 
@@ -428,6 +443,9 @@ pub fn judge(score: &Score, reply: &str) -> Result<(bool, String), String> {
             solution,
             cmd,
         } => run_test(files, solution, cmd, &code_block(reply)),
+        Score::TddRepo { .. } => {
+            Err("a tdd_repo case needs --strategy (a tool-enabled run)".into())
+        }
     }
 }
 
@@ -621,6 +639,9 @@ fn call_claude(
 pub fn plan<'a>(cases: &'a [Loaded], opts: &Options) -> Vec<(&'a Loaded, String, String, u32)> {
     let mut jobs = Vec::new();
     for c in cases {
+        if matches!(c.case.score, Score::TddRepo { .. }) {
+            continue;
+        }
         if !opts.roles.is_empty() && !opts.roles.contains(&c.case.role) {
             continue;
         }
@@ -663,6 +684,9 @@ pub fn run(opts: &Options) -> i32 {
     }
     if !tool_on_path("claude") {
         return fail("claude CLI is required (needs a live login)");
+    }
+    if !opts.strategies.is_empty() {
+        return run_wu(&cases, opts);
     }
     if opts.models.is_empty() || opts.efforts.is_empty() || opts.runs == 0 {
         return fail("give at least one --model, one --effort and --runs 1 or more");
@@ -728,6 +752,34 @@ pub fn run(opts: &Options) -> i32 {
         .filter(|c| matches!(c.outcome, Outcome::Scored { .. }))
         .count();
     i32::from(scored == 0)
+}
+
+/// The tool-enabled path: only `tdd_repo` cases, each run once per strategy.
+fn run_wu(cases: &[Loaded], opts: &Options) -> i32 {
+    if opts.models.is_empty() || opts.efforts.is_empty() || opts.runs == 0 {
+        return fail("give at least one --model, one --effort and --runs 1 or more");
+    }
+    let picked: Vec<&Case> = cases
+        .iter()
+        .map(|l| &l.case)
+        .filter(|c| matches!(c.score, Score::TddRepo { .. }))
+        .filter(|c| opts.roles.is_empty() || opts.roles.contains(&c.role))
+        .filter(|c| opts.ids.is_empty() || opts.ids.iter().any(|i| c.id.starts_with(i.as_str())))
+        .collect();
+    if picked.is_empty() {
+        return fail("no tdd_repo case matches --role and --id");
+    }
+    super::wu_bench::run(&super::wu_bench::Plan {
+        cases: picked,
+        strategies: opts.strategies.clone(),
+        models: opts.models.clone(),
+        efforts: opts.efforts.clone(),
+        runs: opts.runs,
+        max_cost_usd: opts.max_cost_usd,
+        jobs: opts.jobs,
+        json: opts.json,
+        plugin_root: opts.repo_root.clone(),
+    })
 }
 
 fn fail(msg: &str) -> i32 {

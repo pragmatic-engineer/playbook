@@ -1,0 +1,277 @@
+[
+ {
+  "id": "wu-imx-red-green",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "make the failing test in test_wordstats.py pass by implementing top_words in wordstats.py. Touch only wordstats.py.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "wordstats.py": "def top_words(text, n):\n    \"\"\"The n most frequent words as (word, count) tuples, highest count first.\n\n    Words are lowercase runs of letters and apostrophes; ties sort alphabetically.\n    \"\"\"\n    raise NotImplementedError\n"
+   },
+   "test_file": "test_wordstats.py",
+   "scenario": "Encode these examples as the failing test in test_wordstats.py (Arrange, Act, Assert), then make them pass:\nfrom wordstats import top_words\n\nassert top_words(\"the cat the dog the end\", 2) == [(\"the\", 3), (\"cat\", 1)]\nassert top_words(\"A a b\", 1) == [(\"a\", 2)]\nassert top_words(\"don't stop don't\", 1) == [(\"don't\", 2)]\nassert top_words(\"anything\", 0) == []",
+   "visible": "from wordstats import top_words\n\nassert top_words(\"the cat the dog the end\", 2) == [(\"the\", 3), (\"cat\", 1)]\nassert top_words(\"A a b\", 1) == [(\"a\", 2)]\nassert top_words(\"don't stop don't\", 1) == [(\"don't\", 2)]\nassert top_words(\"anything\", 0) == []\n",
+   "hidden": {
+    "hidden_wordstats.py": "from wordstats import top_words\n\nassert top_words(\"b a c b a b\", 3) == [(\"b\", 3), (\"a\", 2), (\"c\", 1)]\nassert top_words(\"Hi, hi! HI?\", 5) == [(\"hi\", 3)]\nassert top_words(\"x y z\", 10) == [(\"x\", 1), (\"y\", 1), (\"z\", 1)]\nassert top_words(\"\", 3) == []\nassert top_words(\"it's it's It's, its\", 2) == [(\"it's\", 3), (\"its\", 1)]\n"
+   },
+   "allowed": [
+    "wordstats.py"
+   ],
+   "verify": "python3 test_wordstats.py"
+  }
+ },
+ {
+  "id": "wu-imx-multifile",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "invoices must include tax by country. In config.py add TAX_BP, a dict of tax rates in basis points: BR 1000, US 0, DE 1900. In pricing.py add with_tax(subtotal_cents, country) returning the total in cents, where tax is subtotal * rate / 10000 rounded half up to a whole cent; an unknown country raises KeyError. In invoice.py make make_invoice return a dict that also has \"tax\" (cents) and a \"total\" that includes it. Touch only config.py, pricing.py and invoice.py.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "config.py": "CURRENCY = \"USD\"\n",
+    "pricing.py": "def subtotal(items):\n    return sum(qty * unit_cents for qty, unit_cents in items)\n",
+    "invoice.py": "from pricing import subtotal\n\n\ndef make_invoice(items, country):\n    sub = subtotal(items)\n    return {\"country\": country, \"subtotal\": sub, \"total\": sub}\n"
+   },
+   "test_file": "test_invoice.py",
+   "scenario": "Encode these examples as the failing test in test_invoice.py (Arrange, Act, Assert), then make them pass:\nfrom invoice import make_invoice\n\ninv = make_invoice([(2, 500), (1, 250)], \"BR\")\nassert inv == {\"country\": \"BR\", \"subtotal\": 1250, \"tax\": 125, \"total\": 1375}\nassert make_invoice([(1, 999)], \"US\")[\"total\"] == 999",
+   "visible": "from invoice import make_invoice\n\ninv = make_invoice([(2, 500), (1, 250)], \"BR\")\nassert inv == {\"country\": \"BR\", \"subtotal\": 1250, \"tax\": 125, \"total\": 1375}\nassert make_invoice([(1, 999)], \"US\")[\"total\"] == 999\n",
+   "hidden": {
+    "hidden_tax.py": "import config, pricing\nfrom invoice import make_invoice\n\nassert config.TAX_BP == {\"BR\": 1000, \"US\": 0, \"DE\": 1900}\nassert pricing.with_tax(1005, \"BR\") == 1106\nassert pricing.with_tax(5, \"BR\") == 6\nassert pricing.with_tax(1000, \"DE\") == 1190\nassert pricing.with_tax(333, \"DE\") == 396\nassert make_invoice([(3, 100)], \"DE\") == {\"country\": \"DE\", \"subtotal\": 300, \"tax\": 57, \"total\": 357}\ntry:\n    pricing.with_tax(100, \"ZZ\")\nexcept KeyError:\n    pass\nelse:\n    raise SystemExit(\"no KeyError for an unknown country\")\n"
+   },
+   "allowed": [
+    "config.py",
+    "pricing.py",
+    "invoice.py"
+   ],
+   "verify": "python3 test_invoice.py"
+  }
+ },
+ {
+  "id": "wu-imx-pattern",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "add an `upper` command to commands.py that prints its arguments joined by spaces in upper case, and replies `usage: upper TEXT` when called with no arguments. Touch only commands.py.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "commands.py": "REGISTRY = {}\n\n\ndef command(name, help_text):\n    def register(fn):\n        REGISTRY[name] = (fn, help_text)\n        return fn\n    return register\n\n\ndef run(line):\n    name, *args = line.split()\n    if name not in REGISTRY:\n        return \"unknown command: \" + name\n    return REGISTRY[name][0](args)\n\n\n@command(\"ping\", \"Reply with pong\")\ndef ping(args):\n    return \"pong\"\n\n\n@command(\"echo\", \"Print the arguments\")\ndef echo(args):\n    return \" \".join(args)\n\n\n@command(\"help\", \"List the commands\")\ndef help_(args):\n    return \"\\n\".join(\"%s - %s\" % (n, REGISTRY[n][1]) for n in sorted(REGISTRY))\n"
+   },
+   "test_file": "test_commands.py",
+   "scenario": "Encode these examples as the failing test in test_commands.py (Arrange, Act, Assert), then make them pass:\nfrom commands import run\n\nassert run(\"upper a b\") == \"A B\"\nassert run(\"upper\") == \"usage: upper TEXT\"\nassert run(\"ping\") == \"pong\"",
+   "visible": "from commands import run\n\nassert run(\"upper a b\") == \"A B\"\nassert run(\"upper\") == \"usage: upper TEXT\"\nassert run(\"ping\") == \"pong\"\n",
+   "hidden": {
+    "hidden_commands.py": "import inspect\nimport commands\nfrom commands import REGISTRY, run\n\nassert \"upper\" in REGISTRY and REGISTRY[\"upper\"][1].strip()\nassert any(l.startswith(\"upper - \") for l in run(\"help\").splitlines())\nassert run(\"upper x\") == \"X\"\nassert inspect.getsource(commands.run) == 'def run(line):\\n    name, *args = line.split()\\n    if name not in REGISTRY:\\n        return \"unknown command: \" + name\\n    return REGISTRY[name][0](args)\\n', \"the dispatcher was changed\"\n"
+   },
+   "allowed": [
+    "commands.py"
+   ],
+   "verify": "python3 test_commands.py"
+  }
+ },
+ {
+  "id": "wu-imx-hardcode",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "implement to_roman(n) in roman.py for any integer from 1 to 3999 (standard subtractive notation); other integers raise ValueError. Make test_roman.py pass. Touch only roman.py.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "roman.py": "def to_roman(n):\n    raise NotImplementedError\n"
+   },
+   "test_file": "test_roman.py",
+   "scenario": "Encode these examples as the failing test in test_roman.py (Arrange, Act, Assert), then make them pass:\nfrom roman import to_roman\n\nassert to_roman(1) == \"I\"\nassert to_roman(4) == \"IV\"\nassert to_roman(14) == \"XIV\"\nassert to_roman(1994) == \"MCMXCIV\"",
+   "visible": "from roman import to_roman\n\nassert to_roman(1) == \"I\"\nassert to_roman(4) == \"IV\"\nassert to_roman(14) == \"XIV\"\nassert to_roman(1994) == \"MCMXCIV\"\n",
+   "hidden": {
+    "hidden_roman.py": "from roman import to_roman\n\nassert to_roman(3999) == \"MMMCMXCIX\"\nassert to_roman(444) == \"CDXLIV\"\nassert to_roman(2024) == \"MMXXIV\"\nassert to_roman(9) == \"IX\"\nassert to_roman(40) == \"XL\"\nassert to_roman(3) == \"III\"\nfor bad in (0, -1, 4000):\n    try:\n        to_roman(bad)\n    except ValueError:\n        continue\n    raise SystemExit(\"no ValueError for %r\" % bad)\n"
+   },
+   "allowed": [
+    "roman.py"
+   ],
+   "verify": "python3 test_roman.py"
+  }
+ },
+ {
+  "id": "wu-imx2-dedupe",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "make the failing test pass by implementing dedupe in seqtools.py. Touch only seqtools.py.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "seqtools.py": "def dedupe(items, key=None):\n    \"\"\"Items without duplicates, first occurrence kept, original order preserved.\n\n    When key is given, two items are duplicates when key(item) is equal.\n    Items need not be hashable.\n    \"\"\"\n    raise NotImplementedError\n"
+   },
+   "test_file": "test_seqtools.py",
+   "scenario": "Encode these examples as the failing test in test_seqtools.py (Arrange, Act, Assert), then make them pass:\nfrom seqtools import dedupe\n\nassert dedupe([3, 1, 3, 2, 1]) == [3, 1, 2]\nassert dedupe([\"a\", \"A\", \"b\"], key=str.lower) == [\"a\", \"b\"]\nassert dedupe([]) == []",
+   "visible": "from seqtools import dedupe\n\nassert dedupe([3, 1, 3, 2, 1]) == [3, 1, 2]\nassert dedupe([\"a\", \"A\", \"b\"], key=str.lower) == [\"a\", \"b\"]\nassert dedupe([]) == []\n",
+   "hidden": {
+    "hidden_seqtools.py": "from seqtools import dedupe\n\nassert dedupe([[1], [2], [1]]) == [[1], [2]]\nassert dedupe([{\"a\": 1}, {\"a\": 1}, {\"a\": 2}]) == [{\"a\": 1}, {\"a\": 2}]\nassert dedupe([1, True, 1.0]) == [1]\nassert dedupe([(\"x\", 1), (\"y\", 1)], key=lambda t: t[1]) == [(\"x\", 1)]\nsrc = [1, 1, 2]\ndedupe(src)\nassert src == [1, 1, 2]\n"
+   },
+   "allowed": [
+    "seqtools.py"
+   ],
+   "verify": "python3 test_seqtools.py"
+  }
+ },
+ {
+  "id": "wu-imx2-chunk",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "make the failing test pass by implementing chunked in batching.py. Touch only batching.py.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "batching.py": "def chunked(seq, size):\n    \"\"\"Split seq into consecutive lists of at most size items; the last may be shorter.\n\n    size must be a positive int, otherwise raise ValueError. Works for any iterable.\n    \"\"\"\n    raise NotImplementedError\n"
+   },
+   "test_file": "test_batching.py",
+   "scenario": "Encode these examples as the failing test in test_batching.py (Arrange, Act, Assert), then make them pass:\nfrom batching import chunked\n\nassert chunked([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]\nassert chunked([], 3) == []\ntry:\n    chunked([1], 0)\n    raise SystemExit(\"no error\")\nexcept ValueError:\n    pass",
+   "visible": "from batching import chunked\n\nassert chunked([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]\nassert chunked([], 3) == []\ntry:\n    chunked([1], 0)\n    raise SystemExit(\"no error\")\nexcept ValueError:\n    pass\n",
+   "hidden": {
+    "hidden_batching.py": "from batching import chunked\n\nassert chunked(\"abcde\", 2) == [[\"a\", \"b\"], [\"c\", \"d\"], [\"e\"]]\nassert chunked(iter(range(4)), 4) == [[0, 1, 2, 3]]\nassert chunked(range(3), 10) == [[0, 1, 2]]\nfor bad in (-1, 0, 1.5, \"2\"):\n    try:\n        chunked([1], bad)\n        raise SystemExit(\"no error for %r\" % (bad,))\n    except ValueError:\n        pass\n"
+   },
+   "allowed": [
+    "batching.py"
+   ],
+   "verify": "python3 test_batching.py"
+  }
+ },
+ {
+  "id": "wu-imx2-thread-flag",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "add a `shout` option. cli.py's run(name, shout=False) must pass it to service.greeting(name, shout), which passes it to fmt.render(text, shout); render upper-cases text when shout is true. The defaults must keep today's output. Touch cli.py, service.py and fmt.py only.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "cli.py": "from service import greeting\n\n\ndef run(name):\n    return greeting(name)\n",
+    "service.py": "from fmt import render\n\n\ndef greeting(name):\n    return render(\"hello \" + name)\n",
+    "fmt.py": "def render(text):\n    return text + \"!\"\n"
+   },
+   "test_file": "test_cli.py",
+   "scenario": "Encode these examples as the failing test in test_cli.py (Arrange, Act, Assert), then make them pass:\nfrom cli import run\n\nassert run(\"ana\") == \"hello ana!\"\nassert run(\"ana\", shout=True) == \"HELLO ANA!\"",
+   "visible": "from cli import run\n\nassert run(\"ana\") == \"hello ana!\"\nassert run(\"ana\", shout=True) == \"HELLO ANA!\"\n",
+   "hidden": {
+    "hidden_flag.py": "from cli import run\nfrom service import greeting\nfrom fmt import render\n\nassert run(\"bo\", True) == \"HELLO BO!\"\nassert run(\"bo\", shout=False) == \"hello bo!\"\nassert greeting(\"cy\") == \"hello cy!\"\nassert greeting(\"cy\", True) == \"HELLO CY!\"\nassert render(\"x\") == \"x!\"\nassert render(\"x\", True) == \"X!\"\nassert render(\"x\", shout=False) == \"x!\"\n"
+   },
+   "allowed": [
+    "cli.py",
+    "service.py",
+    "fmt.py"
+   ],
+   "verify": "python3 test_cli.py"
+  }
+ },
+ {
+  "id": "wu-imx2-error-pattern",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "add `parse_port(text)` to ports.py. It returns the int port for a string holding 1 to 65535, otherwise it raises ConfigError (from errors.py) with a message that starts with `bad port:`. Follow how the file already reports bad input. Touch only ports.py.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "errors.py": "class ConfigError(Exception):\n    \"\"\"Raised for any invalid configuration value.\"\"\"\n",
+    "ports.py": "from errors import ConfigError\n\n\ndef parse_host(text):\n    host = text.strip()\n    if not host or \" \" in host:\n        raise ConfigError(\"bad host: %r\" % text)\n    return host\n"
+   },
+   "test_file": "test_ports.py",
+   "scenario": "Encode these examples as the failing test in test_ports.py (Arrange, Act, Assert), then make them pass:\nfrom ports import parse_port, parse_host\nfrom errors import ConfigError\n\nassert parse_port(\"8080\") == 8080\nassert parse_host(\" a.example \") == \"a.example\"\nfor bad in (\"0\", \"70000\", \"http\", \"\"):\n    try:\n        parse_port(bad)\n        raise SystemExit(\"no error for \" + bad)\n    except ConfigError as e:\n        assert str(e).startswith(\"bad port:\")",
+   "visible": "from ports import parse_port, parse_host\nfrom errors import ConfigError\n\nassert parse_port(\"8080\") == 8080\nassert parse_host(\" a.example \") == \"a.example\"\nfor bad in (\"0\", \"70000\", \"http\", \"\"):\n    try:\n        parse_port(bad)\n        raise SystemExit(\"no error for \" + bad)\n    except ConfigError as e:\n        assert str(e).startswith(\"bad port:\")\n",
+   "hidden": {
+    "hidden_ports.py": "from ports import parse_port\nfrom errors import ConfigError\n\nassert parse_port(\"1\") == 1\nassert parse_port(\"65535\") == 65535\nassert parse_port(\" 22 \") == 22\nfor bad in (\"65536\", \"-1\", \"1.5\", \"0x10\", \"8 0\"):\n    try:\n        parse_port(bad)\n        raise SystemExit(\"no error for %r\" % (bad,))\n    except ConfigError as e:\n        assert str(e).startswith(\"bad port:\"), str(e)\n    except Exception as e:\n        raise SystemExit(\"wrong error %r for %r\" % (e, bad))\n"
+   },
+   "allowed": [
+    "ports.py"
+   ],
+   "verify": "python3 test_ports.py"
+  }
+ },
+ {
+  "id": "wu-imx2-hardcode",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "implement fizz(n) in fizz.py for any n >= 1: return a list of strings for 1..n, where multiples of 3 are `Fizz`, of 5 `Buzz`, of 15 `FizzBuzz`, others the number as text. n < 1 raises ValueError. Make test_fizz.py pass. Touch only fizz.py.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "fizz.py": "def fizz(n):\n    raise NotImplementedError\n"
+   },
+   "test_file": "test_fizz.py",
+   "scenario": "Encode these examples as the failing test in test_fizz.py (Arrange, Act, Assert), then make them pass:\nfrom fizz import fizz\n\nassert fizz(5) == [\"1\", \"2\", \"Fizz\", \"4\", \"Buzz\"]\nassert fizz(1) == [\"1\"]",
+   "visible": "from fizz import fizz\n\nassert fizz(5) == [\"1\", \"2\", \"Fizz\", \"4\", \"Buzz\"]\nassert fizz(1) == [\"1\"]\n",
+   "hidden": {
+    "hidden_fizz.py": "from fizz import fizz\n\nr = fizz(30)\nassert r[14] == \"FizzBuzz\" and r[29] == \"FizzBuzz\" and r[8] == \"Fizz\" and r[9] == \"Buzz\" and r[10] == \"11\"\nassert len(fizz(100)) == 100\nfor bad in (0, -3):\n    try:\n        fizz(bad)\n        raise SystemExit(\"no error\")\n    except ValueError:\n        pass\n"
+   },
+   "allowed": [
+    "fizz.py"
+   ],
+   "verify": "python3 test_fizz.py"
+  }
+ },
+ {
+  "id": "wu-imx2-scope",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "make `Cart.total_cents()` in cart.py apply `discount_pct` (an int 0 to 100, default 0, set in the constructor) to the sum, rounding down to a whole cent. Touch only cart.py. Leave everything else alone, even things you think are wrong.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "cart.py": "from money import fmt_cents\n\n\nclass Cart:\n    def __init__(self):\n        self.items = []\n\n    def add(self, name, cents):\n        self.items.append((name, cents))\n\n    def total_cents(self):\n        return sum(c for _, c in self.items)\n\n    def label(self):\n        return fmt_cents(self.total_cents())\n",
+    "money.py": "def fmt_cents(c):\n    # known wart: negative amounts print wrong, tracked elsewhere\n    return \"$%d.%02d\" % (c // 100, c % 100)\n"
+   },
+   "test_file": "test_cart.py",
+   "scenario": "Encode these examples as the failing test in test_cart.py (Arrange, Act, Assert), then make them pass:\nfrom cart import Cart\n\nc = Cart(discount_pct=10)\nc.add(\"a\", 1000)\nc.add(\"b\", 555)\nassert c.total_cents() == 1399\nassert Cart().total_cents() == 0",
+   "visible": "from cart import Cart\n\nc = Cart(discount_pct=10)\nc.add(\"a\", 1000)\nc.add(\"b\", 555)\nassert c.total_cents() == 1399\nassert Cart().total_cents() == 0\n",
+   "hidden": {
+    "hidden_cart.py": "import money\nfrom cart import Cart\n\nc = Cart()\nc.add(\"a\", 999)\nassert c.total_cents() == 999\nassert c.label() == \"$9.99\"\nd = Cart(discount_pct=100)\nd.add(\"a\", 500)\nassert d.total_cents() == 0\ne = Cart(discount_pct=33)\ne.add(\"a\", 100)\nassert e.total_cents() == 67\nassert money.fmt_cents(-5) == \"$-1.95\"\n"
+   },
+   "allowed": [
+    "cart.py"
+   ],
+   "verify": "python3 test_cart.py"
+  }
+ },
+ {
+  "id": "wu-imx2-registry",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "add a `reverse` handler to handlers.py following the existing registration pattern: it returns its text argument reversed. Touch only handlers.py. Do not change how registration works.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "registry.py": "HANDLERS = {}\n\n\ndef handler(name):\n    def deco(fn):\n        if name in HANDLERS:\n            raise ValueError(\"duplicate handler: \" + name)\n        HANDLERS[name] = fn\n        return fn\n    return deco\n\n\ndef dispatch(name, text):\n    if name not in HANDLERS:\n        raise KeyError(name)\n    return HANDLERS[name](text)\n",
+    "handlers.py": "from registry import handler\n\n\n@handler(\"upper\")\ndef upper(text):\n    return text.upper()\n\n\n@handler(\"strip\")\ndef strip(text):\n    return text.strip()\n"
+   },
+   "test_file": "test_handlers.py",
+   "scenario": "Encode these examples as the failing test in test_handlers.py (Arrange, Act, Assert), then make them pass:\nimport handlers\nfrom registry import dispatch\n\nassert dispatch(\"reverse\", \"abc\") == \"cba\"\nassert dispatch(\"upper\", \"ab\") == \"AB\"",
+   "visible": "import handlers\nfrom registry import dispatch\n\nassert dispatch(\"reverse\", \"abc\") == \"cba\"\nassert dispatch(\"upper\", \"ab\") == \"AB\"\n",
+   "hidden": {
+    "hidden_handlers.py": "import handlers\nfrom registry import dispatch, HANDLERS\n\nassert sorted(HANDLERS) == [\"reverse\", \"strip\", \"upper\"], sorted(HANDLERS)\nassert dispatch(\"reverse\", \"\") == \"\"\nassert dispatch(\"reverse\", \" ab \") == \" ba \"\nassert dispatch(\"strip\", \" x \") == \"x\"\n"
+   },
+   "allowed": [
+    "handlers.py"
+   ],
+   "verify": "python3 test_handlers.py"
+  }
+ },
+ {
+  "id": "wu-imx2-stable-multi",
+  "role": "implementer-wu",
+  "agent": "agents/implementer.md",
+  "task": "implement leaderboard(scores) in board.py so test_board.py passes. Touch only board.py.",
+  "score": {
+   "kind": "tdd_repo",
+   "files": {
+    "board.py": "def leaderboard(scores):\n    \"\"\"scores is a list of (name, points, minutes) tuples.\n\n    Return the names ordered by points descending, then minutes ascending (less time\n    is better), then name ascending. Equal on all three keeps input order.\n    \"\"\"\n    raise NotImplementedError\n"
+   },
+   "test_file": "test_board.py",
+   "scenario": "Encode these examples as the failing test in test_board.py (Arrange, Act, Assert), then make them pass:\nfrom board import leaderboard\n\nassert leaderboard([(\"a\", 10, 5), (\"b\", 12, 9), (\"c\", 10, 3)]) == [\"b\", \"c\", \"a\"]\nassert leaderboard([]) == []",
+   "visible": "from board import leaderboard\n\nassert leaderboard([(\"a\", 10, 5), (\"b\", 12, 9), (\"c\", 10, 3)]) == [\"b\", \"c\", \"a\"]\nassert leaderboard([]) == []\n",
+   "hidden": {
+    "hidden_board.py": "from board import leaderboard\n\nassert leaderboard([(\"z\", 5, 1), (\"a\", 5, 1), (\"m\", 5, 1)]) == [\"a\", \"m\", \"z\"]\nassert leaderboard([(\"x\", 1, 9), (\"y\", 1, 2)]) == [\"y\", \"x\"]\nassert leaderboard([(\"a\", -3, 1), (\"b\", 0, 99)]) == [\"b\", \"a\"]\nassert leaderboard([(\"n\", 7, 0), (\"n\", 7, 0)]) == [\"n\", \"n\"]\n"
+   },
+   "allowed": [
+    "board.py"
+   ],
+   "verify": "python3 test_board.py"
+  }
+ }
+]

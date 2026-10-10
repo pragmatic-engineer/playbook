@@ -558,6 +558,9 @@ pub enum EvalCommand {
     /// `--max-cost-usd`, and stops mid run when the spend reaches it. Needs a
     /// logged-in `claude`; it makes real API calls.
     ///
+    /// With `--strategy`, the implementer cases run with tools in a scratch git
+    /// repo, comparing one dispatch per TDD step against one per Work Unit.
+    ///
     /// Example: `playbook eval bench --role fact-checker --model haiku,sonnet --effort low,medium --runs 2`
     Bench {
         /// Case file or directory; defaults to the cases shipped in the playbook repo
@@ -590,6 +593,10 @@ pub enum EvalCommand {
         /// List the cases and exit
         #[arg(long)]
         list: bool,
+        /// Run the `tdd_repo` implementer cases with tools in a scratch git repo, one
+        /// dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
+        #[arg(long, value_delimiter = ',')]
+        strategy: Vec<String>,
     },
 }
 
