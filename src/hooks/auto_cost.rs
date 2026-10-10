@@ -603,9 +603,13 @@ fn telemetry_cents(path: &Path) -> Option<i64> {
 }
 
 fn interval_ms() -> u64 {
-    std::env::var(INTERVAL_VAR)
-        .ok()
-        .and_then(|raw| raw.trim().parse().ok())
+    parse_interval(std::env::var(INTERVAL_VAR).ok().as_deref())
+}
+
+/// The recompute interval for a raw env value: the default when unset, empty
+/// or not a number.
+fn parse_interval(raw: Option<&str>) -> u64 {
+    raw.and_then(|raw| raw.trim().parse().ok())
         .unwrap_or(DEFAULT_INTERVAL_MS)
 }
 
@@ -621,4 +625,24 @@ fn write_atomic(path: &Path, value: &impl Serialize) -> bool {
         return false;
     };
     crate::common::atomic::write_atomic(path, bytes).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_interval_defaults_to_two_seconds_unless_the_env_value_is_a_number() {
+        let rows: [(Option<&str>, u64); 6] = [
+            (None, 2000),
+            (Some("abc"), 2000),
+            (Some(""), 2000),
+            (Some("5000"), 5000),
+            (Some(" 750 "), 750),
+            (Some("0"), 0),
+        ];
+        for (raw, want) in rows {
+            assert_eq!(parse_interval(raw), want, "{raw:?}");
+        }
+    }
 }
