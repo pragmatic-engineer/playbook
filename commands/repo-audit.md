@@ -32,6 +32,7 @@ Explore the repository systematically before forming any opinions:
 - Read the package manifest(s), lockfiles, build config, CI config, environment/config files, and any docs (README, CONTRIBUTING, ADRs).
 - Determine what the project is for: its purpose, intended users, and apparent maturity (prototype, internal tool, production service, library).
 - Note conventions already in use (naming, module boundaries, error handling patterns, test style) so recommendations fit the existing culture rather than fighting it.
+- Run `playbook memory context 2>/dev/null` once. It prints the saved facts for this repo (decisions, conventions, known gotchas) or a `Memory context: none` line saying why. Treat each fact as a lead to verify against the code, never as evidence: a finding still cites `file:line`, and a fact the code contradicts is itself worth reporting as stale. Read the fact files it names only when one bears on a finding. This is read-only.
 
 Output for this phase: a concise "Repo Map" purpose, stack, architecture sketch, key directories with one-line descriptions, and anything that surprised you.
 
