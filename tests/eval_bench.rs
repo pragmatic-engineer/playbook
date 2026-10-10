@@ -182,3 +182,128 @@ fn the_lens_split_fixture_pairs_one_single_reviewer_with_five_lens_reviewers_per
     assert_eq!(text.matches("reviewer-swarm\t").count(), 50, "{text}");
     assert!(text.contains("reviewer-swarm\trd-par-cap@scope"));
 }
+
+/// One tool-enabled case: implement `f` so it returns 1. The stub `claude`
+/// plays the implementer by reading its dispatch prompt.
+const WU_CASE: &str = r#"[{"id":"wu-f","role":"implementer-wu","system":"x","task":"Implement f.",
+ "score":{"kind":"tdd_repo","files":{"m.py":"def f():\n    raise NotImplementedError\n"},
+ "test_file":"test_m.py","scenario":"f() returns 1","visible":"from m import f\nassert f() == 1\n",
+ "hidden":{"hidden_m.py":"from m import f\nassert f() != 2\n"},"allowed":["m.py"],"verify":"python3 test_m.py"}}]"#;
+
+const WU_STUB: &str = r#"p=$(cat)
+echo "$p" >> "$STUB_LOG"
+red() { printf 'from m import f\nassert f() == 1\n' > test_m.py; git add -A; git commit -q -m "wip(wu-1): red - s1"; }
+green() { printf 'def f():\n    return 1\n' > m.py; git add -A; git commit -q -m "wip(wu-1): green - s1"; }
+case "$p" in
+  *"Your step: RED"*) red ;;
+  *"Your step: GREEN"*) green ;;
+  *"Your step: REFACTOR"*) : ;;
+  *"whole Work Unit"*) red; green ;;
+esac
+echo '{"result":"DONE","total_cost_usd":0.05,"is_error":false}'"#;
+
+fn wu_bench(args: &[&str]) -> Run {
+    let dir = scratch();
+    let d = dir.display();
+    stub(
+        &dir,
+        "claude",
+        &format!("export STUB_LOG='{d}/prompts'\n{WU_STUB}"),
+    );
+    fs::write(dir.join("cases.json"), WU_CASE).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["eval", "bench", "--cases"])
+        .arg(dir.join("cases.json"))
+        .args(args)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin:/usr/local/bin", dir.display()),
+        )
+        .output()
+        .unwrap();
+    Run {
+        code: out.status.code().unwrap_or(-1),
+        out: String::from_utf8_lossy(&out.stdout).into_owned(),
+        err: String::from_utf8_lossy(&out.stderr).into_owned(),
+        dir,
+    }
+}
+
+fn have(tool: &str) -> bool {
+    ["/usr/bin", "/bin", "/usr/local/bin"]
+        .iter()
+        .any(|d| Path::new(d).join(tool).is_file())
+}
+
+#[test]
+fn per_step_makes_three_dispatches_and_per_wu_makes_one() {
+    if !["git", "python3", "ssh-keygen"].iter().all(|t| have(t)) {
+        return;
+    }
+    let r = wu_bench(&[
+        "--strategy",
+        "per-step,per-wu",
+        "--json",
+        "--max-cost-usd",
+        "5",
+    ]);
+    assert_eq!(r.code, 0, "{}", r.err);
+    let v: serde_json::Value = serde_json::from_str(r.out.trim()).unwrap();
+    let runs = v["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 2);
+    for run in runs {
+        assert_eq!(run["ok"], true, "{run}");
+    }
+    let by = |s: &str| runs.iter().find(|r| r["strategy"] == s).unwrap();
+    assert_eq!(by("per-step")["dispatches"], 3);
+    assert_eq!(by("per-wu")["dispatches"], 1);
+    assert!((by("per-step")["cost"].as_f64().unwrap() - 0.15).abs() < 1e-9);
+    let prompts = fs::read_to_string(r.dir.join("prompts")).unwrap();
+    assert_eq!(prompts.matches("Your step:").count(), 3);
+    assert_eq!(prompts.matches("whole Work Unit").count(), 1);
+}
+
+#[test]
+fn a_run_that_skips_red_is_a_failure() {
+    if !["git", "python3", "ssh-keygen"].iter().all(|t| have(t)) {
+        return;
+    }
+    let dir = scratch();
+    let d = dir.display();
+    // The stub only ever commits GREEN.
+    stub(
+        &dir,
+        "claude",
+        &format!(
+            "cat > /dev/null\nprintf 'def f():\\n    return 1\\n' > m.py\ngit add -A\ngit commit -q -m 'wip(wu-1): green - s1'\necho '{{\"result\":\"DONE\",\"total_cost_usd\":0.01}}'\n# {d}"
+        ),
+    );
+    fs::write(dir.join("cases.json"), WU_CASE).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["eval", "bench", "--cases"])
+        .arg(dir.join("cases.json"))
+        .args(["--strategy", "per-wu", "--json"])
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin:/usr/local/bin", dir.display()),
+        )
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let run = &v["runs"][0];
+    assert_eq!(run["ok"], false);
+    assert!(
+        run["detail"].as_str().unwrap().contains("no RED commit"),
+        "{run}"
+    );
+}
+
+#[test]
+fn an_unknown_strategy_is_refused_and_the_single_turn_bench_skips_tdd_cases() {
+    let r = wu_bench(&["--strategy", "per-everything"]);
+    assert_eq!(r.code, 1);
+    assert!(r.err.contains("unknown --strategy"), "{}", r.err);
+    let plain = wu_bench(&["--model", "haiku"]);
+    assert_eq!(plain.code, 1, "no single-turn case matches");
+    assert!(plain.err.contains("no case matches"), "{}", plain.err);
+}

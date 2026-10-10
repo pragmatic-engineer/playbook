@@ -9,6 +9,7 @@
 //! against the live services (tests shim `gh` and `claude` on PATH).
 
 pub mod bench;
+pub mod wu_bench;
 
 use serde_json::Value;
 use std::io::Write;
