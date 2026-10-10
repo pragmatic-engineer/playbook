@@ -5,15 +5,15 @@
 //! the live sessions and the recent events. Each is a rounded box with its
 //! key hint and title in the top border, like btop.
 
-use super::app::App;
+use super::app::{App, SpendView};
 use super::chart::{self, Metric, Plot};
-use super::data::Data;
-use super::fmt::{compact, fit, money};
-use super::sort::{event_rows, group_rows, group_tokens, session_rows, Panel, Sort};
+use super::data::{Data, Slots};
+use super::fmt::{compact, fit, money, WEEKDAYS};
+use super::sort::{self, event_rows, group_rows, group_tokens, session_rows, Panel, Sort};
 use super::theme::{Fill, Ink, Palette};
 use super::view::{visible_rows, window_start};
-use crate::usage::aggregate::{Group, SECONDS_PER_DAY};
-use crate::usage::query::{clock, total_tokens, ActiveSession, ACTIVE_SECONDS};
+use crate::usage::aggregate::{date_key, Group, SECONDS_PER_DAY};
+use crate::usage::query::{clock, total_tokens, weekday, ActiveSession, ACTIVE_SECONDS};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -276,6 +276,51 @@ pub fn chart_plot(area: Rect, data: &Data, panel: Panel) -> Plot {
     Plot::new(area, &data.series, metric)
 }
 
+/// The model legend of a stacked chart, in the bottom border: a swatch and a
+/// short name for each model, the biggest first, as many as fit, then `+N`.
+fn model_legend(pal: &Palette, slots: &Slots, width: usize, box_ink: Ink) -> Line<'static> {
+    let edge = fg(pal, box_ink);
+    let room = width.saturating_sub(4);
+    let mut spans = vec![Span::styled("\u{2524}", edge)];
+    let mut used = 0;
+    for (i, name) in slots.order.iter().enumerate() {
+        let short = short_model(name);
+        let left = slots.order.len() - i;
+        let more = format!(" +{left}");
+        let need = 2 + short.chars().count() + usize::from(i > 0);
+        // Keep room for the `+N` unless this is the last one.
+        let reserve = if left > 1 { more.chars().count() } else { 0 };
+        if used + need + reserve > room {
+            let space = if i > 0 { " " } else { "" };
+            spans.push(Span::styled(
+                format!("{space}+{left}"),
+                fg(pal, pal.graph_text),
+            ));
+            break;
+        }
+        if i > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(swatch(pal, slots.slot(name)));
+        spans.push(Span::styled(format!(" {short}"), fg(pal, pal.fg)));
+        used += need;
+    }
+    spans.push(Span::styled("\u{251c}\u{2500}", edge));
+    Line::from(spans)
+}
+
+/// A model's mark: a block in its color, or its pattern without color.
+pub fn swatch(pal: &Palette, slot: usize) -> Span<'static> {
+    if pal.mono {
+        Span::raw(chart::PATTERNS[slot % chart::PATTERNS.len()].to_string())
+    } else {
+        Span::styled(
+            METER,
+            Style::default().fg(pal.color(chart::series_ink(pal, slot))),
+        )
+    }
+}
+
 /// Cost per day or tokens per day: a bar chart with axes, a cursor and a legend.
 fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, panel: Panel) {
     let focused = app.focus == panel;
@@ -292,8 +337,10 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
         1 => "day".to_string(),
         n => format!("{n} days"),
     };
+    let stacked = panel == Panel::Spend && app.spend_view == SpendView::ByModel;
     let title = match panel {
         Panel::Tokens => format!("Tokens per {per}"),
+        _ if stacked => format!("Spend per {per} by model, USD"),
         _ => format!("Spend per {per}, USD"),
     };
     let mut block = panel_block(pal, panel, &title, box_ink, focused);
@@ -307,21 +354,110 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
         let note = format!("peak {}", plot.metric.show(peak));
         block = block.title(note_line(pal, &note, box_ink).right_aligned());
     }
-    if let Some(legend) = gradient_legend(pal, fill, what, box_ink) {
+    if stacked {
+        let legend = model_legend(pal, &data.slots, usize::from(area.width), box_ink);
+        block = block.title_bottom(legend.right_aligned());
+    } else if let Some(legend) = gradient_legend(pal, fill, what, box_ink) {
         block = block.title_bottom(legend.right_aligned());
     }
     frame.render_widget(block, area);
     let view = chart::View {
         fill,
+        stack: stacked.then_some(&data.slots),
         cursor: app.cursor.and_then(|day| plot.index_of(day)),
         today: data.now.div_euclid(SECONDS_PER_DAY),
     };
     chart::render(frame.buffer_mut(), &plot, &data.series, &view, pal);
 }
 
-/// Cost per day.
+/// Cost per day: a chart, stacked by model, or a table of the days.
 pub fn spend(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    chart_panel(frame, area, app, data, pal, Panel::Spend);
+    match app.spend_view {
+        SpendView::Daily => daily_table(frame, area, app, data, pal),
+        _ => chart_panel(frame, area, app, data, pal, Panel::Spend),
+    }
+}
+
+/// How today and the peak day are marked: in color and in type, so the mono
+/// theme shows them too.
+pub fn today_style(pal: &Palette) -> Style {
+    fg(pal, pal.hi).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+}
+
+pub fn peak_style(pal: &Palette) -> Style {
+    fg(pal, pal.warn).add_modifier(Modifier::BOLD)
+}
+
+/// One row for each day up to today: date, messages, tokens, cost and the model
+/// that cost the most. Today and the peak day are marked.
+fn daily_table(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    let focused = app.focus == Panel::Spend;
+    let today = data.now.div_euclid(SECONDS_PER_DAY);
+    let mut block = panel_block(pal, Panel::Spend, "Daily cost", pal.box_cpu, focused);
+    let edge = fg(pal, pal.box_cpu);
+    block = block.title_bottom(
+        Line::from(vec![
+            Span::styled("\u{2524}", edge),
+            Span::styled("today", today_style(pal)),
+            Span::raw(" "),
+            Span::styled("peak", peak_style(pal)),
+            Span::styled("\u{251c}\u{2500}", edge),
+        ])
+        .right_aligned(),
+    );
+    let rows = sort::day_rows(&data.series, today, app.sort(Panel::Spend));
+    if rows.is_empty() {
+        return empty(frame, area, pal, block, "No usage in this range.");
+    }
+    let peak = rows.iter().map(|d| d.cost_usd).fold(0.0, f64::max);
+    let peak_day = rows
+        .iter()
+        .find(|d| d.cost_usd == peak && peak > 0.0)
+        .map(|d| d.day);
+    let long = area.width.saturating_sub(2) >= 52;
+    let cols = [
+        col("date", Constraint::Length(if long { 14 } else { 9 }), 0),
+        col(">msgs", Constraint::Length(5), 0),
+        col(">tokens", Constraint::Length(7), 0),
+        col(">cost", Constraint::Length(9), 0),
+        col("top model", Constraint::Fill(1), 40),
+    ];
+    table(frame, area, app, pal, Panel::Spend, block, &cols, |w| {
+        rows.iter()
+            .map(|d| {
+                let date = date_key(d.day);
+                let text = format!(
+                    "{} {}",
+                    WEEKDAYS[weekday(d.day)],
+                    if long { date.as_str() } else { &date[5..] }
+                );
+                let style = if d.day == today {
+                    today_style(pal)
+                } else if Some(d.day) == peak_day {
+                    peak_style(pal)
+                } else {
+                    Style::default()
+                };
+                let top = d
+                    .top_model()
+                    .map_or(String::new(), |m| short_model(m).to_string());
+                let model = match d.top_model() {
+                    Some(m) => Span::styled(
+                        fit(&top, w[4]),
+                        Style::default().fg(pal.color(chart::series_ink(pal, data.slots.slot(m)))),
+                    ),
+                    None => Span::raw(""),
+                };
+                vec![
+                    Cell::from(text).style(style),
+                    num(d.messages.to_string()),
+                    num(compact(d.tokens)),
+                    cost_cell(pal, d.cost_usd, peak),
+                    Cell::from(Line::from(model)),
+                ]
+            })
+            .collect()
+    });
 }
 
 /// Tokens per day.
@@ -340,6 +476,7 @@ pub fn groups(
     title: &str,
     groups: &[Group],
     total_cost: f64,
+    slots: Option<&Slots>,
 ) {
     let focused = app.focus == panel;
     let (box_ink, fill) = match panel {
@@ -367,8 +504,20 @@ pub fn groups(
                 } else {
                     0.0
                 };
+                let name = match slots {
+                    // A swatch in the model's color, as in the stacked chart.
+                    Some(slots) => Cell::from(Line::from(vec![
+                        swatch(pal, slots.slot(&g.key)),
+                        // The space after the swatch goes first when the name is tight.
+                        Span::raw(match w[0] {
+                            0..=15 => fit(&g.key, w[0].saturating_sub(1)),
+                            _ => format!(" {}", fit(&g.key, w[0] - 2)),
+                        }),
+                    ])),
+                    None => Cell::from(fit(&g.key, w[0])),
+                };
                 vec![
-                    Cell::from(fit(&g.key, w[0])),
+                    name,
                     num(g.messages.to_string()),
                     num(compact(group_tokens(g))),
                     num(money(g.cost_usd)),

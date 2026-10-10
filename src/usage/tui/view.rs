@@ -111,6 +111,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                 "Models",
                 &data.models,
                 total,
+                Some(&data.slots),
             );
             panels::groups(
                 frame,
@@ -121,6 +122,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                 "Projects",
                 &data.repos,
                 total,
+                None,
             );
             panels::sessions(frame, p.sessions, app, data, &pal);
             panels::events(frame, p.events, app, data, &pal);
@@ -153,6 +155,7 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
         ("r", "range".to_string()),
         ("d/w/W/m/M/a", "jump".to_string()),
         ("\u{2190}/\u{2192}", "day".to_string()),
+        ("v", "view".to_string()),
         ("/", "filter".to_string()),
         ("s/S", "sort".to_string()),
         ("enter", "pick".to_string()),
@@ -440,10 +443,16 @@ mod tests {
     #[test]
     fn the_footer_lists_the_keys_and_the_active_theme() {
         let app = App::new(Range::All);
-        let text = screen(&app, 100, 30);
-        assert!(text.contains("/ filter"));
-        assert!(text.contains("s/S sort"));
-        assert!(text.contains("t theme (btop)"));
+        let text = screen(&app, 120, 30);
+        for hint in [
+            "/ filter",
+            "s/S sort",
+            "v view",
+            "\u{2190}/\u{2192} day",
+            "t theme (btop)",
+        ] {
+            assert!(text.contains(hint), "{hint}");
+        }
     }
 
     #[test]

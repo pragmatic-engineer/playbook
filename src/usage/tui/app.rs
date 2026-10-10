@@ -10,6 +10,7 @@ use super::panels;
 use super::sort::{event_rows, group_rows, session_rows, Panel, Sort, PANELS};
 use super::theme::{ColorDepth, Theme};
 use super::view;
+use crate::usage::aggregate::SECONDS_PER_DAY;
 use crate::usage::query::{Range, WeekStart};
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -32,6 +33,28 @@ pub fn ranges(week: WeekStart) -> [Range; 9] {
     ]
 }
 
+/// What the spend panel shows. `v` steps through them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpendView {
+    /// Cost per day, one color along the gradient.
+    #[default]
+    Total,
+    /// Cost per day stacked by model.
+    ByModel,
+    /// A sortable table with a row for each day.
+    Daily,
+}
+
+impl SpendView {
+    pub fn next(self) -> SpendView {
+        match self {
+            SpendView::Total => SpendView::ByModel,
+            SpendView::ByModel => SpendView::Daily,
+            SpendView::Daily => SpendView::Total,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct App {
     pub data: Option<Data>,
@@ -39,6 +62,8 @@ pub struct App {
     /// The day the chart cursor is on, if it was moved or hovered. Both
     /// charts share it, whatever their bar widths.
     pub cursor: Option<i64>,
+    /// What the spend panel shows.
+    pub spend_view: SpendView,
     /// The first day of the week for the week ranges.
     pub week_start: WeekStart,
     pub filter: String,
@@ -79,6 +104,7 @@ impl App {
             data: None,
             range,
             cursor: None,
+            spend_view: SpendView::default(),
             week_start: WeekStart::default(),
             filter: String::new(),
             error: None,
@@ -108,7 +134,20 @@ impl App {
             Panel::Projects => d.repos.len(),
             Panel::Sessions => d.live.active.len(),
             Panel::Events => d.live.feed.len(),
+            Panel::Spend if self.spend_view == SpendView::Daily => {
+                let today = d.now.div_euclid(SECONDS_PER_DAY);
+                d.series.iter().filter(|p| p.day <= today).count()
+            }
             Panel::Spend | Panel::Tokens => 0,
+        }
+    }
+
+    /// Whether the panel is showing a table right now.
+    pub fn is_table(&self, panel: Panel) -> bool {
+        match panel {
+            Panel::Spend => self.spend_view == SpendView::Daily,
+            Panel::Tokens => false,
+            _ => true,
         }
     }
 
@@ -155,6 +194,7 @@ impl App {
     fn plot(&self, panel: Panel) -> Option<Plot> {
         let data = self.data.as_ref()?;
         if data.series.is_empty()
+            || (panel == Panel::Spend && self.spend_view == SpendView::Daily)
             || self.area.width < view::MIN_WIDTH
             || self.area.height < view::MIN_HEIGHT
         {
@@ -233,16 +273,23 @@ impl App {
             KeyCode::BackTab => self.focus_next(-1),
             KeyCode::Left => self.move_cursor(-1),
             KeyCode::Right => self.move_cursor(1),
-            KeyCode::Home | KeyCode::Char('g') if focus.is_chart() => self.move_cursor(isize::MIN),
-            KeyCode::End | KeyCode::Char('G') if focus.is_chart() => self.move_cursor(isize::MAX),
+            KeyCode::Home | KeyCode::Char('g') if focus.is_chart() && !self.is_table(focus) => {
+                self.move_cursor(isize::MIN);
+            }
+            KeyCode::End | KeyCode::Char('G') if focus.is_chart() && !self.is_table(focus) => {
+                self.move_cursor(isize::MAX);
+            }
             KeyCode::Down | KeyCode::Char('j') => self.step(focus, 1),
             KeyCode::Up | KeyCode::Char('k') => self.step(focus, -1),
             KeyCode::PageDown => self.step(focus, 5),
             KeyCode::PageUp => self.step(focus, -5),
             KeyCode::Home | KeyCode::Char('g') => self.select(focus, 0),
             KeyCode::End | KeyCode::Char('G') => self.select(focus, usize::MAX),
-            KeyCode::Char('s') => self.sorts[focus.index()] = self.sort(focus).next(focus),
-            KeyCode::Char('S') if !focus.sortable().is_empty() => {
+            KeyCode::Char('v') => self.spend_view = self.spend_view.next(),
+            KeyCode::Char('s') if self.is_table(focus) => {
+                self.sorts[focus.index()] = self.sort(focus).next(focus);
+            }
+            KeyCode::Char('S') if self.is_table(focus) => {
                 self.sorts[focus.index()] = self.sort(focus).flip();
             }
             KeyCode::Enter => {
@@ -274,7 +321,7 @@ impl App {
         let (panel, rect) = PANELS.iter().zip(rects).find(|(_, r)| r.contains(at))?;
         // Border, then the header row, then the rows.
         let first = rect.y + 2;
-        let row = (!panel.sortable().is_empty() && y >= first)
+        let row = (self.is_table(*panel) && y >= first)
             .then(|| {
                 view::window_start(self.selection(*panel), view::visible_rows(rect))
                     + usize::from(y - first)
@@ -777,6 +824,79 @@ mod tests {
         app.mouse(click(MouseEventKind::Moved, p.models.x + 3, p.models.y + 3));
         app.mouse(click(MouseEventKind::Moved, plot.geo.plot.x - 1, y));
         assert_eq!(app.cursor, before);
+    }
+
+    #[test]
+    fn v_steps_the_spend_panel_through_total_by_model_and_daily() {
+        let mut app = App::new(Range::All);
+        assert_eq!(app.spend_view, SpendView::Total);
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            assert_eq!(app.key(press(KeyCode::Char('v'))), Effect::None);
+            seen.push(app.spend_view);
+        }
+        assert_eq!(
+            seen,
+            [SpendView::ByModel, SpendView::Daily, SpendView::Total]
+        );
+    }
+
+    fn daily() -> App {
+        let mut app = charted(Range::LastDays(30), 30);
+        app.spend_view = SpendView::Daily;
+        app.key(press(KeyCode::Char('1')));
+        app
+    }
+
+    #[test]
+    fn the_daily_table_has_a_row_for_each_day_and_moves_its_selection() {
+        let mut app = daily();
+        assert_eq!(app.rows(Panel::Spend), 30);
+        assert!(app.is_table(Panel::Spend) && !app.is_table(Panel::Tokens));
+        app.key(press(KeyCode::Down));
+        app.key(press(KeyCode::Down));
+        assert_eq!(app.selection(Panel::Spend), 2);
+        app.key(press(KeyCode::End));
+        assert_eq!(app.selection(Panel::Spend), 29);
+        // Only the chart views are drawn as charts.
+        app.spend_view = SpendView::Total;
+        assert_eq!(app.rows(Panel::Spend), 0);
+    }
+
+    #[test]
+    fn s_sorts_the_daily_table_but_not_the_chart_views() {
+        let mut app = daily();
+        assert_eq!(app.sort(Panel::Spend), Sort::new(0, true));
+        app.key(press(KeyCode::Char('s')));
+        assert_eq!(app.sort(Panel::Spend), Sort::new(1, true));
+        app.key(press(KeyCode::Char('S')));
+        assert_eq!(app.sort(Panel::Spend), Sort::new(1, false));
+        app.spend_view = SpendView::ByModel;
+        app.key(press(KeyCode::Char('s')));
+        app.key(press(KeyCode::Char('S')));
+        assert_eq!(app.sort(Panel::Spend), Sort::new(1, false), "unchanged");
+    }
+
+    #[test]
+    fn the_cursor_keys_and_hover_leave_the_daily_table_alone() {
+        let mut app = daily();
+        app.key(press(KeyCode::Left));
+        assert_eq!(app.cursor, None);
+        let p = view::layout(app.area);
+        app.mouse(click(MouseEventKind::Moved, p.spend.x + 6, p.spend.y + 3));
+        assert_eq!(app.cursor, None);
+    }
+
+    #[test]
+    fn clicking_a_day_row_selects_it() {
+        let mut app = daily();
+        let p = view::layout(app.area);
+        let left = MouseEventKind::Down(MouseButton::Left);
+        // Border, header, then the rows: the fourth row.
+        app.mouse(click(left, p.spend.x + 3, p.spend.y + 5));
+        assert_eq!((app.focus, app.selection(Panel::Spend)), (Panel::Spend, 3));
+        // Enter has no filter to apply for a day.
+        assert_eq!(app.key(press(KeyCode::Enter)), Effect::None);
     }
 
     #[test]

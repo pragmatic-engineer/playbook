@@ -5,6 +5,7 @@
 //! range and a filter. Built by the same query layer the web JSON uses
 //! (`usage::query`), so both views report the same numbers.
 
+use super::theme::SERIES;
 use crate::usage::aggregate::{group_usage, unpriced_models, Dimension, Group, SECONDS_PER_DAY};
 use crate::usage::query::{self, LiveView, Range, Totals};
 use crate::usage::UsageEvent;
@@ -20,6 +21,66 @@ pub struct DayPoint {
     pub messages: usize,
     /// Cost per model for the day, by model name.
     pub models: Vec<(String, f64)>,
+}
+
+impl DayPoint {
+    /// The model that cost the most this day, if the day cost anything.
+    pub fn top_model(&self) -> Option<&str> {
+        self.models
+            .iter()
+            .filter(|(_, cost)| *cost > 0.0)
+            .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+            .map(|(name, _)| name.as_str())
+    }
+}
+
+/// Which series color each model wears, so the Models table, the stacked bars
+/// and the legend agree.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Slots {
+    /// Models by cost, the biggest first: the stacking order, bottom up.
+    pub order: Vec<String>,
+    slots: BTreeMap<String, usize>,
+}
+
+impl Slots {
+    /// Gives every model a slot from a hash of its name, moving on to the next
+    /// free one when taken, in name order. The same model keeps its color when
+    /// the range changes, unless another model in the range wants the same
+    /// one. With more models than slots the extra ones share.
+    pub fn of(models: &[Group]) -> Slots {
+        let mut names: Vec<&Group> = models.iter().collect();
+        names.sort_by(|a, b| a.key.cmp(&b.key));
+        let mut taken = [false; SERIES];
+        let mut slots = BTreeMap::new();
+        for g in names {
+            let hash = g.key.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+                (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+            });
+            let start = (hash % SERIES as u64) as usize;
+            let slot = (0..SERIES)
+                .map(|i| (start + i) % SERIES)
+                .find(|s| !taken[*s])
+                .unwrap_or(start);
+            taken[slot] = true;
+            slots.insert(g.key.clone(), slot);
+        }
+        let mut order: Vec<&Group> = models.iter().collect();
+        order.sort_by(|a, b| {
+            b.cost_usd
+                .total_cmp(&a.cost_usd)
+                .then_with(|| a.key.cmp(&b.key))
+        });
+        Slots {
+            order: order.into_iter().map(|g| g.key.clone()).collect(),
+            slots,
+        }
+    }
+
+    /// The slot of a model, 0 for one that is not in the range.
+    pub fn slot(&self, model: &str) -> usize {
+        self.slots.get(model).copied().unwrap_or(0)
+    }
 }
 
 /// What one day adds up to while the series is built.
@@ -40,6 +101,8 @@ pub struct Data {
     /// Per UTC day, oldest first. Idle days are absent.
     pub days: Vec<Group>,
     pub models: Vec<Group>,
+    /// The series color of each model.
+    pub slots: Slots,
     pub repos: Vec<Group>,
     /// Messages in the range whose model has no price (counted as $0).
     pub unpriced: usize,
@@ -113,13 +176,15 @@ impl Data {
     ) -> Data {
         let (inside, _) = query::in_range(window, &[], now, range);
         let inside: Vec<UsageEvent> = inside.into_iter().filter(|e| matches(e, filter)).collect();
+        let models = group_usage(&inside, Dimension::Model);
         Data {
             now,
             range,
             filter: filter.to_string(),
             totals: Totals::of(&inside),
             days: group_usage(&inside, Dimension::Day),
-            models: group_usage(&inside, Dimension::Model),
+            slots: Slots::of(&models),
+            models,
             repos: group_usage(&inside, Dimension::Repo),
             unpriced: unpriced_models(&inside).0,
             series: day_series(&inside, now, range),
@@ -211,5 +276,101 @@ mod tests {
         e.unpriced = true;
         let d = Data::build(&[e], LiveView::default(), NOW, Range::All, "");
         assert_eq!(d.unpriced, 1);
+    }
+
+    fn group(key: &str, cost: f64) -> Group {
+        Group {
+            key: key.into(),
+            cost_usd: cost,
+            ..Group::default()
+        }
+    }
+
+    #[test]
+    fn slots_are_stable_collision_free_and_ordered_by_cost() {
+        let models = [
+            group("claude-sonnet-5", 5.0),
+            group("claude-opus-5", 9.0),
+            group("claude-haiku-4-5", 1.0),
+        ];
+        let slots = Slots::of(&models);
+        assert_eq!(
+            slots.order,
+            ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
+        );
+        let mut seen: Vec<usize> = models.iter().map(|g| slots.slot(&g.key)).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), 3, "three models, three colors");
+        // The order the models arrive in does not change a color.
+        let mut reversed = models.to_vec();
+        reversed.reverse();
+        let again = Slots::of(&reversed);
+        for g in &models {
+            assert_eq!(slots.slot(&g.key), again.slot(&g.key));
+        }
+        // The first model by name always keeps its hashed slot, so a model
+        // alone (a filtered view) keeps its color, and one that collides with
+        // an earlier model moves to the next free slot.
+        let alone = Slots::of(&[group("claude-haiku-4-5", 1.0)]);
+        assert_eq!(
+            alone.slot("claude-haiku-4-5"),
+            slots.slot("claude-haiku-4-5")
+        );
+    }
+
+    #[test]
+    fn more_models_than_colors_share_them_and_an_unknown_model_gets_slot_zero() {
+        let many: Vec<Group> = (0..12)
+            .map(|i| group(&format!("model-{i}"), f64::from(i)))
+            .collect();
+        let slots = Slots::of(&many);
+        assert_eq!(slots.order.len(), 12);
+        assert!(many.iter().all(|g| slots.slot(&g.key) < SERIES));
+        let distinct: std::collections::BTreeSet<usize> =
+            many.iter().map(|g| slots.slot(&g.key)).collect();
+        assert_eq!(
+            distinct.len(),
+            SERIES,
+            "every color is used before any is shared"
+        );
+        assert_eq!(slots.slot("not-in-the-range"), 0);
+        assert!(Slots::of(&[]).order.is_empty());
+    }
+
+    #[test]
+    fn a_day_names_its_top_model_or_none_when_it_cost_nothing() {
+        let day = |models: &[(&str, f64)]| DayPoint {
+            day: 1,
+            cost_usd: models.iter().map(|m| m.1).sum(),
+            tokens: 0,
+            messages: 1,
+            models: models.iter().map(|(n, c)| (n.to_string(), *c)).collect(),
+        };
+        assert_eq!(day(&[("a", 1.0), ("b", 3.0)]).top_model(), Some("b"));
+        assert_eq!(
+            day(&[("a", 2.0), ("b", 2.0)]).top_model(),
+            Some("a"),
+            "a tie goes to the name"
+        );
+        assert_eq!(day(&[("a", 0.0)]).top_model(), None);
+        assert_eq!(day(&[]).top_model(), None);
+    }
+
+    #[test]
+    fn the_series_keeps_the_cost_of_each_model_per_day() {
+        let events = vec![
+            event(NOW, "opus", "a", 2.0),
+            event(NOW - 10, "sonnet", "a", 1.0),
+            event(NOW - 20, "opus", "a", 0.5),
+        ];
+        let d = Data::build(&events, LiveView::default(), NOW, Range::Today, "");
+        assert_eq!(d.series.len(), 1);
+        assert_eq!(d.series[0].messages, 3);
+        assert_eq!(
+            d.series[0].models,
+            vec![("opus".to_string(), 2.5), ("sonnet".to_string(), 1.0)]
+        );
+        assert_eq!(d.slots.order, ["opus", "sonnet"]);
     }
 }

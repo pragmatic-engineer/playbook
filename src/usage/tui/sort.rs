@@ -4,6 +4,7 @@
 //! The panels, which of them are tables, and how a table's rows are sorted.
 //! Pure, so `app` (which row is selected) and `panels` (what is drawn) agree.
 
+use super::data::DayPoint;
 use crate::usage::aggregate::Group;
 use crate::usage::query::{total_tokens, ActiveSession};
 use crate::usage::UsageEvent;
@@ -47,10 +48,12 @@ impl Panel {
     }
 
     /// Columns of the panel's table that `s` can sort by, as indexes into its
-    /// column list. Empty for a graph.
+    /// column list. Empty for a graph. The spend panel is a graph until it is
+    /// switched to its daily table, which `App` knows.
     pub fn sortable(self) -> &'static [usize] {
         match self {
-            Panel::Spend | Panel::Tokens => &[],
+            Panel::Tokens => &[],
+            Panel::Spend => &[0, 1, 2, 3, 4],
             Panel::Models | Panel::Projects => &[0, 1, 2, 3],
             Panel::Sessions => &[1, 2, 3, 4, 5],
             Panel::Events => &[0, 1, 2, 3, 4],
@@ -62,7 +65,9 @@ impl Panel {
             Panel::Models | Panel::Projects => Sort::new(3, true),
             Panel::Sessions => Sort::new(5, false),
             Panel::Events => Sort::new(0, true),
-            Panel::Spend | Panel::Tokens => Sort::new(0, false),
+            // The daily table starts with the newest day.
+            Panel::Spend => Sort::new(0, true),
+            Panel::Tokens => Sort::new(0, false),
         }
     }
 }
@@ -107,7 +112,8 @@ fn is_text(panel: Panel, col: usize) -> bool {
         Panel::Models | Panel::Projects => col == 0,
         Panel::Sessions => matches!(col, 1 | 2),
         Panel::Events => matches!(col, 1 | 2),
-        Panel::Spend | Panel::Tokens => false,
+        Panel::Spend => col == 4,
+        Panel::Tokens => false,
     }
 }
 
@@ -125,6 +131,23 @@ pub fn group_rows(groups: &[Group], sort: Sort) -> Vec<&Group> {
             _ => a.cost_usd.total_cmp(&b.cost_usd),
         };
         sort.order(by).then_with(|| a.key.cmp(&b.key))
+    });
+    rows
+}
+
+/// The days of the daily table, up to and including today. Idle days stay, so
+/// the table is a calendar.
+pub fn day_rows(series: &[DayPoint], today: i64, sort: Sort) -> Vec<&DayPoint> {
+    let mut rows: Vec<&DayPoint> = series.iter().filter(|d| d.day <= today).collect();
+    rows.sort_by(|a, b| {
+        let by = match sort.col {
+            1 => a.messages.cmp(&b.messages),
+            2 => a.tokens.cmp(&b.tokens),
+            3 => a.cost_usd.total_cmp(&b.cost_usd),
+            4 => a.top_model().unwrap_or("").cmp(b.top_model().unwrap_or("")),
+            _ => a.day.cmp(&b.day),
+        };
+        sort.order(by).then_with(|| a.day.cmp(&b.day))
     });
     rows
 }
@@ -212,10 +235,58 @@ mod tests {
     }
 
     #[test]
-    fn a_graph_has_nothing_to_sort() {
-        let s = Panel::Spend.default_sort();
-        assert_eq!(s.next(Panel::Spend), s);
+    fn the_token_graph_has_nothing_to_sort() {
+        let s = Panel::Tokens.default_sort();
+        assert_eq!(s.next(Panel::Tokens), s);
         assert!(Panel::Tokens.sortable().is_empty());
+    }
+
+    fn day(day: i64, cost: f64, messages: usize, model: &str) -> DayPoint {
+        DayPoint {
+            day,
+            cost_usd: cost,
+            tokens: (cost * 100.0) as u64,
+            messages,
+            models: vec![(model.to_string(), cost)],
+        }
+    }
+
+    #[test]
+    fn the_daily_table_sorts_by_each_column_and_skips_days_to_come() {
+        let series = [
+            day(10, 5.0, 2, "opus"),
+            day(11, 1.0, 9, "haiku"),
+            day(12, 3.0, 4, "sonnet"),
+            day(13, 9.0, 1, "opus"),
+        ];
+        let days = |sort| {
+            day_rows(&series, 12, sort)
+                .iter()
+                .map(|d| d.day)
+                .collect::<Vec<_>>()
+        };
+        // Day 13 is after today, so it never shows.
+        assert_eq!(days(Panel::Spend.default_sort()), [12, 11, 10]);
+        assert_eq!(days(Sort::new(0, false)), [10, 11, 12]);
+        assert_eq!(days(Sort::new(1, true)), [11, 12, 10]);
+        assert_eq!(days(Sort::new(2, true)), [10, 12, 11]);
+        assert_eq!(days(Sort::new(3, true)), [10, 12, 11]);
+        assert_eq!(days(Sort::new(4, false)), [11, 10, 12]);
+    }
+
+    #[test]
+    fn the_daily_table_walks_its_columns_with_text_ascending() {
+        let mut s = Panel::Spend.default_sort();
+        let mut seen = vec![s.col];
+        for _ in 0..5 {
+            s = s.next(Panel::Spend);
+            seen.push(s.col);
+        }
+        assert_eq!(seen, [0, 1, 2, 3, 4, 0]);
+        assert!(
+            !Sort::new(3, true).next(Panel::Spend).desc,
+            "model: ascending"
+        );
     }
 
     #[test]

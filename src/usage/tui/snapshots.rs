@@ -9,6 +9,7 @@
 
 use super::app::App;
 use super::data::Data;
+use super::sort::Panel;
 use super::theme::{ColorDepth, Theme};
 use super::view::render;
 use crate::usage::query::{live_view, Range};
@@ -140,6 +141,132 @@ fn a_moved_cursor_reads_out_its_day() {
     check("cursor_100x30", &draw(&a, 100, 30));
 }
 
+fn with_spend_view(theme: Theme, view: crate::usage::tui::app::SpendView) -> App {
+    let mut a = app(theme);
+    a.spend_view = view;
+    a
+}
+
+#[test]
+fn spend_stacked_by_model_100x30() {
+    use crate::usage::tui::app::SpendView;
+    check(
+        "stacked_100x30",
+        &draw(&with_spend_view(Theme::Btop, SpendView::ByModel), 100, 30),
+    );
+}
+
+#[test]
+fn spend_stacked_by_model_without_color_uses_patterns() {
+    use crate::usage::tui::app::SpendView;
+    let text = draw(&with_spend_view(Theme::Mono, SpendView::ByModel), 100, 30);
+    let shown = crate::usage::tui::chart::PATTERNS
+        .iter()
+        .filter(|c| text.contains(**c))
+        .count();
+    assert!(shown >= 3, "three models, three patterns, saw {shown}");
+    check("stacked_mono_100x30", &text);
+}
+
+#[test]
+fn the_daily_table_at_80x24_100x30_and_160x50() {
+    use crate::usage::tui::app::SpendView;
+    for (name, w, h) in [
+        ("daily_80x24", 80, 24),
+        ("daily_100x30", 100, 30),
+        ("daily_160x50", 160, 50),
+    ] {
+        check(
+            name,
+            &draw(&with_spend_view(Theme::Btop, SpendView::Daily), w, h),
+        );
+    }
+}
+
+#[test]
+fn a_model_wears_the_same_color_in_the_table_and_the_stacked_bars() {
+    use crate::usage::tui::app::SpendView;
+    let a = with_spend_view(Theme::Btop, SpendView::ByModel);
+    let buf = buffer(&a, 100, 30);
+    let p = panels();
+    let data = a.data.as_ref().unwrap();
+    let pal = Theme::Btop.palette(ColorDepth::True);
+    // The Models panel is sorted by cost: opus, sonnet, haiku.
+    let rows: Vec<Color> = (0..3)
+        .map(|i| buf[(p.models.x + 1, p.models.y + 2 + i)].fg)
+        .collect();
+    for (i, model) in ["claude-opus-5", "claude-sonnet-5", "claude-haiku-5"]
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(
+            buf[(p.models.x + 1, p.models.y + 2 + i as u16)].symbol(),
+            "\u{25a0}"
+        );
+        assert_eq!(
+            rows[i],
+            pal.color(pal.series[data.slots.slot(model)]),
+            "{model}"
+        );
+    }
+    let bars: std::collections::BTreeSet<String> = (p.spend.y + 1..p.spend.y + p.spend.height - 1)
+        .flat_map(|y| (p.spend.x + 1..p.spend.x + p.spend.width - 1).map(move |x| (x, y)))
+        .filter(|(x, y)| {
+            ('\u{2581}'..='\u{2588}')
+                .contains(&buf[(*x, *y)].symbol().chars().next().unwrap_or(' '))
+        })
+        .flat_map(|(x, y)| {
+            [
+                format!("{:?}", buf[(x, y)].fg),
+                format!("{:?}", buf[(x, y)].bg),
+            ]
+        })
+        .collect();
+    // The two big models show up in the bars in the colors of their rows.
+    for color in &rows[..2] {
+        assert!(
+            bars.contains(&format!("{color:?}")),
+            "{color:?} not in {bars:?}"
+        );
+    }
+    // The legend in the bottom border names them with the same swatches.
+    let legend_row = p.spend.y + p.spend.height - 1;
+    let legend: String = (p.spend.x..p.spend.x + p.spend.width)
+        .map(|x| buf[(x, legend_row)].symbol())
+        .collect();
+    assert!(
+        legend.contains("opus-5") && legend.contains("sonnet-5"),
+        "{legend}"
+    );
+}
+
+#[test]
+fn the_daily_table_marks_today_and_the_peak_day() {
+    use crate::usage::tui::app::SpendView;
+    let mut a = with_spend_view(Theme::Btop, SpendView::Daily);
+    let buf = buffer(&a, 100, 30);
+    let p = panels();
+    // Newest first, so today is the first row.
+    let today = &buf[(p.spend.x + 2, p.spend.y + 2)];
+    let hi = rgb(0xb5, 0x40, 0x40);
+    assert_eq!(today.fg, hi);
+    assert!(today
+        .modifier
+        .contains(ratatui::style::Modifier::UNDERLINED));
+    // By cost, the peak day ($6.01) is the first row.
+    a.sorts[Panel::Spend.index()] = crate::usage::tui::sort::Sort::new(3, true);
+    let buf = buffer(&a, 100, 30);
+    let peak_row = (p.spend.y + 2..p.spend.y + p.spend.height - 1)
+        .find(|y| {
+            let row: String = (p.spend.x..p.spend.x + p.spend.width)
+                .map(|x| buf[(x, *y)].symbol())
+                .collect();
+            row.contains("$6.01")
+        })
+        .expect("the peak day is in the table");
+    assert_eq!(buf[(p.spend.x + 2, peak_row)].fg, rgb(0xff, 0xb8, 0x14));
+}
+
 #[test]
 fn too_small_screen() {
     check("too_small_60x20", &draw(&app(Theme::Btop), 60, 20));
@@ -173,7 +300,8 @@ fn the_theme_changes_color_not_text() {
             .enumerate()
             .take(29)
             .filter(|(i, _)| *i != legend_row)
-            .map(|(_, l)| l)
+            // The models wear patterns, not colors, in mono.
+            .map(|(_, l)| l.replace(crate::usage::tui::chart::PATTERNS, "\u{25a0}"))
             .collect::<Vec<_>>()
             .join("\n")
     };
