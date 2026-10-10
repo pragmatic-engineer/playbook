@@ -274,3 +274,119 @@ fn the_effort_docs_agree_with_the_reviewer_file() {
         "quick-review lost its medium cap"
     );
 }
+
+const MODELS: [&str; 3] = ["haiku", "sonnet", "opus"];
+const EFFORTS: [&str; 4] = ["low", "medium", "high", "xhigh"];
+
+/// Sentences of a command file, with markdown emphasis removed, so a claim
+/// such as "at **medium effort**" reads as plain words.
+fn sentences(text: &str) -> Vec<String> {
+    text.lines()
+        .flat_map(|line| {
+            line.replace("**", "")
+                .split(". ")
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The words of a sentence, lowercased and stripped of punctuation.
+fn words(sentence: &str) -> Vec<String> {
+    sentence
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+#[test]
+fn command_prose_about_one_agent_matches_that_agent_file() {
+    // Arrange: a sentence that names exactly one agent and exactly one model
+    // (or "<level> effort") is a claim about that agent's own file.
+    let all = agents();
+    let known: BTreeSet<&str> = all.keys().map(String::as_str).collect();
+    let mut checked = 0;
+    for entry in fs::read_dir(root().join("commands")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "md") {
+            continue;
+        }
+        let rel = format!("commands/{}", path.file_name().unwrap().to_string_lossy());
+        for sentence in sentences(&fs::read_to_string(&path).unwrap()) {
+            let names = agent_names(&sentence, &known);
+            let [name] = names.iter().collect::<Vec<_>>()[..] else {
+                continue;
+            };
+            let toks = words(&sentence);
+            let models: BTreeSet<&str> = MODELS
+                .into_iter()
+                .filter(|m| toks.iter().any(|t| t == m))
+                .collect();
+            let efforts: BTreeSet<&str> = EFFORTS
+                .into_iter()
+                .filter(|e| toks.windows(2).any(|w| w[0] == *e && w[1] == "effort"))
+                .collect();
+            let (model, effort, _) = &all[name];
+
+            // Act and Assert
+            if let [claimed] = models.iter().collect::<Vec<_>>()[..] {
+                assert_eq!(
+                    claimed, model,
+                    "{rel} says `{name}` runs on {claimed}, agents/{name}.md says {model}: {sentence}"
+                );
+                checked += 1;
+            }
+            if let [claimed] = efforts.iter().collect::<Vec<_>>()[..] {
+                assert_eq!(
+                    claimed, effort,
+                    "{rel} says `{name}` runs at {claimed} effort, agents/{name}.md says {effort}: {sentence}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(
+        checked >= 3,
+        "the scan found only {checked} claims to check"
+    );
+}
+
+#[test]
+fn a_command_that_says_which_model_it_runs_on_matches_its_frontmatter() {
+    // Arrange
+    let mut checked = 0;
+    for entry in fs::read_dir(root().join("commands")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "md") {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        let block = &text[4..text.find("\n---").expect("closing ---")];
+        let Some(model) = block
+            .lines()
+            .find_map(|l| l.strip_prefix("model:"))
+            .map(|v| v.trim().to_string())
+        else {
+            continue;
+        };
+
+        // Act and Assert
+        for sentence in sentences(&text) {
+            let toks = words(&sentence);
+            for w in toks.windows(3) {
+                if w[0] == "runs" && w[1] == "on" && MODELS.contains(&w[2].as_str()) {
+                    assert_eq!(
+                        w[2],
+                        model,
+                        "{}: says it runs on {}, its frontmatter says {model}: {sentence}",
+                        path.display(),
+                        w[2]
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked >= 1, "no command states its model any more");
+}
