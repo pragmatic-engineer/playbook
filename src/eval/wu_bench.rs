@@ -372,10 +372,12 @@ fn run_one(
     plugin: &Path,
     key: &Path,
 ) -> Result<Graded, String> {
+    // A counter, not the clock: parallel runs can read the same nanosecond.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let scratch = std::env::temp_dir().join(format!(
         "playbook-wubench-{}-{}",
         std::process::id(),
-        crate::common::time::now_nanos()
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     let (repo, home, brief_dir) = (
         scratch.join("repo"),
