@@ -4,7 +4,9 @@
 //! The terminal view's state and what each key does. Pure: no terminal, no
 //! store, so every key is a unit test.
 
+use super::chart::Plot;
 use super::data::Data;
+use super::panels;
 use super::sort::{event_rows, group_rows, session_rows, Panel, Sort, PANELS};
 use super::theme::{ColorDepth, Theme};
 use super::view;
@@ -34,6 +36,9 @@ pub fn ranges(week: WeekStart) -> [Range; 9] {
 pub struct App {
     pub data: Option<Data>,
     pub range: Range,
+    /// The day the chart cursor is on, if it was moved or hovered. Both
+    /// charts share it, whatever their bar widths.
+    pub cursor: Option<i64>,
     /// The first day of the week for the week ranges.
     pub week_start: WeekStart,
     pub filter: String,
@@ -73,6 +78,7 @@ impl App {
         App {
             data: None,
             range,
+            cursor: None,
             week_start: WeekStart::default(),
             filter: String::new(),
             error: None,
@@ -145,12 +151,43 @@ impl App {
         self.focus = PANELS[(at + by).rem_euclid(PANELS.len() as isize) as usize];
     }
 
+    /// The laid out chart of a chart panel, once there is data to chart.
+    fn plot(&self, panel: Panel) -> Option<Plot> {
+        let data = self.data.as_ref()?;
+        if data.series.is_empty()
+            || self.area.width < view::MIN_WIDTH
+            || self.area.height < view::MIN_HEIGHT
+        {
+            return None;
+        }
+        let p = view::layout(self.area);
+        let area = if panel == Panel::Tokens {
+            p.tokens
+        } else {
+            p.spend
+        };
+        Some(panels::chart_plot(area, data, panel))
+    }
+
+    /// Moves the chart cursor by `by` bars, or to an end of the chart with
+    /// `isize::MIN` or `isize::MAX` steps. With no cursor yet it starts from the newest bar.
+    fn move_cursor(&mut self, by: isize) {
+        let Some(plot) = self.plot(Panel::Spend) else {
+            return;
+        };
+        let last = plot.bars.len().saturating_sub(1);
+        let at = self.cursor.and_then(|d| plot.index_of(d)).unwrap_or(last);
+        let to = at.saturating_add_signed(by).min(last);
+        self.cursor = plot.bars.get(to).map(|b| b.first);
+    }
+
     /// Switches the range, re-querying only when it changed.
     fn set_range(&mut self, range: Range) -> Effect {
         if range == self.range {
             return Effect::None;
         }
         self.range = range;
+        self.cursor = None;
         Effect::Requery
     }
 
@@ -194,6 +231,10 @@ impl App {
             KeyCode::Char(c @ '1'..='6') => self.focus = PANELS[usize::from(c as u8 - b'1')],
             KeyCode::Tab => self.focus_next(1),
             KeyCode::BackTab => self.focus_next(-1),
+            KeyCode::Left => self.move_cursor(-1),
+            KeyCode::Right => self.move_cursor(1),
+            KeyCode::Home | KeyCode::Char('g') if focus.is_chart() => self.move_cursor(isize::MIN),
+            KeyCode::End | KeyCode::Char('G') if focus.is_chart() => self.move_cursor(isize::MAX),
             KeyCode::Down | KeyCode::Char('j') => self.step(focus, 1),
             KeyCode::Up | KeyCode::Char('k') => self.step(focus, -1),
             KeyCode::PageDown => self.step(focus, 5),
@@ -242,11 +283,37 @@ impl App {
         Some((*panel, row))
     }
 
+    /// Puts the cursor on the bar under a screen cell of a chart, if there is
+    /// one. Returns whether the cell was on a chart.
+    fn point_at_bar(&mut self, panel: Panel, x: u16, y: u16) -> bool {
+        let Some(plot) = self.plot(panel) else {
+            return false;
+        };
+        match plot.geo.bar_at(x, y) {
+            Some(i) => {
+                self.cursor = Some(plot.bars[i].first);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// A click focuses a panel and selects a row, the wheel moves the
-    /// selection of the panel under the pointer.
+    /// selection of the panel under the pointer. Over a chart, hovering or
+    /// clicking a bar puts the cursor on it.
     pub fn mouse(&mut self, ev: MouseEvent) {
         if self.editing {
             return;
+        }
+        if matches!(
+            ev.kind,
+            MouseEventKind::Moved | MouseEventKind::Drag(MouseButton::Left)
+        ) {
+            for panel in [Panel::Spend, Panel::Tokens] {
+                if self.point_at_bar(panel, ev.column, ev.row) {
+                    return;
+                }
+            }
         }
         let Some((panel, row)) = self.hit(ev.column, ev.row) else {
             return;
@@ -254,6 +321,9 @@ impl App {
         match ev.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.focus = panel;
+                if panel.is_chart() {
+                    self.point_at_bar(panel, ev.column, ev.row);
+                }
                 if let Some(row) = row {
                     self.select(panel, row);
                 }
@@ -582,6 +652,131 @@ mod tests {
         app.area = Rect::new(0, 0, 40, 10);
         app.mouse(click(MouseEventKind::Down(MouseButton::Left), 3, 5));
         assert_eq!(app.focus, Panel::Models);
+    }
+
+    const NOW: i64 = 1_788_400_000;
+    const DAY: i64 = 86_400;
+
+    /// An app with one event a day for the last `days` days, in a 100x30 screen.
+    fn charted(range: Range, days: i64) -> App {
+        use crate::usage::query::LiveView;
+        use crate::usage::UsageEvent;
+        let events: Vec<UsageEvent> = (0..days)
+            .map(|d| UsageEvent {
+                event_id: format!("e{d}"),
+                timestamp: NOW - d * DAY,
+                session_id: "s".into(),
+                model: "opus".into(),
+                cost_usd: 1.0 + d as f64,
+                ..UsageEvent::default()
+            })
+            .collect();
+        let mut app = App::new(range);
+        app.data = Some(Data::build(&events, LiveView::default(), NOW, range, ""));
+        app
+    }
+
+    fn today() -> i64 {
+        NOW.div_euclid(DAY)
+    }
+
+    #[test]
+    fn left_and_right_move_the_chart_cursor_one_day_and_stop_at_the_ends() {
+        let mut app = charted(Range::LastDays(30), 30);
+        assert_eq!(app.cursor, None);
+        // From no cursor, the newest day is where it starts, so left goes back.
+        app.key(press(KeyCode::Left));
+        assert_eq!(app.cursor, Some(today() - 1));
+        app.key(press(KeyCode::Left));
+        assert_eq!(app.cursor, Some(today() - 2));
+        app.key(press(KeyCode::Right));
+        assert_eq!(app.cursor, Some(today() - 1));
+        app.key(press(KeyCode::Right));
+        app.key(press(KeyCode::Right));
+        assert_eq!(app.cursor, Some(today()), "stops on the newest day");
+        for _ in 0..40 {
+            app.key(press(KeyCode::Left));
+        }
+        assert_eq!(app.cursor, Some(today() - 29), "stops on the oldest day");
+    }
+
+    #[test]
+    fn home_and_end_jump_the_cursor_when_a_chart_has_the_focus() {
+        let mut app = charted(Range::LastDays(30), 30);
+        app.key(press(KeyCode::Char('1')));
+        app.key(press(KeyCode::Home));
+        assert_eq!(app.cursor, Some(today() - 29));
+        app.key(press(KeyCode::End));
+        assert_eq!(app.cursor, Some(today()));
+        // On a table they still move the row, not the cursor.
+        app.cursor = None;
+        app.key(press(KeyCode::Char('3')));
+        app.key(press(KeyCode::End));
+        assert_eq!(app.cursor, None);
+    }
+
+    #[test]
+    fn a_wide_range_moves_the_cursor_one_bar_which_is_several_days() {
+        let mut app = charted(Range::LastDays(90), 90);
+        let plot = app.plot(Panel::Spend).expect("a chart");
+        let per = plot.geo.per as i64;
+        assert!(per > 1, "90 days do not fit one column each at 100 wide");
+        app.key(press(KeyCode::Left));
+        let first = app.cursor.unwrap();
+        app.key(press(KeyCode::Left));
+        assert_eq!(first - app.cursor.unwrap(), per);
+    }
+
+    #[test]
+    fn the_cursor_resets_when_the_range_changes_and_survives_a_filter() {
+        let mut app = charted(Range::LastDays(30), 30);
+        app.key(press(KeyCode::Left));
+        assert!(app.cursor.is_some());
+        app.filter = "opus".into();
+        app.key(press(KeyCode::Char('c')));
+        assert!(app.cursor.is_some(), "a filter keeps the day");
+        app.key(press(KeyCode::Char('w')));
+        assert_eq!(app.cursor, None);
+    }
+
+    #[test]
+    fn the_cursor_keys_do_nothing_without_data_or_on_a_tiny_screen() {
+        let mut app = App::new(Range::All);
+        app.key(press(KeyCode::Left));
+        assert_eq!(app.cursor, None);
+        let mut small = charted(Range::LastDays(30), 30);
+        small.area = Rect::new(0, 0, 50, 10);
+        small.key(press(KeyCode::Left));
+        assert_eq!(small.cursor, None);
+    }
+
+    #[test]
+    fn hovering_or_clicking_a_bar_puts_the_cursor_on_its_day() {
+        let mut app = charted(Range::LastDays(30), 30);
+        let p = view::layout(app.area);
+        let plot = app.plot(Panel::Spend).unwrap();
+        let (x, y) = (plot.geo.x_of(4), plot.geo.plot.y);
+        app.mouse(click(MouseEventKind::Moved, x, y));
+        assert_eq!(app.cursor, Some(plot.bars[4].first));
+        // Hovering does not take the focus, a click does.
+        assert_eq!(app.focus, Panel::Models);
+        let x = plot.geo.x_of(9);
+        app.mouse(click(MouseEventKind::Down(MouseButton::Left), x, y));
+        assert_eq!(
+            (app.focus, app.cursor),
+            (Panel::Spend, Some(plot.bars[9].first))
+        );
+        // The tokens chart is the same days, so a hover there lands on its day.
+        let tokens = app.plot(Panel::Tokens).unwrap();
+        let (x, y) = (tokens.geo.x_of(2), tokens.geo.plot.y);
+        assert!(p.tokens.contains(ratatui::layout::Position::new(x, y)));
+        app.mouse(click(MouseEventKind::Moved, x, y));
+        assert_eq!(app.cursor, Some(tokens.bars[2].first));
+        // Over a table or the axis the cursor stays where it was.
+        let before = app.cursor;
+        app.mouse(click(MouseEventKind::Moved, p.models.x + 3, p.models.y + 3));
+        app.mouse(click(MouseEventKind::Moved, plot.geo.plot.x - 1, y));
+        assert_eq!(app.cursor, before);
     }
 
     #[test]

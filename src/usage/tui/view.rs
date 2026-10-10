@@ -152,6 +152,7 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
         ("1-6", "panel".to_string()),
         ("r", "range".to_string()),
         ("d/w/W/m/M/a", "jump".to_string()),
+        ("\u{2190}/\u{2192}", "day".to_string()),
         ("/", "filter".to_string()),
         ("s/S", "sort".to_string()),
         ("enter", "pick".to_string()),
