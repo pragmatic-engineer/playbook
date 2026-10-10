@@ -129,11 +129,11 @@ pub fn render(frame: &mut Frame, app: &App) {
             frame.render_widget(Paragraph::new("Reading usage..."), body);
         }
     }
-    frame.render_widget(Paragraph::new(footer(app, &pal)), p.footer);
+    frame.render_widget(Paragraph::new(footer(app, &pal, area.width)), p.footer);
 }
 
 /// The key hints: each key in the accent color, its meaning in the text color.
-fn footer(app: &App, pal: &Palette) -> Line<'static> {
+fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
     let dim = Style::default().fg(pal.color(pal.graph_text));
     if app.editing {
         return Line::styled(
@@ -145,16 +145,31 @@ fn footer(app: &App, pal: &Palette) -> Line<'static> {
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD);
     let theme = format!("theme ({})", app.theme.name());
-    let hints = [
-        ("1-6", "panel"),
-        ("r", "range"),
-        ("/", "filter"),
-        ("s/S", "sort"),
-        ("enter", "pick"),
-        ("t", theme.as_str()),
-        ("m", "mouse"),
-        ("q", "quit"),
+    // Listed in the order shown. When the line is too wide, hints drop in
+    // `DROP` order, so the ones that matter most stay.
+    let mut hints = vec![
+        ("1-6", "panel".to_string()),
+        ("r", "range".to_string()),
+        ("d/w/W/m/M/a", "jump".to_string()),
+        ("/", "filter".to_string()),
+        ("s/S", "sort".to_string()),
+        ("enter", "pick".to_string()),
+        ("t", theme),
+        ("x", "mouse".to_string()),
+        ("q", "quit".to_string()),
     ];
+    let width = |hints: &[(&str, String)]| {
+        1 + hints
+            .iter()
+            .map(|(k, l)| k.chars().count() + l.chars().count() + 2)
+            .sum::<usize>()
+    };
+    for drop in FOOTER_DROP {
+        if width(&hints) <= usize::from(area_width) {
+            break;
+        }
+        hints.retain(|(k, _)| *k != drop);
+    }
     let mut spans = vec![Span::raw(" ")];
     for (key, label) in hints {
         spans.push(Span::styled(key.to_string(), keys));
@@ -163,15 +178,21 @@ fn footer(app: &App, pal: &Palette) -> Line<'static> {
     Line::from(spans)
 }
 
+/// The order footer hints are dropped in on a narrow screen.
+const FOOTER_DROP: [&str; 5] = ["x", "t", "enter", "s/S", "1-6"];
+
 fn range_label(data: &Data) -> String {
     match data.range.days(data.now) {
+        Some((first, past)) if past - first == 1 => {
+            format!("{} {} UTC", data.range.label(), date_key(first))
+        }
         Some((first, past)) => format!(
-            "{} {} to {}",
-            data.range.key(),
+            "{} {} to {} UTC",
+            data.range.label(),
             date_key(first),
             date_key(past - 1)
         ),
-        None => "all time".to_string(),
+        None => "all time UTC".to_string(),
     }
 }
 
@@ -416,6 +437,56 @@ mod tests {
             .filter(|c| c.fg != ratatui::style::Color::Reset)
             .count();
         assert_eq!(colored, 0);
+    }
+
+    #[test]
+    fn the_header_names_the_range_and_its_exact_utc_dates() {
+        use crate::usage::query::WeekStart;
+        // Thursday 2026-09-03 01:46:40 UTC.
+        for (range, want) in [
+            (Range::Today, "today 2026-09-03 UTC"),
+            (
+                Range::ThisWeek(WeekStart::Monday),
+                "this week 2026-08-31 to 2026-09-06 UTC",
+            ),
+            (
+                Range::LastWeek(WeekStart::Monday),
+                "last week 2026-08-24 to 2026-08-30 UTC",
+            ),
+            (
+                Range::CurrentMonth,
+                "this month 2026-09-01 to 2026-09-30 UTC",
+            ),
+            (Range::LastMonth, "last month 2026-08-01 to 2026-08-31 UTC"),
+            (
+                Range::LastDays(30),
+                "last 30 days 2026-08-05 to 2026-09-03 UTC",
+            ),
+            (Range::All, "all time UTC"),
+        ] {
+            let mut app = App::new(range);
+            app.data = Some(Data::build(&[], LiveView::default(), NOW, range, ""));
+            let text = screen(&app, 100, 30);
+            assert!(text.contains(want), "{want}:\n{text}");
+        }
+    }
+
+    #[test]
+    fn the_footer_drops_the_least_important_hints_first_on_a_narrow_screen() {
+        let app = App::new(Range::All);
+        let wide = screen(&app, 120, 30);
+        let narrow = screen(&app, 80, 24);
+        assert!(
+            wide.contains("x mouse") && wide.contains("t theme"),
+            "{wide}"
+        );
+        assert!(
+            !narrow.contains("x mouse") && !narrow.contains("t theme"),
+            "{narrow}"
+        );
+        for kept in ["r range", "d/w/W/m/M/a jump", "/ filter", "q quit"] {
+            assert!(narrow.contains(kept), "{kept}:\n{narrow}");
+        }
     }
 
     #[test]

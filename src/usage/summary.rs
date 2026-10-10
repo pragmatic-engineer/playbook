@@ -4,7 +4,8 @@
 //! Plain-text usage report for the terminal. Structured on purpose: whatever
 //! agent is driving the session can read it and give the insights itself.
 
-use super::aggregate::{count_tools, group_usage, unpriced_models, Dimension, Group};
+use super::aggregate::{count_tools, date_key, group_usage, unpriced_models, Dimension, Group};
+use super::query::{in_range, Range};
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
 use std::fmt::Write;
 
@@ -43,6 +44,36 @@ fn tool_list(out: &mut String, title: &str, counts: &[(String, u64)]) {
 }
 
 pub fn render(usage: &[UsageEvent], tools: &[ToolInvocationEvent]) -> String {
+    scoped(usage, tools, "across all recorded sessions")
+}
+
+/// The report for the events inside `range`, with its dates in the heading.
+pub fn render_range(
+    usage: &[UsageEvent],
+    tools: &[ToolInvocationEvent],
+    range: Range,
+    now: i64,
+) -> String {
+    let (usage, tools) = in_range(usage, tools, now, range);
+    let scope = match range.days(now) {
+        Some((first, past)) => format!(
+            "in {} ({} to {}, UTC)",
+            range.label(),
+            date_key(first),
+            date_key(past - 1)
+        ),
+        None => "across all recorded sessions".to_string(),
+    };
+    if usage.is_empty() && tools.is_empty() {
+        return format!(
+            "No usage {}.\n",
+            scope.replace("across all recorded sessions", "recorded")
+        );
+    }
+    scoped(&usage, &tools, &scope)
+}
+
+fn scoped(usage: &[UsageEvent], tools: &[ToolInvocationEvent], scope: &str) -> String {
     if usage.is_empty() && tools.is_empty() {
         return format!("{EMPTY_MESSAGE}\n");
     }
@@ -50,7 +81,7 @@ pub fn render(usage: &[UsageEvent], tools: &[ToolInvocationEvent]) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "Usage: {} messages, ${:.4} estimated cost across all recorded sessions",
+        "Usage: {} messages, ${:.4} estimated cost {scope}",
         usage.len(),
         total_cost
     );

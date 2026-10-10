@@ -38,6 +38,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `review.stackMaxLines` | `3000` | a number, see the config keys guide for the range |
 | `security.defaults` | `false` | `true`, `false` |
 | `usage.theme` | `btop` | `btop`, `dark`, `light`, `mono` |
+| `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -1057,14 +1058,14 @@ Example: `playbook update --check`
 
 Show token and cost usage across your sessions
 
-With no subcommand, opens the terminal view. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts.
+With no subcommand, opens the terminal view. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Days are UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise.
 
-Example: `playbook usage --range 90d`
+Example: `playbook usage --range last-week`
 
 - `--json`: Print the totals, groupings and live view as JSON
-- `--summary`: Print the text summary of every recorded session and exit
+- `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
 - `--web`: Open the web dashboard (deprecated, removed in v0.22.0)
-- `--range <RANGE>`: Date range for the terminal view and `--json`: 30d, 60d, 90d, month or all
+- `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default 30d, or all with `--summary`
 
 Subcommands: `dashboard`, `ingest`
 

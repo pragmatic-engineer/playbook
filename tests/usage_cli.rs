@@ -226,3 +226,106 @@ fn usage_ingest_still_works_and_warns_that_it_is_deprecated() {
     );
     assert!(err.contains("playbook usage --summary"), "{err}");
 }
+
+fn json_range(home: &Home, range: &str) -> serde_json::Value {
+    let out = home.run(&["usage", "--json", "--range", range]);
+    assert!(out.status.success(), "{range}: {}", stderr(&out));
+    serde_json::from_str(&stdout(&out)).unwrap()
+}
+
+#[test]
+fn json_accepts_every_calendar_range_and_names_its_dates() {
+    let home = Home::new("json-ranges");
+
+    for (key, days) in [
+        ("today", 1),
+        ("week", 7),
+        ("last-week", 7),
+        ("last-month", 28),
+    ] {
+        let doc = json_range(&home, key);
+        assert_eq!(doc["range"]["key"], key);
+        let start = doc["range"]["start"].as_str().unwrap();
+        let end = doc["range"]["end"].as_str().unwrap();
+        assert!(start <= end, "{key}: {start} {end}");
+        // Compare day numbers, not strings: a month has 28 to 31 days.
+        let n = day_number(end) - day_number(start) + 1;
+        if key == "last-month" {
+            assert!((28..=31).contains(&n), "{key}: {n}");
+        } else {
+            assert_eq!(n, days, "{key}");
+        }
+    }
+    // The fixture is old, so none of the short ranges hold it.
+    assert_eq!(json_range(&home, "today")["totals"]["messages"], 0);
+    assert_eq!(json_range(&home, "all")["totals"]["messages"], 3);
+}
+
+/// Days since 0000-03-01, enough to subtract two `YYYY-MM-DD` dates.
+fn day_number(date: &str) -> i64 {
+    let part = |i: usize| date.split('-').nth(i).unwrap().parse::<i64>().unwrap();
+    let (mut y, m, d) = (part(0), part(1), part(2));
+    let m = if m <= 2 {
+        y -= 1;
+        m + 9
+    } else {
+        m - 3
+    };
+    365 * y + y / 4 - y / 100 + y / 400 + (153 * m + 2) / 5 + d
+}
+
+#[test]
+fn summary_accepts_a_range_and_says_which_dates_it_covers() {
+    let home = Home::new("summary-range");
+
+    let all = home.run(&["usage", "--summary", "--range", "all"]);
+    let today = home.run(&["usage", "--summary", "--range", "today"]);
+    let week = home.run(&["usage", "--range", "week"]);
+
+    assert!(all.status.success() && today.status.success() && week.status.success());
+    assert!(stdout(&all).contains("3 messages, $0.0973 estimated cost across all"));
+    let text = stdout(&today);
+    assert!(text.starts_with("No usage in today ("), "{text}");
+    assert!(text.contains("UTC"), "{text}");
+    // A range with no flag prints the summary when stdout is not a terminal.
+    assert!(
+        stdout(&week).starts_with("No usage in this week ("),
+        "{}",
+        stdout(&week)
+    );
+}
+
+#[test]
+fn an_unknown_range_lists_the_new_names() {
+    let home = Home::new("range-names");
+
+    let out = home.run(&["usage", "--summary", "--range", "yesterday"]);
+
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    for name in ["today", "week", "last-week", "last-month"] {
+        assert!(err.contains(name), "{err}");
+    }
+}
+
+#[test]
+fn the_week_start_key_moves_the_week_in_the_json_range() {
+    let home = Home::new("week-start");
+    let start_of = |home: &Home| {
+        let doc = json_range(home, "week");
+        doc["range"]["start"].as_str().unwrap().to_string()
+    };
+    let monday = start_of(&home);
+    let set = home.run(&["config", "set", "--global", "usage.weekStart", "sunday"]);
+    assert!(set.status.success(), "{}", stderr(&set));
+
+    let sunday = start_of(&home);
+
+    // Sunday starts the day before Monday does, except on a Sunday itself,
+    // when this week started today under the Sunday rule, six days after the
+    // Monday rule's start.
+    let gap = day_number(&monday) - day_number(&sunday);
+    assert!(gap == 1 || gap == -6, "{monday} {sunday}");
+    let bad = home.run(&["config", "set", "--global", "usage.weekStart", "friday"]);
+    assert!(!bad.status.success());
+}

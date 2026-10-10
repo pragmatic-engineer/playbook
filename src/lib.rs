@@ -350,24 +350,26 @@ pub enum Command {
     ///
     /// With no subcommand, opens the terminal view. When stdout is not a
     /// terminal, or with `--summary`, prints a text summary of estimated cost
-    /// instead. `--json` prints the same numbers as JSON for scripts.
+    /// instead. `--json` prints the same numbers as JSON for scripts. Days are
+    /// UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d,
+    /// all. Weeks start on Monday unless `usage.weekStart` says otherwise.
     ///
-    /// Example: `playbook usage --range 90d`
+    /// Example: `playbook usage --range last-week`
     Usage {
         #[command(subcommand)]
         sub: Option<UsageCommand>,
         /// Print the totals, groupings and live view as JSON
         #[arg(long, conflicts_with_all = ["summary", "web"])]
         json: bool,
-        /// Print the text summary of every recorded session and exit
-        #[arg(long, conflicts_with_all = ["json", "web", "range"])]
+        /// Print the text summary and exit (every recorded session unless `--range` is given)
+        #[arg(long, conflicts_with_all = ["json", "web"])]
         summary: bool,
         /// Open the web dashboard (deprecated, removed in v0.22.0)
         #[arg(long, conflicts_with_all = ["json", "summary", "range"])]
         web: bool,
-        /// Date range for the terminal view and `--json`: 30d, 60d, 90d, month or all
-        #[arg(long, value_name = "RANGE", default_value = "30d")]
-        range: String,
+        /// Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default 30d, or all with `--summary`
+        #[arg(long, value_name = "RANGE")]
+        range: Option<String>,
     },
     /// Render the files the release job pushes to the Homebrew tap and marketplace
     ///

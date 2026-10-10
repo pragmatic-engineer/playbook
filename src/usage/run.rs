@@ -10,6 +10,7 @@ use super::claude_code::ClaudeCodeSource;
 use super::codex::CodexSource;
 use super::db::{load_tool_events, load_usage_events, open_db};
 use super::ingest::{ingest, IngestStats};
+use super::query::Range;
 use super::summary;
 use crate::common::paths::{playbook_root_from, usage_db_dir};
 use rusqlite::Connection;
@@ -74,9 +75,13 @@ pub fn run_ingest(paths: &Paths) -> Result<String, String> {
 }
 
 /// Bare `playbook usage`: ingest, then render.
-pub fn run_summary(paths: &Paths) -> Result<String, String> {
+/// The text report. `range` is `None` for every recorded session.
+pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<String, String> {
     let (conn, _) = ingest_new(paths)?;
     let usage = load_usage_events(&conn)?;
     let tools = load_tool_events(&conn)?;
-    Ok(summary::render(&usage, &tools))
+    Ok(match range {
+        Some(range) => summary::render_range(&usage, &tools, range, now),
+        None => summary::render(&usage, &tools),
+    })
 }

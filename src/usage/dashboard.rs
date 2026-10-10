@@ -110,7 +110,11 @@ fn is_api(path: &str) -> bool {
 
 fn parse_api(path: &str, query: &str) -> Result<Api, (u16, &'static str, String)> {
     let range = || {
-        Range::parse(query_param(query, "range")).ok_or((400, TEXT, "unknown range".to_string()))
+        Range::parse_with(
+            query_param(query, "range"),
+            super::entry::configured_week_start(),
+        )
+        .ok_or((400, TEXT, "unknown range".to_string()))
     };
     match path {
         "/api/data" => range().map(Api::Data),
@@ -559,6 +563,14 @@ mod tests {
         assert_eq!(seen(""), (200, Some(Range::All)));
         assert_eq!(seen("range=30d"), (200, Some(Range::LastDays(30))));
         assert_eq!(seen("x=1&range=month"), (200, Some(Range::CurrentMonth)));
+        assert_eq!(seen("range=today"), (200, Some(Range::Today)));
+        assert_eq!(seen("range=last-month"), (200, Some(Range::LastMonth)));
+        // The week start comes from config, so only the kind is asserted.
+        assert!(matches!(seen("range=week").1, Some(Range::ThisWeek(_))));
+        assert!(matches!(
+            seen("range=last-week").1,
+            Some(Range::LastWeek(_))
+        ));
         assert_eq!(seen("range=7d"), (400, None));
         assert_eq!(seen("range=<script>"), (400, None));
     }
