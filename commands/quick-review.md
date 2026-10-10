@@ -87,7 +87,7 @@ Findings are plain: a label, `file:line`, the exact evidence, a short failure sc
 
 ## Execution rules
 
-1. Run every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive). Don't simulate.
+1. Run every bash block for real with the `Bash` tool. Don't simulate.
 2. The `reviewer` subagent reads every file it cites at the PR's head SHA (grounding-review evidence rule). It can still be wrong, so the orchestrator sweeps every finding in Step 3b before anything is shown or posted, reading the cited lines plus what the trace needs.
 3. Combine independent `Bash` calls into a single tool call.
 4. Anchor every inline comment to a real `file:line` in the diff. If the line isn't in the diff (e.g. a referenced helper), make it a report-level finding instead.
@@ -135,7 +135,7 @@ The subagent prompt MUST include:
 - The output contract in Step 3: it MUST return exactly that report of plain findings, with no `Post:` block.
 - Read every cited file at `HEAD_SHA` before drafting; quote exact evidence; tag anything unconfirmed `[unverified]`.
 
-Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`); the moment it returns its report, `TaskStop` it. `TaskStop` can itself report failure, e.g. `no task found with ID: qr-<PR_NUMBER>`, when the agent already finished and was cleaned up before this call ran. That failure means the goal (nothing left running) is already satisfied: treat it as a benign no-op, not a command error, and continue to Step 3 with the report already in hand. There is no gh-api fallback; if the worktree setup in Step 1 failed, execution has already stopped.
+Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`). If stopping it reports `no task found`, the agent was already cleaned up: treat that as a no-op and continue to Step 3. There is no gh-api fallback; if the worktree setup in Step 1 failed, execution has already stopped.
 
 ## Step 3: Review report contract
 

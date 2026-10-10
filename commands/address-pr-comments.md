@@ -66,7 +66,7 @@ Parse `$ARGUMENTS` token-by-token:
 
 ## Execution rules
 
-1. Run every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive). Don't simulate.
+1. Run every bash block for real with the `Bash` tool. Don't simulate.
 2. Read the file at the PR's head SHA before proposing a fix. The reviewer's `line` field refers to the post-diff line number.
 3. Combine independent `Bash` calls into a single tool call.
 4. **NEVER resolve threads.** That's the reviewer's call. Reply only.
