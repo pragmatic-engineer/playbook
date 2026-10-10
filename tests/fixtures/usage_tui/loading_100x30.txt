@@ -27,4 +27,4 @@ Reading usage...
 
 
 
- 1-6 panel r range d/w/W/m/M/a jump ←/→ day / filter s/S sort enter pick t theme (btop) q quit
+ 1-6 panel r range d/w/W/m/M/a jump ←/→ day v view / filter s/S sort enter pick q quit

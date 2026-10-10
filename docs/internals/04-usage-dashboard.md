@@ -27,9 +27,9 @@ The view needs a screen of at least 80 columns by 24 rows. Below that it says so
 
 | Key | Panel | Shows |
 |---|---|---|
-| `1` | Spend per day, USD | A bar chart of the cost for each UTC day in the range, with axes (below). |
+| `1` | Spend per day, USD | A bar chart of the cost for each UTC day in the range, with axes (below). `v` steps it through three views: the total, the same bars stacked by model, and a table with a row for each day (see below). |
 | `2` | Tokens per day | The same for tokens, in the net gradient. |
-| `3` | Models | Messages, tokens, cost and a share meter per model. |
+| `3` | Models | Messages, tokens, cost and a share meter per model, with a swatch in the model's color. |
 | `4` | Projects | The same, per repo. |
 | `5` | Live sessions | Sessions with a message in the last 15 minutes, with state, cost and age. |
 | `6` | Recent messages | The newest messages with time, project, model, tokens and cost. |
@@ -46,6 +46,16 @@ The two charts are bar charts drawn with eighth blocks, one bar per UTC day, wit
 - **Wide ranges.** When the range has more days than the chart has columns, days are added up into bars of equal length (the title says `Spend per 3 days`), so nothing is cut off. The axis, readout and cursor then speak of those bars.
 - **Small panels.** Rows go in this order when the panel is short: weekday letters, totals line, readout, dates, so the plot keeps three rows. The y axis goes when the panel is narrower than 16 columns, leaving the bars.
 
+### Daily cost and cost per model
+
+`v` switches the spend panel between three views of the same days.
+
+- **Total.** One color per bar along the gradient, as above.
+- **By model.** Each bar is stacked by model, the biggest model at the bottom, and the legend in the bottom border names them (`■ opus-5 ■ sonnet-5 +1` when they do not all fit). The edge between two models is exact to an eighth of a cell: a cell that holds an edge is drawn as a block in the lower model's color on the upper model's. Without color (the mono theme) the models are told apart by pattern (`█ ▓ ▒ ░ ▚ ▞ ▛ ▟`).
+- **Daily.** A table with a row for each day up to today, newest first: date with weekday, messages, tokens, cost and the model that cost the most that day. `s` and `S` sort it by any column, the selection and the wheel work as in the other tables, and a click selects a row. Today is bold and underlined, the peak day is bold and yellow, and the legend in the bottom border says so. Idle days stay as zero rows, so it reads as a calendar.
+
+A model keeps one color everywhere: its swatch in the Models panel, its band in the stacked bars, its legend entry and its name in the daily table. The color comes from a hash of the model name, so it stays the same when the range changes. Two models that want the same color in one range get the next free one, and with more than eight models the colors are shared.
+
 Keys:
 
 | Key | Action |
@@ -53,6 +63,7 @@ Keys:
 | `1` to `6`, `Tab`, `Shift-Tab` | Focus a panel. The focused panel's hint is a badge. |
 | `Left`, `Right` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
 | `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
+| `v` | Step the spend panel: total, by model, daily table. |
 | `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
 | `S` | Reverse the sort. |
 | `Enter` | Filter the whole view to the selected row: a model, a project or a session id. `Enter` on that row again lifts the filter. |
@@ -177,7 +188,7 @@ The Codex source reads `~/.codex/sessions/**/rollout-*.jsonl` read-only and is s
 
 Tests run against hand-written transcripts in `tests/fixtures/usage/` and a scratch `HOME`, never your real `~/.claude`. Server tests (`tests/usage_dashboard.rs`, `tests/usage_auth.rs`) set `PLAYBOOK_USAGE_NO_BROWSER=1` so no browser opens, and they serialize behind a lock because they bind real sockets. One test runs `usage ingest` in a loop while polling the server, to prove reads never fail and no event is lost or doubled.
 
-Terminal view tests render into a `TestBackend` buffer, with no real terminal. `src/usage/tui/snapshots.rs` compares whole screens at fixed sizes with the text files in `tests/fixtures/usage_tui/`; after an intended layout change, regenerate them with `UPDATE_SNAPSHOTS=1 cargo test --lib usage::tui::snapshots` and review the diff. `src/usage/tui/parity.rs` checks that, for every range, the view reports the same totals and model, repo and day groups as the web JSON.
+Terminal view tests render into a `TestBackend` buffer, with no real terminal. `src/usage/tui/snapshots.rs` compares whole screens at fixed sizes with the text files in `tests/fixtures/usage_tui/`; after an intended layout change, regenerate them with `UPDATE_SNAPSHOTS=1 cargo test --lib usage::tui::snapshots` and review the diff. `src/usage/tui/parity.rs` checks that, for every range, the view reports the same totals and model, repo and day groups as the web JSON, and again for events on both sides of every week and month edge (a week that spans a month boundary, a Sunday week start, a leap February). The snapshots cover 80x24, 100x30 and 160x50, the daily table and the stacked view at those sizes, and a week range. The scale math, the chart geometry and every range's bounds have their own unit tests, and a chart draw test runs the chart at every size from nothing up to 70x22. The fixtures are synthetic: no real project, model spend or session ever goes into a snapshot.
 
 ## Limits
 

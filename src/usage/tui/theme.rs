@@ -115,7 +115,12 @@ pub struct Palette {
     pub live: Ink,
     pub warn: Ink,
     pub error: Ink,
+    /// One color per series, for what is told apart by name (a model).
+    pub series: [Ink; SERIES],
 }
+
+/// How many series colors a palette has. More series share them.
+pub const SERIES: usize = 8;
 
 const fn gray(v: u8) -> Rgb {
     Rgb(v, v, v)
@@ -181,6 +186,16 @@ impl Theme {
                 live: ink(hex(0x0de756)),
                 warn: ink(hex(0xffb814)),
                 error: ink(hex(0xff4769)),
+                series: [
+                    ink(hex(0x5fb3ff)),
+                    ink(hex(0xffb814)),
+                    ink(hex(0xd36bd8)),
+                    ink(hex(0x0de756)),
+                    ink(hex(0xff7a59)),
+                    ink(hex(0x74e6fc)),
+                    ink(hex(0xb0a9de)),
+                    ink(hex(0xcbc06c)),
+                ],
             },
             Theme::Dark => Palette {
                 depth,
@@ -207,6 +222,16 @@ impl Theme {
                 live: Ink::Named(Color::Green),
                 warn: Ink::Named(Color::Yellow),
                 error: Ink::Named(Color::Red),
+                series: [
+                    Ink::Named(Color::Cyan),
+                    Ink::Named(Color::Yellow),
+                    Ink::Named(Color::Magenta),
+                    Ink::Named(Color::Green),
+                    Ink::Named(Color::LightRed),
+                    Ink::Named(Color::LightBlue),
+                    Ink::Named(Color::LightMagenta),
+                    Ink::Named(Color::LightGreen),
+                ],
             },
             // Bright colors vanish on a white ground, so use the dark ones.
             Theme::Light => Palette {
@@ -219,6 +244,16 @@ impl Theme {
                 cached: Fill::Flat(Ink::Named(Color::Blue)),
                 avail: Fill::Flat(Ink::Named(Color::Blue)),
                 warn: ink(Rgb(160, 100, 0)),
+                series: [
+                    Ink::Named(Color::Blue),
+                    ink(Rgb(160, 100, 0)),
+                    Ink::Named(Color::Magenta),
+                    Ink::Named(Color::Green),
+                    Ink::Named(Color::Red),
+                    Ink::Named(Color::Cyan),
+                    Ink::Named(Color::DarkGray),
+                    ink(Rgb(120, 120, 0)),
+                ],
                 ..Theme::Dark.palette(depth)
             },
             Theme::Mono => Palette {
@@ -237,6 +272,7 @@ impl Theme {
                 live: Ink::Default,
                 warn: Ink::Default,
                 error: Ink::Default,
+                series: [Ink::Default; SERIES],
                 ..Theme::Dark.palette(depth)
             },
         }

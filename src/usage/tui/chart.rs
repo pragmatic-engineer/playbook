@@ -11,10 +11,10 @@
 //! chart still draws at any size. `Plot` is the geometry and the data; drawing
 //! and mouse hits both use it, so a click lands on the bar it points at.
 
-use super::data::DayPoint;
+use super::data::{DayPoint, Slots};
 use super::fmt::{axis_money, axis_tokens, compact, fit, money, WEEKDAYS};
 use super::scale::Axis;
-use super::theme::{Fill, Palette};
+use super::theme::{Fill, Ink, Palette, SERIES};
 use crate::usage::aggregate::date_key;
 use crate::usage::query::weekday;
 use ratatui::buffer::Buffer;
@@ -367,8 +367,11 @@ fn unreachable_plot(panel: Rect, metric: Metric) -> Plot {
 
 /// What the chart shows besides the bars.
 #[derive(Debug, Clone, Copy)]
-pub struct View {
+pub struct View<'a> {
     pub fill: Fill,
+    /// Stack each bar by model, in the colors of these slots, instead of one
+    /// color along the fill.
+    pub stack: Option<&'a Slots>,
     /// The bar the cursor is on, if it was moved or hovered.
     pub cursor: Option<usize>,
     /// The day number of today, to mark its bar.
@@ -611,7 +614,10 @@ pub fn render(buf: &mut Buffer, plot: &Plot, series: &[DayPoint], view: &View, p
         }
     }
     draw_axis(buf, plot, pal);
-    draw_bars(buf, plot, view, pal);
+    match view.stack {
+        Some(slots) if plot.metric == Metric::Cost => draw_stacked(buf, plot, slots, pal),
+        _ => draw_bars(buf, plot, view, pal),
+    }
     if let Some(y) = geo.weekdays_y {
         let letters = weekday_letters(geo);
         for (i, bar) in plot.bars.iter().enumerate() {
@@ -714,6 +720,102 @@ fn draw_bars(buf: &mut Buffer, plot: &Plot, view: &View, pal: &Palette) {
     }
 }
 
+/// The glyphs that tell stacked models apart without color, by slot.
+pub const PATTERNS: [char; 8] = [
+    '\u{2588}', '\u{2593}', '\u{2592}', '\u{2591}', '\u{259a}', '\u{259e}', '\u{259b}', '\u{259f}',
+];
+
+/// A bar's models as runs of eighths, bottom up: the slot and where the run
+/// ends. The biggest model comes first and the last run ends at `levels`.
+fn runs(bar: &Bar, slots: &Slots, levels: usize) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    let mut sum = 0.0;
+    let mut prev = 0;
+    for name in &slots.order {
+        let cost = bar
+            .models
+            .iter()
+            .find(|(m, _)| m == name)
+            .map_or(0.0, |(_, c)| *c);
+        if cost <= 0.0 {
+            continue;
+        }
+        sum += cost;
+        let end = ((levels as f64 * sum / bar.cost).round() as usize).min(levels);
+        if end > prev {
+            out.push((slots.slot(name), end));
+            prev = end;
+        }
+    }
+    // Rounding can stop short of the top: the last model takes the rest.
+    match out.last_mut() {
+        Some(last) => last.1 = levels,
+        None if levels > 0 => out.push((0, levels)),
+        None => {}
+    }
+    out
+}
+
+/// Bars stacked by model: each run of eighths in its model's color. A cell
+/// that holds the edge between two models is one block in the lower color on
+/// the upper one, so the edge is exact to an eighth of a cell. Without color
+/// the models are told apart by pattern.
+fn draw_stacked(buf: &mut Buffer, plot: &Plot, slots: &Slots, pal: &Palette) {
+    let geo = &plot.geo;
+    let p = geo.plot;
+    for (i, bar) in plot.bars.iter().enumerate() {
+        let levels = plot.axis.levels(bar.cost, p.height);
+        let runs = runs(bar, slots, levels);
+        let start_of = |k: usize| if k == 0 { 0 } else { runs[k - 1].1 };
+        for r in 0..p.height {
+            let lo = usize::from(r) * 8;
+            if lo >= levels {
+                break;
+            }
+            let hi = (lo + 8).min(levels);
+            // How much of this cell each run fills.
+            let overlap = |k: usize| hi.min(runs[k].1).saturating_sub(lo.max(start_of(k)));
+            let inside: Vec<usize> = (0..runs.len()).filter(|k| overlap(*k) > 0).collect();
+            let main = inside
+                .iter()
+                .copied()
+                .max_by_key(|k| (overlap(*k), std::cmp::Reverse(*k)))
+                .unwrap_or(0);
+            let eighths = hi - lo;
+            let (glyph, style) = match (pal.mono, inside.as_slice()) {
+                (true, _) if eighths == 8 => {
+                    (PATTERNS[runs[main].0 % PATTERNS.len()], Style::default())
+                }
+                (true, _) => (EIGHTHS[eighths - 1], Style::default()),
+                // An edge inside a full cell: lower run as the block, upper as the ground.
+                (false, [low, high]) if eighths == 8 => {
+                    let edge = runs[*low].1 - lo;
+                    let style = Style::default()
+                        .fg(pal.color(pal.series[runs[*low].0 % SERIES]))
+                        .bg(pal.color(pal.series[runs[*high].0 % SERIES]));
+                    (EIGHTHS[edge - 1], style)
+                }
+                (false, _) => (
+                    EIGHTHS[eighths - 1],
+                    Style::default().fg(pal.color(pal.series[runs[main].0 % SERIES])),
+                ),
+            };
+            let y = p.y + p.height - 1 - r;
+            for col in 0..geo.bar_width(i) {
+                let x = geo.x_of(i) + col;
+                if x < p.x + p.width {
+                    buf[(x, y)].set_char(glyph).set_style(style);
+                }
+            }
+        }
+    }
+}
+
+/// The ink of a model's series color, for the legend and the Models table.
+pub fn series_ink(pal: &Palette, slot: usize) -> Ink {
+    pal.series[slot % SERIES]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -745,15 +847,25 @@ mod tests {
     }
 
     fn draw(panel: Rect, series: &[DayPoint], cursor: Option<usize>) -> (Plot, Buffer) {
+        draw_with(panel, series, cursor, None, &pal())
+    }
+
+    fn draw_with(
+        panel: Rect,
+        series: &[DayPoint],
+        cursor: Option<usize>,
+        stack: Option<&Slots>,
+        pal: &Palette,
+    ) -> (Plot, Buffer) {
         let plot = Plot::new(panel, series, Metric::Cost);
         let mut buf = Buffer::empty(panel);
-        let pal = pal();
         let view = View {
             fill: pal.cpu,
+            stack,
             cursor,
             today: series.last().map_or(0, |d| d.day),
         };
-        render(&mut buf, &plot, series, &view, &pal);
+        render(&mut buf, &plot, series, &view, pal);
         (plot, buf)
     }
 
@@ -1146,5 +1258,124 @@ mod tests {
             Plot::new(Rect::new(0, 0, 40, 12), &z, Metric::Cost).peak_index(),
             None
         );
+    }
+
+    /// Two models, sorted by cost, in slots 2 and 5.
+    fn slots() -> Slots {
+        let g = |key: &str, cost: f64| crate::usage::aggregate::Group {
+            key: key.into(),
+            cost_usd: cost,
+            ..Default::default()
+        };
+        Slots::of(&[g("opus", 9.0), g("sonnet", 1.0)])
+    }
+
+    fn two_models(opus: f64, sonnet: f64) -> Vec<DayPoint> {
+        vec![DayPoint {
+            day: FIRST,
+            cost_usd: opus + sonnet,
+            tokens: 1000,
+            messages: 2,
+            models: vec![("opus".to_string(), opus), ("sonnet".to_string(), sonnet)],
+        }]
+    }
+
+    #[test]
+    fn runs_split_the_height_by_cost_biggest_model_first_and_end_at_the_top() {
+        let slots = slots();
+        let bar = &bars(&two_models(2.5, 1.5), 1)[0];
+        let r = runs(bar, &slots, 32);
+        assert_eq!(
+            r,
+            vec![(slots.slot("opus"), 20), (slots.slot("sonnet"), 32)]
+        );
+        // A model with no cost has no run, and the last run reaches the top
+        // even when rounding falls short.
+        let one = &bars(&two_models(0.0, 3.0), 1)[0];
+        assert_eq!(runs(one, &slots, 9), vec![(slots.slot("sonnet"), 9)]);
+        let thirds = &bars(&two_models(1.0, 1.0), 1)[0];
+        assert_eq!(runs(thirds, &slots, 7).last().map(|r| r.1), Some(7));
+        assert!(runs(bar, &slots, 0).is_empty());
+    }
+
+    #[test]
+    fn a_stacked_bar_has_each_model_in_its_color_with_an_exact_edge() {
+        let slots = slots();
+        let pal = pal();
+        let series = two_models(2.5, 1.5);
+        let (plot, buf) = draw_with(Rect::new(0, 0, 40, 12), &series, None, Some(&slots), &pal);
+        let (p, h) = (plot.geo.plot, plot.geo.plot.height);
+        assert_eq!(plot.axis.max, 4.0, "the bar fills the plot");
+        let x = plot.geo.x_of(0);
+        let cell = |r: u16| &buf[(x, p.y + h - 1 - r)];
+        let opus = pal.color(pal.series[slots.slot("opus")]);
+        let sonnet = pal.color(pal.series[slots.slot("sonnet")]);
+        assert_ne!(opus, sonnet);
+        // 2.5 of 4 is 62.5%: the cell at that height holds the edge, with the
+        // lower model as the block and the upper one behind it.
+        let edge_row = (h * 5 / 8).min(h - 1);
+        let edge = cell(edge_row);
+        assert_eq!((edge.fg, edge.bg), (opus, sonnet), "edge cell");
+        assert!(('\u{2581}'..='\u{2587}').contains(&edge.symbol().chars().next().unwrap()));
+        assert_eq!(cell(0).fg, opus);
+        assert_eq!(cell(h - 1).fg, sonnet);
+        assert_eq!(cell(h - 1).symbol(), "\u{2588}");
+    }
+
+    #[test]
+    fn a_stacked_bar_is_as_tall_as_the_plain_one() {
+        let series = two_models(2.5, 1.0);
+        let slots = slots();
+        let height = |buf: &Buffer, plot: &Plot| {
+            let x = plot.geo.x_of(0);
+            let p = plot.geo.plot;
+            (p.y..p.y + p.height)
+                .filter(|y| buf[(x, *y)].symbol() != " " && buf[(x, *y)].symbol() != "\u{2504}")
+                .count()
+        };
+        let (plain, a) = draw_with(Rect::new(0, 0, 40, 12), &series, None, None, &pal());
+        let (stacked, b) = draw_with(Rect::new(0, 0, 40, 12), &series, None, Some(&slots), &pal());
+        assert_eq!(height(&a, &plain), height(&b, &stacked));
+    }
+
+    #[test]
+    fn without_color_the_models_are_told_apart_by_pattern() {
+        let slots = slots();
+        let mono = Theme::Mono.palette(ColorDepth::True);
+        let series = two_models(2.0, 2.0);
+        let (plot, buf) = draw_with(Rect::new(0, 0, 40, 12), &series, None, Some(&slots), &mono);
+        let (p, h) = (plot.geo.plot, plot.geo.plot.height);
+        let x = plot.geo.x_of(0);
+        let low = buf[(x, p.y + h - 1)].symbol().to_string();
+        let high = buf[(x, p.y)].symbol().to_string();
+        assert_eq!(low, PATTERNS[slots.slot("opus")].to_string());
+        assert_eq!(high, PATTERNS[slots.slot("sonnet")].to_string());
+        assert_ne!(low, high);
+        assert!(buf
+            .content()
+            .iter()
+            .all(|c| c.fg == ratatui::style::Color::Reset));
+    }
+
+    #[test]
+    fn a_stacked_chart_draws_at_every_size_without_panicking() {
+        let slots = slots();
+        let series: Vec<DayPoint> = (0..40)
+            .map(|d| DayPoint {
+                day: FIRST + d,
+                ..two_models(1.0 + (d % 5) as f64, 0.5)[0].clone()
+            })
+            .collect();
+        for w in 0..60 {
+            for h in 0..16 {
+                let _ = draw_with(
+                    Rect::new(0, 0, w, h),
+                    &series,
+                    Some(2),
+                    Some(&slots),
+                    &pal(),
+                );
+            }
+        }
     }
 }
