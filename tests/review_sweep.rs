@@ -21,7 +21,7 @@ use std::path::PathBuf;
 
 /// Files that carry the sweep as a section of their own.
 const SWEEP_FILES: &[&str] = &[
-    "skills/grounding-review/SKILL.md",
+    "skills/grounding-review/references/orchestrator.md",
     "commands/quick-review.md",
     "commands/deep-review.md",
     "commands/implement.md",
@@ -558,10 +558,11 @@ fn posting_steps_post_the_previewed_drafts_as_they_are() {
 #[test]
 fn grounding_review_loads_writing_style_for_human_text_only() {
     // Arrange
-    let doc = load("skills/grounding-review/SKILL.md");
+    let skill = load("skills/grounding-review/SKILL.md");
+    let doc = load("skills/grounding-review/references/orchestrator.md");
 
     // Act
-    let text = doc.lines.join("\n");
+    let text = skill.lines.join("\n");
     let format = doc
         .section(|t| t == "Review Report Format")
         .expect("report format");
