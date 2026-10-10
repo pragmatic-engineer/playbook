@@ -2,6 +2,11 @@
 
 Read by `/playbook:implement` Step 10, only when the run uses `--boundary=land`. The step headings and decision rows below keep the names `commands/implement.md` refers to.
 
+## Contents
+
+- Step 10: Land the Segment (promote, gate on CI, merge, confirm, fix tiers, park)
+- Decision rows for `land`
+
 ## Step 10: Land the Segment
 
 Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MUST complete with the PR reading `MERGED` before Step 5 creates Segment N+1's branch. Skip this step entirely under **savepoint** and **pause**.
