@@ -726,7 +726,7 @@ Print the Homebrew formula for VERSION, filled from a SHA256SUMS file
 
 Setup for the review commands
 
-Subcommands: `checks`, `prepare`, `ref`, `triage-merge`
+Subcommands: `checks`, `prepare`, `ref`, `size`, `triage-merge`
 
 ### `playbook review checks`
 
@@ -758,6 +758,19 @@ Example: `playbook review ref security`
 
 - `<LENS>`: The lens, such as `security`, `types` or `behaviour-drift`
 - `--plugin-root <PLUGIN_ROOT>`: Plugin root; defaults to `$CLAUDE_PLUGIN_ROOT`
+
+### `playbook review size`
+
+Measure a diff and say which review path it takes
+
+Counts the changed lines of `BASE...HEAD` and prints `lines=N files=M path=single|swarm`. A diff of at most 150 changed lines takes the `single` path, one reviewer holding every lens; a larger one, or any run with `--all-lenses`, takes `swarm`.
+
+Example: `playbook review size --base main`
+
+- `--base <BASE>`: The ref the diff starts from
+- `--head <HEAD>`: The ref the diff ends at
+- `--all-lenses`: Always take the swarm path
+- `--dir <DIR>`: The repository to measure in; defaults to the current directory
 
 ### `playbook review triage-merge`
 

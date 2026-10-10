@@ -71,9 +71,10 @@ pull request.
 PLANNING: /playbook:implement never designs. If the reference isn't a ready plan, it
 stops and tells you to run /playbook:plan or /playbook:adr first.
 
-REFINEMENT: after implementing, /playbook:implement runs one pass (self quick-review +
-SOLID/DRY/KISS/YAGNI simplify, executed autonomously) then an adversarial
-review, before opening the PR set (or finishing, per the chosen boundary).
+REFINEMENT: after implementing, /playbook:implement runs one SOLID/DRY/KISS/YAGNI
+simplify pass (executed autonomously) then an adversarial review (one reviewer for a
+small diff, a lens swarm for a large one), before opening the PR set (or finishing,
+per the chosen boundary).
 ```
 
 ## Step 0: Read the run mode
@@ -376,18 +377,28 @@ Once the implementation is green, run ONE refinement pass over the code you just
 - **Pause boundary:** earlier Segments' PRs are already open, so you cannot rebase them. Run the refinement scoped to the **current** Segment only, before its PR opens (this is why the pause flow runs Steps 7-9 per Segment). A fix that implicates an already-delivered Segment is recorded as a follow-up, not a rebased commit.
 - **`land` boundary:** earlier Segments are not merely open, they are merged into the default branch, so nothing about them is rewritable. Run the refinement scoped to the **current** Segment only, before its PR opens, exactly as under **pause**. A fix implicating an already-landed Segment is a follow-up PR, never a rebase. This is stricter than pause, not looser: under pause an earlier Segment's PR could at least still be amended by a human; under `land` it is history.
 
-1. **Self quick-review (local).** Apply the `playbook:grounding-review` discipline to the branch diff: findings with a Conventional Comments label and `file:line` evidence. Keep it local; don't post anything. Before fixing, run the same three checks as the Step 9 verification sweep (true, label, anchor) on each finding and drop or relabel what does not hold. Fix only the findings you hold with HIGH confidence (clear bug, dead code, obvious simplification). Leave low-confidence or speculative findings for the adversarial review (Step 9); don't guess.
-2. **Simplify & refactor analysis.** Read the changed files through the Design principles (SOLID, DRY, KISS, YAGNI). List concrete, behaviour-preserving changes: collapse needless indirection, delete dead or speculative code, dedupe real repetition, flatten tangled control flow, tighten names. Skip anything that changes behaviour or adds abstraction with no second caller.
-3. **Re-plan.** Fold the high-confidence fixes and accepted simplifications into a small set of refinement Work Units (same shape as a `/playbook:plan` plan: `Files`, `Requires`, `Done When`). Scope is limited to code already written. If a finding implies new feature work, record it as a follow-up; don't build it.
-4. **Execute autonomously.** Run the refinement Work Units like `--auto`: TDD where it applies, behaviour-preserving refactors keep tests green, commit each WU with `/playbook:commit-and-push`. Then re-run the validation checks from Step 7 (type-check/lint/test only, not the status flip or the continue-to-Step-8 handoff); they MUST stay green.
+1. **Simplify & refactor analysis.** Read the changed files through the Design principles (SOLID, DRY, KISS, YAGNI). List concrete, behaviour-preserving changes: collapse needless indirection, delete dead or speculative code, dedupe real repetition, flatten tangled control flow, tighten names. Skip anything that changes behaviour or adds abstraction with no second caller.
+2. **Re-plan.** Fold the accepted simplifications into a small set of refinement Work Units (same shape as a `/playbook:plan` plan: `Files`, `Requires`, `Done When`). Scope is limited to code already written. If a simplification implies new feature work, record it as a follow-up; don't build it.
+3. **Execute autonomously.** Run the refinement Work Units like `--auto`: TDD where it applies, behaviour-preserving refactors keep tests green, commit each WU with `/playbook:commit-and-push`. Then re-run the validation checks from Step 7 (type-check/lint/test only, not the status flip or the continue-to-Step-8 handoff); they MUST stay green.
 
-Run this pass once. Don't loop: Step 9 is the backstop for whatever remains.
+Run this pass once. Don't loop. Step 9 is the only review of the diff: this pass does not review for bugs, so it neither duplicates nor pre-empts it.
 
 ## Step 9: Adversarial Review (MUST)
 
 This reviews the IMPLEMENTED work, not the plan: Step 4's adversarial review ran before execution against the plan; this one runs after, against the diff.
 
-**Haiku triage, before the swarm.** Skip triage entirely when `--all-lenses` was passed: all 5 lenses (correctness, behaviour drift, principles, scope, tests) run `full-lens`, unchanged from today's fixed-5-lens-always-full swarm.
+**Pick the path (MUST).** Measure the diff this review covers, from the same base the Step 5 re-split guard uses (`<segment-base>`, or the default branch for the whole implemented diff):
+
+```bash
+playbook review size --base <segment-base>
+```
+
+Add `--all-lenses` when that flag was passed. It prints `lines=N files=M path=single|swarm`.
+
+- **`path=single` (at most 150 changed lines, no `--all-lenses`):** dispatch ONE `reviewer` (`subagent_type: playbook:reviewer`, or the `-low` or `-xhigh` variant per "Pick the tier" in `playbook:delegating-subagents`) with all five lenses as its focus (the definitions are listed below), the full branch diff, the plan, and the refinement notes, asking for plain findings in the shape the swarm prompt describes plus the lens each finding belongs to. No triage and no `cheap-checker`: a diff this small costs less to review whole than to classify. Under `--no-tests` tell it missing new tests is intentional. Then continue at "Consolidate" below, and apply the same silent-reviewer rule: a reviewer that returned nothing did NOT run.
+- **`path=swarm`:** triage and the lens swarm, as the rest of this step describes.
+
+**Haiku triage, before the swarm (swarm path only).** Skip triage entirely when `--all-lenses` was passed: all 5 lenses (correctness, behaviour drift, principles, scope, tests) run `full-lens`, unchanged from today's fixed-5-lens-always-full swarm.
 
 Otherwise, dispatch `review-triage` (`subagent_type: playbook:review-triage`) exactly once, before the swarm, scoped to Step 9's fixed 5 lenses (`correctness`, `behaviour-drift`, `principles`, `scope`, `tests`), against the implemented diff (the same full branch diff the swarm dispatch below uses), the plan, and the refinement notes. Capture the returned tier map.
 
@@ -445,7 +456,7 @@ Apply the fixes you hold with HIGH confidence plus every `blocking` correctness/
 
 **Boundary behaviour.** With **savepoint** (the default, and `--auto`), open the whole PR set here at the end. With **pause after each PR**, Step 9 has already run per Segment (its scoped review before the PR), so this step opens that one Segment's PR and stops for the user before the next Segment. With **land**, this step opens that one Segment's PR as a draft and then continues straight into Step 10, which promotes, gates on CI, merges, and only then returns to Step 5 for the next Segment.
 
-**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings, the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:deep-review`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Under **land**, this step hands off to Step 10 instead of finishing here; the true finish is Step 10's own report once the Segment reads `MERGED` (or `PARKED`). Starting the next feature: run `/clear` before the next `/playbook:plan`, so this run's plan, dispatch history, and fixes don't carry into it.
+**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings (on the single path, one line: "single reviewer, 5 lenses (<count>)"), the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:deep-review`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Under **land**, this step hands off to Step 10 instead of finishing here; the true finish is Step 10's own report once the Segment reads `MERGED` (or `PARKED`). Starting the next feature: run `/clear` before the next `/playbook:plan`, so this run's plan, dispatch history, and fixes don't carry into it.
 
 ## Step 10: Land the Segment (`--boundary=land` only)
 

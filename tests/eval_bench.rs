@@ -169,3 +169,16 @@ fn the_shipped_fixtures_load_and_cover_every_role() {
         );
     }
 }
+
+#[test]
+fn the_lens_split_fixture_pairs_one_single_reviewer_with_five_lens_reviewers_per_diff() {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["eval", "bench", "--list", "--cases"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/bench-extra"))
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(text.matches("reviewer-single\t").count(), 10, "{text}");
+    assert_eq!(text.matches("reviewer-swarm\t").count(), 50, "{text}");
+    assert!(text.contains("reviewer-swarm\trd-par-cap@scope"));
+}

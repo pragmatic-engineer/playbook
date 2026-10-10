@@ -1057,6 +1057,21 @@ fn main() {
                 }
             }
             ReviewCommand::Checks { dir } => println!("{}", review::checks::run_checks(&dir)),
+            ReviewCommand::Size {
+                base,
+                head,
+                all_lenses,
+                dir,
+            } => {
+                let dir = dir.unwrap_or_else(|| std::path::PathBuf::from("."));
+                match review::size::run(&dir, &base, &head, all_lenses) {
+                    Ok(line) => println!("{line}"),
+                    Err(err) => {
+                        eprintln!("error: {err}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             ReviewCommand::Ref { lens, plugin_root } => {
                 let root = plugin_root
                     .or_else(|| {

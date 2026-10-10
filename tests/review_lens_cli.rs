@@ -226,3 +226,103 @@ fn the_review_commands_call_the_subcommands_instead_of_restating_the_rules() {
         );
     }
 }
+
+fn repo_with_change(lines: usize) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("pb-review-size-{}-{lines}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(&dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "t"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "commit.gpgsign", "false"]);
+    fs::write(dir.join("a.txt"), "base\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "base"]);
+    git(&["switch", "-q", "-c", "work"]);
+    fs::write(dir.join("a.txt"), "x\n".repeat(lines)).unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "work"]);
+    dir
+}
+
+#[test]
+fn size_picks_one_reviewer_up_to_150_changed_lines_and_the_swarm_above() {
+    // 149 added + 1 deleted = 150: still one reviewer.
+    let small = repo_with_change(149);
+    let (code, out, _) = playbook(
+        &[
+            "review",
+            "size",
+            "--base",
+            "main",
+            "--dir",
+            small.to_str().unwrap(),
+        ],
+        None,
+    );
+    assert_eq!(code, 0);
+    assert_eq!(out, "lines=150 files=1 path=single");
+
+    let big = repo_with_change(150);
+    let (_, out, _) = playbook(
+        &[
+            "review",
+            "size",
+            "--base",
+            "main",
+            "--dir",
+            big.to_str().unwrap(),
+        ],
+        None,
+    );
+    assert_eq!(out, "lines=151 files=1 path=swarm");
+}
+
+#[test]
+fn size_with_all_lenses_always_takes_the_swarm_and_a_bad_base_fails() {
+    let small = repo_with_change(3);
+    let dir = small.to_str().unwrap();
+    let (_, out, _) = playbook(
+        &[
+            "review",
+            "size",
+            "--base",
+            "main",
+            "--dir",
+            dir,
+            "--all-lenses",
+        ],
+        None,
+    );
+    assert_eq!(out, "lines=4 files=1 path=swarm");
+    let (code, _, err) = playbook(
+        &["review", "size", "--base", "no-such-ref", "--dir", dir],
+        None,
+    );
+    assert_eq!(code, 1);
+    assert!(
+        err.starts_with("error: git diff no-such-ref...HEAD failed"),
+        "{err}"
+    );
+}
+
+#[test]
+fn implement_picks_its_review_path_with_size_and_has_no_second_self_review() {
+    let text = fs::read_to_string(root().join("commands/implement.md")).unwrap();
+    assert!(text.contains("playbook review size --base"));
+    assert!(text.contains("`path=single`") && text.contains("`path=swarm`"));
+    assert!(
+        !text.contains("Self quick-review"),
+        "Step 8 must not review the diff again before Step 9"
+    );
+}
