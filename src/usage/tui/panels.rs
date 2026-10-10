@@ -9,8 +9,9 @@ use super::app::App;
 use super::data::Data;
 use super::fmt::{compact, fit, money};
 use super::graph;
-use super::panel::Panel;
+use super::sort::{event_rows, group_rows, group_tokens, session_rows, Panel, Sort};
 use super::theme::{Fill, Ink, Palette};
+use super::view::{visible_rows, window_start};
 use crate::usage::aggregate::{date_key, Group};
 use crate::usage::query::{clock, total_tokens, ActiveSession, ACTIVE_SECONDS};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -28,6 +29,18 @@ const METER_EMPTY: &str = "\u{b7}";
 
 fn fg(pal: &Palette, ink: Ink) -> Style {
     Style::default().fg(pal.color(ink))
+}
+
+/// The selected row: the theme's selection colors, or reverse video in mono.
+fn selected_style(pal: &Palette) -> Style {
+    if pal.mono {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+            .fg(pal.color(pal.sel_fg))
+            .bg(pal.color(pal.sel_bg))
+            .add_modifier(Modifier::BOLD)
+    }
 }
 
 /// `┤¹Title├` the way btop writes a box title, with the panel's key hint in the
@@ -108,26 +121,43 @@ const fn col(head: &'static str, width: Constraint, min_inner: u16) -> Col {
     }
 }
 
-/// The header row, in the title color.
-fn head(pal: &Palette, cols: &[Col], keep: &[bool]) -> Row<'static> {
-    let cells =
-        cols.iter()
-            .zip(keep)
-            .filter(|(_, k)| **k)
-            .map(|(c, _)| match c.head.strip_prefix('>') {
-                Some(right) => num(right),
-                None => Cell::from(c.head),
-            });
+/// The header row: sorted column marked with an arrow, in the title color.
+fn head(pal: &Palette, cols: &[Col], keep: &[bool], sort: Sort, sortable: bool) -> Row<'static> {
+    let cells = cols
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(i, c)| {
+            let (label, right) = match c.head.strip_prefix('>') {
+                Some(l) => (l, true),
+                None => (c.head, false),
+            };
+            let mark = match (sortable && sort.col == i, sort.desc) {
+                (true, true) => "\u{25bc}",
+                (true, false) => "\u{25b2}",
+                _ => "",
+            };
+            let text = format!("{label}{mark}");
+            if right {
+                num(text)
+            } else {
+                Cell::from(text)
+            }
+        });
     Row::new(cells).style(fg(pal, pal.title).add_modifier(Modifier::BOLD))
 }
 
 /// Draws a table inside its panel box. `rows` gets the width in cells of every
 /// column (0 for a column that is left out) so it can cut text to fit, and
-/// returns one cell per column for every row.
+/// returns one cell per column for every row. Only the rows that fit are drawn,
+/// scrolled so the selected one is in view.
+#[allow(clippy::too_many_arguments)]
 fn table<'a>(
     frame: &mut Frame,
     area: Rect,
+    app: &App,
     pal: &Palette,
+    panel: Panel,
     block: Block<'static>,
     cols: &[Col],
     rows: impl FnOnce(&[usize]) -> Vec<Vec<Cell<'a>>>,
@@ -151,22 +181,34 @@ fn table<'a>(
             widths[i] = next.next().map_or(0, |r| usize::from(r.width));
         }
     }
-    let rows: Vec<Row> = rows(&widths)
+    let all = rows(&widths);
+    let visible = visible_rows(area);
+    let selected = app.selection(panel);
+    let start = window_start(selected, visible);
+    let focused = app.focus == panel;
+    let rows: Vec<Row> = all
         .into_iter()
-        .map(|cells| {
-            Row::new(
+        .enumerate()
+        .skip(start)
+        .take(visible)
+        .map(|(i, cells)| {
+            let row = Row::new(
                 cells
                     .into_iter()
                     .zip(&keep)
                     .filter(|(_, k)| **k)
                     .map(|(c, _)| c),
-            )
+            );
+            if focused && i == selected {
+                row.style(selected_style(pal))
+            } else {
+                row
+            }
         })
         .collect();
+    let header = head(pal, cols, &keep, app.sort(panel), true);
     frame.render_widget(
-        Table::new(rows, constraints)
-            .header(head(pal, cols, &keep))
-            .block(block),
+        Table::new(rows, constraints).header(header).block(block),
         area,
     );
 }
@@ -283,10 +325,6 @@ pub fn tokens(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
     );
 }
 
-fn group_tokens(g: &Group) -> u64 {
-    g.input_tokens + g.output_tokens + g.cache_creation_tokens + g.cache_read_tokens
-}
-
 /// Models or projects: messages, tokens, cost and share of the total cost.
 #[allow(clippy::too_many_arguments)]
 pub fn groups(
@@ -308,20 +346,15 @@ pub fn groups(
     if groups.is_empty() {
         return empty(frame, area, pal, block, "No usage in this range.");
     }
-    let mut sorted: Vec<&Group> = groups.iter().collect();
-    sorted.sort_by(|a, b| {
-        b.cost_usd
-            .total_cmp(&a.cost_usd)
-            .then_with(|| a.key.cmp(&b.key))
-    });
+    let sorted = group_rows(groups, app.sort(panel));
     let cols = [
-        col("", Constraint::Fill(1), 0),
+        col("name", Constraint::Fill(1), 0),
         col(">msgs", Constraint::Length(5), 0),
         col(">tokens", Constraint::Length(7), 0),
         col(">cost", Constraint::Length(9), 0),
         col("share", Constraint::Length(8), 48),
     ];
-    table(frame, area, pal, block, &cols, |w| {
+    table(frame, area, app, pal, panel, block, &cols, |w| {
         sorted
             .iter()
             .map(|g| {
@@ -393,9 +426,9 @@ pub fn sessions(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
         col(">cost", Constraint::Length(8), 0),
         col(">ago", Constraint::Length(4), 0),
     ];
-    let rows = &live.active;
+    let rows = session_rows(&live.active, app.sort(Panel::Sessions));
     let peak = rows.iter().map(|s| s.cost_usd).fold(0.0, f64::max);
-    table(frame, area, pal, block, &cols, |w| {
+    table(frame, area, app, pal, Panel::Sessions, block, &cols, |w| {
         rows.iter()
             .map(|s| {
                 let (state, color) = session_state(data.now, s, pal);
@@ -427,9 +460,9 @@ pub fn events(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
         col(">tokens", Constraint::Length(7), 46),
         col(">cost", Constraint::Length(8), 0),
     ];
-    let rows = &data.live.feed;
+    let rows = event_rows(&data.live.feed, app.sort(Panel::Events));
     let peak = rows.iter().map(|e| e.cost_usd).fold(0.0, f64::max);
-    table(frame, area, pal, block, &cols, |w| {
+    table(frame, area, app, pal, Panel::Events, block, &cols, |w| {
         rows.iter()
             .map(|e| {
                 vec![

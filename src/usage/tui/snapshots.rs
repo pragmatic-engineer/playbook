@@ -221,6 +221,18 @@ fn the_graph_runs_the_gradient_from_start_toward_end() {
 }
 
 #[test]
+fn the_selected_row_of_the_focused_panel_is_highlighted() {
+    let a = app(Theme::Btop);
+    let buf = buffer(&a, 100, 30);
+    // Models is focused: its first data row (row 13) has the selection ground.
+    assert_eq!(buf[(2, 13)].bg, rgb(0x6a, 0x2f, 0x2f));
+    assert_eq!(buf[(2, 13)].fg, rgb(0xee, 0xee, 0xee));
+    assert_eq!(buf[(2, 14)].bg, rgb(0, 0, 0));
+    // The projects panel is not focused, so it shows no selection.
+    assert_eq!(buf[(52, 13)].bg, rgb(0, 0, 0));
+}
+
+#[test]
 fn meters_use_the_gradient_and_the_dim_color_for_the_rest() {
     let buf = buffer(&app(Theme::Btop), 100, 30);
     // The haiku share is tiny: a dim dot at the end of its row (row 15).
@@ -267,12 +279,15 @@ fn a_16_color_terminal_gets_named_colors_only() {
 }
 
 #[test]
-fn mono_draws_no_color_at_all() {
+fn mono_draws_no_color_at_all_but_still_marks_the_selection() {
     let buf = buffer(&app(Theme::Mono), 100, 30);
     assert!(buf
         .content()
         .iter()
         .all(|c| c.fg == Color::Reset && c.bg == Color::Reset));
+    assert!(buf[(2, 13)]
+        .modifier
+        .contains(ratatui::style::Modifier::REVERSED));
 }
 
 #[test]

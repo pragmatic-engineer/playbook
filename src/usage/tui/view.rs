@@ -8,8 +8,8 @@
 use super::app::App;
 use super::data::Data;
 use super::fmt::{compact, money};
-use super::panel::Panel;
 use super::panels;
+use super::sort::Panel;
 use super::theme::Palette;
 use crate::usage::aggregate::date_key;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -68,6 +68,16 @@ pub fn layout(area: Rect) -> Panels {
         events,
         footer,
     }
+}
+
+/// Table rows that fit in a panel: its height less two borders and the header.
+pub fn visible_rows(area: Rect) -> usize {
+    usize::from(area.height.saturating_sub(3))
+}
+
+/// The first row drawn so the selected one is the last one in view at most.
+pub fn window_start(selected: usize, visible: usize) -> usize {
+    (selected + 1).saturating_sub(visible)
 }
 
 pub fn render(frame: &mut Frame, app: &App) {
@@ -139,7 +149,10 @@ fn footer(app: &App, pal: &Palette) -> Line<'static> {
         ("1-6", "panel"),
         ("r", "range"),
         ("/", "filter"),
+        ("s/S", "sort"),
+        ("enter", "pick"),
         ("t", theme.as_str()),
+        ("m", "mouse"),
         ("q", "quit"),
     ];
     let mut spans = vec![Span::raw(" ")];
@@ -374,6 +387,7 @@ mod tests {
         let app = App::new(Range::All);
         let text = screen(&app, 100, 30);
         assert!(text.contains("/ filter"));
+        assert!(text.contains("s/S sort"));
         assert!(text.contains("t theme (btop)"));
     }
 

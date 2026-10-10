@@ -9,12 +9,12 @@ pub mod app;
 pub mod data;
 pub mod fmt;
 pub mod graph;
-pub mod panel;
 pub mod panels;
 #[cfg(test)]
 mod parity;
 #[cfg(test)]
 mod snapshots;
+pub mod sort;
 pub mod theme;
 pub mod view;
 pub mod worker;
@@ -22,7 +22,10 @@ pub mod worker;
 use super::query::Range;
 use super::run::Paths;
 use app::{App, Effect};
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
+};
+use ratatui::crossterm::execute;
 use std::time::Duration;
 use theme::{ColorDepth, Theme};
 use worker::{Update, Worker};
@@ -47,7 +50,9 @@ fn start_theme(no_color: bool) -> Theme {
 /// including a panic (ratatui installs the hook).
 pub fn run(paths: &Paths, range: Range) -> Result<(), String> {
     let mut terminal = ratatui::init();
+    let _ = execute!(std::io::stdout(), EnableMouseCapture);
     let result = event_loop(&mut terminal, paths, range);
+    let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result.map_err(|e| format!("terminal error: {e}"))
 }
@@ -67,13 +72,19 @@ fn event_loop(
     );
     let worker = Worker::spawn(paths.clone(), app.range, app.filter.clone());
     while !app.quit {
+        app.area = terminal.size().map(Into::into)?;
         terminal.draw(|frame| view::render(frame, &app))?;
         if event::poll(TICK)? {
             // A resize needs no handling: the next draw reads the new size.
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press && app.key(key) == Effect::Requery {
-                    worker.ask(app.range, &app.filter);
-                }
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
+                    Effect::Requery => worker.ask(app.range, &app.filter),
+                    Effect::Mouse if app.mouse => execute!(std::io::stdout(), EnableMouseCapture)?,
+                    Effect::Mouse => execute!(std::io::stdout(), DisableMouseCapture)?,
+                    Effect::None => {}
+                },
+                Event::Mouse(ev) => app.mouse(ev),
+                _ => {}
             }
         }
         while let Ok(update) = worker.updates.try_recv() {
