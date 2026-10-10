@@ -586,7 +586,24 @@ First moves any legacy folders from the old repo-local location.
 
 Helpers for `/playbook:plan`
 
-Subcommands: `checkpoint`
+Subcommands: `brief`, `checkpoint`
+
+### `playbook plan brief`
+
+Write the per-Work-Unit brief files `/playbook:implement` gives its subagents
+
+Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree, scoped verify), the Work Unit's own section of the plan verbatim, and a "Relevant memory" list of the facts anchored to its files or matching its title. Every id is checked first: a missing one writes nothing and exits 1. Prints the paths written, one per line.
+
+Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 'cargo test {tests}'`
+
+- `<PLAN>`: The plan or blueprint file
+- `<WUS>`: Work Unit ids, such as `WU-1`
+- `--out <OUT>`: Folder to write the briefs into
+- `--worktree <WORKTREE>`: One worktree path for every brief
+- `--worktree-base <WORKTREE_BASE>`: Folder holding one worktree per Work Unit, named by its lower case id
+- `--verify <VERIFY>`: Scoped verify command; `{tests}` and `{files}` become the Work Unit's paths
+- `--repo <REPO>`: Repo slug (`owner/name`) for the memory scope; defaults to the origin remote's
+- `--graph <GRAPH>`: Memory graph file; defaults to `~/.config/playbook/memory/memory.graph.json`
 
 ### `playbook plan checkpoint`
 
