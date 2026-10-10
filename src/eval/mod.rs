@@ -4,7 +4,7 @@
 //! `playbook eval review-triage`: a live regression eval for the review
 //! triage classifier. For each case it fetches the pull request's diff with
 //! `gh pr diff`, sends the classifier prompt plus that diff to
-//! `claude -p --model haiku`, and compares the returned tier per lens with
+//! `claude -p --model haiku` on stdin, and compares the returned tier per lens with
 //! the case's known `found` fact. Costs real API calls, never run by tests
 //! against the live services (tests shim `gh` and `claude` on PATH).
 
@@ -12,8 +12,9 @@ pub mod bench;
 pub mod wu_bench;
 
 use serde_json::Value;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const DEFAULT_FIXTURES: &str = "tests/fixtures/review-triage-eval-set.json";
 const DEFAULT_PROMPT: &str = "agents/review-triage.md";
@@ -148,6 +149,33 @@ pub fn repo_root() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// Sends the prompt to `claude -p` on stdin, so a large diff cannot hit the
+/// per-argument size limit and the diff text stays out of `ps` output.
+/// Returns (stdout, stderr or the spawn error).
+fn call_claude(prompt: &str) -> (String, String) {
+    let mut child = match Command::new("claude")
+        .args(["-p", "--model", "haiku"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => return (String::new(), e.to_string()),
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        // A write error (claude exited early) shows up in its own output.
+        let _ = stdin.write_all(prompt.as_bytes());
+    }
+    match child.wait_with_output() {
+        Ok(out) => (
+            String::from_utf8_lossy(&out.stdout).to_string(),
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ),
+        Err(e) => (String::new(), e.to_string()),
+    }
+}
+
 fn fail(msg: &str) -> i32 {
     eprintln!("eval review-triage: {msg}");
     1
@@ -239,16 +267,7 @@ fn run_cases(fixtures: &Path, cases: &[Value], system_prompt: &str) -> i32 {
         let full_prompt = format!(
             "{system_prompt}\n\nCandidate lenses to classify (return a tier for every one of these, and only these): {lens_list}\n\nDiff to classify:\n{diff}"
         );
-        let (response, claude_err) = match Command::new("claude")
-            .args(["-p", "--model", "haiku", &full_prompt])
-            .output()
-        {
-            Ok(out) => (
-                String::from_utf8_lossy(&out.stdout).to_string(),
-                String::from_utf8_lossy(&out.stderr).trim().to_string(),
-            ),
-            Err(e) => (String::new(), e.to_string()),
-        };
+        let (response, claude_err) = call_claude(&full_prompt);
 
         let Some(tier_map) = parse_tier_map(&response) else {
             let head: String = response.trim().chars().take(300).collect();

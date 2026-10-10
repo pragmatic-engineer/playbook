@@ -50,7 +50,7 @@ fn shims(dir: &Path, gh_ok: bool) {
         dir,
         "claude",
         &format!(
-            "touch '{d}/sentinel'\necho \"$@\" > '{d}/argv'\nn=0; [ -f '{d}/count' ] && n=$(cat '{d}/count')\nn=$((n+1)); echo $n > '{d}/count'\nif [ -f '{d}/response_'$n'.json' ]; then cat '{d}/response_'$n'.json'; else cat '{d}/response.json'; fi"
+            "touch '{d}/sentinel'\necho \"$@\" > '{d}/argv'\ncat > '{d}/stdin'\nn=0; [ -f '{d}/count' ] && n=$(cat '{d}/count')\nn=$((n+1)); echo $n > '{d}/count'\nif [ -f '{d}/response_'$n'.json' ]; then cat '{d}/response_'$n'.json'; else cat '{d}/response.json'; fi"
         ),
     );
 }
@@ -230,10 +230,11 @@ fn an_empty_case_file_fails_instead_of_passing_vacuously() {
 fn the_prompt_sent_to_claude_carries_the_body_lenses_and_diff() {
     let r = run_with(&one(true), SEC_FULL, true, &[]);
     let argv = fs::read_to_string(r.dir.join("argv")).unwrap();
-    assert!(argv.starts_with("-p --model haiku"), "{argv}");
-    assert!(argv.contains("Classify each lens."));
-    assert!(!argv.contains("name: t"), "frontmatter leaked: {argv}");
-    assert!(argv.contains("Candidate lenses to classify"));
-    assert!(argv.contains("security"));
-    assert!(argv.contains("+placeholder"));
+    assert_eq!(argv.trim(), "-p --model haiku", "prompt must not ride argv");
+    let sent = fs::read_to_string(r.dir.join("stdin")).unwrap();
+    assert!(sent.contains("Classify each lens."));
+    assert!(!sent.contains("name: t"), "frontmatter leaked: {sent}");
+    assert!(sent.contains("Candidate lenses to classify"));
+    assert!(sent.contains("security"));
+    assert!(sent.contains("+placeholder"));
 }

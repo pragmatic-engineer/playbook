@@ -38,7 +38,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - agents/review-triage.md
-      - src/eval/**
+      # Only the triage runner moves this eval. bench.rs and src/lib.rs (a
+      # module list) cannot change a verdict, and compile errors in them are
+      # caught by the regular CI jobs, so they do not pay for a live run.
+      - src/eval/mod.rs
       - tests/fixtures/review-triage-eval-set.json
       # Editing this workflow runs it, so a change to it tests itself.
       - .github/workflows/agent-eval-review-triage.yml
