@@ -6,12 +6,13 @@
 //! keys, `view` draws a frame, and `run` is the terminal loop around them.
 
 pub mod app;
+pub mod chart;
 pub mod data;
 pub mod fmt;
-pub mod graph;
 pub mod panels;
 #[cfg(test)]
 mod parity;
+pub mod scale;
 #[cfg(test)]
 mod snapshots;
 pub mod sort;
