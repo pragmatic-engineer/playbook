@@ -97,16 +97,17 @@ mod search_counter {
     }
 
     #[test]
-    fn threshold_nudges_fire_at_four_eight_twelve_and_then_fall_silent() {
+    fn the_single_nudge_fires_at_eight_and_every_other_count_is_silent() {
         // Arrange: each case is a run of Grep calls and the substring the
         // nudge on the last call must contain, or `None` when the last call
-        // must stay silent. Pins all three thresholds plus the boundary
-        // just past each one.
-        let cases: [(u32, Option<&str>); 5] = [
-            (4, Some("has reached 4")),
-            (5, None),
-            (8, Some("is now 8")),
-            (12, Some("is 12")),
+        // must stay silent. Pins the one threshold and its neighbours,
+        // plus the old 4 and 12 thresholds, which are retired.
+        let cases: [(u32, Option<&str>); 6] = [
+            (4, None),
+            (7, None),
+            (8, Some("count is 8")),
+            (9, None),
+            (12, None),
             (13, None),
         ];
         let mut failures = Vec::new();

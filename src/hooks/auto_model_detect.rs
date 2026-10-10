@@ -21,15 +21,10 @@
 use crate::common::emit_prompt_context;
 use crate::common::payload::Payload;
 
-const MSG: &str = r#"This prompt looks like design / architecture work. Your main session runs on the default model. Before reasoning inline, consider delegating to an Opus subagent, its full deliberation stays in the subagent's context, only the conclusion returns to yours.
+const MSG: &str = "Design or architecture prompt. Beyond a quick choice, run /playbook:plan, or hand the analysis to an Opus subagent so the deliberation stays out of this context. Keep Opus under 20% of usage.";
 
-Recommended for design-heavy prompts:
-  - Plan (Agent tool, `model: "opus"`), implementation planning and architecture with codebase grounding
-  - /playbook:plan, ideation and requirements through a verified implementation plan
-
-If the prompt is actually small-scope (e.g. quick choice between two named options), staying on Sonnet inline is fine. Use judgment.
-
-Routing policy: Opus only when Sonnet wasn't enough, keep Opus under 20% of total usage. Routine/mechanical/formatting/search subagents default to Haiku (3x cheaper); escalate to Sonnet for real coding."#;
+/// Session marker: the generic design nudge was already shown.
+const DESIGN_NUDGE_MARKER: &str = "design-nudge-seen";
 
 /// Literal phrases the python regex's alternation expands to, once every
 /// `?` optional group and `(a|b|c)` nested alternation is enumerated. Every
@@ -45,10 +40,8 @@ const PHRASES: &[&str] = &[
     "tradeoffs",
     "alternative",
     "alternatives",
-    "approach",
     "strategy",
     "paradigm",
-    "pattern",
     "abstraction",
     "refactor plan",
     "migration",
@@ -56,14 +49,10 @@ const PHRASES: &[&str] = &[
     "schema",
     "modeling",
     "data model",
-    "contract",
     "interface design",
     // Decision verbs.
-    "evaluate",
-    "compare",
     "brainstorm",
     "propose",
-    "recommend",
     "critique",
     "review the approach",
     "review the design",
@@ -174,7 +163,25 @@ pub fn run(payload: &Payload) {
     if !has_design_intent(&lower) {
         return;
     }
+    if !first_design_nudge(payload) {
+        return;
+    }
     emit_prompt_context(MSG);
+}
+
+/// True the first time it is called in a session, and records that. A session
+/// with no directory has nowhere to record it, so it always nudges.
+fn first_design_nudge(payload: &Payload) -> bool {
+    let dir = crate::common::session_dir(payload);
+    if dir.is_empty() {
+        return true;
+    }
+    let marker = std::path::Path::new(&dir).join(DESIGN_NUDGE_MARKER);
+    if marker.exists() {
+        return false;
+    }
+    let _ = std::fs::write(marker, "1");
+    true
 }
 
 fn has_design_intent(lower: &[char]) -> bool {
