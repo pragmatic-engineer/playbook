@@ -113,6 +113,10 @@ fn runs_the_real_binary_with_its_arguments_and_installs_nothing() {
 
 #[test]
 fn skips_its_own_directory_and_finds_the_real_binary_further_down_path() {
+    if has_system_binary() {
+        eprintln!("SKIP: a playbook binary exists in a fixed system location");
+        return;
+    }
     let p = Plugin::new("shim-skip");
     let home = p.work.dir("h2");
     let elsewhere = p.work.dir("elsewhere");
