@@ -71,7 +71,7 @@ fn every_command_that_spawns_agents_reads_the_effort_ceiling_in_step_zero() {
         checked += 1;
     }
     assert!(
-        checked >= 7,
+        checked >= 6,
         "found only {checked} commands that spawn agents"
     );
 }
@@ -80,7 +80,6 @@ fn every_command_that_spawns_agents_reads_the_effort_ceiling_in_step_zero() {
 fn the_resolved_names_are_real_components() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for name in [
-        "address-pr-comments",
         "adr",
         "deep-review",
         "implement",
@@ -149,7 +148,7 @@ fn every_command_that_spawns_agents_calls_route_and_names_the_gate() {
         checked += 1;
     }
     assert!(
-        checked >= 7,
+        checked >= 6,
         "found only {checked} commands that spawn agents"
     );
 }

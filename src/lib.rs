@@ -911,6 +911,33 @@ pub enum PrCommand {
         #[arg(default_value = "")]
         args: String,
     },
+    /// Post one reply on a pull request, from a file
+    ///
+    /// `--thread ID` replies in a review thread (ID is the `databaseId` of the
+    /// thread's first comment, as `pr comments` writes it); `--issue` comments
+    /// on the pull request itself. The body is read from `--body-file`, so
+    /// quotes, backticks and newlines need no shell escaping. It refuses an
+    /// empty body, an em or en dash, and AI attribution. Prints `Posted:
+    /// <url>` and the body.
+    ///
+    /// Example: `playbook pr reply --pr 12 --thread 345 --body-file /tmp/reply.md`
+    Reply {
+        /// The pull request number
+        #[arg(long)]
+        pr: String,
+        /// Reply in the review thread whose first comment has this `databaseId`
+        #[arg(long, conflicts_with = "issue", required_unless_present = "issue")]
+        thread: Option<String>,
+        /// Comment on the pull request itself
+        #[arg(long)]
+        issue: bool,
+        /// File holding the reply text
+        #[arg(long)]
+        body_file: PathBuf,
+        /// `owner/name`; defaults to the current repo
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// Find the pull requests stacked with a PR
     ///
     /// Reads the GitHub stack API, then falls back to the branch chain. Takes
