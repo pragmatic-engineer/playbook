@@ -80,19 +80,15 @@ Dispatch the remaining collectors in parallel with `subagent_type: playbook:coll
 
 ## Phase 2: Analyze into topics (parallel subagents)
 
-Feed the Phase 1 findings to one analyst per cluster, spawned with `subagent_type: playbook:analyst`. Spawn each analyst with a stable `name`. Each emits **candidate facts**, where each fact has: `title`, `body` (the fact, then Why, then How to apply), proposed `type` (`project` for repo knowledge, `reference` for external pointers), `scope` (`repo` | `global`), proposed `links` edges, and `anchors` (repo-relative code locations the fact describes: dirs, files, or `file#symbol`).
+Feed the Phase 1 findings to three analysts, spawned with `subagent_type: playbook:analyst`, each owning a group of clusters. Spawn each analyst with a stable `name`. The findings are read once per spawn instead of nine times. Each analyst returns one section per cluster it owns, headed by the cluster name, so Phase 3 still reads facts per cluster. Each emits **candidate facts**, where each fact has: `title`, `body` (the fact, then Why, then How to apply), proposed `type` (`project` for repo knowledge, `reference` for external pointers), `scope` (`repo` | `global`), proposed `links` edges, and `anchors` (repo-relative code locations the fact describes: dirs, files, or `file#symbol`).
 
-Clusters:
+Analyst groups and their clusters:
 
-- architecture & module map
-- conventions & patterns (design patterns adopted, build/test/lint, branching, commit/PR)
-- domain glossary
-- decisions & active work (ADRs from PRs/commits + JIRA epics)
-- infrastructure (CI/CD, deploy, cloud, IaC)
-- setup (local dev and onboarding)
-- scripts & tooling
-- database schemas & models
-- data access patterns
+- **Structure and language:** architecture & module map; conventions & patterns (design patterns adopted, build/test/lint, branching, commit/PR); domain glossary
+- **History and operations:** decisions & active work (ADRs from PRs/commits + JIRA epics); infrastructure (CI/CD, deploy, cloud, IaC); setup (local dev and onboarding)
+- **Tooling and data:** scripts & tooling; database schemas & models; data access patterns
+
+Name the clusters of the group in the analyst's prompt, in this order. A repo with no database code or no JIRA still gets the group; its empty clusters come back as empty lists.
 
 Keep facts atomic: one concept per fact. Drop low-signal or self-evident facts.
 
