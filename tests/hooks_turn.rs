@@ -126,6 +126,50 @@ mod auto_model_detect {
     }
 
     #[test]
+    fn the_generic_design_nudge_fires_once_per_session_and_stays_short() {
+        // Arrange
+        let home = scratch_home("amd-once");
+        let payload = r#"{"session_id":"once-1","prompt":"I want to think through the architecture for this new service before writing code."}"#;
+
+        // Act
+        let (first, _) = run_hook("auto-model-detect", &home, payload);
+        let (second, _) = run_hook("auto-model-detect", &home, payload);
+        let other = payload.replace("once-1", "once-2");
+        let (other_session, _) = run_hook("auto-model-detect", &home, &other);
+
+        // Assert
+        assert!(first.contains("/playbook:plan"), "{first}");
+        assert!(
+            first.len() < 450,
+            "the nudge should stay short: {}",
+            first.len()
+        );
+        assert_eq!(second, "", "second prompt in the same session is silent");
+        assert!(!other_session.is_empty(), "a new session nudges again");
+    }
+
+    #[test]
+    fn retired_keywords_no_longer_trigger_the_generic_nudge() {
+        // Arrange: words that fired on routine prompts.
+        for prompt in [
+            "Please compare these two log files and tell me what changed between them.",
+            "Can you evaluate whether this regex handles unicode input correctly now?",
+            "Is there a pattern in how these test failures show up across the runs?",
+            "Recommend a name for this variable and then update the call sites below.",
+        ] {
+            let home = scratch_home("amd-retired");
+            let payload = serde_json::json!({ "prompt": prompt }).to_string();
+
+            // Act
+            let (stdout, code) = run_hook("auto-model-detect", &home, &payload);
+
+            // Assert
+            assert_eq!(code, 0);
+            assert_eq!(stdout, "", "{prompt}");
+        }
+    }
+
+    #[test]
     fn slash_command_stays_silent() {
         // Arrange
         let home = scratch_home("amd-slash");

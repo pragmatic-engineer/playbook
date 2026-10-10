@@ -11,7 +11,7 @@
 //!     counts. Subsequent reads of the same file don't, since those are
 //!     often offset follow-ups that should be encouraged, not discouraged.
 //!
-//! Emits additionalContext at thresholds 4, 8 and 12. Past 12 it stays
+//! Emits one additionalContext nudge, at count 8. Every other count stays
 //! silent so it doesn't become spam: by then Claude has either delegated or
 //! chosen not to.
 
@@ -60,41 +60,22 @@ pub fn run(payload: &Payload) {
     nudge(n);
 }
 
-/// Escalating nudge toward the Explore subagent at counts 4, 8 and 12. Any
-/// other count, including everything past 12, stays silent so the nudge
-/// never becomes spam.
+/// The one nudge toward the Explore subagent, fired when the unique reads and
+/// searches reach this count. Any other count stays silent.
+const NUDGE_AT: i64 = 8;
+
 fn nudge(n: i64) {
-    match n {
-        4 => emit_pre_context(
-            "PreToolUse",
-            &format!(
-                "Search/read count for this session has reached {n}. If your remaining \
-                 searches will fan across more than a couple more files, dispatch the \
-                 Explore subagent now (Agent tool, subagent_type: \"Explore\"): its full \
-                 search context stays in its window and only a digest comes back to \
-                 yours. Keeps main context lean for the actual work."
-            ),
-        ),
-        8 => emit_pre_context(
-            "PreToolUse",
-            &format!(
-                "Search/read count is now {n}. You're deep in exploration, so strongly \
-                 prefer dispatching the Explore subagent for the rest of this discovery \
-                 work. Each additional Read here costs main-context tokens you won't \
-                 recover."
-            ),
-        ),
-        12 => emit_pre_context(
-            "PreToolUse",
-            &format!(
-                "Search/read count is {n}. Main context is now carrying significant \
-                 exploration weight. Wrap up this discovery and continue in an Explore \
-                 subagent, or summarize findings to yourself and consider /clear once \
-                 the task is settled."
-            ),
-        ),
-        _ => {}
+    if n != NUDGE_AT {
+        return;
     }
+    emit_pre_context(
+        "PreToolUse",
+        &format!(
+            "Search/read count is {n}. If more discovery is coming, dispatch the Explore \
+             subagent (Agent tool, subagent_type: \"Explore\"): its search context stays in \
+             its own window and only a digest comes back."
+        ),
+    );
 }
 
 /// Whole-line exact match against `seen_file`, mirroring `grep -qxF`. A

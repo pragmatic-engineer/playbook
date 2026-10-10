@@ -69,7 +69,7 @@ Every hook is a module under `src/hooks/`, run as `playbook hook <name>` (see AD
 | `Read` | `preread-size-check` | Denies a full-file read of a large file (over the line or byte limit) when no `offset`/`limit` is set, pushing toward grep-first, then a targeted read. Allowlists a small set of config and docs files usually needed whole. |
 | `AskUserQuestion` | `auto-guard` | Only when the resolved mode is `auto`: denies the question tool so the model takes the recommended option. See [Auto mode](../guides/05-auto-mode.md). |
 | any tool | `auto-cost` | Only in auto mode: warns at `auto.warnPct` of `auto.budgetUsd`, and at the cap denies every tool except reads, `git status`, `git diff`, `playbook mode status` and a park note. See [Auto mode](../guides/05-auto-mode.md). |
-| `Read`, `Grep`, `Glob`, `Edit`, `Write`, `NotebookEdit` | `search-counter` | Tracks exploration breadth. Nudges Claude toward the Explore subagent at thresholds 4, 8, and 12 unique file reads or searches. |
+| `Read`, `Grep`, `Glob`, `Edit`, `Write`, `NotebookEdit` | `search-counter` | Tracks exploration breadth. Nudges Claude toward the Explore subagent once, at 8 unique file reads or searches. |
 | `Edit`, `Write` | `memory-anchors` | When the target path is anchored in the graph-first memory store (`~/.config/playbook/memory/memory.graph.json`), surfaces the facts that describe it, plus their `depends_on` and `contradicts` neighbours, as `additionalContext` before the edit lands. Never blocks. Also fires on `UserPromptSubmit`; see below. |
 | `Edit`, `Write` | `no-slop-guard` | Denies an Edit or Write whose new content, in a Rust, shell, or Python file, carries a run of 3 or more consecutive comment lines, or a comment naming a plan, brief, dispatch id, or completion criterion. |
 
@@ -86,7 +86,7 @@ Every hook is a module under `src/hooks/`, run as `playbook hook <name>` (see AD
 | Hook | Purpose |
 |---|---|
 | `auto-model-detect` | Nudges the main session toward delegating design and architecture-shaped prompts (ADR, schema, tradeoff, alternatives, etc.) to an Opus subagent, rather than reasoning inline on the default model. Skips slash commands and prompts under 20 characters. |
-| `auto-guard` | In auto mode adds a one line reminder to each prompt. |
+| `auto-guard` | In auto mode with the default permission mode, advises a trusted permission mode once per session. |
 | `memory-anchors` | Matches prompt text and this session's touched files against the same anchor index `PreToolUse` builds, injecting each matched fact's name, description and body (body cut at 1,500 characters), deduped per session. Common words are ignored, at most 3 facts per prompt and 9 per session. Never blocks. |
 
 ### PreCompact

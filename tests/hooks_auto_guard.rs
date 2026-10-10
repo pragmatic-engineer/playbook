@@ -27,7 +27,7 @@ fn parse(out: &str) -> Value {
 }
 
 const STANDING_LINE: &str = "AUTO MODE is on: wherever the command allows it, take the recommended answer and log it as an assumption instead of asking.";
-const TRUSTED_MODE_ADVICE: &str = "launch with a trusted permission mode";
+const TRUSTED_MODE_ADVICE: &str = "Launch with a trusted permission mode";
 
 /// The captured UserPromptSubmit payload with its `permission_mode` swapped
 /// for `mode`, or dropped entirely when `mode` is `None`.
@@ -168,8 +168,8 @@ fn malformed_stdin_exits_zero_with_no_output() {
 }
 
 #[test]
-fn auto_mode_user_prompt_submit_carries_the_standing_line() {
-    // Arrange
+fn auto_mode_user_prompt_submit_no_longer_repeats_the_standing_line() {
+    // Arrange: session-init already injects the rule at SessionStart.
     let s = scratch("standing-line");
 
     // Act
@@ -177,47 +177,24 @@ fn auto_mode_user_prompt_submit_carries_the_standing_line() {
 
     // Assert
     assert_eq!(code, 0);
-    let context = prompt_context(&out);
     assert!(
-        context.contains(STANDING_LINE),
-        "additionalContext missing the standing line: {out}"
+        !prompt_context(&out).contains(STANDING_LINE),
+        "the per-prompt standing line is retired: {out}"
     );
 }
 
 #[test]
-fn auto_mode_repeats_the_standing_line_on_every_prompt() {
-    // Arrange
-    let s = scratch("not-deduped");
-
-    // Act
-    let first = run_hook(&s, HOOK, USER_PROMPT_SUBMIT, &[("PLAYBOOK_MODE", "auto")]);
-    let second = run_hook(&s, HOOK, USER_PROMPT_SUBMIT, &[("PLAYBOOK_MODE", "auto")]);
-
-    // Assert
-    assert!(prompt_context(&first.0).contains(STANDING_LINE));
-    assert!(
-        prompt_context(&second.0).contains(STANDING_LINE),
-        "the second identical prompt must carry the line again: {}",
-        second.0
-    );
-}
-
-#[test]
-fn auto_mode_emits_the_standing_line_for_a_slash_prompt() {
+fn auto_mode_with_a_slash_prompt_prints_nothing_extra() {
     // Arrange
     let s = scratch("slash");
-    let payload = USER_PROMPT_SUBMIT.replace(r#""prompt":"Use"#, r#""prompt":"/playbook:plan Use"#);
-    assert!(payload.contains(r#""prompt":"/playbook:plan"#));
+    let payload = prompt_payload(Some("acceptEdits"))
+        .replace(r#""prompt":"Use"#, r#""prompt":"/playbook:plan Use"#);
 
     // Act
     let (out, code) = run_hook(&s, HOOK, &payload, &[("PLAYBOOK_MODE", "auto")]);
 
     // Assert
-    assert_eq!(code, 0);
-    assert!(
-        prompt_context(&out).contains(STANDING_LINE),
-        "a slash prompt must still carry the line: {out}"
-    );
+    assert_eq!((out.as_str(), code), ("", 0));
 }
 
 #[test]
@@ -234,26 +211,24 @@ fn ask_mode_user_prompt_submit_prints_nothing() {
 }
 
 #[test]
-fn auto_mode_with_default_permission_mode_advises_a_trusted_mode() {
+fn auto_mode_with_default_permission_mode_advises_a_trusted_mode_once() {
     // Arrange
     let s = scratch("perm-default");
+    let payload = prompt_payload(Some("default"));
+    let env = [("PLAYBOOK_MODE", "auto")];
 
     // Act
-    let (out, code) = run_hook(
-        &s,
-        HOOK,
-        &prompt_payload(Some("default")),
-        &[("PLAYBOOK_MODE", "auto")],
-    );
+    let first = run_hook(&s, HOOK, &payload, &env);
+    let second = run_hook(&s, HOOK, &payload, &env);
 
     // Assert
-    assert_eq!(code, 0);
-    let context = prompt_context(&out);
-    assert!(context.contains(STANDING_LINE), "standing line lost: {out}");
+    assert_eq!(first.1, 0);
     assert!(
-        context.contains(TRUSTED_MODE_ADVICE),
-        "default permission mode must add the advice: {out}"
+        prompt_context(&first.0).contains(TRUSTED_MODE_ADVICE),
+        "default permission mode must add the advice: {}",
+        first.0
     );
+    assert_eq!(second.0, "", "the advice is given once per session");
 }
 
 #[test]
@@ -279,16 +254,7 @@ fn auto_mode_gives_no_trusted_mode_advice_for_other_permission_modes() {
         );
 
         // Assert
-        assert_eq!(code, 0, "permission_mode {mode:?}");
-        let context = prompt_context(&out);
-        assert!(
-            context.contains(STANDING_LINE),
-            "permission_mode {mode:?} must still carry the standing line: {out}"
-        );
-        assert!(
-            !context.contains(TRUSTED_MODE_ADVICE),
-            "permission_mode {mode:?} must not carry the advice: {out}"
-        );
+        assert_eq!((out.as_str(), code), ("", 0), "permission_mode {mode:?}");
     }
 }
 

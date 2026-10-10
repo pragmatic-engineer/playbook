@@ -1,18 +1,22 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! In `auto`, denies `AskUserQuestion` and adds a standing note to every user prompt.
+//! In `auto`, denies `AskUserQuestion`. On the first prompt of a session in the default
+//! permission mode it also advises a trusted mode, once. The standing auto-mode rule is
+//! injected by `session-init` at SessionStart, not repeated on every prompt.
 
 use crate::common::mode::{resolve_for_hook, Mode};
 use crate::common::payload::Payload;
-use crate::common::{emit_pre_deny, emit_prompt_context};
+use crate::common::{emit_pre_deny, emit_prompt_context, session_dir};
+use std::path::Path;
 
 const DENY_REASON: &str = "AUTO MODE: no questions. Choose the option marked recommended, or the first option when none is marked, record it as an assumption, and continue.";
 
-const PROMPT_NOTE: &str = "AUTO MODE is on: wherever the command allows it, take the recommended answer and log it as an assumption instead of asking.";
-
 const TRUSTED_MODE_ADVICE: &str =
-    "Permission prompts will stall an unattended run: launch with a trusted permission mode.";
+    "AUTO MODE: permission prompts will stall an unattended run. Launch with a trusted permission mode.";
+
+/// Session marker: the advice was already given.
+const ADVISED_MARKER: &str = "auto-advice-given";
 
 pub fn run(payload: &Payload) {
     let event = payload.field(".hook_event_name");
@@ -25,15 +29,22 @@ pub fn run(payload: &Payload) {
     }
     if guards_question {
         emit_pre_deny(DENY_REASON);
-    } else {
-        emit_prompt_context(&prompt_note(payload));
+    } else if payload.field(".permission_mode") == "default" && first_advice(payload) {
+        emit_prompt_context(TRUSTED_MODE_ADVICE);
     }
 }
 
-fn prompt_note(payload: &Payload) -> String {
-    if payload.field(".permission_mode") == "default" {
-        format!("{PROMPT_NOTE} {TRUSTED_MODE_ADVICE}")
-    } else {
-        PROMPT_NOTE.to_string()
+/// True the first time it is called in a session, and records that. A session
+/// with no directory has nowhere to record it and always advises.
+fn first_advice(payload: &Payload) -> bool {
+    let dir = session_dir(payload);
+    if dir.is_empty() {
+        return true;
     }
+    let marker = Path::new(&dir).join(ADVISED_MARKER);
+    if marker.exists() {
+        return false;
+    }
+    let _ = std::fs::write(marker, "1");
+    true
 }
