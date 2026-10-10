@@ -11,49 +11,158 @@ use super::{ToolInvocationEvent, UsageEvent};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 
-/// The date window both views show. Days are UTC, like every grouping.
+/// The day a calendar week starts on. Monday is the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WeekStart {
+    #[default]
+    Monday,
+    Sunday,
+    Saturday,
+}
+
+impl WeekStart {
+    pub fn parse(value: &str) -> Option<WeekStart> {
+        match value {
+            "monday" => Some(WeekStart::Monday),
+            "sunday" => Some(WeekStart::Sunday),
+            "saturday" => Some(WeekStart::Saturday),
+            _ => None,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            WeekStart::Monday => "monday",
+            WeekStart::Sunday => "sunday",
+            WeekStart::Saturday => "saturday",
+        }
+    }
+
+    pub fn short(self) -> &'static str {
+        match self {
+            WeekStart::Monday => "Mon",
+            WeekStart::Sunday => "Sun",
+            WeekStart::Saturday => "Sat",
+        }
+    }
+
+    /// The weekday index of the first day, with Monday as 0.
+    fn index(self) -> i64 {
+        match self {
+            WeekStart::Monday => 0,
+            WeekStart::Saturday => 5,
+            WeekStart::Sunday => 6,
+        }
+    }
+}
+
+/// Weekday of a day number, Monday as 0 to Sunday as 6. 1970-01-01 (day 0)
+/// was a Thursday.
+pub fn weekday(day: i64) -> usize {
+    (day + 3).rem_euclid(7) as usize
+}
+
+/// The date window both views show. Days are UTC, so there is no daylight
+/// saving: every day is exactly 86,400 seconds and a week is exactly 7 days.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Range {
+    Today,
+    ThisWeek(WeekStart),
+    LastWeek(WeekStart),
     LastDays(i64),
     CurrentMonth,
+    LastMonth,
     All,
 }
 
 impl Range {
-    /// The `range` query value. No value means all time, so older callers
-    /// keep their behaviour.
+    /// The `range` query value, with weeks starting on Monday. No value means
+    /// all time, so older callers keep their behaviour.
     pub fn parse(value: Option<&str>) -> Option<Range> {
+        Range::parse_with(value, WeekStart::Monday)
+    }
+
+    /// Like `parse`, with the configured first day of the week.
+    pub fn parse_with(value: Option<&str>, week: WeekStart) -> Option<Range> {
         match value {
             None | Some("all") => Some(Range::All),
+            Some("today") => Some(Range::Today),
+            Some("week") => Some(Range::ThisWeek(week)),
+            Some("last-week") => Some(Range::LastWeek(week)),
             Some("30d") => Some(Range::LastDays(30)),
             Some("60d") => Some(Range::LastDays(60)),
             Some("90d") => Some(Range::LastDays(90)),
             Some("month") => Some(Range::CurrentMonth),
+            Some("last-month") => Some(Range::LastMonth),
             Some(_) => None,
         }
     }
 
     pub fn key(self) -> &'static str {
         match self {
+            Range::Today => "today",
+            Range::ThisWeek(_) => "week",
+            Range::LastWeek(_) => "last-week",
             Range::LastDays(30) => "30d",
             Range::LastDays(60) => "60d",
             Range::LastDays(_) => "90d",
             Range::CurrentMonth => "month",
+            Range::LastMonth => "last-month",
             Range::All => "all",
         }
     }
 
+    /// The name shown to people.
+    pub fn label(self) -> &'static str {
+        match self {
+            Range::Today => "today",
+            Range::ThisWeek(_) => "this week",
+            Range::LastWeek(_) => "last week",
+            Range::LastDays(30) => "last 30 days",
+            Range::LastDays(60) => "last 60 days",
+            Range::LastDays(_) => "last 90 days",
+            Range::CurrentMonth => "this month",
+            Range::LastMonth => "last month",
+            Range::All => "all time",
+        }
+    }
+
+    /// The same range with weeks starting on `week`.
+    pub fn with_week_start(self, week: WeekStart) -> Range {
+        match self {
+            Range::ThisWeek(_) => Range::ThisWeek(week),
+            Range::LastWeek(_) => Range::LastWeek(week),
+            other => other,
+        }
+    }
+
     /// First and one-past-last UTC day, or `None` for all time. "Last N days"
-    /// includes today; the current month runs from its 1st to its last day.
+    /// includes today; a month runs from its 1st to its last day; a week runs
+    /// seven days from its first day.
     pub fn days(self, now: i64) -> Option<(i64, i64)> {
         let today = now.div_euclid(SECONDS_PER_DAY);
+        let first_of_month = |day: i64| day - (civil_from_days(day).2 - 1);
+        let week_first =
+            |week: WeekStart| today - (weekday(today) as i64 - week.index()).rem_euclid(7);
         match self {
             Range::All => None,
+            Range::Today => Some((today, today + 1)),
+            Range::ThisWeek(w) => {
+                let first = week_first(w);
+                Some((first, first + 7))
+            }
+            Range::LastWeek(w) => {
+                let first = week_first(w);
+                Some((first - 7, first))
+            }
             Range::LastDays(n) => Some((today - n + 1, today + 1)),
             Range::CurrentMonth => {
-                let first = today - (civil_from_days(today).2 - 1);
-                let probe = first + 31;
-                Some((first, probe - (civil_from_days(probe).2 - 1)))
+                let first = first_of_month(today);
+                Some((first, first_of_month(first + 31)))
+            }
+            Range::LastMonth => {
+                let first = first_of_month(today);
+                Some((first_of_month(first - 1), first))
             }
         }
     }
@@ -349,6 +458,204 @@ mod tests {
         }
         assert_eq!(Range::parse(None), Some(Range::All));
         assert_eq!(Range::parse(Some("7d")), None);
+    }
+
+    // All times are UTC, so there is no daylight saving: a day is always
+    // 86,400 seconds and a week is always 7 days. These tests rely on that.
+    const SEP_3_NOON: i64 = 1_788_436_800; // Thursday 2026-09-03
+    const SEP_6_LAST_SECOND: i64 = 1_788_739_199; // Sunday 2026-09-06 23:59:59
+    const SEP_7_MIDNIGHT: i64 = 1_788_739_200; // Monday 2026-09-07
+    const JAN_15_2027: i64 = 1_800_014_400;
+    const MAR_1_2027: i64 = 1_803_859_200;
+    const MAR_1_2028: i64 = 1_835_481_600; // after a leap February
+
+    fn span(range: Range, now: i64) -> (String, String) {
+        let (first, past) = range.days(now).expect("a bounded range");
+        (
+            crate::usage::aggregate::date_key(first),
+            crate::usage::aggregate::date_key(past - 1),
+        )
+    }
+
+    fn dates(a: &str, b: &str) -> (String, String) {
+        (a.to_string(), b.to_string())
+    }
+
+    const MON: WeekStart = WeekStart::Monday;
+
+    #[test]
+    fn today_is_one_utc_day() {
+        assert_eq!(
+            span(Range::Today, SEP_3_NOON),
+            dates("2026-09-03", "2026-09-03")
+        );
+        assert_eq!(
+            span(Range::Today, SEP_7_MIDNIGHT),
+            dates("2026-09-07", "2026-09-07")
+        );
+        assert_eq!(
+            span(Range::Today, SEP_7_MIDNIGHT - 1),
+            dates("2026-09-06", "2026-09-06")
+        );
+    }
+
+    #[test]
+    fn a_week_that_spans_a_month_boundary_is_one_calendar_week() {
+        // Thursday 2026-09-03: the Monday week started on August 31.
+        assert_eq!(
+            span(Range::ThisWeek(MON), SEP_3_NOON),
+            dates("2026-08-31", "2026-09-06")
+        );
+        assert_eq!(
+            span(Range::LastWeek(MON), SEP_3_NOON),
+            dates("2026-08-24", "2026-08-30")
+        );
+    }
+
+    #[test]
+    fn the_week_turns_over_at_midnight_on_its_first_day() {
+        assert_eq!(
+            span(Range::ThisWeek(MON), SEP_6_LAST_SECOND),
+            dates("2026-08-31", "2026-09-06")
+        );
+        assert_eq!(
+            span(Range::ThisWeek(MON), SEP_7_MIDNIGHT),
+            dates("2026-09-07", "2026-09-13")
+        );
+        assert_eq!(
+            span(Range::LastWeek(MON), SEP_7_MIDNIGHT),
+            dates("2026-08-31", "2026-09-06")
+        );
+    }
+
+    #[test]
+    fn the_configured_week_start_moves_the_week() {
+        let sun = WeekStart::Sunday;
+        let sat = WeekStart::Saturday;
+        // Thursday 2026-09-03.
+        assert_eq!(
+            span(Range::ThisWeek(sun), SEP_3_NOON),
+            dates("2026-08-30", "2026-09-05")
+        );
+        assert_eq!(
+            span(Range::LastWeek(sun), SEP_3_NOON),
+            dates("2026-08-23", "2026-08-29")
+        );
+        assert_eq!(
+            span(Range::ThisWeek(sat), SEP_3_NOON),
+            dates("2026-08-29", "2026-09-04")
+        );
+        // On the first day itself the week starts today, and on the day
+        // before it the week started six days ago.
+        assert_eq!(
+            span(Range::ThisWeek(sun), SEP_6_LAST_SECOND),
+            dates("2026-09-06", "2026-09-12")
+        );
+        assert_eq!(
+            span(Range::ThisWeek(sun), SEP_6_LAST_SECOND - 86_400),
+            dates("2026-08-30", "2026-09-05")
+        );
+        // Every week is seven days whatever the start.
+        for w in [MON, sun, sat] {
+            for r in [Range::ThisWeek(w), Range::LastWeek(w)] {
+                let (first, past) = r.days(SEP_3_NOON).unwrap();
+                assert_eq!(past - first, 7);
+                assert_eq!(weekday(first) as i64, w.index());
+            }
+        }
+    }
+
+    #[test]
+    fn last_month_is_the_whole_previous_calendar_month() {
+        assert_eq!(
+            span(Range::LastMonth, SEP_3_NOON),
+            dates("2026-08-01", "2026-08-31")
+        );
+        // From January it is December of the year before.
+        assert_eq!(
+            span(Range::LastMonth, JAN_15_2027),
+            dates("2026-12-01", "2026-12-31")
+        );
+        // Midnight of the 1st is already the new month.
+        assert_eq!(
+            span(Range::LastMonth, MAR_1_2027),
+            dates("2027-02-01", "2027-02-28")
+        );
+        assert_eq!(
+            span(Range::CurrentMonth, MAR_1_2027),
+            dates("2027-03-01", "2027-03-31")
+        );
+        assert_eq!(
+            span(Range::LastMonth, MAR_1_2028),
+            dates("2028-02-01", "2028-02-29")
+        );
+        assert_eq!(
+            span(Range::LastMonth, MAR_1_2027 - 1),
+            dates("2027-01-01", "2027-01-31")
+        );
+    }
+
+    #[test]
+    fn weekday_counts_from_monday() {
+        assert_eq!(weekday(0), 3); // 1970-01-01 was a Thursday
+        assert_eq!(weekday(SEP_3_NOON.div_euclid(86_400)), 3);
+        assert_eq!(weekday(SEP_7_MIDNIGHT.div_euclid(86_400)), 0);
+        assert_eq!(weekday(SEP_6_LAST_SECOND.div_euclid(86_400)), 6);
+        assert_eq!(weekday(-1), 2); // 1969-12-31 was a Wednesday
+    }
+
+    #[test]
+    fn every_range_key_parses_back_and_week_start_applies_to_weeks_only() {
+        for key in [
+            "today",
+            "week",
+            "last-week",
+            "30d",
+            "60d",
+            "90d",
+            "month",
+            "last-month",
+            "all",
+        ] {
+            let r = Range::parse_with(Some(key), WeekStart::Sunday).unwrap();
+            assert_eq!(r.key(), key);
+            assert!(!r.label().is_empty());
+        }
+        assert_eq!(
+            Range::parse_with(Some("week"), WeekStart::Sunday),
+            Some(Range::ThisWeek(WeekStart::Sunday))
+        );
+        assert_eq!(
+            Range::parse(Some("week")),
+            Some(Range::ThisWeek(WeekStart::Monday))
+        );
+        assert_eq!(
+            Range::ThisWeek(MON).with_week_start(WeekStart::Saturday),
+            Range::ThisWeek(WeekStart::Saturday)
+        );
+        assert_eq!(
+            Range::Today.with_week_start(WeekStart::Saturday),
+            Range::Today
+        );
+        assert_eq!(Range::parse(Some("yesterday")), None);
+        for w in ["monday", "sunday", "saturday"] {
+            assert_eq!(WeekStart::parse(w).map(WeekStart::key), Some(w));
+        }
+        assert_eq!(WeekStart::parse("friday"), None);
+    }
+
+    #[test]
+    fn contains_holds_at_the_edges_of_every_new_range() {
+        let day = |d: i64| d * 86_400;
+        let (first, past) = Range::LastWeek(MON).days(SEP_3_NOON).unwrap();
+        let r = Range::LastWeek(MON);
+        assert!(r.contains(SEP_3_NOON, day(first)));
+        assert!(r.contains(SEP_3_NOON, day(past) - 1));
+        assert!(!r.contains(SEP_3_NOON, day(first) - 1));
+        assert!(!r.contains(SEP_3_NOON, day(past)));
+        let t = Range::Today;
+        assert!(t.contains(SEP_3_NOON, day(SEP_3_NOON.div_euclid(86_400))));
+        assert!(!t.contains(SEP_3_NOON, day(SEP_3_NOON.div_euclid(86_400)) - 1));
     }
 
     #[test]

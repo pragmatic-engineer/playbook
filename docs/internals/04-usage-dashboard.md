@@ -7,9 +7,9 @@
 | Command | What it does |
 |---|---|
 | `playbook usage` | Opens the terminal view. When stdout is not a terminal, prints the text summary instead. |
-| `playbook usage --summary` | Reads anything new, then prints the text summary and exits. |
+| `playbook usage --summary` | Reads anything new, then prints the text summary and exits. With `--range` it covers only that range and says which dates. |
 | `playbook usage --json` | Prints the totals, the groups and the live view as JSON, for scripts. |
-| `playbook usage --range <30d\|60d\|90d\|month\|all>` | Sets the range for the terminal view and `--json`. The default is `30d`. |
+| `playbook usage --range <name>` | Sets the range for the terminal view, `--json` and `--summary`. See [Ranges](#ranges). The default is `30d`, or all time for `--summary`. |
 | `playbook usage --web` | Opens the web dashboard. Deprecated, removed in v0.22.0. |
 | `playbook usage ingest` | Reads anything new into the store. Deprecated, use `--summary` or `--json`. |
 | `playbook usage dashboard` | Starts the dashboard server and opens it. Deprecated, use `--web`. |
@@ -43,14 +43,31 @@ Keys:
 | `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
 | `S` | Reverse the sort. |
 | `Enter` | Filter the whole view to the selected row: a model, a project or a session id. `Enter` on that row again lifts the filter. |
-| `r` | Step the range: 30d, 60d, 90d, month, all. |
+| `r` | Step the range: today, week, last week, month, last month, 30d, 60d, 90d, all. |
+| `d`, `w`, `W`, `m`, `M`, `a` | Jump to today, this week, last week, this month, last month, all time. |
 | `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. |
 | `c` | Clear the filter. |
 | `t` | Cycle the theme: btop, dark, light, mono. |
-| `m` | Turn mouse reporting on or off. Turn it off to select text with the mouse. |
+| `x` | Turn mouse reporting on or off. Turn it off to select text with the mouse. |
 | `q`, `Esc`, `Ctrl-C` | Quit. |
 
 The mouse is optional and on by default: a click focuses a panel and selects the row under it, and the wheel moves the selection of the panel under the pointer.
+
+### Ranges
+
+Every range is a set of whole UTC days, shown in the header with its name and exact dates (`last week 2026-08-24 to 2026-08-30 UTC`). The time zone is UTC everywhere in the view, the JSON and the web dashboard, so there is no daylight saving: a day is always 86,400 seconds and a week is always seven days.
+
+| Name (`--range`) | Days |
+|---|---|
+| `today` | Today only. |
+| `week` | The calendar week that holds today, from its first day for seven days (it can run into next month, and the graph stops at today). |
+| `last-week` | The seven days before that. A week can span a month boundary. |
+| `month` | The 1st to the last day of this month. |
+| `last-month` | The whole previous calendar month, from December when it is January. |
+| `30d`, `60d`, `90d` | The last N days, including today. |
+| `all` | Everything stored. |
+
+Weeks start on Monday. Set `usage.weekStart` to `sunday` or `saturday` to change it (`playbook config set usage.weekStart sunday`). The terminal view, `--json`, `--summary` and the web `range=` parameter all read the key, so they agree. The key is spelled in camel case like the other config keys.
 
 While you type a filter every key is text, so `q` and `r` do not quit or change the range until you press `Enter` or `Esc`.
 
@@ -109,7 +126,7 @@ Four endpoints return usage data, all behind the same guard (Host allowlist, `Se
 
 The first three return JSON. Each endpoint ingests anything new first. The session `id` is checked before any lookup: 1 to 128 characters of letters, digits, `-`, `_` and `.`, starting with a letter or digit. Anything else is a 400, an unknown id is a 404. A session's row stats count only the messages inside the range, while its timeline shows all of them. The charts are inline SVG drawn on the server, with every label escaped.
 
-The page has a date range toggle: last 30, 60 or 90 days, the current month, or all time. It sends the choice as `/api/data?range=30d|60d|90d|month|all`, and the server filters usage and skill and agent counts to that window before it groups anything. Days are UTC. "Last N days" includes today. "Current month" runs from the 1st to the last day of the month. A request with no `range` gets all time, and an unknown value gets a 400. The response names the window in `range` (`key`, `start`, `end`), and the page shows those dates above the totals. The page opens on the last 30 days and remembers your choice in `localStorage`. The layout works on a phone: wide tables and charts scroll sideways in their own box.
+The page has a date range toggle: last 30, 60 or 90 days, the current month, or all time. It sends the choice as `/api/data?range=30d|60d|90d|month|all` (the API also accepts `today`, `week`, `last-week` and `last-month`), and the server filters usage and skill and agent counts to that window before it groups anything. Days are UTC. "Last N days" includes today. "Current month" runs from the 1st to the last day of the month. A request with no `range` gets all time, and an unknown value gets a 400. The response names the window in `range` (`key`, `start`, `end`), and the page shows those dates above the totals. The page opens on the last 30 days and remembers your choice in `localStorage`. The layout works on a phone: wide tables and charts scroll sideways in their own box.
 
 The page is three same-origin files: `/` (HTML), `/app.css` and `/app.js`. They hold no data and need no token. Every `/api/` path does.
 

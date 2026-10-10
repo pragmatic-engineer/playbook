@@ -34,6 +34,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "review.stackMaxLines",
     "security.defaults",
     "usage.theme",
+    "usage.weekStart",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -87,6 +88,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "review.stackMaxLines" => Some(Value::Number(3000.into())),
         "security.defaults" => Some(Value::Bool(false)),
         "usage.theme" => Some(Value::String("btop".to_string())),
+        "usage.weekStart" => Some(Value::String("monday".to_string())),
         _ => None,
     }
 }
@@ -105,6 +107,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "agents.variants" => Some(&["auto", "all", "off"]),
         "routing.escalate" => Some(&["ask", "auto", "deny"]),
         "usage.theme" => Some(&["btop", "dark", "light", "mono"]),
+        "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         _ => None,
     }
 }

@@ -311,5 +311,6 @@ fn an_unknown_range_fails_with_the_valid_values() {
     let env = Env::new("range", &[("critic", "sonnet", "high")]);
     let out = env.run(&["effort", "suggest", "--range", "7d"]);
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("30d, 60d, 90d, month or all"));
+    assert!(String::from_utf8_lossy(&out.stderr)
+        .contains("today, week, last-week, month, last-month, 30d, 60d, 90d or all"));
 }

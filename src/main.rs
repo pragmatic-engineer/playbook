@@ -123,7 +123,7 @@ fn main() {
                 playbook::EffortCommand::Suggest { range, json } => {
                     let Some(range) = usage::query::Range::parse(Some(&range)) else {
                         eprintln!(
-                            "error: unknown range '{range}', use 30d, 60d, 90d, month or all"
+                            "error: unknown range '{range}', use today, week, last-week, month, last-month, 30d, 60d, 90d or all"
                         );
                         std::process::exit(1);
                     };

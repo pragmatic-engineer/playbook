@@ -27,4 +27,4 @@ Reading usage...
 
 
 
- 1-6 panel r range / filter s/S sort enter pick t theme (btop) m mouse q quit
+ 1-6 panel r range d/w/W/m/M/a jump / filter s/S sort enter pick t theme (btop) x mouse q quit

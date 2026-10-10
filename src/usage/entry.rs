@@ -4,7 +4,7 @@
 //! `playbook usage` and its subcommands: picks the terminal view, the text or
 //! JSON output, or the deprecated web dashboard.
 
-use super::query::{self, Range};
+use super::query::{self, Range, WeekStart};
 use super::run::{ingest_new, run_ingest, run_summary, Paths};
 use super::{api, dashboard, db, tui};
 use crate::{DashboardCommand, UsageCommand};
@@ -18,7 +18,8 @@ pub struct Opts {
     pub json: bool,
     pub summary: bool,
     pub web: bool,
-    pub range: String,
+    /// The `--range` value, or `None` when the flag was not given.
+    pub range: Option<String>,
 }
 
 /// Whether the terminal view can run: it needs a terminal on both ends.
@@ -104,23 +105,49 @@ pub fn run(
             );
             web(paths)
         }
-        None if opts.summary => run_summary(paths),
+        None if opts.summary => {
+            let range = opts.range.as_deref().map(parse_range).transpose()?;
+            run_summary(paths, range, crate::common::time::now_secs())
+        }
         None if opts.json => {
-            let range = parse_range(&opts.range)?;
+            let range = parse_range(opts.range.as_deref().unwrap_or(DEFAULT_RANGE))?;
             let (conn, _) = ingest_new(paths)?;
             json_report(&conn, range, crate::common::time::now_secs())
         }
         None if interactive => {
-            tui::run(paths, parse_range(&opts.range)?)?;
+            tui::run(
+                paths,
+                parse_range(opts.range.as_deref().unwrap_or(DEFAULT_RANGE))?,
+            )?;
             Ok(String::new())
         }
-        None => run_summary(paths),
+        None => {
+            let range = opts.range.as_deref().map(parse_range).transpose()?;
+            run_summary(paths, range, crate::common::time::now_secs())
+        }
     }
 }
 
-fn parse_range(value: &str) -> Result<Range, String> {
-    Range::parse(Some(value))
-        .ok_or_else(|| format!("unknown range `{value}`; use 30d, 60d, 90d, month or all"))
+/// The range of the terminal view and `--json` when `--range` is not given.
+const DEFAULT_RANGE: &str = "30d";
+
+/// The first day of the week, from the `usage.weekStart` config key. Monday
+/// when the key is unset or unreadable.
+pub fn configured_week_start() -> WeekStart {
+    let home = crate::common::session::home_dir();
+    crate::config::resolve_valid("usage.weekStart", &home, None)
+        .ok()
+        .and_then(|(value, _, _)| value.as_str().and_then(WeekStart::parse))
+        .unwrap_or_default()
+}
+
+/// Parses a range name with the configured week start.
+pub fn parse_range(value: &str) -> Result<Range, String> {
+    Range::parse_with(Some(value), configured_week_start()).ok_or_else(|| {
+        format!(
+            "unknown range `{value}`; use today, week, last-week, month, last-month, 30d, 60d, 90d or all"
+        )
+    })
 }
 
 #[cfg(test)]
@@ -128,8 +155,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_range_names_one_of_the_five_values() {
-        for ok in ["30d", "60d", "90d", "month", "all"] {
+    fn a_range_names_one_of_the_nine_values() {
+        for ok in [
+            "today",
+            "week",
+            "last-week",
+            "month",
+            "last-month",
+            "30d",
+            "60d",
+            "90d",
+            "all",
+        ] {
             assert!(parse_range(ok).is_ok(), "{ok}");
         }
         let err = parse_range("7d").unwrap_err();

@@ -37,7 +37,7 @@ pub struct Data {
 }
 
 /// One point per day from the range start (or the first event, for all time)
-/// to today, so the graph axis is a real calendar.
+/// to today or the range end, whichever comes first, so the graph axis is a real calendar.
 fn day_series(events: &[UsageEvent], now: i64, range: Range) -> Vec<DayPoint> {
     let today = now.div_euclid(SECONDS_PER_DAY);
     let mut per_day: BTreeMap<i64, (f64, u64)> = BTreeMap::new();
@@ -46,14 +46,15 @@ fn day_series(events: &[UsageEvent], now: i64, range: Range) -> Vec<DayPoint> {
         slot.0 += e.cost_usd;
         slot.1 += query::total_tokens(e);
     }
-    let first = match range.days(now) {
-        Some((first, _)) => first,
+    // A range that ended before today (last week) stops at its last day.
+    let (first, last) = match range.days(now) {
+        Some((first, past)) => (first, (past - 1).min(today).max(first)),
         None => match per_day.keys().next() {
-            Some(day) => *day,
+            Some(day) => (*day, today.max(*day)),
             None => return Vec::new(),
         },
     };
-    (first..=today.max(first))
+    (first..=last)
         .map(|day| {
             let (cost_usd, tokens) = per_day.get(&day).copied().unwrap_or_default();
             DayPoint {

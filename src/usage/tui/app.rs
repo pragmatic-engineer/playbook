@@ -8,25 +8,34 @@ use super::data::Data;
 use super::sort::{event_rows, group_rows, session_rows, Panel, Sort, PANELS};
 use super::theme::{ColorDepth, Theme};
 use super::view;
-use crate::usage::query::Range;
+use crate::usage::query::{Range, WeekStart};
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Position, Rect};
 
-/// The ranges `r` steps through.
-pub const RANGES: [Range; 5] = [
-    Range::LastDays(30),
-    Range::LastDays(60),
-    Range::LastDays(90),
-    Range::CurrentMonth,
-    Range::All,
-];
+/// The ranges `r` steps through: the calendar ranges from the shortest to
+/// the longest, then the rolling ones.
+pub fn ranges(week: WeekStart) -> [Range; 9] {
+    [
+        Range::Today,
+        Range::ThisWeek(week),
+        Range::LastWeek(week),
+        Range::CurrentMonth,
+        Range::LastMonth,
+        Range::LastDays(30),
+        Range::LastDays(60),
+        Range::LastDays(90),
+        Range::All,
+    ]
+}
 
 #[derive(Debug)]
 pub struct App {
     pub data: Option<Data>,
     pub range: Range,
+    /// The first day of the week for the week ranges.
+    pub week_start: WeekStart,
     pub filter: String,
     /// The last store error, shown in the header until the next good refresh.
     pub error: Option<String>,
@@ -64,6 +73,7 @@ impl App {
         App {
             data: None,
             range,
+            week_start: WeekStart::default(),
             filter: String::new(),
             error: None,
             quit: false,
@@ -135,6 +145,15 @@ impl App {
         self.focus = PANELS[(at + by).rem_euclid(PANELS.len() as isize) as usize];
     }
 
+    /// Switches the range, re-querying only when it changed.
+    fn set_range(&mut self, range: Range) -> Effect {
+        if range == self.range {
+            return Effect::None;
+        }
+        self.range = range;
+        Effect::Requery
+    }
+
     pub fn key(&mut self, key: KeyEvent) -> Effect {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if self.editing {
@@ -145,9 +164,19 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('c') if ctrl => self.quit = true,
             KeyCode::Char('t') if !self.no_color => self.theme = self.theme.next(),
-            KeyCode::Char('m') => {
+            KeyCode::Char('x') => {
                 self.mouse = !self.mouse;
                 return Effect::Mouse;
+            }
+            KeyCode::Char(c @ ('d' | 'w' | 'W' | 'm' | 'M' | 'a')) => {
+                return self.set_range(match c {
+                    'd' => Range::Today,
+                    'w' => Range::ThisWeek(self.week_start),
+                    'W' => Range::LastWeek(self.week_start),
+                    'm' => Range::CurrentMonth,
+                    'M' => Range::LastMonth,
+                    _ => Range::All,
+                });
             }
             KeyCode::Char('/') => {
                 self.editing = true;
@@ -158,9 +187,9 @@ impl App {
                 return Effect::Requery;
             }
             KeyCode::Char('r') => {
-                let at = RANGES.iter().position(|r| *r == self.range).unwrap_or(0);
-                self.range = RANGES[(at + 1) % RANGES.len()];
-                return Effect::Requery;
+                let all = ranges(self.week_start);
+                let at = all.iter().position(|r| *r == self.range).unwrap_or(0);
+                return self.set_range(all[(at + 1) % all.len()]);
             }
             KeyCode::Char(c @ '1'..='6') => self.focus = PANELS[usize::from(c as u8 - b'1')],
             KeyCode::Tab => self.focus_next(1),
@@ -288,12 +317,33 @@ mod tests {
     fn r_steps_through_every_range_and_wraps() {
         let mut app = App::new(Range::LastDays(30));
         let mut seen = Vec::new();
-        for _ in 0..RANGES.len() {
+        for _ in 0..ranges(WeekStart::Monday).len() {
             assert_eq!(app.key(press(KeyCode::Char('r'))), Effect::Requery);
             seen.push(app.range);
         }
         assert_eq!(seen.last(), Some(&Range::LastDays(30)));
-        assert!(seen.contains(&Range::All));
+        assert_eq!(seen[0], Range::LastDays(60));
+        for want in ranges(WeekStart::Monday) {
+            assert!(seen.contains(&want), "{want:?}");
+        }
+    }
+
+    #[test]
+    fn direct_keys_jump_to_a_range_and_requery_only_on_a_change() {
+        let mut app = App::new(Range::LastDays(30));
+        app.week_start = WeekStart::Sunday;
+        for (key, want) in [
+            ('d', Range::Today),
+            ('w', Range::ThisWeek(WeekStart::Sunday)),
+            ('W', Range::LastWeek(WeekStart::Sunday)),
+            ('m', Range::CurrentMonth),
+            ('M', Range::LastMonth),
+            ('a', Range::All),
+        ] {
+            assert_eq!(app.key(press(KeyCode::Char(key))), Effect::Requery, "{key}");
+            assert_eq!(app.range, want, "{key}");
+            assert_eq!(app.key(press(KeyCode::Char(key))), Effect::None, "{key}");
+        }
     }
 
     fn type_filter(app: &mut App, text: &str) {
@@ -472,10 +522,10 @@ mod tests {
     }
 
     #[test]
-    fn m_toggles_the_mouse() {
+    fn x_toggles_the_mouse() {
         let mut app = App::new(Range::All);
         assert!(app.mouse);
-        assert_eq!(app.key(press(KeyCode::Char('m'))), Effect::Mouse);
+        assert_eq!(app.key(press(KeyCode::Char('x'))), Effect::Mouse);
         assert!(!app.mouse);
     }
 
