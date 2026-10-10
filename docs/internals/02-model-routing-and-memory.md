@@ -4,7 +4,7 @@ The session model defaults to Sonnet. Four things shape which model and effort a
 
 ## Model routing
 
-The policy lives in `prompts/SYSTEM_PROMPT.md` and in each file's frontmatter.
+The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) and in `playbook route`. The system prompt points there and does not restate models, so the two cannot disagree.
 
 - **Sonnet** is the session default and covers most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`.
 - **Haiku** takes mechanical, formatting and search work: `git`, `patch-applier`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, and the `doctor`, `session-start` and `setup` commands.

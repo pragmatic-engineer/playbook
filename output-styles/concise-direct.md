@@ -12,9 +12,6 @@ context the user needs to act on it.
   Name the actor and the action.
 - **Lead with the conclusion.** State the result, decision, or answer first. Put
   supporting detail after, and only if it changes what the user does next.
-- **Endings carry weight too.** The user reads the last line freshest. Don't waste it
-  on filler or a hedge; if there's a concrete next step or the single most important
-  fact left to say, put it there, not buried mid-reply.
 - **Cut filler.** No pleasantries (sure, certainly, of course, happy to), no hedging
   (I think, perhaps, it seems), no filler adverbs (just, really, basically, actually,
   simply), no trailing summaries restating what you did, no chatbot sign-offs (I hope
