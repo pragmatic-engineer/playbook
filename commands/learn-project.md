@@ -24,7 +24,7 @@ Parse `$ARGUMENTS`:
 
 ## Execution rules
 
-1. Run every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive). Don't simulate.
+1. Run every bash block for real with the `Bash` tool. Don't simulate.
 2. Read files before asserting facts about them (grounding).
 3. Combine independent `Bash` calls into a single tool call.
 4. Never edit project code or config. Writes are limited to `~/.config/playbook/memory/` files.
@@ -70,9 +70,9 @@ Then, before collecting:
 
 ## Phase 1: Collect (parallel subagents)
 
-On `--refresh` only, before dispatching, run `playbook memory context --repo $REPO`: its facts block (`name: description` lines), not the full fact bodies. If the command produces no output (empty store, or the `playbook` binary unavailable), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches `$REPO` (or its owner, for `org` scope). Include whichever result you got in each collector's prompt so it can flag what's already documented instead of silently re-discovering it, and note anything that looks stale against what it finds. Note in the report which source produced it: command output, direct graph read, or nothing found. Skip this on a fresh (non-`--refresh`) run: there's rarely anything in the store yet, and this command's job is building it, not consuming it.
+On `--refresh` only, before dispatching, run `playbook memory context --repo $REPO`: its facts block (`name: description` lines), not the full fact bodies. Include the result in each collector's prompt so it can flag what's already documented instead of silently re-discovering it, and note anything that looks stale against what it finds. Skip this on a fresh (non-`--refresh`) run: there's rarely anything in the store yet, and this command's job is building it, not consuming it.
 
-Dispatch these collectors in parallel with `subagent_type: playbook:collector`. `collector` pins Haiku, the cost win this phase is built for. Each returns a compact structured summary (tight JSON or markdown) that cites paths/refs, NOT raw command output. Spawn each collector with a stable `name`; the moment it returns its result, call `TaskStop` on it. A spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished collector, so leaving it unstopped keeps it running in the background.
+Dispatch these collectors in parallel with `subagent_type: playbook:collector`. `collector` pins Haiku, the cost win this phase is built for. Each returns a compact structured summary (tight JSON or markdown) that cites paths/refs, NOT raw command output. Spawn each collector with a stable `name`.
 
 - **git-history**: contributors and ownership, churn hotspots (`git log --format= --name-only | sort | uniq -c | sort -rn`), commit-message and branch conventions, tags/releases, cadence.
 - **code-structure**: top-level tree, entry points, languages, build/test/lint tooling, Dockerfiles / CI-CD configs, IaC, migration dirs and ORM models, `scripts/` and Makefile targets.
@@ -82,7 +82,7 @@ Dispatch these collectors in parallel with `subagent_type: playbook:collector`. 
 
 ## Phase 2: Analyze into topics (parallel subagents)
 
-Feed the Phase 1 findings to one analyst per cluster, spawned with `subagent_type: playbook:analyst`. Spawn each analyst with a stable `name` and `TaskStop` it as soon as it returns. A finished agent stays idle-alive for `SendMessage` follow-ups; this flow never reuses one, so stopping it immediately prevents lingering background processes. Each emits **candidate facts**, where each fact has: `title`, `body` (the fact, then Why, then How to apply), proposed `type` (`project` for repo knowledge, `reference` for external pointers), `scope` (`repo` | `global`), proposed `links` edges, and `anchors` (repo-relative code locations the fact describes: dirs, files, or `file#symbol`).
+Feed the Phase 1 findings to one analyst per cluster, spawned with `subagent_type: playbook:analyst`. Spawn each analyst with a stable `name`. Each emits **candidate facts**, where each fact has: `title`, `body` (the fact, then Why, then How to apply), proposed `type` (`project` for repo knowledge, `reference` for external pointers), `scope` (`repo` | `global`), proposed `links` edges, and `anchors` (repo-relative code locations the fact describes: dirs, files, or `file#symbol`).
 
 Clusters:
 
@@ -101,7 +101,7 @@ Keep facts atomic: one concept per fact. Drop low-signal or self-evident facts.
 ## Phase 3: Classify, dedupe, plan
 
 - **Scope routing:** default `repo`. Mark `global` only when the fact is org/account-wide and not tied to this repo (company tooling, the Atlassian instance, standards seen across repos). A repo fact that contradicts a global one wins for this repo; note it with a `contradicts` edge.
-- **Dedupe:** run `playbook memory context --repo $REPO` once: its facts block already covers both project-scoped and global-scoped facts for this repo (global-scoped facts are always included), so one call replaces both index reads. Load the relevant fact files it names. If the command produces nothing, fall back to reading `~/.config/playbook/memory/memory.graph.json` directly the same way as Phase 1's priming; this fallback is not optional polish here, since a broken dedupe read risks writing a duplicate fact. Note which source produced the result. If a fact already exists: skip it, unless `--refresh`, in which case update the file or write a successor carrying a `supersedes` edge. Never blind-duplicate.
+- **Dedupe:** run `playbook memory context --repo $REPO` once: its facts block already covers both project-scoped and global-scoped facts for this repo (global-scoped facts are always included), so one call replaces both index reads. Load the relevant fact files it names. If it prints `Memory context: none` on a repo that already has facts, stop and report the broken read rather than writing possible duplicates. If a fact already exists: skip it, unless `--refresh`, in which case update the file or write a successor carrying a `supersedes` edge. Never blind-duplicate.
 - **Plan:** show the user a concise table of candidate facts (title · scope · type · new/update/supersede). Ask once: "Write these to memory?" Proceed only on yes; honor a subset selection.
 
 ## Phase 4: Write memory
@@ -164,7 +164,7 @@ One tight summary:
 
 ## Teardown (MUST run, even on failure or abort)
 
-`TaskStop` every subagent spawned in this flow that is still alive. Confirm via `TaskList` that none from this run remain before finishing.
+Close any subagent from this run that is still alive before finishing.
 
 ## Anti-patterns to refuse
 

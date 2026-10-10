@@ -82,11 +82,11 @@ Both paths produce the same file format and land in the right scope of the store
 
 Facts reach context three ways, described in full in [ADR 0004](../adr/0004-graph-first-memory.md) and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md).
 
-**At session start**, the `session-init` hook injects a slice of `memory.graph.json`: every global fact plus every fact scoped to the current repo, as names and one-line descriptions, not full bodies. The slice is capped at 16000 characters, so it cannot grow without bound as the store grows. With no graph file, it injects nothing.
+**At session start**, the `session-init` hook injects one small ranked block from `memory.graph.json`: the global and repo-scoped facts that are pinned, most used (hit counts in `memory.signals.json`), or most linked (edges and anchors), as names and one-line descriptions. It is capped near 2,500 characters, so it does not grow with the store, and it only reads the store. Facts with no pin, use or link are left to prompt and edit recall. With no graph file, it injects nothing.
 
 **Editing or writing a file** surfaces the facts anchored to it: the `memory-anchors` hook matches the edited path against the graph's anchor index and injects the matching facts' names, descriptions, and `depends_on`/`contradicts` neighbours.
 
-**Asking about a file or topic**, a prompt rather than an edit, surfaces matching facts' full bodies, not just their descriptions. `memory-anchors` also runs on every prompt, matching prompt text and this session's already-touched files against the same index, deduped so a fact injects at most once per session.
+**Asking about a file or topic**, a prompt rather than an edit, surfaces matching facts: name, description and the start of the body (cut at 1,500 characters). `memory-anchors` also runs on every prompt, matching prompt words (common words ignored) and this session's already-touched files against the same index, best match first. It injects at most 3 facts per prompt and 9 per session, and a fact injects at most once per session.
 
 The anchor index above builds once per session and is not rebuilt within it, so a fact written mid-session will not surface via anchor or prompt matching until the next session starts.
 

@@ -523,7 +523,7 @@ Subcommands: `context`, `import-claude`, `rebuild`
 
 ### `playbook memory context`
 
-Print the repo-scoped markdown slice of the memory graph (facts in scope, typed edges, anchor index). Prints nothing, exit 0, when the graph is missing or unreadable
+Print the repo-scoped markdown slice of the memory graph (facts in scope, typed edges, anchor index). When there is nothing to show it prints one `Memory context: none (<reason>)` line, exit 0. A missing default graph is rebuilt from the fact files first
 
 - `--repo <REPO>`: Repo slug (`owner/name`); defaults to the origin remote's slug
 - `--graph <GRAPH>`: Graph file; defaults to `~/.config/playbook/memory/memory.graph.json`

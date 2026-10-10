@@ -101,7 +101,7 @@ In auto mode this command never force-pushes and never uses a forced lease. A pu
 
 ## Execution Rules (MUST)
 
-1. **Execute every bash block for real with the `Bash` tool (capital B, tool names are case-sensitive).** Don't simulate or predict output; drive the next step from real output.
+1. **Execute every bash block for real with the `Bash` tool.** Don't simulate or predict output; drive the next step from real output.
 2. **No caching.** Every invocation is a fresh run. Don't reuse results from prior conversations or training data.
 3. **No skipping.** Execute steps in order. The only exception: steps guarded by a flag the user didn't set.
 4. **No assumptions.** Don't guess file contents, command output, or environment state. Run it and read the result.
@@ -143,7 +143,7 @@ If the plan or ADR blueprint ends with a "Confidence + open items" trailer, read
 ## Step 3: Load Standards and Context
 
 - Invoke the `playbook:engineering-standards` skill (testing requirements, mocking, PR readiness, deployment), the `playbook:grounding-research` skill (verify before asserting), `playbook:delegating-subagents` (every dispatch names an output file and the orchestrator reads it; this command delegates every Work Unit, so it governs the whole run), and `playbook:writing-style` (for any prose, e.g. commit messages and the PR body).
-- Load memory context: run `playbook memory context --repo <owner>/<repo>` (`<owner>/<repo>` derived from `git remote get-url origin`), then load the fact files it names on demand (cross-project preferences, corrections, conventions, gotchas, and prior decisions). If the command produces no output (empty store, or the `playbook` binary unavailable, indistinguishable from stdout alone), fall back to reading `~/.config/playbook/memory/memory.graph.json` directly with the `Read` tool and picking out nodes whose `scope` is `global`, or whose `project` matches this repo (or its owner, for `org` scope), since this command is an LLM session and can parse JSON without shelling to `playbook`. Note which path actually produced the result (command output, direct graph read, or nothing found), so a gap or conflict can be traced to its source. Honor the typed edges: a project fact that contradicts a global one wins for this repo, and surface any conflict bearing on the work rather than silently choosing. If nothing is found by either path, skip this step silently and proceed on the codebase and the plan alone.
+- Load memory context: run `playbook memory context --repo <owner>/<repo>` (`<owner>/<repo>` derived from `git remote get-url origin`), then load the fact files it names on demand (cross-project preferences, corrections, conventions, gotchas, and prior decisions). The command reads the memory graph itself and prints a `Memory context: none` line saying why when it has nothing; note whether facts were found, so a gap or conflict can be traced to its source. Honor the typed edges: a project fact that contradicts a global one wins for this repo, and surface any conflict bearing on the work rather than silently choosing. If nothing is found, skip this step silently and proceed on the codebase and the plan alone.
 - **Cost baseline:** find the most recently written `telemetry.jsonl` under `~/.config/playbook/runtime/` (one per session, populated by `statusline.sh` on each render), read its last line, and record the `cost_usd` field as this run's starting cost. No file yet (statusline hasn't rendered this session) means no baseline: Step 7 then reports the cost as unavailable rather than a delta.
 - Read every file the plan references before changing it (grounding).
 - **Detect the stack** to know the verify commands: check `tsconfig.json` / `package.json` (TS/JS), `pyproject.toml` / `setup.py` (Python), `go.mod` (Go), `Cargo.toml` (Rust). Derive the type-check / lint / test commands from what you find.
@@ -252,7 +252,7 @@ The plan's Segments are the starting point; reality wins at the budget.
 
    A plan `Parallel group` annotation, when present, confirms safety but isn't required. A WU that clashes with the forming wave drops to a later wave.
 3. **Draft the wave's briefs (haiku).** Before dispatching, issue ONE Agent call for the whole wave, `model: "haiku"`, mechanical extraction, no judgment calls: hand it the wave's WU rows from the plan (Files, Changes, Test scenarios, Done When) plus the memory slice you selected for each WU (File-based handoff, below), and have it write each WU's `.brief.md`. One call per wave, not one per WU, keeps this to a single round-trip regardless of wave size.
-4. **Dispatch the wave concurrently.** Issue the Agent calls in a single message so they run at once, one worktree per WU (see Worktree isolation). A wave of one runs in the main tree with no worktree. Give each Agent a stable `name`; the moment it returns its result, call `TaskStop` on it. A spawned agent stays idle-alive for `SendMessage` follow-ups and this flow never reuses a finished one, so leaving it unstopped keeps it running in the background.
+4. **Dispatch the wave concurrently.** Issue the Agent calls in a single message so they run at once, one worktree per WU (see Worktree isolation). A wave of one runs in the main tree with no worktree. Give each Agent a stable `name`.
 5. **Integrate, then recompute.** After the wave returns, integrate (below), append to the ledger, then recompute the ready set for the next wave.
 
 Scope each WU's verify command to its own test files (the full suite runs in Step 7) so an in-progress sibling can't trip another's tests.
@@ -435,7 +435,7 @@ A `skip` lens dispatches nothing. Track it explicitly as skipped in the triage s
 
 **Trust gate.** This tiered dispatch mechanism ships and functions as soon as this Work Unit lands: a `full-lens` tier still gets the exact reviewer it always did, a `cheap-check` tier gets a real narrow-scope pass from `cheap-checker`, and a `skip` tier is a real, tracked decision to run nothing. But a `skip` or `cheap-check` decision should not be treated as validated judgment yet: `playbook eval review-triage` (a later Work Unit) has not yet recorded a pass verdict against a real fixture set. Until it has, treat triage's tier choices as best-effort, not proven: a `skip` verdict is not yet evidence a lens truly had nothing to find, and a `cheap-check` narrow pass is not yet guaranteed to have caught everything the full lens would have.
 
-Give each reviewer Task a stable `name` and call `TaskStop` on it the moment it returns its findings. Reviewer agents stay idle-alive after returning; this flow never reuses them, so stop each one immediately.
+Give each reviewer Task a stable `name`.
 
 **The `reviewer` agent is structurally read-only, so a lens can only deliver by returning, and that channel is unreliable** (`playbook:delegating-subagents`). It holds Read, Grep, Glob and Skill; `playbook agents check` forbids `Write` and `Bash` for that tier by design, so there is no file to fall back on. **A lens that returned nothing did NOT run.** Never count it as a clean lens, and never let a swarm with missing lenses read as "no findings": that is how a review swarm silently becomes a no-op while looking thorough. Name the missing lenses in the final report. Start your own pass on the riskiest part of the diff while the swarm runs, so lost lenses cost latency rather than coverage.
 
@@ -643,4 +643,4 @@ That last diff MUST be empty. A squash-merge collapses the branch's internal sha
 
 ## Teardown (MUST run, even on failure or abort)
 
-`TaskStop` every subagent spawned in this flow that is still alive: implementer Tasks from each wave, quality-gate agents from Step 4, and adversarial reviewer Tasks from Step 9. Confirm via `TaskList` that no tasks from this run remain before finishing.
+Close any subagent from this run that is still alive before finishing.

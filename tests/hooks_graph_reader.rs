@@ -985,3 +985,91 @@ fn session_init_fallback_migrates_legacy_graph_file_and_is_idempotent() {
 
     let _ = fs::remove_dir_all(&home);
 }
+
+// ---------------------------------------------------------------------
+// Prompt recall is bounded: stopwords, at most three facts, capped bodies.
+// ---------------------------------------------------------------------
+
+/// `count` global facts whose descriptions all mention `widgets`, each with a
+/// 5,000 character body, written under `home`.
+fn write_widget_facts(home: &Path, count: usize) {
+    let nodes: Vec<Value> = (0..count)
+        .map(|n| {
+            json!({"id": format!("global/widget-{n:02}"), "file": format!("widget-{n:02}.md"),
+                   "scope": "global", "type": "feedback", "name": format!("widget-{n:02}"),
+                   "description": "Use when widgets misbehave"})
+        })
+        .collect();
+    write_graph(home, &json!({"nodes": nodes, "edges": []}).to_string());
+    for n in 0..count {
+        write_fact_body(home, &format!("widget-{n:02}.md"), &"w".repeat(5000));
+    }
+}
+
+#[test]
+fn a_prompt_matching_many_facts_injects_three_with_capped_bodies() {
+    // Arrange
+    let home = scratch_home("recall-cap");
+    write_widget_facts(&home, 20);
+
+    // Act
+    let context = additional_context(&run_prompt_hook(&home, "widgets misbehave", "rc1"));
+
+    // Assert
+    assert_eq!(context.matches("### widget-").count(), 3, "{context}");
+    assert!(context.contains("Use when widgets misbehave"));
+    assert!(context.contains("[cut; full fact:"), "bodies are cut");
+    assert!(
+        context.chars().count() < 5200,
+        "{}",
+        context.chars().count()
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_prompt_of_only_common_words_injects_nothing() {
+    // Arrange: every description holds the words a generic prompt uses.
+    let home = scratch_home("recall-stopwords");
+    let graph = json!({"nodes": [
+        {"id": "global/a", "file": "a.md", "scope": "global", "type": "feedback",
+         "name": "avoid-flaky", "description": "Use when you fix the failing test and add a flag to the cli"}
+    ], "edges": []})
+    .to_string();
+    write_graph(&home, &graph);
+    write_fact_body(&home, "a.md", "BODY\n");
+
+    // Act
+    let context = additional_context(&run_prompt_hook(
+        &home,
+        "can you fix this and add one",
+        "rc2",
+    ));
+
+    // Assert
+    assert_eq!(context, "");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn recall_goes_quiet_after_nine_facts_in_one_session() {
+    // Arrange
+    let home = scratch_home("recall-session-cap");
+    write_widget_facts(&home, 20);
+
+    // Act: five prompts, each able to match fresh facts.
+    let counts: Vec<usize> = (0..5)
+        .map(|_| {
+            additional_context(&run_prompt_hook(&home, "widgets misbehave", "rc3"))
+                .matches("### widget-")
+                .count()
+        })
+        .collect();
+
+    // Assert
+    assert_eq!(counts, vec![3, 3, 3, 0, 0]);
+
+    let _ = fs::remove_dir_all(&home);
+}

@@ -349,12 +349,15 @@ fn main() {
                 let repo = repo
                     .filter(|r| !r.is_empty())
                     .unwrap_or_else(common::repo_slug);
+                // The default graph is derived state: rebuild it from the fact
+                // files when it is missing, so a fresh store still answers.
+                let default_graph = graph.is_none();
                 let graph =
                     graph.unwrap_or_else(|| common::paths::memory_dir().join("memory.graph.json"));
-                let output = json::memorycontext::render_for_graph_file(&graph, &repo);
-                if !output.is_empty() {
-                    println!("{output}");
+                if default_graph && !graph.exists() {
+                    let _ = hooks::rebuild_memory_graph::rebuild_now();
                 }
+                println!("{}", json::memorycontext::render_with_source(&graph, &repo));
             }
         },
         Command::Manifest { sub } => match sub {

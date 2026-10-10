@@ -57,17 +57,6 @@ fn the_print_rule_covers_codes_location_and_zero_findings() {
 }
 
 #[test]
-fn commands_that_run_bash_blocks_name_the_capital_b_tool() {
-    for file in BASH_RUNNERS {
-        let text = read(file);
-        assert!(
-            text.contains("`Bash` tool (capital B, tool names are case-sensitive)"),
-            "{file} must say to run bash blocks with the `Bash` tool"
-        );
-    }
-}
-
-#[test]
 fn no_prose_names_a_lowercase_bash_tool() {
     for file in BASH_RUNNERS {
         for (i, line) in read(file).lines().enumerate() {

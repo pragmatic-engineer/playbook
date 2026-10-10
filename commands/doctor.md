@@ -8,7 +8,7 @@ effort: low
 
 # Doctor
 
-Run the checks with the `Bash` tool (capital B, tool names are case-sensitive):
+Run the checks with the `Bash` tool:
 
 ```bash
 playbook doctor check

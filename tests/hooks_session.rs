@@ -161,7 +161,7 @@ fn session_init_injects_the_graph_backed_slice() {
     fs::write(
         memory_dir.join("memory.graph.json"),
         format!(
-            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"widget-fact-one","description":"The widget module talks to the sprocket service.","project":"{repo_slug}"}}],"edges":[]}}"#
+            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"widget-fact-one","description":"The widget module talks to the sprocket service.","project":"{repo_slug}","pinned":true}}],"edges":[]}}"#
         ),
     )
     .unwrap();
@@ -189,17 +189,15 @@ fn session_init_injects_the_graph_backed_slice() {
     );
 }
 
-/// ADR 0008 WU-1: the graph-backed slice is capped at 16000 chars. A
-/// repo-slice with enough facts to exceed that cap must still be truncated:
-/// an early fact (guaranteed within the first 16000 chars) survives, a fact
-/// deliberately placed past that boundary does not.
+/// The ranked memory block is capped near 2,500 characters. With 120 equally
+/// pinned facts the tie breaks by name, so an early fact survives and one
+/// placed past the cap does not.
 #[test]
-fn session_init_caps_the_graph_backed_slice_like_the_native_fallback() {
-    // Arrange: ~120 facts, each with a ~150-char description, so the
-    // rendered "Facts:" section alone exceeds 16000 chars well before the
-    // last node. Zero-padded names sort in the order the slice
-    // renders them (`sort_by(.name)`), so "fact-001" is early and
-    // "fact-120" is guaranteed past the cap.
+fn session_init_caps_the_ranked_memory_block() {
+    // Arrange: 120 pinned facts, each with a ~150-char description, so the
+    // block would run past 15,000 characters uncapped. Zero-padded names
+    // break the score tie in order, so "fact-001" is early and "fact-120"
+    // is guaranteed past the cap.
     let work = scratch_dir("graph-cap");
     let repo_slug = "acme/widget";
     let repo_dir = work.join("repo");
@@ -212,7 +210,7 @@ fn session_init_caps_the_graph_backed_slice_like_the_native_fallback() {
     let nodes: Vec<String> = (1..=120)
         .map(|n| {
             format!(
-                r#"{{"id":"{repo_slug}/f{n:03}","file":"{repo_slug}/f{n:03}.md","scope":"project","type":"project","name":"fact-{n:03}","description":"desc-{n:03}-{padding}","project":"{repo_slug}"}}"#
+                r#"{{"id":"{repo_slug}/f{n:03}","file":"{repo_slug}/f{n:03}.md","scope":"project","type":"project","name":"fact-{n:03}","description":"desc-{n:03}-{padding}","project":"{repo_slug}","pinned":true}}"#
             )
         })
         .collect();
@@ -240,7 +238,12 @@ fn session_init_caps_the_graph_backed_slice_like_the_native_fallback() {
     );
     assert!(
         !context.contains("fact-120"),
-        "a fact placed past the 16000-char cap should be truncated away: {context}"
+        "a fact placed past the cap should be left out: {context}"
+    );
+    assert!(
+        context.chars().count() <= 2600,
+        "the whole context here is the memory block, held near 2,500 chars: {}",
+        context.chars().count()
     );
 }
 
@@ -259,7 +262,7 @@ fn session_init_falls_back_to_a_native_graph_read() {
     fs::write(
         memory_dir.join("memory.graph.json"),
         format!(
-            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"native-fact-one","description":"parsed straight from the graph file, no script involved","project":"{repo_slug}"}}],"edges":[]}}"#
+            r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"native-fact-one","description":"parsed straight from the graph file, no script involved","project":"{repo_slug}","pinned":true}}],"edges":[]}}"#
         ),
     )
     .unwrap();
@@ -296,12 +299,13 @@ fn session_init_native_fallback_absent_graph_emits_no_memory_block() {
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
+        outcome.stdout.trim().is_empty()
+            || serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
         "stdout should be valid JSON: {}",
         outcome.stdout
     );
     assert!(
-        !context.contains("Project memory for this repo"),
+        !context.contains("Top memory facts for this repo"),
         "no memory block should be emitted when memory.graph.json is absent: {context}"
     );
 }
@@ -326,12 +330,13 @@ fn session_init_native_fallback_malformed_graph_emits_no_memory_block() {
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
+        outcome.stdout.trim().is_empty()
+            || serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
         "stdout should be valid JSON: {}",
         outcome.stdout
     );
     assert!(
-        !context.contains("Project memory for this repo"),
+        !context.contains("Top memory facts for this repo"),
         "no memory block should be emitted for a malformed graph file: {context}"
     );
 }
@@ -359,12 +364,13 @@ fn session_init_native_fallback_no_nodes_array_emits_no_memory_block() {
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
+        outcome.stdout.trim().is_empty()
+            || serde_json::from_str::<serde_json::Value>(&outcome.stdout).is_ok(),
         "stdout should be valid JSON: {}",
         outcome.stdout
     );
     assert!(
-        !context.contains("Project memory for this repo"),
+        !context.contains("Top memory facts for this repo"),
         "no memory block should be emitted when the graph file has no nodes array: {context}"
     );
 }
@@ -384,7 +390,7 @@ fn session_init_migrates_legacy_home_memory_root_before_recall() {
     fs::write(
         legacy_dir.join("memory.graph.json"),
         format!(
-            r#"{{"nodes":[{{"id":"{repo_slug}/legacy-root-fact","file":"{repo_slug}/legacy-root-fact.md","scope":"project","type":"project","name":"legacy-root-fact","description":"still under the old home tree","project":"{repo_slug}"}}],"edges":[]}}"#
+            r#"{{"nodes":[{{"id":"{repo_slug}/legacy-root-fact","file":"{repo_slug}/legacy-root-fact.md","scope":"project","type":"project","name":"legacy-root-fact","description":"still under the old home tree","project":"{repo_slug}","pinned":true}}],"edges":[]}}"#
         ),
     )
     .unwrap();
@@ -438,7 +444,7 @@ fn session_init_no_memory_store_emits_no_memory_block() {
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        !context.contains("Project memory for this repo"),
+        !context.contains("Top memory facts for this repo"),
         "no memory block should be emitted: {context}"
     );
 }
@@ -473,7 +479,7 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        !context.contains("Project memory for this repo"),
+        !context.contains("Top memory facts for this repo"),
         "no memory block should be emitted outside a git repo: {context}"
     );
     assert!(
@@ -603,7 +609,7 @@ fn session_init_injects_a_pinned_fact_independent_of_general_memory_slice() {
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("Facts pinned or frequently used in this repo:"),
+        context.contains("Top memory facts for this repo"),
         "additionalContext should carry the promoted-facts block header: {context}"
     );
     assert!(
@@ -649,7 +655,7 @@ fn session_init_injects_a_promoted_fact_independent_of_general_memory_slice() {
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("Facts pinned or frequently used in this repo:"),
+        context.contains("Top memory facts for this repo"),
         "additionalContext should carry the promoted-facts block header: {context}"
     );
     assert!(
@@ -730,7 +736,7 @@ fn a_global_promoted_fact_injects_regardless_of_repo() {
     // no-CLAUDE_PLUGIN_ROOT branch, just without that header or bullet.
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("Facts pinned or frequently used in this repo:"),
+        context.contains("Top memory facts for this repo"),
         "additionalContext should carry the promoted-facts block header: {context}"
     );
     assert!(
@@ -771,7 +777,7 @@ fn an_org_scoped_promoted_fact_injects_for_a_sibling_repo_under_the_same_owner()
     // no-CLAUDE_PLUGIN_ROOT branch, just without that header or bullet.
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert!(
-        context.contains("Facts pinned or frequently used in this repo:"),
+        context.contains("Top memory facts for this repo"),
         "additionalContext should carry the promoted-facts block header: {context}"
     );
     assert!(
@@ -1164,14 +1170,13 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
 }
 
 // ---------------------------------------------------------------------
-// session-init: toolkit primer content
+// session-init: no toolkit primer or async note
 // ---------------------------------------------------------------------
 
 #[test]
-fn session_init_toolkit_primer_points_at_playbook_plan() {
-    // Arrange: one command file under the scratch HOME, enough to make the
-    // skills/commands primer (and its TOOLKIT_PREAMBLE) non-empty, since
-    // that block stays silent when both catalogs are empty.
+fn session_init_injects_no_toolkit_primer_even_with_user_commands() {
+    // Arrange: one command file under the scratch HOME, which used to make
+    // the toolkit primer fire. Claude Code already lists skills and commands.
     let home = scratch_dir("toolkit-primer");
     let commands_root = home.join(".claude").join("commands");
     fs::create_dir_all(&commands_root).unwrap();
@@ -1191,21 +1196,15 @@ fn session_init_toolkit_primer_points_at_playbook_plan() {
         &[],
     );
 
-    // Assert: the toolkit primer names the merged /playbook:plan command
-    // and no longer mentions the retired /playbook:brainstorm or
-    // /playbook:scope pair.
+    // Assert
     let context = additional_context(&outcome.stdout);
     assert!(
-        context.contains("/playbook:plan"),
-        "toolkit primer should mention /playbook:plan: {context}"
+        !context.contains("Your toolkit") && !context.contains("a test command"),
+        "the toolkit primer is retired: {context}"
     );
     assert!(
-        !context.contains("/playbook:scope"),
-        "toolkit primer should not mention retired /playbook:scope: {context}"
-    );
-    assert!(
-        !context.contains("/playbook:brainstorm"),
-        "toolkit primer should not mention retired /playbook:brainstorm: {context}"
+        !context.contains("Async and deferred-tool discipline"),
+        "the async note is retired: {context}"
     );
 }
 
@@ -1354,8 +1353,6 @@ fn session_init_degrades_quietly_when_both_shell_outs_are_unreachable() {
         r#"{"session_id":"sid-fail","source":"startup"}"#,
         &[
             ("CLAUDE_PLUGIN_ROOT", "/nonexistent-plugin-root-xyz"),
-            ("SKILLS_PRIMER", "0"),
-            ("ASYNC_DISCIPLINE", "0"),
             ("AUTO_LEARN_NUDGE", "0"),
         ],
     );
@@ -2084,7 +2081,6 @@ const SESSION_START: &str =
 const OFF_SWITCH: &str = "playbook mode ask";
 const ENV_OFF_SWITCH: &str = "unset `PLAYBOOK_MODE`";
 const AUTO_RULE: &str = "wherever the command allows it, take the recommended answer and log it as an assumption instead of asking";
-const ASYNC_NOTE: &str = "Async and deferred-tool discipline";
 
 /// SessionStart `additionalContext` from the real binary under the isolated
 /// auto env, with the scratch config and the extra variables applied.
@@ -2159,7 +2155,7 @@ fn session_init_in_ask_emits_no_auto_block() {
 }
 
 #[test]
-fn session_init_in_auto_with_headless_keeps_the_auto_block_and_the_other_skips() {
+fn session_init_in_auto_with_headless_keeps_the_auto_block() {
     // Arrange / Act
     let context =
         auto_session_context("auto-headless", Some("auto"), &[("PLAYBOOK_HEADLESS", "1")]);
@@ -2169,24 +2165,136 @@ fn session_init_in_auto_with_headless_keeps_the_auto_block_and_the_other_skips()
         context.contains("source: config") && context.contains(OFF_SWITCH),
         "headless must not drop the auto block: {context}"
     );
+}
+
+// ---------------------------------------------------------------------
+// session-init: the ranked memory block
+// ---------------------------------------------------------------------
+
+/// A scratch HOME holding `graph` and `signals`, plus a repo whose origin is
+/// `acme/widget`. Returns `(repo_dir, home)`.
+fn ranked_world(tag: &str, graph: &str, signals: Option<&str>) -> (PathBuf, PathBuf) {
+    let work = scratch_dir(tag);
+    let repo_dir = work.join("repo");
+    init_repo_with_origin(&repo_dir, "git@github.com:acme/widget.git");
+    let home = work.join("home");
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    fs::create_dir_all(&memory_dir).unwrap();
+    fs::write(memory_dir.join("memory.graph.json"), graph).unwrap();
+    if let Some(signals) = signals {
+        fs::write(memory_dir.join("memory.signals.json"), signals).unwrap();
+    }
+    (repo_dir, home)
+}
+
+fn node(name: &str, extra: &str) -> String {
+    format!(
+        r#"{{"id":"acme/widget/{name}","file":"acme/widget/{name}.md","scope":"project","type":"project","name":"{name}","description":"About {name}.","project":"acme/widget"{extra}}}"#
+    )
+}
+
+#[test]
+fn memory_block_ranks_pinned_then_used_then_linked_and_drops_the_rest() {
+    // Arrange: one fact per rank, plus a fact with no signal at all.
+    let nodes = [
+        node("zz-linked", ""),
+        node("yy-used", ""),
+        node("xx-pinned", r#","pinned":true"#),
+        node("ww-quiet", ""),
+        node("vv-partner", ""),
+    ]
+    .join(",");
+    let graph = format!(
+        r#"{{"nodes":[{nodes}],"edges":[{{"from":"acme/widget/zz-linked","to":"acme/widget/vv-partner","relation":"relates_to"}}]}}"#
+    );
+    let signals = r#"{"nodes":{"acme/widget/yy-used":{"hits":4,"promoted":true}}}"#;
+    let (repo_dir, home) = ranked_world("rank-order", &graph, Some(signals));
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert
+    let at = |name: &str| context.find(&format!("- {name}:"));
     assert!(
-        !context.contains(ASYNC_NOTE),
-        "headless must still skip the async note: {context}"
+        at("xx-pinned") < at("yy-used") && at("yy-used") < at("zz-linked"),
+        "pinned, then used, then linked: {context}"
+    );
+    assert!(at("xx-pinned").is_some());
+    assert!(
+        at("ww-quiet").is_none(),
+        "a fact with no pin, use or link is left out: {context}"
     );
 }
 
 #[test]
-fn session_init_in_auto_without_headless_keeps_the_async_note() {
-    // Arrange / Act
-    let context = auto_session_context("auto-interactive", Some("auto"), &[]);
+fn memory_block_is_empty_when_no_fact_has_any_signal() {
+    // Arrange
+    let graph = format!(r#"{{"nodes":[{}],"edges":[]}}"#, node("quiet-fact", ""));
+    let (repo_dir, home) = ranked_world("rank-none", &graph, None);
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
 
     // Assert
     assert!(
-        context.contains("source: config") && context.contains(OFF_SWITCH),
-        "the auto block should be injected: {context}"
+        !additional_context(&outcome.stdout).contains("quiet-fact"),
+        "{}",
+        outcome.stdout
     );
+}
+
+#[test]
+fn session_init_never_writes_to_the_memory_store() {
+    // Arrange
+    let graph = format!(
+        r#"{{"nodes":[{}],"edges":[]}}"#,
+        node("pinned-fact", r#","pinned":true"#)
+    );
+    let signals = r#"{"nodes":{"acme/widget/pinned-fact":{"hits":2}}}"#;
+    let (repo_dir, home) = ranked_world("rank-readonly", &graph, Some(signals));
+    let memory_dir = home.join(".config").join("playbook").join("memory");
+    // The ranking reads these two files; the one-off migration marker that
+    // session start has always written is outside this check.
+    let snapshot = |dir: &Path| -> Vec<Vec<u8>> {
+        ["memory.graph.json", "memory.signals.json"]
+            .iter()
+            .map(|name| fs::read(dir.join(name)).unwrap_or_default())
+            .collect()
+    };
+    let before = snapshot(&memory_dir);
+
+    // Act
+    let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
+
+    // Assert
+    assert!(additional_context(&outcome.stdout).contains("pinned-fact"));
+    assert_eq!(before, snapshot(&memory_dir));
+}
+
+#[test]
+fn a_huge_handoff_is_cut_so_the_whole_context_stays_under_the_harness_cap() {
+    // Arrange: a 30,000 character handoff plus a pinned fact.
+    let graph = format!(
+        r#"{{"nodes":[{}],"edges":[]}}"#,
+        node("pinned-fact", r#","pinned":true"#)
+    );
+    let (repo_dir, home) = ranked_world("rank-handoff-cap", &graph, None);
+    write_handoff(&home, &repo_dir, &"handoff line\n".repeat(2500));
+
+    // Act
+    let outcome = run_session_init_at(&repo_dir, &home);
+    let context = additional_context(&outcome.stdout);
+
+    // Assert: the harness replaces anything past 10,000 characters.
     assert!(
-        context.contains(ASYNC_NOTE),
-        "an interactive auto session still gets the async note: {context}"
+        context.chars().count() <= 9000,
+        "context is {} chars",
+        context.chars().count()
+    );
+    assert!(context.contains("handoff cut to fit"), "{context}");
+    assert!(
+        context.contains("pinned-fact"),
+        "memory still fits: {context}"
     );
 }
