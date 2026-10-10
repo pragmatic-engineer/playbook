@@ -210,21 +210,28 @@ Every Agent prompt MUST include: a pointer to its Work Unit's brief file (Step 5
 
 **Execution unit (MUST): the plan's Work Units, grouped by Segment.** Execute **one Segment at a time** in dependency order (Step 4.5). Within a Segment, execute its Work Units with the wave scheduler below; each WU becomes one small savepoint commit. The scheduler, worktree isolation, TDD flow, and verify-by-diff are unchanged; they just run scoped to the current Segment's WUs. **A wave never mixes WUs from two Segments:** the outer Segment loop is strictly sequential relative to the inner wave loop, so the ready set is always drawn from the current Segment only.
 
-**Per-Segment setup (MUST): branch per topology.** Before a Segment's first commit, put HEAD on the right branch (always branch-first; never commit to the default branch). `<seg-slug>` is the Segment's Title kebab-cased and truncated, the same way `<plan-slug>` derives from the topic (Step 7 of `/playbook:plan`). Capture the branch's starting ref as `<segment-base>` (used by the re-split guard):
+**Per-Segment setup (MUST): branch per topology.** Before a Segment's first commit, put HEAD on the right branch (always branch-first; never commit to the default branch) with one call. `<seg-slug>` is the Segment's Title kebab-cased and truncated by the command, the same way `<plan-slug>` derives from the topic (Step 7 of `/playbook:plan`):
 
-- **Stacked:** `git switch -c <type>/<plan-slug>-s<N>-<seg-slug>` off the previous Segment's branch (Segment 1 off the default branch); `<segment-base>` is that starting ref. The base for Segment N's PR is Segment N-1's branch.
-- **Independent:** each Segment branch off the default branch; `<segment-base>` is the default branch.
-- **Single:** one shared branch for the whole plan (the pre-existing behaviour); `<segment-base>` is the branch tip captured at this Segment's first commit.
-- **`land` boundary (overrides the topology's base, all three topologies):** `git fetch origin <default-branch>` first, then branch off `origin/<default-branch>`; `<segment-base>` is `origin/<default-branch>` at that fetched SHA. Never branch off the previous Segment's branch: under `land` that branch is already merged, and with `delete_branch_on_merge: true` it may no longer exist on origin. Never branch off the *local* default branch, which is stale the moment Segment N-1 merged.
+```bash
+playbook segment branch --type <type> --plan-slug <plan-slug> --n <N> --title "<Segment title>" \
+  --topology <stacked|independent|single> --default-branch <default-branch> \
+  [--prev-branch <previous Segment branch>] [--land]
+```
 
-On a **ledger-driven resume** (Step 5 ledger, e.g. after `/clear`, a crash, or a fresh checkout), the previous Segment's branch may not exist locally: `git fetch origin <prev-Segment-branch>` (or confirm the ref exists) before branching off it. Record `Segment id -> branch -> <segment-base> -> WU commit range` in the ledger as you go.
+It prints `branch=<name> base=<sha> base_ref=<ref>`. `base` is `<segment-base>`, used by the re-split guard. It creates `<type>/<plan-slug>-s<N>-<seg-slug>` from the base the topology needs: the default branch for **independent** Segments, the previous Segment's branch for **stacked** ones (Segment 1 off the default branch; the base for Segment N's PR is Segment N-1's branch), and under **single** nothing is created, because the whole plan shares one branch whose tip is the base. With `--land` (all three topologies) it fetches `origin/<default-branch>` and branches off that, never off the previous Segment's branch (already merged, possibly deleted) and never off the stale local default branch. It exits 1 when the branch already exists or, under single, when HEAD is on the default branch.
 
-**Re-split guard (MUST, hard limit = 1500 changed lines; Segments target under 500).** After a Segment's WUs are committed, measure its real diff against its base: `git diff --shortstat <segment-base>...HEAD`. If changed lines exceed 1500, split the Segment at WU boundaries, in git:
+On a **ledger-driven resume** (Step 5 ledger, e.g. after `/clear`, a crash, or a fresh checkout), a Segment branch that already exists is resumed with `git switch`; the command also fetches a stacked previous branch that is not local. Record `Segment id -> branch -> <segment-base> -> WU commit range` in the ledger as you go.
 
-1. Pick the last WU that keeps the Segment at or under budget; call its commit `<split-sha>`.
-2. Rename the current Segment branch to hold the excess commits: `git branch -m <current-branch> <type>/<plan-slug>-s<N>b-<seg-slug>`. Then create the trimmed Segment branch at the split point under the original name and switch to it: `git switch -c <current-branch> <split-sha>`. No branch is reset.
-3. The new `s<N>b` Segment branches off the trimmed current Segment (its `<segment-base>` is `<split-sha>`; under **independent** it still branches off the default branch); its PR targets the current Segment's branch under stacked, the default branch under independent, or the current Segment's (shared) branch under single. The `b` suffix avoids colliding with a planned `s<N+1>`. **Under single topology this means the re-split adds one follow-up PR** stacked on the shared branch: single still ships one PR normally, but the 1500 hard limit is never breached, so an overflowing single plan yields the shared-branch PR plus one follow-up.
-4. **Deliver `s<N>b` as the very next Segment**, before any pre-planned `s<N+1>`, then continue the outer loop. Note the re-split (new Segment id, split point) in the ledger and the final report.
+**Re-split guard (MUST, hard limit = 1500 changed lines; Segments target under 500).** After a Segment's WUs are committed, run `playbook segment size --base <segment-base>`; it prints `lines=N files=M over=true|false`. When `over=true`, split the Segment at a WU boundary:
+
+```bash
+playbook segment resplit --base <segment-base> --type <type> --plan-slug <plan-slug> --n <N> --title "<Segment title>"
+```
+
+It finds the last WU commit that keeps the Segment at or under 1500 lines (`<split-sha>`), renames the current branch to `<type>/<plan-slug>-s<N>b-<seg-slug>` so it keeps every commit, recreates the original branch name at `<split-sha>` and checks it out. It prints `split=<sha> trimmed=<branch> excess=<branch>`; no branch is reset. It exits 1 when even the first WU commit is over the limit.
+
+- The new `s<N>b` Segment's `<segment-base>` is `<split-sha>` (under **independent** it still branches off the default branch). Its PR targets the current Segment's branch under stacked, the default branch under independent, or the current Segment's (shared) branch under single. The `b` suffix avoids colliding with a planned `s<N+1>`. **Under single topology this means the re-split adds one follow-up PR** stacked on the shared branch: single still ships one PR normally, but the 1500 hard limit is never breached.
+- **Deliver `s<N>b` as the very next Segment**, before any pre-planned `s<N+1>`, then continue the outer loop. Note the re-split (new Segment id, split point) in the ledger and the final report.
 
 **Under `land`, a re-split defers `s<N>b` (MUST).** The re-split creates `s<N>b` before the current Segment has merged, which is the one place this command creates a later Segment's branch ahead of time. Do NOT open its PR yet. Land the current Segment first, then `git fetch origin <default-branch>`, `git rebase --onto origin/<default-branch> <split-sha> <type>/<plan-slug>-s<N>b-<seg-slug>`, and deliver `s<N>b` as the next Segment with the default branch as its base. Its PR must never target the current Segment's branch, which is merged and likely deleted.
 

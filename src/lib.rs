@@ -35,6 +35,7 @@ pub mod release;
 pub mod review;
 pub mod routing;
 pub mod sanitize;
+pub mod segment;
 pub mod settings;
 pub mod state;
 pub mod statusline;
@@ -523,6 +524,11 @@ pub enum Command {
     Review {
         #[command(subcommand)]
         sub: ReviewCommand,
+    },
+    /// The git recipes `/playbook:implement` runs for a Segment
+    Segment {
+        #[command(subcommand)]
+        sub: SegmentCommand,
     },
     /// List the plans and ADR blueprints `/playbook:implement` can run
     ///
@@ -1863,4 +1869,101 @@ mod tests {
             .try_get_matches_from(["playbook", "hook", "session-init"])
             .is_ok());
     }
+}
+
+/// How a plan's Segments are delivered.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SegmentTopology {
+    Stacked,
+    Independent,
+    Single,
+}
+
+/// Naming arguments shared by `segment branch` and `segment resplit`.
+#[derive(Debug, clap::Args)]
+pub struct SegmentNaming {
+    /// Conventional commit type for the branch name, such as feat
+    #[arg(long = "type")]
+    pub kind: String,
+    /// The plan slug
+    #[arg(long)]
+    pub plan_slug: String,
+    /// The Segment number
+    #[arg(long)]
+    pub n: u32,
+    /// The Segment title, kebab-cased and truncated into the branch name
+    #[arg(long)]
+    pub title: String,
+    /// The repository's default branch
+    #[arg(long, default_value = "main")]
+    pub default_branch: String,
+    /// The repository to run in; defaults to the current directory
+    #[arg(long)]
+    pub dir: Option<PathBuf>,
+}
+
+/// `playbook segment` subcommands.
+#[derive(Debug, clap::Subcommand)]
+pub enum SegmentCommand {
+    /// Put HEAD on the branch a Segment is built on
+    ///
+    /// Names the branch `<type>/<plan-slug>-s<N>-<title>` and creates it from
+    /// the right base: the default branch for independent Segments, the
+    /// previous Segment's branch for stacked ones (fetched when it is not
+    /// local), and always the fetched `origin/<default>` under `--land`. The
+    /// single topology creates nothing and reports the current branch and tip.
+    /// Prints `branch=<name> base=<sha> base_ref=<ref>`. Exits 1 when the
+    /// branch already exists.
+    ///
+    /// Example: `playbook segment branch --type feat --plan-slug my-plan --n 2 --title "Parser core" --topology stacked --prev-branch feat/my-plan-s1-schema`
+    Branch {
+        #[command(flatten)]
+        naming: SegmentNaming,
+        /// stacked, independent or single
+        #[arg(long, value_enum)]
+        topology: SegmentTopology,
+        /// The previous Segment's branch, for a stacked Segment past the first
+        #[arg(long)]
+        prev_branch: Option<String>,
+        /// The land boundary: branch off the fetched origin default branch
+        #[arg(long)]
+        land: bool,
+    },
+    /// Measure a Segment against its base
+    ///
+    /// Prints `lines=N files=M over=true|false` for `BASE...HEAD`; `over` is
+    /// true past the limit.
+    ///
+    /// Example: `playbook segment size --base main`
+    Size {
+        /// The Segment's base ref
+        #[arg(long)]
+        base: String,
+        /// Changed lines at which a Segment is over budget
+        #[arg(long, default_value_t = 1500)]
+        limit: u64,
+        /// The repository to run in; defaults to the current directory
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// Cut an over-budget Segment at a Work Unit boundary
+    ///
+    /// Finds the last commit that keeps `BASE...commit` within the limit,
+    /// renames the current branch to `<type>/<plan-slug>-s<N>b-<title>` (it
+    /// keeps every commit) and recreates the original branch name at the split
+    /// commit. Prints `split=none` when the Segment already fits, otherwise
+    /// `split=<sha> trimmed=<branch> excess=<branch>`. Exits 1 when even the
+    /// first commit is over the limit.
+    ///
+    /// Example: `playbook segment resplit --base main --type feat --plan-slug my-plan --n 2 --title "Parser core"`
+    Resplit {
+        #[command(flatten)]
+        naming: SegmentNaming,
+        /// The Segment's base ref
+        #[arg(long)]
+        base: String,
+        /// Changed lines at which a Segment is over budget
+        #[arg(long, default_value_t = 1500)]
+        limit: u64,
+    },
 }
