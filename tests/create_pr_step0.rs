@@ -119,3 +119,26 @@ fn a_missing_skill_names_the_fallback() {
         "{out}"
     );
 }
+
+#[test]
+fn the_commit_flag_writes_one_small_slice() {
+    let o = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["pr", "rules", "--commit", "--plugin-root"])
+        .arg(root())
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let path = PathBuf::from(String::from_utf8_lossy(&o.stdout).trim());
+    assert!(path.ends_with("writing-style-commit.md"), "{path:?}");
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(text.contains("IRON RULE") && text.contains("Banned Words"));
+    assert!(!text.contains("When reviewing"));
+    let full = fs::read_to_string(root().join("skills/writing-style/SKILL.md")).unwrap();
+    assert!(
+        text.len() * 5 < full.len(),
+        "{} of {}",
+        text.len(),
+        full.len()
+    );
+    let _ = fs::remove_dir_all(path.parent().unwrap());
+}
