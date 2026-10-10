@@ -335,7 +335,7 @@ Example: `playbook effort xhigh`
 - `<LEVEL>`: auto, low, medium, high, xhigh or max
 - `--json`: Print the status as JSON (with no level)
 
-Subcommands: `list`, `resolve`
+Subcommands: `list`, `resolve`, `suggest`
 
 ### `playbook effort list`
 
@@ -356,6 +356,17 @@ Example: `playbook effort resolve agents reviewer --cap medium --json`
 - `<KIND>`: agents, commands or skills
 - `<NAME>`: The component name, such as `reviewer` or `deep-review`
 - `--cap <CAP>`: An extra ceiling from the caller: low, medium, high, xhigh or max
+- `--json`: Print JSON
+
+### `playbook effort suggest`
+
+List agents where a change to effort looks safe or needed (read only)
+
+Reads the local usage store and the quality floor table and prints, for each agent, its dispatches, reruns and overrides, the cost per effort level, and whether lowering is permitted or something needs a look. Lowering is only ever proposed down to the benchmark floor. Nothing is written: not the store, not memory, not any settings file. Cost is per model and effort bucket, shared with the main session.
+
+Example: `playbook effort suggest --range 90d --json`
+
+- `--range <RANGE>`: 30d, 60d, 90d, month or all
 - `--json`: Print JSON
 
 ### `playbook eval`

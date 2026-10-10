@@ -16,7 +16,9 @@
 //! nothing. A session started without the launcher gets no playbook ceiling.
 
 pub mod component;
+pub mod floor;
 pub mod model_cap;
+pub mod suggest;
 
 use crate::config::{self, write};
 use serde_json::Value;

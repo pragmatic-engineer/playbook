@@ -102,6 +102,24 @@ pub enum EffortCommand {
         #[arg(long)]
         json: bool,
     },
+    /// List agents where a change to effort looks safe or needed (read only)
+    ///
+    /// Reads the local usage store and the quality floor table and prints, for
+    /// each agent, its dispatches, reruns and overrides, the cost per effort
+    /// level, and whether lowering is permitted or something needs a look.
+    /// Lowering is only ever proposed down to the benchmark floor. Nothing is
+    /// written: not the store, not memory, not any settings file. Cost is per
+    /// model and effort bucket, shared with the main session.
+    ///
+    /// Example: `playbook effort suggest --range 90d --json`
+    Suggest {
+        /// 30d, 60d, 90d, month or all
+        #[arg(long, default_value = "30d")]
+        range: String,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List every component with its shipped effort and effective level
     List {
         /// Print JSON

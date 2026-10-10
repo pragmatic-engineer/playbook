@@ -119,6 +119,30 @@ fn main() {
                         )
                     );
                 }
+                playbook::EffortCommand::Suggest { range, json } => {
+                    let Some(range) = usage::query::Range::parse(Some(&range)) else {
+                        eprintln!(
+                            "error: unknown range '{range}', use 30d, 60d, 90d, month or all"
+                        );
+                        std::process::exit(1);
+                    };
+                    let now = common::time::now_secs();
+                    match effort::suggest::run(
+                        &home,
+                        claude.as_deref(),
+                        root.as_deref(),
+                        &common::paths::usage_db_dir().join("usage.db"),
+                        range,
+                        now,
+                    ) {
+                        Ok(report) if json => println!("{}", report.to_json()),
+                        Ok(report) => println!("{}", report.to_text()),
+                        Err(err) => {
+                            eprintln!("error: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 playbook::EffortCommand::Resolve {
                     kind,
                     name,
