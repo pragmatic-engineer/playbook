@@ -36,7 +36,7 @@ Only you should run these. If auto comes from `PLAYBOOK_MODE`, unset the variabl
 
 Two hooks watch every session whose resolved mode is `auto`.
 
-**Question hook (`auto-guard`).** It denies the question tool, so the model takes the recommended option. It also adds a one line reminder to each prompt.
+**Question hook (`auto-guard`).** It denies the question tool, so the model takes the recommended option. In the default permission mode it also advises, once per session, launching with a trusted permission mode. The standing auto-mode rule comes from `session-init` at SessionStart.
 
 **Spend cap hook (`auto-cost`).** It totals what the session has cost. At `auto.warnPct` (default 70) of `auto.budgetUsd` (default 5, in US dollars) it warns once. At the cap it denies every tool except reading files, `git status`, `git diff`, `playbook mode status`, and writing a short note about where the work stopped.
 

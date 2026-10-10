@@ -416,7 +416,7 @@ fn fires(f: &Fire, name: &str) -> bool {
         }
         "auto-guard" => {
             let ask = r#"{"session_id":"fire-auto-guard","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]}}"#;
-            let prompt = r#"{"session_id":"fire-auto-guard","hook_event_name":"UserPromptSubmit","prompt":"hi"}"#;
+            let prompt = r#"{"session_id":"fire-auto-guard","hook_event_name":"UserPromptSubmit","permission_mode":"default","prompt":"hi"}"#;
             let auto = |payload: &str, mode: &[(&str, &str)]| {
                 let home = scratch(f, "h-auto");
                 run_hook(
@@ -436,7 +436,7 @@ fn fires(f: &Fire, name: &str) -> bool {
                 && ok2
                 && out2.contains("\"permissionDecision\":\"deny\"")
                 && ok3
-                && out3.contains("AUTO MODE is on")
+                && out3.contains("trusted permission mode")
         }
         "auto-cost" => {
             let payload = r#"{"session_id":"fire-auto-cost","hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"prompt":"x"}}"#;
