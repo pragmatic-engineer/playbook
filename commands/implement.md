@@ -393,13 +393,19 @@ This reviews the IMPLEMENTED work, not the plan: Step 4's adversarial review ran
 
 Otherwise, dispatch `review-triage` (`subagent_type: playbook:review-triage`) exactly once, before the swarm, scoped to Step 9's fixed 5 lenses (`correctness`, `behaviour-drift`, `principles`, `scope`, `tests`), against the implemented diff (the same full branch diff the swarm dispatch below uses), the plan, and the refinement notes. Capture the returned tier map.
 
-Three fail-open rules apply: if the `review-triage` dispatch itself fails, times out, or returns nothing at all, every lens defaults to `full-lens`. If it returns a tier map missing one or more lenses, each missing lens individually defaults to `full-lens`, keeping the lenses present in the map at their returned tier. If a lens IS present in the map but its `tier` value is anything other than `skip`, `cheap-check`, or `full-lens` (a drifted or malformed classifier response), that lens defaults to `full-lens` too: it must never fall through the dispatch-by-tier branches below silently.
+Complete the map in code. Write the triage return text to a file (or pipe it with `--tiers -`; omit `--tiers` when the dispatch failed or returned nothing) and run:
 
-**Under `--no-tests` (or an explicit "No new tests" answer),** the `tests` lens resolves to `skip` with the recorded reason "no new tests by explicit user choice", overriding triage for that lens only; the other four lenses triage as usual. Tell every dispatched reviewer that missing new tests is intentional and not a finding. A broken existing test is still a finding.
+```bash
+playbook review triage-merge --lenses correctness,behaviour-drift,principles,scope,tests --tiers <file>
+```
 
-Report which lenses resolved to which tier as a one-line summary, e.g. "Triage: correctness=full-lens, tests=cheap-check, scope=skip", before the swarm dispatches.
+It prints the full tier map as JSON plus a `Triage:` line. A dispatch that failed or returned nothing, a lens the map left out, and a `tier` other than `skip`, `cheap-check` or `full-lens` all become `full-lens`; lenses triage did classify keep their tier. Use the printed map below.
 
-Dispatch it as a swarm of lens-specialized reviewers in parallel (each reads the diff, none writes, so parallel is always safe): for each of the 5 lenses, read its triage tier from the tier map captured above before dispatching; a lens absent from the map defaults to `full-lens`, per the fail-open-per-lens rule above. A `full-lens` lens dispatches a `reviewer` agent (`subagent_type: playbook:reviewer`, or the `-low` or `-xhigh` variant per "Pick the tier" in `playbook:delegating-subagents`) exactly as this step already did before tiered dispatch existed, issued as one Agent call per lens in a single message, with its lens as the focus, the full branch diff, the plan, and the refinement notes; the prompt shape stays the same apart from asking for plain findings: a Conventional Comments label, `file:line`, evidence, a short failure scenario and one fix in plain words, no comment body, and the reviewer never loads `playbook:writing-style` (nothing here is posted). Each lens tries to break the work, not bless it:
+**Under `--no-tests` (or an explicit "No new tests" answer),** the `tests` lens resolves to `skip` with the recorded reason "no new tests by explicit user choice", overriding triage for that lens only; the other four lenses triage as usual: add `--force 'tests=skip:no new tests by explicit user choice'` to the `triage-merge` call. Tell every dispatched reviewer that missing new tests is intentional and not a finding. A broken existing test is still a finding.
+
+Report the `Triage:` line it printed before the swarm dispatches.
+
+Dispatch it as a swarm of lens-specialized reviewers in parallel (each reads the diff, none writes, so parallel is always safe): for each of the 5 lenses, read its tier from the map `triage-merge` printed above before dispatching. A `full-lens` lens dispatches a `reviewer` agent (`subagent_type: playbook:reviewer`, or the `-low` or `-xhigh` variant per "Pick the tier" in `playbook:delegating-subagents`) exactly as this step already did before tiered dispatch existed, issued as one Agent call per lens in a single message, with its lens as the focus, the full branch diff, the plan, and the refinement notes; the prompt shape stays the same apart from asking for plain findings: a Conventional Comments label, `file:line`, evidence, a short failure scenario and one fix in plain words, no comment body, and the reviewer never loads `playbook:writing-style` (nothing here is posted). Each lens tries to break the work, not bless it:
 
 - **Correctness:** bugs, off-by-one, unhandled errors, regressions the tests miss.
 - **Behaviour drift:** did any simplification or refactor change observable behaviour?
@@ -407,29 +413,7 @@ Dispatch it as a swarm of lens-specialized reviewers in parallel (each reads the
 - **Scope:** anything built beyond the plan; anything the plan required but is missing.
 - **Tests:** weak assertions, missing boundary or regression coverage, flakiness.
 
-A `cheap-check` lens dispatches a `cheap-checker` agent (`subagent_type: playbook:cheap-checker`) instead of `reviewer`. Its prompt names the lens's narrow concern, taken from the tier map's `reason` field for that lens, the full branch diff, the plan, the refinement notes, and ONE `skills/grounding-review/references/<file>.md` path to read for criteria, per this mapping (Step 9's 5 lenses carry different names from `/playbook:deep-review`'s lenses, so they need their own mapping, written here rather than reused from that command):
-
-| Lens | Reference file |
-|---|---|
-| correctness | correctness.md |
-| behaviour-drift | (none, no matching category) |
-| principles | (none, no matching category) |
-| scope | scope-control.md |
-| tests | (none, no matching category) |
-
-`scope` maps to `scope-control.md` directly since the category names match exactly. `principles` (SOLID/DRY/KISS/YAGNI violations, leftover speculative code, needless abstraction) has no matching category: `maintainability.md` covers mixed concerns, magic numbers, and naming, but never speculative code or unnecessary abstraction, the YAGNI half of this lens's own stated focus, so `principles` falls back to the full `SKILL.md` like `tests` does rather than pointing at a reference file that only partially covers its concern.
-
-`behaviour-drift` (did a refactor change observable behaviour) also has no matching category: none of the 7 reference files ask whether a simplification changed behaviour, that is a distinct concern from the bug-pattern checks `correctness.md` covers, so it falls back to the full `SKILL.md` too rather than reusing a file that only partially fits.
-
-Path resolution and fallback follow the same single rule as `/playbook:deep-review`'s Step 3 mapping: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real `Bash` step before building the string, inside an executed bash block, for example:
-
-```bash
-playbook skill ref grounding-review <file>
-```
-
-It prints the absolute path of `references/<file>.md` (give `<file>` without `.md`), or of the full `SKILL.md` when the file is missing or no name is given.
-
-If the lens has a mapped file, resolve it this way and confirm it exists; if a lens has no mapped file (`principles`, `behaviour-drift`, `tests`) or the resolved file doesn't exist, resolve the full `SKILL.md` path instead, one rule either way, not two. Hand `cheap-checker` the resolved ABSOLUTE path this `Bash` step produced, never the unexpanded placeholder or a bare repo-relative string: it has no `Bash` to expand `$CLAUDE_PLUGIN_ROOT` itself. The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern.
+A `cheap-check` lens dispatches a `cheap-checker` agent (`subagent_type: playbook:cheap-checker`) instead of `reviewer`. Its prompt names the lens's narrow concern, taken from the tier map's `reason` field for that lens, the full branch diff, the plan, the refinement notes, and ONE reference file path to read for criteria. Resolve it with `playbook review ref <lens>`, which prints the absolute path: the lens's grounding-review reference file, or the full `SKILL.md` for a lens with no matching file (`behaviour-drift`, `principles`, `tests`). Hand `cheap-checker` that absolute path, never a bare repo-relative string: it has no `Bash`. The narrow concern text, not the reference file, is what scopes the check.
 
 A `skip` lens dispatches nothing. Track it explicitly as skipped in the triage summary above, e.g. "Triage: correctness=full-lens, tests=cheap-check, scope=skip"; a skipped lens is never conflated with a dispatched lens that returned nothing below, since it was never dispatched at all and so has no return value to lose.
 
