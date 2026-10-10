@@ -53,7 +53,7 @@ Every hook is a module under `src/hooks/`, run as `playbook hook <name>` (see AD
 
 | Hook | Purpose |
 |---|---|
-| `session-init` | Creates the per-session runtime dir and zeros its counters. Clears the statusline PR/CI cache for the current branch. Checks the config hash and warns on drift when a resumed session is running on stale config. Injects `additionalContext`: the project memory slice, an auto-learn nudge, a skills/commands primer, and the async/deferred-tool discipline reminder. |
+| `session-init` | Creates the per-session runtime dir and zeros its counters. Clears the statusline PR/CI cache for the current branch. Checks the config hash and warns on drift when a resumed session is running on stale config. Injects `additionalContext`: an auto-learn nudge, a handoff, and one small ranked memory block (pinned, most used, most linked facts, capped near 2,500 characters). The whole string stays under 9,000 characters because Claude Code replaces a hook string over 10,000 with a 2,000 character preview. Read only: it never writes to the memory store. |
 
 ### PreToolUse
 
@@ -86,7 +86,7 @@ Every hook is a module under `src/hooks/`, run as `playbook hook <name>` (see AD
 |---|---|
 | `auto-model-detect` | Nudges the main session toward delegating design and architecture-shaped prompts (ADR, schema, tradeoff, alternatives, etc.) to an Opus subagent, rather than reasoning inline on the default model. Skips slash commands and prompts under 20 characters. |
 | `auto-guard` | In auto mode adds a one line reminder to each prompt. |
-| `memory-anchors` | Matches prompt text and this session's touched files against the same anchor index `PreToolUse` builds, injecting the matched facts' bodies (not just names), deduped per session. Never blocks. |
+| `memory-anchors` | Matches prompt text and this session's touched files against the same anchor index `PreToolUse` builds, injecting each matched fact's name, description and body (body cut at 1,500 characters), deduped per session. Common words are ignored, at most 3 facts per prompt and 9 per session. Never blocks. |
 
 ### PreCompact
 

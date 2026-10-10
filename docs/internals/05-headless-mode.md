@@ -84,7 +84,7 @@ One switch covers every row above. `PLAYBOOK_HEADLESS` set to `1`, `true`, `yes`
 
 When headless:
 
-- `session-init` skips the worktree sweep, the handoff load, and the three nudges (the same effect as `AUTO_LEARN_NUDGE=0`, `SKILLS_PRIMER=0`, and `ASYNC_DISCIPLINE=0`). It injects no memory either, unless `PLAYBOOK_HEADLESS_MEMORY=1` opts memory in. It still writes `session-start.log`.
+- `session-init` skips the worktree sweep, the handoff load, and the auto-learn nudge (the same effect as `AUTO_LEARN_NUDGE=0`). It injects no memory either, unless `PLAYBOOK_HEADLESS_MEMORY=1` opts memory in. It still writes `session-start.log`.
 - `memory-capture` (Stop) never blocks, even if a `capture-due` marker exists.
 - `auto-model-detect` stays silent.
 - The safety guards (`preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) behave exactly as they do interactively.

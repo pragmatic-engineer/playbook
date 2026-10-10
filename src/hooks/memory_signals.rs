@@ -192,6 +192,21 @@ pub fn promoted_ids(mem_dir: &Path) -> std::collections::HashSet<String> {
         .unwrap_or_default()
 }
 
+/// Per-node `(hits, promoted)` in one read-only pass, for ranking. A missing
+/// or unparsable file returns an empty map, so a ranking caller falls back to
+/// pins and links alone. Never writes.
+pub fn ranking_signals(mem_dir: &Path) -> HashMap<String, (u32, bool)> {
+    read_store(mem_dir)
+        .map(|store| {
+            store
+                .nodes
+                .into_iter()
+                .map(|(id, signals)| (id, (signals.hits, signals.promoted)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A missing file returns an empty default store. A file that exists but
 /// fails to read or parse returns `None`, so the caller can leave it on disk
 /// untouched rather than overwriting possibly-recoverable data.

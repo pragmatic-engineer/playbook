@@ -454,6 +454,96 @@ pub fn render_graph(graph: &Graph<'_>, repo: &str) -> String {
     blocks.join("\n\n")
 }
 
+/// Score weights for `render_ranked`. A pin always outranks usage, usage
+/// outranks links, and each term is capped so one noisy signal cannot drown
+/// the others.
+const PIN_SCORE: u64 = 1_000_000;
+const PROMOTED_SCORE: u64 = 1_000;
+const HIT_SCORE: u64 = 10;
+const HIT_CAP: u64 = 50;
+const LINK_CAP: u64 = 20;
+
+/// Longest description kept per line in the ranked block.
+const RANKED_DESC_CHARS: usize = 140;
+
+/// A small ranked block for session start: pinned facts first, then the most
+/// used, then the most linked (edges and anchors both count). Facts with no
+/// signal at all are left out, so a fresh store injects nothing. One
+/// `- name: description` line per fact, whole lines only, never over `cap`
+/// characters including the header. `signals` maps a node id to its
+/// `(hits, promoted)` pair; the caller reads it, this function never writes.
+/// Empty when nothing ranks.
+pub fn render_ranked(
+    graph: &Graph<'_>,
+    repo: &str,
+    signals: &std::collections::HashMap<String, (u32, bool)>,
+    header: &str,
+    cap: usize,
+) -> String {
+    let Some(nodes) = graph.nodes.as_deref() else {
+        return String::new();
+    };
+    let org = (!repo.is_empty()).then(|| repo.split('/').next().unwrap_or(repo));
+    let in_scope = |node: &Node<'_>| -> bool {
+        let project = node.project.as_deref();
+        match node.scope.as_deref() {
+            Some("global") => true,
+            Some("project") => project == Some(repo),
+            Some("org") => org.is_some() && project == org,
+            _ => false,
+        }
+    };
+
+    let mut links: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
+    for e in &graph.edges {
+        for end in [e.from.as_deref(), e.to.as_deref()].into_iter().flatten() {
+            *links.entry(end).or_default() += 1;
+        }
+    }
+
+    let mut ranked: Vec<(u64, &str, &Node<'_>)> = nodes
+        .iter()
+        .filter(|n| in_scope(n) && !n.name.or_empty().is_empty())
+        .filter_map(|n| {
+            let id = n.id.as_deref()?;
+            let (hits, promoted) = signals.get(id).copied().unwrap_or((0, false));
+            let mut score = u64::from(hits).min(HIT_CAP) * HIT_SCORE
+                + links.get(id).copied().unwrap_or(0).min(LINK_CAP);
+            if promoted {
+                score += PROMOTED_SCORE;
+            }
+            if n.pinned.is_true() {
+                score += PIN_SCORE;
+            }
+            (score > 0).then_some((score, n.name.or_empty(), n))
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
+
+    let mut out = String::from(header);
+    let mut kept = 0;
+    for (_, name, node) in ranked {
+        let desc = node.description.or_empty();
+        let line = if desc.is_empty() {
+            format!("\n- {name}")
+        } else if desc.chars().count() > RANKED_DESC_CHARS {
+            let cut: String = desc.chars().take(RANKED_DESC_CHARS).collect();
+            format!("\n- {name}: {cut}...")
+        } else {
+            format!("\n- {name}: {desc}")
+        };
+        if out.chars().count() + line.chars().count() > cap {
+            break;
+        }
+        out.push_str(&line);
+        kept += 1;
+    }
+    if kept == 0 {
+        return String::new();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,5 +755,72 @@ mod tests {
         assert_eq!(render_memory_context(r#"{"edges": []}"#, "a/b"), "");
         assert_eq!(render_memory_context(r#"{"nodes": "x"}"#, "a/b"), "");
         assert_eq!(render_memory_context("not json", "a/b"), "");
+    }
+
+    fn ranked(graph: &str, signals: &[(&str, u32, bool)], cap: usize) -> String {
+        let graph = parse_graph(graph).expect("graph parses");
+        let signals = signals
+            .iter()
+            .map(|(id, hits, promoted)| (id.to_string(), (*hits, *promoted)))
+            .collect();
+        render_ranked(&graph, "acme/proj", &signals, "H", cap)
+    }
+
+    const RANK_GRAPH: &str = r#"{"nodes": [
+        {"id": "a", "scope": "global", "name": "a-plain", "description": "d"},
+        {"id": "b", "scope": "global", "name": "b-pinned", "description": "d", "pinned": true},
+        {"id": "c", "scope": "global", "name": "c-used", "description": "d"},
+        {"id": "d", "scope": "project", "project": "other/proj", "name": "d-foreign", "description": "d", "pinned": true},
+        {"id": "e", "scope": "global", "name": "e-linked", "description": "d"}
+    ], "edges": [
+        {"from": "e", "to": "a", "relation": "relates_to"},
+        {"from": "e", "to": "x", "relation": "anchors"}
+    ]}"#;
+
+    #[test]
+    fn ranked_orders_pinned_then_used_then_linked_and_skips_foreign_scope() {
+        // Arrange / Act
+        let got = ranked(RANK_GRAPH, &[("c", 3, false)], 2500);
+
+        // Assert: a is linked once (via e), so it ranks after e (two links).
+        assert_eq!(
+            got,
+            "H\n- b-pinned: d\n- c-used: d\n- e-linked: d\n- a-plain: d"
+        );
+    }
+
+    #[test]
+    fn ranked_stops_at_whole_lines_under_the_cap() {
+        // Arrange / Act: room for the header and one 11 character line only.
+        let got = ranked(RANK_GRAPH, &[], 20);
+
+        // Assert
+        assert_eq!(got, "H\n- b-pinned: d");
+        assert!(got.chars().count() <= 20);
+    }
+
+    #[test]
+    fn ranked_is_empty_when_nothing_has_a_signal() {
+        // Arrange
+        let graph = r#"{"nodes": [{"id": "a", "scope": "global", "name": "a", "description": "d"}], "edges": []}"#;
+
+        // Act / Assert
+        assert_eq!(ranked(graph, &[], 2500), "");
+    }
+
+    #[test]
+    fn ranked_truncates_a_long_description() {
+        // Arrange
+        let long = "x".repeat(300);
+        let graph = format!(
+            r#"{{"nodes": [{{"id": "a", "scope": "global", "name": "a", "description": "{long}", "pinned": true}}], "edges": []}}"#
+        );
+
+        // Act
+        let got = ranked(&graph, &[], 2500);
+
+        // Assert
+        assert!(got.ends_with("..."));
+        assert!(got.chars().count() < 170);
     }
 }

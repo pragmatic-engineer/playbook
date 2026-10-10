@@ -41,6 +41,40 @@ use std::time::{Duration, Instant};
 /// facts; `git::TIMEOUT` only bounds one call, not the chain of them.
 const STALENESS_BUDGET: Duration = Duration::from_secs(3);
 
+/// Most facts one prompt may inject.
+const MAX_FACTS_PER_PROMPT: usize = 3;
+
+/// Most facts recalled over a whole session, across prompts. Past it the hook
+/// goes quiet, so a long session cannot keep adding recall to its history.
+const MAX_FACTS_PER_SESSION: usize = 9;
+
+/// Longest fact body injected, in characters. Longer bodies are cut and point
+/// at the file, which the model can read when it needs the rest.
+const BODY_CAP_CHARS: usize = 1500;
+
+/// Hard ceiling for one prompt's whole recall message.
+const PROMPT_RECALL_CAP_CHARS: usize = 5000;
+
+/// Shortest prompt word that can match.
+const MIN_TOKEN_CHARS: usize = 3;
+
+/// Words that appear in most prompts and say nothing about a topic. Without
+/// this list, "fix the failing test" matched 180 of 261 facts. Sorted, so a
+/// binary search finds a word.
+const STOPWORDS: [&str; 117] = [
+    "about", "above", "add", "after", "again", "all", "also", "and", "any", "are", "because",
+    "been", "before", "being", "both", "but", "can", "change", "check", "code", "could", "did",
+    "does", "doing", "done", "each", "else", "file", "files", "find", "fix", "for", "from", "get",
+    "give", "going", "have", "help", "here", "how", "into", "its", "just", "keep", "let", "like",
+    "look", "make", "may", "more", "most", "need", "new", "not", "now", "off", "one", "only",
+    "other", "our", "out", "over", "please", "put", "really", "run", "same", "see", "set",
+    "should", "show", "some", "still", "such", "take", "tell", "test", "tests", "than", "that",
+    "the", "their", "them", "then", "there", "these", "they", "thing", "things", "this", "those",
+    "through", "too", "try", "update", "use", "using", "very", "want", "was", "way", "well",
+    "were", "what", "when", "where", "which", "while", "who", "why", "will", "with", "work",
+    "would", "yes", "you", "your",
+];
+
 /// Pure wrapper around the deadline comparison, so the boundary condition is
 /// directly testable without depending on real elapsed wall-clock time or a
 /// real `git` subprocess in a test.
@@ -167,16 +201,27 @@ fn run_prompt(payload: &Payload, dir: &str) {
 
     let seen_path = Path::new(dir).join("prompt-recall-seen.tsv");
     let seen = read_seen(&seen_path);
+    let room = MAX_FACTS_PER_SESSION
+        .saturating_sub(seen.len())
+        .min(MAX_FACTS_PER_PROMPT);
+    if room == 0 {
+        return;
+    }
 
     let mut newly_seen = Vec::new();
-    let mut bodies = Vec::new();
+    let mut entries: Vec<String> = Vec::new();
+    let mut used_chars = 0;
     let staleness_deadline = Instant::now() + STALENESS_BUDGET;
     for row in &matches {
+        if newly_seen.len() >= room {
+            break;
+        }
         let from_id = row.get(1).cloned().unwrap_or_default();
         if from_id.is_empty() || seen.contains(&from_id) {
             continue;
         }
         let name = row.get(2).cloned().unwrap_or_default();
+        let desc = row.get(3).cloned().unwrap_or_default();
         let file = row.get(5).cloned().unwrap_or_default();
         if file.is_empty() {
             continue;
@@ -193,10 +238,15 @@ fn run_prompt(payload: &Payload, dir: &str) {
         } else {
             ""
         };
-        bodies.push(format!("### {name}{note}\n{body}"));
+        let entry = format_recalled_fact(&name, &desc, note, &body, &file);
+        if used_chars + entry.chars().count() > PROMPT_RECALL_CAP_CHARS {
+            break;
+        }
+        used_chars += entry.chars().count();
+        entries.push(entry);
         newly_seen.push(from_id);
     }
-    if bodies.is_empty() {
+    if entries.is_empty() {
         return;
     }
 
@@ -210,28 +260,89 @@ fn run_prompt(payload: &Payload, dir: &str) {
     append_seen(&seen_path, &newly_seen);
     let msg = format!(
         "Recalled from memory, matching this prompt:\n\n{}",
-        bodies.join("\n\n")
+        entries.join("\n\n")
     );
     emit_prompt_context(&msg);
 }
 
-/// Any whitespace-separated prompt word of at least 3 characters, lowercased,
-/// found as a substring of a row's name or description (also lowercased).
-/// Deliberately crude: a plain substring scan over a corpus this small costs
-/// single-digit milliseconds, and no ranking model is proposed (ADR 0008).
-/// Deduplicated by from_id, same as `matching_rows`.
+/// One recalled fact: its name, its description, then the body, cut at
+/// `BODY_CAP_CHARS` with a pointer to the file when it is longer.
+fn format_recalled_fact(name: &str, desc: &str, note: &str, body: &str, file: &str) -> String {
+    let mut out = format!("### {name}{note}");
+    if !desc.is_empty() {
+        out.push('\n');
+        out.push_str(desc);
+    }
+    let body = strip_frontmatter(body).trim();
+    if body.chars().count() > BODY_CAP_CHARS {
+        let head: String = body.chars().take(BODY_CAP_CHARS).collect();
+        out.push_str(&format!(
+            "\n{head}\n[cut; full fact: ~/.config/playbook/memory/{file}]"
+        ));
+    } else if !body.is_empty() {
+        out.push('\n');
+        out.push_str(body);
+    }
+    out
+}
+
+/// `text` without a leading `---` frontmatter block, which the graph already
+/// carries as the name and description.
+fn strip_frontmatter(text: &str) -> &str {
+    let Some(rest) = text.strip_prefix("---\n") else {
+        return text;
+    };
+    match rest.find("\n---") {
+        Some(end) => rest[end + 4..].trim_start_matches(['\n', '\r']),
+        None => text,
+    }
+}
+
+/// Prompt words that can match: lowercased, trimmed of punctuation, at least
+/// `MIN_TOKEN_CHARS` long, and not a stopword. Order and repeats are dropped.
+fn prompt_tokens(prompt: &str) -> Vec<String> {
+    let lower = prompt.to_lowercase();
+    let mut tokens: Vec<String> = Vec::new();
+    for word in lower.split(char::is_whitespace) {
+        let word = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
+        if word.chars().count() < MIN_TOKEN_CHARS
+            || STOPWORDS.binary_search(&word).is_ok()
+            || tokens.iter().any(|t| t == word)
+        {
+            continue;
+        }
+        tokens.push(word.to_string());
+    }
+    tokens
+}
+
+/// Whether `token` matches `text`. A hyphenated token (a fact name pasted
+/// from the prompt) matches as a substring. Any other token matches a word of
+/// `text` that equals it, or, from 4 characters, one that extends it or that
+/// it extends ("test" and "testing"), which skips the accidental hits a plain
+/// substring scan made ("add" inside "address", "cli" inside "client").
+fn token_matches(token: &str, text: &str) -> bool {
+    if token.contains('-') {
+        return text.contains(token);
+    }
+    text.split(|c: char| !c.is_alphanumeric()).any(|word| {
+        word == token
+            || (token.chars().count() >= 4
+                && word.chars().count() >= 4
+                && (word.starts_with(token) || token.starts_with(word)))
+    })
+}
+
+/// Rows whose name or description matches a prompt token, best first: each
+/// distinct token that hits counts one, two when it hits the name. Ties keep
+/// index order. Deduplicated by from_id, same as `matching_rows`.
 fn prompt_token_matches(idx_contents: &str, prompt: &str) -> Vec<Vec<String>> {
-    let lower_prompt = prompt.to_lowercase();
-    let tokens: Vec<&str> = lower_prompt
-        .split(|c: char| c.is_whitespace())
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '-'))
-        .filter(|w| w.len() >= 3)
-        .collect();
+    let tokens = prompt_tokens(prompt);
     if tokens.is_empty() {
         return Vec::new();
     }
 
-    let mut matches = Vec::new();
+    let mut scored: Vec<(usize, Vec<String>)> = Vec::new();
     let mut seen_from: HashSet<String> = HashSet::new();
     for line in idx_contents.lines() {
         if line.is_empty() {
@@ -240,8 +351,17 @@ fn prompt_token_matches(idx_contents: &str, prompt: &str) -> Vec<Vec<String>> {
         let cols: Vec<&str> = line.split('\t').collect();
         let name = cols.get(2).copied().unwrap_or("").to_lowercase();
         let desc = cols.get(3).copied().unwrap_or("").to_lowercase();
-        let haystack = format!("{name} {desc}");
-        if haystack.trim().is_empty() || !tokens.iter().any(|t| haystack.contains(t)) {
+        let score: usize = tokens
+            .iter()
+            .map(|t| {
+                if token_matches(t, &name) {
+                    2
+                } else {
+                    usize::from(token_matches(t, &desc))
+                }
+            })
+            .sum();
+        if score == 0 {
             continue;
         }
         let from_id = cols.get(1).copied().unwrap_or("").to_string();
@@ -249,9 +369,10 @@ fn prompt_token_matches(idx_contents: &str, prompt: &str) -> Vec<Vec<String>> {
             continue;
         }
         seen_from.insert(from_id);
-        matches.push(cols.iter().map(|s| s.to_string()).collect());
+        scored.push((score, cols.iter().map(|s| s.to_string()).collect()));
     }
-    matches
+    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    scored.into_iter().map(|(_, row)| row).collect()
 }
 
 /// Absolute paths touched this session, from `edits.jsonl`, in file order.
@@ -309,14 +430,14 @@ fn append_seen(path: &Path, ids: &[String]) {
 
 /// Reads a fact's markdown body from `~/.config/playbook/memory/<file>` (`file` is
 /// relative to that root, per `rebuild_memory_graph.rs`'s node construction).
-/// Capped at 16000 chars, matching `session_init.rs`'s `MEMORY_BODY_CAP_CHARS`,
-/// so one huge fact cannot dominate a turn. `None` on any read failure
+/// Read whole and cut later by `format_recalled_fact`, so one huge fact cannot
+/// dominate a turn. `None` on any read failure
 /// (deleted, unreadable): the caller skips this one fact rather than
 /// treating it as fatal.
 fn read_fact_body(file: &str) -> Option<String> {
     let path = memory_dir().join(file);
     let contents = fs::read_to_string(path).ok()?;
-    Some(contents.chars().take(16000).collect())
+    Some(contents)
 }
 
 /// Anchors in the graph are repo-relative paths; the tool gives us an
@@ -700,6 +821,105 @@ mod tests {
              the next per-fact staleness check instead of starting another \
              potentially slow git call"
         );
+    }
+
+    /// A small index shaped like the real store: every fact has a name and a
+    /// description, and the descriptions use everyday words.
+    const RECALL_INDEX: &str =
+        "\tg/a\tavoid-flaky-tests\tUse when a test fails at random in CI\t\ta.md\n\
+        \tg/b\tcli-flag-parsing\tUse when you add a flag to the cli\t\tb.md\n\
+        \tg/c\tclient-retries\tUse when the http client retries a request\t\tc.md\n\
+        \tg/d\taddress-parsing\tUse when you change how an address is parsed\t\td.md\n\
+        \tg/e\tcommit-signing\tUse when you commit and the signature fails\t\te.md\n\
+        \tg/f\tthis-does-that\tWhat this does and what that does\t\tf.md\n";
+
+    fn matched_names(prompt: &str) -> Vec<String> {
+        prompt_token_matches(RECALL_INDEX, prompt)
+            .into_iter()
+            .map(|row| row[2].clone())
+            .collect()
+    }
+
+    #[test]
+    fn stopwords_are_sorted_and_unique_so_binary_search_is_valid() {
+        // Arrange / Act / Assert
+        assert!(STOPWORDS.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn generic_prompts_match_almost_nothing() {
+        // Arrange: the three prompts that matched 180, 181 and 61 of 261 facts.
+        let prompts = [
+            "fix the failing test",
+            "add a flag to the cli",
+            "what does this do",
+        ];
+
+        // Act
+        let counts: Vec<usize> = prompts.iter().map(|p| matched_names(p).len()).collect();
+
+        // Assert
+        assert!(counts.iter().all(|n| *n < 4), "{counts:?}");
+    }
+
+    #[test]
+    fn a_short_word_matches_a_whole_word_not_a_substring() {
+        // Arrange / Act
+        let names = matched_names("the cli");
+
+        // Assert: "cli" is in "cli-flag-parsing" but not inside "client-retries".
+        assert_eq!(names, vec!["cli-flag-parsing"]);
+    }
+
+    #[test]
+    fn a_stem_matches_its_longer_form() {
+        // Arrange / Act
+        let names = matched_names("signing problems");
+
+        // Assert: "signing" hits the name; "problems" hits nothing.
+        assert_eq!(names, vec!["commit-signing"]);
+    }
+
+    #[test]
+    fn matches_are_ranked_by_how_many_prompt_words_hit() {
+        // Arrange / Act: "commit" hits e (name) and "signature" hits e (desc).
+        let names = matched_names("commit signature http");
+
+        // Assert: e scores 3, c scores 1.
+        assert_eq!(names, vec!["commit-signing", "client-retries"]);
+    }
+
+    #[test]
+    fn a_hyphenated_fact_name_matches_as_a_whole() {
+        // Arrange / Act
+        let names = matched_names("why does avoid-flaky-tests apply");
+
+        // Assert
+        assert_eq!(names, vec!["avoid-flaky-tests"]);
+    }
+
+    #[test]
+    fn a_recalled_fact_carries_description_and_a_capped_body() {
+        // Arrange
+        let body = format!("---\nname: x\n---\n{}", "b".repeat(BODY_CAP_CHARS + 50));
+
+        // Act
+        let out = format_recalled_fact("x", "Use when y", "", &body, "x.md");
+
+        // Assert
+        assert!(out.starts_with("### x\nUse when y\n"));
+        assert!(!out.contains("name: x"), "frontmatter should be stripped");
+        assert!(out.contains("[cut; full fact: ~/.config/playbook/memory/x.md]"));
+        assert!(out.chars().count() < BODY_CAP_CHARS + 200);
+    }
+
+    #[test]
+    fn a_short_body_is_kept_whole() {
+        // Arrange / Act
+        let out = format_recalled_fact("x", "", "", "short body", "x.md");
+
+        // Assert
+        assert_eq!(out, "### x\nshort body");
     }
 
     /// The pre-index linear scan, kept as the oracle for equivalence.

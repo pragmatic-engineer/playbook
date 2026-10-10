@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-const ASYNC_NOTE: &str = "Async and deferred-tool discipline";
+const HANDOFF_MARKER: &str = "HANDOFF-PROBE-MARKER";
 const MEMORY_FACT: &str = "zebra-fact";
 
 /// A scratch HOME with one global memory fact, and a scratch git repo with an
@@ -50,7 +50,7 @@ fn world(tag: &str) -> World {
     let mem = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&mem).unwrap();
     let graph = format!(
-        r#"{{"nodes":[{{"id":"g1","name":"{MEMORY_FACT}","description":"stripes","scope":"global","type":"user"}}],"edges":[]}}"#
+        r#"{{"nodes":[{{"id":"g1","name":"{MEMORY_FACT}","description":"stripes","scope":"global","type":"user","pinned":true}}],"edges":[]}}"#
     );
     fs::write(mem.join("memory.graph.json"), graph).unwrap();
     World { home, repo }
@@ -64,14 +64,13 @@ fn run_hook(w: &World, hook: &str, stdin: &str, env: &[(&str, &str)]) -> (String
         .args(["hook", hook])
         .current_dir(&w.repo)
         .env("HOME", &w.home)
+        .env("PWD", &w.repo)
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
         .env_remove("PLAYBOOK_HEADLESS_MEMORY")
         .env_remove("HOOK_INPUT")
         .env_remove("CLAUDE_PLUGIN_ROOT")
         .env_remove("AUTO_LEARN_NUDGE")
-        .env_remove("SKILLS_PRIMER")
-        .env_remove("ASYNC_DISCIPLINE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -92,24 +91,44 @@ fn run_hook(w: &World, hook: &str, stdin: &str, env: &[(&str, &str)]) -> (String
     )
 }
 
+/// Saves one handoff for the scratch repo, the interactive-only block these
+/// tests use to tell an interactive start from a headless one.
+fn save_handoff(w: &World) {
+    let slug: String = w
+        .repo
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let dir = w.home.join(".config/playbook/runtime/handoff");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join(format!("{slug}-0-1.md")),
+        format!("# Session Handoff - probe\n\n1. {HANDOFF_MARKER}\n"),
+    )
+    .unwrap();
+}
+
 fn start_payload() -> String {
     r#"{"hook_event_name":"SessionStart","source":"startup","session_id":"hl-session"}"#.to_string()
 }
 
 #[test]
-fn interactive_session_start_still_injects_memory_and_the_async_note() {
+fn interactive_session_start_still_injects_memory_and_the_handoff() {
     let w = world("interactive");
+    save_handoff(&w);
 
     let (out, code) = run_hook(&w, "session-init", &start_payload(), &[]);
 
     assert_eq!(code, 0);
     assert!(out.contains(MEMORY_FACT), "memory slice missing: {out}");
-    assert!(out.contains(ASYNC_NOTE), "async note missing: {out}");
+    assert!(out.contains(HANDOFF_MARKER), "handoff missing: {out}");
 }
 
 #[test]
 fn headless_session_start_injects_neither_memory_nor_nudges() {
     let w = world("headless");
+    save_handoff(&w);
 
     let (out, code) = run_hook(
         &w,
@@ -120,17 +139,18 @@ fn headless_session_start_injects_neither_memory_nor_nudges() {
 
     assert_eq!(code, 0);
     assert!(!out.contains(MEMORY_FACT), "memory leaked: {out}");
-    assert!(!out.contains(ASYNC_NOTE), "nudge leaked: {out}");
+    assert!(!out.contains(HANDOFF_MARKER), "nudge leaked: {out}");
 }
 
 #[test]
 fn ci_true_alone_counts_as_headless_for_session_start() {
     let w = world("ci-alias");
+    save_handoff(&w);
 
     let (out, _) = run_hook(&w, "session-init", &start_payload(), &[("CI", "true")]);
 
     assert!(
-        !out.contains(ASYNC_NOTE) && !out.contains(MEMORY_FACT),
+        !out.contains(HANDOFF_MARKER) && !out.contains(MEMORY_FACT),
         "{out}"
     );
 }
@@ -138,6 +158,7 @@ fn ci_true_alone_counts_as_headless_for_session_start() {
 #[test]
 fn explicit_opt_out_restores_interactive_behavior_under_ci() {
     let w = world("optout");
+    save_handoff(&w);
 
     let (out, _) = run_hook(
         &w,
@@ -147,7 +168,7 @@ fn explicit_opt_out_restores_interactive_behavior_under_ci() {
     );
 
     assert!(
-        out.contains(MEMORY_FACT) && out.contains(ASYNC_NOTE),
+        out.contains(MEMORY_FACT) && out.contains(HANDOFF_MARKER),
         "{out}"
     );
 }
@@ -155,6 +176,7 @@ fn explicit_opt_out_restores_interactive_behavior_under_ci() {
 #[test]
 fn headless_memory_opt_in_injects_memory_but_still_no_nudges() {
     let w = world("memory-optin");
+    save_handoff(&w);
 
     let (out, _) = run_hook(
         &w,
@@ -167,26 +189,13 @@ fn headless_memory_opt_in_injects_memory_but_still_no_nudges() {
     );
 
     assert!(out.contains(MEMORY_FACT), "opted-in memory missing: {out}");
-    assert!(!out.contains(ASYNC_NOTE), "nudge leaked: {out}");
+    assert!(!out.contains(HANDOFF_MARKER), "nudge leaked: {out}");
 }
 
 #[test]
 fn headless_session_start_leaves_a_saved_handoff_unread() {
     let w = world("handoff");
-    let mut save = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(["handoff", "save", "--dir"])
-        .arg(&w.repo)
-        .env("HOME", &w.home)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .spawn()
-        .unwrap();
-    save.stdin
-        .take()
-        .unwrap()
-        .write_all(b"# Session Handoff - probe\n\n1. HANDOFF-PROBE-MARKER\n")
-        .unwrap();
-    assert!(save.wait().unwrap().success());
+    save_handoff(&w);
     let dir = w.home.join(".config/playbook/runtime/handoff");
     let unread = |d: &Path| {
         fs::read_dir(d)
@@ -204,7 +213,7 @@ fn headless_session_start_leaves_a_saved_handoff_unread() {
         &[("PLAYBOOK_HEADLESS", "1")],
     );
 
-    assert!(!out.contains("HANDOFF-PROBE-MARKER"), "{out}");
+    assert!(!out.contains(HANDOFF_MARKER), "{out}");
     assert_eq!(unread(&dir), 1, "headless must not consume the handoff");
 }
 
