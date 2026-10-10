@@ -686,7 +686,8 @@ mod tests {
         if !need.iter().all(|t| on_path(t)) {
             return;
         }
-        let dir = std::env::temp_dir().join(format!("pb-wubench-grade-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pb-wubench-grade-{}", crate::testing::run_id()));
         let _ = std::fs::remove_dir_all(&dir);
         let repo = dir.join("repo");
         std::fs::create_dir_all(&repo).unwrap();

@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn write_briefs_checks_every_id_before_writing() {
-        let dir = std::env::temp_dir().join(format!("pb-brief-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pb-brief-{}", crate::testing::run_id()));
         let _ = std::fs::remove_dir_all(&dir);
         let ctx = Context {
             plan_path: "p.md",

@@ -26,7 +26,7 @@ mod tests {
     fn scratch(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "playbook-self-root-{tag}-{}-{:?}",
-            std::process::id(),
+            crate::testing::run_id(),
             std::thread::current().id()
         ));
         fs::create_dir_all(&dir).expect("scratch dir");

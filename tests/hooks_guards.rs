@@ -25,7 +25,10 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 fn scratch(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let base = PathBuf::from(std::env::var("HOME").expect("HOME")).join(".cache/playbook-tests");
-    let dir = base.join(format!("playbook-guards-{tag}-{}-{n}", std::process::id()));
+    let dir = base.join(format!(
+        "playbook-guards-{tag}-{}-{n}",
+        playbook::testing::run_id()
+    ));
     fs::create_dir_all(&dir).expect("scratch dir");
     dir
 }

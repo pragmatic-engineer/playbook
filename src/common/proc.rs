@@ -181,7 +181,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_child_past_the_deadline_gets_sigterm_before_it_is_killed() {
-        let marker = std::env::temp_dir().join(format!("proc-term-{}", std::process::id()));
+        let marker = std::env::temp_dir().join(format!("proc-term-{}", crate::testing::run_id()));
         let script = format!(
             "trap 'echo stopped > {}; exit 0' TERM; while :; do sleep 0.05; done",
             marker.display()

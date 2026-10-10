@@ -139,7 +139,7 @@ fn triage_merge_with_no_reply_runs_everything_in_full() {
 
 #[test]
 fn triage_merge_reads_a_file_and_a_missing_file_is_a_silent_triage() {
-    let dir = std::env::temp_dir().join(format!("pb-triage-merge-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("pb-triage-merge-{}", playbook::testing::run_id()));
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("t.json");
     fs::write(&file, r#"{"a":{"tier":"cheap-check","reason":"r"}}"#).unwrap();
@@ -228,7 +228,10 @@ fn the_review_commands_call_the_subcommands_instead_of_restating_the_rules() {
 }
 
 fn repo_with_change(lines: usize) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("pb-review-size-{}-{lines}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "pb-review-size-{}-{lines}",
+        playbook::testing::run_id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let git = |args: &[&str]| {

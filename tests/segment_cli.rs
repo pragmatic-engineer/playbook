@@ -43,8 +43,10 @@ impl Repo {
     /// A work clone on `main` with one commit, and a bare `origin` it tracks.
     fn new(tag: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root =
-            std::env::temp_dir().join(format!("playbook-segment-{tag}-{}-{n}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "playbook-segment-{tag}-{}-{n}",
+            playbook::testing::run_id()
+        ));
         fs::create_dir_all(&root).expect("scratch dir");
         let root = root.canonicalize().expect("scratch dir resolves");
         let origin = root.join("origin.git");

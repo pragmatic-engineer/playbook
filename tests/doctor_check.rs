@@ -21,7 +21,10 @@ struct Box {
 impl Box {
     fn new(tag: &str) -> Box {
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!("pb-doctor-{tag}-{}-{n}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "pb-doctor-{tag}-{}-{n}",
+            playbook::testing::run_id()
+        ));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("home/.claude")).unwrap();
         fs::create_dir_all(root.join("bin")).unwrap();

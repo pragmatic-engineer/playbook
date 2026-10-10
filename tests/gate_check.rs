@@ -36,7 +36,7 @@ impl Fixture {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
             "playbook-gate-check-{tag}-{}-{n}",
-            std::process::id()
+            playbook::testing::run_id()
         ));
         fs::create_dir_all(&dir).expect("scratch repo should be creatable");
         let init = Command::new("git")
@@ -60,7 +60,7 @@ impl Fixture {
 
         let home = std::env::temp_dir().join(format!(
             "playbook-gate-check-home-{tag}-{}-{n}",
-            std::process::id()
+            playbook::testing::run_id()
         ));
         fs::create_dir_all(&home).expect("scratch home should be creatable");
 

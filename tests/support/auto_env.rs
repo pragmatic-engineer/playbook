@@ -44,7 +44,10 @@ pub struct Scratch {
 
 pub fn scratch(tag: &str) -> Scratch {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("auto-env-{}-{tag}-{n}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "auto-env-{}-{tag}-{n}",
+        playbook::testing::run_id()
+    ));
     let home = root.join("home");
     let cwd = root.join("cwd");
     fs::create_dir_all(&home).expect("scratch home should be creatable");

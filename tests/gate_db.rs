@@ -15,7 +15,10 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 fn scratch_db_path(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir()
-        .join(format!("playbook-gate-db-{tag}-{}-{n}", std::process::id()))
+        .join(format!(
+            "playbook-gate-db-{tag}-{}-{n}",
+            playbook::testing::run_id()
+        ))
         .join("state.db")
 }
 

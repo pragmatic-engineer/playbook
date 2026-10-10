@@ -17,8 +17,10 @@ struct Fixture {
 
 impl Fixture {
     fn new(tag: &str) -> Self {
-        let dir =
-            std::env::temp_dir().join(format!("pb-gate-snap-cli-{}-{tag}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "pb-gate-snap-cli-{}-{tag}",
+            playbook::testing::run_id()
+        ));
         let _ = fs::remove_dir_all(&dir);
         let repo = dir.join("repo");
         let home = dir.join("home");

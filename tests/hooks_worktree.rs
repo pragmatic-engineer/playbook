@@ -54,7 +54,10 @@ fn fixture(tag: &str) -> Fixture {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let root = fs::canonicalize(std::env::temp_dir())
         .unwrap()
-        .join(format!("playbook-wt-hook-{}-{tag}-{n}", std::process::id()));
+        .join(format!(
+            "playbook-wt-hook-{}-{tag}-{n}",
+            playbook::testing::run_id()
+        ));
     let _ = fs::remove_dir_all(&root);
     let repo = root.join("proj").join("app");
     let origin = root.join("origin.git");

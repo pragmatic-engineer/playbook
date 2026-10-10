@@ -71,7 +71,8 @@ mod tests {
     use super::*;
 
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("pb-planning-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pb-planning-{tag}-{}", crate::testing::run_id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

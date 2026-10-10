@@ -143,7 +143,7 @@ fn pin_sets_an_archive_source_and_keeps_everything_else() {
 }
 
 fn scratch(name: &str, body: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("release-{}-{name}", std::process::id()));
+    let path = std::env::temp_dir().join(format!("release-{}-{name}", playbook::testing::run_id()));
     std::fs::write(&path, body).unwrap();
     path
 }

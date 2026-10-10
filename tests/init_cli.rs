@@ -25,7 +25,7 @@ impl Sandbox {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let home = std::env::temp_dir().join(format!(
             "playbook-init-cli-{tag}-{}-{n}",
-            std::process::id()
+            playbook::testing::run_id()
         ));
         let _ = fs::remove_dir_all(&home);
         fs::create_dir_all(home.join(".claude")).expect("scratch home");

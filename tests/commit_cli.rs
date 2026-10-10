@@ -47,7 +47,10 @@ impl Repo {
     /// `main` pushed to a bare origin, and a local branch `feat` checked out.
     fn new(tag: &str) -> Repo {
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!("pb-commit-{tag}-{}-{n}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "pb-commit-{tag}-{}-{n}",
+            playbook::testing::run_id()
+        ));
         let _ = fs::remove_dir_all(&root);
         let origin = root.join("origin.git");
         let work = root.join("work");

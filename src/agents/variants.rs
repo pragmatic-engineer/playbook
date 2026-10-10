@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn a_session_json_names_its_variants_and_stays_under_the_cap() {
-        let dir = std::env::temp_dir().join(format!("pb-variants-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pb-variants-{}", crate::testing::run_id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("reviewer.md"), BASE).unwrap();
         let (text, names) = session_json(&dir, Mode::Auto, &|_| None).unwrap();
@@ -361,7 +361,8 @@ mod tests {
     fn a_haiku_agent_never_gets_a_max_variant_even_in_all_mode() {
         let content =
             "---\nname: c\ndescription: d\ntools: Read\nmodel: haiku\neffort: low\n---\nBody\n";
-        let dir = std::env::temp_dir().join(format!("pb-variants-haiku-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pb-variants-haiku-{}", crate::testing::run_id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("cheap-checker.md"), content).unwrap();
         let map = session_agents(&dir, Mode::All, &|_| None);
@@ -376,7 +377,8 @@ mod tests {
     fn the_git_agent_gets_its_xhigh_variant_in_auto_mode() {
         let content =
             "---\nname: g\ndescription: d\ntools: Bash\nmodel: haiku\neffort: low\n---\nBody\n";
-        let dir = std::env::temp_dir().join(format!("pb-variants-git-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pb-variants-git-{}", crate::testing::run_id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("git.md"), content).unwrap();
         let map = session_agents(&dir, Mode::Auto, &|_| None);

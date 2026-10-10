@@ -92,7 +92,7 @@ mod tests {
             let n = COUNTER.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
                 "playbook-json-jsoncmp-{tag}-{}-{n}.json",
-                std::process::id()
+                crate::testing::run_id()
             ));
             fs::write(&path, contents).expect("fixture file should be writable");
             Self { path }
@@ -188,7 +188,7 @@ mod tests {
         let a = Fixture::new("missing-file-a", r#"{"a": 1}"#);
         let missing = std::env::temp_dir().join(format!(
             "playbook-json-jsoncmp-missing-file-b-{}.json",
-            std::process::id()
+            crate::testing::run_id()
         ));
 
         // Act

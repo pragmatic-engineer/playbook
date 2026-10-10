@@ -20,8 +20,10 @@ struct Env {
 impl Env {
     fn new(tag: &str) -> Env {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root =
-            std::env::temp_dir().join(format!("pbk-handoff-{}-{n}-{tag}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "pbk-handoff-{}-{n}-{tag}",
+            playbook::testing::run_id()
+        ));
         let home = root.join("home");
         let cwd = root.join("work").join("repo");
         fs::create_dir_all(&home).unwrap();

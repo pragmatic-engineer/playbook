@@ -17,7 +17,10 @@ struct Home(PathBuf);
 impl Home {
     fn new() -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("playbook-route-{}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "playbook-route-{}-{n}",
+            playbook::testing::run_id()
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         Home(dir)

@@ -39,6 +39,8 @@ pub mod segment;
 pub mod settings;
 pub mod state;
 pub mod statusline;
+#[doc(hidden)]
+pub mod testing;
 pub mod trust;
 pub mod uninstall;
 pub mod update;

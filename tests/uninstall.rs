@@ -22,7 +22,7 @@ impl Sandbox {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let home = std::env::temp_dir().join(format!(
             "playbook-uninstall-{tag}-{}-{n}",
-            std::process::id()
+            playbook::testing::run_id()
         ));
         let _ = fs::remove_dir_all(&home);
         let bin_dir = home.join("bin");
