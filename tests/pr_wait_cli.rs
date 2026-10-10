@@ -90,6 +90,38 @@ fn ci_wait_times_out_while_checks_stay_pending() {
 }
 
 #[test]
+fn ci_wait_reads_required_checks_by_default_and_all_on_request() {
+    let s = Sandbox::new("all");
+    s.gh(
+        r#"case "$*" in *--required*) echo '[]';; *) echo '[{"name":"a","bucket":"pass"}]';; esac"#,
+    );
+    let t = out(&s.run(&["pr", "ci-wait", "7", "--interval", "0"]));
+    assert!(t.contains("CI_VERDICT=NONE"), "{t}");
+    let t = out(&s.run(&[
+        "pr",
+        "ci-wait",
+        "7",
+        "--all",
+        "--settle",
+        "0",
+        "--interval",
+        "0",
+    ]));
+    assert!(t.contains("CI_VERDICT=PASS"), "{t}");
+}
+
+#[test]
+fn merge_passes_the_head_commit_to_gh() {
+    let s = Sandbox::new("match-head");
+    s.gh(r#"echo "$@""#);
+    let t = out(&s.run(&["pr", "merge", "7", "--match-head", "abc123"]));
+    assert!(
+        t.contains("pr merge 7 --auto --match-head-commit abc123"),
+        "{t}"
+    );
+}
+
+#[test]
 fn land_wait_ends_on_merged() {
     let s = Sandbox::new("land");
     s.gh(r#"echo '{"state":"MERGED","mergeStateStatus":"CLEAN","reviewDecision":null,"autoMergeRequest":null}'"#);

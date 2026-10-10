@@ -146,18 +146,17 @@ fn gh_stdout(args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// The required checks of `pr` as `gh` prints them, `[]` when unreadable.
-pub fn read_checks(pr: &str) -> String {
-    gh_stdout(&[
-        "pr",
-        "checks",
-        pr,
-        "--required",
-        "--json",
-        "name,bucket,link",
-    ])
-    .filter(|t| serde_json::from_str::<Value>(t).is_ok())
-    .unwrap_or_else(|| "[]".to_string())
+/// The checks of `pr` as `gh` prints them, `[]` when unreadable. Only the
+/// required ones unless `all`.
+pub fn read_checks(pr: &str, all: bool) -> String {
+    let mut args = vec!["pr", "checks", pr];
+    if !all {
+        args.push("--required");
+    }
+    args.extend(["--json", "name,bucket,link"]);
+    gh_stdout(&args)
+        .filter(|t| serde_json::from_str::<Value>(t).is_ok())
+        .unwrap_or_else(|| "[]".to_string())
 }
 
 /// The land status line of `pr`, empty when unreadable.
@@ -174,14 +173,26 @@ pub fn read_land_line(pr: &str) -> String {
     .unwrap_or_default()
 }
 
+/// The `gh` arguments of a merge: `--auto`, or `--admin --squash`. A
+/// `match_head` commit makes `gh` refuse when the PR head has moved.
+fn merge_args<'a>(pr: &'a str, admin: bool, match_head: Option<&'a str>) -> Vec<&'a str> {
+    let mut args = vec!["pr", "merge", pr];
+    if admin {
+        args.extend(["--admin", "--squash"]);
+    } else {
+        args.push("--auto");
+    }
+    if let Some(oid) = match_head {
+        args.extend(["--match-head-commit", oid]);
+    }
+    args
+}
+
 /// `gh pr merge` with `--auto`, or `--admin --squash`. Returns the two lines
 /// the command file reads: `<label>_rc=<code>` then gh's combined output.
-pub fn merge(pr: &str, admin: bool) -> String {
-    let (label, args): (&str, Vec<&str>) = if admin {
-        ("admin", vec!["pr", "merge", pr, "--admin", "--squash"])
-    } else {
-        ("merge", vec!["pr", "merge", pr, "--auto"])
-    };
+pub fn merge(pr: &str, admin: bool, match_head: Option<&str>) -> String {
+    let label = if admin { "admin" } else { "merge" };
+    let args = merge_args(pr, admin, match_head);
     let mut cmd = Command::new("gh");
     cmd.args(&args);
     match run_with_timeout(&mut cmd, GH_TIMEOUT) {
@@ -215,6 +226,19 @@ mod tests {
 
     fn verdict_of(buckets: &[&str]) -> Option<&'static str> {
         ci_verdict(Counts::from_json(&checks(buckets)))
+    }
+
+    #[test]
+    fn a_merge_pins_the_head_only_when_asked() {
+        assert_eq!(merge_args("7", false, None), ["pr", "merge", "7", "--auto"]);
+        assert_eq!(
+            merge_args("7", false, Some("abc")),
+            ["pr", "merge", "7", "--auto", "--match-head-commit", "abc"]
+        );
+        assert_eq!(
+            merge_args("7", true, None),
+            ["pr", "merge", "7", "--admin", "--squash"]
+        );
     }
 
     #[test]
