@@ -277,23 +277,23 @@ fn quick_review_sweep_traces_but_never_runs_pr_code() {
 }
 
 #[test]
-fn implement_step_8_sweeps_before_it_fixes() {
+fn implement_step_9_sweeps_before_it_fixes() {
     // Arrange
     let doc = load("commands/implement.md");
 
     // Act
-    let text = doc.text_of(&doc.step("Step 8:"));
-    let sweep_at = text.find("verification sweep");
-    let fix_at = text.find("Fix only");
+    let text = doc.text_of(&doc.step("Step 9:"));
+    let sweep_at = text.find("Verification sweep");
+    let fix_at = text.find("Apply the fixes");
 
     // Assert
     let (sweep_at, fix_at) = (
-        sweep_at.expect("implement Step 8 does not mention the verification sweep"),
-        fix_at.expect("implement Step 8 has no fix instruction"),
+        sweep_at.expect("implement Step 9 does not mention the verification sweep"),
+        fix_at.expect("implement Step 9 has no fix instruction"),
     );
     assert!(
         sweep_at < fix_at,
-        "implement Step 8: the sweep must come before the fix instruction"
+        "implement Step 9: the sweep must come before the fix instruction"
     );
 }
 
