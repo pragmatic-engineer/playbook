@@ -374,6 +374,8 @@ Benchmark agent roles across models and effort levels
 
 Each case is a fixed prompt with an objective check (a planted bug found, a claim judged right, a test that passes), so no judge model is involved. It prints pass rate, cost and time per role, model and effort. It estimates the cost first and refuses to start above `--max-cost-usd`, and stops mid run when the spend reaches it. Needs a logged-in `claude`; it makes real API calls.
 
+With `--strategy`, the implementer cases run with tools in a scratch git repo, comparing one dispatch per TDD step against one per Work Unit.
+
 Example: `playbook eval bench --role fact-checker --model haiku,sonnet --effort low,medium --runs 2`
 
 - `--cases <CASES>`: Case file or directory; defaults to the cases shipped in the playbook repo
@@ -386,6 +388,7 @@ Example: `playbook eval bench --role fact-checker --model haiku,sonnet --effort 
 - `--jobs <JOBS>`: Calls in flight at once
 - `--json`: Print JSON instead of a table
 - `--list`: List the cases and exit
+- `--strategy <STRATEGY>`: Run the `tdd_repo` implementer cases with tools in a scratch git repo, one dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
 
 ### `playbook eval review-triage`
 

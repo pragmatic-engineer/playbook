@@ -602,6 +602,7 @@ fn main() {
                 jobs,
                 json,
                 list,
+                strategy,
             } => {
                 let root = eval::repo_root();
                 let opts = eval::bench::Options {
@@ -615,6 +616,7 @@ fn main() {
                     jobs,
                     json,
                     list,
+                    strategies: strategy,
                     repo_root: root,
                 };
                 std::process::exit(eval::bench::run(&opts));
