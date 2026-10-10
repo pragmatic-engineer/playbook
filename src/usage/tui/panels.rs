@@ -6,13 +6,13 @@
 //! key hint and title in the top border, like btop.
 
 use super::app::App;
+use super::chart::{self, Metric, Plot};
 use super::data::Data;
 use super::fmt::{compact, fit, money};
-use super::graph;
 use super::sort::{event_rows, group_rows, group_tokens, session_rows, Panel, Sort};
 use super::theme::{Fill, Ink, Palette};
 use super::view::{visible_rows, window_start};
-use crate::usage::aggregate::{date_key, Group};
+use crate::usage::aggregate::{Group, SECONDS_PER_DAY};
 use crate::usage::query::{clock, total_tokens, ActiveSession, ACTIVE_SECONDS};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -244,85 +244,88 @@ fn cost_cell(pal: &Palette, cost: f64, peak: f64) -> Cell<'static> {
     num(money(cost)).style(Style::default().fg(pal.graded(pal.process, pct)))
 }
 
-/// The newest points that fit in `width` columns, two per cell.
-fn tail(series: &[super::data::DayPoint], width: u16) -> &[super::data::DayPoint] {
-    let keep = usize::from(width.saturating_sub(2)) * 2;
-    &series[series.len().saturating_sub(keep)..]
+/// The legend of the bar colors, in the bottom border: the gradient from a low
+/// value to a high one. The mono theme has no colors, so it has no legend.
+fn gradient_legend(pal: &Palette, fill: Fill, what: &str, box_ink: Ink) -> Option<Line<'static>> {
+    if pal.mono {
+        return None;
+    }
+    let edge = fg(pal, box_ink);
+    let mut spans = vec![
+        Span::styled("\u{2524}", edge),
+        Span::styled(format!("{what} low "), fg(pal, pal.graph_text)),
+    ];
+    for pct in [10.0, 30.0, 50.0, 70.0, 90.0] {
+        spans.push(Span::styled(
+            METER,
+            Style::default().fg(pal.graded(fill, pct)),
+        ));
+    }
+    spans.push(Span::styled(" high", fg(pal, pal.graph_text)));
+    spans.push(Span::styled("\u{251c}\u{2500}", edge));
+    Some(Line::from(spans))
 }
 
-fn graph_panel(
-    frame: &mut Frame,
-    area: Rect,
-    pal: &Palette,
-    focused: bool,
-    panel: Panel,
-    (title, peak, dates): (&str, String, Option<String>),
-    (values, fill, box_ink): (Vec<f64>, Fill, Ink),
-) {
-    let mut block = panel_block(pal, panel, title, box_ink, focused)
-        .title(note_line(pal, &format!("peak {peak}"), box_ink).right_aligned());
-    if let Some(dates) = dates {
-        // The dates go only where they fit between the corners.
-        if dates.chars().count() + 4 <= usize::from(area.width.saturating_sub(2)) {
-            block = block.title_bottom(note_line(pal, &dates, box_ink).left_aligned());
-        }
+/// The chart a panel shows, laid out for its box. The same layout answers
+/// mouse hits (`App::mouse`), so a click lands on the bar it points at.
+pub fn chart_plot(area: Rect, data: &Data, panel: Panel) -> Plot {
+    let metric = match panel {
+        Panel::Tokens => Metric::Tokens,
+        _ => Metric::Cost,
+    };
+    Plot::new(area, &data.series, metric)
+}
+
+/// Cost per day or tokens per day: a bar chart with axes, a cursor and a legend.
+fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, panel: Panel) {
+    let focused = app.focus == panel;
+    let (name, fill, box_ink, what) = match panel {
+        Panel::Tokens => ("Tokens", pal.down, pal.box_net, "tokens"),
+        _ => ("Spend", pal.cpu, pal.box_cpu, "cost"),
+    };
+    if data.series.is_empty() {
+        let block = panel_block(pal, panel, name, box_ink, focused);
+        return empty(frame, area, pal, block, "No usage in this range.");
     }
-    let inner = block.inner(area);
+    let plot = chart_plot(area, data, panel);
+    let per = match plot.geo.per {
+        1 => "day".to_string(),
+        n => format!("{n} days"),
+    };
+    let title = match panel {
+        Panel::Tokens => format!("Tokens per {per}"),
+        _ => format!("Spend per {per}, USD"),
+    };
+    let mut block = panel_block(pal, panel, &title, box_ink, focused);
+    if plot.geo.stats_y.is_none() {
+        // No room for the totals line, so the peak goes in the border.
+        let peak = plot
+            .bars
+            .iter()
+            .map(|b| b.value(plot.metric))
+            .fold(0.0, f64::max);
+        let note = format!("peak {}", plot.metric.show(peak));
+        block = block.title(note_line(pal, &note, box_ink).right_aligned());
+    }
+    if let Some(legend) = gradient_legend(pal, fill, what, box_ink) {
+        block = block.title_bottom(legend.right_aligned());
+    }
     frame.render_widget(block, area);
-    graph::render(frame.buffer_mut(), inner, &values, fill, pal);
+    let view = chart::View {
+        fill,
+        today: data.now.div_euclid(SECONDS_PER_DAY),
+    };
+    chart::render(frame.buffer_mut(), &plot, &data.series, &view, pal);
 }
 
 /// Cost per day.
 pub fn spend(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let focused = app.focus == Panel::Spend;
-    let shown = tail(&data.series, area.width);
-    if shown.is_empty() {
-        let block = panel_block(pal, Panel::Spend, "Spend", pal.box_cpu, focused);
-        return empty(frame, area, pal, block, "No usage in this range.");
-    }
-    let peak = shown.iter().map(|p| p.cost_usd).fold(0.0, f64::max);
-    let dates = format!(
-        "{} to {}",
-        date_key(shown[0].day),
-        date_key(shown[shown.len() - 1].day)
-    );
-    graph_panel(
-        frame,
-        area,
-        pal,
-        focused,
-        Panel::Spend,
-        ("Spend per day", money(peak), Some(dates)),
-        (
-            shown.iter().map(|p| p.cost_usd).collect(),
-            pal.cpu,
-            pal.box_cpu,
-        ),
-    );
+    chart_panel(frame, area, app, data, pal, Panel::Spend);
 }
 
 /// Tokens per day.
 pub fn tokens(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let focused = app.focus == Panel::Tokens;
-    let shown = tail(&data.series, area.width);
-    if shown.is_empty() {
-        let block = panel_block(pal, Panel::Tokens, "Tokens", pal.box_net, focused);
-        return empty(frame, area, pal, block, "No usage in this range.");
-    }
-    let peak = shown.iter().map(|p| p.tokens).max().unwrap_or(0);
-    graph_panel(
-        frame,
-        area,
-        pal,
-        focused,
-        Panel::Tokens,
-        ("Tokens per day", compact(peak), None),
-        (
-            shown.iter().map(|p| p.tokens as f64).collect(),
-            pal.down,
-            pal.box_net,
-        ),
-    );
+    chart_panel(frame, area, app, data, pal, Panel::Tokens);
 }
 
 /// Models or projects: messages, tokens, cost and share of the total cost.

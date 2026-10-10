@@ -27,12 +27,23 @@ The view needs a screen of at least 80 columns by 24 rows. Below that it says so
 
 | Key | Panel | Shows |
 |---|---|---|
-| `1` | Spend per day | A braille graph of the cost for each UTC day in the range, idle days at zero, colored by value from the cpu gradient (green, yellow, red). The peak and the date range sit in the border. |
+| `1` | Spend per day, USD | A bar chart of the cost for each UTC day in the range, with axes (below). |
 | `2` | Tokens per day | The same for tokens, in the net gradient. |
 | `3` | Models | Messages, tokens, cost and a share meter per model. |
 | `4` | Projects | The same, per repo. |
 | `5` | Live sessions | Sessions with a message in the last 15 minutes, with state, cost and age. |
 | `6` | Recent messages | The newest messages with time, project, model, tokens and cost. |
+
+### The charts
+
+The two charts are bar charts drawn with eighth blocks, one bar per UTC day, with idle days at zero and the days still to come in a week or month in progress left empty.
+
+- **y axis.** Labels at the bottom, middle and top, in dollars or tokens with units (`$0`, `$2.5`, `$250`, `$2.5K`, `500K`, `2.5M`). The top is a round value above the peak (1, 1.2, 1.6, 2, 2.5, 3, 4, 5, 6 or 8 times a power of ten), so the labels are round and the middle is half the top. Faint dotted guides mark the top and the middle.
+- **x axis.** The first, middle and last date under the bars, with the year when it fits.
+- **Totals line.** The total, the peak (with its date) and the average per day that has happened, for the range.
+- **Legend.** The bar color follows its height on the axis along the theme gradient (green to red for cost), and the legend in the bottom border says so. The mono theme has no colors and no legend.
+- **Wide ranges.** When the range has more days than the chart has columns, days are added up into bars of equal length (the title says `Spend per 3 days`), so nothing is cut off.
+- **Small panels.** The totals line goes first when the panel is short, then the dates, so the plot keeps three rows. The y axis goes when the panel is narrower than 16 columns, leaving the bars.
 
 Keys:
 
@@ -51,7 +62,7 @@ Keys:
 | `x` | Turn mouse reporting on or off. Turn it off to select text with the mouse. |
 | `q`, `Esc`, `Ctrl-C` | Quit. |
 
-The mouse is optional and on by default: a click focuses a panel and selects the row under it, and the wheel moves the selection of the panel under the pointer.
+The mouse is optional and on by default: a click focuses a panel and selects the row under it and the wheel moves the selection of the panel under the pointer.
 
 ### Ranges
 
@@ -84,7 +95,7 @@ The theme comes from the `usage.theme` config key (`btop`, `dark`, `light`, `mon
 
 Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the btop values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither it goes to the nearest of the 16 basic colors. The values come from btop's `Default_theme` and the code in `src/usage/tui/theme.rs` says so. btop is Apache 2.0 like playbook, and the attribution is in `NOTICE`.
 
-The code is in `src/usage/tui/`. `data.rs` builds one immutable snapshot from the store, `worker.rs` refreshes it on a thread so a slow read never blocks a key, `app.rs` holds the state and the keys, `view.rs` and `panels.rs` draw (`graph.rs` is the braille graph, `sort.rs` the panel list and the row sorts), and `theme.rs` holds the colors. The numbers come from `src/usage/query.rs`, the same layer the web JSON uses, so the same range gives the same totals in both. The reasons for ratatui and the measured binary cost are in [ADR-0020](../adr/0020-usage-terminal-ui.md).
+The code is in `src/usage/tui/`. `data.rs` builds one immutable snapshot from the store, `worker.rs` refreshes it on a thread so a slow read never blocks a key, `app.rs` holds the state and the keys, `view.rs` and `panels.rs` draw (`chart.rs` is the bar chart with its axes, `scale.rs` the round axis values, `sort.rs` the panel list and the row sorts), and `theme.rs` holds the colors. The numbers come from `src/usage/query.rs`, the same layer the web JSON uses, so the same range gives the same totals in both. The reasons for ratatui and the measured binary cost are in [ADR-0020](../adr/0020-usage-terminal-ui.md).
 
 ## Where the data comes from
 

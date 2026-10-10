@@ -17,6 +17,18 @@ pub struct DayPoint {
     pub day: i64,
     pub cost_usd: f64,
     pub tokens: u64,
+    pub messages: usize,
+    /// Cost per model for the day, by model name.
+    pub models: Vec<(String, f64)>,
+}
+
+/// What one day adds up to while the series is built.
+#[derive(Default)]
+struct DayAcc {
+    cost_usd: f64,
+    tokens: u64,
+    messages: usize,
+    models: BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,31 +49,42 @@ pub struct Data {
 }
 
 /// One point per day from the range start (or the first event, for all time)
-/// to today or the range end, whichever comes first, so the graph axis is a real calendar.
+/// to the end of the range (today for all time), so the graph axis is a real calendar.
 fn day_series(events: &[UsageEvent], now: i64, range: Range) -> Vec<DayPoint> {
     let today = now.div_euclid(SECONDS_PER_DAY);
-    let mut per_day: BTreeMap<i64, (f64, u64)> = BTreeMap::new();
+    let mut per_day: BTreeMap<i64, DayAcc> = BTreeMap::new();
     for e in events {
         let slot = per_day.entry(query::day_of(e.timestamp)).or_default();
-        slot.0 += e.cost_usd;
-        slot.1 += query::total_tokens(e);
+        slot.cost_usd += e.cost_usd;
+        slot.tokens += query::total_tokens(e);
+        slot.messages += 1;
+        *slot.models.entry(e.model.clone()).or_default() += e.cost_usd;
     }
-    // A range that ended before today (last week) stops at its last day.
+    // The series covers the whole range, so a week or month in progress shows
+    // its days to come as empty bars. All time stops at today.
     let (first, last) = match range.days(now) {
-        Some((first, past)) => (first, (past - 1).min(today).max(first)),
+        Some((first, past)) => (first, (past - 1).max(first)),
         None => match per_day.keys().next() {
             Some(day) => (*day, today.max(*day)),
             None => return Vec::new(),
         },
     };
     (first..=last)
-        .map(|day| {
-            let (cost_usd, tokens) = per_day.get(&day).copied().unwrap_or_default();
-            DayPoint {
+        .map(|day| match per_day.remove(&day) {
+            Some(acc) => DayPoint {
                 day,
-                cost_usd,
-                tokens,
-            }
+                cost_usd: acc.cost_usd,
+                tokens: acc.tokens,
+                messages: acc.messages,
+                models: acc.models.into_iter().collect(),
+            },
+            None => DayPoint {
+                day,
+                cost_usd: 0.0,
+                tokens: 0,
+                messages: 0,
+                models: Vec::new(),
+            },
         })
         .collect()
 }

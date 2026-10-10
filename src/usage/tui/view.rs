@@ -12,6 +12,7 @@ use super::panels;
 use super::sort::Panel;
 use super::theme::Palette;
 use crate::usage::aggregate::date_key;
+use crate::usage::query::Range;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -45,9 +46,9 @@ pub fn layout(area: Rect) -> Panels {
     ])
     .areas(area);
     let [graphs, tables, live] = Layout::vertical([
-        Constraint::Percentage(30),
-        Constraint::Percentage(30),
-        Constraint::Percentage(40),
+        Constraint::Fill(45),
+        Constraint::Fill(28),
+        Constraint::Fill(27),
     ])
     .areas(body);
     let halves = |row: Rect| {
@@ -184,15 +185,23 @@ const FOOTER_DROP: [&str; 5] = ["x", "t", "enter", "s/S", "1-6"];
 fn range_label(data: &Data) -> String {
     match data.range.days(data.now) {
         Some((first, past)) if past - first == 1 => {
-            format!("{} {} UTC", data.range.label(), date_key(first))
+            format!("{} {}", data.range.label(), date_key(first))
         }
         Some((first, past)) => format!(
-            "{} {} to {} UTC",
+            "{} {} to {}",
             data.range.label(),
             date_key(first),
             date_key(past - 1)
         ),
-        None => "all time UTC".to_string(),
+        None => "all time".to_string(),
+    }
+}
+
+/// The time zone note in the header border. Weeks say which day they start on.
+fn zone_note(app: &App) -> String {
+    match app.range {
+        Range::ThisWeek(w) | Range::LastWeek(w) => format!("UTC, weeks start {}", w.short()),
+        _ => "UTC".to_string(),
     }
 }
 
@@ -208,6 +217,14 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
                 Style::default()
                     .fg(pal.color(pal.title))
                     .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("\u{251c}", edge),
+        ]))
+        .title(Line::from(vec![
+            Span::styled("\u{2500}\u{2524}", edge),
+            Span::styled(
+                zone_note(app),
+                Style::default().fg(pal.color(pal.graph_text)),
             ),
             Span::styled("\u{251c}", edge),
         ]));
@@ -232,18 +249,34 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
                 + d.totals.output_tokens
                 + d.totals.cache_creation_tokens
                 + d.totals.cache_read_tokens;
-            let mut spans = vec![
-                Span::styled(range_label(d), accent),
-                Span::raw(format!(
-                    "   {}   {} messages   {} tokens",
+            let label = range_label(d);
+            let unpriced = if d.unpriced > 0 {
+                format!("  {} unpriced", d.unpriced)
+            } else {
+                String::new()
+            };
+            // The long words give way when the line would not fit.
+            let numbers = |messages: &str, tokens_word: &str| {
+                format!(
+                    "  {}  {} {messages}  {} {tokens_word}",
                     money(d.totals.cost_usd),
                     d.totals.messages,
                     compact(tokens)
-                )),
-            ];
+                )
+            };
+            let room = usize::from(area.width.saturating_sub(2));
+            let full = numbers("messages", "tokens");
+            let numbers = if label.chars().count() + full.chars().count() + unpriced.chars().count()
+                <= room
+            {
+                full
+            } else {
+                numbers("msgs", "tok")
+            };
+            let mut spans = vec![Span::styled(label, accent), Span::raw(numbers)];
             if d.unpriced > 0 {
                 spans.push(Span::styled(
-                    format!("   {} unpriced", d.unpriced),
+                    unpriced,
                     Style::default().fg(pal.color(pal.warn)),
                 ));
             }
@@ -444,31 +477,36 @@ mod tests {
         use crate::usage::query::WeekStart;
         // Thursday 2026-09-03 01:46:40 UTC.
         for (range, want) in [
-            (Range::Today, "today 2026-09-03 UTC"),
+            (Range::Today, "today 2026-09-03"),
             (
                 Range::ThisWeek(WeekStart::Monday),
-                "this week 2026-08-31 to 2026-09-06 UTC",
+                "this week 2026-08-31 to 2026-09-06",
             ),
             (
                 Range::LastWeek(WeekStart::Monday),
-                "last week 2026-08-24 to 2026-08-30 UTC",
+                "last week 2026-08-24 to 2026-08-30",
             ),
-            (
-                Range::CurrentMonth,
-                "this month 2026-09-01 to 2026-09-30 UTC",
-            ),
-            (Range::LastMonth, "last month 2026-08-01 to 2026-08-31 UTC"),
-            (
-                Range::LastDays(30),
-                "last 30 days 2026-08-05 to 2026-09-03 UTC",
-            ),
-            (Range::All, "all time UTC"),
+            (Range::CurrentMonth, "this month 2026-09-01 to 2026-09-30"),
+            (Range::LastMonth, "last month 2026-08-01 to 2026-08-31"),
+            (Range::LastDays(30), "last 30 days 2026-08-05 to 2026-09-03"),
+            (Range::All, "all time"),
         ] {
             let mut app = App::new(range);
             app.data = Some(Data::build(&[], LiveView::default(), NOW, range, ""));
             let text = screen(&app, 100, 30);
             assert!(text.contains(want), "{want}:\n{text}");
+            assert!(text.contains("UTC"), "{text}");
         }
+        // A week says which day the weeks start on.
+        let range = Range::LastWeek(WeekStart::Sunday);
+        let mut app = App::new(range);
+        app.data = Some(Data::build(&[], LiveView::default(), NOW, range, ""));
+        let text = screen(&app, 100, 30);
+        assert!(text.contains("UTC, weeks start Sun"), "{text}");
+        assert!(
+            text.contains("last week 2026-08-23 to 2026-08-29"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -487,6 +525,25 @@ mod tests {
         for kept in ["r range", "d/w/W/m/M/a jump", "/ filter", "q quit"] {
             assert!(narrow.contains(kept), "{kept}:\n{narrow}");
         }
+    }
+
+    #[test]
+    fn a_long_header_uses_short_words_so_the_unpriced_count_still_shows() {
+        let mut e = event("mystery", "alpha", 0.0);
+        e.unpriced = true;
+        let mut app = App::new(Range::LastDays(30));
+        app.data = Some(Data::build(
+            &[e],
+            LiveView::default(),
+            NOW,
+            Range::LastDays(30),
+            "",
+        ));
+        let text = screen(&app, 80, 24);
+        assert!(text.contains("1 unpriced"), "{text}");
+        assert!(text.contains("1 msgs"), "{text}");
+        // With room, the full words are used.
+        assert!(screen(&app, 120, 30).contains("1 messages"));
     }
 
     #[test]

@@ -29,6 +29,39 @@ pub fn compact(n: u64) -> String {
     n.to_string()
 }
 
+/// A number with at most three decimals and no trailing zeros: `2.5`, `0.05`.
+fn trimmed(n: f64) -> String {
+    let text = format!("{n:.3}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// An axis label in dollars: `$0`, `$0.25`, `$12.5`, `$250`, `$2.5K`.
+pub fn axis_money(usd: f64) -> String {
+    format!("${}", axis_number(usd))
+}
+
+/// An axis label in tokens: `0`, `250`, `500K`, `2.5M`.
+pub fn axis_tokens(n: f64) -> String {
+    axis_number(n)
+}
+
+fn axis_number(n: f64) -> String {
+    const UNITS: [(f64, &str); 3] = [(1e9, "B"), (1e6, "M"), (1e3, "K")];
+    for (size, suffix) in UNITS {
+        if n >= size * 0.9995 {
+            return format!("{}{suffix}", trimmed(n / size));
+        }
+    }
+    if n >= 100.0 {
+        format!("{n:.0}")
+    } else {
+        trimmed(n)
+    }
+}
+
+/// `Mon` to `Sun` for a weekday index with Monday as 0.
+pub const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 /// A horizontal bar `width` cells wide, filled to `fraction` (0 to 1).
 pub fn bar(fraction: f64, width: usize) -> String {
     let filled = ((fraction.clamp(0.0, 1.0) * width as f64).round() as usize).min(width);
@@ -71,6 +104,26 @@ mod tests {
         assert_eq!(compact(1_500), "1.5K");
         assert_eq!(compact(3_400_000), "3.4M");
         assert_eq!(compact(5_600_000_000), "5.6B");
+    }
+
+    #[test]
+    fn axis_labels_are_short_and_round() {
+        for (n, money, tokens) in [
+            (0.0, "$0", "0"),
+            (0.05, "$0.05", "0.05"),
+            (0.25, "$0.25", "0.25"),
+            (1.25, "$1.25", "1.25"),
+            (12.5, "$12.5", "12.5"),
+            (250.0, "$250", "250"),
+            (999.9, "$1K", "1K"),
+            (2_500.0, "$2.5K", "2.5K"),
+            (500_000.0, "$500K", "500K"),
+            (2_500_000.0, "$2.5M", "2.5M"),
+            (1_000_000_000.0, "$1B", "1B"),
+        ] {
+            assert_eq!(axis_money(n), money, "{n}");
+            assert_eq!(axis_tokens(n), tokens, "{n}");
+        }
     }
 
     #[test]

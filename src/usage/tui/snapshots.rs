@@ -39,13 +39,34 @@ fn event(age_secs: i64, session: &str, model: &str, repo: &str, cost: f64) -> Us
 }
 
 fn fixture() -> Vec<UsageEvent> {
-    vec![
+    let mut events = vec![
         event(20, "s-live", "claude-opus-5", "alpha", 0.75),
         event(300, "s-live", "claude-opus-5", "alpha", 0.5),
         event(2 * DAY, "s-old", "claude-sonnet-5", "beta", 1.25),
         event(9 * DAY, "s-old", "claude-opus-5", "beta", 6.0),
         event(20 * DAY, "s-older", "claude-haiku-5", "gamma", 0.1),
-    ]
+    ];
+    // A few more days of synthetic spend so the charts have a shape. Every
+    // fifth day is idle. Haiku stays the smallest model by a wide margin.
+    for d in 1..30_i64 {
+        if d % 5 == 0 || [2, 9, 20].contains(&d) {
+            continue;
+        }
+        let base = [0.4, 1.1, 2.6, 0.8, 1.9, 0.3, 1.4][(d % 7) as usize];
+        let (model, repo, cost) = match d % 3 {
+            0 => ("claude-opus-5", "alpha", base),
+            1 => ("claude-sonnet-5", "beta", base / 2.0),
+            _ => ("claude-haiku-5", "gamma", base / 100.0),
+        };
+        events.push(event(
+            d * DAY + 3 * 3_600,
+            &format!("s-{d}"),
+            model,
+            repo,
+            cost,
+        ));
+    }
+    events
 }
 
 fn app(theme: Theme) -> App {
@@ -102,6 +123,17 @@ fn wide_screen_160x50() {
 }
 
 #[test]
+fn the_week_range_has_wide_bars_and_the_days_to_come() {
+    let mut a = app(Theme::Btop);
+    let events = fixture();
+    let live = live_view(&events, &events, &events, NOW);
+    let range = Range::ThisWeek(crate::usage::query::WeekStart::Monday);
+    a.range = range;
+    a.data = Some(Data::build(&events, live, NOW, range, ""));
+    check("week_160x50", &draw(&a, 160, 50));
+}
+
+#[test]
 fn too_small_screen() {
     check("too_small_60x20", &draw(&app(Theme::Btop), 60, 20));
 }
@@ -125,13 +157,22 @@ fn the_theme_changes_color_not_text() {
     let dark = draw(&app(Theme::Dark), 100, 30);
     let light = draw(&app(Theme::Light), 100, 30);
     let mono = draw(&app(Theme::Mono), 100, 30);
-    // Only the footer's theme name differs.
-    assert_eq!(btop.replace("(btop)", "(x)"), dark.replace("(dark)", "(x)"));
-    assert_eq!(
-        dark.replace("(dark)", "(x)"),
-        light.replace("(light)", "(x)")
-    );
-    assert_eq!(dark.replace("(dark)", "(x)"), mono.replace("(mono)", "(x)"));
+    // Only the footer differs: it names the theme.
+    // Only the footer, which names the theme, and the legend, which the mono
+    // theme leaves out, differ.
+    let legend_row = usize::from(panels().spend.bottom() - 1);
+    let body = |s: &str| {
+        s.lines()
+            .enumerate()
+            .take(29)
+            .filter(|(i, _)| *i != legend_row)
+            .map(|(_, l)| l)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(body(&btop), body(&dark));
+    assert_eq!(body(&dark), body(&light));
+    assert_eq!(body(&dark), body(&mono));
 }
 
 fn buffer(app: &App, width: u16, height: u16) -> Buffer {
@@ -164,84 +205,97 @@ fn btop_paints_a_black_ground_and_gray_text() {
     assert_eq!(buf[(x, y)].fg, rgb(0xcc, 0xcc, 0xcc));
 }
 
+fn panels() -> crate::usage::tui::view::Panels {
+    crate::usage::tui::view::layout(ratatui::layout::Rect::new(0, 0, 100, 30))
+}
+
 #[test]
 fn each_box_has_its_own_outline_color() {
     let buf = buffer(&app(Theme::Btop), 100, 30);
-    let corner = |x: u16, y: u16| {
+    let p = panels();
+    let corner = |r: ratatui::layout::Rect| {
         assert_eq!(
-            buf[(x, y)].symbol(),
+            buf[(r.x, r.y)].symbol(),
             "\u{256d}",
-            "rounded corner at {x},{y}"
+            "rounded corner at {r:?}"
         );
-        buf[(x, y)].fg
+        buf[(r.x, r.y)].fg
     };
-    assert_eq!(corner(0, 0), rgb(0x55, 0x6d, 0x59)); // header and spend: cpu
-    assert_eq!(corner(0, 3), rgb(0x55, 0x6d, 0x59)); // spend
-    assert_eq!(corner(50, 3), rgb(0x5c, 0x58, 0x8d)); // tokens: net
-    assert_eq!(corner(0, 11), rgb(0x6c, 0x6c, 0x4b)); // models: mem
-    assert_eq!(corner(50, 11), rgb(0x6c, 0x6c, 0x4b)); // projects: mem
-    assert_eq!(corner(0, 19), rgb(0x80, 0x52, 0x52)); // sessions: proc
-    assert_eq!(corner(50, 19), rgb(0x80, 0x52, 0x52)); // events: proc
+    assert_eq!(corner(p.header), rgb(0x55, 0x6d, 0x59)); // header: cpu
+    assert_eq!(corner(p.spend), rgb(0x55, 0x6d, 0x59)); // spend: cpu
+    assert_eq!(corner(p.tokens), rgb(0x5c, 0x58, 0x8d)); // tokens: net
+    assert_eq!(corner(p.models), rgb(0x6c, 0x6c, 0x4b)); // models: mem
+    assert_eq!(corner(p.projects), rgb(0x6c, 0x6c, 0x4b)); // projects: mem
+    assert_eq!(corner(p.sessions), rgb(0x80, 0x52, 0x52)); // sessions: proc
+    assert_eq!(corner(p.events), rgb(0x80, 0x52, 0x52)); // events: proc
 }
 
 #[test]
 fn titles_carry_a_hint_in_the_accent_color() {
     let buf = buffer(&app(Theme::Btop), 100, 30);
-    // Spend sits at row 3, the hint after the corner, a dash and the `┤`.
-    let (x, y) = find(&buf, "\u{b9}", 3);
+    let p = panels();
+    // The hint follows the corner, a dash and the `┤`.
+    let (x, y) = find(&buf, "\u{b9}", p.spend.y);
     assert_eq!(buf[(x, y)].fg, rgb(0xb5, 0x40, 0x40));
     assert_eq!(buf[(x - 1, y)].symbol(), "\u{2524}");
     assert_eq!(buf[(x + 1, y)].fg, rgb(0xee, 0xee, 0xee));
     // The focused panel (models, hint 3) wears a badge: title on accent.
-    let (x, y) = find(&buf, "\u{b3}", 11);
+    let (x, y) = find(&buf, "\u{b3}", p.models.y);
     assert_eq!(buf[(x, y)].bg, rgb(0xb5, 0x40, 0x40));
 }
 
 #[test]
-fn the_graph_runs_the_gradient_from_start_toward_end() {
+fn the_bars_run_the_gradient_with_their_height_on_the_scale() {
     let buf = buffer(&app(Theme::Btop), 100, 30);
-    // Collect the colors of braille cells inside the spend panel.
+    let p = panels();
+    // Collect the colors of bar cells inside the spend panel.
     let mut colors: Vec<Color> = Vec::new();
-    for y in 4..11 {
-        for x in 1..49 {
+    for y in p.spend.y + 1..p.spend.y + p.spend.height - 1 {
+        for x in p.spend.x + 1..p.spend.x + p.spend.width - 1 {
             let c = &buf[(x, y)];
             if c.symbol()
                 .chars()
                 .next()
-                .is_some_and(|ch| ('\u{2801}'..='\u{28ff}').contains(&ch))
+                .is_some_and(|ch| ('\u{2581}'..='\u{2588}').contains(&ch))
             {
                 colors.push(c.fg);
             }
         }
     }
     assert!(!colors.is_empty());
-    // The peak day is the end color, the small days are nearer the start.
-    assert!(colors.contains(&rgb(0xdc, 0x4c, 0x4c)), "{colors:?}");
-    assert!(colors.iter().any(|c| *c != rgb(0xdc, 0x4c, 0x4c)));
+    // Taller days sit further along the gradient than small ones.
+    let mut distinct = colors.clone();
+    distinct.sort_by_key(|c| format!("{c:?}"));
+    distinct.dedup();
+    assert!(distinct.len() >= 3, "{distinct:?}");
 }
 
 #[test]
 fn the_selected_row_of_the_focused_panel_is_highlighted() {
     let a = app(Theme::Btop);
     let buf = buffer(&a, 100, 30);
-    // Models is focused: its first data row (row 13) has the selection ground.
-    assert_eq!(buf[(2, 13)].bg, rgb(0x6a, 0x2f, 0x2f));
-    assert_eq!(buf[(2, 13)].fg, rgb(0xee, 0xee, 0xee));
-    assert_eq!(buf[(2, 14)].bg, rgb(0, 0, 0));
+    let p = panels();
+    let first = p.models.y + 2;
+    // Models is focused: its first data row has the selection ground.
+    assert_eq!(buf[(2, first)].bg, rgb(0x6a, 0x2f, 0x2f));
+    assert_eq!(buf[(2, first)].fg, rgb(0xee, 0xee, 0xee));
+    assert_eq!(buf[(2, first + 1)].bg, rgb(0, 0, 0));
     // The projects panel is not focused, so it shows no selection.
-    assert_eq!(buf[(52, 13)].bg, rgb(0, 0, 0));
+    assert_eq!(buf[(p.projects.x + 2, first)].bg, rgb(0, 0, 0));
 }
 
 #[test]
 fn meters_use_the_gradient_and_the_dim_color_for_the_rest() {
     let buf = buffer(&app(Theme::Btop), 100, 30);
-    // The haiku share is tiny: a dim dot at the end of its row (row 15).
-    let (x, y) = find(&buf, "\u{b7}", 15);
+    let p = panels();
+    let first = p.models.y + 2;
+    // The haiku share is tiny: a dim dot at the end of its row.
+    let (x, y) = find(&buf, "\u{b7}", first + 2);
     assert_eq!(buf[(x, y)].fg, rgb(0x40, 0x40, 0x40));
     // The opus share fills most of its row with colored squares.
     let squares: Vec<Color> = (0..50)
-        .filter(|x| buf[(*x, 13)].symbol() == "\u{25a0}")
-        .map(|x| buf[(x, 13)].fg)
+        .filter(|x| buf[(*x, first)].symbol() == "\u{25a0}")
+        .map(|x| buf[(x, first)].fg)
         .collect();
     assert!(squares.len() >= 6, "{squares:?}");
     assert_ne!(squares[0], squares[squares.len() - 1]);
@@ -285,7 +339,8 @@ fn mono_draws_no_color_at_all_but_still_marks_the_selection() {
         .content()
         .iter()
         .all(|c| c.fg == Color::Reset && c.bg == Color::Reset));
-    assert!(buf[(2, 13)]
+    let first = panels().models.y + 2;
+    assert!(buf[(2, first)]
         .modifier
         .contains(ratatui::style::Modifier::REVERSED));
 }

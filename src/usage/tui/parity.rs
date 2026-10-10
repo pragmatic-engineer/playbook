@@ -237,26 +237,22 @@ mod calendar {
     }
 
     #[test]
-    fn the_graph_of_a_finished_range_ends_on_its_last_day() {
+    fn the_graph_covers_the_whole_range_and_adds_up_to_the_totals() {
         let events = fixture();
         for (range, days) in [
             (Range::LastWeek(WeekStart::Monday), 7),
             (Range::LastMonth, 31),
             (Range::Today, 1),
-            // Up to today, not to the end of the week.
-            (Range::ThisWeek(WeekStart::Monday), 4),
+            // A week and a month in progress show their days to come.
+            (Range::ThisWeek(WeekStart::Monday), 7),
+            (Range::CurrentMonth, 30),
         ] {
             let tui = Data::build(&events, LiveView::default(), NOON, range, "");
             assert_eq!(tui.series.len(), days, "{range:?}");
             let graphed: f64 = tui.series.iter().map(|p| p.cost_usd).sum();
-            let total = tui.totals.cost_usd;
-            // The future event on the 6th is in the totals but past the graph.
-            let future = if matches!(range, Range::ThisWeek(_)) {
-                512.0
-            } else {
-                0.0
-            };
-            assert!((graphed + future - total).abs() < 1e-9, "{range:?}");
+            assert!((graphed - tui.totals.cost_usd).abs() < 1e-9, "{range:?}");
+            let messages: usize = tui.series.iter().map(|p| p.messages).sum();
+            assert_eq!(messages, tui.totals.messages, "{range:?}");
         }
     }
 }
