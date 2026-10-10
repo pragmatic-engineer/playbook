@@ -420,18 +420,19 @@ fn tree(root: &Path) -> Vec<String> {
 }
 
 #[test]
-fn recompute_interval_defaults_to_two_seconds_and_reads_the_env_var() {
+fn recompute_interval_reads_the_env_var_and_falls_back_to_the_default() {
     // Arrange: rows are (label, interval, age of the stored cost in ms,
-    // expected cents). The ages sit a second either side of the 2000 ms
-    // default, so the outcome does not depend on how long the process takes.
-    let rows: [(&str, Option<&str>, u64, i64); 9] = [
-        ("unset: 1 s old is reused", None, 1000, 0),
+    // expected cents). The process start-up delay under load only ever makes
+    // the stored cost look older, so every row must stay correct when the age
+    // grows: recomputed rows are at least a second past the interval, and
+    // reused rows sit far inside a long one. That the default is 2000 ms and
+    // that unparsable or empty values fall back to it is pinned by the unit
+    // test in `src/hooks/auto_cost.rs`, which needs no clock.
+    let rows: [(&str, Option<&str>, u64, i64); 6] = [
         ("unset: 3 s old is recomputed", None, 3000, 100),
-        ("unparsable: 1 s old is reused", Some("abc"), 1000, 0),
         ("unparsable: 3 s old is recomputed", Some("abc"), 3000, 100),
-        ("empty: 1 s old is reused", Some(""), 1000, 0),
         ("empty: 3 s old is recomputed", Some(""), 3000, 100),
-        ("5000: 3 s old is reused", Some("5000"), 3000, 0),
+        ("600000: 3 s old is reused", Some("600000"), 3000, 0),
         ("5000: 6 s old is recomputed", Some("5000"), 6000, 100),
         ("zero recomputes on every call", Some("0"), 1000, 100),
     ];
