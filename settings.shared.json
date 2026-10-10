@@ -66,7 +66,8 @@
       "Bash(which:*)",
       "Bash(mkdir:*)",
       "Bash(playbook mode status:*)",
-      "Bash(playbook mode ask)"
+      "Bash(playbook mode ask)",
+      "Bash(playbook run-context:*)"
     ],
     "deny": [
       "Read(**/.env)",
@@ -124,6 +125,11 @@
             "type": "command",
             "command": "playbook hook commit-message-sanitizer",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "playbook hook policy-guard",
+            "timeout": 10
           }
         ]
       },
@@ -133,6 +139,11 @@
           {
             "type": "command",
             "command": "playbook hook no-slop-guard",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "playbook hook policy-guard",
             "timeout": 10
           }
         ]

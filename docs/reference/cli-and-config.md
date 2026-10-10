@@ -47,7 +47,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage dashboard, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `release`, `review`, `route`, `sanitize`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `release`, `review`, `route`, `run-context`, `sanitize`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -783,6 +783,17 @@ Example: `playbook route implement --tier medium --json`
 - `--tier <TIER>`: low, medium or high (implement only)
 - `--failures <FAILURES>`: How many times this task already failed
 - `--json`: Print the decision as JSON
+
+### `playbook run-context`
+
+Read the run mode and effort ceiling a command's Step 0 needs, in one call
+
+Reads `--auto` and `--ask` from the command's arguments (exit 2 when both are present), and prints one JSON object: `mode`, `source`, `hook_mode`, `warning`, and `ceiling` when `--command` names the command. `ceiling` is the highest effort the user allows, or null.
+
+Example: `playbook run-context --command implement --args "--auto"`
+
+- `--command <COMMAND>`: The command's name, such as `implement`; adds the effort ceiling
+- `--args <ARGS>`: The command's raw arguments, as one string
 
 ### `playbook sanitize`
 

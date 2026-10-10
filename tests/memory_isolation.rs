@@ -69,6 +69,11 @@ fn no_rust_code_builds_a_path_into_claude_codes_project_memory() {
     let mut files = Vec::new();
     files_under(&root, &["rs"], &mut files);
     for file in files {
+        // The one exception: `policy-guard` names those directories only to
+        // deny writes into them, and never touches them.
+        if file.ends_with("hooks/policy_guard.rs") {
+            continue;
+        }
         let text = fs::read_to_string(&file).unwrap_or_default();
         let code = production(&text);
         let builds_projects = code.contains("\"projects\"") || code.contains("/projects/");
@@ -121,6 +126,27 @@ fn the_claude_memory_reader_only_reads() {
         assert!(
             !code.contains(banned),
             "claude_read.rs must only read Claude Code's memory, found {banned}"
+        );
+    }
+}
+
+#[test]
+fn policy_guard_only_denies_and_never_writes() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/hooks/policy_guard.rs");
+    let code = production(&fs::read_to_string(path).unwrap());
+    for banned in [
+        "fs::write",
+        "File::create",
+        "OpenOptions",
+        "create_dir",
+        "remove_file",
+        "remove_dir",
+        "fs::rename",
+        "fs::copy",
+    ] {
+        assert!(
+            !code.contains(banned),
+            "policy_guard.rs uses {banned}: it must only read and deny"
         );
     }
 }

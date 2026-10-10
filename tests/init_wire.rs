@@ -254,6 +254,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "no-slop-guard",
         "precommit-check",
         "commit-message-sanitizer",
+        "policy-guard",
     ]
     .into_iter()
     .collect();
@@ -261,7 +262,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly all 18 ported HookName variants in binary form"
+        "wiring should register exactly all 19 ported HookName variants in binary form"
     );
 }
 
@@ -335,6 +336,7 @@ fn no_hook_command_points_under_claude_hooks_dir_after_wiring() {
         "no-slop-guard",
         "precommit-check",
         "commit-message-sanitizer",
+        "policy-guard",
     ] {
         assert!(
             commands.contains(&format!("playbook hook {name}")),

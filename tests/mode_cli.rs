@@ -342,3 +342,76 @@ fn mode_auto_twice_leaves_the_stored_values_identical() {
     let after_second = stored_repo(&home);
     assert_eq!(after_first, after_second);
 }
+
+#[test]
+fn run_context_reads_the_flag_from_the_arguments_and_adds_the_ceiling() {
+    // Arrange
+    let repo = seeded_repo("run-context");
+    let home = scratch_dir("run-context-home");
+
+    // Act
+    let out = run_playbook(
+        &repo,
+        &home,
+        &[],
+        &["run-context", "--command", "plan", "--args", "12 --auto"],
+    );
+
+    // Assert
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let v = status_json(&out);
+    assert_eq!(v["mode"], "auto");
+    assert_eq!(v["source"], "flag");
+    assert!(v.get("ceiling").is_some(), "{v}");
+    assert!(v.get("warning").is_some() && v.get("hook_mode").is_some());
+}
+
+#[test]
+fn run_context_without_a_command_leaves_the_ceiling_out() {
+    let repo = seeded_repo("run-context-bare");
+    let home = scratch_dir("run-context-bare-home");
+
+    let out = run_playbook(&repo, &home, &[], &["run-context", "--args", "--ask"]);
+
+    let v = status_json(&out);
+    assert_eq!(v["mode"], "ask");
+    assert!(v.get("ceiling").is_none(), "{v}");
+}
+
+#[test]
+fn run_context_exits_2_when_both_flags_are_given() {
+    let repo = seeded_repo("run-context-conflict");
+    let home = scratch_dir("run-context-conflict-home");
+
+    let out = run_playbook(
+        &repo,
+        &home,
+        &[],
+        &["run-context", "--command", "adr", "--args", "--auto --ask"],
+    );
+
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stdout_of(&out).is_empty());
+    assert!(stderr_of(&out).contains("--auto and --ask conflict; pass one."));
+}
+
+#[test]
+fn run_context_treats_auto_design_as_auto() {
+    let repo = seeded_repo("run-context-design");
+    let home = scratch_dir("run-context-design-home");
+
+    let out = run_playbook(
+        &repo,
+        &home,
+        &[],
+        &[
+            "run-context",
+            "--command",
+            "plan",
+            "--args",
+            "idea --auto-design",
+        ],
+    );
+
+    assert_eq!(status_json(&out)["mode"], "auto");
+}

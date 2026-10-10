@@ -212,6 +212,22 @@ pub enum Command {
         #[command(subcommand)]
         sub: DoctorCommand,
     },
+    /// Read the run mode and effort ceiling a command's Step 0 needs, in one call
+    ///
+    /// Reads `--auto` and `--ask` from the command's arguments (exit 2 when
+    /// both are present), and prints one JSON object: `mode`, `source`,
+    /// `hook_mode`, `warning`, and `ceiling` when `--command` names the
+    /// command. `ceiling` is the highest effort the user allows, or null.
+    ///
+    /// Example: `playbook run-context --command implement --args "--auto"`
+    RunContext {
+        /// The command's name, such as `implement`; adds the effort ceiling
+        #[arg(long)]
+        command: Option<String>,
+        /// The command's raw arguments, as one string
+        #[arg(long, default_value = "", allow_hyphen_values = true)]
+        args: String,
+    },
     /// Choose whether playbook asks questions or decides on its own
     ///
     /// `ask` is the default. `auto` lets commands pick the recommended option
@@ -1455,6 +1471,7 @@ pub enum HookName {
     BgAwaitGuard,
     NoSlopGuard,
     CommitMessageSanitizer,
+    PolicyGuard,
     PrecommitCheck,
     AutoGuard,
     AutoCost,
@@ -1560,6 +1577,7 @@ mod tests {
             "no-slop-guard",
             "precommit-check",
             "commit-message-sanitizer",
+            "policy-guard",
         ];
 
         // Act

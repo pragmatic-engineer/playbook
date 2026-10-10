@@ -345,6 +345,20 @@ fn fires(f: &Fire, name: &str) -> bool {
                 .1
                 .contains("\"permissionDecision\":\"deny\"")
         }
+        "policy-guard" => {
+            let home = f.home.clone();
+            run_hook(
+                &f.playbook,
+                name,
+                r#"{"tool_input":{"command":"git commit --no-verify -m x"}}"#,
+                &home,
+                &home,
+                &[],
+                &[],
+            )
+            .1
+            .contains("\"permissionDecision\":\"deny\"")
+        }
         "commit-message-sanitizer" => {
             let home = f.home.clone();
             let bad = "git commit -m 'feat: x' -m 'Claude-Session: https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQr'";
