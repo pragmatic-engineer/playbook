@@ -44,22 +44,7 @@ Team engineering standards for code design, commits, pull requests, testing, and
 
 ### Self-review before committing
 
-Read the staged diff before you commit it. `/playbook:commit-and-push` runs in a forked
-context on the `git` agent, so it stages, writes a message, and pushes without
-ever judging the change. You are the only reader who sees it first.
-
-Run `git diff --cached` and check:
-
-- Every staged file belongs in this commit. Nothing swept in by `-A`.
-- One concern. If the message needs an "and", split the commit.
-- No leftover scaffolding: debug output, commented-out code, a stray test file.
-- Nothing secret: keys, tokens, `.env` files, real customer data.
-- The change does what you set out to do, and you can say why in one line.
-
-`playbook hook precommit-check` covers the mechanical half of this (secret-shaped
-filenames, debug leftovers in added lines, oversized commits) and warns without
-blocking. It cannot tell whether the change is correct or whether it belongs in
-one commit. That part is yours.
+`/playbook:commit-and-push` runs in a forked context on the `git` agent, so it never judges the change. Read `git diff --cached` first and ask the two things no hook can: does it belong in one commit (if the message needs an "and", split it), and can you say why in one line. `playbook hook precommit-check` already warns on secret-shaped filenames, debug leftovers and oversized commits.
 
 ## Pull Requests
 
