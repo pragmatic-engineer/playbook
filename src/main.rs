@@ -662,6 +662,31 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
+                PrCommand::Reply {
+                    pr,
+                    thread,
+                    issue: _,
+                    body_file,
+                    repo,
+                } => {
+                    let target = match thread {
+                        Some(id) => pr::reply::Target::Thread(id),
+                        None => pr::reply::Target::Issue,
+                    };
+                    let req = pr::reply::Request {
+                        pr: &pr,
+                        target,
+                        body_file: &body_file,
+                        repo: repo.as_deref(),
+                    };
+                    match pr::reply::run(&req) {
+                        Ok(text) => println!("{text}"),
+                        Err(err) => {
+                            eprintln!("error: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 PrCommand::Stack { args } => match pr::stack::run(&args) {
                     Ok(text) => println!("{text}"),
                     Err(err) => {

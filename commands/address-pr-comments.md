@@ -1,6 +1,6 @@
 ---
 description: Use when a PR has unresolved review comments to work through. Walks them one at a time, applies fixes or drafts replies, commits and pushes through /playbook:commit-and-push, then posts the queued replies.
-allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, Skill
+allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Skill
 argument-hint: "[PR number] [--bots] [--dry-run] [-y|--yes] [--auto] [--ask]"
 model: opus
 effort: high
@@ -15,16 +15,15 @@ Iterate through unresolved review-thread comments and PR-level comments on a pul
 Do this first. Read the mode from the CLI:
 
 ```bash
-playbook run-context --command address-pr-comments --args "$ARGUMENTS"
+playbook run-context --args "$ARGUMENTS"
 ```
 
-The JSON has `mode` (`ask` or `auto`), `source`, `hook_mode`, `warning` and `ceiling`. If `warning` is not empty, print it once. `ceiling` is the highest effort the user allows for this run (`null` means no limit): hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. Exit 2 means `--auto` and `--ask` were both passed: stop with the line it printed. For any other failure, do not stop and do not retry: run in ask mode with no ceiling and print one line. When the error is `unrecognized subcommand 'run-context'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
+The JSON has `mode` (`ask` or `auto`), `source`, `hook_mode` and `warning`. If `warning` is not empty, print it once. Exit 2 means `--auto` and `--ask` were both passed: stop with the line it printed. For any other failure, do not stop and do not retry: run in ask mode and print one line. When the error is `unrecognized subcommand 'run-context'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
 
 If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:address-pr-comments needs a person to run it, because it replies on GitHub in your name and each reply needs your approval." Do not run any later step.
 
 In `ask` mode, behave exactly as this file describes.
 
-**Routing.** Where you choose what to spawn, also run `playbook route mechanical --json` and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on.
 
 ## Discipline: receiving review feedback
 
@@ -129,21 +128,19 @@ For each indexed item, do this loop:
    - `Edit-then-fix` means: user wants to write a different fix than what you proposed. Wait for them to describe it, then apply.
    - `Quit` means: stop iterating, jump straight to Step 5 with what you have so far.
 
-5. **Apply.** Everything above this sub-step (show context, verify the claim, choose the action, draft the exact diff or reply text, get user approval) stays in the main session unchanged. Once an action is approved and its content is fully decided, dispatch execution to `patch-applier` (`subagent_type: playbook:patch-applier`) rather than applying it directly. `patch-applier` holds `Edit` and `Bash`, so per `playbook:delegating-subagents` it delivers its outcome by file, not by return value alone: every dispatch below names a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md` (`<N>` is this item's index), and the main session reads that file the moment the dispatch returns or goes idle, before trusting any outcome.
+5. **Apply.** The approved item is fully decided, so apply it yourself; this command spawns no agent.
 
-   - **For Both, dispatch the fix half now and queue the reply text for Step 6.** The reply half of a **Both** action is NEVER dispatched here: only its content is decided now. Step 6 dispatches it after commit, once the push has succeeded. This deferred timing is the primary rule for Both, not a trailing exception to it.
-   - For **Fix**, or the fix half of **Both**: dispatch `patch-applier` with the exact, already-approved diff and the report file path. Read the report file; it names the exact hunk applied, or a failure. Print the applied hunk to the user immediately, before advancing to the next indexed item.
-   - For **Reply only** (no fix): dispatch `patch-applier` with the exact reply text, the exact command shape to run, and the report file path, matching the two existing shapes below:
+   - **For Both, apply the fix half now and queue the reply text for Step 6.** The reply half of a **Both** action is NEVER posted here: only its content is decided now. Step 6 posts it after the commit, once the push has succeeded.
+   - For **Fix**, or the fix half of **Both**: apply the approved diff with `Edit`. Read the changed lines back and print the applied hunk to the user immediately, before advancing to the next indexed item.
+   - For **Reply only** (no fix): write the approved reply text to a file with `Write` (for example `/tmp/<repo>/address-pr-comments-<PR_NUMBER>-item-<N>.md`) and post it:
      ```bash
-     # Inline review-thread reply (use databaseId of the first comment in the thread)
-     gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" \
-       -f body="<reply text>"
-     # PR-level issue comment reply
-     gh pr comment "$PR_NUMBER" --body "<reply text>"
+     # Inline review-thread reply (the databaseId of the thread's first comment)
+     playbook pr reply --pr "$PR_NUMBER" --thread "$DATABASE_ID" --body-file <that file>
+     # PR-level comment reply
+     playbook pr reply --pr "$PR_NUMBER" --issue --body-file <that file>
      ```
-     Read the report file; it names the exact body posted, or a failure. Print the posted body to the user immediately, before advancing to the next indexed item.
-   - One dispatch per approved item, applied immediately. Do not batch multiple items into one `patch-applier` call.
-   - If the report file is missing, or names a failure (the diff did not apply, the `gh api` call failed), surface it to the user plainly and mark the item `failed` in the tracked state below, never `fixed`/`replied`. A missing report file is its own distinct outcome from a reported failure: say which one happened, don't guess.
+     It posts the file verbatim (no shell quoting to get wrong), refuses an empty body, an em or en dash and AI attribution, and prints `Posted: <url>` and the body. Print the posted body to the user before advancing to the next indexed item.
+   - If an edit does not apply or `playbook pr reply` exits 1, surface the error to the user plainly and mark the item `failed` in the tracked state below, never `fixed`/`replied`.
 
 6. **Track state.** Keep a running markdown list, one row per indexed item, with status `fixed | replied | both-queued | failed | skipped`. This is the audit trail.
 
@@ -165,12 +162,7 @@ If approved (or `AUTO_COMMIT=true`):
 
 1. Invoke the `commit-and-push` skill with the `-A` flag and an extra hint that the commit message should reference the PR (e.g. "address review comments on #<PR_NUMBER>"). The skill handles staging, formatting, message generation, rebase, and push. Capture the resulting commit SHA from the skill's output.
 
-2. For each `both-queued` reply, dispatch `patch-applier` (`subagent_type: playbook:patch-applier`) with the exact reply body, the command shape to run, and a report file path at `/tmp/$REPO/address-pr-comments-$PR_NUMBER-item-<N>.report.md`, the same convention Step 4 uses:
-   ```bash
-   gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" \
-     -f body="$REPLY_TEXT"
-   ```
-   Read the report file the moment the dispatch returns or goes idle; it names the exact body posted, or a failure. Print the posted body before moving to the next queued reply. On a missing report file or a reported failure, apply the SAME rule Step 4 sub-step 5 uses: surface it to the user plainly, mark the item `failed` (not `both-queued` anymore), and do not count it toward "posted P queued replies" below. This is the same delegation Step 4 uses for an immediate reply, applied here to the deferred post: Step 4's "who executes the post changes, not when" claim depends on this step actually dispatching `patch-applier` too, not the main session running `gh api` directly.
+2. For each `both-queued` reply, write the reply body to a file and post it with `playbook pr reply --pr "$PR_NUMBER" --thread "$DATABASE_ID" --body-file <file>`, the same call Step 4 uses for an immediate reply. Print the posted body before moving to the next queued reply. On a failure, apply the SAME rule Step 4 sub-step 5 uses: surface it to the user plainly, mark the item `failed` (not `both-queued` anymore), and do not count it toward "posted P queued replies" below.
 
 3. Print a final summary:
    ```
@@ -184,6 +176,6 @@ If approved (or `AUTO_COMMIT=true`):
 ## Notes
 
 - **Threads with multiple comments.** A thread can have a back-and-forth. Display all comments in chronological order but treat the latest non-author comment as the prompt. If the latest comment is from `$ME` (you replied earlier), surface that and let the user decide if there's anything still pending.
-- **No silent edits.** Every file change must be visible to the user before the next iteration. If a file is edited (directly, or via `patch-applier`'s dispatch), print the resulting hunk.
+- **No silent edits.** Every file change must be visible to the user before the next iteration. If a file is edited, print the resulting hunk.
 - **Failure handling.** If a reply POST fails (404 on the thread, 403 if you're not a collaborator), don't retry blindly. Print the error, leave the reply in the queue, and continue with the rest. Surface the failures in the final summary so the user can post them manually.
 - **Resuming after Quit.** If the user quits mid-iteration, print the remaining indexed items with their URLs so they can re-run `/playbook:address-pr-comments` later (the resolved/unresolved state on GitHub is still the source of truth).

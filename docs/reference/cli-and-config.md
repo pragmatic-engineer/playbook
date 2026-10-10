@@ -630,7 +630,7 @@ These are the mechanical steps behind `/playbook:create-pull-request`.
 
 Example: `playbook pr prepare --base main`
 
-Subcommands: `ci-wait`, `comments`, `create`, `land-wait`, `merge`, `prepare`, `review-triage`, `rules`, `stack`
+Subcommands: `ci-wait`, `comments`, `create`, `land-wait`, `merge`, `prepare`, `reply`, `review-triage`, `rules`, `stack`
 
 ### `playbook pr ci-wait`
 
@@ -692,6 +692,20 @@ Finds the branch and base, checks the repo is ready, writes the diff to a scratc
 - `--base <BASE>`: Base branch for the PR (default: the repo's default branch)
 - `--ticket <TICKET>`: Ticket id to cite (default: one found in the branch name)
 - `--dir <DIR>`: Work in this directory instead of the current one
+
+### `playbook pr reply`
+
+Post one reply on a pull request, from a file
+
+`--thread ID` replies in a review thread (ID is the `databaseId` of the thread's first comment, as `pr comments` writes it); `--issue` comments on the pull request itself. The body is read from `--body-file`, so quotes, backticks and newlines need no shell escaping. It refuses an empty body, an em or en dash, and AI attribution. Prints `Posted: <url>` and the body.
+
+Example: `playbook pr reply --pr 12 --thread 345 --body-file /tmp/reply.md`
+
+- `--pr <PR>`: The pull request number
+- `--thread <THREAD>`: Reply in the review thread whose first comment has this `databaseId`
+- `--issue`: Comment on the pull request itself
+- `--body-file <BODY_FILE>`: File holding the reply text
+- `--repo <REPO>`: `owner/name`; defaults to the current repo
 
 ### `playbook pr review-triage`
 
