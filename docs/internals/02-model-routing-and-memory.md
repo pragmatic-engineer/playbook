@@ -6,9 +6,9 @@ The session model defaults to Sonnet. Four things shape which model and effort a
 
 The policy lives in `prompts/SYSTEM_PROMPT.md` and in each file's frontmatter.
 
-- **Sonnet** is the session default and covers most coding: `/playbook:implement`, `/playbook:fix`, the implementer and the critic.
+- **Sonnet** is the session default and covers most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`.
 - **Haiku** takes mechanical, formatting and search work: `git`, `patch-applier`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, and the `doctor`, `session-start` and `setup` commands.
-- **Opus** takes design (`/playbook:plan`, `/playbook:adr`), every reviewer (`/playbook:quick-review` at medium effort, `/playbook:deep-review` and `/playbook:implement` Step 9 at high), the auditor behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`.
+- **Opus** takes design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`.
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
 
@@ -21,9 +21,9 @@ Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mod
 | `mechanical` | haiku, low | `patch-applier` |
 | `classify` | haiku, medium | `review-triage` |
 | `check` | haiku, medium | `cheap-checker` |
-| `review` | opus, high | `reviewer` |
+| `review` | opus, medium | `reviewer` |
 | `implement` (`--tier low\|medium\|high`) | sonnet, low, medium or high | `implementer` |
-| `design` | opus, xhigh | `critic` |
+| `design` | opus, xhigh | `critic` (stress-tests the design at its own Sonnet medium; the design itself runs in the command on Opus) |
 
 Approval is needed for the top model, the high implement tier, and a task that has failed twice (`--failures 2`). `routing.escalate` decides what happens then: `ask` (default) tells the orchestrator to ask you, `auto` proceeds (auto mode and `auto.budgetUsd` still cap the spend), `deny` returns the next cheaper route. Your effort ceiling always wins. `--json` prints the decision for scripts.
 
@@ -45,7 +45,7 @@ The reasoning is in [Why the pieces are shaped this way](../concepts/03-why-the-
 
 Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
 
-The rule: lower effort where the work is mechanical or already decided, and never where a missed finding is costly. A wrong model costs a rerun. A reviewer that stops looking costs a bug in production.
+The rule: lower effort where the work is mechanical or already decided, and never where a missed finding is costly. A wrong model costs a rerun. A reviewer that stops looking costs a bug in production, which is why risky diffs still get the `-xhigh` reviewer.
 
 | File | Model | Effort | Reasoning |
 | --- | --- | --- | --- |
@@ -54,8 +54,8 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `agents/collector` | haiku | `low` (was medium) | Gathers and compacts raw history; the analyst does the thinking later. |
 | `agents/cheap-checker` | haiku | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
 | `agents/review-triage` | haiku | `low` (was medium) | A three-way classifier; any bad or missing answer already falls back to `full-lens`, so a wrong call fails safe. |
-| `commands/quick-review` | sonnet (orchestrator); its reviewer runs on opus | `medium` for the command and for its reviewer (the reviewer's base is `high`) | One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. The reviewer is spawned as `reviewer-medium` through `playbook effort resolve agents reviewer --cap medium`, and falls back to the base reviewer in a session without variants. The Opus medium A/B (issue #660) is now done: see the `agents/reviewer` row. |
-| `agents/reviewer` | opus | `high` (kept) | A missed finding is the cost. This includes the security lens, so nothing here is lowered; the `-low` variants exist only for small diffs and are an orchestrator choice. Benched on 10 real diffs (7 with a seeded real finding, 3 clean), 20 runs per cell (200 calls): Opus high 200/200, Opus medium 199/200 (the one miss was `rd-lower`, a seeded finding, 139/140 recall), Sonnet medium and high 200/200, Opus low 49/50 in a 5 run round. Cost per call: Opus high $0.0155 to $0.0168, Opus medium $0.0125 to $0.0136 (19% less), Sonnet high $0.0066 to $0.0072, Sonnet medium $0.0050 to $0.0054. Opus medium is within 1 point of high, which backs `quick-review`'s `reviewer-medium`, but the 7 seeded findings are a small set of distinct bugs, so 140 runs do not prove recall on harder ones, and a missed review finding is the costly error. Sonnet matched Opus on this set at about 60% less, and moving the reviewer to Sonnet would also change the tier rule above; both stay unapplied until a larger set of seeded diffs exists. |
+| `commands/quick-review` | sonnet (orchestrator); its reviewer runs on opus | `medium` for the command and for its reviewer (the reviewer's base is now `medium` too) | One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. The reviewer is spawned through `playbook effort resolve agents reviewer --cap medium`, which returns the base reviewer (already at medium), or `reviewer-low` when the user's ceiling is lower. See [ADR-0021](../adr/0021-reviewer-at-opus-medium.md). |
+| `agents/reviewer` | opus | `medium` (was high) | Lowered by [ADR-0021](../adr/0021-reviewer-at-opus-medium.md). Benched on 10 real diffs (7 with a seeded real finding, 3 clean), 20 runs per cell (200 calls): Opus high 200/200, Opus medium 199/200 (the one miss was `rd-lower`, a seeded finding, 139/140 recall), Sonnet medium and high 200/200, Opus low 49/50 in a 5 run round. Cost per call: Opus high $0.0155 to $0.0168, Opus medium $0.0125 to $0.0136 (19% less), Sonnet high $0.0066 to $0.0072, Sonnet medium $0.0050 to $0.0054. The 7 seeded findings are a small set of distinct bugs, so the bench does not prove recall on harder ones. Risk is bounded by the variants: an orchestrator sends a security lens, a diff over 60 KB or an auth, secrets or crypto diff to `reviewer-xhigh`, and a small diff to `reviewer-low`. A session started without `ccc` or `ccd` has the base reviewer only, at medium. Sonnet matched Opus on this set at about 60% less; moving the reviewer to Sonnet would also change the tier rule above and stays unapplied until a larger set of seeded diffs exists. |
 | `agents/critic` | sonnet | `medium` (was high) | Round 2 bench (2026-10-10, 90 calls per cell on 6 plans, 4 with a seeded flaw and 2 clean): Sonnet medium 89/90 (98.9%) at $0.0088, Sonnet low 89/90 at $0.0078, Sonnet high 71/90 (78.9%) at $0.0145. Every miss at `high` was a false blocking finding on a clean plan; the only missed flaw in 180 medium and low calls was one `cr-destructive` run. Medium is 39% cheaper and no worse on seeded flaws. Haiku scored 67 to 73% on the same cases (false blocks on clean plans), so the critic stays on Sonnet. |
 | `agents/fact-checker` | haiku | `medium` (was high) | The `high` in the file was already cut to `medium` by the Haiku effort cap, so the file now says what runs. Measured with `playbook eval bench` on real playbook excerpts over three rounds (2026-10-09 and 2026-10-10, 6 cases): Haiku high 137/138 (99.3%) at $0.00027 a call, Haiku medium 134/138 (97.1%) at $0.00021, Haiku low 86/90 (95.6%, four misses on one case) at $0.00015, Sonnet high 78/78. Medium is within 3 points of high, so it is the setting. |
 | `agents/test-reviewer` | haiku | `low` (kept) | Pilot, same benchmark (18 calls per cell, then 90 per Haiku cell in round 2 on real tests with weakened assertions and clean controls): Haiku low 86/90 (95.6%), medium 86/90, high 90/90, Sonnet high 48/48, Sonnet low 42/48. Every Haiku low miss was a false alarm on a clean control, not a missed weak test, so low stays; it is the lowest setting there is. |
@@ -89,7 +89,7 @@ This table lists every agent, command and skill with the model and effort in its
 | agent | `implementer` | `sonnet` | `medium` | Writes and commits production logic. Round 2 bench on 20 repo tasks: Sonnet medium 200/200, high 198/200; Haiku stays under 92%. |
 | agent | `patch-applier` | `haiku` | `low` | Applies an approved diff verbatim, with no judgment. |
 | agent | `review-triage` | `haiku` | `low` | A three-way classifier. A bad or missing answer falls back to a full lens. |
-| agent | `reviewer` | `opus` | `high` | Review is where a missed finding costs most. quick-review runs it at medium through the variant mechanism (--cap medium). |
+| agent | `reviewer` | `opus` | `medium` | Opus medium 199/200 against high 200/200 on the reviewer bench, 19% cheaper. Risky diffs go to `reviewer-xhigh` and small ones to `reviewer-low` (ADR-0021). |
 | agent | `test-reviewer` | `haiku` | `low` | Pilot (18 calls per cell): Haiku low, medium and high 18/18, Sonnet high 18/18, Sonnet low 16/18. |
 | command | `address-pr-comments` | `opus` | `high` | Judgment on review threads and replies that go public. |
 | command | `adr` | `opus` | `high` | A hard-to-reverse decision record. |
@@ -101,7 +101,7 @@ This table lists every agent, command and skill with the model and effort in its
 | command | `implement` | `sonnet` | `high` | Executes an approved plan and delegates edits. |
 | command | `learn-project` | `opus` | `high` | Builds durable memory from a whole repo. Mistakes persist. |
 | command | `plan` | `opus` | `high` | Design work. A weak plan is expensive. |
-| command | `quick-review` | `sonnet` | `medium` | One pass over a diff. Its reviewer runs on Opus at medium. |
+| command | `quick-review` | `sonnet` | `medium` | One pass over a diff. Its reviewer runs on Opus at medium, the reviewer's own effort. |
 | command | `repo-audit` | - | - | Forks into the auditor agent, which sets the model and effort. |
 | command | `session-start` | `haiku` | `low` | Loads a saved handoff. Mechanical. |
 | command | `setup` | `haiku` | `low` | Runs compiled helpers and asks questions. Mechanical. |

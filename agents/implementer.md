@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Write-capable executor for the /playbook:implement command's per-Work-Unit dispatch, one call per RED, GREEN, or REFACTOR step of a TDD cycle, or per file group on the --no-tdd and --no-tests paths. Given a Work Unit's brief (its files, changes, test scenarios, done-when, and scoped verify command) plus the one step it owns, it writes the code or tests for that step, runs the scoped verify, and commits that step as a checkpoint inside the Work Unit's tree. Holds Edit, Write, and Bash because implementing and verifying is its job. Not for general-purpose work.
+description: "Write-capable executor for /playbook:implement. One call per RED, GREEN or REFACTOR step (or file group) of a Work Unit: writes code or tests, runs the scoped verify, commits a checkpoint. Not for general-purpose work."
 tools: Read, Grep, Glob, Edit, Write, Bash, Skill
 model: sonnet
 effort: medium
