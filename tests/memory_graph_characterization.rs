@@ -83,7 +83,10 @@ fn write_corpus(mem: &Path) {
 #[test]
 fn rebuild_of_a_generated_corpus_pins_the_similarity_edges() {
     // Arrange
-    let home = std::env::temp_dir().join(format!("playbook-graphchar-{}", std::process::id()));
+    let home = std::env::temp_dir().join(format!(
+        "playbook-graphchar-{}",
+        playbook::testing::run_id()
+    ));
     let _ = fs::remove_dir_all(&home);
     let mem = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&mem).unwrap();

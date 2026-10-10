@@ -20,7 +20,8 @@ struct Box_ {
 impl Box_ {
     fn new(tag: &str) -> Self {
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let home = std::env::temp_dir().join(format!("pb-mi-{tag}-{}-{n}", std::process::id()));
+        let home =
+            std::env::temp_dir().join(format!("pb-mi-{tag}-{}-{n}", playbook::testing::run_id()));
         let _ = fs::remove_dir_all(&home);
         let from = home.join(".claude/projects/p/memory");
         fs::create_dir_all(&from).unwrap();

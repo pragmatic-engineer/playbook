@@ -16,7 +16,10 @@ const GRAPH: &str = r#"{"nodes":[
 ],"edges":[{"from":"g/types","to":"a1","relation":"anchors"}]}"#;
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("pb-plan-brief-{}-{tag}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "pb-plan-brief-{}-{tag}",
+        playbook::testing::run_id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir

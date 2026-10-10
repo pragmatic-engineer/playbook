@@ -65,7 +65,8 @@ mod tests {
     use super::*;
 
     fn dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("pb-gate-snap-{}-{tag}", std::process::id()));
+        let d =
+            std::env::temp_dir().join(format!("pb-gate-snap-{}-{tag}", crate::testing::run_id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

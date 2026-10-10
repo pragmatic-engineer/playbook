@@ -70,7 +70,7 @@ impl Env {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let base = std::env::temp_dir().join(format!(
             "playbook-effort-suggest-{}-{tag}-{n}",
-            std::process::id()
+            playbook::testing::run_id()
         ));
         let _ = fs::remove_dir_all(&base);
         let home = base.join("home");

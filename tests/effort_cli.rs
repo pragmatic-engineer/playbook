@@ -20,7 +20,7 @@ impl Home {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
             "playbook-effort-cli-{}-{tag}-{n}",
-            std::process::id()
+            playbook::testing::run_id()
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();

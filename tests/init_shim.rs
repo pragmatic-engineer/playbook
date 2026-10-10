@@ -23,7 +23,7 @@ fn temp_home(tag: &str) -> PathBuf {
     let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
     let home = env::temp_dir().join(format!(
         "playbook-init-shim-{}-{tag}-{n}",
-        std::process::id()
+        playbook::testing::run_id()
     ));
     fs::create_dir_all(&home).expect("temp home should be creatable");
     home

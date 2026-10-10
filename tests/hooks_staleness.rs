@@ -19,7 +19,10 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// A fresh scratch directory, unique per call.
 fn scratch_dir(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("playbook-wu4-{}-{tag}-{n}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "playbook-wu4-{}-{tag}-{n}",
+        playbook::testing::run_id()
+    ));
     fs::create_dir_all(&dir).unwrap();
     dir
 }

@@ -60,6 +60,9 @@ pub(crate) mod test_support {
 
     pub(crate) fn scratch_dir(tag: &str) -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("playbook-test-{}-{tag}-{n}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "playbook-test-{}-{tag}-{n}",
+            crate::testing::run_id()
+        ))
     }
 }

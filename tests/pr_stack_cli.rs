@@ -21,7 +21,7 @@ fn fixtures() -> PathBuf {
 /// `pr list` returns `head-<branch>.json` or `base-<branch>.json` (else `[]`).
 fn run(api: &str, args: &str) -> Output {
     let n = N.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("pb-stack-{}-{n}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("pb-stack-{}-{n}", playbook::testing::run_id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("bin")).unwrap();
     fs::create_dir_all(root.join("home")).unwrap();
@@ -103,7 +103,8 @@ fn the_text_form_marks_the_current_pr() {
 
 fn sandbox(gh_body: &str) -> (PathBuf, String) {
     let n = N.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("pb-stack-map-{}-{n}", std::process::id()));
+    let root =
+        std::env::temp_dir().join(format!("pb-stack-map-{}-{n}", playbook::testing::run_id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("bin")).unwrap();
     let gh = root.join("bin/gh");

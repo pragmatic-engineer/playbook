@@ -214,7 +214,7 @@ mod tests {
             let n = COUNTER.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
                 "playbook-doctor-field-{tag}-{}-{n}.json",
-                std::process::id()
+                crate::testing::run_id()
             ));
             fs::write(&path, contents).expect("fixture file should be writable");
             Self { path }

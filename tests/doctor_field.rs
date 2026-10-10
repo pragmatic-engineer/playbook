@@ -25,7 +25,7 @@ impl Fixture {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
             "playbook-doctor-field-cmd-{tag}-{}-{n}.json",
-            std::process::id()
+            playbook::testing::run_id()
         ));
         fs::write(&path, contents).expect("fixture file should be writable");
         Self { path }

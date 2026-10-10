@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("pb-pr-reply-{}-{tag}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("pb-pr-reply-{}-{tag}", playbook::testing::run_id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir

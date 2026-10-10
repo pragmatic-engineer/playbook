@@ -8,7 +8,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn home(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("pb-doctor-models-{tag}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "pb-doctor-models-{tag}-{}",
+        playbook::testing::run_id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join(".claude")).unwrap();
     dir

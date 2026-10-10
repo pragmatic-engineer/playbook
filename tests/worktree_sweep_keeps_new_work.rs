@@ -41,8 +41,10 @@ fn git_ok(repo: &Path, args: &[&str]) {
 
 fn fixture(tag: &str) -> Fixture {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let container =
-        std::env::temp_dir().join(format!("playbook-wt-keep-{}-{tag}-{n}", std::process::id()));
+    let container = std::env::temp_dir().join(format!(
+        "playbook-wt-keep-{}-{tag}-{n}",
+        playbook::testing::run_id()
+    ));
     fs::create_dir_all(&container).unwrap();
     let container = container.canonicalize().unwrap();
     let repo = container.join("repo");

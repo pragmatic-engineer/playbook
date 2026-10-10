@@ -37,8 +37,10 @@ struct Sandbox {
 impl Sandbox {
     fn new(tag: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let home =
-            std::env::temp_dir().join(format!("playbook-cc-{tag}-{}-{n}", std::process::id()));
+        let home = std::env::temp_dir().join(format!(
+            "playbook-cc-{tag}-{}-{n}",
+            playbook::testing::run_id()
+        ));
         fs::create_dir_all(&home).expect("sandbox home");
         Self { home }
     }

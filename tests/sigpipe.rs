@@ -9,7 +9,8 @@ use std::process::{Command, Stdio};
 
 #[test]
 fn a_closed_reader_does_not_panic_the_cli() {
-    let home = std::env::temp_dir().join(format!("playbook-sigpipe-{}", std::process::id()));
+    let home =
+        std::env::temp_dir().join(format!("playbook-sigpipe-{}", playbook::testing::run_id()));
     std::fs::create_dir_all(&home).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["config", "list"])

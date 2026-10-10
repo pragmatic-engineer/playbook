@@ -21,8 +21,10 @@ struct Home(PathBuf);
 impl Home {
     fn new(tag: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("playbook-usage-{}-{tag}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "playbook-usage-{}-{tag}-{n}",
+            playbook::testing::run_id()
+        ));
         let project = dir.join(".claude/projects/proj-one");
         fs::create_dir_all(&project).unwrap();
         fs::copy(
@@ -103,7 +105,10 @@ fn usage_ingest_reports_counts_and_a_second_run_adds_nothing() {
 #[test]
 fn a_home_with_no_claude_data_prints_the_empty_message_and_exits_zero() {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("playbook-usage-{}-empty-{n}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "playbook-usage-{}-empty-{n}",
+        playbook::testing::run_id()
+    ));
     fs::create_dir_all(&dir).unwrap();
     let dir = dir.canonicalize().unwrap();
 

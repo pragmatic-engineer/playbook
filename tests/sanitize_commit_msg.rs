@@ -15,7 +15,8 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn message_file(text: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("sanitize-msg-{}-{n}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("sanitize-msg-{}-{n}", playbook::testing::run_id()));
     fs::create_dir_all(&dir).expect("scratch dir");
     let file = dir.join("COMMIT_EDITMSG");
     fs::write(&file, text).expect("message file");

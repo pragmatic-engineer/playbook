@@ -21,8 +21,10 @@ static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// touches the real `~/.config/playbook/runtime`.
 fn scratch_home(tag: &str) -> PathBuf {
     let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir =
-        std::env::temp_dir().join(format!("hooks-turn-test-{}-{tag}-{n}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "hooks-turn-test-{}-{tag}-{n}",
+        playbook::testing::run_id()
+    ));
     fs::create_dir_all(&dir).expect("scratch home should be creatable");
     dir
 }

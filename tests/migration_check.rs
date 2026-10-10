@@ -15,7 +15,10 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn home_with(settings: Option<&str>) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let home = std::env::temp_dir().join(format!("playbook-migcheck-{}-{n}", std::process::id()));
+    let home = std::env::temp_dir().join(format!(
+        "playbook-migcheck-{}-{n}",
+        playbook::testing::run_id()
+    ));
     let _ = fs::remove_dir_all(&home);
     fs::create_dir_all(home.join(".claude")).unwrap();
     if let Some(text) = settings {

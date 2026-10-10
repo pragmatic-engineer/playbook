@@ -22,7 +22,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
     let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
         "playbook-hooks-counter-test-{}-{tag}-{n}",
-        std::process::id()
+        playbook::testing::run_id()
     ))
 }
 

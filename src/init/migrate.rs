@@ -583,7 +583,8 @@ mod tests {
     static SLOW_RUNS: AtomicUsize = AtomicUsize::new(0);
 
     fn home(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("pb-migrate-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pb-migrate-{tag}-{}", crate::testing::run_id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

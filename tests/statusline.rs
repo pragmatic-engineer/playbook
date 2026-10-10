@@ -25,7 +25,8 @@ struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!("statusline-{}-{n}", std::process::id()));
+        let p =
+            std::env::temp_dir().join(format!("statusline-{}-{n}", playbook::testing::run_id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Scratch(p)

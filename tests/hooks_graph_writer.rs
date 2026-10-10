@@ -28,7 +28,10 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// per call so parallel test threads never collide.
 fn scratch_home(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let home = std::env::temp_dir().join(format!("playbook-wu5-{}-{tag}-{n}", std::process::id()));
+    let home = std::env::temp_dir().join(format!(
+        "playbook-wu5-{}-{tag}-{n}",
+        playbook::testing::run_id()
+    ));
     fs::create_dir_all(home.join(".config").join("playbook").join("memory")).unwrap();
     home
 }

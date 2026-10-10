@@ -15,7 +15,10 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// developer's checkout, remote, or config.
 fn scratch() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("playbook-pr-cli-{}-{n}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "playbook-pr-cli-{}-{n}",
+        playbook::testing::run_id()
+    ));
     std::fs::create_dir_all(&dir).expect("scratch dir");
     dir
 }

@@ -235,7 +235,8 @@ mod tests {
 
     #[test]
     fn the_commit_slice_is_small_and_has_the_rules_a_commit_needs() {
-        let dir = std::env::temp_dir().join(format!("pb-rules-commit-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pb-rules-commit-{}", crate::testing::run_id()));
         let path = extract_commit(&repo_root(), &dir).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("MUST NEVER use em dashes"));

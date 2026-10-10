@@ -22,7 +22,10 @@ impl Sandbox {
     /// A clean repo whose HEAD is `sha`, and a fake `gh` for PR 7 authored by `author`.
     fn new(tag: &str, author: &str, me: &str) -> Sandbox {
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!("pb-review-{tag}-{}-{n}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "pb-review-{tag}-{}-{n}",
+            playbook::testing::run_id()
+        ));
         let _ = fs::remove_dir_all(&root);
         let repo = root.join("repo");
         fs::create_dir_all(&repo).unwrap();

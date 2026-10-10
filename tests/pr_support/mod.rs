@@ -55,8 +55,10 @@ pub struct Fixture {
 impl Fixture {
     pub fn new(tag: &str, branch: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root =
-            std::env::temp_dir().join(format!("playbook-pr-{tag}-{}-{n}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "playbook-pr-{tag}-{}-{n}",
+            playbook::testing::run_id()
+        ));
         fs::create_dir_all(&root).expect("root");
         let root = root.canonicalize().expect("canonicalize");
         let bare = root.join("origin.git");

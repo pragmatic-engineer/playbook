@@ -80,7 +80,7 @@ impl Sandbox {
         let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
             "playbook-install-binary-backup-{}-{tag}-{n}",
-            std::process::id()
+            playbook::testing::run_id()
         ));
         let stubs = root.join("stubs");
         let failing_cp = root.join("failing-cp");

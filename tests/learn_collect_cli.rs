@@ -21,7 +21,10 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 fn repo(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("pb-learn-collect-{}-{tag}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "pb-learn-collect-{}-{tag}",
+        playbook::testing::run_id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let p = dir.as_path();

@@ -23,7 +23,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
     let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
         "playbook-hooks-preread-{tag}-{}-{n}",
-        std::process::id()
+        playbook::testing::run_id()
     ));
     fs::create_dir_all(&dir).expect("scratch dir should be creatable");
     // Canonical, so a path under it is already what the hook resolves it to.

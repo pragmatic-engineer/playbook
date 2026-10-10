@@ -25,7 +25,10 @@ struct World {
 
 fn world(tag: &str) -> World {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("headless-{}-{tag}-{n}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "headless-{}-{tag}-{n}",
+        playbook::testing::run_id()
+    ));
     let home = root.join("home");
     let repo = root.join("repo");
     fs::create_dir_all(&home).unwrap();

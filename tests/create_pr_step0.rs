@@ -93,7 +93,7 @@ fn a_renamed_end_marker_heading_produces_a_detectable_runaway_extraction() {
 
 #[test]
 fn a_renamed_end_marker_makes_the_command_fail_loudly() {
-    let dir = std::env::temp_dir().join(format!("pb-rules-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("pb-rules-{}", playbook::testing::run_id()));
     let _ = fs::remove_dir_all(&dir);
     for skill in ["writing-style", "engineering-standards"] {
         fs::create_dir_all(dir.join("skills").join(skill)).unwrap();
