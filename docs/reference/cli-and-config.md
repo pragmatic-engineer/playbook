@@ -181,6 +181,7 @@ Reads the message from stdin, or from `--message-file`. Adds a sign-off per `com
 - `--auto`: Auto mode: never force a push
 - `--no-signoff`: Leave the sign-off trailer off
 - `--no-type-check`: Skip the check that the commit type fits the files (a docs-only change is not `feat`, a lock-file bump is not `fix`)
+- `--no-prose-check`: Skip the prose check (a dash, a curly quote, a banned word or a contrast phrase in the message)
 
 ### `playbook config`
 
@@ -683,9 +684,10 @@ Asks a small model three times. Anything but a unanimous `quick` becomes `deep`.
 
 Cut the skill rules a PR title and body need
 
-Reads the writing-style and engineering-standards skills under `CLAUDE_PLUGIN_ROOT`, writes four files under `/tmp`, checks each, and prints their paths. A failed check prints `ERROR: ...` and exits 1.
+Reads the writing-style and engineering-standards skills under `CLAUDE_PLUGIN_ROOT`, writes four files under `/tmp`, checks each, and prints their paths. A failed check prints `ERROR: ...` and exits 1. With `--commit` it writes only the commit-message slice of writing-style.
 
 - `--plugin-root <PLUGIN_ROOT>`: Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
+- `--commit`: Write only the slice a commit message needs
 
 ### `playbook pr stack`
 

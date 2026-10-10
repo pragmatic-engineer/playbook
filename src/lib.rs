@@ -868,10 +868,14 @@ pub enum PrCommand {
     /// Reads the writing-style and engineering-standards skills under
     /// `CLAUDE_PLUGIN_ROOT`, writes four files under `/tmp`, checks each, and
     /// prints their paths. A failed check prints `ERROR: ...` and exits 1.
+    /// With `--commit` it writes only the commit-message slice of writing-style.
     Rules {
         /// Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
         #[arg(long)]
         plugin_root: Option<PathBuf>,
+        /// Write only the slice a commit message needs
+        #[arg(long)]
+        commit: bool,
     },
     /// Resolve a PR and fetch its review threads and comments
     ///
@@ -1040,6 +1044,10 @@ pub enum CommitCommand {
         /// change is not `feat`, a lock-file bump is not `fix`)
         #[arg(long)]
         no_type_check: bool,
+        /// Skip the prose check (a dash, a curly quote, a banned word or a
+        /// contrast phrase in the message)
+        #[arg(long)]
+        no_prose_check: bool,
     },
 }
 

@@ -69,3 +69,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0017](adr/0017-per-component-effort-ceilings.md) | Per-component effort ceilings | Accepted | 2026-10-09 |
 | [0018](adr/0018-tls-platform-verifier-not-adopted.md) | Keep the bundled root certificates, do not adopt the TLS platform verifier yet | Accepted | 2026-10-09 |
 | [0019](adr/0019-pr-stack-review.md) | Review a whole pull request stack with shared context | Accepted | 2026-10-09 |
+| [0021](adr/0021-reviewer-at-opus-medium.md) | Ship the reviewer agent at Opus medium | Accepted | 2026-10-10 |

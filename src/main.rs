@@ -639,14 +639,22 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                PrCommand::Rules { plugin_root } => {
+                PrCommand::Rules {
+                    plugin_root,
+                    commit,
+                } => {
                     let root = plugin_root
                         .or_else(|| std::env::var_os("CLAUDE_PLUGIN_ROOT").map(Into::into))
                         .unwrap_or_default();
                     let dir = std::env::temp_dir()
                         .join(format!("create-pr-step0-{}", std::process::id()));
-                    match pr::rules::extract(&root, &dir) {
-                        Ok(ex) => println!("{}", pr::rules::report(&ex)),
+                    let printed = if commit {
+                        pr::rules::extract_commit(&root, &dir).map(|p| p.display().to_string())
+                    } else {
+                        pr::rules::extract(&root, &dir).map(|ex| pr::rules::report(&ex))
+                    };
+                    match printed {
+                        Ok(text) => println!("{text}"),
                         Err(err) => {
                             eprintln!("ERROR: {err}");
                             std::process::exit(1);
@@ -955,6 +963,7 @@ fn main() {
                     auto,
                     no_signoff,
                     no_type_check,
+                    no_prose_check,
                 } => {
                     let (path, temp) = match message_file {
                         Some(p) => (p, false),
@@ -981,6 +990,7 @@ fn main() {
                         auto,
                         no_signoff,
                         no_type_check,
+                        no_prose_check,
                     };
                     let result = commit::run::run(&dir, &path, opts, signoff_on);
                     if temp {
