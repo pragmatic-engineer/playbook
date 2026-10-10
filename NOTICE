@@ -2,3 +2,8 @@ Playbook
 Copyright 2026 Igor Santos
 
 This product is licensed under the Apache License, Version 2.0.
+
+This product includes color values from the default theme of btop
+(https://github.com/aristocratos/btop), Copyright 2021 Aristocratos, licensed
+under the Apache License, Version 2.0. They are used in
+src/usage/tui/theme.rs for the `btop` theme of `playbook usage`.

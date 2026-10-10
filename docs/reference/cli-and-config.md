@@ -37,6 +37,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `review.stackMaxPrs` | `6` | a number, see the config keys guide for the range |
 | `review.stackMaxLines` | `3000` | a number, see the config keys guide for the range |
 | `security.defaults` | `false` | `true`, `false` |
+| `usage.theme` | `btop` | `btop`, `dark`, `light`, `mono` |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands

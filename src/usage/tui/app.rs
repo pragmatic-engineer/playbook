@@ -5,7 +5,8 @@
 //! store, so every key is a unit test.
 
 use super::data::Data;
-use super::theme::Theme;
+use super::panel::{Panel, PANELS};
+use super::theme::{ColorDepth, Theme};
 use crate::usage::query::Range;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -27,9 +28,14 @@ pub struct App {
     pub error: Option<String>,
     pub quit: bool,
     pub theme: Theme,
+    pub depth: ColorDepth,
+    /// `NO_COLOR` is set: the theme stays `mono`.
+    pub no_color: bool,
     /// True while the filter is being typed; keys then edit `draft`.
     pub editing: bool,
     pub draft: String,
+    /// The panel the keys act on.
+    pub focus: Panel,
 }
 
 /// What the loop must do after a key.
@@ -49,9 +55,17 @@ impl App {
             error: None,
             quit: false,
             theme: Theme::default(),
+            depth: ColorDepth::default(),
+            no_color: false,
             editing: false,
             draft: String::new(),
+            focus: Panel::Models,
         }
+    }
+
+    fn focus_next(&mut self, by: isize) {
+        let at = self.focus.index() as isize;
+        self.focus = PANELS[(at + by).rem_euclid(PANELS.len() as isize) as usize];
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Effect {
@@ -62,7 +76,7 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('c') if ctrl => self.quit = true,
-            KeyCode::Char('t') => self.theme = self.theme.next(),
+            KeyCode::Char('t') if !self.no_color => self.theme = self.theme.next(),
             KeyCode::Char('/') => {
                 self.editing = true;
                 self.draft = self.filter.clone();
@@ -76,6 +90,9 @@ impl App {
                 self.range = RANGES[(at + 1) % RANGES.len()];
                 return Effect::Requery;
             }
+            KeyCode::Char(c @ '1'..='6') => self.focus = PANELS[usize::from(c as u8 - b'1')],
+            KeyCode::Tab => self.focus_next(1),
+            KeyCode::BackTab => self.focus_next(-1),
             _ => {}
         }
         Effect::None
@@ -200,8 +217,33 @@ mod tests {
     #[test]
     fn t_cycles_the_theme() {
         let mut app = App::new(Range::All);
+        assert_eq!(app.theme, Theme::Btop);
         app.key(press(KeyCode::Char('t')));
-        assert_eq!(app.theme, Theme::Light);
+        assert_eq!(app.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn no_color_keeps_the_theme_locked() {
+        let mut app = App::new(Range::All);
+        app.no_color = true;
+        app.theme = Theme::Mono;
+        app.key(press(KeyCode::Char('t')));
+        assert_eq!(app.theme, Theme::Mono);
+    }
+
+    #[test]
+    fn number_keys_and_tab_move_the_focus() {
+        let mut app = App::new(Range::All);
+        app.key(press(KeyCode::Char('5')));
+        assert_eq!(app.focus, Panel::Sessions);
+        app.key(press(KeyCode::Tab));
+        assert_eq!(app.focus, Panel::Events);
+        app.key(press(KeyCode::Tab));
+        assert_eq!(app.focus, Panel::Spend);
+        app.key(press(KeyCode::BackTab));
+        assert_eq!(app.focus, Panel::Events);
+        app.key(press(KeyCode::Char('7')));
+        assert_eq!(app.focus, Panel::Events);
     }
 
     #[test]

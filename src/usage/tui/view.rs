@@ -8,13 +8,14 @@
 use super::app::App;
 use super::data::Data;
 use super::fmt::{compact, money};
+use super::panel::Panel;
 use super::panels;
 use super::theme::Palette;
 use crate::usage::aggregate::date_key;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
 /// Smallest screen the layout fits.
@@ -71,6 +72,10 @@ pub fn layout(area: Rect) -> Panels {
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
+    let pal = app.theme.palette(app.depth);
+    // The ground first: widgets below only set what they color.
+    let base = Style::default().fg(pal.color(pal.fg)).bg(pal.color(pal.bg));
+    frame.buffer_mut().set_style(area, base);
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         let msg = format!(
             "Terminal too small: need {MIN_WIDTH}x{MIN_HEIGHT}, have {}x{}",
@@ -80,53 +85,69 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
     let p = layout(area);
-    let pal = app.theme.palette();
     render_header(frame, p.header, app, &pal);
     match &app.data {
         Some(data) => {
-            panels::spend(frame, p.spend, data, &pal);
-            panels::tokens(frame, p.tokens, data, &pal);
+            panels::spend(frame, p.spend, app, data, &pal);
+            panels::tokens(frame, p.tokens, app, data, &pal);
+            let total = data.totals.cost_usd;
             panels::groups(
                 frame,
                 p.models,
+                app,
+                &pal,
+                Panel::Models,
                 "Models",
                 &data.models,
-                data.totals.cost_usd,
+                total,
             );
             panels::groups(
                 frame,
                 p.projects,
+                app,
+                &pal,
+                Panel::Projects,
                 "Projects",
                 &data.repos,
-                data.totals.cost_usd,
+                total,
             );
-            panels::sessions(frame, p.sessions, data, &pal);
-            panels::events(frame, p.events, data);
+            panels::sessions(frame, p.sessions, app, data, &pal);
+            panels::events(frame, p.events, app, data, &pal);
         }
         None => {
             let body = Rect::new(p.spend.x, p.spend.y, area.width, 1);
             frame.render_widget(Paragraph::new("Reading usage..."), body);
         }
     }
-    frame.render_widget(
-        Paragraph::new(footer(app)).style(Style::default().add_modifier(Modifier::DIM)),
-        p.footer,
-    );
+    frame.render_widget(Paragraph::new(footer(app, &pal)), p.footer);
 }
 
-fn footer(app: &App) -> String {
+/// The key hints: each key in the accent color, its meaning in the text color.
+fn footer(app: &App, pal: &Palette) -> Line<'static> {
+    let dim = Style::default().fg(pal.color(pal.graph_text));
     if app.editing {
-        return format!(" filter: {}_   enter apply   esc cancel", app.draft);
+        return Line::styled(
+            format!(" filter: {}_   enter apply   esc cancel", app.draft),
+            dim,
+        );
     }
-    let filter = if app.filter.is_empty() {
-        String::new()
-    } else {
-        format!("   filter: {}", app.filter)
-    };
-    format!(
-        " r range   / filter   c clear   t theme ({})   q quit{filter}",
-        app.theme.name()
-    )
+    let keys = Style::default()
+        .fg(pal.color(pal.hi))
+        .add_modifier(Modifier::BOLD);
+    let theme = format!("theme ({})", app.theme.name());
+    let hints = [
+        ("1-6", "panel"),
+        ("r", "range"),
+        ("/", "filter"),
+        ("t", theme.as_str()),
+        ("q", "quit"),
+    ];
+    let mut spans = vec![Span::raw(" ")];
+    for (key, label) in hints {
+        spans.push(Span::styled(key.to_string(), keys));
+        spans.push(Span::styled(format!(" {label} "), dim));
+    }
+    Line::from(spans)
 }
 
 fn range_label(data: &Data) -> String {
@@ -142,18 +163,43 @@ fn range_label(data: &Data) -> String {
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
-    let block = Block::bordered().title(Span::styled(
-        " playbook usage ",
-        Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
-    ));
+    let edge = Style::default().fg(pal.color(pal.box_cpu));
+    let mut block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(edge)
+        .title(Line::from(vec![
+            Span::styled("\u{2500}\u{2524}", edge),
+            Span::styled(
+                "playbook usage",
+                Style::default()
+                    .fg(pal.color(pal.title))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("\u{251c}", edge),
+        ]));
+    if !app.filter.is_empty() {
+        block = block.title(
+            Line::from(vec![
+                Span::styled("\u{2524}", edge),
+                Span::styled(
+                    format!("filter {}", app.filter),
+                    Style::default().fg(pal.color(pal.hi)),
+                ),
+                Span::styled("\u{251c}\u{2500}", edge),
+            ])
+            .right_aligned(),
+        );
+    }
+    let accent = Style::default().fg(pal.color(pal.hi));
+    let error = Style::default().fg(pal.color(pal.error));
     let line = match (&app.data, &app.error) {
-        (Some(d), error) => {
+        (Some(d), err) => {
             let tokens = d.totals.input_tokens
                 + d.totals.output_tokens
                 + d.totals.cache_creation_tokens
                 + d.totals.cache_read_tokens;
             let mut spans = vec![
-                Span::styled(range_label(d), Style::default().fg(pal.accent)),
+                Span::styled(range_label(d), accent),
                 Span::raw(format!(
                     "   {}   {} messages   {} tokens",
                     money(d.totals.cost_usd),
@@ -164,18 +210,15 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
             if d.unpriced > 0 {
                 spans.push(Span::styled(
                     format!("   {} unpriced", d.unpriced),
-                    Style::default().fg(pal.warn),
+                    Style::default().fg(pal.color(pal.warn)),
                 ));
             }
-            if let Some(e) = error {
-                spans.push(Span::styled(
-                    format!("   {e}"),
-                    Style::default().fg(pal.error),
-                ));
+            if let Some(e) = err {
+                spans.push(Span::styled(format!("   {e}"), error));
             }
             Line::from(spans)
         }
-        (None, Some(e)) => Line::styled(e.clone(), Style::default().fg(pal.error)),
+        (None, Some(e)) => Line::styled(e.clone(), error),
         (None, None) => Line::raw("Reading usage..."),
     };
     frame.render_widget(Paragraph::new(line).block(block), area);
@@ -284,7 +327,7 @@ mod tests {
         let wide = screen(&app, 120, 30);
         let narrow = screen(&app, 80, 24);
         assert!(
-            wide.contains("share") && wide.contains('\u{2588}'),
+            wide.contains("share") && wide.contains('\u{25a0}'),
             "{wide}"
         );
         assert!(!narrow.contains("share"), "{narrow}");
@@ -331,7 +374,7 @@ mod tests {
         let app = App::new(Range::All);
         let text = screen(&app, 100, 30);
         assert!(text.contains("/ filter"));
-        assert!(text.contains("t theme (dark)"));
+        assert!(text.contains("t theme (btop)"));
     }
 
     #[test]
@@ -342,7 +385,7 @@ mod tests {
         assert!(screen(&app, 100, 30).contains("filter: opus_"));
         app.editing = false;
         app.filter = "opus".into();
-        assert!(screen(&app, 100, 30).contains("filter: opus"));
+        assert!(screen(&app, 100, 30).contains("filter opus"));
     }
 
     #[test]

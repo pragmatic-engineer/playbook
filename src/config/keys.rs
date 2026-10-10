@@ -33,6 +33,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "review.stackMaxPrs",
     "review.stackMaxLines",
     "security.defaults",
+    "usage.theme",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -85,6 +86,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "review.stackMaxPrs" => Some(Value::Number(6.into())),
         "review.stackMaxLines" => Some(Value::Number(3000.into())),
         "security.defaults" => Some(Value::Bool(false)),
+        "usage.theme" => Some(Value::String("btop".to_string())),
         _ => None,
     }
 }
@@ -102,6 +104,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "memory.source" => Some(&["both", "playbook"]),
         "agents.variants" => Some(&["auto", "all", "off"]),
         "routing.escalate" => Some(&["ask", "auto", "deny"]),
+        "usage.theme" => Some(&["btop", "dark", "light", "mono"]),
         _ => None,
     }
 }
