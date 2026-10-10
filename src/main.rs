@@ -1022,6 +1022,39 @@ fn main() {
                 }
             }
             ReviewCommand::Checks { dir } => println!("{}", review::checks::run_checks(&dir)),
+            ReviewCommand::Ref { lens, plugin_root } => {
+                let root = plugin_root
+                    .or_else(|| {
+                        std::env::var_os("CLAUDE_PLUGIN_ROOT").map(std::path::PathBuf::from)
+                    })
+                    .unwrap_or_default();
+                println!("{}", review::lens::ref_path(&root, &lens).display());
+            }
+            ReviewCommand::TriageMerge {
+                lenses,
+                tiers,
+                forced,
+            } => {
+                let forced: Result<Vec<_>, _> = forced
+                    .iter()
+                    .map(|f| review::lens::parse_forced(f))
+                    .collect();
+                let forced = forced.unwrap_or_else(|err| {
+                    eprintln!("error: {err}");
+                    std::process::exit(2);
+                });
+                let raw = match tiers.as_deref() {
+                    None => String::new(),
+                    Some("-") => {
+                        let mut s = String::new();
+                        let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s);
+                        s
+                    }
+                    Some(path) => std::fs::read_to_string(path).unwrap_or_default(),
+                };
+                let merged = review::lens::merge(&lenses, &raw, &forced);
+                println!("{}", review::lens::render(&merged));
+            }
         },
         Command::Plans { json } => {
             let Some(base) = common::repo_scoped_dir(common::RepoScope::Worktree) else {

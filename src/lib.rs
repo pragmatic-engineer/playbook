@@ -1080,6 +1080,41 @@ pub enum ReviewCommand {
         /// The review worktree to run in
         dir: PathBuf,
     },
+    /// Print the absolute path of the reference file a review lens reads
+    ///
+    /// Maps a deep-review lens or an implement Step 9 lens to its
+    /// grounding-review reference file and prints the absolute path. A lens
+    /// with no matching file, or an unknown one, prints the path of the full
+    /// `SKILL.md`. Hand the path to `cheap-checker`, which has no shell.
+    ///
+    /// Example: `playbook review ref security`
+    Ref {
+        /// The lens, such as `security`, `types` or `behaviour-drift`
+        lens: String,
+        /// Plugin root; defaults to `$CLAUDE_PLUGIN_ROOT`
+        #[arg(long)]
+        plugin_root: Option<PathBuf>,
+    },
+    /// Complete a review-triage tier map so no lens is left unclassified
+    ///
+    /// Reads the triage reply (a JSON object of `{lens: {tier, reason}}`) from
+    /// `--tiers FILE`, or `-` for stdin, and prints the full map as JSON plus a
+    /// `Triage: lens=tier, ...` line. A missing or unusable reply, a lens the
+    /// reply left out, and a tier other than `skip`, `cheap-check` or
+    /// `full-lens` all become `full-lens`.
+    ///
+    /// Example: `playbook review triage-merge --lenses security,logic --tiers triage.json`
+    TriageMerge {
+        /// Every lens that was sent to triage, comma separated
+        #[arg(long, value_delimiter = ',', required = true)]
+        lenses: Vec<String>,
+        /// File holding the triage reply, or `-` for stdin; omit when triage returned nothing
+        #[arg(long)]
+        tiers: Option<String>,
+        /// Fix a lens's tier whatever triage said, as `lens=tier:reason` (repeatable)
+        #[arg(long = "force")]
+        forced: Vec<String>,
+    },
 }
 
 /// `playbook gate` subcommands.

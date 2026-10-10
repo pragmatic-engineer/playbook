@@ -10,6 +10,7 @@ use crate::pr::shared::gh;
 use std::process::Command;
 
 pub mod checks;
+pub mod lens;
 
 /// Which review command is asking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

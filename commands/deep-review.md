@@ -163,13 +163,15 @@ Skip this step entirely when `--all` was passed (check `$ARGUMENTS` the same way
 
 Otherwise, dispatch `review-triage` (`subagent_type: playbook:review-triage`) exactly once per review run, regardless of how many lenses Step 2 selected. The prompt includes: the PR diff (the same diff Step 1 already captured via `gh pr diff "$PR_NUMBER"` and that Step 3's reviewer prompts also embed), `HEAD_SHA`, the absolute `$WT` path (or a note that the tree is in-place when `WT` is empty, same convention Step 3 uses), and the full set of lens names Step 2 selected (core reviewers plus any triggered conditional reviewers). Capture the returned tier map, a JSON object of `{lens: {tier, reason}}`, into context for Step 3 to read.
 
-Three distinct fail-open rules apply, not one:
+Complete the map in code, not by hand. Write the triage return text to a file, or pipe it in with `--tiers -` (omit `--tiers` when the dispatch failed or returned nothing), then run:
 
-- **Total failure:** if the `review-triage` dispatch itself fails, times out, or returns nothing at all (per `playbook:delegating-subagents`, `review-triage` is structurally read-only so its return value is the only channel and can fail silently), every lens Step 2 selected defaults to `full-lens`.
-- **Partial response:** if the dispatch returns a tier map missing one or more of Step 2's selected lenses, each MISSING lens individually defaults to `full-lens`; lenses present in the returned map keep their returned tier. This mirrors the same discipline Step 3's existing "Returned findings / Returned empty array / Returned nothing" tracking table already applies one layer downstream (a silent lens is never folded into "found nothing"), applied here to triage's own output instead of the swarm's findings.
-- **Unrecognised tier:** if a lens IS present in the returned map but its `tier` value is anything other than `skip`, `cheap-check`, or `full-lens` (a drifted or malformed classifier response, not schema-validated on the way in), that lens defaults to `full-lens` too, the same as if it were missing. A lens present with garbage in its `tier` field must never fall through Step 3's dispatch-by-tier branches silently: that is the same "swarm becomes a no-op while looking thorough" failure this file already warns against for a lost reviewer, just triggered from triage's side instead of the swarm's.
+```bash
+playbook review triage-merge --lenses <comma separated lens names> --tiers <file>
+```
 
-Report which lenses resolved to which tier, a one-line summary, e.g. "Triage: security=full-lens, docs=cheap-check, perf=skip", the same way Step 2 already reports which reviewers it selected and why.
+It prints the full tier map as JSON, one entry per lens Step 2 selected, then a `Triage: lens=tier, ...` line. A dispatch that failed or returned nothing, a lens the map left out, and a `tier` other than `skip`, `cheap-check` or `full-lens` all become `full-lens`; lenses triage did classify keep their tier. A silent or malformed triage never narrows coverage (per `playbook:delegating-subagents`, `review-triage` is structurally read-only so its return value can fail silently). Use the printed map in Step 3.
+
+Report the `Triage:` line it printed (e.g. "Triage: security=full-lens, docs=cheap-check, perf=skip"), the same way Step 2 reports which reviewers it selected and why.
 
 ## Step 2e: Load skills and reference files
 
@@ -179,39 +181,12 @@ Only now, with the lenses and tiers settled, load what the run needs. The orches
 
 **Concurrency cap (MUST).** Dispatch at most 8 reviewers at once. When the selected set (Step 2) is 8 or fewer, dispatch it in one wave exactly as below. When it's larger (only possible under `--all`, up to 14 lenses), split into waves of at most 8: issue the first wave's `Agent` calls in one message, wait for them to return, then issue the remaining lenses as a second wave. This bounds concurrent spawns; it never drops a lens to stay under the cap; every selected reviewer still runs, just possibly across two waves instead of one.
 
-For each lens in a wave, read its Step 2d tier from the captured tier map before dispatching: a lens absent from the map defaults to `full-lens`, per Step 2d's fail-open-per-lens rule (a triage dispatch that returns a partial map never silently narrows a lens's coverage). Dispatch by tier:
+For each lens in a wave, read its tier from the map `triage-merge` printed in Step 2d before dispatching (it is already complete, so no lens lacks a tier). Dispatch by tier:
 
-- **`full-lens`:** dispatch a `reviewer` subagent (`subagent_type: playbook:reviewer`, or a `reviewer-low` or `reviewer-xhigh` variant the session has, chosen by "Pick the tier" in `playbook:delegating-subagents`) as everything below through "Instruct each to" describes. It loads `playbook:grounding-review` and, when its lens has a mapped file in the `cheap-check` table below, only that reference file, resolved to an absolute path the same way. It never loads `playbook:writing-style`.
-- **`cheap-check`:** dispatch a `cheap-checker` subagent (already pinned to low effort, so no tier variant applies) (`subagent_type: playbook:cheap-checker`) instead of `reviewer`. Its prompt names: the lens's narrow concern, taken from the tier map's `reason` field for that lens (that field is already a short, grounded justification from `review-triage`, so it doubles as the concern statement); the PR diff and `HEAD_SHA`; the absolute `$WT` path (or the in-place note when `WT` is empty), same conventions as the `reviewer` dispatch below; and ONE reference file path to read for criteria, per this mapping:
+- **`full-lens`:** dispatch a `reviewer` subagent (`subagent_type: playbook:reviewer`, or a `reviewer-low` or `reviewer-xhigh` variant the session has, chosen by "Pick the tier" in `playbook:delegating-subagents`) as everything below through "Instruct each to" describes. It loads `playbook:grounding-review` and, when `playbook review ref <lens>` returns a reference file for its lens rather than `SKILL.md`, only that reference file. It never loads `playbook:writing-style`.
+- **`cheap-check`:** dispatch a `cheap-checker` subagent (already pinned to low effort, so no tier variant applies) (`subagent_type: playbook:cheap-checker`) instead of `reviewer`. Its prompt names: the lens's narrow concern, taken from the tier map's `reason` field for that lens (that field is already a short, grounded justification from `review-triage`, so it doubles as the concern statement); the PR diff and `HEAD_SHA`; the absolute `$WT` path (or the in-place note when `WT` is empty), same conventions as the `reviewer` dispatch below; and ONE reference file path to read for criteria.
 
-  | Lens | Reference file |
-  |---|---|
-  | security | security.md |
-  | perf | performance.md |
-  | data | performance.md |
-  | logic | correctness.md |
-  | types | reliability.md |
-  | architecture | architecture.md |
-  | migration | architecture.md |
-  | big-o | performance.md |
-  | complexity | maintainability.md |
-  | dedup | maintainability.md |
-  | integration | reliability.md |
-  | test | (none, no matching category) |
-  | docs | (none, no matching category) |
-  | adr | architecture.md |
-
-  `types` maps to `reliability.md`, not `correctness.md`: that file's "cast with `as` instead of parsed with a runtime schema validator" bullet is the one that actually matches the `types` lens's stated focus (unsafe casts, non-null assertions), and `correctness.md` has no bullet about either.
-
-  Path resolution: resolve the actual value of `$CLAUDE_PLUGIN_ROOT` with a real `Bash` step before building the string, inside an executed bash block, not prose that merely names the variable, for example:
-
-  ```bash
-  playbook skill ref grounding-review <file>
-  ```
-
-  It prints the absolute path of `references/<file>.md` (give `<file>` without `.md`), or of the full `SKILL.md` when the file is missing or no name is given.
-
-  If the lens has a mapped file, resolve it to an absolute path this way and confirm that file exists. If a lens has no mapped file (`test`, `docs`), or the resolved file doesn't exist for some reason (defensive fallback), resolve the full `SKILL.md` path instead: the same fallback mechanism either way (no reference file to hand over), so it is one rule, not two. Hand `cheap-checker` the resolved ABSOLUTE path this `Bash` step produced, never the unexpanded `${CLAUDE_PLUGIN_ROOT}` placeholder or a bare repo-relative string: `cheap-checker` has no `Bash`, so it cannot expand `$CLAUDE_PLUGIN_ROOT` itself, and a repo-relative path never resolves against the diff's own target repo (which is not this plugin's repo). The narrow concern text, not the reference file, is what scopes the check, so falling back to the full `SKILL.md` for criteria still returns a finding scoped to just that lens's concern, never the full skill's breadth.
+  Resolve the lens's reference file with one call, `playbook review ref <lens>`, which prints its absolute path (the full `SKILL.md` path for a lens with no matching file, such as `test` or `docs`, or when the file is missing). Hand `cheap-checker` that ABSOLUTE path, never a bare repo-relative string: `cheap-checker` has no `Bash` and a repo-relative path never resolves against the diff's own target repo. The narrow concern text, not the reference file, is what scopes the check, so a `SKILL.md` fallback still returns a finding scoped to just that lens's concern.
 - **`skip`:** dispatch nothing for that lens. Track it explicitly as skipped, e.g. in the same one-line summary Step 2d already reports ("Triage: security=full-lens, docs=cheap-check, perf=skip"). A skipped lens is never conflated with "returned nothing" below: it was never dispatched at all, so it has no return value to lose.
 
 Spawn each wave **in parallel** (one message, multiple `Agent` calls). The `reviewer` agent is structurally read-only (Read/Grep/Glob only, no Edit/Write/Bash) and pins its own model tier, so the orchestrator no longer sets `model` per call; `cheap-checker` is the same shape (Read/Grep/Glob/Skill, its own pinned `haiku` model). Each reviewer prompt MUST include: its focus area (from the table), the PR diff and `HEAD_SHA`, the instruction to load `playbook:grounding-review` (plus its mapped reference file), the absolute `$WT` path (or a note that the tree is in-place if `WT` is empty) with the instruction "Read and grep files under <WT>; do not install or build anything.", the `CHECK_OUTPUT` captured in Step 2b verbatim under a heading "Check suite output (from orchestrator)", and, when Step 2c loaded anything, a memory slice: facts anchored to a file touched in the diff, or otherwise related to the lens's focus area (for example, security-tagged facts for the security lens), listed by one-line hook or short body under a heading "Relevant memory (from orchestrator)". No matching facts means no section, not an empty placeholder.
