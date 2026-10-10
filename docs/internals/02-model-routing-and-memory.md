@@ -136,6 +136,10 @@ Effort is fixed per agent definition: base agents run at their own effort, and a
 
 A ceiling for one component is the key `effort.<agents|commands|skills>.<name>` (see [ADR-0017](../adr/0017-per-component-effort-ceilings.md)). `playbook effort list` prints every component with its shipped, configured and effective effort. `playbook effort resolve agents <name> --json` returns, for an agent, the file to dispatch under the ceilings and every file allowed at or below them. The `Agent` tool has no per-call effort, so choosing the file is how an agent's ceiling is enforced.
 
+### Tuning from usage
+
+`playbook effort suggest` is a read only report (stage 1 of [ADR-0022](../adr/0022-effort-auto-tune-from-evidence.md)). For each agent it shows the dispatches in the window, how many used a variant above or below the shipped effort, repeats inside a session, the cost per effort bucket, your ceilings, and whether lowering is permitted or something needs a look. Permission to lower comes only from the quality floor table in `src/effort/floor.rs`, one row per agent with the benchmark run behind it. A floor is pinned to the shipped effort when the bench is thin, so a row moves below shipped only when a larger bench says so, and the policy table above stays the human readable record. Usage evidence can hold a change back or ask for a look, and it never grants a lowering. `tests/effort_suggest.rs` fails when an agent has no floor row or a floor is above the effort in the agent file, so change both with the agent file.
+
 ### Model tiers and the 5.5 rule
 
 Every model playbook picks is the 5.5 generation. Plugin files name a tier by alias (`haiku`, `sonnet`, `opus`) and never pin a model id. Claude Code resolves each alias to the newest model the provider offers (on the Anthropic API that is the 5.5 model).

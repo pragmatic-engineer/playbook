@@ -284,7 +284,8 @@ pub enum Command {
     /// shipped effort and effective level. `playbook effort resolve agents
     /// reviewer` says which agent file to dispatch under the ceilings. Set a
     /// per-component ceiling with `playbook config set --global
-    /// effort.agents.reviewer medium`.
+    /// effort.agents.reviewer medium`. `playbook effort suggest` reads your
+    /// usage and lists agents where a change looks safe or needed.
     ///
     /// `auto` (the default) sets no ceiling, so Claude Code's own
     /// `maxEffortLevel` decides how high effort may go. Each skill, command and
