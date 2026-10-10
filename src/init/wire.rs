@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wires the 18 hooks Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command: 13 functional hooks plus 5 guards.
+//! `playbook hook <name>` command: 13 functional hooks plus 6 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
 //! two mirror different sources: `PORTED_HOOK_SPECS` is the 13 functional
@@ -250,6 +250,14 @@ const GUARD_SPECS: &[HookSpec] = &[
         also_replaces: None,
     },
     HookSpec {
+        event: "PreToolUse",
+        matcher: Some("Bash"),
+        name: "policy-guard",
+        if_cond: None,
+        timeout: Some(10),
+        also_replaces: None,
+    },
+    HookSpec {
         // The backstop for what the PreToolUse rewrite did not see. It can
         // amend a signed commit and edit a PR, so it gets a longer timeout.
         event: "PostToolUse",
@@ -263,6 +271,14 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Edit|Write"),
         name: "no-slop-guard",
+        if_cond: None,
+        timeout: Some(10),
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "PreToolUse",
+        matcher: Some("Edit|Write"),
+        name: "policy-guard",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,

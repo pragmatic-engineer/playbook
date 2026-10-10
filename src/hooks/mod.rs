@@ -18,6 +18,7 @@ pub mod memory_capture;
 pub mod memory_signals;
 pub mod migration_check;
 pub mod no_slop_guard;
+pub mod policy_guard;
 pub mod post_edit_track;
 pub mod precommit_check;
 pub mod precompact_warn;
@@ -53,6 +54,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::BgAwaitGuard => bg_await_guard::run(payload),
         HookName::NoSlopGuard => no_slop_guard::run(payload),
         HookName::CommitMessageSanitizer => commit_message_sanitizer::run(payload),
+        HookName::PolicyGuard => policy_guard::run(payload),
         HookName::PrecommitCheck => precommit_check::run(payload),
         HookName::AutoGuard => auto_guard::run(payload),
         HookName::AutoCost => auto_cost::run(payload),
