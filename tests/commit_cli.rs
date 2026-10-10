@@ -375,3 +375,31 @@ fn run_refuses_a_fix_type_on_a_lock_file_bump() {
     assert!(!o.status.success());
     assert!(err(&o).contains("build or chore"), "{}", err(&o));
 }
+
+#[test]
+fn run_refuses_a_message_with_a_dash_and_commits_nothing() {
+    let r = Repo::new("prose-dash");
+    r.stage("code.rs", "fn main() {}\n");
+    let before = git(&r.work, &["rev-parse", "HEAD"]);
+    let o = r.pb(
+        &["commit", "run"],
+        "feat: add a thing \u{2014} fast\n\nIt's not slow, it's quick.\n",
+    );
+    assert!(!o.status.success());
+    let e = err(&o);
+    assert!(e.contains("line 1: an em or en dash"), "{e}");
+    assert!(e.contains("line 3: contrast framing"), "{e}");
+    assert!(e.contains("Nothing was committed"), "{e}");
+    assert_eq!(git(&r.work, &["rev-parse", "HEAD"]), before);
+}
+
+#[test]
+fn run_skips_the_prose_check_on_request() {
+    let r = Repo::new("prose-skip");
+    r.stage("code.rs", "fn main() {}\n");
+    let o = r.pb(
+        &["commit", "run", "--no-prose-check"],
+        "feat: quote the \"utilize\" flag\n",
+    );
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+}

@@ -19,6 +19,7 @@ pub mod par;
 pub mod paths;
 pub mod payload;
 pub mod proc;
+pub mod prose;
 pub mod re;
 pub mod repo;
 pub mod session;

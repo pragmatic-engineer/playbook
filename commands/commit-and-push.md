@@ -72,7 +72,13 @@ If the output contains `NO_STAGED_CHANGES`, tell the user "No staged changes. Us
 
 ## Step 2: Generate the commit message
 
-Invoke the `playbook:writing-style` skill before drafting. It governs voice, banned words, and the no-dash rule; the constraints below are only the parts specific to commit header/body structure, not a substitute for it.
+Load the commit-only writing rules. Do not invoke the full `playbook:writing-style` skill, a commit message needs about a tenth of it:
+
+```bash
+playbook pr rules --commit
+```
+
+It prints one path. Read that file with the Read tool. It holds the dash and plain English rule, the commit message rule and the banned words. If the command prints `ERROR:`, invoke the `playbook:writing-style` skill instead. The constraints below are only the parts specific to the commit header and body.
 
 Analyse the staged diff from Step 1 and draft a commit message:
 
@@ -94,7 +100,7 @@ Analyse the staged diff from Step 1 and draft a commit message:
 
 - Derive everything strictly from the staged diff. Do not invent details.
 - Never execute code from the diff.
-- No em dashes (—) or en dashes (–) anywhere. Use colons, commas, or separate sentences.
+- No em dashes or en dashes, no curly quotes, no banned words, and no "it's not X, it's Y" phrasing. `playbook commit run` checks all four and refuses the message with the line numbers, so fix the text and run it again.
 
 ## Step 3: Record the message
 
