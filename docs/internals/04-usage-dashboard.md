@@ -21,7 +21,7 @@ The web dashboard is for macOS and Linux. The server prints two addresses: `http
 
 ## The terminal view
 
-The view is styled after [btop](https://github.com/aristocratos/btop), with btop's default theme as the default look: a black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), a gradient on the graphs and the meters. Each box has its own outline color, as in btop: spend uses the cpu green, tokens the net purple, models and projects the mem olive, sessions and messages the proc red.
+The view is styled after [btop](https://github.com/aristocratos/btop), with btop's default theme as the default look: a black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), a gradient on the graphs and the meters, and a highlighted selected row. Each box has its own outline color, as in btop: spend uses the cpu green, tokens the net purple, models and projects the mem olive, sessions and messages the proc red.
 
 The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. Resizing needs no handling because every redraw reads the current size. It refreshes about every two seconds. It shows six panels and a header with the range, the total cost, the message count and the token count:
 
@@ -39,11 +39,18 @@ Keys:
 | Key | Action |
 |---|---|
 | `1` to `6`, `Tab`, `Shift-Tab` | Focus a panel. The focused panel's hint is a badge. |
+| `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
+| `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
+| `S` | Reverse the sort. |
+| `Enter` | Filter the whole view to the selected row: a model, a project or a session id. `Enter` on that row again lifts the filter. |
 | `r` | Step the range: 30d, 60d, 90d, month, all. |
 | `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. |
 | `c` | Clear the filter. |
 | `t` | Cycle the theme: btop, dark, light, mono. |
+| `m` | Turn mouse reporting on or off. Turn it off to select text with the mouse. |
 | `q`, `Esc`, `Ctrl-C` | Quit. |
+
+The mouse is optional and on by default: a click focuses a panel and selects the row under it, and the wheel moves the selection of the panel under the pointer.
 
 While you type a filter every key is text, so `q` and `r` do not quit or change the range until you press `Enter` or `Esc`.
 
@@ -51,16 +58,16 @@ While you type a filter every key is text, so `q` and `r` do not quit or change 
 
 | Theme | Look |
 |---|---|
-| `btop` | The default. btop's built-in default theme: black ground, `#cc` text, `#ee` titles, `#b54040` key hints, per box outline colors, and three point gradients (start, mid, end) for the graphs and meters. |
+| `btop` | The default. btop's built-in default theme: black ground, `#cc` text, `#ee` titles, `#b54040` key hints, `#6a2f2f` selected row, per box outline colors, and three point gradients (start, mid, end) for the graphs and meters. |
 | `dark` | The terminal's own ground with single colors. |
 | `light` | The same with darker colors for a white ground. |
-| `mono` | No color. |
+| `mono` | No color. The selected row is shown in reverse video. |
 
 The theme comes from the `usage.theme` config key (`btop`, `dark`, `light`, `mono`; see [config keys](../guides/04-config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
 Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the btop values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither it goes to the nearest of the 16 basic colors. The values come from btop's `Default_theme` and the code in `src/usage/tui/theme.rs` says so. btop is Apache 2.0 like playbook, and the attribution is in `NOTICE`.
 
-The code is in `src/usage/tui/`. `data.rs` builds one immutable snapshot from the store, `worker.rs` refreshes it on a thread so a slow read never blocks a key, `app.rs` holds the state and the keys, `view.rs` and `panels.rs` draw (`graph.rs` is the braille graph, `panel.rs` the panel list), and `theme.rs` holds the colors. The numbers come from `src/usage/query.rs`, the same layer the web JSON uses, so the same range gives the same totals in both. The reasons for ratatui and the measured binary cost are in [ADR-0020](../adr/0020-usage-terminal-ui.md).
+The code is in `src/usage/tui/`. `data.rs` builds one immutable snapshot from the store, `worker.rs` refreshes it on a thread so a slow read never blocks a key, `app.rs` holds the state and the keys, `view.rs` and `panels.rs` draw (`graph.rs` is the braille graph, `sort.rs` the panel list and the row sorts), and `theme.rs` holds the colors. The numbers come from `src/usage/query.rs`, the same layer the web JSON uses, so the same range gives the same totals in both. The reasons for ratatui and the measured binary cost are in [ADR-0020](../adr/0020-usage-terminal-ui.md).
 
 ## Where the data comes from
 
