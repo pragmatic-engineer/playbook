@@ -4,6 +4,8 @@
 //! `playbook mode`: set the repo's `ask`/`auto` mode and report which mode
 //! resolves, from where, and what the guard hook sees.
 
+pub mod context;
+
 use crate::common::mode::{self, Mode, Resolved, Source};
 use crate::common::{home_dir, repo_slug};
 use crate::config::{self, write};

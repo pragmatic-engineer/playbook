@@ -62,7 +62,7 @@ fn every_command_that_spawns_agents_reads_the_effort_ceiling_in_step_zero() {
             continue;
         }
         let step = step_zero(&text).unwrap_or_else(|| panic!("{name}: no Step 0 section"));
-        let call = format!("playbook effort resolve commands {name} --json");
+        let call = format!("playbook run-context --command {name}");
         assert!(step.contains(&call), "{name}: Step 0 must run `{call}`");
         assert!(
             step.contains("delegating-subagents"),
