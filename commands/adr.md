@@ -236,7 +236,7 @@ Spawn a `fact-checker` agent with the record (and blueprint, if any). It verifie
 Confidence: HIGH | MEDIUM | LOW
 ```
 
-**Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/adr-<record-slug>-fact-check.txt`, then run `playbook gate record <record-slug> adr fact-check <that file> --source /tmp/<repo>/adr-<record-slug>-source.fact-check.md`. Do this every time Phase 1 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so a stale FAIL from an earlier iteration is overwritten once a later iteration passes, and only the last recording before this stage's Gate Check matters.
+**Record the gate:** pipe its full raw return text (a quoted heredoc on stdin, no scratch file) to `playbook gate record <record-slug> adr fact-check - --source /tmp/<repo>/adr-<record-slug>-source.fact-check.md`. Do this every time Phase 1 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so a stale FAIL from an earlier iteration is overwritten once a later iteration passes, and only the last recording before this stage's Gate Check matters.
 
 After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).** A revised record or blueprint means re-writing this phase's own snapshot, and the shared `<gate-source-path>`, before this phase re-runs.
 
@@ -246,7 +246,7 @@ After it returns, if a project store is present at `~/.config/playbook/memory/<o
 
 Spawn a `critic` agent with focus `decision`, given the record, blueprint, and the Phase 1 report. It challenges the decision: simpler alternatives, scope creep, over-engineering, missing error paths, blast radius, contradictions with the fact-check.
 
-**Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/adr-<record-slug>-adversarial.txt`, then run `playbook gate record <record-slug> adr adversarial <that file> --source /tmp/<repo>/adr-<record-slug>-source.adversarial.md`. Do this every time Phase 2 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before this stage's Gate Check matters.
+**Record the gate:** pipe its full raw return text (a quoted heredoc on stdin, no scratch file) to `playbook gate record <record-slug> adr adversarial - --source /tmp/<repo>/adr-<record-slug>-source.adversarial.md`. Do this every time Phase 2 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before this stage's Gate Check matters.
 
 After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, record any rejected simpler alternative (with reasoning) as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run (max 3).** A revised record or blueprint means re-writing this phase's own snapshot, and the shared `<gate-source-path>`, before this phase re-runs.
 
@@ -256,7 +256,7 @@ After it returns, if a project store is present at `~/.config/playbook/memory/<o
 
 Spawn a `test-reviewer` agent with the blueprint's test plan and the Phase 1 report (it runs in parallel with Phase 2). For a `--record-only` ADR with no blueprint tests, this is typically `PASS: N/A (no test plan)`. For a blueprint with Gherkin scenarios or TDD cycles, evaluate them against `playbook:engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
 
-**Record the gate:** write its full raw return text to a file, e.g. `/tmp/<repo>/adr-<record-slug>-test-review.txt`, then run `playbook gate record <record-slug> adr test-review <that file> --source /tmp/<repo>/adr-<record-slug>-source.test-review.md`. Do this every time Phase 3 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before this stage's Gate Check matters. **FAIL → revise the test plan and re-run (max 3).** A revised record or blueprint means re-writing this phase's own snapshot, and the shared `<gate-source-path>`, before this phase re-runs.
+**Record the gate:** pipe its full raw return text (a quoted heredoc on stdin, no scratch file) to `playbook gate record <record-slug> adr test-review - --source /tmp/<repo>/adr-<record-slug>-source.test-review.md`. Do this every time Phase 3 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before this stage's Gate Check matters. **FAIL → revise the test plan and re-run (max 3).** A revised record or blueprint means re-writing this phase's own snapshot, and the shared `<gate-source-path>`, before this phase re-runs.
 
 ### Structural Checks
 
