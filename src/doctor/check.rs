@@ -77,13 +77,17 @@ impl Env {
     }
 }
 
-const PRE_GUARDS: [&str; 5] = [
+const PRE_GUARDS: [&str; 6] = [
     "rm-workspace-guard",
     "bg-await-guard",
     "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
+    "policy-guard",
 ];
+
+/// The guards that must also be wired on PostToolUse.
+const POST_GUARDS: [&str; 1] = ["commit-message-sanitizer"];
 
 const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash, or brew install pragmatic-engineer/tap/playbook, and make sure its directory is on PATH";
 
@@ -165,7 +169,7 @@ fn layer2(env: &Env) -> Row {
     let mut problems = String::new();
     for (event, guards, suffix) in [
         ("PreToolUse", &PRE_GUARDS[..], ""),
-        ("PostToolUse", &PRE_GUARDS[4..], "(PostToolUse)"),
+        ("PostToolUse", &POST_GUARDS[..], "(PostToolUse)"),
     ] {
         for (guard, count) in field::hook_commands_for_event(&settings, event, guards) {
             total += 1;

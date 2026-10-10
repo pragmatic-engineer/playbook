@@ -7,7 +7,7 @@ The session model defaults to Sonnet. Four things shape which model and effort a
 The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) and in `playbook route`. The system prompt points there and does not restate models, so the two cannot disagree.
 
 - **Sonnet** is the session default and covers most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`.
-- **Haiku** takes mechanical, formatting and search work: `git`, `patch-applier`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, and the `doctor`, `session-start` and `setup` commands.
+- **Haiku** takes mechanical, formatting and search work: `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, and the `doctor`, `session-start` and `setup` commands.
 - **Opus** takes design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`.
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
@@ -18,7 +18,7 @@ Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mod
 
 | Kind | Model and effort | Agent |
 |---|---|---|
-| `mechanical` | haiku, low | `patch-applier` |
+| `mechanical` | haiku, low | `collector` |
 | `classify` | haiku, medium | `review-triage` |
 | `check` | haiku, medium | `cheap-checker` |
 | `review` | opus, medium | `reviewer` |
@@ -50,7 +50,6 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | File | Model | Effort | Reasoning |
 | --- | --- | --- | --- |
 | `agents/git` | haiku | `xhigh` (was low) | Drafts the commit message and PR title and body, and runs fixed git and `gh` steps. The Haiku evaluation found the conventional commit type was right 42% of the time at `low` and 100% at `xhigh`; at about $0.0006 a call the extra effort costs less than a cent. This is the one Haiku role allowed above `medium` (see the effort cap below), and `playbook commit run` also refuses a type that contradicts the files. |
-| `agents/patch-applier` | haiku | `low` (was medium) | Applies a diff someone else approved, verbatim, with no judgment. |
 | `agents/collector` | haiku | `low` (was medium) | Gathers and compacts raw history; the analyst does the thinking later. |
 | `agents/cheap-checker` | haiku | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
 | `agents/review-triage` | haiku | `low` (was medium) | A three-way classifier; any bad or missing answer already falls back to `full-lens`, so a wrong call fails safe. |
@@ -89,7 +88,6 @@ This table lists every agent, command and skill with the model and effort in its
 | agent | `fact-checker` | `haiku` | `medium` | Three bench rounds: Haiku medium 134/138, high 137/138, at about a tenth of Sonnet's cost. The Haiku effort cap already held it at medium. |
 | agent | `git` | `haiku` | `xhigh` | Drafts commit and PR text. The commit type was right 42% of the time at low and 100% at xhigh. The one Haiku role allowed above medium (OPT_INS). |
 | agent | `implementer` | `sonnet` | `medium` | Writes and commits production logic. Round 2 bench on 20 repo tasks: Sonnet medium 200/200, high 198/200; Haiku stays under 92%. |
-| agent | `patch-applier` | `haiku` | `low` | Applies an approved diff verbatim, with no judgment. |
 | agent | `review-triage` | `haiku` | `low` | A three-way classifier. A bad or missing answer falls back to a full lens. |
 | agent | `reviewer` | `opus` | `medium` | Opus medium 199/200 against high 200/200 on the reviewer bench, 19% cheaper. Risky diffs go to `reviewer-xhigh` and small ones to `reviewer-low` (ADR-0021). |
 | agent | `test-reviewer` | `haiku` | `low` | Pilot (18 calls per cell): Haiku low, medium and high 18/18, Sonnet high 18/18, Sonnet low 16/18. |

@@ -3,7 +3,7 @@
 
 //! Effort-tier variants of an agent (`reviewer-low`, `reviewer-xhigh`),
 //! rendered in memory and handed to Claude Code for one session with
-//! `--agents`. No variant is a committed file: 12 agents times four other
+//! `--agents`. No variant is a committed file: 11 agents times four other
 //! tiers would add dozens of descriptions to every session's context, so
 //! the launcher injects only the variants a session can use.
 //!
@@ -28,7 +28,7 @@ pub const TIERS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 /// Every base agent with the tiers it can be rendered at. A tier equal to the
 /// base file's own effort renders nothing. `playbook agents check` fails when
 /// an agent file has no entry here.
-pub const VARIANTS: [(&str, &[&str]); 12] = [
+pub const VARIANTS: [(&str, &[&str]); 11] = [
     ("analyst", &TIERS),
     ("auditor", &TIERS),
     ("cheap-checker", &TIERS),
@@ -37,7 +37,6 @@ pub const VARIANTS: [(&str, &[&str]); 12] = [
     ("fact-checker", &TIERS),
     ("git", &TIERS),
     ("implementer", &TIERS),
-    ("patch-applier", &TIERS),
     ("review-triage", &TIERS),
     ("reviewer", &TIERS),
     ("test-reviewer", &TIERS),

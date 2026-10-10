@@ -38,7 +38,7 @@ The full list of agents, their tools and how a command binds to one is in [Autho
 The rule is: spend on judgment, save on routine.
 
 - **Sonnet** is the session default and covers most coding. `implementer` and `critic` use it because they write code or check plans, and Sonnet at medium effort did as well as high in `playbook eval bench`.
-- **Haiku** runs `git`, `patch-applier`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer` and `analyst`. The first five apply a decision someone else already made, or classify with a safe fallback, and a wrong answer is cheap to detect and rerun. The last three ran on Haiku after the same bench showed no meaningful loss on real playbook code.
+- **Haiku** runs `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer` and `analyst`. The first five apply a decision someone else already made, or classify with a safe fallback, and a wrong answer is cheap to detect and rerun. The last three ran on Haiku after the same bench showed no meaningful loss on real playbook code.
 - **Opus** runs design (`/playbook:plan`, `/playbook:adr`), every `reviewer`, and the `auditor`. A missed finding in a review, or a weak design, costs far more than the extra tokens.
 
 Plugin files name only the alias. `ccc` resolves each to the 5.5 model and passes the previous generation as a fallback. The table, the overrides (`models.<alias>`) and the routing details, including the hook that nudges design prompts toward Opus, are in [Model routing and memory](../internals/02-model-routing-and-memory.md).

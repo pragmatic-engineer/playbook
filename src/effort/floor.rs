@@ -37,7 +37,7 @@ pub struct Floor {
 const DOC: &str = "docs/internals/02-model-routing-and-memory.md";
 
 /// Every agent, sorted by name.
-pub const FLOORS: [Floor; 12] = [
+pub const FLOORS: [Floor; 11] = [
     Floor {
         agent: "analyst",
         floor: "medium",
@@ -93,13 +93,6 @@ pub const FLOORS: [Floor; 12] = [
         costly_to_miss: false,
         fan_out: true,
         source: "bench campaign 2026-10-10 (#712, #714): Sonnet low 99.7% and medium 98.7% on 20 repo tasks; single turn bench with no tools, so pinned at shipped medium",
-    },
-    Floor {
-        agent: "patch-applier",
-        floor: "low",
-        costly_to_miss: false,
-        fan_out: true,
-        source: "already the lowest effort; kept by the bench campaign (#714)",
     },
     Floor {
         agent: "review-triage",

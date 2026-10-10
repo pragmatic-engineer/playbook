@@ -43,7 +43,7 @@ pub fn table(kind: &str, tier: &str) -> Option<Route> {
         ("mechanical", _) => Route {
             model: "haiku",
             effort: "low",
-            agent: "patch-applier",
+            agent: "collector",
             reason: "an exact, already decided step needs no judgment",
         },
         ("classify", _) => Route {
