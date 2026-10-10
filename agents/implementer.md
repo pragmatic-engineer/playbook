@@ -14,7 +14,7 @@ You have no interactive user. Never wait for confirmation. Your final message is
 
 ## The TDD steps, when the brief names one
 
-- **RED:** write ONLY the failing tests that encode the brief's scenarios, Arrange-Act-Assert, mapping to each scenario's Given/When/Then. Do not touch production code. Run the scoped verify: the tests MUST fail. If they pass, the test proves nothing, so fix it.
+- **RED:** write ONLY the failing tests that encode the brief's scenarios, Arrange-Act-Assert with `// Arrange`, `// Act` and `// Assert` comments mapping to each scenario's Given/When/Then, one action per test, and a parameterised test when scenarios share structure but differ in data. Do not touch production code. Run the scoped verify: the tests MUST fail. If they pass, the test proves nothing, so fix it.
 - **GREEN:** write ONLY the minimal production code that makes the tests pass. Run the scoped verify: the tests MUST pass.
 - **REFACTOR:** clean up without changing behaviour. The tests stay green. Run the scoped verify again.
 - **Single pass (`--no-tdd`):** write the code and its tests together; the tests still encode the brief's scenarios. Run the scoped verify.

@@ -12,7 +12,8 @@ use playbook::{
     CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DoctorCommand, EvalCommand,
     GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand,
     MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ReleaseCommand, ReviewCommand,
-    ReviewWorktreeCommand, SanitizeCommand, SettingsCommand, SkillCommand, WorktreeCommand,
+    ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology, SettingsCommand,
+    SkillCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -628,6 +629,69 @@ fn main() {
                 Ok(text) => print!("{text}"),
                 Err(err) => {
                     eprintln!("release: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::Segment { sub } => {
+            let result = match sub {
+                SegmentCommand::Branch {
+                    naming,
+                    topology,
+                    prev_branch,
+                    land,
+                } => {
+                    let args = playbook::segment::BranchArgs {
+                        kind: &naming.kind,
+                        plan_slug: &naming.plan_slug,
+                        n: naming.n,
+                        title: &naming.title,
+                        topology: match topology {
+                            SegmentTopology::Stacked => playbook::segment::Topology::Stacked,
+                            SegmentTopology::Independent => {
+                                playbook::segment::Topology::Independent
+                            }
+                            SegmentTopology::Single => playbook::segment::Topology::Single,
+                        },
+                        default_branch: &naming.default_branch,
+                        prev_branch: prev_branch.as_deref(),
+                        land,
+                    };
+                    playbook::segment::branch(
+                        &naming.dir.clone().unwrap_or_else(|| ".".into()),
+                        &args,
+                    )
+                }
+                SegmentCommand::Size { base, limit, dir } => {
+                    playbook::segment::size(&dir.unwrap_or_else(|| ".".into()), &base, limit)
+                }
+                SegmentCommand::Resplit {
+                    naming,
+                    base,
+                    limit,
+                } => {
+                    let args = playbook::segment::BranchArgs {
+                        kind: &naming.kind,
+                        plan_slug: &naming.plan_slug,
+                        n: naming.n,
+                        title: &naming.title,
+                        topology: playbook::segment::Topology::Stacked,
+                        default_branch: &naming.default_branch,
+                        prev_branch: None,
+                        land: false,
+                    };
+                    playbook::segment::resplit(
+                        &naming.dir.clone().unwrap_or_else(|| ".".into()),
+                        &base,
+                        &args,
+                        limit,
+                    )
+                }
+            };
+            match result {
+                Ok(line) => println!("{line}"),
+                Err(err) => {
+                    eprintln!("error: {err}");
                     std::process::exit(1);
                 }
             }

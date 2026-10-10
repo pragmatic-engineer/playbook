@@ -204,38 +204,34 @@ Record the resolved Segments and the chosen strategy in the progress ledger (Ste
 
 **Delegation (MUST):** this command runs on Sonnet. The orchestrating session reads the plan and delegates each implementation chunk to a subagent via the Agent tool, then reviews the result. Delegation keeps each chunk in a fresh, isolated context (no bleed between cycles); the orchestrator spends its turn reviewing, not editing. Independent Work Units run in parallel by default, each isolated in its own git worktree, with the model tier set per role (see the scheduler below). The deep design reasoning already happened in `/playbook:plan` or `/playbook:adr`, so execution doesn't need Opus.
 
-Every Agent prompt MUST include: a pointer to its Work Unit's brief file (Step 5's File-based handoff), which carries the plan content that dispatch needs, the specific cycle/step, the test-structure rules below, the design principles below, and grounding rules ("read files before modifying, match existing style, verify imports resolve, don't guess types, apply SOLID/DRY/KISS/YAGNI"). Point at the brief; don't paste the whole multi-WU plan into every prompt.
+Every Agent prompt MUST include: a pointer to its Work Unit's brief file (Step 5's File-based handoff), which carries the plan content that dispatch needs, and the specific cycle/step. The `implementer` agent already carries the design principles, the grounding rules and the test structure, so do not restate them in the prompt. Point at the brief; don't paste the whole multi-WU plan into every prompt.
 
-**Design principles (MUST).** Every change, and every Agent prompt, applies:
-- **SOLID:** one responsibility per unit, small focused interfaces, depend on abstractions only at real seams (no abstraction without a second caller).
-- **DRY:** factor out genuine duplication once it recurs (rule of three); don't couple unrelated code that only looks alike.
-- **KISS:** the simplest design that passes the tests and reads clearly; fewer moving parts wins.
-- **YAGNI:** build only what the plan requires now. No speculative hooks, flags, config, or generality.
-- **Self-explanatory over commented.** Clear names, small functions, obvious control flow, so a reader rarely needs a comment to follow it. No comments unless WHY is non-obvious; never restate WHAT the code already shows.
-- **Composable over inherited.** Prefer composition (small, combinable functions or objects) over deep inheritance, in both OOP and functional code. Inheritance only for a genuine is-a relationship, kept shallow.
-- **Model multi-step processing explicitly.** A request handler, a hook, a CLI command, or any multi-step pipeline reads as a named sequence of steps, not implicit control flow scattered across helpers. Log at each step, so a failure's exact location is visible from the logs alone, without needing to reproduce it locally first.
-- **Idempotent and retryable where the operation allows it.** Design service and API operations to be safely repeatable (idempotency keys, upserts, at-least-once-safe handlers). This is also a `playbook:grounding-review` Reliability check, so building it in avoids a review round-trip.
-- **Error messages are descriptive and assertive.** State exactly what failed and why, in plain language: "order 4471 has no shipping address", not "an error occurred". Never put PII or PHI (names, emails, government IDs, health data) in an error message or a log line; reference a record by its non-sensitive identifier instead.
-
-When SOLID's abstraction pulls against KISS/YAGNI, favour the simplest thing that meets the plan. These principles are also the lens for the refinement pass (Step 8).
+**Design principles (MUST).** The rules every change follows (SOLID, DRY, KISS, YAGNI, composition over inheritance, explicit logged steps, idempotent operations, assertive errors without PII) live in `playbook:engineering-standards` (loaded in Step 3) and in the `implementer` agent that writes the code. When SOLID's abstraction pulls against KISS/YAGNI, favour the simplest thing that meets the plan. They are also the lens for the refinement pass (Step 8) and the principles review lens (Step 9).
 
 **Execution unit (MUST): the plan's Work Units, grouped by Segment.** Execute **one Segment at a time** in dependency order (Step 4.5). Within a Segment, execute its Work Units with the wave scheduler below; each WU becomes one small savepoint commit. The scheduler, worktree isolation, TDD flow, and verify-by-diff are unchanged; they just run scoped to the current Segment's WUs. **A wave never mixes WUs from two Segments:** the outer Segment loop is strictly sequential relative to the inner wave loop, so the ready set is always drawn from the current Segment only.
 
-**Per-Segment setup (MUST): branch per topology.** Before a Segment's first commit, put HEAD on the right branch (always branch-first; never commit to the default branch). `<seg-slug>` is the Segment's Title kebab-cased and truncated, the same way `<plan-slug>` derives from the topic (Step 7 of `/playbook:plan`). Capture the branch's starting ref as `<segment-base>` (used by the re-split guard):
+**Per-Segment setup (MUST): branch per topology.** Before a Segment's first commit, put HEAD on the right branch (always branch-first; never commit to the default branch) with one call. `<seg-slug>` is the Segment's Title kebab-cased and truncated by the command, the same way `<plan-slug>` derives from the topic (Step 7 of `/playbook:plan`):
 
-- **Stacked:** `git switch -c <type>/<plan-slug>-s<N>-<seg-slug>` off the previous Segment's branch (Segment 1 off the default branch); `<segment-base>` is that starting ref. The base for Segment N's PR is Segment N-1's branch.
-- **Independent:** each Segment branch off the default branch; `<segment-base>` is the default branch.
-- **Single:** one shared branch for the whole plan (the pre-existing behaviour); `<segment-base>` is the branch tip captured at this Segment's first commit.
-- **`land` boundary (overrides the topology's base, all three topologies):** `git fetch origin <default-branch>` first, then branch off `origin/<default-branch>`; `<segment-base>` is `origin/<default-branch>` at that fetched SHA. Never branch off the previous Segment's branch: under `land` that branch is already merged, and with `delete_branch_on_merge: true` it may no longer exist on origin. Never branch off the *local* default branch, which is stale the moment Segment N-1 merged.
+```bash
+playbook segment branch --type <type> --plan-slug <plan-slug> --n <N> --title "<Segment title>" \
+  --topology <stacked|independent|single> --default-branch <default-branch> \
+  [--prev-branch <previous Segment branch>] [--land]
+```
 
-On a **ledger-driven resume** (Step 5 ledger, e.g. after `/clear`, a crash, or a fresh checkout), the previous Segment's branch may not exist locally: `git fetch origin <prev-Segment-branch>` (or confirm the ref exists) before branching off it. Record `Segment id -> branch -> <segment-base> -> WU commit range` in the ledger as you go.
+It prints `branch=<name> base=<sha> base_ref=<ref>`. `base` is `<segment-base>`, used by the re-split guard. It creates `<type>/<plan-slug>-s<N>-<seg-slug>` from the base the topology needs: the default branch for **independent** Segments, the previous Segment's branch for **stacked** ones (Segment 1 off the default branch; the base for Segment N's PR is Segment N-1's branch), and under **single** nothing is created, because the whole plan shares one branch whose tip is the base. With `--land` (all three topologies) it fetches `origin/<default-branch>` and branches off that, never off the previous Segment's branch (already merged, possibly deleted) and never off the stale local default branch. It exits 1 when the branch already exists or, under single, when HEAD is on the default branch.
 
-**Re-split guard (MUST, hard limit = 1500 changed lines; Segments target under 500).** After a Segment's WUs are committed, measure its real diff against its base: `git diff --shortstat <segment-base>...HEAD`. If changed lines exceed 1500, split the Segment at WU boundaries, in git:
+On a **ledger-driven resume** (Step 5 ledger, e.g. after `/clear`, a crash, or a fresh checkout), a Segment branch that already exists is resumed with `git switch`; the command also fetches a stacked previous branch that is not local. Record `Segment id -> branch -> <segment-base> -> WU commit range` in the ledger as you go.
 
-1. Pick the last WU that keeps the Segment at or under budget; call its commit `<split-sha>`.
-2. Rename the current Segment branch to hold the excess commits: `git branch -m <current-branch> <type>/<plan-slug>-s<N>b-<seg-slug>`. Then create the trimmed Segment branch at the split point under the original name and switch to it: `git switch -c <current-branch> <split-sha>`. No branch is reset.
-3. The new `s<N>b` Segment branches off the trimmed current Segment (its `<segment-base>` is `<split-sha>`; under **independent** it still branches off the default branch); its PR targets the current Segment's branch under stacked, the default branch under independent, or the current Segment's (shared) branch under single. The `b` suffix avoids colliding with a planned `s<N+1>`. **Under single topology this means the re-split adds one follow-up PR** stacked on the shared branch: single still ships one PR normally, but the 1500 hard limit is never breached, so an overflowing single plan yields the shared-branch PR plus one follow-up.
-4. **Deliver `s<N>b` as the very next Segment**, before any pre-planned `s<N+1>`, then continue the outer loop. Note the re-split (new Segment id, split point) in the ledger and the final report.
+**Re-split guard (MUST, hard limit = 1500 changed lines; Segments target under 500).** After a Segment's WUs are committed, run `playbook segment size --base <segment-base>`; it prints `lines=N files=M over=true|false`. When `over=true`, split the Segment at a WU boundary:
+
+```bash
+playbook segment resplit --base <segment-base> --type <type> --plan-slug <plan-slug> --n <N> --title "<Segment title>"
+```
+
+It finds the last WU commit that keeps the Segment at or under 1500 lines (`<split-sha>`), renames the current branch to `<type>/<plan-slug>-s<N>b-<seg-slug>` so it keeps every commit, recreates the original branch name at `<split-sha>` and checks it out. It prints `split=<sha> trimmed=<branch> excess=<branch>`; no branch is reset. It exits 1 when even the first WU commit is over the limit.
+
+- The new `s<N>b` Segment's `<segment-base>` is `<split-sha>` (under **independent** it still branches off the default branch). Its PR targets the current Segment's branch under stacked, the default branch under independent, or the current Segment's (shared) branch under single. The `b` suffix avoids colliding with a planned `s<N+1>`. **Under single topology this means the re-split adds one follow-up PR** stacked on the shared branch: single still ships one PR normally, but the 1500 hard limit is never breached.
+- **Deliver `s<N>b` as the very next Segment**, before any pre-planned `s<N+1>`, then continue the outer loop. Note the re-split (new Segment id, split point) in the ledger and the final report.
 
 **Under `land`, a re-split defers `s<N>b` (MUST).** The re-split creates `s<N>b` before the current Segment has merged, which is the one place this command creates a later Segment's branch ahead of time. Do NOT open its PR yet. Land the current Segment first, then `git fetch origin <default-branch>`, `git rebase --onto origin/<default-branch> <split-sha> <type>/<plan-slug>-s<N>b-<seg-slug>`, and deliver `s<N>b` as the next Segment with the default branch as its base. Its PR must never target the current Segment's branch, which is merged and likely deleted.
 
@@ -293,8 +289,6 @@ WORKTREES_DIR=$(playbook path worktrees --create) || exit 1
 ```
 
 **Model tiering (MUST, never omit `model`).** Implementer Tasks spawn the `implementer` agent, which pins `model: sonnet` itself, so you don't set the model on those calls. Ledger writes stay a direct orchestrator action: a few-line append per WU, small enough that a separate dispatch would cost more in round-trip latency than it saves in tokens. Verification and the adversarial review (Step 9) run the capable tier. An omitted `model` on a non-typed call silently inherits the priciest default, so always set it there.
-
-**Test structure (from `playbook:engineering-standards`):** every test follows Arrange-Act-Assert with `// Arrange` / `// Act` / `// Assert` comments mapping to the scenario's Given/When/Then; one action per test; use parameterised tests (`test.each`, `pytest.mark.parametrize`, table-driven) when scenarios share AAA structure but differ in data.
 
 **With TDD (default).** A Work Unit with N test scenarios means up to 3N dispatches: for each scenario, in dependency order:
 
@@ -467,127 +461,7 @@ Apply the fixes you hold with HIGH confidence plus every `blocking` correctness/
 
 ## Step 10: Land the Segment (`--boundary=land` only)
 
-Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MUST complete with the PR reading `MERGED` before Step 5 creates Segment N+1's branch. Skip this step entirely under **savepoint** and **pause**.
-
-**The governing rule: attempt, then re-read state. Never conclude from an exit code.** `gh pr merge --auto` returns 0 when it merely *arms* auto-merge, and returns non-zero while still enqueueing successfully (this repo prints `! The merge strategy for main is set by the merge queue` to stderr and enqueues anyway). Both directions of the exit code lie. The exit code and stderr route the next probe; only a fresh `gh pr view` adjudicates. Equally, do NOT pre-compute whether a human review is required from `gh api repos/{owner}/{repo}` (`allow_auto_merge`, `permissions.admin`) or from branch-protection/ruleset introspection: those are two different APIs a repo may use either of, and neither tells you whether *this* PR is already satisfied. `reviewDecision` on the PR does, because GitHub computes it across whichever system is active, including approvals already present.
-
-**Never pass `--delete-branch`.** It is redundant where the repo sets `delete_branch_on_merge`, and it deletes the LOCAL branch even when the merge itself fails (seen during a 503), which is the one state this loop must not land in.
-
-**1. Promote to ready.** `/playbook:create-pull-request` opens a draft unless `pr.draft` is `false`, and a draft cannot enqueue (`Pull request is a draft`). Promote it directly (a no-op when the PR already opened ready):
-
-```bash
-gh pr ready "$BRANCH"
-```
-
-**Do NOT invoke `playbook:finish-pull-request` (it runs `/clear`, then `/playbook:deep-review --self`), and do NOT pass `--ready` to `/playbook:create-pull-request`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Its `/clear` is context isolation by hand for a session that wrote the code itself; subagent dispatch is context isolation by construction. And `/clear` cannot be issued programmatically at all, so instructing it inside an autonomous loop would mean stopping to ask the user to type it, once per Segment, which is exactly what `land` exists to remove. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
-
-**2. Gate on required checks.** Poll with a deadline; never `--watch` unbounded.
-
-```bash
-playbook pr ci-wait "$PR"
-```
-
-`--required` is deliberate: the merge gate is what the repo enforces, not every check that exists. A failing NON-required check does not block the merge, but MUST be reported as a follow-up rather than silently dropped. `CI_VERDICT=NONE` (the repo requires no checks) is a legitimate pass; record it as `NONE`, never as `PASS`, so the ledger does not claim a gate that never ran. `CI_VERDICT=TIMEOUT` parks the Segment; do not merge a PR whose checks never finished.
-
-**3. CI-fix loop (two budgets, counted separately).** **3 fix attempts** per Segment, matching the existing `--auto: WU fails after 3 retries -> stop` rule, plus **2 reruns** per Segment. A rerun is not a fix and MUST NOT consume the fix budget.
-
-**Transient, not a code failure** (rerun, don't fix) when either holds:
-- `CI_VERDICT=CANCELLED`: `concurrency: cancel-in-progress` cancelled the run behind a newer push. `CANCELLED` is not `FAILURE`.
-- The failed *step* is `Set up job`, which runs before any repo code, so the failure cannot be yours (typically a rate-limited action download taking the whole matrix red at once):
-
-```bash
-# Left as gh's own --jq: it runs gh's bundled Go jq implementation, not the
-# system jq binary, so it is out of scope for this port.
-gh api "repos/{owner}/{repo}/actions/runs/<id>/jobs" \
-  --jq '.jobs[] | select(.conclusion=="failure")
-        | "\(.name) -> \(.steps[] | select(.conclusion=="failure") | .name)"'
-```
-
-Either case: `gh run rerun <id> --failed`, then return to step 2. Max 2 reruns; a third consecutive transient parks the Segment as `CI_UNSTABLE` rather than burning turns.
-
-**Genuine failure:** apply `playbook:systematic-debugging` to find the root cause before touching code, dispatch an `implementer` scoped to the failing check's diagnosis on the Segment branch, then `/playbook:commit-and-push`, then return to step 2. **A formatter failure MUST be fixed by running the project's own formatter** (`cargo fmt`, `prettier --write`, `ruff format`, per the Step 3 stack detection), never by hand-editing lines to satisfy it: a hand-edit burns a fix attempt and usually trips the next wrapping rule. Capture `<pre-fix-sha>` before the fix; step 4 needs it.
-
-**4. Re-review the fix, tiered by what the fix actually is.** Re-running the full 5-lens swarm for a one-line format fix is waste; skipping review for a logic change is not. Classify the fix diff mechanically, do not judge:
-
-- **Tier 0, no re-review.** The fix diff is empty (rerun only), or the fix is confined to CI workflow config that touches no shipped code, or the fix is provably tool-generated. Prove the last case, don't assert it: from the pre-fix tree, re-run the formatter/codegen and confirm it reproduces the fix exactly (`git diff --quiet` against the fix's tree). If the tool reproduces it, there is no human-authored change to review.
-- **Tier 1, one scoped lens.** Touches production or test code, under 50 changed lines, and no file outside the Segment's `Files`. Dispatch ONE `reviewer-low` (`subagent_type: reviewer-low` when `playbook effort resolve agents reviewer --json` lists it in `allowed`, else `playbook:reviewer`, small diff per "Pick the tier" in `playbook:delegating-subagents`) with focus `correctness` (plus `tests` when the fix touched test files), scoped to `git diff <pre-fix-sha>..HEAD`, the fix diff only, never the whole Segment diff.
-- **Tier 2, full Step 9 swarm scoped to this Segment.** Any one of: a file outside the Segment's `Files`; over 50 changed lines; a changed public signature, or a deleted or weakened assertion; the failing check was a security check (secret scanning, dependency/vulnerability scanning) rather than build/lint/test; **or this is the 2nd or 3rd fix attempt**. Repeated failure means the first root-cause diagnosis was wrong, which is exactly when a narrow re-look is worthless.
-
-Record the tier and its finding count in the ledger. Fix Tier 1/2 findings per Step 9's rules, then return to step 2.
-
-**5. Read the PR's real state before attempting anything.**
-
-```bash
-gh pr view "$PR" --json state,mergedAt,isDraft,mergeable,mergeStateStatus,reviewDecision,autoMergeRequest,baseRefName \
-  -q '{state,mergedAt,isDraft,mergeable,mergeStateStatus,reviewDecision,autoMerge:(.autoMergeRequest!=null),base:.baseRefName}'
-```
-
-Route in this order, first match wins:
-
-1. `state == "MERGED"` -> go to step 8.
-2. `state == "CLOSED"` and `mergedAt == null` -> the PR was closed out from under this run. `mergeable`/`mergeStateStatus` will sit at `UNKNOWN` forever and look like GitHub computation lag; it is not. Under `land` no sibling PR is ever open, so this should be impossible: report it as an invariant violation and STOP. Do not auto-reopen.
-3. `isDraft == true` -> step 1 did not take; re-run `gh pr ready` once, then re-read.
-4. `mergeable == "CONFLICTING"` or `mergeStateStatus == "DIRTY"` -> **conflict, a different problem entirely.** This is not a permissions question and `--admin` cannot bypass it. `git fetch origin <default-branch>` and `git rebase origin/<default-branch>`, resolve, `git push` (chained with `&&`, never as a separate statement), return to step 2. If a conflict hunk falls in a file outside the Segment's `Files`, STOP and report: resolving it would silently rewrite work this Segment does not own. Max 2 conflict-resolution attempts, then park as `CONFLICT`.
-5. `mergeable == "UNKNOWN"` -> GitHub is still computing. Re-read after 10s, up to 6 times. Route 2 already ruled out the closed-PR case that makes `UNKNOWN` permanent.
-6. `mergeStateStatus == "BEHIND"` -> the base moved while CI ran. Rebase onto `origin/<default-branch>` and push; do not merge and do not park. Return to step 2.
-7. `reviewDecision == "CHANGES_REQUESTED"` -> **park unconditionally** (step 7). A human looked and objected; that is categorically different from nobody having looked yet, and it MUST NOT be bypassed even where `--admin` would succeed.
-8. Otherwise -> step 6.
-
-**6. Attempt the merge, then re-read.**
-
-```bash
-playbook pr merge "$PR"
-```
-
-No strategy flag: where a merge queue is required it sets the strategy, and passing one only adds a stderr warning. If the output of `playbook pr merge` says auto-merge is not allowed for this repository, fall back to a synchronous `gh pr merge "$PR" --squash` (checks are already green by step 2); that is a repo-settings difference, not a permissions block, and it is discovered by attempting, not by reading `.allow_auto_merge` first.
-
-Then poll to a terminal state, re-reading rather than believing `merge_rc`:
-
-```bash
-playbook pr land-wait "$PR"
-```
-
-`RESTATE` returns to step 5. `TIMEOUT` with everything green falls through to the admin escalation below; a merge queue can hold a PR for its full batching window, so a deadline shorter than that window would escalate needlessly.
-
-**Admin escalation (MUST be gated on green checks).** Only when `LAND_VERDICT` is `REVIEW_GATE` or `TIMEOUT`, `mergeable == "MERGEABLE"`, AND step 2 returned `CI_VERDICT=PASS` or `NONE`:
-
-```bash
-playbook pr merge "$PR" --admin
-```
-
-**`--admin` bypasses required status checks, not only reviews.** Never reach it from a failing or unfinished CI state: the 3-attempt fix cap has no admin escape hatch, and "give up on CI, merge it anyway" is never a valid outcome of this loop. Re-read state afterwards, as always. If the output of `playbook pr merge --admin` says the PR must be merged using the asynchronous merge REST API, the PR's base is another open PR's branch, which `land` guarantees cannot happen: report the topology invariant as violated and STOP rather than retrying. Any permission refusal goes to step 7 with the message recorded verbatim.
-
-**7. Park (a stop, not a wait).** A human approving and merging cannot happen inside one turn, so parking ends the run, the way **pause** does, but only because genuinely blocked. Record in the ledger:
-
-```
-land: PARKED
-parked_reason: reviewDecision=REVIEW_REQUIRED; `gh pr merge --admin` refused: <verbatim message>
-parked_at: <ISO-8601>
-```
-
-Then report and STOP: the PR URL and number; the verbatim blocking field and refusal message; what is already green (required checks passed, Step 9 self-review done, N findings fixed, ledger-confirmed); the remaining Segments by name; and the literal resume command. Do not open the remaining Segments' PRs, do not start their branches, and do not fall back to another boundary without asking.
-
-**Resuming a parked Segment (MUST, and it differs from a normal ledger resume).** A normal resume continues *work*; a parked resume first checks whether the block cleared. Before any dispatch, any branch operation, or any re-review:
-
-```bash
-gh pr view "$PR" --json state,mergedAt,reviewDecision,mergeStateStatus \
-  -q '[.state,(.mergedAt//"-"),(.reviewDecision//"-"),.mergeStateStatus]|@tsv'
-```
-
-- `MERGED` -> go to step 8 and continue to Segment N+1. Do not re-run Steps 7-9 for this Segment.
-- `OPEN` with `reviewDecision == "APPROVED"` -> a human approved but did not merge. Re-enter at **step 5 only**. Do not re-review, do not re-push, do not re-run CI unless step 5 routes you there.
-- `OPEN` with the block unchanged -> still parked. Report and stop again immediately, having run nothing. A resumed run MUST NOT redo work on a parked PR.
-- `CLOSED` with `mergedAt == null` -> ask the user before anything else.
-
-**8. Confirm the content actually landed, then advance (MUST).** A merge command's success message is not evidence, the same way a subagent's `DONE` is not (Verify-by-diff, Step 5):
-
-```bash
-git fetch origin "$DEFAULT_BRANCH"
-git log --oneline -1 "origin/$DEFAULT_BRANCH"
-git diff "origin/$DEFAULT_BRANCH" "$SEGMENT_BRANCH" -- <the Segment's Files>
-```
-
-That last diff MUST be empty. A squash-merge collapses the branch's internal shape, so the trees match even though the commits do not. A non-empty diff means either concurrent merges by someone else (re-check scoped to the Segment's own `Files`, which is why the pathspec is there) or content genuinely lost; investigate before continuing, never assume. Record `land: MERGED (<merge-sha>)` in the ledger, then return to Step 5 for Segment N+1, whose branch MUST be created off the `origin/<default-branch>` just fetched.
+Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MUST complete with the PR reading `MERGED` before Step 5 creates Segment N+1's branch. Skip this step entirely under **savepoint** and **pause**. Under `land`, read the procedure first and follow it in full: run `playbook skill ref finish-pull-request land-segment` and read the file it prints. It holds the attempt-then-re-read rule, the promote, CI gate, merge and confirm loop, the fix tiers, the park conditions and the `land` decision rows. The Decision Rules table below keeps the rows that choose the boundary.
 
 ## Decision Rules
 
@@ -620,26 +494,6 @@ That last diff MUST be empty. A squash-merge collapses the branch's internal sha
 | `--auto` with no `--boundary` | Self-select `savepoint`; NEVER self-select `land`, which is opt-in only (Step 4.5) |
 | `land` boundary chosen | Run Steps 7-9 scoped per Segment, then Step 10: promote, gate on CI, merge, confirm `MERGED`, only then start Segment N+1 |
 | `land` + stacked topology | Reinterpret as independent: Segment N is merged before N+1's branch exists, so branch off the fetched `origin/<default>`. Record the override as an assumption (Step 4.5) |
-| `land`: Segment's PR just opened | `gh pr ready <branch>` directly; do NOT invoke `playbook:finish-pull-request` (`/clear` + `deep-review --self`) and do NOT pass `--ready`: Steps 8-9 already reviewed this diff, and `/clear` cannot be issued programmatically (Step 10) |
-| `land`: required checks green (or none required) | Attempt `gh pr merge <n> --auto`; re-read `state`/`autoMergeRequest` before believing the exit code, in either direction (Step 10) |
-| `land`: `mergeable: CONFLICTING` / `mergeStateStatus: DIRTY` | Conflict, not permissions: rebase on the fetched default branch, push `&&`-chained, re-run CI. Never `--admin`; it cannot bypass a conflict (Step 10) |
-| `land`: `mergeStateStatus: BEHIND` | Rebase onto `origin/<default>` and push; don't merge, don't park (Step 10) |
-| `land`: a conflict hunk falls outside the Segment's `Files` | STOP and report; resolving it would rewrite work this Segment doesn't own (Step 10) |
-| `land`: a required check fails | Root-cause per `playbook:systematic-debugging`, fix, push, re-review per the fix tier; max 3 fix attempts per Segment (Step 10) |
-| `land`: check `bucket: cancel`, or the failed step is `Set up job` | Transient, not a code failure: `gh run rerun <id> --failed`, max 2, and it does NOT consume the 3-attempt fix budget (Step 10) |
-| `land`: a non-required check fails | Doesn't block the merge; report it as a follow-up, never drop it silently (Step 10) |
-| `land`: the CI fix is a formatter failure | Run the project's formatter; never hand-edit lines to satisfy it (Step 10) |
-| `land`: the fix diff is reproducible by re-running the formatter/codegen | Tier 0, no re-review; prove it with `git diff --quiet`, don't assert it (Step 10) |
-| `land`: fix under 50 lines, inside the Segment's `Files` | Tier 1: one `reviewer` on the fix diff only, focus `correctness` (Step 10) |
-| `land`: fix touches logic, a public signature, a security check, or is attempt 2 or 3 | Tier 2: full Step 9 swarm scoped to the Segment before re-attempting the merge (Step 10) |
-| `land`: `reviewDecision: REVIEW_REQUIRED` and `--admin` refused | PARK: record `land: PARKED` + verbatim reason, report the PR and what's already green, STOP (Step 10) |
-| `land`: `reviewDecision: CHANGES_REQUESTED` | PARK unconditionally; never `--admin` past a human's stated objection, even holding admin rights (Step 10) |
-| `land`: required checks not green | Never `--admin`; it bypasses required checks too. Fix or park. The 3-attempt cap has no admin escape hatch (Step 10) |
-| `land`: `gh pr merge` fails with "asynchronous merge REST API" | The PR's base is another open PR's branch, which `land` forbids: report the topology invariant as violated and STOP (Step 10) |
-| `land`: resume lands on a Segment recorded `PARKED` | Re-check `gh pr view <n> --json state,mergedAt,reviewDecision` FIRST. `MERGED` -> continue; `APPROVED` -> re-enter at the merge attempt only; still blocked -> report and stop, redoing nothing (Step 10) |
-| `land`: Segment reads `MERGED` | `git fetch origin <default>`; `git diff origin/<default> <segment-branch> -- <Segment Files>` MUST be empty before Segment N+1's branch is created (Step 10) |
-| `land`: a re-split fired (`s<N>b`) | Don't open `s<N>b`'s PR yet: land the current Segment, then `git rebase --onto origin/<default> <split-sha>` and deliver it against the default branch (Step 5) |
-| `land`: any `gh pr merge` invocation | Never pass `--delete-branch`; it deletes the local branch even when the merge fails (Step 10) |
 
 ## Teardown (MUST run, even on failure or abort)
 

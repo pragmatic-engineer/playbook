@@ -48,7 +48,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage dashboard, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `release`, `review`, `route`, `run-context`, `sanitize`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `release`, `review`, `route`, `run-context`, `sanitize`, `segment`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -896,6 +896,59 @@ Clean a PR title or body saved to a file
 
 - `<FILE>`: File holding the text
 - `--check`: Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
+
+### `playbook segment`
+
+The git recipes `/playbook:implement` runs for a Segment
+
+Subcommands: `branch`, `resplit`, `size`
+
+### `playbook segment branch`
+
+Put HEAD on the branch a Segment is built on
+
+Names the branch `<type>/<plan-slug>-s<N>-<title>` and creates it from the right base: the default branch for independent Segments, the previous Segment's branch for stacked ones (fetched when it is not local), and always the fetched `origin/<default>` under `--land`. The single topology creates nothing and reports the current branch and tip. Prints `branch=<name> base=<sha> base_ref=<ref>`. Exits 1 when the branch already exists.
+
+Example: `playbook segment branch --type feat --plan-slug my-plan --n 2 --title "Parser core" --topology stacked --prev-branch feat/my-plan-s1-schema`
+
+- `--type <KIND>`: Conventional commit type for the branch name, such as feat
+- `--plan-slug <PLAN_SLUG>`: The plan slug
+- `--n <N>`: The Segment number
+- `--title <TITLE>`: The Segment title, kebab-cased and truncated into the branch name
+- `--default-branch <DEFAULT_BRANCH>`: The repository's default branch
+- `--dir <DIR>`: The repository to run in; defaults to the current directory
+- `--topology <TOPOLOGY>`: stacked, independent or single (one of `stacked`, `independent`, `single`)
+- `--prev-branch <PREV_BRANCH>`: The previous Segment's branch, for a stacked Segment past the first
+- `--land`: The land boundary: branch off the fetched origin default branch
+
+### `playbook segment resplit`
+
+Cut an over-budget Segment at a Work Unit boundary
+
+Finds the last commit that keeps `BASE...commit` within the limit, renames the current branch to `<type>/<plan-slug>-s<N>b-<title>` (it keeps every commit) and recreates the original branch name at the split commit. Prints `split=none` when the Segment already fits, otherwise `split=<sha> trimmed=<branch> excess=<branch>`. Exits 1 when even the first commit is over the limit.
+
+Example: `playbook segment resplit --base main --type feat --plan-slug my-plan --n 2 --title "Parser core"`
+
+- `--type <KIND>`: Conventional commit type for the branch name, such as feat
+- `--plan-slug <PLAN_SLUG>`: The plan slug
+- `--n <N>`: The Segment number
+- `--title <TITLE>`: The Segment title, kebab-cased and truncated into the branch name
+- `--default-branch <DEFAULT_BRANCH>`: The repository's default branch
+- `--dir <DIR>`: The repository to run in; defaults to the current directory
+- `--base <BASE>`: The Segment's base ref
+- `--limit <LIMIT>`: Changed lines at which a Segment is over budget
+
+### `playbook segment size`
+
+Measure a Segment against its base
+
+Prints `lines=N files=M over=true|false` for `BASE...HEAD`; `over` is true past the limit.
+
+Example: `playbook segment size --base main`
+
+- `--base <BASE>`: The Segment's base ref
+- `--limit <LIMIT>`: Changed lines at which a Segment is over budget
+- `--dir <DIR>`: The repository to run in; defaults to the current directory
 
 ### `playbook settings`
 
