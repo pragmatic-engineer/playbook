@@ -4,10 +4,14 @@
 //! SessionStart hook (ports the retired shell original). Prepares the per-session
 //! runtime directory and zeroes its counters, warns on a resumed session
 //! whose config has drifted since it was created, and injects SessionStart
-//! additionalContext: the project memory slice, an auto-learn nudge, a
-//! skills/commands primer, and the async/deferred-tool discipline reminder.
+//! additionalContext: an auto-learn nudge, a handoff, and one small ranked
+//! memory block, in that order. The harness caps a hook's context string at
+//! 10,000 characters and replaces the whole string with a 2,000 character
+//! preview past that, so the total is held under `CONTEXT_CAP_CHARS` and the
+//! variable, least critical block (memory) comes last.
 //!
-//! The config hash and the memory slice are both computed in process.
+//! The config hash and the memory block are both computed in process, and
+//! the memory store is only ever read here.
 
 use crate::common::mode::{resolve_for_hook, Mode, Source};
 use crate::common::{config_hash, home_dir, repo_slug, run_with_timeout, session_dir, Payload};
@@ -23,9 +27,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Matches the retired shell original's `timeout=15`.
 const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Shared cap for the injected memory slice, graph-backed or native
-/// fallback alike. See `cap_memory_body`'s doc comment for why this exists.
-const MEMORY_BODY_CAP_CHARS: usize = 16000;
+/// The harness truncates a hook's `additionalContext` at 10,000 characters
+/// (Claude Code hooks reference). Stay under it with margin, since a string
+/// past the cap is replaced by a 2,000 character preview.
+const CONTEXT_CAP_CHARS: usize = 9000;
+
+/// Ceiling for the ranked memory block, header included.
+const MEMORY_BLOCK_CAP_CHARS: usize = 2500;
+
+/// Smallest ranked block worth injecting. Below this the header alone would
+/// eat the budget, so the block is skipped.
+const MEMORY_BLOCK_MIN_CHARS: usize = 300;
 
 /// The per-session counter/state files zeroed at the start of every session.
 /// `capture-crossings` has no python counterpart, so this no longer matches the retired shell original one-for-one.
@@ -50,23 +62,6 @@ const DRIFT_EXTRA_CONTEXT: &str = "The user resumed this session, but the config
     about why a recent settings change isn't showing up, point them to 'ccc fresh' or starting \
     a new `claude` invocation.";
 
-const TOOLKIT_PREAMBLE: &str = "Your toolkit. Before substantive work, check whether one of \
-    these fits and use it instead of ad-hoc steps: plan a feature with /playbook:plan, execute a ready \
-    plan with /playbook:implement, record a decision with /playbook:adr, commit and push with /playbook:commit-and-push, \
-    open a PR with /playbook:create-pull-request, review a PR with /playbook:quick-review or /playbook:deep-review, debug \
-    a failure with the systematic-debugging skill. Invoke skills via the Skill tool, commands \
-    as slash commands. Full catalog (name: what it is for):";
-
-const ASYNC_DISCIPLINE_TEXT: &str = "Async and deferred-tool discipline. (1) Deferred tools \
-    are surfaced by name only (e.g. Monitor, TaskCreate, TaskStop, TaskUpdate, ScheduleWakeup): \
-    their schemas are NOT loaded, so calling them with guessed parameters fails validation. \
-    Before calling any tool that is not already in your active tool list, load it first with \
-    ToolSearch (query \"select:NAME\"), then call it; never guess its parameters. (2) Don't run \
-    a command in the background when the next step needs its result (installs, builds, \
-    typechecks): run it in the foreground with an extended timeout (up to 600000ms). A \
-    backgrounded job re-invokes you only when it exits, and shell state (including `wait`) \
-    does not persist across Bash calls, so there is nothing to poll.";
-
 /// Run the session-init hook: reset per-session state, warn on config drift,
 /// and emit a single SessionStart payload with whatever additionalContext
 /// applies. Never panics; every failure along the way degrades to "say
@@ -89,25 +84,23 @@ pub fn run(payload: &Payload) {
     let (system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
     append_auto_mode_note(&mut extra_context);
 
-    if !headless || crate::common::headless::headless_memory_enabled() {
-        append_memory_context(&mut extra_context, &repo_root);
+    if !headless {
+        append_auto_learn_nudge(&mut extra_context, &repo_root);
     }
     let injected = if headless {
         0
     } else {
         append_handoff_slice(&mut extra_context)
     };
+    if !headless || crate::common::headless::headless_memory_enabled() {
+        append_memory_context(&mut extra_context, &repo_root);
+    }
     crate::handoff::log_start(
         &payload.field(".source"),
         &payload.field(".session_id"),
         &crate::handoff::current_slug(),
         injected,
     );
-    if !headless {
-        append_auto_learn_nudge(&mut extra_context, &repo_root);
-        append_skills_primer(&mut extra_context, &home);
-        append_async_discipline(&mut extra_context);
-    }
 
     emit(&system_message, &extra_context);
 }
@@ -222,132 +215,38 @@ fn check_config_drift(payload: &Payload, dir: &str, home: &str) -> (String, Stri
     (system_message, extra_context)
 }
 
-/// Independent cap for `append_promoted_facts`'s own block, deliberately
-/// smaller than `MEMORY_BODY_CAP_CHARS`: this block is meant to guarantee a
-/// small, curated set of facts survives `append_memory_slice`'s truncation,
-/// not to duplicate that block's own full budget. Reusing the full
-/// `MEMORY_BODY_CAP_CHARS` here would let the two blocks together inject up
-/// to double that constant's own limit, close to the store size that
-/// motivated adding the limit in the first place (see `cap_memory_body`).
-const PROMOTED_FACTS_CAP_CHARS: usize = 4000;
-
-/// Inject facts pinned or usage-promoted for this repo, unconditionally: no
-/// anchor match, prompt match, or hit count is required. Runs before
-/// `append_memory_slice` so a pinned or promoted fact lands in the
-/// transcript ahead of the block that raw-truncates at
-/// `MEMORY_BODY_CAP_CHARS`, guaranteeing it survives that truncation rather
-/// than depending on where it happens to sort within it. Reads
-/// `memory.graph.json` directly rather than going through
-/// `memory_anchors.rs`'s anchor index, since that index only covers
-/// anchored facts and its row-building functions are private to that
-/// module.
-///
-/// A fact that also fits within the general slice below appears twice in
-/// the final context, once here and once there. Deduplicating across two
-/// structurally different sources, a direct graph read here versus a shell
-/// script's stdout there, for a minor cosmetic redundancy is not worth the
-/// added complexity, so this overlap is left as a known, accepted tradeoff.
-fn append_promoted_facts(
-    extra_context: &mut String,
-    mem_slug: &str,
-    graph: &crate::json::memorycontext::Graph<'_>,
-) {
-    let mem_dir = crate::common::paths::memory_dir();
-    let nodes = graph.nodes.as_deref().unwrap_or(&[]);
-
-    // One read of memory.signals.json for the whole pass, rather than one
-    // per node: memory_signals::is_promoted re-reads and re-parses the file
-    // on every call, which would otherwise cost one file read and JSON
-    // parse per in-scope node on every SessionStart.
-    let promoted = memory_signals::promoted_ids(&mem_dir);
-
-    let mut lines = Vec::new();
-    for node in nodes {
-        if !in_promotion_scope(node, mem_slug) {
-            continue;
-        }
-        let Some(id) = node.id.as_deref() else {
-            continue;
-        };
-        if !node.pinned.is_true() && !promoted.contains(id) {
-            continue;
-        }
-        let name = node.name.or_empty();
-        if name.is_empty() {
-            continue;
-        }
-        let desc = node.description.or_empty();
-        lines.push(if desc.is_empty() {
-            format!("- {name}")
-        } else {
-            format!("- {name}: {desc}")
-        });
-    }
-    if lines.is_empty() {
-        return;
-    }
-
-    let body: String = lines
-        .join("\n")
-        .chars()
-        .take(PROMOTED_FACTS_CAP_CHARS)
-        .collect();
-    let ctx = format!("Facts pinned or frequently used in this repo:\n{body}");
-    push_context(extra_context, &ctx);
-}
-
-/// Whether `node` is in scope: global always, org when its owner matches, project when it belongs to `repo`.
-/// Matches `memory_anchors.rs`'s private `in_scope`, reimplemented locally per this codebase's per-module-duplication convention.
-fn in_promotion_scope(node: &crate::json::memorycontext::Node<'_>, repo: &str) -> bool {
-    match node.scope.as_deref() {
-        Some("global") => true,
-        Some("org") => node.project.as_deref() == repo.split('/').next(),
-        Some("project") => node.project.as_deref() == Some(repo),
-        _ => false,
-    }
-}
-
-/// Reads `memory.graph.json` once, parses it once, and injects the promoted
-/// facts and the project memory slice from the same parse. Nothing is added
-/// when there is no repo, no slug, or no readable graph.
+/// Reads `memory.graph.json` and `memory.signals.json` (read only) and injects
+/// one small ranked block of the repo's most relevant facts. Nothing is added
+/// when there is no repo, no slug, no readable graph, nothing ranks, or the
+/// rest of the context has already used the budget.
 fn append_memory_context(extra_context: &mut String, repo_root: &str) {
     let mem_slug = repo_slug();
     if repo_root.is_empty() || mem_slug.is_empty() {
         return;
     }
-    let path = crate::common::paths::memory_dir().join("memory.graph.json");
-    let Ok(content) = fs::read_to_string(path) else {
+    let mem_dir = crate::common::paths::memory_dir();
+    let Ok(content) = fs::read_to_string(mem_dir.join("memory.graph.json")) else {
         return;
     };
     let Some(graph) = crate::json::memorycontext::parse_graph(&content) else {
         return;
     };
-    append_promoted_facts(extra_context, &mem_slug, &graph);
-    append_memory_slice(extra_context, &mem_slug, &graph);
-}
-
-/// Inject the project memory slice into `extra_context`: the repo-scoped
-/// facts, edges, and anchor index rendered from `memory.graph.json`, capped,
-/// or nothing when the graph is absent or empty.
-fn append_memory_slice(
-    extra_context: &mut String,
-    mem_slug: &str,
-    graph: &crate::json::memorycontext::Graph<'_>,
-) {
-    let mem_body = cap_memory_body(
-        crate::json::memorycontext::render_graph(graph, mem_slug).trim_matches('\n'),
-    );
-    if mem_body.is_empty() {
+    let room = CONTEXT_CAP_CHARS
+        .saturating_sub(extra_context.chars().count() + BLOCK_SEPARATOR_CHARS)
+        .min(MEMORY_BLOCK_CAP_CHARS);
+    if room < MEMORY_BLOCK_MIN_CHARS {
         return;
     }
-
-    let mem_ctx = format!(
-        "Project memory for this repo ({mem_slug}), stored in the central memory store at \
-        ~/.config/playbook/memory/{mem_slug}/. A scoped slice: facts in scope, their typed \
-        edges, and an anchor index mapping code paths to the facts that describe them. Fact \
-        bodies are read on demand.\n{mem_body}"
+    let header = format!(
+        "Top memory facts for this repo ({mem_slug}), ranked by pins, use and links. Prompt and \
+        edit recall surface the rest. Facts live in ~/.config/playbook/memory/{mem_slug}/."
     );
-    push_context(extra_context, &mem_ctx);
+    let signals = memory_signals::ranking_signals(&mem_dir);
+    let block =
+        crate::json::memorycontext::render_ranked(&graph, &mem_slug, &signals, &header, room);
+    if !block.is_empty() {
+        push_context(extra_context, &block);
+    }
 }
 
 /// ADR 0008 WU-3: reload persisted session-handoffs (saved by
@@ -362,7 +261,14 @@ fn append_handoff_slice(extra_context: &mut String) -> usize {
         return 0;
     }
     let taken = crate::handoff::take_in(&crate::handoff::root(), &slug, SystemTime::now());
+    // Leave the memory block its share of the cap. The handoff files are
+    // archived under `handoff/used/` once taken, so a cut loses nothing.
+    let budget = CONTEXT_CAP_CHARS
+        .saturating_sub(extra_context.chars().count() + MEMORY_BLOCK_CAP_CHARS)
+        .max(MIN_HANDOFF_CHARS)
+        / taken.contents.len().max(1);
     for (i, contents) in taken.contents.iter().enumerate() {
+        let contents = &fit_handoff(contents, budget);
         let ctx = if taken.total > 1 {
             format!(
                 "Handoff from a previous session in this directory \
@@ -378,12 +284,22 @@ fn append_handoff_slice(extra_context: &mut String) -> usize {
     taken.contents.len()
 }
 
-/// ADR 0008 WU-1: the graph-backed slice had no cap, unlike the fallback
-/// that preceded it, so it grew without bound as the memory store grew (8.8 KB
-/// when ADR 0004 measured it, 29.3 KB two weeks later). Same cap, same
-/// constant, so the two paths cannot drift apart again.
-fn cap_memory_body(body: &str) -> String {
-    body.chars().take(MEMORY_BODY_CAP_CHARS).collect()
+/// Room a handoff keeps even when the rest of the context is large.
+const MIN_HANDOFF_CHARS: usize = 3000;
+
+/// Characters a `push_context` separator adds.
+const BLOCK_SEPARATOR_CHARS: usize = 2;
+
+const HANDOFF_CUT_NOTE: &str =
+    "\n[handoff cut to fit the hook output cap; the full text is under the handoff used directory]";
+
+/// `text`, or its leading `budget` characters plus a note when longer.
+fn fit_handoff(text: &str, budget: usize) -> String {
+    if text.chars().count() <= budget {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(budget).collect();
+    format!("{head}{HANDOFF_CUT_NOTE}")
 }
 
 /// Nudge the user to refresh project memory if a previous session queued an
@@ -473,158 +389,6 @@ fn learn_flag_edits(path: &Path) -> String {
         Some(serde_json::Value::String(s)) => s.clone(),
         Some(other) => other.to_string(),
     }
-}
-
-/// Build the "Your toolkit" primer from the installed skills and commands,
-/// as `- name: description` lines. Matches the retired shell original.
-fn append_skills_primer(extra_context: &mut String, home: &str) {
-    if std::env::var("SKILLS_PRIMER").unwrap_or_else(|_| "1".to_string()) == "0" {
-        return;
-    }
-    let skills_root = Path::new(home).join(".claude").join("skills");
-    let commands_root = Path::new(home).join(".claude").join("commands");
-    let skill_lines = catalog_skills(&skills_root);
-    let cmd_lines = catalog_commands(&commands_root);
-    if skill_lines.is_empty() && cmd_lines.is_empty() {
-        return;
-    }
-    let mut toolkit = TOOLKIT_PREAMBLE.to_string();
-    if !skill_lines.is_empty() {
-        toolkit.push_str("\n\nSkills:\n");
-        toolkit.push_str(&skill_lines);
-    }
-    if !cmd_lines.is_empty() {
-        toolkit.push_str("\nCommands:\n");
-        toolkit.push_str(&cmd_lines);
-    }
-    push_context(extra_context, &toolkit);
-}
-
-/// `- name: one-line description` for every `<root>/<skill>/SKILL.md`,
-/// sorted the same way the bash glob `*/SKILL.md` would be: by the entry
-/// name with `/SKILL.md` appended, so the `/` participates in the sort key.
-/// Matches the retired shell original (the `kind == "skill"` branch).
-fn catalog_skills(root: &Path) -> String {
-    if !root.is_dir() {
-        return String::new();
-    }
-    let Ok(read) = fs::read_dir(root) else {
-        return String::new();
-    };
-    let mut entries: Vec<String> = read
-        .flatten()
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .collect();
-    entries.sort_by_cached_key(|entry| format!("{entry}/SKILL.md"));
-
-    let mut lines = Vec::new();
-    for entry in entries {
-        let skill_file = root.join(&entry).join("SKILL.md");
-        if !skill_file.is_file() {
-            continue;
-        }
-        let name = frontmatter_field(&skill_file, "name");
-        let name = if name.is_empty() { entry } else { name };
-        let description = one_line(&frontmatter_field(&skill_file, "description"));
-        lines.push(format!("- {name}: {description}"));
-    }
-    finalize_catalog_lines(&lines)
-}
-
-/// `- /name: one-line description` for every `<root>/*.md`, sorted by file
-/// name. Matches the retired shell original (the `kind == "command"`
-/// branch).
-fn catalog_commands(root: &Path) -> String {
-    if !root.is_dir() {
-        return String::new();
-    }
-    let Ok(read) = fs::read_dir(root) else {
-        return String::new();
-    };
-    let mut entries: Vec<String> = read
-        .flatten()
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .collect();
-    entries.sort();
-
-    let mut lines = Vec::new();
-    for entry in entries {
-        let Some(base) = entry.strip_suffix(".md") else {
-            continue;
-        };
-        let command_file = root.join(&entry);
-        if !command_file.is_file() {
-            continue;
-        }
-        let description = one_line(&frontmatter_field(&command_file, "description"));
-        lines.push(format!("- /{base}: {description}"));
-    }
-    finalize_catalog_lines(&lines)
-}
-
-fn finalize_catalog_lines(lines: &[String]) -> String {
-    if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    }
-}
-
-/// The value of `field` in `path`'s YAML frontmatter (the block between the
-/// first line `---` and the next `---`), with leading whitespace and one
-/// pair of enclosing quotes stripped. Empty when the file is unreadable,
-/// has no frontmatter, or lacks the field. Matches
-/// the retired shell original.
-fn frontmatter_field(path: &Path, field: &str) -> String {
-    let Ok(contents) = fs::read_to_string(path) else {
-        return String::new();
-    };
-    let mut lines = contents.split('\n');
-    if lines.next() != Some("---") {
-        return String::new();
-    }
-    let prefix = format!("{field}:");
-    for line in lines {
-        if line == "---" {
-            break;
-        }
-        let Some(rest) = line.strip_prefix(&prefix) else {
-            continue;
-        };
-        let value = rest.trim_start_matches([' ', '\t']);
-        let value = value.strip_prefix('"').unwrap_or(value);
-        let value = value.strip_suffix('"').unwrap_or(value);
-        return value.to_string();
-    }
-    String::new()
-}
-
-/// Collapse newlines and tabs to spaces, then truncate to 150 characters
-/// (147 plus an ellipsis) so a runaway description cannot blow up the
-/// primer. Matches the retired shell original.
-fn one_line(text: &str) -> String {
-    let collapsed: String = text
-        .chars()
-        .map(|c| match c {
-            '\n' | '\t' => ' ',
-            other => other,
-        })
-        .collect();
-    if collapsed.chars().count() > 150 {
-        let truncated: String = collapsed.chars().take(147).collect();
-        format!("{truncated}...")
-    } else {
-        collapsed
-    }
-}
-
-/// Append the async and deferred-tool discipline reminder, unless disabled.
-/// Matches the retired shell original.
-fn append_async_discipline(extra_context: &mut String) {
-    if std::env::var("ASYNC_DISCIPLINE").unwrap_or_else(|_| "1".to_string()) == "0" {
-        return;
-    }
-    push_context(extra_context, ASYNC_DISCIPLINE_TEXT);
 }
 
 /// Append `addition` to `ctx`, separated by a blank line if `ctx` already
