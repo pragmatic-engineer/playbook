@@ -96,12 +96,13 @@ fn text(rows: &[&Value]) -> String {
         .join("\n")
 }
 
-const GUARDS: [&str; 5] = [
+const GUARDS: [&str; 6] = [
     "rm-workspace-guard",
     "bg-await-guard",
     "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
+    "policy-guard",
 ];
 
 fn hook(cmd: &str) -> String {
@@ -133,7 +134,7 @@ fn l2_all_guards_and_the_backstop_wired_passes() {
     let rows = b.run(&[], "/bin/zsh", None);
     let l2 = layer(&rows, "2");
     assert_eq!(l2[0]["level"], "PASS", "{}", text(&l2));
-    assert!(text(&l2).contains("6 of 6"));
+    assert!(text(&l2).contains("7 of 7"));
 }
 
 #[test]
@@ -145,6 +146,7 @@ fn l2_a_legacy_command_is_not_wired() {
         hook("playbook hook no-slop-guard"),
         hook("~/.claude/hooks/precommit-check.sh"),
         hook("playbook hook commit-message-sanitizer"),
+        hook("playbook hook policy-guard"),
     ]
     .join(",");
     b.settings(&format!(
@@ -155,7 +157,7 @@ fn l2_a_legacy_command_is_not_wired() {
     let t = text(&layer(&rows, "2"));
     assert!(t.starts_with("FAIL"), "{t}");
     assert!(
-        t.contains("5/6") && t.contains("precommit-check:NOT_WIRED"),
+        t.contains("6/7") && t.contains("precommit-check:NOT_WIRED"),
         "{t}"
     );
 }
@@ -169,6 +171,7 @@ fn l2_a_near_miss_command_does_not_count() {
         hook("playbook hook no-slop-guard"),
         hook("playbook hook precommit-check"),
         hook("playbook hook commit-message-sanitizer"),
+        hook("playbook hook policy-guard"),
     ]
     .join(",");
     b.settings(&format!(
@@ -186,7 +189,7 @@ fn l2_each_missing_guard_drops_the_count_and_is_named() {
         let pre: Vec<&str> = GUARDS.iter().copied().filter(|g| *g != missing).collect();
         b.settings(&guard_settings(&pre, &["commit-message-sanitizer"]));
         let t = text(&layer(&b.run(&[], "/bin/zsh", None), "2"));
-        assert!(t.contains("5/6"), "{missing}: {t}");
+        assert!(t.contains("6/7"), "{missing}: {t}");
         assert!(
             t.contains(&format!(" {missing}:NOT_WIRED")),
             "{missing}: {t}"
@@ -199,7 +202,7 @@ fn l2_the_backstop_is_checked_on_posttooluse() {
     let b = Box::new("l2g");
     b.settings(&guard_settings(&GUARDS, &[]));
     let t = text(&layer(&b.run(&[], "/bin/zsh", None), "2"));
-    assert!(t.contains("5/6"), "{t}");
+    assert!(t.contains("6/7"), "{t}");
     assert!(
         t.contains("commit-message-sanitizer(PostToolUse):NOT_WIRED"),
         "{t}"

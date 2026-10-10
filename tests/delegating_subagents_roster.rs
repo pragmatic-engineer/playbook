@@ -4,7 +4,7 @@
 //! Pins the roster table in `skills/delegating-subagents/SKILL.md` against
 //! `agents/*.md`. That table went stale once, listing 7 of the 12 real
 //! agents (missing `auditor`, `cheap-checker`, `patch-applier`, and
-//! `review-triage` entirely) with no automated check to catch the drift,
+//! `review-triage` entirely; `patch-applier` has since been retired) with no automated check to catch the drift,
 //! only a manual re-read. This test is that check: it fails CI the next
 //! time an agent is added or removed without the table being updated to
 //! match, rather than relying on someone remembering the table exists.

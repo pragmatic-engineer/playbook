@@ -30,7 +30,6 @@ File delivery needs `Write` or `Bash`. The read-only agents have neither on purp
 | Agent | `subagent_type` to pass the `Agent` tool | Delivery |
 |---|---|---|
 | `implementer` | `playbook:implementer` | File (has `Write` and `Bash`) |
-| `patch-applier` | `playbook:patch-applier` | File (has `Bash`) |
 | `collector` | `playbook:collector` | File (has `Bash`) |
 | `auditor` | `playbook:auditor` | File (has `Bash`) |
 | `git` | `playbook:git` | File (has `Bash`) |
