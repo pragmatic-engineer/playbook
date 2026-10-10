@@ -928,6 +928,12 @@ pub enum PrCommand {
         /// Seconds between reads
         #[arg(long, default_value_t = 20)]
         interval: u64,
+        /// Wait on every check, not only the required ones
+        #[arg(long)]
+        all: bool,
+        /// Wait this many seconds before the first read, so checks register
+        #[arg(long, default_value_t = 0)]
+        settle: u64,
     },
     /// Wait for a PR to merge or hit a gate
     ///
@@ -954,6 +960,9 @@ pub enum PrCommand {
         /// Squash with admin rights instead of arming auto-merge
         #[arg(long)]
         admin: bool,
+        /// Refuse the merge unless the PR head is this commit
+        #[arg(long)]
+        match_head: Option<String>,
     },
 }
 

@@ -67,12 +67,15 @@ fn the_self_review_step_reads_the_fix_and_merge_settings_through_config_get() {
 }
 
 #[test]
-fn the_merge_flow_marks_ready_polls_checks_to_a_deadline_and_pins_the_head_commit() {
+fn the_merge_flow_marks_ready_waits_with_the_binary_and_pins_the_head_commit() {
     // Arrange
     let step = self_review_step();
 
     // Act
-    let merge_lines: Vec<&str> = step.lines().filter(|l| l.contains("gh pr merge")).collect();
+    let merge_line = step
+        .lines()
+        .find(|l| l.contains("**Merge:**"))
+        .expect("Step 5 must have a Merge bullet");
 
     // Assert
     assert!(
@@ -80,39 +83,27 @@ fn the_merge_flow_marks_ready_polls_checks_to_a_deadline_and_pins_the_head_commi
         "Step 5 must mark the PR ready"
     );
     assert!(
-        step.contains("gh pr checks <n> --json name,bucket"),
-        "Step 5 must poll `gh pr checks --json name,bucket`"
-    );
-    assert!(
         !step.contains("--watch"),
         "Step 5 must not use the unbounded `gh pr checks --watch`"
     );
     for needle in [
-        "every 30 seconds",
+        "playbook pr ci-wait <n> --all --settle 120",
         "45 minutes",
-        "own short Bash call",
-        "`skipping`",
-        "`cancel`",
-        "`pending`",
-        "two minutes after `gh pr ready`",
+        "own Bash call",
+        "`PASS`",
+        "`NONE`",
+        "`FAIL` or `CANCELLED`",
+        "`TIMEOUT`",
     ] {
         assert!(step.contains(needle), "Step 5 must say `{needle}`");
     }
-    let line = merge_lines
-        .iter()
-        .find(|l| l.contains("--auto"))
-        .expect("`gh pr merge` must use --auto");
-    let start = line.find("gh pr merge").unwrap();
-    let primary = &line[start..start + line[start..].find('`').unwrap()];
     assert!(
-        primary.contains("--match-head-commit <recorded headRefOid>"),
-        "`gh pr merge` must pin the recorded head commit"
+        merge_line.contains("playbook pr merge <n> --match-head <recorded headRefOid>"),
+        "the merge must pin the recorded head commit"
     );
     assert!(
-        !primary.contains("--squash")
-            && !primary.contains("--merge ")
-            && !primary.contains("--rebase"),
-        "the first `gh pr merge` must not pick a method"
+        !merge_line.contains("playbook pr merge <n> --squash"),
+        "the first merge must not pick a method"
     );
     assert!(
         step.contains("squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed"),
@@ -126,10 +117,10 @@ fn the_merge_flow_reports_which_outcome_the_post_merge_read_shows() {
     let step = self_review_step();
 
     // Act
-    let reads_both = step.contains("gh pr view <n> --json state,autoMergeRequest");
+    let waits_on_land = step.contains("playbook pr land-wait <n>");
 
     // Assert
-    assert!(reads_both, "Step 5 must read state and autoMergeRequest");
+    assert!(waits_on_land, "Step 5 must confirm with `pr land-wait`");
     for case in [
         "`MERGED`",
         "auto-merge armed",

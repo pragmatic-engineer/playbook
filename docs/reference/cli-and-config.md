@@ -621,6 +621,8 @@ Prints a `checks total=.. pending=.. fail=.. cancel=..` line per read, then `CI_
 - `<PR>`: PR number
 - `--timeout <TIMEOUT>`: Give up after this many seconds
 - `--interval <INTERVAL>`: Seconds between reads
+- `--all`: Wait on every check, not only the required ones
+- `--settle <SETTLE>`: Wait this many seconds before the first read, so checks register
 
 ### `playbook pr comments`
 
@@ -659,6 +661,7 @@ Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said. Always exits 
 
 - `<PR>`: PR number
 - `--admin`: Squash with admin rights instead of arming auto-merge
+- `--match-head <MATCH_HEAD>`: Refuse the merge unless the PR head is this commit
 
 ### `playbook pr prepare`
 
