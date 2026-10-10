@@ -17,10 +17,10 @@ is idempotent; re-running /playbook:setup is safe and only changes what is missi
 Do this first. If `command -v playbook` finds nothing, stop with one line: "playbook is not on PATH. If you just installed it, open a new terminal and run /playbook:setup again; otherwise run `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash` first." Otherwise read the mode from the CLI:
 
 ```bash
-playbook mode status --json
+playbook run-context --args "$ARGUMENTS"
 ```
 
-If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, do not stop and do not retry. Run in ask mode and print one line. When the error is `unrecognized subcommand 'mode'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
+The JSON has `mode` (`ask` or `auto`), `source`, `hook_mode` and `warning`. If `warning` is not empty, print it once. Exit 2 means `--auto` and `--ask` were both passed: stop with the line it printed. For any other failure, do not stop and do not retry: run in ask mode and print one line. When the error is `unrecognized subcommand 'run-context'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
 
 If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:setup needs a person to run it, because it changes your global settings and shell files outside this repo." Do not run any later step.
 

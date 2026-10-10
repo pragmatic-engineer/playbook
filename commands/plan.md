@@ -92,12 +92,10 @@ Strip `--ticket <id>`, `--depth <n>`, `--adr`, `--auto-design`, `--auto`, and `-
 **Read the run mode (MUST, first).** Run:
 
 ```bash
-playbook mode status --json
+playbook run-context --command plan --args "$ARGUMENTS"
 ```
 
-Add `--flag auto` if the arguments contain `--auto` or `--auto-design`. Add `--flag ask` if they contain `--ask`. If `--ask` comes with either auto flag, stop with one line: "--ask and --auto conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, do not stop and do not retry. Run in ask mode and print one line. When the error is `unrecognized subcommand 'mode'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
-
-**Effort ceiling.** Also run `playbook effort resolve commands plan --json`. Its `ceiling` is the highest effort the user allows for this run (`null` means no limit). Hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. If the command fails, carry on with no ceiling.
+The JSON has `mode` (`ask` or `auto`), `source`, `hook_mode`, `warning` and `ceiling`. If `warning` is not empty, print it once. `ceiling` is the highest effort the user allows for this run (`null` means no limit): hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. Exit 2 means `--auto` and `--ask` were both passed: stop with the line it printed. For any other failure, do not stop and do not retry: run in ask mode with no ceiling and print one line. When the error is `unrecognized subcommand 'run-context'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
 
 **Routing.** Where you choose what to spawn, also run `playbook route design --json` and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on.
 

@@ -441,6 +441,12 @@ fn every_command_file_has_a_row_in_the_table_and_the_reverse() {
     );
 }
 
+/// Step 0 reads the run mode with `playbook mode status` or, since it also
+/// resolves the effort ceiling, `playbook run-context`.
+fn reads_mode(text: &str) -> bool {
+    text.contains("playbook mode status") || text.contains("playbook run-context")
+}
+
 #[test]
 fn step0_section_reads_mode_status() {
     // Arrange
@@ -455,12 +461,10 @@ fn step0_section_reads_mode_status() {
         // Assert
         match step0 {
             None => failures.push(format!("{}: no `Step 0` section", spec.name)),
-            Some(s) if !file.text_of(&s).contains("playbook mode status") => {
-                failures.push(format!(
-                    "{}: `{}` never calls `playbook mode status`",
-                    spec.name, s.title
-                ))
-            }
+            Some(s) if !reads_mode(&file.text_of(&s)) => failures.push(format!(
+                "{}: `{}` never calls `playbook mode status` or `playbook run-context`",
+                spec.name, s.title
+            )),
             Some(_) => {}
         }
     }
@@ -698,9 +702,7 @@ fn refuse_list_step0_stops_in_auto_naming_the_command_and_why() {
         let blocks = file.paragraphs(&step0);
 
         // Act
-        let read = blocks
-            .iter()
-            .find(|(_, b)| b.contains("playbook mode status"));
+        let read = blocks.iter().find(|(_, b)| reads_mode(b));
         let refusal = blocks.iter().find(|(_, b)| {
             let b = b.to_lowercase();
             b.contains("auto")

@@ -153,6 +153,34 @@ fn main() {
                 }
             }
         }
+        Command::RunContext { command, args } => {
+            let ceiling = || {
+                let home = common::home_dir();
+                let claude_home = home.join(".claude");
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let claude = effort::claude_cap(&claude_home, &cwd);
+                let root = init::self_root::resolve(
+                    std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
+                    &claude_home,
+                );
+                let resolved = effort::component::resolve_capped(
+                    effort::component::Kind::Command,
+                    command.as_deref().unwrap_or_default(),
+                    &home,
+                    claude.as_deref(),
+                    root.as_deref(),
+                    None,
+                );
+                resolved.to_json()["ceiling"].as_str().map(str::to_string)
+            };
+            match mode::context::run_context(&args, ceiling, command.is_some()) {
+                Ok(json) => println!("{json}"),
+                Err(err) => {
+                    eprintln!("{err}");
+                    std::process::exit(2);
+                }
+            }
+        }
         Command::Effort { level, json, .. } => {
             let home = common::home_dir();
             match level {

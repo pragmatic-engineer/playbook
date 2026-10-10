@@ -15,10 +15,10 @@ Fix one small bug end to end: a failing test, the smallest change that makes it 
 Do this first, before Step 1. Read the mode from the CLI:
 
 ```bash
-playbook mode status --json
+playbook run-context --args "$ARGUMENTS"
 ```
 
-If the arguments contain `--auto`, add `--flag auto`. If they contain `--ask`, add `--flag ask`. If both are present, stop with one line: "--auto and --ask conflict; pass one." The JSON has four keys: `mode` (`ask` or `auto`), `source` (where it came from), `hook_mode` and `warning`. If `warning` is not empty, print it once. If the command fails, do not stop and do not retry. Run in ask mode and print one line. When the error is `unrecognized subcommand 'mode'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
+The JSON has `mode` (`ask` or `auto`), `source`, `hook_mode` and `warning`. If `warning` is not empty, print it once. Exit 2 means `--auto` and `--ask` were both passed: stop with the line it printed. For any other failure, do not stop and do not retry: run in ask mode and print one line. When the error is `unrecognized subcommand 'run-context'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
 
 - **`ask` mode:** behave exactly as this file describes. Every step marked "if mode is ask" stays.
 - **`auto` mode:** take the recommended answer at each of those steps and keep going. Record every answer you chose yourself in an Assumptions list and print it in the final output. Never force-push.
