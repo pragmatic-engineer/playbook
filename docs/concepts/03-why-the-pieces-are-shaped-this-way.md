@@ -37,8 +37,8 @@ The full list of agents, their tools and how a command binds to one is in [Autho
 
 The rule is: spend on judgment, save on routine.
 
-- **Sonnet** is the session default and covers most coding. `implementer` and `critic` use it because they write code or check plans, and Sonnet at medium effort did as well as high in `playbook eval bench`. `fact-checker`, `test-reviewer` and `analyst` run on Haiku after the same bench showed no meaningful loss on real playbook code.
-- **Haiku** runs `git`, `patch-applier`, `collector`, `cheap-checker` and `review-triage`. These apply a decision someone else already made, or classify with a safe fallback. A wrong answer is cheap to detect and rerun.
+- **Sonnet** is the session default and covers most coding. `implementer` and `critic` use it because they write code or check plans, and Sonnet at medium effort did as well as high in `playbook eval bench`.
+- **Haiku** runs `git`, `patch-applier`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer` and `analyst`. The first five apply a decision someone else already made, or classify with a safe fallback, and a wrong answer is cheap to detect and rerun. The last three ran on Haiku after the same bench showed no meaningful loss on real playbook code.
 - **Opus** runs design (`/playbook:plan`, `/playbook:adr`), every `reviewer`, and the `auditor`. A missed finding in a review, or a weak design, costs far more than the extra tokens.
 
 Plugin files name only the alias. `ccc` resolves each to the 5.5 model and passes the previous generation as a fallback. The table, the overrides (`models.<alias>`) and the routing details, including the hook that nudges design prompts toward Opus, are in [Model routing and memory](../internals/02-model-routing-and-memory.md).
@@ -48,7 +48,7 @@ Plugin files name only the alias. `ccc` resolves each to the 5.5 model and passe
 Model choice sets how capable the work is. Effort sets how long it thinks. They are separate because the right pairing differs by task:
 
 - A fixed procedure (commit, push, open a PR) needs a cheap model at **low** effort. Thinking harder does not improve it.
-- A review needs a strong model at **high** effort, because a reviewer that stops looking early is worse than a slow one.
+- A review needs a strong model, and Opus at **medium** found as much as at high on the reviewer bench, so the reviewer ships at medium and a risky diff escalates to `xhigh` by variant.
 - A small diff does not need an `xhigh` review, and a risky one might.
 
 The rule that produced the current values: **lower effort where the work is mechanical or already decided, and never where a missed finding is costly.** A model that is wrong costs a rerun. A reviewer that stops looking costs a bug in production. The table of every value and its reason is in [Effort policy](../internals/02-model-routing-and-memory.md#effort-policy).
