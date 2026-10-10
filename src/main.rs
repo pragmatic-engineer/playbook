@@ -507,13 +507,30 @@ fn main() {
             }
         }
         Command::Gate { sub } => match sub {
+            GateCommand::Snapshot { plan_slug, phases } => {
+                let result = gate_plans_dir()
+                    .and_then(|dir| gate::snapshot::snapshot(&dir, &plan_slug, &phases));
+                match result {
+                    Ok(paths) => {
+                        for p in paths {
+                            println!("{}", p.display());
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("gate snapshot: {err}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             GateCommand::Record {
                 plan_slug,
                 command,
                 phase,
                 input,
                 source,
-            } => match gate::record::run(&plan_slug, &command, &phase, &input, &source) {
+            } => match gate_source(source, &plan_slug, Some(&phase))
+                .and_then(|source| gate::record::run(&plan_slug, &command, &phase, &input, &source))
+            {
                 Ok(()) => println!("gate record: recorded {phase} verdict for {plan_slug}"),
                 Err(err) => {
                     eprintln!("gate record: {err}");
@@ -526,7 +543,9 @@ fn main() {
                 phases,
                 source,
                 json: true,
-            } => match gate::check::run_json(&plan_slug, &command, &phases, &source) {
+            } => match gate_source(source, &plan_slug, None)
+                .and_then(|source| gate::check::run_json(&plan_slug, &command, &phases, &source))
+            {
                 Ok((doc, ok)) => {
                     println!("{doc}");
                     if !ok {
@@ -547,7 +566,9 @@ fn main() {
                 phases,
                 source,
                 json: false,
-            } => match gate::check::run(&plan_slug, &command, &phases, &source) {
+            } => match gate_source(source, &plan_slug, None)
+                .and_then(|source| gate::check::run(&plan_slug, &command, &phases, &source))
+            {
                 Ok(output) => println!("{output}"),
                 Err(err) => {
                     eprintln!("gate check: {err}");
@@ -1543,6 +1564,27 @@ fn main() {
             }
         }
     }
+}
+
+/// This worktree's plans folder, where the gate source files live.
+fn gate_plans_dir() -> Result<std::path::PathBuf, String> {
+    common::repo_scoped_dir(common::RepoScope::Worktree)
+        .map(|base| base.join("plans"))
+        .ok_or_else(|| "this repo needs a git 'origin' remote".to_string())
+}
+
+/// The `--source` given, else the phase's snapshot (or the shared draft when
+/// no phase is named).
+fn gate_source(given: Option<String>, slug: &str, phase: Option<&str>) -> Result<String, String> {
+    if let Some(source) = given {
+        return Ok(source);
+    }
+    let dir = gate_plans_dir()?;
+    let path = match phase {
+        Some(phase) => gate::snapshot::phase_path(&dir, slug, phase)?,
+        None => gate::snapshot::shared_path(&dir, slug)?,
+    };
+    Ok(path.display().to_string())
 }
 
 fn exit_on_mode_error(result: Result<String, String>) {

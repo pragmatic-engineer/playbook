@@ -419,7 +419,7 @@ Record and check plan verdicts used as gates
 
 Verdicts are stored per worktree, keyed by plan.
 
-Subcommands: `check`, `record`
+Subcommands: `check`, `record`, `snapshot`
 
 ### `playbook gate check`
 
@@ -430,7 +430,7 @@ Exits 0 only if every named phase is PASS or WARN and its source is unchanged. E
 - `<PLAN_SLUG>`: Plan slug to check
 - `<COMMAND>`: Command running this check
 - `<PHASES>`: Phase names to check
-- `--source <SOURCE>`: File with the current source content, compared against what each verdict saw
+- `--source <SOURCE>`: File with the current source content, compared against what each verdict saw; defaults to the shared draft, `<plans>/<slug>.gate-source.md`
 - `--json`: Print one JSON object instead of text (exit codes stay the same)
 
 ### `playbook gate record`
@@ -443,7 +443,18 @@ Reads a phase agent's output, finds its `VERDICT:` line, and stores it.
 - `<COMMAND>`: Command that produced this verdict
 - `<PHASE>`: Which phase this verdict is for
 - `<INPUT>`: File with the phase agent's output, or "-" to read stdin
-- `--source <SOURCE>`: File with the source content the verdict covers, used to spot a stale verdict later
+- `--source <SOURCE>`: File with the source content the verdict covers, used to spot a stale verdict later; defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
+
+### `playbook gate snapshot`
+
+Freeze the plan draft for each gate phase about to run
+
+Copies `<plans>/<slug>.gate-source.md`, the draft as it stands, to `<plans>/<slug>.gate-source.<phase>.md` for every phase named, so each phase records its verdict against what it actually reviewed. Prints the snapshot paths. Fails, copying nothing, when the draft file is missing.
+
+Example: `playbook gate snapshot my-plan adversarial test-review`
+
+- `<PLAN_SLUG>`: Plan slug
+- `<PHASES>`: Phase names to snapshot for
 
 ### `playbook glossary`
 

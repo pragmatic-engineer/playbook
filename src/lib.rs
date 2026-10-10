@@ -1267,9 +1267,25 @@ pub enum GateCommand {
         phase: String,
         /// File with the phase agent's output, or "-" to read stdin
         input: String,
-        /// File with the source content the verdict covers, used to spot a stale verdict later
+        /// File with the source content the verdict covers, used to spot a stale verdict later;
+        /// defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
         #[arg(long)]
-        source: String,
+        source: Option<String>,
+    },
+    /// Freeze the plan draft for each gate phase about to run
+    ///
+    /// Copies `<plans>/<slug>.gate-source.md`, the draft as it stands, to
+    /// `<plans>/<slug>.gate-source.<phase>.md` for every phase named, so each
+    /// phase records its verdict against what it actually reviewed. Prints the
+    /// snapshot paths. Fails, copying nothing, when the draft file is missing.
+    ///
+    /// Example: `playbook gate snapshot my-plan adversarial test-review`
+    Snapshot {
+        /// Plan slug
+        plan_slug: String,
+        /// Phase names to snapshot for
+        #[arg(required = true)]
+        phases: Vec<String>,
     },
     /// Check that recorded phase verdicts still pass
     ///
@@ -1282,9 +1298,10 @@ pub enum GateCommand {
         command: String,
         /// Phase names to check
         phases: Vec<String>,
-        /// File with the current source content, compared against what each verdict saw
+        /// File with the current source content, compared against what each verdict saw;
+        /// defaults to the shared draft, `<plans>/<slug>.gate-source.md`
         #[arg(long)]
-        source: String,
+        source: Option<String>,
         /// Print one JSON object instead of text (exit codes stay the same)
         #[arg(long)]
         json: bool,
