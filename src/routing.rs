@@ -60,9 +60,9 @@ pub fn table(kind: &str, tier: &str) -> Option<Route> {
         },
         ("review", _) => Route {
             model: "opus",
-            effort: "high",
+            effort: "medium",
             agent: "reviewer",
-            reason: "a missed finding costs more than the extra tokens",
+            reason: "Opus at medium matched high on the reviewer bench at lower cost",
         },
         ("implement", "low") => Route {
             model: "sonnet",

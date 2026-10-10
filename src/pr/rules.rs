@@ -63,6 +63,42 @@ pub struct Extracted {
     pub eng: PathBuf,
 }
 
+/// The slice a commit message needs: the dash and plain English rule, the
+/// commit-message bullet, and the banned words. About a tenth of the skill.
+pub fn extract_commit(plugin_root: &Path, out_dir: &Path) -> Result<PathBuf, String> {
+    let ws = plugin_root.join("skills/writing-style/SKILL.md");
+    let text = fs::read_to_string(&ws).map_err(|_| {
+        format!(
+            "{} not found under $CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead.",
+            ws.display()
+        )
+    })?;
+    fs::create_dir_all(out_dir)
+        .map_err(|e| format!("could not create {}: {e}", out_dir.display()))?;
+    let mut lines = cut(
+        &text,
+        Some("> **IRON RULE:** MUST NEVER use em dashes"),
+        End::Before("> **IRON RULE:**"),
+    );
+    lines.extend(cut(
+        &text,
+        Some("- Commit messages MUST"),
+        End::Before("- PR descriptions"),
+    ));
+    lines.push(String::new());
+    lines.extend(cut(&text, Some("## Banned Words"), End::Before("---")));
+    let has = |s: &str| lines.iter().any(|l| l.contains(s));
+    if !(has("IRON RULE") && has("Commit messages MUST") && has("delve")) {
+        return Err("writing-style commit extraction is missing an expected rule; read the full skill via the Skill tool instead.".into());
+    }
+    if has("PR descriptions MUST") || has("# GitHub-Specific Rules") {
+        return Err("writing-style commit extraction ran past its end marker; read the full skill via the Skill tool instead.".into());
+    }
+    let path = out_dir.join("writing-style-commit.md");
+    write(&path, &lines)?;
+    Ok(path)
+}
+
 /// Cut and verify. `out_dir` is created if missing.
 pub fn extract(plugin_root: &Path, out_dir: &Path) -> Result<Extracted, String> {
     let ws = plugin_root.join("skills/writing-style/SKILL.md");
@@ -138,6 +174,84 @@ pub fn report(ex: &Extracted) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn headings(lines: &[String]) -> Vec<&str> {
+        lines
+            .iter()
+            .filter(|l| l.starts_with('#'))
+            .map(String::as_str)
+            .collect()
+    }
+
+    /// Pins the shape of the four `pr rules` slices: their headings, first
+    /// and last line, and a size ceiling in bytes. A heading rename or a
+    /// stray section that lands inside a slice fails here, not silently.
+    #[test]
+    fn the_four_slices_keep_their_shape() {
+        let ws = fs::read_to_string(repo_root().join("skills/writing-style/SKILL.md")).unwrap();
+        let es =
+            fs::read_to_string(repo_root().join("skills/engineering-standards/SKILL.md")).unwrap();
+        let core = cut(&ws, None, End::Before("# GitHub-Specific Rules"));
+        let prs = cut(&ws, Some("### When creating PRs"), End::Before("## "));
+        let github = cut(
+            &ws,
+            Some("## Prohibited GitHub Content"),
+            End::Before("## Examples"),
+        );
+        let eng = cut(
+            &es,
+            Some("### Readiness"),
+            End::Before("### Review Comments"),
+        );
+        let bytes = |l: &[String]| l.iter().map(|s| s.len() + 1).sum::<usize>();
+
+        assert_eq!(
+            headings(&core),
+            [
+                "# Writing Style",
+                "## Reviewer usability (MUST, adapted from \"Don't Make Me Think\")",
+                "## Voice",
+                "## Prohibitions",
+                "## Banned Words",
+            ]
+        );
+        assert!(core.iter().any(|l| l.contains("IRON RULE")));
+        assert!(bytes(&core) < 14_000, "core is {} bytes", bytes(&core));
+
+        assert_eq!(headings(&prs), ["### When creating PRs"]);
+        assert!(bytes(&prs) < 800);
+
+        assert_eq!(headings(&github), ["## Prohibited GitHub Content"]);
+        assert!(github.iter().any(|l| l.starts_with("11. ")));
+        assert!(bytes(&github) < 2_500);
+
+        assert_eq!(headings(&eng), ["### Readiness", "### Size"]);
+        assert!(bytes(&eng) < 1_500);
+    }
+
+    #[test]
+    fn the_commit_slice_is_small_and_has_the_rules_a_commit_needs() {
+        let dir = std::env::temp_dir().join(format!("pb-rules-commit-{}", std::process::id()));
+        let path = extract_commit(&repo_root(), &dir).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("MUST NEVER use em dashes"));
+        assert!(text.contains("- Commit messages MUST"));
+        assert!(text.contains("## Banned Words"));
+        assert!(!text.contains("PR descriptions MUST"));
+        assert!(!text.contains("GitHub-Specific"));
+        assert!(text.len() < 3_500, "commit slice is {} bytes", text.len());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_examples_heading_stub_stays_so_the_github_slice_has_an_end() {
+        let ws = fs::read_to_string(repo_root().join("skills/writing-style/SKILL.md")).unwrap();
+        assert!(ws.lines().any(|l| l.starts_with("## Examples")));
+    }
 
     #[test]
     fn a_range_stops_before_its_end_heading() {
