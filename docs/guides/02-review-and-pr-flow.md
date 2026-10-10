@@ -76,15 +76,6 @@ What a whole-stack review does:
 
 Both commands follow the `grounding-review` discipline.
 
-**Severity**
-
-| Level | Meaning |
-|---|---|
-| `critical` | Must not merge. Data loss, security breach, or production outage. |
-| `high` | Should not merge without addressing. Incorrect behaviour or reliability risk. |
-| `medium` | May merge; address soon. Maintainability or minor correctness. |
-| `low` | Informational. Style, naming. Safe to defer. |
-
 **Labels** are Conventional Comments in plain text: `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. Use `blocking` for must-fix before merge and `issue` for a real problem that does not block. Each finding is one or two sentences.
 
 Every review ends with a **Verification Summary**: each file, whether it was read, which lines were checked, and its findings. Confidence is HIGH (all verified), MEDIUM (1 or 2 unverified) or LOW (more).

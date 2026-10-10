@@ -127,3 +127,40 @@ fn every_skill_passes_structural_lint() {
         problems.join("\n")
     );
 }
+
+fn read_skill(rel: &str) -> String {
+    fs::read_to_string(skills_dir().join(rel)).unwrap_or_else(|_| panic!("{rel} should exist"))
+}
+
+#[test]
+fn lens_reviewers_do_not_load_the_orchestrator_sections() {
+    let skill = read_skill("grounding-review/SKILL.md");
+    for heading in [
+        "## Review Report Format",
+        "## Verification Sweep",
+        "## Subject Lines",
+        "## Severity",
+    ] {
+        assert!(
+            !skill.contains(heading),
+            "grounding-review SKILL.md must not carry `{heading}`, it is orchestrator-only"
+        );
+    }
+    let orch = read_skill("grounding-review/references/orchestrator.md");
+    assert!(orch.contains("## Review Report Format"));
+    assert!(orch.contains("## Verification Sweep (MUST)"));
+    assert!(skill.contains("playbook skill ref grounding-review orchestrator"));
+}
+
+#[test]
+fn writing_style_keeps_the_examples_heading_stub() {
+    let skill = read_skill("writing-style/SKILL.md");
+    assert!(
+        skill.lines().any(|l| l.starts_with("## Examples")),
+        "src/pr/rules.rs ends the GitHub slice at this heading"
+    );
+    for name in ["examples", "imperfections", "shell-quoting"] {
+        assert!(skill.contains(&format!("playbook skill ref writing-style {name}")));
+        read_skill(&format!("writing-style/references/{name}.md"));
+    }
+}
