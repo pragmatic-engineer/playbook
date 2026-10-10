@@ -1115,6 +1115,21 @@ pub enum AdrCommand {
 pub enum LearnCommand {
     /// Name the repo and memory store, probe the tools, and tally JIRA keys
     Preflight,
+    /// Count the git history or the repo layout for the learn-project collectors
+    ///
+    /// `git` prints contributors, churn hotspots, commit types, remote branch
+    /// prefixes, recent tags and commits per month. `structure` prints the
+    /// top level, languages, entry points, build manifests with their scripts
+    /// and targets, test and lint config, Dockerfiles, CI, infrastructure as
+    /// code, migrations, model files and `scripts/`. Both print one JSON
+    /// object, read only through `git`, with every count capped.
+    ///
+    /// Example: `playbook learn collect git structure`
+    Collect {
+        /// Which to collect: `git`, `structure`, or both
+        #[arg(required = true, value_parser = ["git", "structure"])]
+        roles: Vec<String>,
+    },
 }
 
 /// `playbook commit` subcommands.

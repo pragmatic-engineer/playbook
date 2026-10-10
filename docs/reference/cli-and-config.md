@@ -521,7 +521,17 @@ Example: `playbook init --no-hooks --aliases`
 
 Helpers for `/playbook:learn-project`
 
-Subcommands: `preflight`
+Subcommands: `collect`, `preflight`
+
+### `playbook learn collect`
+
+Count the git history or the repo layout for the learn-project collectors
+
+`git` prints contributors, churn hotspots, commit types, remote branch prefixes, recent tags and commits per month. `structure` prints the top level, languages, entry points, build manifests with their scripts and targets, test and lint config, Dockerfiles, CI, infrastructure as code, migrations, model files and `scripts/`. Both print one JSON object, read only through `git`, with every count capped.
+
+Example: `playbook learn collect git structure`
+
+- `<ROLES>`: Which to collect: `git`, `structure`, or both (one of `git`, `structure`)
 
 ### `playbook learn preflight`
 

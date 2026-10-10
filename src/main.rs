@@ -1091,6 +1091,23 @@ fn main() {
                 }
             }
         }
+        Command::Learn {
+            sub: LearnCommand::Collect { roles },
+        } => {
+            let dir = std::env::current_dir().unwrap_or_default();
+            let mut out = serde_json::Map::new();
+            for role in &roles {
+                let (key, value) = match role.as_str() {
+                    "git" => ("git", learn::collect::git_history(&dir)),
+                    _ => ("structure", learn::collect::code_structure(&dir)),
+                };
+                out.insert(key.to_string(), value);
+            }
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::Value::Object(out)).unwrap_or_default()
+            );
+        }
         Command::Commit { sub } => {
             let dir = std::env::current_dir().unwrap_or_default();
             match sub {

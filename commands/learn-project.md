@@ -70,10 +70,10 @@ Then, before collecting:
 
 On `--refresh` only, before dispatching, run `playbook memory context --repo $REPO`: its facts block (`name: description` lines), not the full fact bodies. Include the result in each collector's prompt so it can flag what's already documented instead of silently re-discovering it, and note anything that looks stale against what it finds. Skip this on a fresh (non-`--refresh`) run: there's rarely anything in the store yet, and this command's job is building it, not consuming it.
 
-Dispatch these collectors in parallel with `subagent_type: playbook:collector`. `collector` pins Haiku, the cost win this phase is built for. Each returns a compact structured summary (tight JSON or markdown) that cites paths/refs, NOT raw command output. Spawn each collector with a stable `name`.
+Run `playbook learn collect git structure` first. It counts the git history and reads the layout with no model, and prints one JSON object with a `git` key (contributors by name, churn hotspots, commit types and conventional-commit share, remote branch prefixes, recent tags, commits per month) and a `structure` key (top level, languages, entry points, build manifests with their scripts and targets, test and lint config, Docker, CI, IaC, migrations, model files, `scripts/`). Write the `git` value to `/tmp/learn-project/<owner>-<repo>/git-history.json` and the `structure` value to `code-structure.json`, so the analysts read the same files the collectors would have written. No collector is spawned for these two roles.
 
-- **git-history**: contributors and ownership, churn hotspots (`git log --format= --name-only | sort | uniq -c | sort -rn`), commit-message and branch conventions, tags/releases, cadence.
-- **code-structure**: top-level tree, entry points, languages, build/test/lint tooling, Dockerfiles / CI-CD configs, IaC, migration dirs and ORM models, `scripts/` and Makefile targets.
+Dispatch the remaining collectors in parallel with `subagent_type: playbook:collector`. `collector` pins Haiku, the cost win this phase is built for. Each returns a compact structured summary (tight JSON or markdown) that cites paths/refs, NOT raw command output. Spawn each collector with a stable `name`.
+
 - **pull-requests** (if `gh` ok): `gh pr list --state all --limit <MAX_PRS> --json number,title,labels,body,author`: recurring themes, review norms, linked JIRA keys, notable decisions.
 - **jira** (if reachable): epics, active sprints/boards, components, common labels for the project key(s).
 - **confluence** (if reachable): pages on setup/onboarding, architecture, runbooks, and decisions in the project space; capture titles, URLs, and key points.
