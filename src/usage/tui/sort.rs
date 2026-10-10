@@ -40,6 +40,12 @@ impl Panel {
         ][self.index()]
     }
 
+    /// Whether the panel is a chart, which the left and right keys move a
+    /// cursor along.
+    pub fn is_chart(self) -> bool {
+        matches!(self, Panel::Spend | Panel::Tokens)
+    }
+
     /// Columns of the panel's table that `s` can sort by, as indexes into its
     /// column list. Empty for a graph.
     pub fn sortable(self) -> &'static [usize] {

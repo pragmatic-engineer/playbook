@@ -123,7 +123,7 @@ fn wide_screen_160x50() {
 }
 
 #[test]
-fn the_week_range_has_wide_bars_and_the_days_to_come() {
+fn the_week_range_has_wide_bars_and_weekday_names() {
     let mut a = app(Theme::Btop);
     let events = fixture();
     let live = live_view(&events, &events, &events, NOW);
@@ -131,6 +131,13 @@ fn the_week_range_has_wide_bars_and_the_days_to_come() {
     a.range = range;
     a.data = Some(Data::build(&events, live, NOW, range, ""));
     check("week_160x50", &draw(&a, 160, 50));
+}
+
+#[test]
+fn a_moved_cursor_reads_out_its_day() {
+    let mut a = app(Theme::Btop);
+    a.cursor = Some(NOW.div_euclid(DAY) - 9);
+    check("cursor_100x30", &draw(&a, 100, 30));
 }
 
 #[test]

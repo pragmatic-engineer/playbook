@@ -313,6 +313,7 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
     frame.render_widget(block, area);
     let view = chart::View {
         fill,
+        cursor: app.cursor.and_then(|day| plot.index_of(day)),
         today: data.now.div_euclid(SECONDS_PER_DAY),
     };
     chart::render(frame.buffer_mut(), &plot, &data.series, &view, pal);
