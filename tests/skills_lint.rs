@@ -164,3 +164,23 @@ fn writing_style_keeps_the_examples_heading_stub() {
         read_skill(&format!("writing-style/references/{name}.md"));
     }
 }
+
+#[test]
+fn playbook_usage_names_every_command() {
+    let usage = read_skill("playbook-usage/SKILL.md");
+    let commands = Path::new(env!("CARGO_MANIFEST_DIR")).join("commands");
+    for entry in fs::read_dir(commands).unwrap().filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "md") {
+            let name = path.file_stem().unwrap().to_string_lossy().to_string();
+            assert!(
+                usage.contains(&format!("/playbook:{name}")),
+                "playbook-usage does not list /playbook:{name}"
+            );
+        }
+    }
+    assert!(
+        !usage.contains("14 slash commands"),
+        "do not hard-code a command count"
+    );
+}
