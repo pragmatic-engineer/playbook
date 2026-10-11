@@ -125,6 +125,9 @@ pub struct Data {
     /// Today, the week and the month so far against the previous period over
     /// the same elapsed span. `None` for the other ranges.
     pub comparison: Option<Comparison>,
+    /// Cost per agent from telemetry. Empty until `load` reads the store, and
+    /// for a range with no telemetry.
+    pub agents: query::AgentView,
 }
 
 /// Days charted for today, since a single bar says nothing.
@@ -241,6 +244,7 @@ impl Data {
             series,
             live,
             comparison,
+            agents: query::AgentView::default(),
         }
     }
 }
@@ -267,7 +271,9 @@ pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<D
         None => db::load_usage_events(conn)?,
     };
     let live = query::load_live(conn, now)?;
-    Ok(Data::build(&window, live, now, range, filter))
+    let mut data = Data::build(&window, live, now, range, filter);
+    data.agents = query::load_agents(conn, range, now)?;
+    Ok(data)
 }
 
 #[cfg(test)]

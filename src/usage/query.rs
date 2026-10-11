@@ -256,6 +256,48 @@ pub fn load_window(conn: &Connection, range: Range, now: i64) -> Result<Vec<Usag
     }
 }
 
+/// Cost per agent from telemetry. Only telemetry knows which agent made a
+/// request, so this is empty for a range with no telemetry rows.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AgentView {
+    /// One group per agent name, the main session as `main`. Sorted by name.
+    pub rows: Vec<super::aggregate::Group>,
+    /// Telemetry cost over the range, all agents.
+    pub cost_usd: f64,
+}
+
+impl AgentView {
+    /// Share of `total_cost` (the transcript spend of the range) that
+    /// telemetry covers, from 0 to 1.
+    pub fn coverage(&self, total_cost: f64) -> f64 {
+        if total_cost > 0.0 {
+            (self.cost_usd / total_cost).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Whether telemetry has any request in the range.
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+}
+
+/// The agent split of the range, read from the telemetry tables. The
+/// transcript totals are not touched.
+pub fn load_agents(conn: &Connection, range: Range, now: i64) -> Result<AgentView, String> {
+    let (since, until) = match range.days(now) {
+        Some((first, past)) => (
+            first.saturating_mul(SECONDS_PER_DAY),
+            past.saturating_mul(SECONDS_PER_DAY),
+        ),
+        None => (i64::MIN, i64::MAX),
+    };
+    let rows = super::telemetry_db::agent_groups(conn, since, until)?;
+    let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
+    Ok(AgentView { rows, cost_usd })
+}
+
 /// A session counts as active when its last message is this recent.
 pub const ACTIVE_SECONDS: i64 = 15 * 60;
 pub const BURN_MINUTES: i64 = 60;

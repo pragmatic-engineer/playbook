@@ -66,6 +66,24 @@ impl SpendView {
     }
 }
 
+/// What the projects panel shows. `v` switches it while the panel is focused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectsView {
+    #[default]
+    Projects,
+    /// Cost per agent, from telemetry.
+    Agents,
+}
+
+impl ProjectsView {
+    pub fn next(self) -> ProjectsView {
+        match self {
+            ProjectsView::Projects => ProjectsView::Agents,
+            ProjectsView::Agents => ProjectsView::Projects,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct App {
     pub data: Option<Data>,
@@ -75,6 +93,8 @@ pub struct App {
     pub cursor: Option<i64>,
     /// What the spend panel shows.
     pub spend_view: SpendView,
+    /// What the projects panel shows.
+    pub projects_view: ProjectsView,
     /// The first day of the week for the week ranges.
     pub week_start: WeekStart,
     pub filter: String,
@@ -118,6 +138,7 @@ impl App {
             range,
             cursor: None,
             spend_view: SpendView::default(),
+            projects_view: ProjectsView::default(),
             week_start: WeekStart::default(),
             filter: String::new(),
             error: None,
@@ -150,6 +171,7 @@ impl App {
         let Some(d) = &self.data else { return 0 };
         match panel {
             Panel::Models => pair_groups(&d.models, &d.models_before).len(),
+            Panel::Projects if self.projects_view == ProjectsView::Agents => d.agents.rows.len(),
             Panel::Projects => d.repos.len(),
             Panel::Live => d.live.active.len(),
             Panel::Sessions => d.sessions.len(),
@@ -196,10 +218,17 @@ impl App {
                 .into_iter()
                 .map(|p| p.key)
                 .collect(),
-            Panel::Projects => group_rows(&d.repos, sort)
-                .iter()
-                .map(|g| g.key.clone())
-                .collect(),
+            Panel::Projects => {
+                let groups = if self.projects_view == ProjectsView::Agents {
+                    &d.agents.rows
+                } else {
+                    &d.repos
+                };
+                group_rows(groups, sort)
+                    .iter()
+                    .map(|g| g.key.clone())
+                    .collect()
+            }
             Panel::Live => session_rows(&d.live.active, sort)
                 .iter()
                 .map(|s| s.id.clone())
@@ -231,6 +260,8 @@ impl App {
                 .into_iter()
                 .nth(at)
                 .map(|p| p.key),
+            // An agent is not a field of a usage event, so it cannot filter.
+            Panel::Projects if self.projects_view == ProjectsView::Agents => None,
             Panel::Projects => group_rows(&d.repos, sort).get(at).map(|g| g.key.clone()),
             Panel::Live => session_rows(&d.live.active, sort)
                 .get(at)
@@ -372,6 +403,9 @@ impl App {
             KeyCode::PageUp => self.step(focus, -5),
             KeyCode::Home | KeyCode::Char('g') => self.select(focus, 0),
             KeyCode::End | KeyCode::Char('G') => self.select(focus, usize::MAX),
+            KeyCode::Char('v') if focus == Panel::Projects => {
+                self.projects_view = self.projects_view.next();
+            }
             KeyCode::Char('v') => self.spend_view = self.spend_view.next(),
             KeyCode::Char('s') if self.is_table(focus) => {
                 self.sorts[focus.index()] = self.sort(focus).next(focus, self.compared());

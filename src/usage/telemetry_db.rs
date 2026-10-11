@@ -172,6 +172,44 @@ pub fn session_source(conn: &Connection, session_id: &str) -> Result<Source, Str
     .map_err(|e| format!("failed to read the source of {session_id}: {e}"))
 }
 
+/// Telemetry requests in `[since, until)` grouped by agent name, sorted by
+/// name. The main session (no agent name) is `main`.
+pub fn agent_groups(
+    conn: &Connection,
+    since: i64,
+    until: i64,
+) -> Result<Vec<super::aggregate::Group>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT CASE WHEN agent_name = '' THEN 'main' ELSE agent_name END AS agent,
+                    COUNT(*), SUM(input_tokens), SUM(output_tokens),
+                    SUM(cache_creation_tokens), SUM(cache_read_tokens), SUM(cost_usd)
+             FROM telemetry_requests
+             WHERE timestamp >= ?1 AND timestamp < ?2
+             GROUP BY agent ORDER BY agent",
+        )
+        .map_err(|e| format!("failed to read telemetry agents: {e}"))?;
+    let rows = stmt
+        .query_map(params![since, until], |r| {
+            let n = |i: usize| -> rusqlite::Result<u64> {
+                Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0))
+            };
+            Ok(super::aggregate::Group {
+                key: r.get(0)?,
+                messages: n(1)?,
+                input_tokens: n(2)?,
+                output_tokens: n(3)?,
+                cache_creation_tokens: n(4)?,
+                cache_read_tokens: n(5)?,
+                cost_usd: r.get(6)?,
+                unpriced: 0,
+            })
+        })
+        .map_err(|e| format!("failed to read telemetry agents: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("failed to read telemetry agents: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +337,29 @@ mod tests {
         assert_eq!(count_usage_events(&conn).unwrap(), 1);
         assert_eq!(count_requests(&conn).unwrap(), 0);
         assert_eq!(session_source(&conn, "s1").unwrap(), Source::Transcript);
+    }
+    #[test]
+    fn agent_groups_sum_cost_per_agent_inside_the_window_and_name_the_main_session() {
+        let conn = mem();
+        let mut main = request("r1");
+        main.agent_name = String::new();
+        main.cost_usd = 1.0;
+        let mut sub = request("r2");
+        sub.agent_name = "reviewer".into();
+        sub.cost_usd = 0.5;
+        let mut sub2 = request("r3");
+        sub2.agent_name = "reviewer".into();
+        sub2.cost_usd = 0.25;
+        let mut outside = request("r4");
+        outside.timestamp = 10_000;
+        for r in [&main, &sub, &sub2, &outside] {
+            insert_request(&conn, r).unwrap();
+        }
+        let groups = agent_groups(&conn, 0, 1_000).unwrap();
+        let names: Vec<&str> = groups.iter().map(|g| g.key.as_str()).collect();
+        assert_eq!(names, ["main", "reviewer"]);
+        assert!((groups[1].cost_usd - 0.75).abs() < 1e-9);
+        assert_eq!(groups[1].messages, 2);
+        assert!(agent_groups(&conn, 5_000, 6_000).unwrap().is_empty());
     }
 }

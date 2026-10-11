@@ -5,7 +5,7 @@
 //! the live sessions and the sessions of the range by day. Each is a rounded
 //! box with its key hint and title in the top border, like btop.
 
-use super::app::{App, SpendView};
+use super::app::{App, ProjectsView, SpendView};
 use super::chart::{self, Metric, Plot};
 use super::data::{Data, Slots};
 use super::fmt::{compact, fit, money, signed_money, signed_percent, WEEKDAYS};
@@ -579,6 +579,9 @@ pub fn models(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
 
 /// Projects of the period: messages, tokens, cost and share of the total cost.
 pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    if app.projects_view == ProjectsView::Agents {
+        return agents(frame, area, app, data, pal);
+    }
     let focused = app.focus == Panel::Projects;
     let block = panel_block(pal, Panel::Projects, "Projects", pal.box_mem, focused);
     if data.repos.is_empty() {
@@ -589,6 +592,55 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
     let cols = [
         col("name", Constraint::Fill(1), 0),
         col(">msgs", Constraint::Length(5), 0),
+        col(">tokens", Constraint::Length(7), 0),
+        col(">cost", Constraint::Length(9), 0),
+        col("share", Constraint::Length(8), 48),
+    ];
+    table(frame, area, app, pal, Panel::Projects, block, &cols, |w| {
+        sorted
+            .iter()
+            .map(|g| {
+                let share = if total_cost > 0.0 {
+                    g.cost_usd / total_cost
+                } else {
+                    0.0
+                };
+                vec![
+                    Cell::from(fit(&g.key, w[0])),
+                    num(g.messages.to_string()),
+                    num(compact(group_tokens(g))),
+                    num(money(g.cost_usd)),
+                    meter(pal, pal.avail, share, 8),
+                ]
+            })
+            .collect()
+    });
+}
+
+/// Cost per agent, from telemetry. The transcript totals stay the totals; the
+/// note says how much of the spend telemetry covers.
+fn agents(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    let focused = app.focus == Panel::Projects;
+    let mut block = panel_block(pal, Panel::Projects, "Agents", pal.box_mem, focused);
+    if data.agents.is_empty() {
+        let text = "Telemetry off. Start sessions with cc and set usage.telemetry to auto, \
+                    or see docs/guides/04-config-keys.md. v switches back to projects.";
+        return empty(frame, area, pal, block, text);
+    }
+    let covered = data.agents.coverage(data.totals.cost_usd) * 100.0;
+    block = block.title(
+        note_line(
+            pal,
+            &format!("source telemetry {covered:.0}% of spend"),
+            pal.box_mem,
+        )
+        .right_aligned(),
+    );
+    let total_cost = data.agents.cost_usd;
+    let sorted = group_rows(&data.agents.rows, app.sort(Panel::Projects));
+    let cols = [
+        col("agent", Constraint::Fill(1), 0),
+        col(">reqs", Constraint::Length(5), 0),
         col(">tokens", Constraint::Length(7), 0),
         col(">cost", Constraint::Length(9), 0),
         col("share", Constraint::Length(8), 48),
