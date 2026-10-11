@@ -175,6 +175,21 @@ fn usage_json_prints_totals_and_the_live_view_without_charts() {
 }
 
 #[test]
+fn usage_json_adds_a_comparison_for_a_period_range_only() {
+    let home = Home::new("json-comparison");
+
+    let week = home.run(&["usage", "--json", "--range", "week"]);
+    let all = home.run(&["usage", "--json", "--range", "all"]);
+
+    assert!(week.status.success(), "stderr: {}", stderr(&week));
+    let doc: serde_json::Value = serde_json::from_str(&stdout(&week)).unwrap();
+    assert_eq!(doc["comparison"]["period"], "week");
+    assert!(doc["comparison"]["change"]["cost_usd"]["amount"].is_number());
+    let doc: serde_json::Value = serde_json::from_str(&stdout(&all)).unwrap();
+    assert!(doc.get("comparison").is_none());
+}
+
+#[test]
 fn usage_summary_prints_the_text_report() {
     let home = Home::new("summary-flag");
 

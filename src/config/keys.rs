@@ -35,6 +35,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "security.defaults",
     "usage.theme",
     "usage.weekStart",
+    "usage.refreshSeconds",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -89,6 +90,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "security.defaults" => Some(Value::Bool(false)),
         "usage.theme" => Some(Value::String("btop".to_string())),
         "usage.weekStart" => Some(Value::String("monday".to_string())),
+        "usage.refreshSeconds" => Some(Value::Number(5.into())),
         _ => None,
     }
 }

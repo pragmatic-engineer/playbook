@@ -352,7 +352,9 @@ pub enum Command {
     /// terminal, or with `--summary`, prints a text summary of estimated cost
     /// instead. `--json` prints the same numbers as JSON for scripts. Days are
     /// UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d,
-    /// all. Weeks start on Monday unless `usage.weekStart` says otherwise.
+    /// all. Weeks start on Monday unless `usage.weekStart` says otherwise. For
+    /// today, week and month, `--json` adds a comparison with the previous
+    /// period over the same elapsed span, and `--summary` prints it.
     ///
     /// Example: `playbook usage --range last-week`
     Usage {
