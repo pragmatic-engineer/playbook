@@ -52,7 +52,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `release`, `review`, `route`, `run-context`, `sanitize`, `segment`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -771,28 +771,6 @@ Find the pull requests stacked with a PR
 Reads the GitHub stack API, then falls back to the branch chain. Takes the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`). Prints a summary, or JSON with `--json`. `--context` writes one shared review context under `/tmp/pr-stack-<pr>`. `map --stack <file> --findings <file>` gives each finding to the PR whose diff holds the line.
 
 - `<ARGS>`: The command's arguments, as one string
-
-### `playbook release`
-
-Render the files the release job pushes to the Homebrew tap and marketplace
-
-Run by the release workflow after a tag. Prints the file to stdout and never touches the network.
-
-Subcommands: `pin-marketplace`, `render-formula`
-
-### `playbook release pin-marketplace`
-
-Print marketplace.json with the playbook plugin pinned to VERSION's archive
-
-- `<MARKETPLACE>`
-- `<SHA256>`
-- `--repo <REPO>`: The `owner/name` repository the archive URL points at
-
-### `playbook release render-formula`
-
-Print the Homebrew formula for VERSION, filled from a SHA256SUMS file
-
-- `<SUMS>`
 
 ### `playbook review`
 
