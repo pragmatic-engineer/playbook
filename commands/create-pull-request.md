@@ -3,7 +3,7 @@ description: Use when a branch is ready to open as a pull request. Runs pre-flig
 allowed-tools: Bash, Read, Skill
 argument-hint: "[--help] [--ready] [--base <branch>] [--ticket <ID>] [--dir <path>] [--auto] [--ask]"
 context: fork
-agent: git
+agent: playbook:git
 ---
 
 # Create Pull Request

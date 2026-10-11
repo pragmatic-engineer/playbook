@@ -33,7 +33,7 @@ context: fork
 agent: auditor
 ```
 
-That is what `commands/repo-audit.md` adds to its frontmatter to route to `auditor`. `commands/commit-and-push.md` and `commands/create-pull-request.md` both add the same two lines, pointing at `agent: git`.
+That is what `commands/repo-audit.md` adds to its frontmatter to route to `auditor`. `commands/commit-and-push.md` and `commands/create-pull-request.md` both add the same two lines, pointing at `agent: playbook:git`. A plugin agent needs its `playbook:` prefix here, as it does for `subagent_type`: a bare `agent: git` does not resolve, and the fork silently runs as a general purpose agent on the session's own model (measured: Sonnet at $0.117 a commit against $0.007 on the Haiku `git` agent).
 
 **Inline spawn.** The command keeps `Agent` in its `allowed-tools` and spawns the agent directly with `subagent_type: <name>`, often several at once. Pick this when the command orchestrates and the agent does one scoped piece of the work, or when you need a swarm.
 
