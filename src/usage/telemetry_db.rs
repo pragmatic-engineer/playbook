@@ -66,7 +66,18 @@ CREATE TABLE IF NOT EXISTS telemetry_errors (
     duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0),
     PRIMARY KEY (session_id, sequence)
 );
-CREATE INDEX IF NOT EXISTS telemetry_errors_by_time ON telemetry_errors (timestamp);";
+CREATE INDEX IF NOT EXISTS telemetry_errors_by_time ON telemetry_errors (timestamp);
+CREATE TABLE IF NOT EXISTS telemetry_metrics (
+    session_id TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    start_ns INTEGER NOT NULL,
+    end_ns INTEGER NOT NULL,
+    timestamp INTEGER NOT NULL,
+    value REAL NOT NULL CHECK(value >= 0),
+    PRIMARY KEY (session_id, metric, kind, start_ns, end_ns)
+);
+CREATE INDEX IF NOT EXISTS telemetry_metrics_by_time ON telemetry_metrics (timestamp);";
 
 const DOWN_SQL: &str = "
 DROP INDEX IF EXISTS telemetry_requests_by_time;
@@ -76,7 +87,9 @@ DROP TABLE IF EXISTS session_reconcile;
 DROP INDEX IF EXISTS telemetry_tools_by_time;
 DROP TABLE IF EXISTS telemetry_tools;
 DROP INDEX IF EXISTS telemetry_errors_by_time;
-DROP TABLE IF EXISTS telemetry_errors;";
+DROP TABLE IF EXISTS telemetry_errors;
+DROP INDEX IF EXISTS telemetry_metrics_by_time;
+DROP TABLE IF EXISTS telemetry_metrics;";
 
 /// Where a session's numbers come from. A session with no recorded source is
 /// read from transcripts, so history before telemetry needs no backfill.
@@ -146,6 +159,21 @@ pub struct TelemetryError {
     /// 1 for the first try; 2 or more means a retry was already made.
     pub attempt: u64,
     pub duration_ms: u64,
+}
+
+/// One delta data point of a counter metric. The key is the session, the
+/// metric, its kind and the exact interval, so a redelivered point is a no-op.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TelemetryMetric {
+    pub session_id: String,
+    /// `active_time` (seconds), `lines_of_code`, `commits` or `pull_requests`.
+    pub metric: String,
+    /// The `type` attribute (`user`, `cli`, `added`, `removed`), or empty.
+    pub kind: String,
+    pub start_ns: i64,
+    pub end_ns: i64,
+    pub timestamp: i64,
+    pub value: f64,
 }
 
 /// Creates the telemetry tables. Safe to run any number of times.
@@ -240,6 +268,28 @@ pub fn insert_tool(conn: &Connection, t: &TelemetryTool) -> Result<usize, String
 }
 
 /// Stores a failed API attempt. Keyed by session and event sequence.
+pub fn insert_metric(conn: &Connection, m: &TelemetryMetric) -> Result<usize, String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO telemetry_metrics
+         (session_id, metric, kind, start_ns, end_ns, timestamp, value)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            m.session_id,
+            m.metric,
+            m.kind,
+            m.start_ns,
+            m.end_ns,
+            m.timestamp,
+            if m.value.is_finite() && m.value >= 0.0 {
+                m.value
+            } else {
+                0.0
+            }
+        ],
+    )
+    .map_err(|e| format!("failed to store a telemetry metric: {e}"))
+}
+
 pub fn insert_error(conn: &Connection, e: &TelemetryError) -> Result<usize, String> {
     conn.execute(
         "INSERT OR IGNORE INTO telemetry_errors
@@ -327,12 +377,23 @@ pub struct Health {
     pub tool_calls: u64,
     pub tool_failures: u64,
     pub tool_ms: u64,
+    /// Claude Code's own `active_time` metric, user and cli, in milliseconds.
+    pub active_ms: u64,
+    pub lines_changed: u64,
+    pub commits: u64,
+    pub pull_requests: u64,
 }
 
 impl Health {
     /// Whether the window has any telemetry row of any kind.
     pub fn is_empty(&self) -> bool {
-        self.requests == 0 && self.errors == 0 && self.tool_calls == 0
+        self.requests == 0
+            && self.errors == 0
+            && self.tool_calls == 0
+            && self.active_ms == 0
+            && self.lines_changed == 0
+            && self.commits == 0
+            && self.pull_requests == 0
     }
 
     /// Time waiting on the API or on tools. This is a floor for the time
@@ -390,7 +451,24 @@ pub fn health(conn: &Connection, since: i64, until: i64) -> Result<Health, Strin
         tool_calls: tool[0],
         tool_failures: tool[1],
         tool_ms: tool[2],
+        active_ms: metric_sum(conn, "active_time", since, until)?.saturating_mul(1000),
+        lines_changed: metric_sum(conn, "lines_of_code", since, until)?,
+        commits: metric_sum(conn, "commits", since, until)?,
+        pull_requests: metric_sum(conn, "pull_requests", since, until)?,
     })
+}
+
+/// Sum of one metric in `[since, until)`, over all kinds.
+fn metric_sum(conn: &Connection, metric: &str, since: i64, until: i64) -> Result<u64, String> {
+    let v: f64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(value), 0) FROM telemetry_metrics
+             WHERE metric = ?1 AND timestamp >= ?2 AND timestamp < ?3",
+            params![metric, since, until],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("failed to read telemetry metrics: {e}"))?;
+    Ok(v.round() as u64)
 }
 
 pub fn count_requests(conn: &Connection) -> Result<i64, String> {
@@ -773,6 +851,37 @@ mod tests {
         let none = health(&conn, 5_000, 6_000).unwrap();
         assert!(none.is_empty());
         assert_eq!((none.api_error_rate(), none.tool_error_rate()), (0.0, 0.0));
+    }
+
+    #[test]
+    fn health_adds_active_time_lines_commits_and_pull_requests() {
+        let conn = mem();
+        let m = |metric: &str, kind: &str, end: i64, v: f64| TelemetryMetric {
+            session_id: "s".into(),
+            metric: metric.into(),
+            kind: kind.into(),
+            start_ns: end - 1,
+            end_ns: end,
+            timestamp: end,
+            value: v,
+        };
+        for row in [
+            m("active_time", "user", 10, 30.0),
+            m("active_time", "cli", 10, 90.0),
+            m("lines_of_code", "added", 10, 40.0),
+            m("lines_of_code", "removed", 10, 10.0),
+            m("commits", "", 10, 2.0),
+            m("pull_requests", "", 10, 1.0),
+            m("active_time", "cli", 10, 5.0),
+        ] {
+            insert_metric(&conn, &row).unwrap();
+        }
+        // The same interval, session, metric and kind is one point.
+        let h = health(&conn, 0, 100).unwrap();
+        assert_eq!(h.active_ms, 120_000);
+        assert_eq!((h.lines_changed, h.commits, h.pull_requests), (50, 2, 1));
+        assert!(!h.is_empty());
+        assert!(health(&conn, 100, 200).unwrap().is_empty());
     }
 
     #[test]

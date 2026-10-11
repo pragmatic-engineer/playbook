@@ -596,6 +596,10 @@ fn health_app(with_telemetry: bool, view: crate::usage::tui::app::ProjectsView) 
             tool_calls: 190,
             tool_failures: 7,
             tool_ms: 37_000,
+            active_ms: 5_400_000,
+            lines_changed: 1_200,
+            commits: 4,
+            pull_requests: 1,
         };
         data.health.before = Some(Health {
             requests: 150,
@@ -605,6 +609,10 @@ fn health_app(with_telemetry: bool, view: crate::usage::tui::app::ProjectsView) 
             tool_calls: 120,
             tool_failures: 1,
             tool_ms: 20_000,
+            active_ms: 3_600_000,
+            lines_changed: 800,
+            commits: 2,
+            pull_requests: 1,
         });
     }
     a.data = Some(data);
@@ -635,7 +643,9 @@ fn the_health_view_shows_errors_retries_busy_time_and_cache_hit_against_the_prev
     // A tall terminal shows every figure, the cache hit rate from transcripts too.
     let tall = draw(&health_app(true, ProjectsView::Health), 160, 50);
     assert!(
-        tall.contains("Cache hit") && tall.contains("Busy time"),
+        tall.contains("Cache hit")
+            && tall.contains("Active time")
+            && tall.contains("Lines changed"),
         "{tall}"
     );
     check("health_100x30", &text);

@@ -501,6 +501,7 @@ mod tests {
                 "session_reconcile",
                 "session_sources",
                 "telemetry_errors",
+                "telemetry_metrics",
                 "telemetry_requests",
                 "telemetry_tools",
                 "tool_invocation_events",

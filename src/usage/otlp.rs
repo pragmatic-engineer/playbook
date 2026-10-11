@@ -15,7 +15,7 @@
 //! are kept (model, effort, agent name, ids) are checked for a safe charset
 //! and length, and a value that fails the check is dropped.
 
-use super::telemetry_db::{TelemetryError, TelemetryRequest, TelemetryTool};
+use super::telemetry_db::{TelemetryError, TelemetryMetric, TelemetryRequest, TelemetryTool};
 use serde_json::Value;
 
 /// The attribute keys this parser reads. Everything else is ignored.
@@ -40,6 +40,18 @@ pub const ALLOWED_KEYS: &[&str] = &[
     "cache_creation_tokens",
     "cost_usd",
 ];
+
+/// The metrics read, with the short name stored. The cost and token metrics
+/// are left out, the requests already carry them with a key.
+const METRICS: &[(&str, &str)] = &[
+    ("active_time.total", "active_time"),
+    ("lines_of_code.count", "lines_of_code"),
+    ("commit.count", "commits"),
+    ("pull_request.count", "pull_requests"),
+];
+
+/// The attribute keys read on a metric point.
+const METRIC_KEYS: &[&str] = &["session.id", "type"];
 
 /// The most log records read from one body; the rest are dropped.
 pub const MAX_RECORDS: usize = 2000;
@@ -229,6 +241,99 @@ pub fn parse_events(body: &[u8], now: i64) -> Result<Parsed, String> {
         }
     }
     Ok(out)
+}
+
+/// Parses an OTLP JSON metrics body into counter points. Only delta sums of
+/// the metrics in `METRICS` with a session id are kept; a cumulative sum is
+/// skipped because adding it up would count it again and again.
+pub fn parse_metrics(body: &[u8], now: i64) -> Result<Vec<TelemetryMetric>, String> {
+    let doc: Value = serde_json::from_slice(body).map_err(|e| format!("invalid JSON: {e}"))?;
+    let empty = Vec::new();
+    let resources = doc
+        .get("resourceMetrics")
+        .and_then(Value::as_array)
+        .unwrap_or(&empty);
+    let mut out = Vec::new();
+    let mut seen = 0usize;
+    for metrics in resources
+        .iter()
+        .filter_map(|r| r.get("scopeMetrics")?.as_array())
+        .flatten()
+        .filter_map(|s| s.get("metrics")?.as_array())
+    {
+        for metric in metrics {
+            let name = metric.get("name").and_then(Value::as_str).unwrap_or("");
+            let name = name.strip_prefix(EVENT_PREFIX).unwrap_or(name);
+            let Some((_, short)) = METRICS.iter().find(|(n, _)| *n == name) else {
+                continue;
+            };
+            let Some(sum) = metric.get("sum") else {
+                continue;
+            };
+            // 1 is delta in the OTLP enum, 2 is cumulative.
+            let delta = match sum.get("aggregationTemporality") {
+                Some(Value::String(s)) => s == "AGGREGATION_TEMPORALITY_DELTA",
+                Some(other) => as_u64(other) == Some(1),
+                None => false,
+            };
+            if !delta {
+                continue;
+            }
+            for point in sum
+                .get("dataPoints")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                seen += 1;
+                if seen > MAX_RECORDS {
+                    return Ok(out);
+                }
+                out.extend(metric_point(point, short, now));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn metric_point(point: &Value, metric: &str, now: i64) -> Option<TelemetryMetric> {
+    let (mut session, mut kind) = (None, String::new());
+    for attr in point.get("attributes")?.as_array()? {
+        let key = attr.get("key").and_then(Value::as_str).unwrap_or("");
+        if !METRIC_KEYS.contains(&key) {
+            continue;
+        }
+        let text = attr
+            .get("value")
+            .and_then(any_value)
+            .and_then(Value::as_str);
+        match key {
+            "session.id" => session = text.and_then(|t| safe_text(t, MAX_ID_LEN)),
+            _ => {
+                kind = text
+                    .and_then(|t| safe_text(t, MAX_NAME_LEN))
+                    .unwrap_or_default()
+            }
+        }
+    }
+    let value = point
+        .get("asDouble")
+        .or_else(|| point.get("asInt"))
+        .and_then(as_f64)?;
+    let end_ns = point.get("timeUnixNano").and_then(as_u64)?;
+    let start_ns = point
+        .get("startTimeUnixNano")
+        .and_then(as_u64)
+        .unwrap_or(end_ns);
+    Some(TelemetryMetric {
+        session_id: session?,
+        metric: metric.to_string(),
+        kind,
+        start_ns: i64::try_from(start_ns).ok()?,
+        end_ns: i64::try_from(end_ns).ok()?,
+        timestamp: nanos_to_secs(point).unwrap_or(now),
+        value,
+    })
 }
 
 fn request(f: Fields, timestamp: i64) -> Option<TelemetryRequest> {
@@ -532,5 +637,83 @@ mod tests {
     fn a_deeply_nested_body_is_rejected_without_a_crash() {
         let deep = format!("{}{}", "[".repeat(5000), "]".repeat(5000));
         assert!(parse_logs(deep.as_bytes(), 1).is_err());
+    }
+
+    fn metric_body(name: &str, temporality: Value, points: Vec<Value>) -> Vec<u8> {
+        json!({"resourceMetrics": [{
+            "resource": {"attributes": [s("user.email", "a@b.c")]},
+            "scopeMetrics": [{"metrics": [{
+                "name": name,
+                "sum": {"aggregationTemporality": temporality, "dataPoints": points}
+            }]}]
+        }]})
+        .to_string()
+        .into_bytes()
+    }
+
+    fn point(session: &str, kind: &str, value: f64) -> Value {
+        json!({
+            "startTimeUnixNano": "1760000000000000000",
+            "timeUnixNano": "1760000060000000000",
+            "asDouble": value,
+            "attributes": [s("session.id", session), s("type", kind), s("user.id", "u-1")]
+        })
+    }
+
+    #[test]
+    fn an_active_time_delta_point_becomes_a_row_without_other_attributes() {
+        let body = metric_body(
+            "claude_code.active_time.total",
+            json!(1),
+            vec![point("s1", "cli", 12.5)],
+        );
+        let rows = parse_metrics(&body, 5).unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(
+            (r.metric.as_str(), r.kind.as_str(), r.session_id.as_str()),
+            ("active_time", "cli", "s1")
+        );
+        assert_eq!((r.value, r.timestamp), (12.5, 1_760_000_060));
+    }
+
+    #[test]
+    fn cumulative_unknown_and_sessionless_metrics_are_skipped() {
+        let cumulative = metric_body(
+            "claude_code.active_time.total",
+            json!(2),
+            vec![point("s1", "cli", 1.0)],
+        );
+        assert!(parse_metrics(&cumulative, 5).unwrap().is_empty());
+        let cost = metric_body(
+            "claude_code.cost.usage",
+            json!(1),
+            vec![point("s1", "", 1.0)],
+        );
+        assert!(parse_metrics(&cost, 5).unwrap().is_empty());
+        let none =
+            json!({"startTimeUnixNano": "1", "timeUnixNano": "2", "asInt": "3", "attributes": []});
+        let body = metric_body("claude_code.commit.count", json!(1), vec![none]);
+        assert!(parse_metrics(&body, 5).unwrap().is_empty());
+        assert!(parse_metrics(b"{}", 5).unwrap().is_empty());
+        assert!(parse_metrics(b"nope", 5).is_err());
+    }
+
+    #[test]
+    fn the_four_counters_are_read_with_integer_values() {
+        for (name, short) in METRICS {
+            let p = json!({"startTimeUnixNano": "1760000000000000000", "timeUnixNano": "1760000060000000000", "asInt": "7",
+                "attributes": [s("session.id", "s1")]});
+            let rows = parse_metrics(
+                &metric_body(
+                    &format!("claude_code.{name}"),
+                    json!("AGGREGATION_TEMPORALITY_DELTA"),
+                    vec![p],
+                ),
+                5,
+            )
+            .unwrap();
+            assert_eq!((rows[0].metric.as_str(), rows[0].value), (*short, 7.0));
+        }
     }
 }
