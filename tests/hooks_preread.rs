@@ -851,3 +851,252 @@ mod preread_size_check {
         );
     }
 }
+
+mod preread_reread {
+    use super::*;
+    use std::time::{Duration, SystemTime};
+
+    fn payload(session_id: &str, file_path: &str, extra: &str) -> String {
+        format!(
+            r#"{{"session_id":"{session_id}","tool_input":{{"file_path":"{file_path}"{extra}}}}}"#
+        )
+    }
+
+    fn write_lines(path: &Path, n: usize) {
+        let content: String = (1..=n).map(|i| format!("{i}\n")).collect();
+        fs::write(path, content).expect("fixture file should be writable");
+    }
+
+    fn read(home: &Path, session_id: &str, file: &Path, extra: &str) -> String {
+        stdout_string(&run_hook(
+            "preread-size-check",
+            home,
+            &payload(session_id, file.to_str().unwrap(), extra),
+        ))
+    }
+
+    fn is_denied(out: &str) -> bool {
+        out.contains(r#""permissionDecision":"deny""#)
+    }
+
+    #[test]
+    fn unchanged_file_read_twice_is_denied_the_second_time() {
+        // Arrange
+        let home = scratch_dir("reread-unchanged");
+        let file = home.join("notes.txt");
+        write_lines(&file, 300);
+        assert!(!is_denied(&read(&home, "rr1", &file, "")));
+
+        // Act
+        let out = read(&home, "rr1", &file, "");
+
+        // Assert
+        assert!(is_denied(&out), "should deny, got: {out}");
+        assert!(out.contains("300 lines"), "should name the count: {out}");
+        assert!(out.contains("Grep"), "should hint at Grep: {out}");
+    }
+
+    #[test]
+    fn first_read_is_allowed() {
+        // Arrange
+        let home = scratch_dir("reread-first");
+        let file = home.join("notes.txt");
+        write_lines(&file, 300);
+
+        // Act
+        let out = read(&home, "rr2", &file, "");
+
+        // Assert
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn changed_file_is_allowed_again() {
+        // Arrange
+        let home = scratch_dir("reread-changed");
+        let file = home.join("notes.txt");
+        write_lines(&file, 300);
+        read(&home, "rr3", &file, "");
+        write_lines(&file, 301);
+
+        // Act
+        let out = read(&home, "rr3", &file, "");
+
+        // Assert
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn same_size_file_with_a_newer_mtime_is_allowed_again() {
+        // Arrange
+        let home = scratch_dir("reread-mtime");
+        let file = home.join("notes.txt");
+        write_lines(&file, 300);
+        read(&home, "rr4", &file, "");
+        let handle = fs::File::options().write(true).open(&file).unwrap();
+        handle
+            .set_modified(SystemTime::now() + Duration::from_secs(60))
+            .unwrap();
+
+        // Act
+        let out = read(&home, "rr4", &file, "");
+
+        // Assert
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn read_after_a_compaction_is_allowed() {
+        // Arrange
+        let home = scratch_dir("reread-compact");
+        let file = home.join("notes.txt");
+        write_lines(&file, 300);
+        read(&home, "rr5", &file, "");
+        run_hook(
+            "session-init",
+            &home,
+            r#"{"session_id":"rr5","source":"compact"}"#,
+        );
+
+        // Act
+        let out = read(&home, "rr5", &file, "");
+
+        // Assert
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn read_with_an_offset_or_limit_is_never_denied() {
+        // Arrange
+        let home = scratch_dir("reread-range");
+        let file = home.join("notes.txt");
+        write_lines(&file, 300);
+        read(&home, "rr6", &file, "");
+
+        // Act
+        let with_offset = read(&home, "rr6", &file, r#","offset":10"#);
+        let with_limit = read(&home, "rr6", &file, r#","limit":50"#);
+
+        // Assert
+        assert_eq!(with_offset, "");
+        assert_eq!(with_limit, "");
+    }
+
+    #[test]
+    fn a_partial_first_read_does_not_make_the_full_read_a_repeat() {
+        // Arrange
+        let home = scratch_dir("reread-partial");
+        let file = home.join("notes.txt");
+        write_lines(&file, 300);
+        read(&home, "rr7", &file, r#","limit":50"#);
+
+        // Act
+        let out = read(&home, "rr7", &file, "");
+
+        // Assert
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn file_longer_than_the_read_cap_is_never_denied() {
+        // Arrange: the harness truncates it, so an earlier read was partial.
+        let home = scratch_dir("reread-truncated");
+        let file = home.join("notes.csv");
+        fs::write(&file, "a\n".repeat(2500)).unwrap();
+        let allowlisted = home.join("Cargo.lock");
+        fs::write(&allowlisted, "a\n".repeat(2500)).unwrap();
+
+        // Act
+        let out = (
+            read(&home, "rr8", &allowlisted, ""),
+            read(&home, "rr8", &allowlisted, ""),
+        );
+
+        // Assert
+        assert_eq!(out, (String::new(), String::new()));
+    }
+
+    #[test]
+    fn short_file_is_never_denied() {
+        // Arrange
+        let home = scratch_dir("reread-short");
+        let file = home.join("notes.txt");
+        write_lines(&file, 149);
+        read(&home, "rr9", &file, "");
+
+        // Act
+        let out = read(&home, "rr9", &file, "");
+
+        // Assert
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn file_at_the_minimum_line_count_is_denied_on_repeat() {
+        // Arrange
+        let home = scratch_dir("reread-min");
+        let file = home.join("notes.txt");
+        write_lines(&file, 150);
+        read(&home, "rr10", &file, "");
+
+        // Act
+        let out = read(&home, "rr10", &file, "");
+
+        // Assert
+        assert!(is_denied(&out), "got: {out}");
+    }
+
+    #[test]
+    fn image_and_pdf_reads_are_exempt() {
+        // Arrange
+        let home = scratch_dir("reread-image");
+        let png = home.join("shot.png");
+        let pdf = home.join("doc.PDF");
+        fs::write(&png, "x\n".repeat(400)).unwrap();
+        fs::write(&pdf, "x\n".repeat(400)).unwrap();
+        read(&home, "rr11", &png, "");
+        read(&home, "rr11", &pdf, r#","pages":"1-2""#);
+
+        // Act
+        let again_png = read(&home, "rr11", &png, "");
+        let again_pdf = read(&home, "rr11", &pdf, r#","pages":"1-2""#);
+
+        // Assert
+        assert_eq!(again_png, "");
+        assert_eq!(again_pdf, "");
+    }
+
+    #[test]
+    fn subagent_read_is_never_denied() {
+        // Arrange
+        let home = scratch_dir("reread-subagent");
+        let file = home.join("notes.txt");
+        write_lines(&file, 300);
+        read(&home, "rr12", &file, "");
+        let body = format!(
+            r#"{{"session_id":"rr12","agent_id":"a1","tool_input":{{"file_path":"{}"}}}}"#,
+            file.display()
+        );
+
+        // Act
+        let out = stdout_string(&run_hook("preread-size-check", &home, &body));
+
+        // Assert
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn same_file_in_another_session_is_allowed() {
+        // Arrange
+        let home = scratch_dir("reread-other-session");
+        let file = home.join("notes.txt");
+        write_lines(&file, 300);
+        read(&home, "rr13", &file, "");
+
+        // Act
+        let out = read(&home, "rr14", &file, "");
+
+        // Assert
+        assert_eq!(out, "");
+    }
+}
