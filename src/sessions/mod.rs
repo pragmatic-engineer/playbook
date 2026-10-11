@@ -1,0 +1,612 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
+//! The session management core (ADR-0024, stage 1): one derived record per
+//! recent agent session, with its repo, branch, worktree, linked issue or PR,
+//! state, last activity, context size and cost. Read only. It writes nothing,
+//! stores no prompt text and never acts on a session: the hint on a record is a
+//! suggestion for the person reading it.
+//!
+//! The pure parts (`build`, `state_of`, `issue_from_branch`, the renderers)
+//! take their inputs as arguments so tests need no git, `gh` or terminal. The
+//! impure part (`gather`) looks up the working directory, the worktree and the
+//! pull request, each bounded by a timeout, and reads `unknown` on failure.
+
+pub mod links;
+
+use crate::usage::UsageEvent;
+use serde_json::{json, Value};
+
+/// Seconds of silence under which a session reads `working`.
+pub const WORKING_SECONDS: i64 = 120;
+const DAY: i64 = 86_400;
+
+/// A pull request linked to a session by its branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrKind {
+    Open,
+    Merged,
+    Closed,
+}
+
+impl PrKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            PrKind::Open => "open",
+            PrKind::Merged => "merged",
+            PrKind::Closed => "closed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pr {
+    pub number: u64,
+    pub kind: PrKind,
+}
+
+/// Where the session ran, as far as git can tell.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Place {
+    /// The working directory the transcript recorded.
+    pub cwd: Option<String>,
+    /// Root of a linked worktree, when the directory is one.
+    pub worktree: Option<String>,
+    /// Which playbook convention made the worktree, empty when none did.
+    pub convention: &'static str,
+    /// The directory no longer exists.
+    pub gone: bool,
+    /// Uncommitted or untracked changes. `None` when it could not be read.
+    pub dirty: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum State {
+    Working,
+    Idle,
+    Stale,
+    Done,
+}
+
+impl State {
+    pub fn label(self) -> &'static str {
+        match self {
+            State::Working => "working",
+            State::Idle => "idle",
+            State::Stale => "stale",
+            State::Done => "done",
+        }
+    }
+}
+
+/// The limits that decide a state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Settings {
+    pub stale_after_days: i64,
+    pub recent_days: i64,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            stale_after_days: 3,
+            recent_days: 7,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Record {
+    pub id: String,
+    pub agent: String,
+    pub repo: String,
+    pub branch: String,
+    pub place: Place,
+    /// Issue number read from the branch name. A guess, shown as inferred.
+    pub issue: Option<u64>,
+    pub pr: Option<Pr>,
+    pub state: State,
+    pub last_activity: i64,
+    /// Prompt size of the newest request: input plus cache read plus cache write.
+    pub context_tokens: u64,
+    pub cost_usd: f64,
+    pub unpriced: usize,
+    pub messages: usize,
+    /// A person has to look at this one: it is finished or stale and holds
+    /// changes that are not committed.
+    pub needs_attention: bool,
+    /// What a person could do. Never run by playbook.
+    pub hint: String,
+}
+
+/// The first number in a branch name that looks like an issue, or `None`.
+/// `feat/536-foo` and `fix/issue-536` give 536. A year (1990 to 2100) is not
+/// an issue.
+pub fn issue_from_branch(branch: &str) -> Option<u64> {
+    branch
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|s| !s.is_empty() && s.len() <= 6 && s.bytes().all(|b| b.is_ascii_digit()))
+        .filter_map(|s| s.parse::<u64>().ok())
+        .find(|n| *n > 0 && !(1990..=2100).contains(n))
+}
+
+/// Whether a branch is a repo's trunk, which never counts as a session's work.
+pub fn is_trunk(branch: &str) -> bool {
+    matches!(branch, "main" | "master" | "trunk" | "develop" | "")
+}
+
+/// The state of a session. A merged or closed PR means done, whatever the clock says.
+pub fn state_of(last: i64, now: i64, pr: Option<Pr>, cfg: Settings) -> State {
+    if matches!(
+        pr,
+        Some(Pr {
+            kind: PrKind::Merged | PrKind::Closed,
+            ..
+        })
+    ) {
+        return State::Done;
+    }
+    let age = now - last;
+    if age < WORKING_SECONDS {
+        State::Working
+    } else if age >= cfg.stale_after_days * DAY {
+        State::Stale
+    } else {
+        State::Idle
+    }
+}
+
+/// The suggestion for a state, and whether it needs attention.
+fn advice(state: State, dirty: Option<bool>) -> (bool, String) {
+    let keeps = dirty == Some(true);
+    match (state, keeps) {
+        (State::Done, true) => (
+            true,
+            "work landed but the worktree has uncommitted changes: commit or discard them by hand, nothing is removed".into(),
+        ),
+        (State::Done, false) => (
+            false,
+            "work landed: close this session, `playbook worktree sweep` removes a clean worktree".into(),
+        ),
+        (State::Stale, true) => (
+            true,
+            "stale with uncommitted changes: resume it or commit the work".into(),
+        ),
+        (State::Stale, false) => (false, "stale: archive or close this session".into()),
+        _ => (false, String::new()),
+    }
+}
+
+/// One record per session in `events` (all of a session's events, any order),
+/// newest activity first. `lookup` supplies the place and the PR of a session's
+/// newest event. Sessions whose newest event is older than `recent_days` are
+/// left out unless they are not finished.
+pub fn build(
+    events: &[UsageEvent],
+    now: i64,
+    cfg: Settings,
+    lookup: &dyn Fn(&UsageEvent) -> (Place, Option<Pr>),
+) -> Vec<Record> {
+    let mut by_session: std::collections::BTreeMap<&str, Vec<&UsageEvent>> = Default::default();
+    for e in events {
+        by_session.entry(e.session_id.as_str()).or_default().push(e);
+    }
+    let mut records: Vec<Record> = by_session
+        .into_values()
+        .filter_map(|group| {
+            let newest = *group.iter().max_by_key(|e| e.timestamp)?;
+            if now - newest.timestamp >= cfg.recent_days * DAY {
+                return None;
+            }
+            let (place, pr) = lookup(newest);
+            let state = state_of(newest.timestamp, now, pr, cfg);
+            let (needs_attention, hint) = advice(state, place.dirty);
+            Some(Record {
+                id: newest.session_id.clone(),
+                agent: newest.agent.clone(),
+                repo: newest.repo.clone(),
+                branch: newest.branch.clone(),
+                place,
+                issue: issue_from_branch(&newest.branch),
+                pr,
+                state,
+                last_activity: newest.timestamp,
+                context_tokens: newest.input_tokens
+                    + newest.cache_read_tokens
+                    + newest.cache_creation_tokens,
+                cost_usd: group.iter().map(|e| e.cost_usd).sum(),
+                unpriced: group.iter().filter(|e| e.unpriced).count(),
+                messages: group.len(),
+                needs_attention,
+                hint,
+            })
+        })
+        .collect();
+    records.sort_by(|a, b| {
+        b.last_activity
+            .cmp(&a.last_activity)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    records
+}
+
+/// `3m`, `2h`, `4d` since `then`, or `now` under a minute.
+pub fn age(then: i64, now: i64) -> String {
+    let s = (now - then).max(0);
+    match s {
+        0..=59 => "now".into(),
+        60..=3599 => format!("{}m", s / 60),
+        3600..=86_399 => format!("{}h", s / 3600),
+        _ => format!("{}d", s / DAY),
+    }
+}
+
+/// `182k` or `1.2M` tokens, `-` for none.
+pub fn tokens(n: u64) -> String {
+    match n {
+        0 => "-".into(),
+        1..=999 => n.to_string(),
+        1_000..=999_999 => format!("{}k", n / 1000),
+        _ => format!("{:.1}M", n as f64 / 1_000_000.0),
+    }
+}
+
+fn link_label(r: &Record) -> String {
+    match (r.pr, r.issue) {
+        (Some(pr), _) => format!("PR #{} {}", pr.number, pr.kind.label()),
+        (None, Some(n)) => format!("issue #{n}?"),
+        (None, None) => "-".into(),
+    }
+}
+
+fn worktree_label(r: &Record) -> String {
+    if r.place.gone {
+        return "gone".into();
+    }
+    match &r.place.worktree {
+        Some(path) => {
+            let name = path.rsplit('/').next().unwrap_or(path);
+            if r.place.convention.is_empty() {
+                name.to_string()
+            } else {
+                format!("{name} ({})", r.place.convention)
+            }
+        }
+        None if r.place.cwd.is_some() => "main checkout".into(),
+        None => "-".into(),
+    }
+}
+
+/// The table `playbook sessions` prints. Times are relative to `now`, which
+/// the footer states in UTC.
+pub fn render_text(records: &[Record], now: i64) -> String {
+    if records.is_empty() {
+        return "No recent sessions.\n".into();
+    }
+    let header = [
+        "STATE", "SESSION", "REPO", "BRANCH", "WORKTREE", "LINK", "LAST", "CONTEXT", "COST",
+    ];
+    let rows: Vec<[String; 9]> = records
+        .iter()
+        .map(|r| {
+            [
+                r.state.label().to_string(),
+                crate::usage::query::short_id(&r.id),
+                r.repo.clone(),
+                r.branch.clone(),
+                worktree_label(r),
+                link_label(r),
+                age(r.last_activity, now),
+                tokens(r.context_tokens),
+                format!("${:.2}", r.cost_usd),
+            ]
+        })
+        .collect();
+    let mut widths = header.map(str::len);
+    for row in &rows {
+        for (w, cell) in widths.iter_mut().zip(row) {
+            *w = (*w).max(cell.chars().count());
+        }
+    }
+    let line = |cells: Vec<&str>| {
+        let mut out = String::new();
+        for (i, cell) in cells.iter().enumerate() {
+            if i > 0 {
+                out.push_str("  ");
+            }
+            out.push_str(&format!("{:<w$}", cell, w = widths[i]));
+        }
+        out.trim_end().to_string()
+    };
+    let mut out = line(header.to_vec());
+    out.push('\n');
+    for row in &rows {
+        out.push_str(&line(row.iter().map(String::as_str).collect()));
+        out.push('\n');
+    }
+    let attention: Vec<&Record> = records.iter().filter(|r| !r.hint.is_empty()).collect();
+    if !attention.is_empty() {
+        out.push_str("\nSuggestions (nothing is done for you):\n");
+        for r in attention {
+            let mark = if r.needs_attention { "!" } else { "-" };
+            out.push_str(&format!(
+                "{mark} {} {}: {}\n",
+                crate::usage::query::short_id(&r.id),
+                r.branch,
+                r.hint
+            ));
+        }
+    }
+    out.push_str(&format!(
+        "\n{} sessions, as of {} UTC. Issue links marked ? are guessed from the branch name.\n",
+        records.len(),
+        crate::usage::query::clock(now)
+    ));
+    out
+}
+
+/// The `--json` document.
+pub fn render_json(records: &[Record], now: i64) -> Value {
+    let rows: Vec<Value> = records
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "agent": r.agent,
+                "repo": r.repo,
+                "branch": r.branch,
+                "cwd": r.place.cwd,
+                "worktree": r.place.worktree,
+                "worktree_convention": r.place.convention,
+                "worktree_gone": r.place.gone,
+                "uncommitted": r.place.dirty,
+                "issue_inferred": r.issue,
+                "pr": r.pr.map(|p| json!({"number": p.number, "state": p.kind.label()})),
+                "state": r.state.label(),
+                "last_activity": r.last_activity,
+                "context_tokens": r.context_tokens,
+                "cost_usd": r.cost_usd,
+                "unpriced_messages": r.unpriced,
+                "messages": r.messages,
+                "needs_attention": r.needs_attention,
+                "hint": r.hint,
+            })
+        })
+        .collect();
+    json!({"generated_at": now, "sessions": rows})
+}
+
+/// `playbook sessions`: reads the usage store (after ingesting new history),
+/// looks up each session's place and PR, and returns the text or JSON.
+pub fn run(
+    json: bool,
+    paths: &crate::usage::run::Paths,
+    home: &std::path::Path,
+) -> Result<String, String> {
+    let now = crate::common::time::now_secs();
+    let cfg = links::settings(home);
+    let (conn, _) = crate::usage::run::ingest_new(paths)?;
+    let events = crate::usage::db::load_usage_events_since(&conn, now - cfg.recent_days * DAY)?;
+    let mut newest: std::collections::BTreeMap<&str, &UsageEvent> = Default::default();
+    for e in &events {
+        let slot = newest.entry(e.session_id.as_str()).or_insert(e);
+        if e.timestamp > slot.timestamp {
+            *slot = e;
+        }
+    }
+    let heads: Vec<&UsageEvent> = newest.into_values().collect();
+    let found = links::gather(&heads, paths, home);
+    let lookup = |e: &UsageEvent| found.get(&e.session_id).cloned().unwrap_or_default();
+    let all = crate::usage::db::load_usage_events_of_sessions(
+        &conn,
+        &heads
+            .iter()
+            .map(|e| e.session_id.clone())
+            .collect::<Vec<_>>(),
+    )?;
+    let records = build(&all, now, cfg, &lookup);
+    if json {
+        serde_json::to_string_pretty(&render_json(&records, now))
+            .map_err(|e| format!("failed to encode sessions: {e}"))
+    } else {
+        Ok(render_text(&records, now))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOW: i64 = 1_788_400_000;
+
+    fn ev(session: &str, ts: i64, branch: &str, cost: f64) -> UsageEvent {
+        UsageEvent {
+            event_id: format!("{session}{ts}"),
+            timestamp: ts,
+            session_id: session.into(),
+            agent: "claude-code".into(),
+            repo: "playbook".into(),
+            branch: branch.into(),
+            input_tokens: 100,
+            cache_read_tokens: 1000,
+            cache_creation_tokens: 50,
+            cost_usd: cost,
+            ..UsageEvent::default()
+        }
+    }
+
+    fn none(_: &UsageEvent) -> (Place, Option<Pr>) {
+        (Place::default(), None)
+    }
+
+    #[test]
+    fn an_issue_number_comes_from_the_branch_and_a_year_does_not() {
+        assert_eq!(issue_from_branch("feat/536-sessions"), Some(536));
+        assert_eq!(issue_from_branch("fix/issue-12-x"), Some(12));
+        assert_eq!(issue_from_branch("docs/adr-session-management"), None);
+        assert_eq!(issue_from_branch("release/2026"), None);
+        assert_eq!(issue_from_branch("v2"), None);
+        assert_eq!(issue_from_branch("main"), None);
+    }
+
+    #[test]
+    fn a_session_is_working_idle_or_stale_by_its_last_message() {
+        let cfg = Settings::default();
+        assert_eq!(state_of(NOW - 30, NOW, None, cfg), State::Working);
+        assert_eq!(state_of(NOW - 3600, NOW, None, cfg), State::Idle);
+        assert_eq!(state_of(NOW - 3 * DAY, NOW, None, cfg), State::Stale);
+        assert_eq!(state_of(NOW - 3 * DAY + 1, NOW, None, cfg), State::Idle);
+    }
+
+    #[test]
+    fn a_merged_or_closed_pr_is_done_and_an_open_one_is_not() {
+        let cfg = Settings::default();
+        let pr = |kind| Some(Pr { number: 7, kind });
+        assert_eq!(
+            state_of(NOW - 10, NOW, pr(PrKind::Merged), cfg),
+            State::Done
+        );
+        assert_eq!(
+            state_of(NOW - 10, NOW, pr(PrKind::Closed), cfg),
+            State::Done
+        );
+        assert_eq!(
+            state_of(NOW - 10, NOW, pr(PrKind::Open), cfg),
+            State::Working
+        );
+    }
+
+    #[test]
+    fn a_record_sums_the_session_and_sizes_the_context_from_the_newest_message() {
+        let events = [
+            ev("a", NOW - 1200, "feat/9-x", 0.5),
+            ev("a", NOW - 600, "feat/9-x", 0.25),
+        ];
+        let records = build(&events, NOW, Settings::default(), &none);
+        assert_eq!(records.len(), 1);
+        let r = &records[0];
+        assert_eq!(r.cost_usd, 0.75);
+        assert_eq!(r.messages, 2);
+        assert_eq!(r.context_tokens, 1150);
+        assert_eq!(r.issue, Some(9));
+        assert_eq!(r.last_activity, NOW - 600);
+        assert_eq!(r.state, State::Idle);
+    }
+
+    #[test]
+    fn sessions_older_than_the_window_are_left_out_and_the_rest_sort_newest_first() {
+        let events = [
+            ev("old", NOW - 8 * DAY, "b", 1.0),
+            ev("mid", NOW - 3600, "b", 1.0),
+            ev("new", NOW - 10, "b", 1.0),
+        ];
+        let ids: Vec<String> = build(&events, NOW, Settings::default(), &none)
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ids, ["new", "mid"]);
+    }
+
+    #[test]
+    fn a_finished_session_with_uncommitted_work_needs_attention_and_is_never_removed() {
+        let events = [ev("a", NOW - 600, "feat/1-x", 0.1)];
+        let lookup = |_: &UsageEvent| {
+            (
+                Place {
+                    cwd: Some("/w/repo".into()),
+                    worktree: Some("/w/repo".into()),
+                    dirty: Some(true),
+                    ..Place::default()
+                },
+                Some(Pr {
+                    number: 4,
+                    kind: PrKind::Merged,
+                }),
+            )
+        };
+        let r = &build(&events, NOW, Settings::default(), &lookup)[0];
+        assert_eq!(r.state, State::Done);
+        assert!(r.needs_attention);
+        assert!(r.hint.contains("nothing is removed"));
+    }
+
+    #[test]
+    fn a_clean_merged_session_gets_a_suggestion_not_attention() {
+        let events = [ev("a", NOW - 600, "feat/1-x", 0.1)];
+        let lookup = |_: &UsageEvent| {
+            (
+                Place {
+                    dirty: Some(false),
+                    ..Place::default()
+                },
+                Some(Pr {
+                    number: 4,
+                    kind: PrKind::Merged,
+                }),
+            )
+        };
+        let r = &build(&events, NOW, Settings::default(), &lookup)[0];
+        assert!(!r.needs_attention);
+        assert!(r.hint.contains("worktree sweep"));
+    }
+
+    #[test]
+    fn the_text_has_every_column_the_suggestions_and_a_utc_footer() {
+        let events = [ev("abcdef123456", NOW - 7200, "feat/536-x", 1.234)];
+        let lookup = |_: &UsageEvent| {
+            (
+                Place {
+                    cwd: Some("/w/playbook/536".into()),
+                    worktree: Some("/w/playbook/536".into()),
+                    convention: "ccc",
+                    dirty: Some(false),
+                    ..Place::default()
+                },
+                Some(Pr {
+                    number: 540,
+                    kind: PrKind::Merged,
+                }),
+            )
+        };
+        let text = render_text(&build(&events, NOW, Settings::default(), &lookup), NOW);
+        for want in [
+            "STATE",
+            "done",
+            "abcdef12",
+            "playbook",
+            "feat/536-x",
+            "536 (ccc)",
+            "PR #540 merged",
+            "2h",
+            "1k",
+            "$1.23",
+            "Suggestions",
+            "UTC",
+        ] {
+            assert!(text.contains(want), "missing {want:?} in\n{text}");
+        }
+        assert_eq!(render_text(&[], NOW), "No recent sessions.\n");
+    }
+
+    #[test]
+    fn the_json_names_the_guess_and_holds_no_prompt_text() {
+        let events = [ev("a", NOW - 600, "fix/issue-3", 0.1)];
+        let doc = render_json(&build(&events, NOW, Settings::default(), &none), NOW);
+        let row = &doc["sessions"][0];
+        assert_eq!(row["issue_inferred"], 3);
+        assert_eq!(row["state"], "idle");
+        assert!(row["pr"].is_null());
+        assert_eq!(doc["generated_at"], NOW);
+    }
+
+    #[test]
+    fn ages_and_token_counts_read_short() {
+        assert_eq!(age(NOW - 5, NOW), "now");
+        assert_eq!(age(NOW - 90, NOW), "1m");
+        assert_eq!(age(NOW - 7300, NOW), "2h");
+        assert_eq!(age(NOW - 3 * DAY, NOW), "3d");
+        assert_eq!(tokens(0), "-");
+        assert_eq!(tokens(182_000), "182k");
+        assert_eq!(tokens(1_250_000), "1.2M");
+    }
+}

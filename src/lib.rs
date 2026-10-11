@@ -35,6 +35,7 @@ pub mod review;
 pub mod routing;
 pub mod sanitize;
 pub mod segment;
+pub mod sessions;
 pub mod settings;
 pub mod state;
 pub mod statusline;
@@ -453,6 +454,21 @@ pub enum Command {
         /// Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
         #[arg(long, value_name = "RANGE")]
         range: Option<String>,
+    },
+    /// List recent agent sessions with repo, branch, worktree, linked PR, state, context size and cost
+    ///
+    /// Read only. A session is done when the pull request of its branch is
+    /// merged or closed, and stale after `sessions.staleAfterDays` without
+    /// activity. Suggestions are printed, never acted on, and a worktree with
+    /// uncommitted changes is flagged, never removed.
+    ///
+    /// Example: `playbook sessions --json`
+    Sessions {
+        #[command(subcommand)]
+        sub: Option<SessionsCommand>,
+        /// Print the sessions as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Check how well the review triage classifier sorts real pull requests
     ///
@@ -1521,6 +1537,17 @@ pub enum DepsCommand {
     Ensure {
         /// Brewfile to read; defaults to `Brewfile` in the current directory.
         brewfile: Option<PathBuf>,
+    },
+}
+
+/// `playbook sessions` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum SessionsCommand {
+    /// List recent sessions (the default)
+    List {
+        /// Print the sessions as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 

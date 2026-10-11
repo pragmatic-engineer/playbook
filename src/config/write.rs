@@ -102,6 +102,9 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
             whole.is_some_and(|n| (1..=3600).contains(&n)),
             "a whole number between 1 and 3600",
         ),
+        "sessions.staleAfterDays" | "sessions.recentDays" => {
+            (whole.is_some_and(|n| n >= 1), "a positive integer")
+        }
         "hygiene.thresholdTokens" => (
             whole.is_some_and(|n| n >= 10_000),
             "a whole number of at least 10000",
