@@ -3,7 +3,7 @@
 
 //! The usage store: one global SQLite database (not repo-scoped, since spend
 //! is only meaningful as a total across projects). Connection setup mirrors
-//! `gate::db::open_db`: the dashboard server reads while `ingest` writes from
+//! `gate::db::open_db`: the terminal view reads while `ingest` writes from
 //! other processes, which is what WAL mode and `busy_timeout` are for.
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};

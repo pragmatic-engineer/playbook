@@ -57,7 +57,7 @@ impl ClaudeCodeSource {
         files.sort();
         // A file last modified before the watermark cannot hold a newer
         // event, so unchanged transcripts are never re-read. This keeps a
-        // repeated ingest (the dashboard polls every few seconds) cheap.
+        // repeated ingest (the terminal view polls every few seconds) cheap.
         files.retain(|f| !modified_before(f, watermark));
 
         let records = map_files(&files, threads, Dedup::default, |file, repos, seen| {
