@@ -484,3 +484,46 @@ fn the_dark_theme_keeps_the_terminal_ground() {
         .iter()
         .all(|c| matches!(c.bg, Color::Reset | Color::Blue | Color::Cyan)));
 }
+
+fn agents_app(with_telemetry: bool) -> App {
+    use crate::usage::aggregate::Group;
+    use crate::usage::tui::app::ProjectsView;
+    let mut a = app(Theme::Btop);
+    a.projects_view = ProjectsView::Agents;
+    if with_telemetry {
+        let group = |key: &str, messages: u64, cost: f64| Group {
+            key: key.into(),
+            messages,
+            input_tokens: 1_000 * messages,
+            output_tokens: 500 * messages,
+            cost_usd: cost,
+            ..Group::default()
+        };
+        let data = a.data.as_mut().unwrap();
+        data.agents.rows = vec![
+            group("main", 40, 9.0),
+            group("general-purpose", 12, 2.5),
+            group("reviewer", 5, 0.5),
+        ];
+        data.agents.cost_usd = 12.0;
+    }
+    a
+}
+
+#[test]
+fn the_agents_view_lists_cost_per_agent_and_the_telemetry_share() {
+    let text = draw(&agents_app(true), 100, 30);
+    assert!(
+        text.contains("Agents") && text.contains("reviewer"),
+        "{text}"
+    );
+    assert!(text.contains("source telemetry"), "{text}");
+    check("agents_100x30", &text);
+}
+
+#[test]
+fn the_agents_view_says_telemetry_is_off_when_there_are_no_rows() {
+    let text = draw(&agents_app(false), 100, 30);
+    assert!(text.contains("Telemetry off"), "{text}");
+    check("agents_off_100x30", &text);
+}
