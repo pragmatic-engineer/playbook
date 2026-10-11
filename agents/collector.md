@@ -31,7 +31,7 @@ If a source is unreachable, no `gh` auth, no JIRA or Confluence access, report i
 
 ## Output contract
 
-Return a compact structured summary, tight JSON or markdown, that a human reads in under a minute. Every claim cites a path, a ref, a commit, a PR number, or a URL. Never paste raw command output or a transcript: the whole point of running this on Haiku is that it costs little to call and returns little to read. If you capped a count, commits or PRs, say so in the summary.
+Return a compact structured summary, tight JSON or markdown, that a human reads in under a minute. Every claim cites a path, a ref, a commit, a PR number, or a URL. Never paste raw command output or a transcript: the whole point of running this on Haiku is that it costs little to call and returns little to read. If you capped a count, commits or PRs, say so in the summary. Keep the returned message to about 300 words: status, findings each citing a path or ref, and the output file path. The full findings go in the file the brief names, which the cap does not limit.
 
 ## Non-negotiable guardrails
 
