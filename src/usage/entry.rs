@@ -73,6 +73,15 @@ pub fn run(
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             super::collector::run_collect(paths, port, idle_seconds, &stop)
         }
+        Some(UsageCommand::Status { json }) => {
+            let status = super::collector::status(paths)?;
+            if json {
+                serde_json::to_string_pretty(&status)
+                    .map_err(|e| format!("failed to encode the collector status: {e}"))
+            } else {
+                Ok(status.text(crate::common::time::now_secs()))
+            }
+        }
         None if opts.summary => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;
             run_summary(paths, range, crate::common::time::now_secs())

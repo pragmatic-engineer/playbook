@@ -173,7 +173,7 @@ The usage database also holds two tables for OpenTelemetry data, `telemetry_requ
 
 - **Where it listens.** 127.0.0.1 only, JSON protocol only (`http/json`). The default port is 4318. If that is taken it picks a free one and records it. `--port N` asks for a specific port and fails when it is busy.
 - **State.** `collector.json` next to the usage database (owner-only) holds the pid, the port and a bearer token. A second start finds the live collector and says so. A stale file (dead pid) is replaced. The token and port survive restarts, so a session started earlier keeps sending to the right place with the right token.
-- **Idle shutdown.** It stops after 600 seconds with no request (`--idle-seconds`, 0 means never) and clears the pid.
+- **Idle shutdown.** It stops after 600 seconds with no telemetry request (`--idle-seconds`, 0 means never) and clears the pid. Only a request that was read counts: a bare connect, such as the liveness probe `cc` makes or `playbook usage status`, does not reset the timer, and a test polls status while the collector idles out to prove it. A session that is still open when the collector stops loses its export from then on and is read from transcripts, so use `--idle-seconds 0` for a collector that should outlive quiet periods.
 - **Limits.** Headers 16 KiB, body 1 MiB (also when chunked), 50 requests per second (then 429), 5 seconds to send a request. Content type must be `application/json`, a compressed body is refused, and the bearer token is required. Paths: `/v1/logs` is stored, `/v1/metrics` and `/v1/traces` are accepted and dropped.
 - **What is stored.** `api_request`, `tool_result` and `api_error` events, keyed by session id and request id, tool use id, or event sequence, so a redelivered batch changes nothing. An allowlist of attribute keys is read (event name, session id, request id, model, effort, agent name, skill name, tool name, tool use id, success, duration, status code, attempt, event sequence, the four token counts, cost). Every other attribute, including prompts, tool content, file paths, emails, user and organization ids and resource attributes, is never read. Kept names must be plain ASCII (letters, digits and `. _ - : /`), else they are dropped.
 - **Data loss.** Claude Code may drop telemetry sent while no receiver listens. Such a session is read from transcripts.
@@ -214,3 +214,17 @@ Two more views of the projects panel (`4`, then `v` three and four times) read t
 - **Busy time.** The sum of API call time and tool call time. It leaves out the time Claude Code spent thinking between calls, so it is a floor, and it is not Claude Code's own `active_time` metric. The metric is not collected: `cc` sets the metrics exporter to `none`, and a metric point has no key to dedupe on.
 - **Sources and empty state.** Every figure except the cache hit rate is telemetry only, so the panel says `Telemetry off` when the range has no telemetry rows, and the title note reads `source telemetry`. Periods are UTC, the same windows as the rest of the view.
 - **Not verified.** Tool names of MCP tools and plugin tools, which Claude Code may redact without the tool details flag, and the attempt numbers of a real overload (an unknown model was the trial case).
+
+## Checking and running the collector
+
+`playbook usage status` prints whether a collector is running (pid, port, start time and idle limit), how many telemetry rows are stored (API requests, tool calls, API errors) and the time of the newest event with its age. `--json` prints the same fields. It starts nothing, creates no database when there is none, never prints the bearer token, and exits 0 whether or not a collector runs, so a script reads the `running` field. When no collector is running it shows the last port it used.
+
+To keep a collector running for `cc` sessions without a terminal tab, start it in a detached tmux session. The idle limit is off here so it does not stop in a quiet hour:
+
+```
+tmux new-session -d -s playbook-collect 'playbook usage collect --idle-seconds 0'
+playbook usage status
+tmux kill-session -t playbook-collect
+```
+
+`playbook usage collect` stays in the foreground, so any tool that runs a command in the background can run it the same way (`nohup playbook usage collect --idle-seconds 0 &` also works). A second start reports the running collector and exits, so it is safe to put the command in a shell profile or a tmux startup script. Playbook writes no service file for you: a launchd agent or a systemd user unit is yours to write if you want one, and it only needs that one command line.

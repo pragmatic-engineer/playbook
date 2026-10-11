@@ -138,6 +138,7 @@ mod tests {
             pid: std::process::id(),
             port,
             token: "tok".into(),
+            ..State::default()
         }
     }
 
@@ -189,6 +190,7 @@ mod tests {
             pid: 0,
             port: state.port,
             token: "tok".into(),
+            ..State::default()
         };
         assert!(decide(true, false, false, Some(&dead)).is_empty());
     }
