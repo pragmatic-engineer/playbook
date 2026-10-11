@@ -7,11 +7,14 @@
 use super::chart::Plot;
 use super::data::Data;
 use super::panels;
-use super::sort::{day_rows, group_rows, session_day_rows, session_rows, Panel, Sort, PANELS};
+use super::sort::{
+    day_rows, group_rows, pair_rows, session_day_rows, session_rows, Panel, Sort, PANELS,
+};
 use super::theme::{ColorDepth, Theme};
 use super::view;
 use super::worker::DEFAULT_REFRESH_SECONDS;
 use crate::usage::aggregate::SECONDS_PER_DAY;
+use crate::usage::period::pair_groups;
 use crate::usage::query::{Range, WeekStart};
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -137,11 +140,16 @@ impl App {
         self.sorts[panel.index()]
     }
 
+    /// Whether the range is a period shown against the one before it.
+    pub fn compared(&self) -> bool {
+        self.data.as_ref().is_some_and(|d| d.comparison.is_some())
+    }
+
     /// How many rows the panel's table has.
     fn rows(&self, panel: Panel) -> usize {
         let Some(d) = &self.data else { return 0 };
         match panel {
-            Panel::Models => d.models.len(),
+            Panel::Models => pair_groups(&d.models, &d.models_before).len(),
             Panel::Projects => d.repos.len(),
             Panel::Live => d.live.active.len(),
             Panel::Sessions => d.sessions.len(),
@@ -184,9 +192,9 @@ impl App {
         };
         let sort = self.sort(panel);
         match panel {
-            Panel::Models => group_rows(&d.models, sort)
-                .iter()
-                .map(|g| g.key.clone())
+            Panel::Models => pair_rows(&d.models, &d.models_before, sort)
+                .into_iter()
+                .map(|p| p.key)
                 .collect(),
             Panel::Projects => group_rows(&d.repos, sort)
                 .iter()
@@ -219,7 +227,10 @@ impl App {
         let at = self.selection(panel);
         let sort = self.sort(panel);
         match panel {
-            Panel::Models => group_rows(&d.models, sort).get(at).map(|g| g.key.clone()),
+            Panel::Models => pair_rows(&d.models, &d.models_before, sort)
+                .into_iter()
+                .nth(at)
+                .map(|p| p.key),
             Panel::Projects => group_rows(&d.repos, sort).get(at).map(|g| g.key.clone()),
             Panel::Live => session_rows(&d.live.active, sort)
                 .get(at)
@@ -363,7 +374,7 @@ impl App {
             KeyCode::End | KeyCode::Char('G') => self.select(focus, usize::MAX),
             KeyCode::Char('v') => self.spend_view = self.spend_view.next(),
             KeyCode::Char('s') if self.is_table(focus) => {
-                self.sorts[focus.index()] = self.sort(focus).next(focus);
+                self.sorts[focus.index()] = self.sort(focus).next(focus, self.compared());
             }
             KeyCode::Char('S') if self.is_table(focus) => {
                 self.sorts[focus.index()] = self.sort(focus).flip();
@@ -699,6 +710,60 @@ mod tests {
         ));
         assert_eq!(app.selection(Panel::Models), 0);
         assert_eq!(app.focus, Panel::Models);
+    }
+
+    #[test]
+    fn the_models_table_lists_the_models_of_both_periods_and_sorts_by_the_change() {
+        use crate::usage::query::LiveView;
+        use crate::usage::UsageEvent;
+        let ev = |ts: i64, model: &str, cost: f64| UsageEvent {
+            event_id: format!("{model}{ts}"),
+            timestamp: ts,
+            session_id: "s".into(),
+            model: model.into(),
+            cost_usd: cost,
+            ..UsageEvent::default()
+        };
+        let events = [
+            ev(NOW - 60, "opus", 5.0),
+            ev(NOW - 86_400 - 60, "opus", 4.0),
+            ev(NOW - 86_400 - 30, "haiku", 3.0),
+        ];
+        let mut app = App::new(Range::Today);
+        app.data = Some(Data::build(
+            &events,
+            LiveView::default(),
+            NOW,
+            Range::Today,
+            "",
+        ));
+        // Haiku had no cost now but still has a row, and the table is compared.
+        assert!(app.compared());
+        assert_eq!(app.rows(Panel::Models), 2);
+        assert_eq!(app.row_ids(Panel::Models), ["opus", "haiku"]);
+        // `s` reaches the previous cost and the change.
+        app.key(press(KeyCode::Char('3')));
+        app.key(press(KeyCode::Char('s')));
+        assert_eq!(app.sort(Panel::Models).col, 4);
+        app.key(press(KeyCode::Char('s')));
+        assert_eq!(app.sort(Panel::Models).col, 5);
+        // Biggest rise first: opus +1, haiku -3.
+        assert_eq!(app.row_ids(Panel::Models), ["opus", "haiku"]);
+        app.key(press(KeyCode::Char('S')));
+        assert_eq!(app.row_ids(Panel::Models), ["haiku", "opus"]);
+        // Another range has no comparison and only the first four columns.
+        app.range = Range::All;
+        app.data = Some(Data::build(
+            &events,
+            LiveView::default(),
+            NOW,
+            Range::All,
+            "",
+        ));
+        assert!(!app.compared());
+        app.sorts[Panel::Models.index()] = Sort::new(3, true);
+        app.key(press(KeyCode::Char('s')));
+        assert_eq!(app.sort(Panel::Models).col, 0);
     }
 
     #[test]

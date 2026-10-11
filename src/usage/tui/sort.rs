@@ -6,6 +6,7 @@
 
 use super::data::DayPoint;
 use crate::usage::aggregate::Group;
+use crate::usage::period::{pair_groups, Paired};
 use crate::usage::query::{ActiveSession, SessionDay};
 use std::cmp::Ordering;
 
@@ -50,11 +51,13 @@ impl Panel {
 
     /// Columns of the panel's table that `s` can sort by, as indexes into its
     /// column list. Empty for a graph. The spend panel is a graph until it is
-    /// switched to its daily table, which `App` knows.
-    pub fn sortable(self) -> &'static [usize] {
+    /// switched to its daily table, which `App` knows. The models table has the
+    /// previous cost and the change as well when the range has a comparison.
+    pub fn sortable(self, compared: bool) -> &'static [usize] {
         match self {
             Panel::Tokens => &[],
             Panel::Spend => &[0, 1, 2, 3, 4],
+            Panel::Models if compared => &[0, 1, 2, 3, 4, 5],
             Panel::Models | Panel::Projects => &[0, 1, 2, 3],
             Panel::Live => &[1, 2, 3, 4, 5],
             Panel::Sessions => &[1, 2, 3, 4, 5, 6],
@@ -87,8 +90,8 @@ impl Sort {
 
     /// The next sortable column of `panel`, wrapping. A new column starts in
     /// the direction that suits it: text ascending, numbers descending.
-    pub fn next(self, panel: Panel) -> Sort {
-        let cols = panel.sortable();
+    pub fn next(self, panel: Panel, compared: bool) -> Sort {
+        let cols = panel.sortable(compared);
         let Some(at) = cols.iter().position(|c| *c == self.col) else {
             return self;
         };
@@ -170,6 +173,28 @@ pub fn session_rows(sessions: &[ActiveSession], sort: Sort) -> Vec<&ActiveSessio
     rows
 }
 
+/// Models with their change against the previous period. Column 5 is the
+/// change in cost.
+pub fn pair_rows(current: &[Group], before: &[Group], sort: Sort) -> Vec<Paired> {
+    let mut rows = pair_groups(current, before);
+    rows.sort_by(|a, b| {
+        let by = match sort.col {
+            1 => a.current.messages.cmp(&b.current.messages),
+            2 => group_tokens(&a.current).cmp(&group_tokens(&b.current)),
+            3 => a.current.cost_usd.total_cmp(&b.current.cost_usd),
+            4 => a.previous.cost_usd.total_cmp(&b.previous.cost_usd),
+            5 => cost_change(a).total_cmp(&cost_change(b)),
+            _ => a.key.cmp(&b.key),
+        };
+        sort.order(by).then_with(|| a.key.cmp(&b.key))
+    });
+    rows
+}
+
+pub fn cost_change(p: &Paired) -> f64 {
+    p.current.cost_usd - p.previous.cost_usd
+}
+
 /// The sessions of the period grouped by day, newest day first whatever the
 /// sort. The sort orders the sessions inside each day.
 pub fn session_day_rows(rows: &[SessionDay], sort: Sort) -> Vec<&SessionDay> {
@@ -233,20 +258,20 @@ mod tests {
         let mut s = Panel::Models.default_sort();
         let mut seen = vec![s.col];
         for _ in 0..4 {
-            s = s.next(Panel::Models);
+            s = s.next(Panel::Models, false);
             seen.push(s.col);
         }
         assert_eq!(seen, [3, 0, 1, 2, 3]);
         // Text starts ascending, numbers descending.
-        assert!(!Sort::new(3, true).next(Panel::Models).desc);
-        assert!(Sort::new(0, false).next(Panel::Models).desc);
+        assert!(!Sort::new(3, true).next(Panel::Models, false).desc);
+        assert!(Sort::new(0, false).next(Panel::Models, false).desc);
     }
 
     #[test]
     fn the_token_graph_has_nothing_to_sort() {
         let s = Panel::Tokens.default_sort();
-        assert_eq!(s.next(Panel::Tokens), s);
-        assert!(Panel::Tokens.sortable().is_empty());
+        assert_eq!(s.next(Panel::Tokens, false), s);
+        assert!(Panel::Tokens.sortable(false).is_empty());
     }
 
     fn day(day: i64, cost: f64, messages: usize, model: &str) -> DayPoint {
@@ -287,12 +312,12 @@ mod tests {
         let mut s = Panel::Spend.default_sort();
         let mut seen = vec![s.col];
         for _ in 0..5 {
-            s = s.next(Panel::Spend);
+            s = s.next(Panel::Spend, false);
             seen.push(s.col);
         }
         assert_eq!(seen, [0, 1, 2, 3, 4, 0]);
         assert!(
-            !Sort::new(3, true).next(Panel::Spend).desc,
+            !Sort::new(3, true).next(Panel::Spend, false).desc,
             "model: ascending"
         );
     }
@@ -314,6 +339,51 @@ mod tests {
         assert_eq!(rows[0].id, "new");
         let rows = session_rows(&sessions, Sort::new(5, true));
         assert_eq!(rows[0].id, "old");
+    }
+
+    fn model_group(key: &str, cost: f64) -> Group {
+        Group {
+            key: key.into(),
+            messages: 1,
+            cost_usd: cost,
+            ..Group::default()
+        }
+    }
+
+    #[test]
+    fn models_sort_by_cost_previous_cost_and_change() {
+        let now = [
+            model_group("a", 5.0),
+            model_group("b", 1.0),
+            model_group("c", 3.0),
+        ];
+        let before = [model_group("a", 5.0), model_group("b", 9.0)];
+        let keys = |sort| {
+            pair_rows(&now, &before, sort)
+                .iter()
+                .map(|r| r.key.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keys(Panel::Models.default_sort()), ["a", "c", "b"]);
+        assert_eq!(keys(Sort::new(4, true)), ["b", "a", "c"]);
+        assert_eq!(keys(Sort::new(5, true)), ["c", "a", "b"]);
+        assert_eq!(keys(Sort::new(0, false)), ["a", "b", "c"]);
+        // A model that only the previous period had is a row with nothing now.
+        let gone = pair_rows(&[], &before, Sort::new(3, true));
+        assert_eq!(gone.len(), 2);
+        assert_eq!(gone[0].current.messages, 0);
+    }
+
+    #[test]
+    fn the_models_table_has_two_more_columns_to_sort_when_it_compares() {
+        let mut s = Panel::Models.default_sort();
+        let mut seen = vec![s.col];
+        for _ in 0..6 {
+            s = s.next(Panel::Models, true);
+            seen.push(s.col);
+        }
+        assert_eq!(seen, [3, 4, 5, 0, 1, 2, 3]);
+        assert!(Panel::Models.sortable(false).len() < Panel::Models.sortable(true).len());
     }
 
     fn day_row(day: i64, id: &str, cost: f64, messages: usize) -> SessionDay {
