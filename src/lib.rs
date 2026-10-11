@@ -122,6 +122,40 @@ pub enum EffortCommand {
         /// Print JSON
         #[arg(long)]
         json: bool,
+        /// Print a proposed config patch instead (still read only)
+        #[arg(long)]
+        patch: bool,
+    },
+    /// Apply the proposed effort patch to playbook's config, after approval
+    ///
+    /// Builds the same patch as `suggest --patch`, shows it, and asks `y/N`.
+    /// `--yes` approves without asking, and is required when not at a
+    /// terminal. Writes only playbook's own config: the global tier, a backup
+    /// of the previous `effort.*` keys under `~/.config/playbook/effort/`, a
+    /// ledger and a change log. Never goes below an agent's quality floor,
+    /// never touches the reviewer, the auditor or any agent marked costly to
+    /// miss, and never exceeds a ceiling. Claude Code's settings are not touched.
+    ///
+    /// Example: `playbook effort apply --range 90d`
+    Apply {
+        /// 30d, 60d, 90d, month or all
+        #[arg(long, default_value = "30d")]
+        range: String,
+        /// Approve without asking
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Undo what `effort apply` changed, in one command
+    ///
+    /// Restores each key the patch changed to its earlier value, unless you
+    /// edited it since. `--all` also sets every other `effort.*` key in the
+    /// global tier back to its default. A backup is written first.
+    ///
+    /// Example: `playbook effort reset --all`
+    Reset {
+        /// Also reset every `effort.*` key to its default
+        #[arg(long)]
+        all: bool,
     },
     /// List every component with its shipped effort and effective level
     List {

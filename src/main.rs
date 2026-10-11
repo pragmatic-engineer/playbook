@@ -120,24 +120,40 @@ fn main() {
                         )
                     );
                 }
-                playbook::EffortCommand::Suggest { range, json } => {
-                    let Some(range) = usage::query::Range::parse(Some(&range)) else {
-                        eprintln!(
-                            "error: unknown range '{range}', use today, week, last-week, month, last-month, 30d, 60d, 90d or all"
-                        );
-                        std::process::exit(1);
-                    };
-                    let now = common::time::now_secs();
-                    match effort::suggest::run(
+                playbook::EffortCommand::Suggest { range, json, patch } => {
+                    let report = suggest_report(&range, &home, claude.as_deref(), root.as_deref());
+                    match (patch, json) {
+                        (true, true) => println!("{}", effort::patch::build(&report).to_json()),
+                        (true, false) => println!("{}", effort::patch::build(&report).to_text()),
+                        (false, true) => println!("{}", report.to_json()),
+                        (false, false) => println!("{}", report.to_text()),
+                    }
+                }
+                playbook::EffortCommand::Apply { range, yes } => {
+                    use std::io::IsTerminal;
+                    let report = suggest_report(&range, &home, claude.as_deref(), root.as_deref());
+                    let patch = effort::patch::build(&report);
+                    let interactive = std::io::stdin().is_terminal();
+                    let stdin = std::io::stdin();
+                    match effort::patch::run_apply(
                         &home,
-                        claude.as_deref(),
-                        root.as_deref(),
-                        &common::paths::usage_db_dir().join("usage.db"),
-                        range,
-                        now,
+                        &patch,
+                        yes,
+                        interactive,
+                        &mut stdin.lock(),
+                        &mut std::io::stdout(),
+                        common::time::now_secs(),
                     ) {
-                        Ok(report) if json => println!("{}", report.to_json()),
-                        Ok(report) => println!("{}", report.to_text()),
+                        Ok(msg) => println!("{msg}"),
+                        Err(err) => {
+                            eprintln!("error: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                playbook::EffortCommand::Reset { all } => {
+                    match effort::patch::reset(&home, all, common::time::now_secs()) {
+                        Ok(msg) => println!("{msg}"),
                         Err(err) => {
                             eprintln!("error: {err}");
                             std::process::exit(1);
@@ -1782,5 +1798,34 @@ fn enter_dir(label: &str, dir: Option<&str>) {
     if let Err(err) = pr::shared::enter_dir(dir) {
         eprintln!("{label}: {err}");
         std::process::exit(1);
+    }
+}
+
+/// The stage 1 report for `range`, or exit with the reason it cannot be made.
+fn suggest_report(
+    range: &str,
+    home: &std::path::Path,
+    claude: Option<&str>,
+    root: Option<&std::path::Path>,
+) -> effort::suggest::Report {
+    let Some(range) = usage::query::Range::parse(Some(range)) else {
+        eprintln!(
+            "error: unknown range '{range}', use today, week, last-week, month, last-month, 30d, 60d, 90d or all"
+        );
+        std::process::exit(1);
+    };
+    match effort::suggest::run(
+        home,
+        claude,
+        root,
+        &common::paths::usage_db_dir().join("usage.db"),
+        range,
+        common::time::now_secs(),
+    ) {
+        Ok(report) => report,
+        Err(err) => {
+            eprintln!("error: {err}");
+            std::process::exit(1);
+        }
     }
 }

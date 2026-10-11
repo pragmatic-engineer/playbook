@@ -56,13 +56,21 @@ Older versions kept `config.json` files. The first run imports them and renames 
 
 `playbook effort suggest` lists the agents where a change to effort looks safe or needed. It reads your local usage store (the same one `playbook usage` fills) and prints, for each agent, how often it was dispatched, how often at a higher or lower variant than it ships at, repeats inside a session, and cost per effort level for its model. Add `--json` for scripts and `--range 30d|60d|90d|month|all` to change the window (default `30d`).
 
-- It only reads. It never writes your config, your memory or any Claude Code settings. To act on a suggestion, run the `playbook config set --global effort.agents.<name> <level>` command it prints, or ignore it. Setting a key back to `auto` (`playbook config set --global effort.agents.<name> auto`, or `playbook effort auto` for the global ceiling) undoes it.
+- `suggest` only reads. It never writes your config, your memory or any Claude Code settings. To act on a suggestion, use the patch below, run the `playbook config set --global effort.agents.<name> <level>` command it prints, or ignore it.
 - It only proposes a lower level where a benchmark showed quality holds (the quality floor table in `src/effort/floor.rs`). Today every agent ships at its floor, so a clean report usually says no change. Agents where a missed finding is costly (the reviewer and the auditor) are never proposed for lowering.
 - It tells you when a ceiling you set sits below an agent's floor, which can make results worse.
 - With less than 7 days of history, or fewer than 20 dispatches over 5 sessions for an agent, it says there is not enough data and proposes nothing.
 - Cost is per model and effort level and includes the main session, because a usage row does not say which agent made it. Read it as a rough guide.
 
-There are no config keys for it yet. The thresholds are constants in `src/effort/suggest.rs`. Applying a patch and choosing effort per dispatch automatically are later stages (see [ADR-0022](../adr/0022-effort-auto-tune-from-evidence.md)) and do not exist yet.
+The thresholds are constants in `src/effort/suggest.rs`.
+
+### Apply a patch, and undo it
+
+- `playbook effort suggest --patch` (add `--json` for scripts) prints the proposed `playbook config set --global effort.agents.<name> <floor>` lines with the evidence for each. It writes nothing.
+- `playbook effort apply` builds the same patch, shows it and asks `y/N`. `--yes` approves without asking, and is required when input is not a terminal. Nothing is applied without one of the two.
+- A patch line is a global ceiling for that agent, so it applies to every project and every diff. It never goes below the agent's quality floor, never names an agent marked costly to miss (the reviewer, the auditor), and never raises anything above a ceiling.
+- Before writing, the previous global `effort.*` keys are saved to `~/.config/playbook/effort/backups/config-<time>.json`. The keys changed are recorded in `effort/ledger.json`, and each change is appended to `effort/changes.log` (one JSON object per line, UTC time). The write goes through playbook's own config store and atomic file helpers. Claude Code's settings are never touched.
+- `playbook effort reset` puts each patched key back to what it was before, and leaves a key you edited by hand since. `playbook effort reset --all` also sets every other global `effort.*` key to its default. A backup is written first. Choosing effort per dispatch automatically is a later stage (see [ADR-0022](../adr/0022-effort-auto-tune-from-evidence.md)) and does not exist yet.
 
 ## See also
 

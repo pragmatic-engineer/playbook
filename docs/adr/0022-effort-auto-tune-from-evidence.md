@@ -1,8 +1,8 @@
 # ADR-0022: Tune Effort From Local Evidence, in Three Stages
 
-- **Status:** Accepted
+- **Status:** Accepted. Stage 1 shipped (#578). Stage 2 shipped (#784, in progress for stage 3).
 - **Date created:** 2026-10-10
-- **Date modified:** 2026-10-10
+- **Date modified:** 2026-10-11
 
 ## Context
 
@@ -73,7 +73,7 @@ There is no ground truth for a finding nobody saw. The design treats every measu
 Each stage ships and is judged on its own. Stage 2 and 3 are not part of the work that accepts this ADR.
 
 1. **Report (the first change after this ADR).** `playbook effort suggest` prints, per agent, the evidence and whether a change looks safe or needed, and `--json` prints the same for scripts. It reads the usage store, the floor table and the effort resolution. It writes nothing. It cannot lower anything it is not permitted to, and it says "no change" when that is the answer. The command does not exist when this ADR is accepted. Its work items are: filter tool events by the same window as usage rows (the existing loader has no time filter), normalize dispatch names (strip the `playbook:` or `playbook-variants:` prefix, split a `-low`, `-medium`, `-high`, `-xhigh` or `-max` suffix off a known agent, and count rows with any other name as excluded), treat an empty `effort` on a usage row as its own "unknown" bucket, and open the store read only so the report never creates or migrates it. The windows are the existing `30d`, `60d`, `90d`, `month` and `all`.
-2. **Proposed config patch.** `playbook effort suggest --patch` shows the exact `playbook config set` commands for the user's own config, with the evidence, and applies them only on explicit approval, recording each key in the ledger. Needs per component attribution first, so that the evidence is the component's own cost. A patch sets a global ceiling (`effort.agents.<name>` is global tier only, as in ADR-0017), so it applies to every project and every diff. It is therefore offered only for a component whose floor is below shipped and which is not costly to miss, and the user is told that it applies everywhere. A ledgered key the user later edits by hand leaves the ledger, so reset never overwrites an edit.
+2. **Proposed config patch (shipped).** `playbook effort suggest --patch` shows the exact `playbook config set` commands for the user's own config, with the evidence, and applies them only on explicit approval, recording each key in the ledger. `playbook effort apply` asks `y/N` (or takes `--yes`), keeps a backup of the previous keys, and `playbook effort reset` undoes it. Per component cost attribution did not ship first, so the evidence shown per line is the shared bucket plus the floor's benchmark source, labelled as such. A patch sets a global ceiling (`effort.agents.<name>` is global tier only, as in ADR-0017), so it applies to every project and every diff. It is therefore offered only for a component whose floor is below shipped and which is not costly to miss, and the user is told that it applies everywhere. A ledgered key the user later edits by hand leaves the ledger, so reset never overwrites an edit.
 3. **Optional automatic choice per dispatch.** A config key (default `off`) lets the dispatch step pick among the variants allowed by the ceiling, using diff shape, protected paths and the component's history. Every automatic choice is printed in the dispatch report with its one line reason, appended to a local log, and shown in `playbook effort suggest`. It is never silent, never above the ceiling, and a failure to read evidence falls back to the shipped default. Today `playbook effort resolve` never returns a variant above the shipped effort (`src/effort/component.rs`), and the orchestrator picks `reviewer-xhigh` itself. Stage 3 keeps raising in the orchestrator guidance and adds only a new, separate lookup, so `resolve` keeps its contract.
 
 ### 7. Relation to #532 and #575

@@ -18,6 +18,7 @@
 pub mod component;
 pub mod floor;
 pub mod model_cap;
+pub mod patch;
 pub mod suggest;
 
 use crate::config::{self, write};
