@@ -48,7 +48,7 @@ brew install pragmatic-engineer/tap/playbook
 playbook init
 ```
 
-`playbook init` wires the hooks and the `PATH` block, so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Upgrade with `brew upgrade playbook`.
+`playbook init` wires the hooks and the `PATH` block, so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `init` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Upgrade with `brew upgrade playbook`.
 
 ### Without `curl | bash`
 
