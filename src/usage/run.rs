@@ -57,6 +57,8 @@ pub fn ingest_new(paths: &Paths) -> Result<(Connection, IngestStats), String> {
         stats.tools_inserted += more.tools_inserted;
         stats.duplicates_skipped += more.duplicates_skipped;
     }
+    // Telemetry never changes the totals; a failure here leaves transcripts as the source.
+    let _ = super::reconcile::reconcile(&conn, crate::common::time::now_secs());
     Ok((conn, stats))
 }
 

@@ -33,12 +33,23 @@ CREATE TABLE IF NOT EXISTS session_sources (
     session_id TEXT PRIMARY KEY,
     source TEXT NOT NULL CHECK(source IN ('telemetry','transcript')),
     updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_reconcile (
+    session_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL CHECK(state IN ('complete','partial','disagree')),
+    telemetry_tokens INTEGER NOT NULL,
+    transcript_tokens INTEGER NOT NULL,
+    telemetry_cost REAL NOT NULL,
+    transcript_cost REAL NOT NULL,
+    note TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
 );";
 
 const DOWN_SQL: &str = "
 DROP INDEX IF EXISTS telemetry_requests_by_time;
 DROP TABLE IF EXISTS telemetry_requests;
-DROP TABLE IF EXISTS session_sources;";
+DROP TABLE IF EXISTS session_sources;
+DROP TABLE IF EXISTS session_reconcile;";
 
 /// Where a session's numbers come from. A session with no recorded source is
 /// read from transcripts, so history before telemetry needs no backfill.
@@ -265,6 +276,7 @@ mod tests {
 
         assert!(!table_exists(&conn, "telemetry_requests"));
         assert!(!table_exists(&conn, "session_sources"));
+        assert!(!table_exists(&conn, "session_reconcile"));
         assert!(table_exists(&conn, "usage_events"));
         migrate_up(&conn).unwrap();
         assert_eq!(count_requests(&conn).unwrap(), 0);

@@ -497,6 +497,7 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "session_reconcile",
                 "session_sources",
                 "telemetry_requests",
                 "tool_invocation_events",

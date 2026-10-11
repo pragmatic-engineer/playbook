@@ -20,6 +20,7 @@ pub mod period;
 pub mod pricing;
 pub mod query;
 pub mod receiver;
+pub mod reconcile;
 pub mod repo;
 pub mod run;
 pub mod summary;
