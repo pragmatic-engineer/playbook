@@ -67,7 +67,7 @@ pub fn env_for(state: &State) -> Vec<(String, String)> {
     let pairs = [
         ("CLAUDE_CODE_ENABLE_TELEMETRY", "1".to_string()),
         ("OTEL_LOGS_EXPORTER", "otlp".to_string()),
-        ("OTEL_METRICS_EXPORTER", "none".to_string()),
+        ("OTEL_METRICS_EXPORTER", "otlp".to_string()),
         ("OTEL_TRACES_EXPORTER", "none".to_string()),
         ("OTEL_EXPORTER_OTLP_PROTOCOL", "http/json".to_string()),
         (

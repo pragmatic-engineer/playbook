@@ -756,7 +756,7 @@ fn telemetry_split(
 }
 
 /// Rows in the health view: the figures listed in `health`.
-pub const HEALTH_ROWS: usize = 6;
+pub const HEALTH_ROWS: usize = 9;
 
 /// The title note of a telemetry view: its source and, for a period, the
 /// span it is compared with.
@@ -869,6 +869,7 @@ fn counted(count: u64, rate: f64) -> String {
 /// first. Only a few rows fit in a small terminal and the table scrolls.
 fn figures(data: &Data) -> Vec<Figure> {
     let h = &data.health;
+    let active = h.now.active_ms > 0 || h.before.as_ref().is_some_and(|b| b.active_ms > 0);
     let hit = |t: &crate::usage::query::Totals| {
         let all = t.input_tokens + t.cache_creation_tokens + t.cache_read_tokens;
         if all == 0 {
@@ -903,9 +904,17 @@ fn figures(data: &Data) -> Vec<Figure> {
                 counted(h.tool_failures, h.tool_error_rate()),
             )
         }),
-        figure("Busy time", true, &|h| {
-            (h.busy_ms() as f64, duration_ms(h.busy_ms() as f64))
-        }),
+        // Claude Code's own active time when it was collected, else the
+        // floor made of API and tool time.
+        if active {
+            figure("Active time", true, &|h| {
+                (h.active_ms as f64, duration_ms(h.active_ms as f64))
+            })
+        } else {
+            figure("Busy time", true, &|h| {
+                (h.busy_ms() as f64, duration_ms(h.busy_ms() as f64))
+            })
+        },
         Figure {
             name: "Cache hit (transcripts)",
             now: hit(&data.totals),
@@ -916,6 +925,13 @@ fn figures(data: &Data) -> Vec<Figure> {
         },
         figure("API requests", true, &|h| {
             (h.requests as f64, compact(h.requests))
+        }),
+        figure("Lines changed", true, &|h| {
+            (h.lines_changed as f64, compact(h.lines_changed))
+        }),
+        figure("Commits", true, &|h| (h.commits as f64, compact(h.commits))),
+        figure("Pull requests", true, &|h| {
+            (h.pull_requests as f64, compact(h.pull_requests))
         }),
     ]
 }
