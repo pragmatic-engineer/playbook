@@ -243,3 +243,7 @@ Traversal depth is 1 for all edge types except `supersedes`, which is followed f
 ## Forks versus fresh subagents
 
 An omitted `subagent_type` forks the parent conversation and bills its full history again. Playbook never relies on that: dispatching skills and commands set a `subagent_type` and pass a brief. `context: fork` in command frontmatter starts a fresh agent without parent history and is unaffected.
+
+### Inline briefs for reviewers and implementers
+
+`/playbook:deep-review`, `/playbook:quick-review` and `/playbook:implement` build the brief once per run: diff, numbered excerpts, test command, and the limit to read beyond them only when needed. On the seeded-defect reviewer fixture (7 seeded bugs, 3 clean, 3 repeats, Opus medium) recall stayed 21 of 21 and clean cases 9 of 9, turns fell from 3.4 to 2.2 per run and cost from $0.0447 to $0.0395.
