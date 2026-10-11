@@ -287,6 +287,87 @@ fn anchor_index_is_built_once_and_reused_on_second_edit() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// A second edit of the same file in one session stays quiet, a new file in the
+/// same session still gets its anchors, and a new session starts fresh.
+#[test]
+fn anchors_are_emitted_once_per_file_per_session() {
+    let home = scratch_home("anchors-once-per-file");
+    write_graph(&home, BASE_GRAPH);
+    let a = edit_path(&home, "src/a.py");
+
+    let first = stdout_of(&run_anchors_hook(&home, &a, "s-once"));
+    assert!(
+        first.contains("Memory facts anchored to src/a.py"),
+        "{first}"
+    );
+
+    let second = stdout_of(&run_anchors_hook(&home, &a, "s-once"));
+    assert!(second.is_empty(), "same file, same session: {second}");
+
+    let other = stdout_of(&run_anchors_hook(
+        &home,
+        &edit_path(&home, "src/b.py"),
+        "s-once",
+    ));
+    assert!(
+        other.contains("Memory facts anchored to src/b.py"),
+        "{other}"
+    );
+
+    let fresh = stdout_of(&run_anchors_hook(&home, &a, "s-new"));
+    assert!(
+        fresh.contains("Memory facts anchored to src/a.py"),
+        "{fresh}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A file with many anchored facts is cut to about 600 characters and says how
+/// many were left out.
+#[test]
+fn the_edit_anchor_message_is_capped_at_about_600_chars() {
+    let home = scratch_home("anchors-cap");
+    let mut nodes =
+        String::from(r#"{"id":"code:src/a.py","file":"src/a.py","scope":"code","type":"code"}"#);
+    let mut edges = String::new();
+    for i in 0..30 {
+        nodes.push_str(&format!(
+            r#",{{"id":"global/f{i}","file":"f{i}.md","scope":"global","type":"project","name":"fact-{i}","description":"{}"}}"#,
+            "long description ".repeat(6)
+        ));
+        if !edges.is_empty() {
+            edges.push(',');
+        }
+        edges.push_str(&format!(
+            r#"{{"from":"global/f{i}","to":"code:src/a.py","relation":"anchors"}}"#
+        ));
+    }
+    write_graph(
+        &home,
+        &format!(r#"{{"nodes":[{nodes}],"edges":[{edges}]}}"#),
+    );
+
+    let out = stdout_of(&run_anchors_hook(
+        &home,
+        &edit_path(&home, "src/a.py"),
+        "s-cap",
+    ));
+    let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    let msg = parsed["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(
+        msg.chars().count() <= 600,
+        "{} chars: {msg}",
+        msg.chars().count()
+    );
+    assert!(msg.starts_with("Memory facts anchored to src/a.py:"));
+    assert!(msg.contains("more anchored facts omitted"), "{msg}");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// the retired shell test scenario 7: staleness is pinned behaviour, a
 /// fact added to the graph after the cache was built does not surface
 /// within the same session.
