@@ -16,12 +16,18 @@ pub struct Flags {
     /// Add no playbook hook entries, including the guards in the shared settings
     #[arg(long, overrides_with = "hooks")]
     pub no_hooks: bool,
-    /// Merge playbook's shared settings (status line, options) into settings.json
+    /// Merge playbook's shared settings (options, without the status line) into settings.json
     #[arg(long, overrides_with = "no_settings")]
     pub settings: bool,
     /// Do not touch the shared settings
     #[arg(long, overrides_with = "settings")]
     pub no_settings: bool,
+    /// Use the playbook status line (sets statusLine.command to `playbook statusline`)
+    #[arg(long, overrides_with = "no_statusline")]
+    pub statusline: bool,
+    /// Do not set or change statusLine in settings.json
+    #[arg(long, overrides_with = "statusline")]
+    pub no_statusline: bool,
     /// Also apply the security defaults (permissions rules, autoupdater off); off unless asked or `security.defaults` is true
     #[arg(long, overrides_with = "no_security")]
     pub security: bool,
@@ -56,6 +62,7 @@ pub struct Flags {
 pub struct Choices {
     pub hooks: bool,
     pub settings: bool,
+    pub statusline: bool,
     pub security: bool,
     pub path: bool,
     pub aliases: bool,
@@ -101,7 +108,13 @@ pub fn resolve(
         settings: decide(
             flags.settings,
             flags.no_settings,
-            "Merge playbook's shared settings (status line, options) into settings.json? Hooks are a separate question.",
+            "Merge playbook's shared settings (options) into settings.json? Hooks and the status line are separate questions.",
+            true,
+        ),
+        statusline: decide(
+            flags.statusline,
+            flags.no_statusline,
+            "Use the playbook status line?",
             true,
         ),
         security: pick(flags.security, flags.no_security).unwrap_or(security_config),
@@ -168,6 +181,7 @@ mod tests {
             Choices {
                 hooks: true,
                 settings: true,
+                statusline: true,
                 security: false,
                 path: true,
                 aliases: false,
@@ -191,7 +205,7 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.aliases);
-        assert_eq!(asked.len(), 3, "{asked:?}");
+        assert_eq!(asked.len(), 4, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && !q.contains("ccc")));
@@ -203,7 +217,7 @@ mod tests {
             q.contains("hooks")
         });
         assert!(c.hooks);
-        assert!(!c.settings && !c.path && !c.aliases && !c.system_prompt);
+        assert!(!c.settings && !c.statusline && !c.path && !c.aliases && !c.system_prompt);
     }
 
     #[test]
@@ -213,7 +227,40 @@ mod tests {
             ..Flags::default()
         };
         let c = resolve(&flags, true, false, &mut never);
-        assert!(c.hooks && c.settings && c.path && !c.aliases && !c.system_prompt);
+        assert!(c.hooks && c.settings && c.statusline && c.path && !c.aliases && !c.system_prompt);
+    }
+
+    #[test]
+    fn the_statusline_question_comes_after_settings_and_before_path() {
+        let mut order = Vec::new();
+        resolve(&Flags::default(), true, false, &mut |q, d| {
+            order.push(q.to_string());
+            d
+        });
+        let pos = |needle: &str| order.iter().position(|q| q.contains(needle)).unwrap();
+        assert!(pos("shared settings") < pos("Use the playbook status line"));
+        assert!(pos("Use the playbook status line") < pos("PATH"));
+        assert!(order.iter().any(|q| q == "Use the playbook status line?"));
+    }
+
+    #[test]
+    fn the_statusline_flags_decide_without_a_question() {
+        let on = Flags {
+            statusline: true,
+            ..Flags::default()
+        };
+        let off = Flags {
+            no_statusline: true,
+            ..Flags::default()
+        };
+        assert!(
+            resolve(&on, true, false, &mut |q, d| {
+                assert!(q != "Use the playbook status line?");
+                d
+            })
+            .statusline
+        );
+        assert!(!resolve(&off, false, false, &mut never).statusline);
     }
 
     #[test]

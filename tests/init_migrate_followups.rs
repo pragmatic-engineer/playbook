@@ -43,6 +43,7 @@ fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPath
         aliases: false,
         hooks: true,
         settings: true,
+        statusline: true,
         security: false,
         path_setup: None,
         repo,

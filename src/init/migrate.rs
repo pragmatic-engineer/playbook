@@ -480,9 +480,19 @@ fn with_lock_retry(home: &Path, retries: u32, f: impl FnOnce()) -> bool {
 
 /// Runs the shipped registry.
 pub fn run_pending(ctx: &Ctx) -> Report {
+    run_pending_for(ctx, true)
+}
+
+/// Runs the shipped registry. With `statusline` false the migration that
+/// rewrites `statusLine.command` stays pending, so init leaves that key alone.
+pub fn run_pending_for(ctx: &Ctx, statusline: bool) -> Report {
     let root = playbook_root_from(&ctx.home);
     let pending = crate::state::pending_legacy(&root);
-    let mut report = run_with(&registry(), ctx);
+    let mut migrations = registry();
+    if !statusline {
+        migrations.retain(|m| m.id != "0006-statusline-rust-command");
+    }
+    let mut report = run_with(&migrations, ctx);
     if pending > 0 && crate::state::pending_legacy(&root) == 0 {
         report.steps.insert(
             0,
