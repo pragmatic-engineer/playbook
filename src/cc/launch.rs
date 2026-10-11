@@ -140,6 +140,12 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         std::env::set_var(DISABLE_AUTO_MEMORY_ENV, "1");
     }
 
+    // The session's own environment only, and only when no telemetry setting
+    // exists anywhere. Claude Code's settings files are read, never written.
+    for (var, value) in super::telemetry::session_env(&crate::common::home_dir(), &cwd_now) {
+        std::env::set_var(var, value);
+    }
+
     let mut cwd = cwd_now;
     let rc = dispatch(&mut cwd, &all);
     if let Some(dir) = variants_dir {

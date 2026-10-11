@@ -895,7 +895,9 @@ pub enum UsageCommand {
     /// from Claude Code's JSON telemetry. Prompts, tool content, paths, emails
     /// and user ids are never stored. A second start reports the running
     /// collector. It stops by itself after the idle time. Sessions that sent no
-    /// telemetry are read from transcripts as before.
+    /// telemetry are read from transcripts as before. While it runs, `cc`
+    /// points its sessions at it unless `usage.telemetry` is `off` or you set
+    /// telemetry yourself.
     ///
     /// Example: `playbook usage collect --idle-seconds 1800`
     Collect {

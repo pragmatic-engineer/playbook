@@ -41,6 +41,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.theme` | `btop` | `btop`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.refreshSeconds` | `5` | a number, see the config keys guide for the range |
+| `usage.telemetry` | `auto` | `auto`, `off` |
 | `hygiene.enabled` | `true` | `true`, `false` |
 | `hygiene.thresholdTokens` | `250000` | a number, see the config keys guide for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
@@ -1105,7 +1106,7 @@ Subcommands: `collect`, `ingest`
 
 Run the local OpenTelemetry receiver in the foreground
 
-Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free port when that one is taken) and stores API request cost and token rows from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector. It stops by itself after the idle time. Sessions that sent no telemetry are read from transcripts as before.
+Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free port when that one is taken) and stores API request cost and token rows from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector. It stops by itself after the idle time. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself.
 
 Example: `playbook usage collect --idle-seconds 1800`
 
