@@ -8,7 +8,9 @@
 use super::app::{App, ProjectsView, SpendView};
 use super::chart::{self, Metric, Plot};
 use super::data::{Data, Slots};
-use super::fmt::{compact, fit, money, signed_money, signed_percent, WEEKDAYS};
+use super::fmt::{
+    compact, duration_ms, fit, money, percent, signed_money, signed_percent, WEEKDAYS,
+};
 use super::sort::{
     self, cost_change, group_rows, group_tokens, pair_rows, session_day_rows, session_rows, Panel,
     Sort,
@@ -18,6 +20,7 @@ use super::view::{visible_rows, window_start};
 use crate::usage::aggregate::{date_key, SECONDS_PER_DAY};
 use crate::usage::period::Change;
 use crate::usage::query::{short_id, weekday, ActiveSession, Range, ACTIVE_SECONDS};
+use crate::usage::telemetry_db::{Health, ToolStat};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -164,6 +167,7 @@ fn table<'a>(
     panel: Panel,
     block: Block<'static>,
     cols: &[Col],
+    sortable: bool,
     rows: impl FnOnce(&[usize]) -> Vec<Vec<Cell<'a>>>,
 ) {
     let inner = area.width.saturating_sub(2);
@@ -210,7 +214,7 @@ fn table<'a>(
             }
         })
         .collect();
-    let header = head(pal, cols, &keep, app.sort(panel), true);
+    let header = head(pal, cols, &keep, app.sort(panel), sortable);
     frame.render_widget(
         Table::new(rows, constraints).header(header).block(block),
         area,
@@ -432,42 +436,53 @@ fn daily_table(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
         col(">cost", Constraint::Length(9), 0),
         col("top model", Constraint::Fill(1), 40),
     ];
-    table(frame, area, app, pal, Panel::Spend, block, &cols, |w| {
-        rows.iter()
-            .map(|d| {
-                let date = date_key(d.day);
-                let text = format!(
-                    "{} {}",
-                    WEEKDAYS[weekday(d.day)],
-                    if long { date.as_str() } else { &date[5..] }
-                );
-                let style = if d.day == today {
-                    today_style(pal)
-                } else if Some(d.day) == peak_day {
-                    peak_style(pal)
-                } else {
-                    Style::default()
-                };
-                let top = d
-                    .top_model()
-                    .map_or(String::new(), |m| short_model(m).to_string());
-                let model = match d.top_model() {
-                    Some(m) => Span::styled(
-                        fit(&top, w[4]),
-                        Style::default().fg(pal.color(chart::series_ink(pal, data.slots.slot(m)))),
-                    ),
-                    None => Span::raw(""),
-                };
-                vec![
-                    Cell::from(text).style(style),
-                    num(d.messages.to_string()),
-                    num(compact(d.tokens)),
-                    cost_cell(pal, d.cost_usd, peak),
-                    Cell::from(Line::from(model)),
-                ]
-            })
-            .collect()
-    });
+    table(
+        frame,
+        area,
+        app,
+        pal,
+        Panel::Spend,
+        block,
+        &cols,
+        true,
+        |w| {
+            rows.iter()
+                .map(|d| {
+                    let date = date_key(d.day);
+                    let text = format!(
+                        "{} {}",
+                        WEEKDAYS[weekday(d.day)],
+                        if long { date.as_str() } else { &date[5..] }
+                    );
+                    let style = if d.day == today {
+                        today_style(pal)
+                    } else if Some(d.day) == peak_day {
+                        peak_style(pal)
+                    } else {
+                        Style::default()
+                    };
+                    let top = d
+                        .top_model()
+                        .map_or(String::new(), |m| short_model(m).to_string());
+                    let model = match d.top_model() {
+                        Some(m) => Span::styled(
+                            fit(&top, w[4]),
+                            Style::default()
+                                .fg(pal.color(chart::series_ink(pal, data.slots.slot(m)))),
+                        ),
+                        None => Span::raw(""),
+                    };
+                    vec![
+                        Cell::from(text).style(style),
+                        num(d.messages.to_string()),
+                        num(compact(d.tokens)),
+                        cost_cell(pal, d.cost_usd, peak),
+                        Cell::from(Line::from(model)),
+                    ]
+                })
+                .collect()
+        },
+    );
 }
 
 /// Tokens per day.
@@ -532,49 +547,59 @@ pub fn models(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
         cols.push(col("share", Constraint::Length(8), 48));
     }
     let total = data.totals.cost_usd;
-    table(frame, area, app, pal, Panel::Models, block, &cols, |w| {
-        sorted
-            .iter()
-            .map(|p| {
-                let name = short_model(&p.key);
-                let mut cells = vec![
-                    // A swatch in the model's color, as in the stacked chart.
-                    Cell::from(Line::from(vec![
-                        swatch(pal, data.slots.slot(&p.key)),
-                        // The space after the swatch goes first when the name is tight.
-                        Span::raw(match w[0] {
-                            0..=15 => fit(name, w[0].saturating_sub(1)),
-                            _ => format!(" {}", fit(name, w[0] - 2)),
-                        }),
-                    ])),
-                    num(p.current.messages.to_string()),
-                    num(compact(group_tokens(&p.current))),
-                    num(money(p.current.cost_usd)),
-                ];
-                if compared {
-                    let delta = cost_change(p);
-                    let percent = Change::of(p.current.cost_usd, p.previous.cost_usd).percent;
-                    cells.extend([
-                        num(money(p.previous.cost_usd)).style(fg(pal, pal.graph_text)),
-                        change_cell(pal, signed_money(delta), delta),
-                        change_cell(
-                            pal,
-                            signed_percent(percent, p.current.cost_usd > 0.0),
-                            delta,
-                        ),
-                    ]);
-                } else {
-                    let share = if total > 0.0 {
-                        p.current.cost_usd / total
+    table(
+        frame,
+        area,
+        app,
+        pal,
+        Panel::Models,
+        block,
+        &cols,
+        true,
+        |w| {
+            sorted
+                .iter()
+                .map(|p| {
+                    let name = short_model(&p.key);
+                    let mut cells = vec![
+                        // A swatch in the model's color, as in the stacked chart.
+                        Cell::from(Line::from(vec![
+                            swatch(pal, data.slots.slot(&p.key)),
+                            // The space after the swatch goes first when the name is tight.
+                            Span::raw(match w[0] {
+                                0..=15 => fit(name, w[0].saturating_sub(1)),
+                                _ => format!(" {}", fit(name, w[0] - 2)),
+                            }),
+                        ])),
+                        num(p.current.messages.to_string()),
+                        num(compact(group_tokens(&p.current))),
+                        num(money(p.current.cost_usd)),
+                    ];
+                    if compared {
+                        let delta = cost_change(p);
+                        let percent = Change::of(p.current.cost_usd, p.previous.cost_usd).percent;
+                        cells.extend([
+                            num(money(p.previous.cost_usd)).style(fg(pal, pal.graph_text)),
+                            change_cell(pal, signed_money(delta), delta),
+                            change_cell(
+                                pal,
+                                signed_percent(percent, p.current.cost_usd > 0.0),
+                                delta,
+                            ),
+                        ]);
                     } else {
-                        0.0
-                    };
-                    cells.push(meter(pal, pal.cached, share, 8));
-                }
-                cells
-            })
-            .collect()
-    });
+                        let share = if total > 0.0 {
+                            p.current.cost_usd / total
+                        } else {
+                            0.0
+                        };
+                        cells.push(meter(pal, pal.cached, share, 8));
+                    }
+                    cells
+                })
+                .collect()
+        },
+    );
 }
 
 /// Projects of the period: messages, tokens, cost and share of the total cost.
@@ -582,6 +607,8 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
     match app.projects_view {
         ProjectsView::Agents => return agents(frame, area, app, data, pal),
         ProjectsView::Skills => return skills(frame, area, app, data, pal),
+        ProjectsView::Tools => return tools(frame, area, app, data, pal),
+        ProjectsView::Health => return health(frame, area, app, data, pal),
         ProjectsView::Projects => {}
     }
     let focused = app.focus == Panel::Projects;
@@ -598,25 +625,35 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
         col(">cost", Constraint::Length(9), 0),
         col("share", Constraint::Length(8), 48),
     ];
-    table(frame, area, app, pal, Panel::Projects, block, &cols, |w| {
-        sorted
-            .iter()
-            .map(|g| {
-                let share = if total_cost > 0.0 {
-                    g.cost_usd / total_cost
-                } else {
-                    0.0
-                };
-                vec![
-                    Cell::from(fit(&g.key, w[0])),
-                    num(g.messages.to_string()),
-                    num(compact(group_tokens(g))),
-                    num(money(g.cost_usd)),
-                    meter(pal, pal.avail, share, 8),
-                ]
-            })
-            .collect()
-    });
+    table(
+        frame,
+        area,
+        app,
+        pal,
+        Panel::Projects,
+        block,
+        &cols,
+        true,
+        |w| {
+            sorted
+                .iter()
+                .map(|g| {
+                    let share = if total_cost > 0.0 {
+                        g.cost_usd / total_cost
+                    } else {
+                        0.0
+                    };
+                    vec![
+                        Cell::from(fit(&g.key, w[0])),
+                        num(g.messages.to_string()),
+                        num(compact(group_tokens(g))),
+                        num(money(g.cost_usd)),
+                        meter(pal, pal.avail, share, 8),
+                    ]
+                })
+                .collect()
+        },
+    );
 }
 
 /// Cost per agent, from telemetry. The transcript totals stay the totals; the
@@ -687,25 +724,251 @@ fn telemetry_split(
         col(">cost", Constraint::Length(9), 0),
         col("share", Constraint::Length(8), 48),
     ];
-    table(frame, area, app, pal, Panel::Projects, block, &cols, |w| {
-        sorted
-            .iter()
-            .map(|g| {
-                let share = if total_cost > 0.0 {
-                    g.cost_usd / total_cost
-                } else {
-                    0.0
-                };
-                vec![
-                    Cell::from(fit(&g.key, w[0])),
-                    num(g.messages.to_string()),
-                    num(compact(group_tokens(g))),
-                    num(money(g.cost_usd)),
-                    meter(pal, pal.avail, share, 8),
-                ]
-            })
-            .collect()
-    });
+    table(
+        frame,
+        area,
+        app,
+        pal,
+        Panel::Projects,
+        block,
+        &cols,
+        true,
+        |w| {
+            sorted
+                .iter()
+                .map(|g| {
+                    let share = if total_cost > 0.0 {
+                        g.cost_usd / total_cost
+                    } else {
+                        0.0
+                    };
+                    vec![
+                        Cell::from(fit(&g.key, w[0])),
+                        num(g.messages.to_string()),
+                        num(compact(group_tokens(g))),
+                        num(money(g.cost_usd)),
+                        meter(pal, pal.avail, share, 8),
+                    ]
+                })
+                .collect()
+        },
+    );
+}
+
+/// Rows in the health view: the figures listed in `health`.
+pub const HEALTH_ROWS: usize = 6;
+
+/// The title note of a telemetry view: its source and, for a period, the
+/// span it is compared with.
+fn telemetry_note(pal: &Palette, data: &Data) -> Line<'static> {
+    let text = match &data.comparison {
+        Some(c) => format!("source telemetry  vs {}", c.period.previous_label()),
+        None => "source telemetry".to_string(),
+    };
+    note_line(pal, &text, pal.box_mem).right_aligned()
+}
+
+/// Latency and error rate per tool, from telemetry. For a period each tool
+/// also shows its average latency in the previous span and the change.
+fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    let focused = app.focus == Panel::Projects;
+    let mut block = panel_block(pal, Panel::Projects, "Tools", pal.box_mem, focused);
+    if !data.telemetry_rows {
+        return empty(frame, area, pal, block, TELEMETRY_OFF);
+    }
+    if data.health.tools.is_empty() {
+        return empty(
+            frame,
+            area,
+            pal,
+            block,
+            "No tool calls in this range. v switches the view.",
+        );
+    }
+    block = block.title(telemetry_note(pal, data));
+    let compared = data.comparison.is_some();
+    // The comparison columns only exist for a period, and only when wide.
+    let min = if compared { 46 } else { u16::MAX };
+    let cols = [
+        col("tool", Constraint::Fill(1), 0),
+        col(">calls", Constraint::Length(6), 0),
+        col(">err", Constraint::Length(5), 0),
+        col(">avg", Constraint::Length(7), 0),
+        col(">max", Constraint::Length(7), 70),
+        col(">prev", Constraint::Length(7), min),
+        col(">change", Constraint::Length(8), min),
+    ];
+    let before: std::collections::BTreeMap<&str, &ToolStat> = data
+        .health
+        .tools_before
+        .iter()
+        .map(|t| (t.name.as_str(), t))
+        .collect();
+    table(
+        frame,
+        area,
+        app,
+        pal,
+        Panel::Projects,
+        block,
+        &cols,
+        false,
+        |w| {
+            data.health
+                .tools
+                .iter()
+                .map(|t| {
+                    let rate_color = if t.failures > 0 {
+                        pal.warn
+                    } else {
+                        pal.graph_text
+                    };
+                    let mut cells = vec![
+                        Cell::from(fit(&t.name, w[0])),
+                        num(t.calls.to_string()),
+                        num(percent(t.error_rate())).style(fg(pal, rate_color)),
+                        num(duration_ms(t.avg_ms())),
+                        num(duration_ms(t.max_ms as f64)),
+                    ];
+                    match before.get(t.name.as_str()) {
+                        Some(p) => {
+                            let delta = t.avg_ms() - p.avg_ms();
+                            let pct = Change::of(t.avg_ms(), p.avg_ms()).percent;
+                            cells.push(num(duration_ms(p.avg_ms())).style(fg(pal, pal.graph_text)));
+                            cells.push(change_cell(pal, signed_percent(pct, t.calls > 0), delta));
+                        }
+                        None => {
+                            cells.push(num("-").style(fg(pal, pal.graph_text)));
+                            cells.push(change_cell(pal, "new".to_string(), 0.0));
+                        }
+                    }
+                    cells
+                })
+                .collect()
+        },
+    );
+}
+
+/// One figure of the health view. `better_up` says a rise is good news (cache
+/// hit rate), else a rise is a warning.
+struct Figure {
+    name: &'static str,
+    now: f64,
+    before: Option<f64>,
+    now_text: String,
+    before_text: Option<String>,
+    better_up: bool,
+}
+
+/// A count with its rate beside it: `6 (2.9%)`.
+fn counted(count: u64, rate: f64) -> String {
+    format!("{count} ({})", percent(rate))
+}
+
+/// The figures of the health view, the ones that tell something is wrong
+/// first. Only a few rows fit in a small terminal and the table scrolls.
+fn figures(data: &Data) -> Vec<Figure> {
+    let h = &data.health;
+    let hit = |t: &crate::usage::query::Totals| {
+        let all = t.input_tokens + t.cache_creation_tokens + t.cache_read_tokens;
+        if all == 0 {
+            0.0
+        } else {
+            t.cache_read_tokens as f64 / all as f64
+        }
+    };
+    let figure = |name, better_up, f: &dyn Fn(&Health) -> (f64, String)| {
+        let (now, now_text) = f(&h.now);
+        let before = h.before.as_ref().map(f);
+        Figure {
+            name,
+            now,
+            before: before.as_ref().map(|b| b.0),
+            now_text,
+            before_text: before.map(|b| b.1),
+            better_up,
+        }
+    };
+    let cache = data.comparison.as_ref().map(|c| hit(&c.previous));
+    vec![
+        figure("API errors", false, &|h| {
+            (h.errors as f64, counted(h.errors, h.api_error_rate()))
+        }),
+        figure("Retries", false, &|h| {
+            (h.retried as f64, h.retried.to_string())
+        }),
+        figure("Tool errors", false, &|h| {
+            (
+                h.tool_failures as f64,
+                counted(h.tool_failures, h.tool_error_rate()),
+            )
+        }),
+        figure("Busy time", true, &|h| {
+            (h.busy_ms() as f64, duration_ms(h.busy_ms() as f64))
+        }),
+        Figure {
+            name: "Cache hit (transcripts)",
+            now: hit(&data.totals),
+            before: cache,
+            now_text: percent(hit(&data.totals)),
+            before_text: cache.map(percent),
+            better_up: true,
+        },
+        figure("API requests", true, &|h| {
+            (h.requests as f64, compact(h.requests))
+        }),
+    ]
+}
+
+/// API errors, retries, tool errors, busy time and cache hit rate for the
+/// range against the previous span, from telemetry. The cache hit rate comes
+/// from transcripts, so it stays available without telemetry.
+fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    let focused = app.focus == Panel::Projects;
+    let mut block = panel_block(pal, Panel::Projects, "Health", pal.box_mem, focused);
+    if !data.telemetry_rows {
+        return empty(frame, area, pal, block, TELEMETRY_OFF);
+    }
+    block = block.title(telemetry_note(pal, data));
+    let min = if data.health.before.is_some() {
+        0
+    } else {
+        u16::MAX
+    };
+    let cols = [
+        col("figure", Constraint::Fill(1), 0),
+        col(">now", Constraint::Length(12), 0),
+        col(">before", Constraint::Length(12), min),
+        col(">change", Constraint::Length(8), min),
+    ];
+    let rows = figures(data);
+    debug_assert_eq!(rows.len(), HEALTH_ROWS);
+    table(
+        frame,
+        area,
+        app,
+        pal,
+        Panel::Projects,
+        block,
+        &cols,
+        false,
+        |w| {
+            rows.iter()
+                .map(|f| {
+                    let mut cells = vec![Cell::from(fit(f.name, w[0])), num(f.now_text.clone())];
+                    if let (Some(b), Some(text)) = (f.before, &f.before_text) {
+                        let delta = f.now - b;
+                        let pct = Change::of(f.now, b).percent;
+                        // A rise reads as a warning unless a rise is the good news.
+                        let tone = if f.better_up { -delta } else { delta };
+                        cells.push(num(text.clone()).style(fg(pal, pal.graph_text)));
+                        cells.push(change_cell(pal, signed_percent(pct, f.now > 0.0), tone));
+                    }
+                    cells
+                })
+                .collect()
+        },
+    );
 }
 
 /// `45s`, `7m`, `2h`.
@@ -761,21 +1024,31 @@ pub fn live(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette
     ];
     let rows = session_rows(&live.active, app.sort(Panel::Live));
     let peak = rows.iter().map(|s| s.cost_usd).fold(0.0, f64::max);
-    table(frame, area, app, pal, Panel::Live, block, &cols, |w| {
-        rows.iter()
-            .map(|s| {
-                let (state, color) = session_state(data.now, s, pal);
-                vec![
-                    Cell::from(state).style(Style::default().fg(color)),
-                    Cell::from(fit(&s.repo, w[1])),
-                    Cell::from(fit(short_model(&s.model), w[2])),
-                    num(s.messages.to_string()),
-                    cost_cell(pal, s.cost_usd, peak),
-                    num(age(data.now - s.last)),
-                ]
-            })
-            .collect()
-    });
+    table(
+        frame,
+        area,
+        app,
+        pal,
+        Panel::Live,
+        block,
+        &cols,
+        true,
+        |w| {
+            rows.iter()
+                .map(|s| {
+                    let (state, color) = session_state(data.now, s, pal);
+                    vec![
+                        Cell::from(state).style(Style::default().fg(color)),
+                        Cell::from(fit(&s.repo, w[1])),
+                        Cell::from(fit(short_model(&s.model), w[2])),
+                        num(s.messages.to_string()),
+                        cost_cell(pal, s.cost_usd, peak),
+                        num(age(data.now - s.last)),
+                    ]
+                })
+                .collect()
+        },
+    );
 }
 
 /// Every session of the range, grouped by day (UTC, newest first): the day
@@ -807,39 +1080,49 @@ pub fn sessions(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
     let rows = session_day_rows(&data.sessions, app.sort(Panel::Sessions));
     let peak = rows.iter().map(|s| s.cost_usd).fold(0.0, f64::max);
     let today = data.now.div_euclid(SECONDS_PER_DAY);
-    table(frame, area, app, pal, Panel::Sessions, block, &cols, |w| {
-        rows.iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let first_of_day = i == 0 || rows[i - 1].day != s.day;
-                let day = if !first_of_day {
-                    Cell::from("")
-                } else {
-                    let date = date_key(s.day);
-                    let text = if long {
-                        format!("{} {}", WEEKDAYS[weekday(s.day)], &date[5..])
+    table(
+        frame,
+        area,
+        app,
+        pal,
+        Panel::Sessions,
+        block,
+        &cols,
+        true,
+        |w| {
+            rows.iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    let first_of_day = i == 0 || rows[i - 1].day != s.day;
+                    let day = if !first_of_day {
+                        Cell::from("")
                     } else {
-                        date[5..].to_string()
+                        let date = date_key(s.day);
+                        let text = if long {
+                            format!("{} {}", WEEKDAYS[weekday(s.day)], &date[5..])
+                        } else {
+                            date[5..].to_string()
+                        };
+                        let style = if s.day == today {
+                            today_style(pal)
+                        } else {
+                            Style::default().add_modifier(Modifier::BOLD)
+                        };
+                        Cell::from(text).style(style)
                     };
-                    let style = if s.day == today {
-                        today_style(pal)
-                    } else {
-                        Style::default().add_modifier(Modifier::BOLD)
-                    };
-                    Cell::from(text).style(style)
-                };
-                vec![
-                    day,
-                    Cell::from(short_id(&s.id)),
-                    Cell::from(fit(&s.repo, w[2])),
-                    Cell::from(fit(short_model(&s.model), w[3])),
-                    num(s.messages.to_string()),
-                    num(compact(s.tokens)),
-                    cost_cell(pal, s.cost_usd, peak),
-                ]
-            })
-            .collect()
-    });
+                    vec![
+                        day,
+                        Cell::from(short_id(&s.id)),
+                        Cell::from(fit(&s.repo, w[2])),
+                        Cell::from(fit(short_model(&s.model), w[3])),
+                        num(s.messages.to_string()),
+                        num(compact(s.tokens)),
+                        cost_cell(pal, s.cost_usd, peak),
+                    ]
+                })
+                .collect()
+        },
+    );
 }
 
 #[cfg(test)]

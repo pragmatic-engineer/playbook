@@ -557,6 +557,112 @@ fn the_skills_view_says_telemetry_is_off_when_there_are_no_rows() {
 #[test]
 fn v_cycles_projects_agents_skills_and_back() {
     use crate::usage::tui::app::ProjectsView::*;
-    assert_eq!(Projects.next().next().next(), Projects);
+    assert_eq!(Projects.next().next().next().next().next(), Projects);
     assert_eq!(Agents.next(), Skills);
+    assert_eq!(Skills.next(), Tools);
+    assert_eq!(Tools.next(), Health);
+}
+
+fn health_app(with_telemetry: bool, view: crate::usage::tui::app::ProjectsView) -> App {
+    use crate::usage::telemetry_db::{Health, ToolStat};
+    let mut a = app(Theme::Btop);
+    let events = fixture();
+    let live = live_view(&events, &events, &events, NOW);
+    a.range = Range::Today;
+    let mut data = Data::build(&events, live, NOW, Range::Today, "");
+    if with_telemetry {
+        let t = |name: &str, calls: u64, failures: u64, total_ms: u64, max_ms: u64| ToolStat {
+            name: name.into(),
+            calls,
+            failures,
+            total_ms,
+            max_ms,
+        };
+        data.telemetry_rows = true;
+        data.health.tools = vec![
+            t("Bash", 40, 4, 40 * 900, 12_000),
+            t("Read", 120, 0, 120 * 8, 90),
+            t("Edit", 30, 3, 30 * 15, 80),
+        ];
+        data.health.tools_before = vec![
+            t("Bash", 30, 1, 30 * 600, 9_000),
+            t("Read", 90, 0, 90 * 10, 70),
+        ];
+        data.health.now = Health {
+            requests: 200,
+            api_ms: 900_000,
+            errors: 6,
+            retried: 2,
+            tool_calls: 190,
+            tool_failures: 7,
+            tool_ms: 37_000,
+        };
+        data.health.before = Some(Health {
+            requests: 150,
+            api_ms: 600_000,
+            errors: 3,
+            retried: 1,
+            tool_calls: 120,
+            tool_failures: 1,
+            tool_ms: 20_000,
+        });
+    }
+    a.data = Some(data);
+    a.projects_view = view;
+    a
+}
+
+#[test]
+fn the_tools_view_shows_latency_and_error_rate_against_the_previous_period() {
+    use crate::usage::tui::app::ProjectsView;
+    let text = draw(&health_app(true, ProjectsView::Tools), 100, 30);
+    assert!(text.contains("Tools") && text.contains("Bash"), "{text}");
+    assert!(
+        text.contains("vs yesterday") && text.contains("source telemetry"),
+        "{text}"
+    );
+    check("tools_100x30", &text);
+}
+
+#[test]
+fn the_health_view_shows_errors_retries_busy_time_and_cache_hit_against_the_previous_period() {
+    use crate::usage::tui::app::ProjectsView;
+    let text = draw(&health_app(true, ProjectsView::Health), 100, 30);
+    assert!(
+        text.contains("Health") && text.contains("Retries"),
+        "{text}"
+    );
+    // A tall terminal shows every figure, the cache hit rate from transcripts too.
+    let tall = draw(&health_app(true, ProjectsView::Health), 160, 50);
+    assert!(
+        tall.contains("Cache hit") && tall.contains("Busy time"),
+        "{tall}"
+    );
+    check("health_100x30", &text);
+}
+
+#[test]
+fn the_tools_and_health_views_say_telemetry_is_off_when_there_are_no_rows() {
+    use crate::usage::tui::app::ProjectsView;
+    for view in [ProjectsView::Tools, ProjectsView::Health] {
+        let text = draw(&health_app(false, view), 100, 30);
+        assert!(text.contains("Telemetry off"), "{view:?}\n{text}");
+    }
+}
+
+#[test]
+fn the_tools_view_is_readable_at_the_minimum_size_and_without_a_comparison() {
+    use crate::usage::tui::app::ProjectsView;
+    let a = health_app(true, ProjectsView::Tools);
+    assert!(draw(&a, 80, 24).contains("Bash"));
+    let mut b = app(Theme::Btop);
+    b.projects_view = ProjectsView::Health;
+    let data = b.data.as_mut().unwrap();
+    data.telemetry_rows = true;
+    data.health.now.requests = 5;
+    let text = draw(&b, 100, 30);
+    assert!(
+        text.contains("API errors") && !text.contains("before"),
+        "{text}"
+    );
 }
