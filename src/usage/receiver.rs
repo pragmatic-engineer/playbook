@@ -7,12 +7,11 @@
 //! only, handles one connection at a time with hard limits (header size, body
 //! size, content type, request rate, read deadline), requires a bearer token
 //! when one is set, and answers `Connection: close` to every request. Only the
-//! JSON protocol is supported. `/v1/logs` is parsed by `otlp::parse_logs`
-//! (the attribute allowlist) and stored; `/v1/metrics` and `/v1/traces` are
-//! accepted and dropped.
+//! JSON protocol is supported. `/v1/logs` and `/v1/metrics` are parsed by `otlp`
+//! (the attribute allowlist) and stored; `/v1/traces` is accepted and dropped.
 
 use super::otlp;
-use super::telemetry_db::{insert_error, insert_request, insert_tool};
+use super::telemetry_db::{insert_error, insert_metric, insert_request, insert_tool};
 use rusqlite::Connection;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -239,6 +238,21 @@ fn precheck(
 
 /// Stores a request's rows. Returns the status and body to send.
 fn dispatch(conn: &Connection, req: &Request, now: i64) -> (u16, String) {
+    if req.path == "/v1/metrics" {
+        let Ok(points) = otlp::parse_metrics(&req.body, now) else {
+            return (400, r#"{"error":"invalid OTLP JSON"}"#.to_string());
+        };
+        let stored = conn.unchecked_transaction().and_then(|tx| {
+            for p in &points {
+                insert_metric(&tx, p).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            }
+            tx.commit()
+        });
+        return match stored {
+            Ok(()) => (200, r#"{"partialSuccess":{}}"#.to_string()),
+            Err(_) => (503, r#"{"error":"store unavailable"}"#.to_string()),
+        };
+    }
     if req.path != "/v1/logs" {
         return (200, "{}".to_string());
     }
@@ -587,13 +601,20 @@ mod tests {
                 &logs_body("r2"),
             );
             let d = post(port, "/v1/logs", &auth, b"nope");
-            let e = post(port, "/v1/metrics", &auth, b"{}");
+            let m = br#"{"resourceMetrics":[{"scopeMetrics":[{"metrics":[{"name":"claude_code.active_time.total","sum":{"aggregationTemporality":1,"dataPoints":[{"startTimeUnixNano":"1","timeUnixNano":"2000000000","asDouble":9,"attributes":[{"key":"session.id","value":{"stringValue":"s1"}},{"key":"type","value":{"stringValue":"user"}}]}]}}]}]}]}"#;
+            let e = post(port, "/v1/metrics", &auth, m);
+            let e2 = post(port, "/v1/metrics", &auth, m);
+            assert_eq!(e2.0, 200);
             [a.0, b.0, c.0, d.0, e.0]
         });
         let why = serve(&listener, &conn, &c, &stop, || 1).unwrap();
         assert_eq!(client.join().unwrap(), [200, 200, 401, 400, 200]);
         assert_eq!(why, "idle");
         assert_eq!(count_requests(&conn).unwrap(), 1);
+        let active: f64 = conn
+            .query_row("SELECT SUM(value) FROM telemetry_metrics", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(active, 9.0, "a redelivered metric point is stored once");
         let dump: String = conn
             .query_row(
                 "SELECT group_concat(model||effort||agent_name) FROM telemetry_requests",
