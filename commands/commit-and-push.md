@@ -8,6 +8,8 @@ agent: playbook:git
 
 # Commit and Push
 
+**You are already the executing subagent for this command: run the steps below directly and never call the Skill tool to start it again.**
+
 Generate a commit message from the staged diff, commit, optionally rebase, and push. One flow.
 
 ## Run this now
