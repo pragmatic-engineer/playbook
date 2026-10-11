@@ -31,6 +31,11 @@ const TRUTHY: [&str; 3] = ["true", "1", "yes"];
 
 const WARNING: &str = "You backgrounded a command whose result a later step usually needs (install/build/typecheck). Backgrounding it and then running the next command is a common failure: e.g. `npm run build` before `npm install` finished gives `tsc: not found`. If anything downstream depends on this, run it in the FOREGROUND (run_in_background off) with an extended timeout (up to 600000ms) instead. A backgrounded job re-invokes you only when it exits; shell state and `wait` do NOT persist across Bash calls, so don't poll it (no Monitor/`wait` to synchronize).";
 
+/// Nudge for a foreground long command with no explicit timeout. The Bash tool
+/// default is 2 minutes, and `gh run watch` or a full `cargo test` routinely
+/// outlast it, which kills the command (exit 143) and costs a retry turn.
+const LONG_FOREGROUND_NOTE: &str = "This command often runs longer than the 2 minute default Bash timeout and would be killed (exit 143). Pick one: set an explicit timeout (up to 600000 ms), or run it with run_in_background and wait for the exit notification. Use run_in_background when nothing in the next step depends on the result. Do not poll it.";
+
 pub fn run(payload: &Payload) {
     if std::env::var("BG_AWAIT_GUARD").as_deref() == Ok("0") {
         return;
@@ -41,11 +46,34 @@ pub fn run(payload: &Payload) {
     }
     let backgrounded = payload.field(".tool_input.run_in_background");
     if !TRUTHY.contains(&backgrounded.as_str()) {
+        if payload.field(".tool_input.timeout").is_empty() && is_long_running(&cmd) {
+            emit_pre_context("PreToolUse", LONG_FOREGROUND_NOTE);
+        }
         return;
     }
     if is_await_sensitive(&cmd) {
         emit_pre_context("PreToolUse", WARNING);
     }
+}
+
+/// Commands known to outlast the default Bash timeout: CI watches and full
+/// Rust builds or test runs.
+fn is_long_running(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    let tokens: Vec<&str> = lower.split_whitespace().collect();
+    tokens.iter().enumerate().any(|(i, tok)| {
+        let next = tokens.get(i + 1).copied();
+        match *tok {
+            "gh" => {
+                (next == Some("run") && tokens.get(i + 2) == Some(&"watch"))
+                    || (next == Some("pr")
+                        && tokens.get(i + 2) == Some(&"checks")
+                        && tokens.contains(&"--watch"))
+            }
+            "cargo" => matches!(next, Some("test" | "build" | "nextest" | "clippy")),
+            _ => false,
+        }
+    })
 }
 
 fn is_await_sensitive(cmd: &str) -> bool {

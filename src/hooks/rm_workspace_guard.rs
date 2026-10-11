@@ -92,7 +92,7 @@ pub fn run(payload: &Payload) {
     // which joins on the FIRST character of IFS only. Matching bash's quirk
     // rather than the prettier form keeps the message byte-identical.
     emit_pre_deny(&format!(
-        "rm blocked: {} is outside {roots} and ~/.claude/**",
+        "rm blocked: {} is outside {roots} and ~/.claude/**. Allowed: rm inside the repo or those roots. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path.",
         outside.join(",")
     ));
 }
