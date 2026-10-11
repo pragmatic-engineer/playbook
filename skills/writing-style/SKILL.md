@@ -1,6 +1,6 @@
 ---
 name: writing-style
-description: Voice, banned-word, and no-dash rules for prose a human reads: PRs, review comments, Jira, Confluence, Slack, ADRs, commit messages. Use before writing or posting any.
+description: Voice, banned-word, and no-dash rules for prose a human reads, such as PRs, review comments, Jira, Confluence, Slack, ADRs, commit messages. Use before writing or posting any.
 ---
 
 # Writing Style
