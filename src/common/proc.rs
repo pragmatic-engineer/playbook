@@ -26,6 +26,15 @@ const POLL_FAST: Duration = Duration::from_micros(500);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const FAST_WINDOW: Duration = Duration::from_millis(200);
 
+/// Pause before the next poll of a child that is `age` old.
+fn poll_pause(age: Duration) -> Duration {
+    if age < FAST_WINDOW {
+        POLL_FAST
+    } else {
+        POLL_INTERVAL
+    }
+}
+
 /// How long a child gets to exit after SIGTERM before it is killed.
 const TERM_GRACE: Duration = Duration::from_secs(1);
 
@@ -125,8 +134,7 @@ fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration)
             stop(&mut child);
             return None;
         }
-        let young = started.elapsed() < FAST_WINDOW;
-        std::thread::sleep(if young { POLL_FAST } else { POLL_INTERVAL });
+        std::thread::sleep(poll_pause(started.elapsed()));
     };
     // A grandchild that keeps a pipe open past the child's exit must not hang
     // us either: the same deadline bounds the final read.
@@ -158,24 +166,21 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
     }
 
-    #[cfg(unix)]
     #[test]
-    fn quick_children_are_not_held_back_by_the_poll_interval() {
-        // Arrange
-        let started = Instant::now();
+    fn a_young_child_is_polled_faster_than_the_poll_interval() {
+        // The wall-clock version of this test (20 quick children under 400ms)
+        // failed whenever a busy host stretched process spawns. The guarded
+        // behavior is the pause the loop picks, so assert that directly.
 
         // Act
-        for _ in 0..20 {
-            let mut command = Command::new("true");
-            run_with_timeout(&mut command, Duration::from_secs(5)).expect("true should run");
-        }
+        let at_start = poll_pause(Duration::ZERO);
+        let just_before_window = poll_pause(FAST_WINDOW - Duration::from_millis(1));
+        let at_window = poll_pause(FAST_WINDOW);
 
         // Assert
-        assert!(
-            started.elapsed() < POLL_INTERVAL * 20 - Duration::from_millis(10),
-            "20 quick children took {:?}, a 20ms poll needs at least 400ms",
-            started.elapsed()
-        );
+        assert!(at_start < POLL_INTERVAL, "a fresh child is polled finely");
+        assert_eq!(just_before_window, at_start);
+        assert_eq!(at_window, POLL_INTERVAL, "an old child is polled coarsely");
     }
 
     #[cfg(unix)]
