@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: "Structurally read-only code reviewer for /playbook:deep-review, /playbook:quick-review and the /playbook:implement review swarm. Takes one named lens, or the whole diff, and returns findings in the shape the prompt names. Not for general-purpose work."
+description: "Structurally read-only code reviewer for deep-review, quick-review and the implement review swarm. Takes one named lens or the whole diff. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: opus
 effort: medium

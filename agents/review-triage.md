@@ -1,6 +1,6 @@
 ---
 name: review-triage
-description: "Structurally read-only classifier for /playbook:deep-review and /playbook:implement Step 9. Takes a diff and candidate lenses, labels each skip, cheap-check or full-lens in one call. Not for general-purpose work."
+description: "Structurally read-only classifier. Labels each candidate lens skip, cheap-check or full-lens for a diff. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: haiku
 effort: low

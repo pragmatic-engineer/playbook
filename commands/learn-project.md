@@ -1,5 +1,5 @@
 ---
-description: Use when starting on a repo the memory store knows nothing about, or to refresh what it knows. Reads git history, PRs, JIRA and Confluence, stores distilled facts in memory, and exports memory.graph.json.
+description: Use when starting on a repo the memory store knows nothing about, or to refresh it. Reads git history, PRs, JIRA and Confluence into memory.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill, WebFetch
 argument-hint: "[--refresh] [--graph-only] [--stage] [--from-staged] [--max-prs N] [--max-commits N] [--auto] [--ask]"
 model: opus

@@ -1,5 +1,5 @@
 ---
-description: Use when an idea needs to become a plan, whether it is still raw and undirected or the direction is already settled, or when the user says let's brainstorm this, let's plan this, let's scope this, explore this idea, or break this down. One continuous, interview-driven session that challenges the premise, weighs 2-3 approaches, then interviews for Work Units and Segments, and produces a verified, self-contained implementation plan ready for /playbook:implement.
+description: Use when an idea needs to become a plan, or the user says brainstorm, plan, scope, explore this idea, or break this down. Interview-driven; produces a verified plan for /playbook:implement.
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill, WebFetch
 argument-hint: "[idea | PROJ-123 | ./prompt.md] [--ticket <id>] [--depth 0-2] [--adr] [--auto] [--auto-design] [--ask] [--help]"
 model: opus

@@ -1,6 +1,6 @@
 ---
 name: collector
-description: "Gathers raw material for one /playbook:learn-project Phase 1 role (git-history, code-structure, pull-requests, jira, confluence). Read-only; returns a compact summary, never a raw dump. Not for general-purpose work."
+description: "Read-only. Gathers raw material for one learn-project Phase 1 role (git-history, code-structure, pull-requests, jira, confluence). Not for general-purpose work."
 tools: Bash, Read, Grep, Glob, WebFetch, Skill
 model: haiku
 effort: low

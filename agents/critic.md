@@ -1,6 +1,6 @@
 ---
 name: critic
-description: "Structurally read-only adversarial reviewer for /playbook:plan, /playbook:adr and /playbook:implement. Takes a focus (premise, plan, decision, pre-exec) and returns PASS or FAIL with severity-tagged findings. Not for general-purpose work."
+description: "Structurally read-only adversarial reviewer for plan, adr and implement. Takes a focus (premise, plan, decision, pre-exec); returns PASS or FAIL. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: sonnet
 effort: medium

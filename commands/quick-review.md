@@ -1,5 +1,5 @@
 ---
-description: Use for a routine PR review or a quick check of your own branch. Single pass with grounding-review discipline and Conventional Comments; posts a pending GitHub review, or only reports when no PR is named, with --self, in auto mode, or when the PR is yours.
+description: Use for a routine PR review or a quick check of your own branch. Single pass; posts a pending review, or only reports with --self or no PR named.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
 argument-hint: "[--help] [PR number] [--self] [--this-pr] [--whole-stack] [--auto] [--ask]"
 model: sonnet

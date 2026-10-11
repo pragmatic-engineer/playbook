@@ -1,6 +1,6 @@
 ---
 name: fact-checker
-description: "Structurally read-only verifier for the /playbook:adr, /playbook:plan and /playbook:implement quality gates. Checks every claim in a plan, ADR or blueprint against the repo; returns PASS, FAIL or WARN with a table. Not for general-purpose work."
+description: "Structurally read-only verifier for plan, adr and implement gates. Checks claims in a plan, ADR or blueprint against the repo; returns PASS, FAIL or WARN. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: haiku
 effort: medium

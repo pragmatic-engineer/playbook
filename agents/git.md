@@ -1,6 +1,6 @@
 ---
 name: git
-description: "Isolated executor for /playbook:commit-and-push and /playbook:create-pull-request. Delivers signed commits and pull requests end to end in a forked context on Haiku. Not for general-purpose work."
+description: "Executor for /playbook:commit-and-push and /playbook:create-pull-request. Delivers signed commits and PRs in a fork on Haiku. Not for general-purpose work."
 tools: Bash, Read, Skill
 model: haiku
 effort: xhigh

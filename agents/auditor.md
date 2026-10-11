@@ -1,6 +1,6 @@
 ---
 name: auditor
-description: "Isolated read-only executor for /playbook:repo-audit. Runs the four-phase audit in a forked context on Opus and returns the finished audit document. Not for general-purpose work."
+description: "Read-only executor for /playbook:repo-audit. Runs the four-phase audit in a fork and returns the audit document. Not for general-purpose work."
 tools: Bash, Read, Grep, Glob, WebSearch, WebFetch
 model: opus
 effort: high

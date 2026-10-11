@@ -1,5 +1,5 @@
 ---
-description: Use when a PR has unresolved review comments to work through. Walks them one at a time, applies fixes or drafts replies, commits and pushes through /playbook:commit-and-push, then posts the queued replies.
+description: Use when a PR has unresolved review comments. Walks them one at a time, applies fixes or drafts replies, then posts the replies.
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Skill
 argument-hint: "[PR number] [--bots] [--dry-run] [-y|--yes] [--auto] [--ask]"
 model: opus
