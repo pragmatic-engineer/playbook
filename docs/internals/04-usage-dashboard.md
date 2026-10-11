@@ -74,6 +74,7 @@ Keys:
 | `W`, `M`, `a` | Jump to last week, last month, all time. These are plain ranges with no comparison. |
 | `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. |
 | `c` | Clear the filter. |
+| `p` | Open the [Sessions management view](09-sessions.md#the-sessions-view), a full screen table of recent sessions with their PR, state and suggestions. |
 | `t` | Cycle the theme: btop, dark, light, mono. |
 | `x` | Turn mouse reporting on or off. Turn it off to select text with the mouse. |
 | `q`, `Esc`, `Ctrl-C` | Quit. |

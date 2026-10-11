@@ -251,7 +251,7 @@ pub fn tokens(n: u64) -> String {
     }
 }
 
-fn link_label(r: &Record) -> String {
+pub fn link_label(r: &Record) -> String {
     match (r.pr, r.issue) {
         (Some(pr), _) => format!("PR #{} {}", pr.number, pr.kind.label()),
         (None, Some(n)) => format!("issue #{n}?"),
@@ -259,7 +259,7 @@ fn link_label(r: &Record) -> String {
     }
 }
 
-fn worktree_label(r: &Record) -> String {
+pub fn worktree_label(r: &Record) -> String {
     if r.place.gone {
         return "gone".into();
     }
@@ -376,13 +376,13 @@ pub fn render_json(records: &[Record], now: i64) -> Value {
     json!({"generated_at": now, "sessions": rows})
 }
 
-/// `playbook sessions`: reads the usage store (after ingesting new history),
-/// looks up each session's place and PR, and returns the text or JSON.
-pub fn run(
-    json: bool,
+/// Reads the usage store (after ingesting new history), looks up each
+/// session's place and PR, and returns the records with the time they were
+/// read at.
+pub fn load(
     paths: &crate::usage::run::Paths,
     home: &std::path::Path,
-) -> Result<String, String> {
+) -> Result<(Vec<Record>, i64), String> {
     let now = crate::common::time::now_secs();
     let cfg = links::settings(home);
     let (conn, _) = crate::usage::run::ingest_new(paths)?;
@@ -404,7 +404,16 @@ pub fn run(
             .map(|e| e.session_id.clone())
             .collect::<Vec<_>>(),
     )?;
-    let records = build(&all, now, cfg, &lookup);
+    Ok((build(&all, now, cfg, &lookup), now))
+}
+
+/// `playbook sessions`: the text or JSON of [`load`].
+pub fn run(
+    json: bool,
+    paths: &crate::usage::run::Paths,
+    home: &std::path::Path,
+) -> Result<String, String> {
+    let (records, now) = load(paths, home)?;
     if json {
         serde_json::to_string_pretty(&render_json(&records, now))
             .map_err(|e| format!("failed to encode sessions: {e}"))
