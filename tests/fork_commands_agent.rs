@@ -43,3 +43,30 @@ fn the_git_agent_runs_on_haiku() {
         Some("haiku")
     );
 }
+
+#[test]
+fn repo_audit_forks_into_the_prefixed_auditor_agent() {
+    let file = "commands/repo-audit.md";
+    assert_eq!(
+        frontmatter_value(file, "context").as_deref(),
+        Some("fork"),
+        "{file}"
+    );
+    assert_eq!(
+        frontmatter_value(file, "agent").as_deref(),
+        Some("playbook:auditor"),
+        "{file}"
+    );
+}
+
+#[test]
+fn the_auditor_agent_runs_on_opus_at_high_effort() {
+    assert_eq!(
+        frontmatter_value("agents/auditor.md", "model").as_deref(),
+        Some("opus")
+    );
+    assert_eq!(
+        frontmatter_value("agents/auditor.md", "effort").as_deref(),
+        Some("high")
+    );
+}
