@@ -26,7 +26,6 @@ All run with `CI=true`, stdin from `/dev/null`, and an empty `HOME`.
 | `trust <path>` | yes | always exit 0 |
 | `pr prepare --help` | yes | exit 0, so a caller can detect support |
 | `init` | yes | no prompt; second run changes nothing; with no plugin root it wires hooks and skips the rest |
-| `usage dashboard` | not useful | starts a background server for a browser |
 
 Nothing needed anything from `~/.claude` except `init`, which writes `~/.claude/settings.json`. The state directories created under an empty `HOME` are `~/.config/playbook/usage`, `runtime/` (handoffs, session folders, `session-start.log`), `memory/`, and `repos/<owner>/<repo>/<worktree>/state.db` for the gate.
 
