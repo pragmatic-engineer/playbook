@@ -52,6 +52,19 @@ Effort variants such as `reviewer-low` and `reviewer-xhigh` are not files and no
 
 When you need a result inline and cannot poll a file, prefer a forked skill (`context: fork` with a prefixed `agent: playbook:<name>` in the command's frontmatter, since a bare name falls back to a general purpose agent on the session model) over an Agent-tool spawn. It has been reliable in every measurement.
 
+## Fresh, not forked
+
+An `Agent` call with no `subagent_type` forks the whole parent conversation: the child inherits the parent's history (measured: about 372K tokens on the first turn, $2.90 per fork, 117 of them in 30 days). **Always pass a `subagent_type`.** Use a `playbook:` agent from the roster, or the built-in `Explore` for read-only search and `general-purpose` for anything else. A fresh agent starts with only its brief, so write the brief to stand alone:
+
+```
+Goal: <one sentence, the question or the change>
+Inputs: <absolute paths with line ranges; pasted text only when short>
+Output: write your full report to <absolute path>
+Constraints: <scope, files not to touch, read-only or not>
+```
+
+Fork only when the child needs the decisions and corrections made earlier in this session and writing them down would cost more than the inheritance. That is rare: the measured forks were research, review, edits and commit text, all of which a brief covers. Classification of every playbook spawn site is in [references/briefs.md](references/briefs.md).
+
 ## Route the task first
 
 Run `playbook route <kind> --json` before picking an agent. Kinds: `mechanical`, `classify`, `check`, `review`, `implement`, `design`. For `implement` add `--tier low|medium|high` (low for any well specified unit, medium for a cross-module change or ambiguous spec, high for workflow determinism, concurrency or subtle architecture). Add `--failures <n>` when the task already failed. Read `model`, `effort`, `agent` and `action`.

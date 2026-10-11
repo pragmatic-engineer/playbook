@@ -156,13 +156,13 @@ Run this only when Argument Resolution found a ticket. Skip it entirely for a pl
 - One hop of direct links: linked issues, sub-tasks, parent epic, and linked PRs. `--depth` controls this (0 = ticket only, 1 = direct links (default), 2 = one more hop). Clamp `--depth` to the range 0 to 2, so the crawl is never unbounded.
 - Bounds: cap total related items at about 15, dedup visited tickets by id, and stop early when a hop adds nothing new.
 
-**Discover in parallel.** Fan out discovery agents over the gathered sources (issue the Agent calls in one message so they run at once, per Step 2): the ticket body plus comments, batches of linked items, and the attachments. Each returns a short cited summary (the source id or url, and the facts that bear on the work). These feed the Step 2 digest alongside the codebase exploration. Assign each discovery agent a stable `name` at spawn.
+**Discover in parallel.** Fan out discovery agents (`subagent_type: general-purpose` with a stand-alone brief) over the gathered sources (issue the Agent calls in one message so they run at once, per Step 2): the ticket body plus comments, batches of linked items, and the attachments. Each returns a short cited summary (the source id or url, and the facts that bear on the work). These feed the Step 2 digest alongside the codebase exploration. Assign each discovery agent a stable `name` at spawn.
 
 The ticket's title and description become the idea seed for Step 1's framing. Record the ticket id and link so Step 9 can cite them in the plan.
 
 ### Step 2: Explore context in parallel
 
-Fan out `Explore` agents to map what the dialogue needs. **Dispatch them in parallel: issue all the Agent calls in a single message so they run at once.** Read-only exploration has no shared state, so parallel is always the default here.
+Fan out `Explore` agents (`subagent_type: Explore`, each with a stand-alone brief per `playbook:delegating-subagents`, never an omitted type, which forks the whole session) to map what the dialogue needs. **Dispatch them in parallel: issue all the Agent calls in a single message so they run at once.** Read-only exploration has no shared state, so parallel is always the default here.
 
 Scale the fan-out to the idea: one agent for a tiny change, up to about four for a broad feature. Give each a distinct area, for example:
 

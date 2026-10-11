@@ -22,6 +22,10 @@ Every agent file opens with five keys:
 
 `agents/auditor.md`, `agents/git.md`, and `agents/reviewer.md` are real, filled-in examples of this shape.
 
+## Fresh agents, not forks
+
+An `Agent` call without `subagent_type` forks the parent's whole history. Every command, skill and prompt that dispatches a subagent names a `subagent_type` and writes a stand-alone brief (goal, inputs by path, output file, constraints). The template and the per-site classification are in `skills/delegating-subagents/references/briefs.md`. `tests/fresh_subagent_briefs.rs` pins the wording.
+
 ## The two binding mechanisms
 
 A command binds to an agent one of two ways. Both are real and in use.
