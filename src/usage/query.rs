@@ -141,28 +141,25 @@ impl Range {
     /// seven days from its first day.
     pub fn days(self, now: i64) -> Option<(i64, i64)> {
         let today = now.div_euclid(SECONDS_PER_DAY);
-        let first_of_month = |day: i64| day - (civil_from_days(day).2 - 1);
-        let week_first =
-            |week: WeekStart| today - (weekday(today) as i64 - week.index()).rem_euclid(7);
         match self {
             Range::All => None,
             Range::Today => Some((today, today + 1)),
             Range::ThisWeek(w) => {
-                let first = week_first(w);
+                let first = week_first_day(today, w);
                 Some((first, first + 7))
             }
             Range::LastWeek(w) => {
-                let first = week_first(w);
+                let first = week_first_day(today, w);
                 Some((first - 7, first))
             }
             Range::LastDays(n) => Some((today - n + 1, today + 1)),
             Range::CurrentMonth => {
-                let first = first_of_month(today);
-                Some((first, first_of_month(first + 31)))
+                let first = month_first_day(today);
+                Some((first, month_first_day(first + 31)))
             }
             Range::LastMonth => {
-                let first = first_of_month(today);
-                Some((first_of_month(first - 1), first))
+                let first = month_first_day(today);
+                Some((month_first_day(first - 1), first))
             }
         }
     }
@@ -171,6 +168,16 @@ impl Range {
     pub fn contains(self, now: i64, timestamp: i64) -> bool {
         in_window(self.days(now), timestamp)
     }
+}
+
+/// The first day of the week that holds `day`.
+pub(super) fn week_first_day(day: i64, week: WeekStart) -> i64 {
+    day - (weekday(day) as i64 - week.index()).rem_euclid(7)
+}
+
+/// The 1st of the month that holds `day`.
+pub(super) fn month_first_day(day: i64) -> i64 {
+    day - (civil_from_days(day).2 - 1)
 }
 
 pub fn day_of(timestamp: i64) -> i64 {
@@ -197,6 +204,10 @@ pub struct Totals {
 }
 
 impl Totals {
+    pub fn tokens(&self) -> u64 {
+        self.input_tokens + self.output_tokens + self.cache_creation_tokens + self.cache_read_tokens
+    }
+
     pub fn of(events: &[UsageEvent]) -> Totals {
         // `sum` rather than a fold from 0.0: an empty sum is -0.0 and the
         // dashboard's pinned JSON bytes include it.
@@ -297,6 +308,77 @@ impl Spend {
             unpriced: events.iter().filter(|e| e.unpriced).count(),
         }
     }
+}
+
+/// One session's activity on one UTC day. A session that runs past midnight
+/// has a row for each day it was active.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionDay {
+    pub day: i64,
+    pub id: String,
+    pub repo: String,
+    /// The model that cost the most in the session that day.
+    pub model: String,
+    pub messages: usize,
+    pub tokens: u64,
+    pub cost_usd: f64,
+    pub unpriced: usize,
+}
+
+/// The first characters of a session id, enough to tell sessions apart.
+pub fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
+/// Groups events by day and session, newest day first and the dearest session
+/// first within a day. Ties fall back to the session id so the order is stable.
+pub fn session_days(events: &[UsageEvent]) -> Vec<SessionDay> {
+    let mut groups: BTreeMap<(i64, &str), Vec<&UsageEvent>> = BTreeMap::new();
+    for e in events {
+        groups
+            .entry((day_of(e.timestamp), e.session_id.as_str()))
+            .or_default()
+            .push(e);
+    }
+    let mut rows: Vec<SessionDay> = groups
+        .into_iter()
+        .map(|((day, id), group)| {
+            let mut per_model: BTreeMap<&str, (f64, usize)> = BTreeMap::new();
+            for e in &group {
+                let slot = per_model.entry(e.model.as_str()).or_default();
+                slot.0 += e.cost_usd;
+                slot.1 += 1;
+            }
+            let model = per_model
+                .iter()
+                .max_by(|a, b| {
+                    a.1 .0
+                        .total_cmp(&b.1 .0)
+                        .then(a.1 .1.cmp(&b.1 .1))
+                        .then_with(|| b.0.cmp(a.0))
+                })
+                .map_or(String::new(), |(name, _)| (*name).to_string());
+            let newest = group.iter().max_by_key(|e| e.timestamp);
+            let spend = Spend::of(&group);
+            SessionDay {
+                day,
+                id: id.to_string(),
+                repo: newest.map_or(String::new(), |e| e.repo.clone()),
+                model,
+                messages: spend.messages,
+                tokens: spend.tokens,
+                cost_usd: spend.cost_usd,
+                unpriced: spend.unpriced,
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.day
+            .cmp(&a.day)
+            .then_with(|| b.cost_usd.total_cmp(&a.cost_usd))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    rows
 }
 
 /// One active session: its newest message and the spend over the whole session.
@@ -674,6 +756,56 @@ mod tests {
         let (inside, _) = in_range(&usage, &[], NOW, Range::LastDays(30));
         assert_eq!(inside.len(), 1);
         assert_eq!(Totals::of(&inside).cost_usd, 1.0);
+    }
+
+    #[test]
+    fn session_days_group_by_day_and_session_newest_day_first() {
+        let day = |d: i64| NOW.div_euclid(SECONDS_PER_DAY) * SECONDS_PER_DAY + d * SECONDS_PER_DAY;
+        let mut a1 = event(day(0) + 100, "aaaaaaaa-1111", 1.0);
+        a1.repo = "alpha".into();
+        let mut a2 = event(day(0) + 200, "aaaaaaaa-1111", 2.0);
+        a2.repo = "alpha".into();
+        a2.model = "opus".into();
+        let b = event(day(0) + 50, "bbbbbbbb-2222", 5.0);
+        // The first session also worked the day before.
+        let a_before = event(day(-1) + 10, "aaaaaaaa-1111", 0.5);
+        let rows = session_days(&[a1, b, a_before, a2]);
+        let keys: Vec<(i64, &str)> = rows.iter().map(|r| (r.day, r.id.as_str())).collect();
+        let today = day(0) / SECONDS_PER_DAY;
+        // Within a day the dearest session comes first.
+        assert_eq!(
+            keys,
+            [
+                (today, "bbbbbbbb-2222"),
+                (today, "aaaaaaaa-1111"),
+                (today - 1, "aaaaaaaa-1111")
+            ]
+        );
+        let a_today = &rows[1];
+        assert_eq!((a_today.messages, a_today.tokens), (2, 66));
+        assert!((a_today.cost_usd - 3.0).abs() < 1e-9);
+        assert_eq!(
+            (a_today.repo.as_str(), a_today.model.as_str()),
+            ("alpha", "opus")
+        );
+        assert_eq!(rows[2].messages, 1);
+    }
+
+    #[test]
+    fn a_session_is_split_at_midnight_utc() {
+        let midnight = NOW.div_euclid(SECONDS_PER_DAY) * SECONDS_PER_DAY;
+        let rows = session_days(&[event(midnight - 1, "s", 1.0), event(midnight, "s", 1.0)]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].day, rows[1].day + 1);
+    }
+
+    #[test]
+    fn session_days_tie_break_by_id_and_short_ids_take_eight_characters() {
+        let rows = session_days(&[event(NOW, "b", 1.0), event(NOW + 1, "a", 1.0)]);
+        assert_eq!(rows[0].id, "a");
+        assert!(session_days(&[]).is_empty());
+        assert_eq!(short_id("0199aaaa-0000-7000-8000-000000000001"), "0199aaaa");
+        assert_eq!(short_id("abc"), "abc");
     }
 
     #[test]

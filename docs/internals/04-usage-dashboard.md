@@ -7,8 +7,8 @@
 | Command | What it does |
 |---|---|
 | `playbook usage` | Opens the terminal view. When stdout is not a terminal, prints the text summary instead. |
-| `playbook usage --summary` | Reads anything new, then prints the text summary and exits. With `--range` it covers only that range and says which dates. |
-| `playbook usage --json` | Prints the totals, the groups and the live view as JSON, for scripts. |
+| `playbook usage --summary` | Reads anything new, then prints the text summary and exits. With `--range` it covers only that range and says which dates. For `today`, `week` and `month` it ends with the [period comparison](#period-comparison). |
+| `playbook usage --json` | Prints the totals, the groups and the live view as JSON, for scripts. For `today`, `week` and `month` it adds a `comparison` object. |
 | `playbook usage --range <name>` | Sets the range for the terminal view, `--json` and `--summary`. See [Ranges](#ranges). The default is `30d`, or all time for `--summary`. |
 | `playbook usage --web` | Opens the web dashboard. Deprecated, removed in v0.22.0. |
 | `playbook usage ingest` | Reads anything new into the store. Deprecated, use `--summary` or `--json`. |
@@ -92,6 +92,15 @@ Every range is a set of whole UTC days, shown in the header with its name and ex
 | `all` | Everything stored. |
 
 Weeks start on Monday. Set `usage.weekStart` to `sunday` or `saturday` to change it (`playbook config set usage.weekStart sunday`). The terminal view, `--json`, `--summary` and the web `range=` parameter all read the key, so they agree. The key is spelled in camel case like the other config keys.
+
+### Period comparison
+
+`today`, `week` and `month` are periods: each is compared with the one before it (yesterday, last week, last month) over the same elapsed span, so a Thursday afternoon is never set against a whole week. The code is `src/usage/period.rs`.
+
+- The current span runs from the start of the period through the second of `now`. The previous span starts at the start of the previous period and lasts as long, but never runs past that period, so on March 31 the month so far is compared with all of a 28 day February. The header and `--summary` state the elapsed span.
+- Everything is UTC seconds. A week starts at 00:00 UTC on the day `usage.weekStart` names, and an event at 23:59:59 UTC belongs to the earlier day whatever your local clock says.
+- Cost, tokens and messages each get the amount of change and the percent. The percent is `n/a` (JSON `null`) when the previous value was zero.
+- `--json` adds `comparison`: `period`, `span_seconds`, `current` and `previous` (`start`, `end`, `start_date`, `end_date`, totals), `change` for the three numbers, and `models` with each model's current and previous group.
 
 While you type a filter every key is text, so `q` and `r` do not quit or change the range until you press `Enter` or `Esc`.
 

@@ -366,6 +366,16 @@ fn a_warn_percentage_from_one_to_a_hundred_is_written() {
 }
 
 #[test]
+fn a_usage_refresh_interval_from_one_to_3600_seconds_is_written_and_others_rejected() {
+    for value in [json!(1), json!(5), json!(3600)] {
+        assert_written("usage.refreshSeconds", &value);
+    }
+    for value in [json!(0), json!(3601), json!(-1), json!(2.5)] {
+        assert_rejected("usage.refreshSeconds", &value, "between 1 and 3600");
+    }
+}
+
+#[test]
 fn a_fix_threshold_that_is_not_a_positive_integer_is_rejected() {
     for key in ["fix.maxFiles", "fix.maxLines"] {
         for value in [json!(0), json!(-1), json!(2.5)] {

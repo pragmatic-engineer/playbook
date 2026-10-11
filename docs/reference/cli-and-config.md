@@ -39,6 +39,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `security.defaults` | `false` | `true`, `false` |
 | `usage.theme` | `btop` | `btop`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
+| `usage.refreshSeconds` | `5` | a number, see the config keys guide for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -1058,7 +1059,7 @@ Example: `playbook update --check`
 
 Show token and cost usage across your sessions
 
-With no subcommand, opens the terminal view. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Days are UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise.
+With no subcommand, opens the terminal view. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Days are UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise. For today, week and month, `--json` adds a comparison with the previous period over the same elapsed span, and `--summary` prints it.
 
 Example: `playbook usage --range last-week`
 

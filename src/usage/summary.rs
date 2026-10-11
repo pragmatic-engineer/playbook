@@ -5,7 +5,8 @@
 //! agent is driving the session can read it and give the insights itself.
 
 use super::aggregate::{count_tools, date_key, group_usage, unpriced_models, Dimension, Group};
-use super::query::{in_range, Range};
+use super::period::{elapsed_text, Change, Comparison, Period};
+use super::query::{day_of, in_range, Range};
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
 use std::fmt::Write;
 
@@ -54,6 +55,7 @@ pub fn render_range(
     range: Range,
     now: i64,
 ) -> String {
+    let all_usage = usage;
     let (usage, tools) = in_range(usage, tools, now, range);
     let scope = match range.days(now) {
         Some((first, past)) => format!(
@@ -70,7 +72,62 @@ pub fn render_range(
             scope.replace("across all recorded sessions", "recorded")
         );
     }
-    scoped(&usage, &tools, &scope)
+    let mut out = scoped(&usage, &tools, &scope);
+    if let Some(period) = Period::of_range(range) {
+        out.push_str(&comparison_text(&Comparison::of(all_usage, now, period)));
+    }
+    out
+}
+
+/// `+2.20 (+21.6%)`, or `+2.20 (n/a)` when the previous value was zero.
+fn signed(change: Change, decimals: usize) -> String {
+    let percent = change
+        .percent
+        .map_or("n/a".to_string(), |p| format!("{p:+.1}%"));
+    format!("{:+.decimals$} ({percent})", change.amount)
+}
+
+/// The period against the one before it over the same elapsed span.
+fn comparison_text(c: &Comparison) -> String {
+    let w = c.windows;
+    let mut out = format!(
+        "\nCompared with {} (the same {}, {} to {} UTC)\n",
+        c.period.previous_label(),
+        elapsed_text(w.current.seconds()),
+        date_key(day_of(w.previous.start)),
+        date_key(day_of(w.previous.end - 1)),
+    );
+    let rows = [
+        (
+            "cost USD",
+            c.current.cost_usd,
+            c.previous.cost_usd,
+            4,
+            c.cost(),
+        ),
+        (
+            "tokens",
+            c.current.tokens() as f64,
+            c.previous.tokens() as f64,
+            0,
+            c.tokens(),
+        ),
+        (
+            "messages",
+            c.current.messages as f64,
+            c.previous.messages as f64,
+            0,
+            c.messages(),
+        ),
+    ];
+    for (name, now, before, decimals, change) in rows {
+        let _ = writeln!(
+            out,
+            "  {name:<9} {now:>14.decimals$} vs {before:>14.decimals$}  {}",
+            signed(change, decimals)
+        );
+    }
+    out
 }
 
 fn scoped(usage: &[UsageEvent], tools: &[ToolInvocationEvent], scope: &str) -> String {
@@ -173,5 +230,47 @@ mod tests {
             "Note: 1 messages are unpriced (no known price for claude-future-9); they count as $0."
         ));
         assert!(!render(&[], &[]).contains("unpriced"));
+    }
+
+    #[test]
+    fn a_period_range_adds_the_comparison_with_the_previous_period() {
+        let now = 1_788_436_800; // Thursday 2026-09-03 12:00 UTC
+        let event = |ts: i64, cost: f64| UsageEvent {
+            event_id: ts.to_string(),
+            timestamp: ts,
+            model: "m".into(),
+            input_tokens: 10,
+            cost_usd: cost,
+            ..UsageEvent::default()
+        };
+        let events = [event(now - 60, 3.0), event(now - 86_400 - 60, 1.0)];
+
+        let text = render_range(&events, &[], Range::Today, now);
+
+        assert!(
+            text.contains(
+                "Compared with yesterday (the same 12h 0m, 2026-09-02 to 2026-09-02 UTC)"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("+2.0000 (+200.0%)"), "{text}");
+        assert!(text.contains("+0 (+0.0%)"), "{text}");
+        // A range that is not a period has no comparison.
+        let all = render_range(&events, &[], Range::LastDays(30), now);
+        assert!(!all.contains("Compared with"), "{all}");
+    }
+
+    #[test]
+    fn a_zero_previous_period_prints_n_a_instead_of_a_percent() {
+        let now = 1_788_436_800;
+        let events = [UsageEvent {
+            event_id: "e".into(),
+            timestamp: now - 60,
+            input_tokens: 4,
+            cost_usd: 1.0,
+            ..UsageEvent::default()
+        }];
+        let text = render_range(&events, &[], Range::Today, now);
+        assert!(text.contains("+1.0000 (n/a)"), "{text}");
     }
 }

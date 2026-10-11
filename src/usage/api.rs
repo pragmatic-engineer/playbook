@@ -6,6 +6,7 @@
 //! summary uses.
 
 use super::aggregate::{count_tools, date_key, group_usage, unpriced_models, Dimension, Group};
+use super::period::{pair_groups, Change, Comparison, Period, Span};
 pub use super::query::{active_session_ids, live_window_start, Range, FEED_LIMIT};
 use super::query::{
     clock, day_of, in_range, in_window, live_view, total_tokens, LiveView, Spend, Totals,
@@ -131,6 +132,57 @@ pub fn data_json(
             "cost_by_day": bar_chart("Cost per day", "USD, UTC", &day_bars(&days, window, now)),
             "cost_by_model": bar_chart("Cost per model", "USD", &cost_bars(&models)),
         },
+    })
+}
+
+fn change_json(c: Change) -> Value {
+    json!({ "amount": c.amount, "percent": c.percent })
+}
+
+fn span_json(span: Span, totals: &Totals) -> Value {
+    json!({
+        "start": span.start,
+        "end": span.end,
+        "start_date": date_key(day_of(span.start)),
+        "end_date": date_key(day_of(span.end - 1)),
+        "messages": totals.messages,
+        "tokens": totals.tokens(),
+        "cost_usd": totals.cost_usd,
+    })
+}
+
+/// A period against the one before it over the same elapsed span, with the
+/// change and the models of each. `usage` may hold any span: events outside
+/// both are ignored. Spans are UTC seconds, half open.
+pub fn comparison_json(usage: &[UsageEvent], now: i64, period: Period) -> Value {
+    let windows = period.windows(now);
+    let (current, previous) = windows.split(usage);
+    let c = Comparison::new(period, windows, &current, &previous);
+    let models: Vec<Value> = pair_groups(
+        &group_usage(&current, Dimension::Model),
+        &group_usage(&previous, Dimension::Model),
+    )
+    .iter()
+    .map(|p| {
+        json!({
+            "key": p.key,
+            "current": group_json(&p.current),
+            "previous": group_json(&p.previous),
+            "cost_change": change_json(Change::of(p.current.cost_usd, p.previous.cost_usd)),
+        })
+    })
+    .collect();
+    json!({
+        "period": period.key(),
+        "span_seconds": windows.current.seconds(),
+        "current": span_json(windows.current, &c.current),
+        "previous": span_json(windows.previous, &c.previous),
+        "change": {
+            "cost_usd": change_json(c.cost()),
+            "tokens": change_json(c.tokens()),
+            "messages": change_json(c.messages()),
+        },
+        "models": models,
     })
 }
 
@@ -957,5 +1009,33 @@ mod tests {
         let total: f64 = titles.iter().sum();
         assert!((total - live["hour"]["cost_usd"].as_f64().unwrap()).abs() < 1e-9);
         assert!(chart.contains(&format!("<title>{}: 1.0000", &clock(now)[..5])));
+    }
+
+    #[test]
+    fn the_comparison_json_names_both_spans_the_change_and_the_models() {
+        let now = 1_788_436_800; // Thursday 2026-09-03 12:00 UTC
+        let events = [
+            event(now - 60, "opus", 3.0),
+            event(now - 86_400 - 60, "opus", 1.0),
+            event(now - 86_400 - 30, "sonnet", 1.0),
+        ];
+
+        let v = comparison_json(&events, now, Period::Today);
+
+        assert_eq!(v["period"], "today");
+        assert_eq!(v["span_seconds"], 12 * 3600 + 1);
+        assert_eq!(v["current"]["start_date"], "2026-09-03");
+        assert_eq!(v["previous"]["start_date"], "2026-09-02");
+        assert_eq!(v["current"]["messages"], 1);
+        assert_eq!(v["previous"]["messages"], 2);
+        assert_eq!(v["change"]["cost_usd"]["amount"], 1.0);
+        assert_eq!(v["change"]["cost_usd"]["percent"], 50.0);
+        let models = v["models"].as_array().unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[1]["key"], "sonnet");
+        assert_eq!(models[1]["current"]["messages"], 0);
+        // A model with no spend before has no percent, not a division by zero.
+        let v = comparison_json(&events[..1], now, Period::Today);
+        assert!(v["change"]["cost_usd"]["percent"].is_null());
     }
 }

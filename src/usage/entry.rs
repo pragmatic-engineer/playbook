@@ -4,6 +4,7 @@
 //! `playbook usage` and its subcommands: picks the terminal view, the text or
 //! JSON output, or the deprecated web dashboard.
 
+use super::period::Period;
 use super::query::{self, Range, WeekStart};
 use super::run::{ingest_new, run_ingest, run_summary, Paths};
 use super::{api, dashboard, db, tui};
@@ -33,7 +34,8 @@ fn deprecated(what: &str, instead: &str) {
 }
 
 /// The `--json` document: the dashboard's data without its SVG charts, plus
-/// the live view under `live`.
+/// the live view under `live`, and for today, week and month the comparison
+/// with the previous period under `comparison`.
 pub fn json_report(conn: &Connection, range: Range, now: i64) -> Result<String, String> {
     let usage = query::load_window(conn, range, now)?;
     let tools = db::load_tool_events(conn)?;
@@ -48,6 +50,13 @@ pub fn json_report(conn: &Connection, range: Range, now: i64) -> Result<String, 
     }
     if let Some(map) = data.as_object_mut() {
         map.insert("live".to_string(), live);
+        if let Some(period) = Period::of_range(range) {
+            let events = db::load_usage_events_since(conn, period.windows(now).previous.start)?;
+            map.insert(
+                "comparison".to_string(),
+                api::comparison_json(&events, now, period),
+            );
+        }
     }
     serde_json::to_string_pretty(&data).map_err(|e| format!("failed to encode usage data: {e}"))
 }
