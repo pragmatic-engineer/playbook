@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The typed query layer both views read: the date range, the totals over it,
-//! and the live summary. The web dashboard turns these into JSON (`api.rs`) and
+//! and the live summary. `--json` turns these into JSON (`api.rs`) and
 //! the terminal view draws them, so a number is computed in one place only.
 
 use super::aggregate::{civil_from_days, SECONDS_PER_DAY};
@@ -210,7 +210,7 @@ impl Totals {
 
     pub fn of(events: &[UsageEvent]) -> Totals {
         // `sum` rather than a fold from 0.0: an empty sum is -0.0 and the
-        // dashboard's pinned JSON bytes include it.
+        // pinned JSON bytes include it.
         Totals {
             messages: events.len(),
             input_tokens: events.iter().map(|e| e.input_tokens).sum(),

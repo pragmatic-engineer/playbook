@@ -1,24 +1,23 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook usage` and its subcommands: picks the terminal view, the text or
-//! JSON output, or the deprecated web dashboard.
+//! `playbook usage` and its subcommands: picks the terminal view or the text or
+//! JSON output.
 
 use super::period::Period;
 use super::query::{self, Range, WeekStart};
 use super::run::{ingest_new, run_ingest, run_summary, Paths};
-use super::{api, dashboard, db, tui};
-use crate::{DashboardCommand, UsageCommand};
+use super::{api, db, tui};
+use crate::UsageCommand;
 use rusqlite::Connection;
 
-/// The release that removes the web dashboard and the old subcommands.
+/// The release that removes the old `usage ingest` subcommand.
 const REMOVED_IN: &str = "v0.22.0";
 
 /// The flags of `playbook usage` itself.
 pub struct Opts {
     pub json: bool,
     pub summary: bool,
-    pub web: bool,
     /// The `--range` value, or `None` when the flag was not given.
     pub range: Option<String>,
 }
@@ -33,7 +32,7 @@ fn deprecated(what: &str, instead: &str) {
     eprintln!("usage: {what} is deprecated and will be removed in {REMOVED_IN}. {instead}");
 }
 
-/// The `--json` document: the dashboard's data without its SVG charts, plus
+/// The `--json` document: the totals and groups, plus
 /// the live view under `live`, and for today, week and month the comparison
 /// with the previous period under `comparison`.
 pub fn json_report(conn: &Connection, range: Range, now: i64) -> Result<String, String> {
@@ -41,13 +40,7 @@ pub fn json_report(conn: &Connection, range: Range, now: i64) -> Result<String, 
     let tools = db::load_tool_events(conn)?;
     let mut data = api::data_json(&usage, &tools, now, range);
     let i = query::load_live_inputs(conn, now)?;
-    let mut live = api::live_json(&i.window, &i.sessions, &i.latest, now);
-    if let Some(map) = data.as_object_mut() {
-        map.remove("charts");
-    }
-    if let Some(map) = live.as_object_mut() {
-        map.remove("burn_chart");
-    }
+    let live = api::live_json(&i.window, &i.sessions, &i.latest, now);
     if let Some(map) = data.as_object_mut() {
         map.insert("live".to_string(), live);
         if let Some(period) = Period::of_range(range) {
@@ -59,17 +52,6 @@ pub fn json_report(conn: &Connection, range: Range, now: i64) -> Result<String, 
         }
     }
     serde_json::to_string_pretty(&data).map_err(|e| format!("failed to encode usage data: {e}"))
-}
-
-fn web(paths: &Paths) -> Result<String, String> {
-    let exe = std::env::current_exe().unwrap_or_default();
-    // Test seam: lets spawned-binary tests skip launching a real browser.
-    // Never set in production.
-    if std::env::var_os("PLAYBOOK_USAGE_NO_BROWSER").is_some() {
-        dashboard::run_dashboard(paths, &exe, &dashboard::no_browser)
-    } else {
-        dashboard::run_dashboard(paths, &exe, &dashboard::open_in_browser)
-    }
 }
 
 /// Runs the command. The returned text, when not empty, is printed on stdout.
@@ -86,33 +68,6 @@ pub fn run(
                 "Use `playbook usage --summary`, which also reads new session history.",
             );
             run_ingest(paths)
-        }
-        Some(UsageCommand::Dashboard { serve: true, .. }) => {
-            dashboard::serve(paths).map(|()| String::new())
-        }
-        Some(UsageCommand::Dashboard {
-            sub: Some(DashboardCommand::Stop),
-            ..
-        }) => {
-            deprecated(
-                "`usage dashboard stop`",
-                "The web dashboard is replaced by the terminal view, `playbook usage`.",
-            );
-            dashboard::run_stop(paths)
-        }
-        Some(UsageCommand::Dashboard { .. }) => {
-            deprecated(
-                "`usage dashboard`",
-                "Use `playbook usage` for the terminal view, or `playbook usage --web` until then.",
-            );
-            web(paths)
-        }
-        None if opts.web => {
-            deprecated(
-                "the web dashboard (`--web`)",
-                "Use `playbook usage` for the terminal view.",
-            );
-            web(paths)
         }
         None if opts.summary => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;

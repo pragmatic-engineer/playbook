@@ -1,6 +1,6 @@
 # ADR-0020: A Terminal UI for `playbook usage`, With ratatui and crossterm
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended: the web dashboard (`--web`, `usage dashboard`) was removed outright instead of on the planned later release.
 - **Date created:** 2026-10-10
 - **Date modified:** 2026-10-10
 

@@ -72,19 +72,24 @@ pub mod fake {
 mod tests {
     use super::*;
 
+    /// Answers one request on a local port with the given raw HTTP response.
+    fn serve_once(response: &'static str) -> (u16, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("the fetcher never connected");
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        (port, handle)
+    }
+
     #[test]
     fn http_fetcher_reads_a_body_from_a_local_server() {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let port = server.server_addr().to_ip().unwrap().port();
-        let handle = std::thread::spawn(move || {
-            let request = server
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap()
-                .expect("the fetcher never connected");
-            request
-                .respond(tiny_http::Response::from_string("hello"))
-                .unwrap();
-        });
+        let (port, handle) =
+            serve_once("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello");
         let body = HttpFetcher { local_http: true }
             .get(&format!("http://127.0.0.1:{port}/x"))
             .unwrap();
@@ -94,15 +99,8 @@ mod tests {
 
     #[test]
     fn http_fetcher_reports_an_http_error() {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let port = server.server_addr().to_ip().unwrap().port();
-        let handle = std::thread::spawn(move || {
-            let request = server
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap()
-                .expect("the fetcher never connected");
-            request.respond(tiny_http::Response::empty(404)).unwrap();
-        });
+        let (port, handle) =
+            serve_once("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         let err = HttpFetcher { local_http: true }
             .get(&format!("http://127.0.0.1:{port}/x"))
             .unwrap_err();

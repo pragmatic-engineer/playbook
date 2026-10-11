@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pure grouping over normalized events. The ASCII summary and the dashboard
+//! Pure grouping over normalized events. The ASCII summary and the JSON
 //! both call this, so there is exactly one aggregation implementation.
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
