@@ -7,12 +7,13 @@
 
 use super::app::App;
 use super::data::Data;
-use super::fmt::{compact, fit, money};
+use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
 use super::panels;
 use super::sort::Panel;
 use super::theme::Palette;
 use crate::usage::aggregate::date_key;
-use crate::usage::query::{clock, Range};
+use crate::usage::period::{elapsed_text, Comparison, Span as TimeSpan};
+use crate::usage::query::{clock, day_of, Range};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -36,19 +37,23 @@ pub struct Panels {
     pub footer: Rect,
 }
 
+/// The header holds the comparison: a context line and one row each for cost,
+/// tokens and messages, between two borders.
+const HEADER_HEIGHT: u16 = 6;
+
 /// Header and footer are fixed. The rest is three rows: graphs, breakdowns,
-/// live, each split in two columns. Spare height goes to the live row.
+/// live and sessions, each split in two columns.
 pub fn layout(area: Rect) -> Panels {
     let [header, body, footer] = Layout::vertical([
-        Constraint::Length(3),
+        Constraint::Length(HEADER_HEIGHT),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
     .areas(area);
     let [graphs, tables, live] = Layout::vertical([
-        Constraint::Fill(45),
-        Constraint::Fill(28),
-        Constraint::Fill(27),
+        Constraint::Fill(40),
+        Constraint::Fill(26),
+        Constraint::Fill(34),
     ])
     .areas(body);
     let halves = |row: Rect| {
@@ -234,6 +239,178 @@ fn range_label(data: &Data) -> String {
     }
 }
 
+/// `08-31`, the UTC date without its year.
+fn month_day(timestamp: i64) -> String {
+    date_key(day_of(timestamp))[5..].to_string()
+}
+
+/// `08-31 to 09-03`, or just the date when the span is one day.
+fn date_span(span: TimeSpan) -> String {
+    let (first, last) = (month_day(span.start), month_day(span.end - 1));
+    if first == last {
+        first
+    } else {
+        format!("{first} to {last}")
+    }
+}
+
+/// `12:00`, the UTC time of day the span reaches.
+fn reaches(span: TimeSpan) -> String {
+    clock(span.end - 1)[..5].to_string()
+}
+
+/// The context line: the period so far and the one it is compared with, and
+/// the elapsed span they share. Returns the current part and the rest, in the
+/// longest form that fits `room`.
+fn context(c: &Comparison, room: usize) -> (String, String) {
+    let (w, p) = (c.windows, c.period);
+    let span = elapsed_text(w.current.seconds());
+    let forms = [
+        (
+            format!(
+                "{} {} until {}",
+                p.label(),
+                date_span(w.current),
+                reaches(w.current)
+            ),
+            format!(
+                "  vs  {} {} until {}  (same span {span})",
+                p.previous_label(),
+                date_span(w.previous),
+                reaches(w.previous)
+            ),
+        ),
+        (
+            format!("{} {}", p.label(), date_span(w.current)),
+            format!(
+                "  vs  {} {}  (same span {span})",
+                p.previous_label(),
+                date_span(w.previous)
+            ),
+        ),
+        (
+            p.label().to_string(),
+            format!("  vs  {}  (same {span})", p.previous_label()),
+        ),
+    ];
+    let fits = |(a, b): &(String, String)| a.chars().count() + b.chars().count() <= room;
+    let last = forms[2].clone();
+    forms.into_iter().find(fits).unwrap_or(last)
+}
+
+/// The context line of the header: the comparison when the range is a period,
+/// else the range and its dates alone.
+fn context_line(d: &Data, room: usize) -> (String, String) {
+    match &d.comparison {
+        Some(c) => context(c, room),
+        None => (
+            range_label(d),
+            "  (no previous period to compare)".to_string(),
+        ),
+    }
+}
+
+/// One metric of the header: its name, its value, and when the range is a
+/// period the value before and the change.
+struct Metric {
+    name: &'static str,
+    now: String,
+    before: Option<String>,
+    amount: String,
+    percent: String,
+    /// The change itself, whose sign picks the color.
+    change: f64,
+}
+
+impl Metric {
+    fn alone(name: &'static str, now: String) -> Metric {
+        Metric {
+            name,
+            now,
+            before: None,
+            amount: String::new(),
+            percent: String::new(),
+            change: 0.0,
+        }
+    }
+}
+
+fn metrics(d: &Data) -> [Metric; 3] {
+    let Some(c) = &d.comparison else {
+        return [
+            Metric::alone("cost", money(d.totals.cost_usd)),
+            Metric::alone("tokens", compact(d.totals.tokens())),
+            Metric::alone("messages", d.totals.messages.to_string()),
+        ];
+    };
+    let (cost, tokens, messages) = (c.cost(), c.tokens(), c.messages());
+    [
+        Metric {
+            name: "cost",
+            now: money(c.current.cost_usd),
+            before: Some(money(c.previous.cost_usd)),
+            amount: signed_money(cost.amount),
+            percent: signed_percent(cost.percent, c.current.cost_usd > 0.0),
+            change: cost.amount,
+        },
+        Metric {
+            name: "tokens",
+            now: compact(c.current.tokens()),
+            before: Some(compact(c.previous.tokens())),
+            amount: signed_compact(tokens.amount),
+            percent: signed_percent(tokens.percent, c.current.tokens() > 0),
+            change: tokens.amount,
+        },
+        Metric {
+            name: "messages",
+            now: c.current.messages.to_string(),
+            before: Some(c.previous.messages.to_string()),
+            amount: signed_count(messages.amount),
+            percent: signed_percent(messages.percent, c.current.messages > 0),
+            change: messages.amount,
+        },
+    ]
+}
+
+/// The header body: the context line, then cost, tokens and messages, with the
+/// previous period's value and the change for a period.
+fn header_lines(d: &Data, pal: &Palette, room: usize) -> Vec<Line<'static>> {
+    let accent = Style::default()
+        .fg(pal.color(pal.hi))
+        .add_modifier(Modifier::BOLD);
+    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let (now, rest) = context_line(d, room);
+    let mut lines = vec![Line::from(vec![
+        Span::styled(now, accent),
+        Span::styled(rest, dim),
+    ])];
+    for m in metrics(d) {
+        let tint = if m.change > 0.0 {
+            pal.warn
+        } else if m.change < 0.0 {
+            pal.live
+        } else {
+            pal.graph_text
+        };
+        let mut spans = vec![
+            Span::styled(format!("{:<9}", m.name), dim),
+            Span::styled(
+                format!("{:>11}", m.now),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+        ];
+        if let Some(before) = &m.before {
+            spans.push(Span::styled(format!("   vs{before:>11}   "), dim));
+            spans.push(Span::styled(
+                format!("{:>9} {:>8}", m.amount, m.percent),
+                Style::default().fg(pal.color(tint)),
+            ));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines
+}
+
 /// The time zone note in the header border. Weeks say which day they start on.
 fn zone_note(app: &App) -> String {
     match app.range {
@@ -244,6 +421,14 @@ fn zone_note(app: &App) -> String {
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
     let edge = Style::default().fg(pal.color(pal.box_cpu));
+    let note = |text: String, ink: Style| {
+        Line::from(vec![
+            Span::styled("\u{2524}", edge),
+            Span::styled(text, ink),
+            Span::styled("\u{251c}\u{2500}", edge),
+        ])
+        .right_aligned()
+    };
     let mut block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(edge)
@@ -266,66 +451,23 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
             Span::styled("\u{251c}", edge),
         ]));
     if !app.filter.is_empty() {
-        block = block.title(
-            Line::from(vec![
-                Span::styled("\u{2524}", edge),
-                Span::styled(
-                    format!("filter {}", app.filter),
-                    Style::default().fg(pal.color(pal.hi)),
-                ),
-                Span::styled("\u{251c}\u{2500}", edge),
-            ])
-            .right_aligned(),
-        );
+        let ink = Style::default().fg(pal.color(pal.hi));
+        block = block.title(note(format!("filter {}", app.filter), ink));
     }
-    let accent = Style::default().fg(pal.color(pal.hi));
-    let error = Style::default().fg(pal.color(pal.error));
-    let line = match (&app.data, &app.error) {
-        (Some(d), err) => {
-            let tokens = d.totals.input_tokens
-                + d.totals.output_tokens
-                + d.totals.cache_creation_tokens
-                + d.totals.cache_read_tokens;
-            let label = range_label(d);
-            let unpriced = if d.unpriced > 0 {
-                format!("  {} unpriced", d.unpriced)
-            } else {
-                String::new()
-            };
-            // The long words give way when the line would not fit.
-            let numbers = |messages: &str, tokens_word: &str| {
-                format!(
-                    "  {}  {} {messages}  {} {tokens_word}",
-                    money(d.totals.cost_usd),
-                    d.totals.messages,
-                    compact(tokens)
-                )
-            };
-            let room = usize::from(area.width.saturating_sub(2));
-            let full = numbers("messages", "tokens");
-            let numbers = if label.chars().count() + full.chars().count() + unpriced.chars().count()
-                <= room
-            {
-                full
-            } else {
-                numbers("msgs", "tok")
-            };
-            let mut spans = vec![Span::styled(label, accent), Span::raw(numbers)];
-            if d.unpriced > 0 {
-                spans.push(Span::styled(
-                    unpriced,
-                    Style::default().fg(pal.color(pal.warn)),
-                ));
-            }
-            if let Some(e) = err {
-                spans.push(Span::styled(format!("   {e}"), error));
-            }
-            Line::from(spans)
-        }
-        (None, Some(e)) => Line::styled(e.clone(), error),
-        (None, None) => Line::raw("Reading usage..."),
+    if let Some(d) = app.data.as_ref().filter(|d| d.unpriced > 0) {
+        let ink = Style::default().fg(pal.color(pal.warn));
+        block = block.title(note(format!("{} unpriced", d.unpriced), ink));
+    }
+    let room = usize::from(area.width.saturating_sub(2));
+    let lines = match (&app.data, &app.error) {
+        (Some(d), _) => header_lines(d, pal, room),
+        (None, Some(e)) => vec![Line::styled(
+            e.clone(),
+            Style::default().fg(pal.color(pal.error)),
+        )],
+        (None, None) => vec![Line::raw("Reading usage...")],
     };
-    frame.render_widget(Paragraph::new(line).block(block), area);
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 #[cfg(test)]
@@ -377,17 +519,87 @@ mod tests {
         }
     }
 
+    fn yesterday(model: &str, repo: &str, cost: f64) -> UsageEvent {
+        UsageEvent {
+            event_id: format!("y{model}{repo}{cost}"),
+            timestamp: NOW - 86_400 - 60,
+            ..event(model, repo, cost)
+        }
+    }
+
+    fn app_for(range: Range, events: &[UsageEvent]) -> App {
+        let mut app = App::new(range);
+        app.data = Some(Data::build(events, LiveView::default(), NOW, range, ""));
+        app
+    }
+
     #[test]
     fn the_header_and_both_tables_show_the_totals_and_rows() {
         let app = app_with(&[event("opus", "alpha", 12.5), event("sonnet", "beta", 1.25)]);
         let text = screen(&app, 100, 30);
         assert!(text.contains("$13.75"), "{text}");
-        assert!(text.contains("2 messages"), "{text}");
+        assert!(text.contains("messages") && text.contains("1.5K"), "{text}");
         assert!(text.contains("opus") && text.contains("alpha"), "{text}");
         assert!(
             text.contains("Models") && text.contains("Projects"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_range_that_is_not_a_period_has_no_comparison() {
+        let text = screen(&app_with(&[event("opus", "a", 1.0)]), 100, 30);
+        assert!(text.contains("(no previous period to compare)"), "{text}");
+        assert!(!text.contains(" vs "), "{text}");
+    }
+
+    #[test]
+    fn the_header_shows_both_periods_and_the_change_in_cost_tokens_and_messages() {
+        let app = app_for(
+            Range::Today,
+            &[
+                event("opus", "alpha", 12.5),
+                event("sonnet", "beta", 1.25),
+                yesterday("opus", "alpha", 10.0),
+            ],
+        );
+        let text = screen(&app, 100, 30);
+        for want in [
+            "today",
+            "yesterday",
+            "same span",
+            "$13.75",
+            "$10.00",
+            "+$3.75",
+            "+37.5%",
+            "+1",
+            "UTC",
+        ] {
+            assert!(text.contains(want), "missing {want}:\n{text}");
+        }
+        // Messages: 2 now against 1 before, tokens 3.0K against 1.5K.
+        assert!(text.contains("+100%") && text.contains("+1.5K"), "{text}");
+    }
+
+    #[test]
+    fn a_period_with_no_previous_spend_says_new_not_a_percent() {
+        let text = screen(
+            &app_for(Range::Today, &[event("opus", "alpha", 2.0)]),
+            100,
+            30,
+        );
+        assert!(text.contains("new"), "{text}");
+        assert!(!text.contains("inf") && !text.contains("NaN"), "{text}");
+    }
+
+    #[test]
+    fn a_fall_in_spend_reads_with_a_minus_sign() {
+        let app = app_for(
+            Range::Today,
+            &[event("opus", "a", 1.0), yesterday("opus", "a", 4.0)],
+        );
+        let text = screen(&app, 100, 30);
+        assert!(text.contains("-$3.00") && text.contains("-75.0%"), "{text}");
     }
 
     #[test]
@@ -582,40 +794,56 @@ mod tests {
     }
 
     #[test]
-    fn the_header_names_the_range_and_its_exact_utc_dates() {
+    fn the_header_names_each_period_its_previous_one_and_their_exact_utc_dates() {
         use crate::usage::query::WeekStart;
-        // Thursday 2026-09-03 01:46:40 UTC.
+        // Thursday 2026-09-03 01:46:40 UTC, so 1h 46m into the day.
         for (range, want) in [
-            (Range::Today, "today 2026-09-03"),
+            (
+                Range::Today,
+                "today 09-03 until 01:46  vs  yesterday 09-02 until 01:46  (same span 1h 46m)",
+            ),
             (
                 Range::ThisWeek(WeekStart::Monday),
-                "this week 2026-08-31 to 2026-09-06",
+                "this week 08-31 to 09-03 until 01:46  vs  last week 08-24 to 08-27 until 01:46  (same span 3d 1h)",
             ),
             (
-                Range::LastWeek(WeekStart::Monday),
-                "last week 2026-08-24 to 2026-08-30",
+                Range::CurrentMonth,
+                "this month 09-01 to 09-03 until 01:46  vs  last month 08-01 to 08-03 until 01:46  (same span 2d 1h)",
             ),
-            (Range::CurrentMonth, "this month 2026-09-01 to 2026-09-30"),
+            // The other ranges have no previous period.
+            (Range::LastWeek(WeekStart::Monday), "last week 2026-08-24 to 2026-08-30"),
             (Range::LastMonth, "last month 2026-08-01 to 2026-08-31"),
             (Range::LastDays(30), "last 30 days 2026-08-05 to 2026-09-03"),
             (Range::All, "all time"),
         ] {
-            let mut app = App::new(range);
-            app.data = Some(Data::build(&[], LiveView::default(), NOW, range, ""));
-            let text = screen(&app, 100, 30);
+            let text = screen(&app_for(range, &[]), 120, 30);
             assert!(text.contains(want), "{want}:\n{text}");
             assert!(text.contains("UTC"), "{text}");
         }
-        // A week says which day the weeks start on.
-        let range = Range::LastWeek(WeekStart::Sunday);
-        let mut app = App::new(range);
-        app.data = Some(Data::build(&[], LiveView::default(), NOW, range, ""));
-        let text = screen(&app, 100, 30);
+        // A week says which day the weeks start on, and moves with it.
+        let sunday = Range::ThisWeek(WeekStart::Sunday);
+        let text = screen(&app_for(sunday, &[]), 120, 30);
         assert!(text.contains("UTC, weeks start Sun"), "{text}");
         assert!(
-            text.contains("last week 2026-08-23 to 2026-08-29"),
+            text.contains("this week 08-30 to 09-03") && text.contains("last week 08-23 to 08-27"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_context_line_gives_up_detail_before_the_same_span_note() {
+        let c = Data::build(&[], LiveView::default(), NOW, Range::Today, "")
+            .comparison
+            .expect("today compares");
+        let mut lengths = Vec::new();
+        for room in [110, 80, 50, 40] {
+            let (a, b) = context(&c, room);
+            let len = a.chars().count() + b.chars().count();
+            assert!(len <= room || room < 45, "{room}: {a}{b}");
+            assert!(b.contains("same"), "{room}: {b}");
+            lengths.push(len);
+        }
+        assert!(lengths.windows(2).all(|w| w[0] >= w[1]), "{lengths:?}");
     }
 
     #[test]
@@ -637,22 +865,12 @@ mod tests {
     }
 
     #[test]
-    fn a_long_header_uses_short_words_so_the_unpriced_count_still_shows() {
+    fn the_unpriced_count_shows_in_the_header_border() {
         let mut e = event("mystery", "alpha", 0.0);
         e.unpriced = true;
-        let mut app = App::new(Range::LastDays(30));
-        app.data = Some(Data::build(
-            &[e],
-            LiveView::default(),
-            NOW,
-            Range::LastDays(30),
-            "",
-        ));
-        let text = screen(&app, 80, 24);
-        assert!(text.contains("1 unpriced"), "{text}");
-        assert!(text.contains("1 msgs"), "{text}");
-        // With room, the full words are used.
-        assert!(screen(&app, 120, 30).contains("1 messages"));
+        let app = app_with(&[e]);
+        assert!(screen(&app, 80, 24).contains("1 unpriced"));
+        assert!(screen(&app, 120, 30).contains("1 unpriced"));
     }
 
     #[test]
