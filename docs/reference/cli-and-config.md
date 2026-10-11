@@ -48,7 +48,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 
 Configure and support Claude Code from the command line.
 
-playbook installs hooks and a session launcher, shows a usage dashboard, and helps with pull requests, reviews, worktrees and session handoffs.
+playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
 Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
@@ -1043,22 +1043,9 @@ Example: `playbook usage --range today`
 
 - `--json`: Print the totals, groupings and live view as JSON
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
-- `--web`: Open the web dashboard (deprecated, removed in v0.22.0)
 - `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
 
-Subcommands: `dashboard`, `ingest`
-
-### `playbook usage dashboard`
-
-Open the local usage dashboard in your browser (deprecated: use `playbook usage`)
-
-Starts the dashboard server if it is not running. Stop it with `playbook usage dashboard stop`. Removed in v0.22.0.
-
-Subcommands: `stop`
-
-### `playbook usage dashboard stop`
-
-Stop the running dashboard server
+Subcommands: `ingest`
 
 ### `playbook usage ingest`
 

@@ -51,7 +51,7 @@ use std::path::PathBuf;
 
 /// Configure and support Claude Code from the command line.
 ///
-/// playbook installs hooks and a session launcher, shows a usage dashboard,
+/// playbook installs hooks and a session launcher, shows a usage view,
 /// and helps with pull requests, reviews, worktrees and session handoffs.
 #[derive(Parser, Debug)]
 #[command(
@@ -361,14 +361,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: Option<UsageCommand>,
         /// Print the totals, groupings and live view as JSON
-        #[arg(long, conflicts_with_all = ["summary", "web"])]
+        #[arg(long, conflicts_with_all = ["summary"])]
         json: bool,
         /// Print the text summary and exit (every recorded session unless `--range` is given)
-        #[arg(long, conflicts_with_all = ["json", "web"])]
+        #[arg(long, conflicts_with_all = ["json"])]
         summary: bool,
-        /// Open the web dashboard (deprecated, removed in v0.22.0)
-        #[arg(long, conflicts_with_all = ["json", "summary", "range"])]
-        web: bool,
         /// Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
         #[arg(long, value_name = "RANGE")]
         range: Option<String>,
@@ -803,24 +800,6 @@ pub enum AgentsCommand {
 pub enum UsageCommand {
     /// Read new session history into the usage store (deprecated: use `playbook usage --summary`)
     Ingest,
-    /// Open the local usage dashboard in your browser (deprecated: use `playbook usage`)
-    ///
-    /// Starts the dashboard server if it is not running. Stop it with
-    /// `playbook usage dashboard stop`. Removed in v0.22.0.
-    Dashboard {
-        // Internal flag: runs the detached server process.
-        #[arg(long, hide = true)]
-        serve: bool,
-        #[command(subcommand)]
-        sub: Option<DashboardCommand>,
-    },
-}
-
-/// `playbook usage dashboard` subcommands.
-#[derive(Subcommand, Debug)]
-pub enum DashboardCommand {
-    /// Stop the running dashboard server
-    Stop,
 }
 
 /// `playbook sanitize` subcommands.
