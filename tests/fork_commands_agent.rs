@@ -70,3 +70,31 @@ fn the_auditor_agent_runs_on_opus_at_high_effort() {
         Some("high")
     );
 }
+
+/// A forked command that re-invokes itself through the Skill tool starts a
+/// second fork and wastes a turn (78 cases in 16 sessions). The first line of
+/// the body, right under the title, tells the reader it is already the
+/// executing subagent.
+#[test]
+fn every_forked_command_opens_with_the_do_not_reinvoke_note() {
+    let mut checked = 0;
+    for entry in fs::read_dir("commands").expect("commands dir") {
+        let path = entry.expect("entry").path();
+        let text = fs::read_to_string(&path).expect("command file");
+        if !text.lines().any(|l| l == "context: fork") {
+            continue;
+        }
+        let mut body = text.lines().skip_while(|l| !l.starts_with("# ")).skip(1);
+        let first = body.find(|l| !l.trim().is_empty()).unwrap_or("");
+        assert!(
+            first.contains("already the executing subagent") && first.contains("Skill tool"),
+            "{}: first body line must tell the reader not to call the Skill tool again, got: {first}",
+            path.display()
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 3,
+        "expected at least 3 forked commands, saw {checked}"
+    );
+}
