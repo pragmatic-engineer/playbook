@@ -67,21 +67,54 @@ fn slug_for_dir(dir: &str) -> Result<String, String> {
     Ok(key(&tidy.to_string_lossy()))
 }
 
-/// `<slug>-<epoch>-<pid>.md`. The rest after the slug must be two digit runs,
-/// so a sibling or child directory whose slug merely starts with ours never
-/// matches.
-fn is_handoff_for(name: &str, slug: &str) -> bool {
-    let Some(rest) = name
+/// How long a session-tagged handoff stays eligible, and how long a clear
+/// marker does, before the next start removes it. The tagged handoff is one a
+/// context hygiene nudge asked for, meant for the very next `/clear`.
+const TAGGED_MAX_AGE_SECS: u64 = SECS_PER_DAY;
+const MARKER_MAX_AGE_SECS: u64 = 3600;
+const CLEARED_DIR: &str = "cleared";
+const MAX_TAG_LEN: usize = 40;
+
+/// A session id as a file name part: letters and digits only, so it can
+/// never hold a dash or a path separator.
+pub fn session_tag(session_id: &str) -> String {
+    session_id
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(MAX_TAG_LEN)
+        .collect()
+}
+
+/// `<slug>-<epoch>-<pid>.md`, or `<slug>-<epoch>-<pid>-<tag>.md` for a handoff
+/// saved on behalf of one session. `Some(None)` is the first form,
+/// `Some(Some(tag))` the second. The rest after the slug must be two digit
+/// runs and at most one tag, so a sibling or child directory whose slug merely
+/// starts with ours never matches.
+fn parse_name(name: &str, slug: &str) -> Option<Option<String>> {
+    let rest = name
         .strip_prefix(slug)
         .and_then(|r| r.strip_prefix('-'))
-        .and_then(|r| r.strip_suffix(".md"))
-    else {
-        return false;
-    };
+        .and_then(|r| r.strip_suffix(".md"))?;
     let mut parts = rest.split('-');
     let digits =
         |p: Option<&str>| p.is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
-    digits(parts.next()) && digits(parts.next()) && parts.next().is_none()
+    if !(digits(parts.next()) && digits(parts.next())) {
+        return None;
+    }
+    let tag = match parts.next() {
+        None => return Some(None),
+        Some(t) if !t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric()) => t,
+        Some(_) => return None,
+    };
+    parts.next().is_none().then(|| Some(tag.to_string()))
+}
+
+fn is_handoff_for(name: &str, slug: &str) -> bool {
+    parse_name(name, slug).is_some()
+}
+
+fn tag_of(path: &Path, slug: &str) -> Option<String> {
+    parse_name(path.file_name()?.to_str()?, slug)?
 }
 
 #[derive(Debug, Clone)]
@@ -137,7 +170,14 @@ fn cutoff(now: SystemTime) -> SystemTime {
 /// Writes `text` for `slug`. A temp file in the same directory plus a rename
 /// keeps a reader from ever seeing half a handoff. Never overwrites: a name
 /// already taken moves the epoch forward by one second.
-fn save_in(dir: &Path, slug: &str, text: &str, epoch: u64, pid: u32) -> Result<PathBuf, String> {
+fn save_in(
+    dir: &Path,
+    slug: &str,
+    text: &str,
+    epoch: u64,
+    pid: u32,
+    tag: &str,
+) -> Result<PathBuf, String> {
     if text.trim().is_empty() {
         return Err(
             "empty handoff: pipe the handoff markdown to this command on stdin".to_string(),
@@ -149,7 +189,12 @@ fn save_in(dir: &Path, slug: &str, text: &str, epoch: u64, pid: u32) -> Result<P
     ensure_private_dir(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     let mut stamp = epoch;
     let target = loop {
-        let candidate = dir.join(format!("{slug}-{stamp}-{pid}.md"));
+        let suffix = if tag.is_empty() {
+            String::new()
+        } else {
+            format!("-{tag}")
+        };
+        let candidate = dir.join(format!("{slug}-{stamp}-{pid}{suffix}.md"));
         if !candidate.exists() {
             break candidate;
         }
@@ -192,7 +237,11 @@ fn archive(dir: &Path, path: &Path) {
 /// Never panics, and any failure just yields fewer handoffs.
 pub fn take_in(dir: &Path, slug: &str, now: SystemTime) -> Taken {
     prune_loaded(dir, now);
-    let found = unread(dir, slug);
+    prune_hygiene(dir, slug, now);
+    let found: Vec<Entry> = unread(dir, slug)
+        .into_iter()
+        .filter(|e| tag_of(&e.path, slug).is_none())
+        .collect();
     let total = found.len();
     let limit = cutoff(now);
     let mut contents = Vec::new();
@@ -213,6 +262,95 @@ pub fn take_in(dir: &Path, slug: &str, now: SystemTime) -> Taken {
         }
     }
     Taken { contents, total }
+}
+
+fn older_than(now: SystemTime, then: SystemTime, secs: u64) -> bool {
+    now.duration_since(then).is_ok_and(|d| d.as_secs() > secs)
+}
+
+/// Removes session-tagged handoffs for `slug` past `TAGGED_MAX_AGE_SECS` and
+/// clear markers past `MARKER_MAX_AGE_SECS`, so neither lingers.
+fn prune_hygiene(dir: &Path, slug: &str, now: SystemTime) {
+    for entry in unread(dir, slug) {
+        if tag_of(&entry.path, slug).is_some()
+            && older_than(now, entry.modified, TAGGED_MAX_AGE_SECS)
+        {
+            let _ = fs::remove_file(&entry.path);
+        }
+    }
+    let markers = dir.join(CLEARED_DIR);
+    if let Ok(entries) = fs::read_dir(&markers) {
+        for entry in entries.flatten() {
+            let stale = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .is_ok_and(|t| older_than(now, t, MARKER_MAX_AGE_SECS));
+            if stale {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
+/// Records that the session with `session_id` ended with `/clear`, so the
+/// handoff saved for it may load into the session that replaces it. Nothing
+/// else can tell a start which handoff is its own: the new session has a new
+/// id, and a session that is still running never gets a marker. Never panics.
+pub fn mark_cleared(session_id: &str) {
+    mark_cleared_in(&root(), session_id);
+}
+
+fn mark_cleared_in(dir: &Path, session_id: &str) {
+    let tag = session_tag(session_id);
+    if tag.is_empty() {
+        return;
+    }
+    let markers = dir.join(CLEARED_DIR);
+    if ensure_private_dir(&markers).is_ok() {
+        let _ = fs::write(markers.join(tag), "");
+    }
+}
+
+/// A session-tagged handoff taken for a start after `/clear`.
+pub struct Cleared {
+    pub text: String,
+    /// Where the full handoff now lives (under `used/`).
+    pub path: PathBuf,
+}
+
+/// The read side of a start after `/clear` for one session's own handoff: of
+/// the tagged handoffs for `slug` whose session left a fresh clear marker,
+/// the one with the freshest marker. Its marker is consumed and the file
+/// moves to `used/`, so it can never load twice. A tagged handoff whose
+/// session never cleared, such as a parallel session still running, is left
+/// alone. Never panics.
+pub fn take_cleared_in(dir: &Path, slug: &str, now: SystemTime) -> Option<Cleared> {
+    prune_hygiene(dir, slug, now);
+    let markers = dir.join(CLEARED_DIR);
+    let best = unread(dir, slug)
+        .into_iter()
+        .filter_map(|entry| {
+            let tag = tag_of(&entry.path, slug)?;
+            let marked = fs::metadata(markers.join(&tag))
+                .and_then(|m| m.modified())
+                .ok()?;
+            Some((marked, tag, entry))
+        })
+        .max_by_key(|(marked, _, _)| *marked)?;
+    let (_, tag, entry) = best;
+    let _ = fs::remove_file(markers.join(tag));
+    let text = fs::read_to_string(&entry.path)
+        .ok()
+        .filter(|t| !t.trim().is_empty());
+    let Some(text) = text else {
+        let _ = fs::remove_file(&entry.path);
+        return None;
+    };
+    let name = entry.path.file_name()?.to_owned();
+    archive(dir, &entry.path);
+    let used = dir.join(USED_DIR).join(name);
+    let path = if used.is_file() { used } else { entry.path };
+    Some(Cleared { text, path })
 }
 
 fn age(now: SystemTime, then: SystemTime) -> String {
@@ -290,7 +428,7 @@ fn show_in(dir: &Path, slug: &str, all: bool, now: SystemTime) -> String {
 }
 
 /// CLI entry for `handoff save`.
-pub fn run_save(dir: Option<&str>, text: &str) -> Result<String, String> {
+pub fn run_save(dir: Option<&str>, text: &str, session: Option<&str>) -> Result<String, String> {
     let slug = match dir {
         Some(d) => slug_for_dir(d)?,
         None => current_slug(),
@@ -301,6 +439,7 @@ pub fn run_save(dir: Option<&str>, text: &str) -> Result<String, String> {
         text,
         crate::common::time::now_epoch_secs(),
         std::process::id(),
+        &session.map(session_tag).unwrap_or_default(),
     )?;
     Ok(format!("handoff saved: {}", path.display()))
 }
@@ -499,8 +638,8 @@ mod tests {
     #[test]
     fn two_saves_in_one_second_do_not_overwrite_each_other() {
         let dir = scratch_dir("handoff-two");
-        let a = save_in(&dir, SLUG, "first", 100, 7).unwrap();
-        let b = save_in(&dir, SLUG, "second", 100, 7).unwrap();
+        let a = save_in(&dir, SLUG, "first", 100, 7, "").unwrap();
+        let b = save_in(&dir, SLUG, "second", 100, 7, "").unwrap();
 
         assert_ne!(a, b);
         assert_eq!(fs::read_to_string(a).unwrap(), "first");
@@ -511,7 +650,7 @@ mod tests {
     #[test]
     fn an_empty_handoff_is_refused_and_writes_nothing() {
         let dir = scratch_dir("handoff-empty");
-        let err = save_in(&dir, SLUG, "  \n", 100, 7).unwrap_err();
+        let err = save_in(&dir, SLUG, "  \n", 100, 7, "").unwrap_err();
 
         assert!(err.contains("empty handoff"), "{err}");
         assert_eq!(unread(&dir, SLUG).len(), 0);
@@ -524,7 +663,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let root = scratch_dir("handoff-mode");
         let dir = root.join("handoff");
-        let path = save_in(&dir, SLUG, "# x\n", 100, 7).unwrap();
+        let path = save_in(&dir, SLUG, "# x\n", 100, 7, "").unwrap();
 
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&dir), 0o700);
@@ -535,7 +674,7 @@ mod tests {
     #[test]
     fn a_loaded_handoff_moves_to_used_and_show_still_prints_it() {
         let dir = scratch_dir("handoff-take");
-        save_in(&dir, SLUG, "# topic\nNEXT-STEP\n", 100, 7).unwrap();
+        save_in(&dir, SLUG, "# topic\nNEXT-STEP\n", 100, 7, "").unwrap();
 
         let taken = take_in(&dir, SLUG, SystemTime::now());
 
@@ -554,7 +693,7 @@ mod tests {
     #[test]
     fn a_stale_handoff_is_removed_not_injected_or_kept() {
         let dir = scratch_dir("handoff-stale");
-        let path = save_in(&dir, SLUG, "# old\n", 100, 7).unwrap();
+        let path = save_in(&dir, SLUG, "# old\n", 100, 7, "").unwrap();
         backdate(&path, MAX_AGE_DAYS + 1);
 
         let taken = take_in(&dir, SLUG, SystemTime::now());
@@ -568,7 +707,7 @@ mod tests {
     #[test]
     fn loaded_handoffs_are_pruned_after_the_age_limit() {
         let dir = scratch_dir("handoff-prune");
-        save_in(&dir, SLUG, "# a\n", 100, 7).unwrap();
+        save_in(&dir, SLUG, "# a\n", 100, 7, "").unwrap();
         take_in(&dir, SLUG, SystemTime::now());
         let kept = loaded(&dir, SLUG).remove(0).path;
         backdate(&kept, MAX_AGE_DAYS + 1);
@@ -583,7 +722,7 @@ mod tests {
     fn the_cap_injects_the_freshest_and_removes_the_rest() {
         let dir = scratch_dir("handoff-cap");
         for (i, pid) in [1u32, 2, 3, 4].iter().enumerate() {
-            let p = save_in(&dir, SLUG, &format!("# h{i}\n"), 100 + i as u64, *pid).unwrap();
+            let p = save_in(&dir, SLUG, &format!("# h{i}\n"), 100 + i as u64, *pid, "").unwrap();
             backdate(&p, 4 - i as u64);
         }
 
@@ -598,7 +737,7 @@ mod tests {
     #[test]
     fn show_lists_handoffs_saved_for_other_directories() {
         let dir = scratch_dir("handoff-others");
-        save_in(&dir, "-Users-me-other", "# Other topic\n", 100, 7).unwrap();
+        save_in(&dir, "-Users-me-other", "# Other topic\n", 100, 7, "").unwrap();
 
         let shown = show_in(&dir, SLUG, false, SystemTime::now());
 
@@ -618,8 +757,8 @@ mod tests {
     #[test]
     fn show_all_prints_every_waiting_handoff_and_default_notes_the_rest() {
         let dir = scratch_dir("handoff-all");
-        save_in(&dir, SLUG, "# one\n", 100, 1).unwrap();
-        save_in(&dir, SLUG, "# two\n", 100, 2).unwrap();
+        save_in(&dir, SLUG, "# one\n", 100, 1, "").unwrap();
+        save_in(&dir, SLUG, "# two\n", 100, 2, "").unwrap();
 
         let one = show_in(&dir, SLUG, false, SystemTime::now());
         let both = show_in(&dir, SLUG, true, SystemTime::now());
@@ -684,7 +823,7 @@ mod tests {
         let dir = scratch_dir("handoff-status");
         let log = dir.join("session-start.log");
         log_start_in(&log, 1_788_252_682, "clear", "s1", SLUG, 1);
-        save_in(&dir, SLUG, "# a\n", 100, 1).unwrap();
+        save_in(&dir, SLUG, "# a\n", 100, 1, "").unwrap();
 
         let shown = status_in(&dir, &log, SLUG);
 

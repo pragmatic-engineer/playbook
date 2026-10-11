@@ -41,6 +41,9 @@ pub fn run(payload: &Payload) {
     }
 
     write_clean_exit_marker(&dir, &reason);
+    if reason == "clear" {
+        crate::handoff::mark_cleared(&session_id(payload));
+    }
     queue_auto_learn(payload, &dir);
 }
 

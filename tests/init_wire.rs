@@ -17,7 +17,7 @@
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
-//!   and all 18 ported hooks (the 13 functional hooks plus the 5 safety
+//!   and all 20 ported hooks (the 14 functional hooks plus the 6 safety
 //!   guards) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
@@ -249,6 +249,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "precompact-warn",
         "session-clean-exit",
         "memory-capture",
+        "context-hygiene",
         "rm-workspace-guard",
         "bg-await-guard",
         "no-slop-guard",
@@ -262,7 +263,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly all 19 ported HookName variants in binary form"
+        "wiring should register exactly all 20 ported HookName variants in binary form"
     );
 }
 
