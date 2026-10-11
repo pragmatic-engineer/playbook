@@ -1129,7 +1129,7 @@ Subcommands: `collect`, `ingest`, `status`
 
 Run the local OpenTelemetry receiver in the foreground
 
-Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free port when that one is taken) and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector (`playbook usage status` shows it too). It stops by itself after the idle time, counted from the last real telemetry request, so a status check does not keep it alive. Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself.
+Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free port when that one is taken) and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector (`playbook usage status` shows it too). It stops by itself after the idle time, counted from the last real telemetry request, so a status check does not keep it alive. Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself. When none runs, `cc` starts one itself in the background (once the usage database exists) under the same conditions.
 
 Example: `playbook usage collect --idle-seconds 1800`
 
