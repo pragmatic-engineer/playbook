@@ -10,8 +10,11 @@ use super::claude_code::ClaudeCodeSource;
 use super::codex::CodexSource;
 use super::db::{load_tool_events, load_usage_events, open_db};
 use super::ingest::{ingest, IngestStats};
+use super::limits::LimitPeriod;
+use super::limits_source;
 use super::query::Range;
 use super::summary;
+use super::UsageEvent;
 use crate::common::paths::{playbook_root_from, usage_db_dir};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -77,8 +80,39 @@ pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<Stri
     let (conn, _) = ingest_new(paths)?;
     let usage = load_usage_events(&conn)?;
     let tools = load_tool_events(&conn)?;
-    Ok(match range {
+    let mut text = match range {
         Some(range) => summary::render_range(&usage, &tools, range, now),
         None => summary::render(&usage, &tools),
-    })
+    };
+    if !usage.is_empty() {
+        let (snapshot, budgets) = limit_inputs(paths);
+        text.push_str(&limits_source::summary_section(
+            snapshot.as_ref(),
+            &budgets,
+            &usage,
+            now,
+            super::entry::configured_week_start(),
+        ));
+    }
+    Ok(text)
+}
+
+/// The stored plan limits and the manual budgets from the config.
+fn limit_inputs(paths: &Paths) -> (Option<limits_source::Snapshot>, Vec<(LimitPeriod, f64)>) {
+    let snapshot = paths.db.parent().and_then(limits_source::load);
+    let budgets = limits_source::manual_budgets(&crate::common::session::home_dir());
+    (snapshot, budgets)
+}
+
+/// The `limits` object of `--json`. `events` must reach back to
+/// `limits_source::events_since`.
+pub fn limits_json(paths: &Paths, events: &[UsageEvent], now: i64) -> serde_json::Value {
+    let (snapshot, budgets) = limit_inputs(paths);
+    limits_source::report_json(
+        snapshot.as_ref(),
+        &budgets,
+        events,
+        now,
+        super::entry::configured_week_start(),
+    )
 }

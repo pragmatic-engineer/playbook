@@ -345,6 +345,18 @@ fn a_budget_under_one_cent_is_rejected_with_a_clear_message() {
 }
 
 #[test]
+fn a_usage_budget_takes_zero_or_more_dollars_and_nothing_else() {
+    for key in ["usage.budget.monthlyUsd", "usage.budget.weeklyUsd"] {
+        for value in [json!(0), json!(200), json!(12.5)] {
+            assert_written(key, &value);
+        }
+        for value in [json!(-1), json!(-0.5), json!(2_000_000_000)] {
+            assert_rejected(key, &value, "a number of dollars");
+        }
+    }
+}
+
+#[test]
 fn a_budget_of_a_cent_or_more_including_a_fractional_one_is_written() {
     for value in [json!(5), json!(1000), json!(0.5), json!(2.5), json!(0.01)] {
         assert_written("auto.budgetUsd", &value);

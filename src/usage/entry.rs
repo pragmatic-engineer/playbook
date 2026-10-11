@@ -32,17 +32,27 @@ fn deprecated(what: &str, instead: &str) {
     eprintln!("usage: {what} is deprecated and will be removed in {REMOVED_IN}. {instead}");
 }
 
-/// The `--json` document: the totals and groups, plus
+/// The `--json` document: the totals and groups, the limits and burn rate
+/// under `limits`, plus
 /// the live view under `live`, and for today, week and month the comparison
 /// with the previous period under `comparison`.
-pub fn json_report(conn: &Connection, range: Range, now: i64) -> Result<String, String> {
+pub fn json_report(
+    conn: &Connection,
+    paths: &Paths,
+    range: Range,
+    now: i64,
+) -> Result<String, String> {
     let usage = query::load_window(conn, range, now)?;
     let tools = db::load_tool_events(conn)?;
     let mut data = api::data_json(&usage, &tools, now, range);
     let i = query::load_live_inputs(conn, now)?;
     let live = api::live_json(&i.window, &i.sessions, &i.latest, now);
+    let since = super::limits_source::events_since(now, configured_week_start());
+    let limit_events = db::load_usage_events_since(conn, since)?;
+    let limits = super::run::limits_json(paths, &limit_events, now);
     if let Some(map) = data.as_object_mut() {
         map.insert("live".to_string(), live);
+        map.insert("limits".to_string(), limits);
         if let Some(period) = Period::of_range(range) {
             let events = db::load_usage_events_since(conn, period.windows(now).previous.start)?;
             map.insert(
@@ -89,7 +99,7 @@ pub fn run(
         None if opts.json => {
             let range = parse_range(opts.range.as_deref().unwrap_or(DEFAULT_RANGE))?;
             let (conn, _) = ingest_new(paths)?;
-            json_report(&conn, range, crate::common::time::now_secs())
+            json_report(&conn, paths, range, crate::common::time::now_secs())
         }
         None if interactive => {
             tui::run(
