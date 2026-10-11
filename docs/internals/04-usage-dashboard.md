@@ -162,3 +162,7 @@ Terminal view tests render into a `TestBackend` buffer, with no real terminal. `
 - Live shows what the transcripts record, so a session that is thinking but has not written a message yet does not appear until it does.
 - The terminal view needs a real terminal of 80x24 or more. Use `--json` or `--summary` where there is none.
 - No LLM call is built in. The output is plain text and JSON, so the agent already running your session can read it and suggest where to cut cost.
+
+## Telemetry storage (first slice)
+
+The usage database also holds two tables for OpenTelemetry data, `telemetry_requests` (one row per API request: session id, request id, model, effort, agent name, token counts and cost) and `session_sources` (which source a session reads from, `telemetry` or `transcript`). They are created next to the transcript tables and nothing reads them yet, so every total is unchanged. A session with no row in `session_sources` reads from transcripts. The rows never hold prompts, tool content, paths, emails or user ids. Dropping the two tables reverts the feature and loses no transcript data (`telemetry_db::migrate_down`). Telemetry follows [issue 769](https://github.com/pragmatic-engineer/playbook/issues/769): playbook never writes Claude Code settings, and transcripts stay the fallback.
