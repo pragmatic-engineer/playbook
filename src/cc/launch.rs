@@ -94,7 +94,19 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     let home = crate::common::home_dir();
     let user_settings = home.join(".claude/settings.json");
     let ceiling = crate::effort::ceiling(&home, &home.join(".claude"), &cwd_now);
-    let effort = crate::models::effort_in_force(args, &user_settings, ceiling.effective.as_deref());
+    let mut effort =
+        crate::models::effort_in_force(args, &user_settings, ceiling.effective.as_deref());
+    // Playbook owns this command line, not Claude Code's settings: a session
+    // that stated no effort runs at medium, and one that did is left alone.
+    if let Some(default) = crate::models::session_default_effort(
+        effort.as_deref(),
+        std::env::var_os(crate::models::EFFORT_ENV).is_some(),
+        ceiling.effective.as_deref(),
+    ) {
+        all.push("--effort".into());
+        all.push(default.clone());
+        effort = Some(default);
+    }
     if let Some(flags) = crate::models::launcher_flags(args, &user_settings, effort.as_deref()) {
         all.extend(flags);
     }

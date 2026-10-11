@@ -126,6 +126,35 @@ pub fn effort_in_force(
     )
 }
 
+/// The effort the launcher gives a session that states none. Medium matched
+/// high on every measured agent, and 44% of sessions ran at high. A session that
+/// wants more passes `--effort`, sets `effortLevel` or exports
+/// `CLAUDE_CODE_EFFORT_LEVEL`, and the launcher then adds nothing. Only the
+/// launcher's own `claude` command line carries this value; no settings file is
+/// written.
+pub const SESSION_DEFAULT_EFFORT: &str = "medium";
+
+/// Claude Code's own environment switch for the session effort.
+pub const EFFORT_ENV: &str = "CLAUDE_CODE_EFFORT_LEVEL";
+
+/// The default effort to add, or `None` when the user already stated one
+/// (`stated` is `effort_in_force`, `env_set` is whether `EFFORT_ENV` is set).
+/// Lowered to the effective ceiling, like a stated level.
+pub fn session_default_effort(
+    stated: Option<&str>,
+    env_set: bool,
+    ceiling: Option<&str>,
+) -> Option<String> {
+    if stated.is_some() || env_set {
+        return None;
+    }
+    Some(
+        effort::lower(Some(SESSION_DEFAULT_EFFORT), ceiling)
+            .unwrap_or(SESSION_DEFAULT_EFFORT)
+            .to_string(),
+    )
+}
+
 /// Whether Claude Code already has a fallback the user chose: the flag in
 /// `args`, or `fallbackModel` in the user settings file.
 fn user_has_fallback(args: &[String], user_settings: &Path) -> bool {
@@ -327,6 +356,25 @@ mod tests {
         assert_eq!(
             effort_in_force(&none, &dir.join("missing.json"), None),
             None
+        );
+    }
+
+    #[test]
+    fn the_session_default_is_medium_unless_the_user_stated_an_effort() {
+        assert_eq!(
+            session_default_effort(None, false, None).as_deref(),
+            Some("medium")
+        );
+        assert_eq!(session_default_effort(Some("high"), false, None), None);
+        assert_eq!(session_default_effort(None, true, None), None);
+        assert_eq!(
+            session_default_effort(None, false, Some("low")).as_deref(),
+            Some("low"),
+            "a lower ceiling still wins"
+        );
+        assert_eq!(
+            session_default_effort(None, false, Some("xhigh")).as_deref(),
+            Some("medium")
         );
     }
 
