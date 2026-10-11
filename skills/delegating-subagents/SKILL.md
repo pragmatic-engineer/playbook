@@ -50,7 +50,7 @@ Effort variants such as `reviewer-low` and `reviewer-xhigh` are not files and no
 - **Delegate them.** Reviews, critiques and fact-checks run in their own context. For purely mechanical checks (path existence, line counts, graph acyclicity) a few shell commands you run yourself are cheaper and re-runnable.
 - **Treat silence as NOT RUN.** Never as "reviewed clean" or PASS. Name the missing lens or phase in the report and to the user.
 
-When you need a result inline and cannot poll a file, prefer a forked skill (`context: fork` with an `agent:` in the command's frontmatter) over an Agent-tool spawn. It has been reliable in every measurement.
+When you need a result inline and cannot poll a file, prefer a forked skill (`context: fork` with a prefixed `agent: playbook:<name>` in the command's frontmatter, since a bare name falls back to a general purpose agent on the session model) over an Agent-tool spawn. It has been reliable in every measurement.
 
 ## Route the task first
 
