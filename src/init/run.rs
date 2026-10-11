@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 /// already draw between resolving paths and acting on them.
 pub struct InitPaths {
     /// Where the shipped template, shell runtime and system prompt live.
-    /// `None` when `CLAUDE_PLUGIN_ROOT` is unset, in which case every step
+    /// `None` when `CLAUDE_PLUGIN_ROOT` is unset and no plugin cache exists, in which case every step
     /// that needs it is skipped rather than guessing a path.
     pub self_root: Option<PathBuf>,
     /// `$HOME/.claude`, where `settings.json` and the launcher runtime live.
@@ -281,7 +281,7 @@ fn place_system_prompt_step(self_root: Option<&Path>, home: &Path, opt_in: bool)
     let Some(self_root) = self_root else {
         return StepReport::skipped(
             "system-prompt",
-            "CLAUDE_PLUGIN_ROOT is not set, no prompt to place",
+            "no plugin root and no embedded copy could be written",
         );
     };
     match system_prompt::place_system_prompt(self_root, home, opt_in) {
@@ -335,7 +335,7 @@ fn seed_or_merge_settings(
     let Some(self_root) = self_root else {
         return StepReport::skipped(
             "settings",
-            "CLAUDE_PLUGIN_ROOT is not set, no template to seed from",
+            "no plugin root and no embedded copy could be written",
         );
     };
     let template_path = self_root.join("settings.shared.json");

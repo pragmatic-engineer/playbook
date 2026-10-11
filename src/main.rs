@@ -361,9 +361,10 @@ fn main() {
             let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
             let home = common::home_dir();
             let claude_home = home.join(".claude");
-            let self_root = init::self_root::resolve(
+            let self_root = init::self_root::resolve_or_embedded(
                 std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
                 &claude_home,
+                &home,
             );
             let shell_kind = std::env::var("SHELL")
                 .ok()
