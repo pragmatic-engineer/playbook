@@ -41,7 +41,7 @@ const MEMORY_BLOCK_MIN_CHARS: usize = 300;
 
 /// The per-session counter/state files zeroed at the start of every session.
 /// `capture-crossings` has no python counterpart, so this no longer matches the retired shell original one-for-one.
-const SESSION_COUNTER_FILES: [&str; 7] = [
+const SESSION_COUNTER_FILES: [&str; 8] = [
     "search-count",
     "tool-count",
     "edit-count",
