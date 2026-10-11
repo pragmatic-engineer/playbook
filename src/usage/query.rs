@@ -292,12 +292,23 @@ pub fn load_agents(conn: &Connection, range: Range, now: i64) -> Result<AgentVie
     Ok(AgentView { rows, cost_usd })
 }
 
+/// The name Claude Code reports for a skill of a non official plugin.
+const HIDDEN_PLUGIN_SKILL: &str = "third-party";
+
 /// Cost per skill from telemetry, in the same shape as the agent split. A
 /// request made while a skill was active carries its name; the rest are not
-/// part of any skill row.
+/// part of any skill row. Claude Code reports a skill of a plugin that is not
+/// an official one as `third-party`, the real name is hidden unless tool
+/// details are logged, which playbook never asks for. The row is relabeled so
+/// it does not read as a skill with that name.
 pub fn load_skills(conn: &Connection, range: Range, now: i64) -> Result<AgentView, String> {
     let (since, until) = window_seconds(range, now);
-    let rows = super::telemetry_db::skill_groups(conn, since, until)?;
+    let mut rows = super::telemetry_db::skill_groups(conn, since, until)?;
+    for row in &mut rows {
+        if row.key == HIDDEN_PLUGIN_SKILL {
+            row.key = "plugin skills (names hidden)".to_string();
+        }
+    }
     let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
     Ok(AgentView { rows, cost_usd })
 }
@@ -909,6 +920,28 @@ mod tests {
         assert_eq!(v.burn.len(), BURN_MINUTES as usize);
         assert!((v.burn.iter().map(|b| b.1).sum::<f64>() - 0.5).abs() < 1e-9);
         assert_eq!(v.feed.len(), 1);
+    }
+
+    #[test]
+    fn a_hidden_plugin_skill_gets_a_readable_label() {
+        use crate::usage::telemetry_db::{insert_request, migrate_up, TelemetryRequest};
+        let conn = Connection::open_in_memory().unwrap();
+        migrate_up(&conn).unwrap();
+        for (id, skill) in [("r1", "third-party"), ("r2", "review")] {
+            let r = TelemetryRequest {
+                session_id: "s".into(),
+                request_id: id.into(),
+                timestamp: NOW - 10,
+                skill_name: skill.into(),
+                cost_usd: 1.0,
+                ..Default::default()
+            };
+            insert_request(&conn, &r).unwrap();
+        }
+        let v = load_skills(&conn, Range::LastDays(1), NOW).unwrap();
+        let keys: Vec<&str> = v.rows.iter().map(|g| g.key.as_str()).collect();
+        assert!(keys.contains(&"review") && keys.contains(&"plugin skills (names hidden)"));
+        assert!(!keys.contains(&"third-party"));
     }
 
     #[test]
