@@ -34,7 +34,7 @@ playbook handoff save <<'HANDOFF_EOF'
 HANDOFF_EOF
 ```
 
-The file is keyed by the current directory, so a later session there loads it after `/clear`. The command prints the saved path and refuses empty input. `--dir <path>` saves for another directory.
+The file is keyed by the current directory, so a later session there loads it after `/clear`. The command prints the saved path and refuses empty input. `--dir <path>` saves for another directory. When a context-size nudge gave you a session id, add `--session <id>`: only the start after that session's `/clear` loads the file, so parallel sessions never share it.
 
 If the user passes a path argument (e.g. `/playbook:session-handoff docs/handoffs/2026-06-22.md`), also write the document there, creating parent directories, and confirm the path in one line. A bare filename goes in the current working directory. Never write to a path the user did not provide; this governs the user-facing path, not `playbook handoff save`.
 

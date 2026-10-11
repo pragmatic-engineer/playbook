@@ -654,6 +654,10 @@ pub enum HandoffCommand {
         /// Directory the handoff belongs to (default: the current one)
         #[arg(long)]
         dir: Option<String>,
+        /// Session id the handoff is for. Only the start that follows that
+        /// session's `/clear` loads it, so parallel sessions never share one
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Print this directory's handoff without using it up
     Show {
@@ -1587,6 +1591,7 @@ pub enum HookName {
     WorktreeCreate,
     WorktreeRemove,
     MigrationCheck,
+    ContextHygiene,
 }
 
 /// `playbook cc` subcommands.
@@ -1681,6 +1686,7 @@ mod tests {
             "precompact-warn",
             "session-clean-exit",
             "memory-capture",
+            "context-hygiene",
             "rm-workspace-guard",
             "bg-await-guard",
             "no-slop-guard",

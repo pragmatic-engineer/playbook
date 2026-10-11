@@ -36,6 +36,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "usage.theme",
     "usage.weekStart",
     "usage.refreshSeconds",
+    "hygiene.enabled",
+    "hygiene.thresholdTokens",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -91,6 +93,8 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.theme" => Some(Value::String("btop".to_string())),
         "usage.weekStart" => Some(Value::String("monday".to_string())),
         "usage.refreshSeconds" => Some(Value::Number(5.into())),
+        "hygiene.enabled" => Some(Value::Bool(true)),
+        "hygiene.thresholdTokens" => Some(Value::Number(250_000.into())),
         _ => None,
     }
 }
