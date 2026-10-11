@@ -150,6 +150,17 @@ pub fn configured_week_start() -> WeekStart {
         .unwrap_or_default()
 }
 
+/// Seconds between refreshes of the terminal view, from the
+/// `usage.refreshSeconds` config key.
+pub fn configured_refresh_seconds() -> u64 {
+    let home = crate::common::session::home_dir();
+    crate::config::resolve_valid("usage.refreshSeconds", &home, None)
+        .ok()
+        .and_then(|(value, _, _)| value.as_u64())
+        .filter(|n| *n > 0)
+        .unwrap_or(tui::worker::DEFAULT_REFRESH_SECONDS)
+}
+
 /// Parses a range name with the configured week start.
 pub fn parse_range(value: &str) -> Result<Range, String> {
     Range::parse_with(Some(value), configured_week_start()).ok_or_else(|| {

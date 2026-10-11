@@ -6,8 +6,7 @@
 
 use super::data::DayPoint;
 use crate::usage::aggregate::Group;
-use crate::usage::query::{total_tokens, ActiveSession};
-use crate::usage::UsageEvent;
+use crate::usage::query::{ActiveSession, SessionDay};
 use std::cmp::Ordering;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,8 +15,10 @@ pub enum Panel {
     Tokens,
     Models,
     Projects,
+    /// Sessions with a message in the last 15 minutes.
+    Live,
+    /// Every session of the period, grouped by day.
     Sessions,
-    Events,
 }
 
 pub const PANELS: [Panel; 6] = [
@@ -25,8 +26,8 @@ pub const PANELS: [Panel; 6] = [
     Panel::Tokens,
     Panel::Models,
     Panel::Projects,
+    Panel::Live,
     Panel::Sessions,
-    Panel::Events,
 ];
 
 impl Panel {
@@ -55,16 +56,17 @@ impl Panel {
             Panel::Tokens => &[],
             Panel::Spend => &[0, 1, 2, 3, 4],
             Panel::Models | Panel::Projects => &[0, 1, 2, 3],
-            Panel::Sessions => &[1, 2, 3, 4, 5],
-            Panel::Events => &[0, 1, 2, 3, 4],
+            Panel::Live => &[1, 2, 3, 4, 5],
+            Panel::Sessions => &[1, 2, 3, 4, 5, 6],
         }
     }
 
     pub fn default_sort(self) -> Sort {
         match self {
             Panel::Models | Panel::Projects => Sort::new(3, true),
-            Panel::Sessions => Sort::new(5, false),
-            Panel::Events => Sort::new(0, true),
+            Panel::Live => Sort::new(5, false),
+            // The dearest session of each day first.
+            Panel::Sessions => Sort::new(6, true),
             // The daily table starts with the newest day.
             Panel::Spend => Sort::new(0, true),
             Panel::Tokens => Sort::new(0, false),
@@ -110,8 +112,8 @@ impl Sort {
 fn is_text(panel: Panel, col: usize) -> bool {
     match panel {
         Panel::Models | Panel::Projects => col == 0,
-        Panel::Sessions => matches!(col, 1 | 2),
-        Panel::Events => matches!(col, 1 | 2),
+        Panel::Live => matches!(col, 1 | 2),
+        Panel::Sessions => matches!(col, 1..=3),
         Panel::Spend => col == 4,
         Panel::Tokens => false,
     }
@@ -168,17 +170,23 @@ pub fn session_rows(sessions: &[ActiveSession], sort: Sort) -> Vec<&ActiveSessio
     rows
 }
 
-pub fn event_rows(events: &[UsageEvent], sort: Sort) -> Vec<&UsageEvent> {
-    let mut rows: Vec<&UsageEvent> = events.iter().collect();
+/// The sessions of the period grouped by day, newest day first whatever the
+/// sort. The sort orders the sessions inside each day.
+pub fn session_day_rows(rows: &[SessionDay], sort: Sort) -> Vec<&SessionDay> {
+    let mut rows: Vec<&SessionDay> = rows.iter().collect();
     rows.sort_by(|a, b| {
         let by = match sort.col {
-            1 => a.repo.cmp(&b.repo),
-            2 => a.model.cmp(&b.model),
-            3 => total_tokens(a).cmp(&total_tokens(b)),
-            4 => a.cost_usd.total_cmp(&b.cost_usd),
-            _ => a.timestamp.cmp(&b.timestamp),
+            1 => a.id.cmp(&b.id),
+            2 => a.repo.cmp(&b.repo),
+            3 => a.model.cmp(&b.model),
+            4 => a.messages.cmp(&b.messages),
+            5 => a.tokens.cmp(&b.tokens),
+            _ => a.cost_usd.total_cmp(&b.cost_usd),
         };
-        sort.order(by).then_with(|| a.event_id.cmp(&b.event_id))
+        b.day
+            .cmp(&a.day)
+            .then_with(|| sort.order(by))
+            .then_with(|| a.id.cmp(&b.id))
     });
     rows
 }
@@ -302,25 +310,44 @@ mod tests {
             unpriced: 0,
         };
         let sessions = [s("old", 10), s("new", 90)];
-        let rows = session_rows(&sessions, Panel::Sessions.default_sort());
+        let rows = session_rows(&sessions, Panel::Live.default_sort());
         assert_eq!(rows[0].id, "new");
         let rows = session_rows(&sessions, Sort::new(5, true));
         assert_eq!(rows[0].id, "old");
     }
 
-    #[test]
-    fn events_default_to_newest_first() {
-        let e = |id: &str, ts: i64, cost: f64| UsageEvent {
-            event_id: id.into(),
-            timestamp: ts,
+    fn day_row(day: i64, id: &str, cost: f64, messages: usize) -> SessionDay {
+        SessionDay {
+            day,
+            id: id.into(),
+            repo: "r".into(),
+            model: "m".into(),
+            messages,
+            tokens: messages as u64 * 10,
             cost_usd: cost,
-            ..UsageEvent::default()
+            unpriced: 0,
+        }
+    }
+
+    #[test]
+    fn sessions_stay_grouped_by_day_and_the_sort_orders_inside_each_day() {
+        let rows = [
+            day_row(10, "a", 1.0, 9),
+            day_row(11, "b", 2.0, 1),
+            day_row(11, "c", 5.0, 3),
+            day_row(10, "d", 4.0, 2),
+        ];
+        let ids = |sort| {
+            session_day_rows(&rows, sort)
+                .iter()
+                .map(|r| r.id.clone())
+                .collect::<Vec<_>>()
         };
-        let events = [e("a", 1, 9.0), e("b", 2, 1.0)];
-        let by_time = event_rows(&events, Panel::Events.default_sort());
-        assert_eq!(by_time[0].event_id, "b");
-        let by_cost = event_rows(&events, Sort::new(4, true));
-        assert_eq!(by_cost[0].event_id, "a");
+        // Newest day first, the dearest session first inside it.
+        assert_eq!(ids(Panel::Sessions.default_sort()), ["c", "b", "d", "a"]);
+        assert_eq!(ids(Sort::new(6, false)), ["b", "c", "a", "d"]);
+        assert_eq!(ids(Sort::new(4, true)), ["c", "b", "a", "d"]);
+        assert_eq!(ids(Sort::new(1, false)), ["b", "c", "a", "d"]);
     }
 
     #[test]

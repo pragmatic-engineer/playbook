@@ -14,8 +14,9 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-/// How often the store is re-read when nothing else asks.
-pub const REFRESH: Duration = Duration::from_secs(2);
+/// How often the store is re-read when nothing else asks, unless
+/// `usage.refreshSeconds` says otherwise.
+pub const DEFAULT_REFRESH_SECONDS: u64 = 5;
 
 pub enum Request {
     /// Show this range and filter now, then keep refreshing them.
@@ -34,7 +35,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn spawn(paths: Paths, range: Range, filter: String) -> Worker {
+    pub fn spawn(paths: Paths, range: Range, filter: String, every: Duration) -> Worker {
         let (requests, request_rx) = mpsc::channel::<Request>();
         let (update_tx, updates) = mpsc::channel::<Update>();
         let handle = std::thread::spawn(move || {
@@ -50,7 +51,7 @@ impl Worker {
                 if update_tx.send(update).is_err() {
                     return;
                 }
-                match request_rx.recv_timeout(REFRESH) {
+                match request_rx.recv_timeout(every) {
                     Ok(Request::Query { range, filter }) => query = (range, filter),
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => return,

@@ -23,7 +23,11 @@ The web dashboard is for macOS and Linux. The server prints two addresses: `http
 
 The view is styled after [btop](https://github.com/aristocratos/btop), with btop's default theme as the default look: a black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), a gradient on the graphs and the meters, and a highlighted selected row. Each box has its own outline color, as in btop: spend uses the cpu green, tokens the net purple, models and projects the mem olive, sessions and messages the proc red.
 
-The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. Resizing needs no handling because every redraw reads the current size. It refreshes about every two seconds. It shows six panels and a header with the range, the total cost, the message count and the token count:
+The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. Resizing needs no handling because every redraw reads the current size. It shows six panels and a header with the range, the total cost, the message count and the token count.
+
+The view re-reads the store every 5 seconds (set `usage.refreshSeconds`, 1 to 3600, to change it) and the footer shows when it last did (`updated 01:46:40 UTC, every 5s`), or why the last read failed. A refresh swaps in the new snapshot without touching the chart cursor, the focus, the sorts, the spend view, a filter being typed or the selected rows: each table finds its selected row again by what it is (a model, a project, a session, a day), so a row that moved in the order stays selected, and the scroll follows it. A short footer keeps the time and drops the interval.
+
+The panels:
 
 | Key | Panel | Shows |
 |---|---|---|
@@ -32,17 +36,18 @@ The view needs a screen of at least 80 columns by 24 rows. Below that it says so
 | `3` | Models | Messages, tokens, cost and a share meter per model, with a swatch in the model's color. |
 | `4` | Projects | The same, per repo. |
 | `5` | Live sessions | Sessions with a message in the last 15 minutes, with state, cost and age. |
-| `6` | Recent messages | The newest messages with time, project, model, tokens and cost. |
+| `6` | Sessions per day | Every session in the range, grouped by UTC day with the newest day first. Each row has the short session id, project, main model, messages, tokens and cost for that day, and a session that runs past midnight has a row for each day. The day is named on the first row of its group, and `s` orders the sessions inside each day. `Enter` filters the view to the session. |
 
 ### The charts
 
 The two charts are bar charts drawn with eighth blocks, one bar per UTC day, with idle days at zero and the days still to come in a week or month in progress left empty.
 
-- **y axis.** Labels at the bottom, middle and top, in dollars or tokens with units (`$0`, `$2.5`, `$250`, `$2.5K`, `500K`, `2.5M`). The top is a round value above the peak (1, 1.2, 1.6, 2, 2.5, 3, 4, 5, 6 or 8 times a power of ten), so the labels are round and the middle is half the top. Faint dotted guides mark the top and the middle.
-- **x axis.** The first, middle and last date under the bars (with the year when it fits), and a row of weekday letters or names when the panel is tall enough. Today's weekday is bold and underlined, the peak day's is yellow, and the cursor's is highlighted.
+- **y axis.** Labels at the bottom, middle and top, with a blank column between them and the box, in dollars or tokens with units (`$0`, `$2.5`, `$250`, `$2.5K`, `500K`, `2.5M`). The top is a round value above the peak (1, 1.2, 1.6, 2, 2.5, 3, 4, 5, 6 or 8 times a power of ten), so the labels are round and the middle is half the top. Faint dotted guides mark the top and the middle.
+- **x axis.** The first, middle and last date under the bars (with the year when it fits), and a row of weekday letters or names when the panel is tall enough and every bar is wide enough for a letter and a gap (a month in a narrow panel has none). Today's weekday is bold and underlined, the peak day's is yellow, and the cursor's is highlighted.
 - **Totals line.** The total, the peak (with its date) and the average per day that has happened, for the range.
 - **Cursor.** `Left` and `Right` move it one bar, `Home` and `End` jump to the first and last bar while a chart has the focus, and with the mouse on, hovering or clicking a bar puts it there. A readout line gives the day, its cost, messages, tokens and top model with its share (the token chart leads with tokens). It starts on today, and both charts share it. Changing the range resets it.
 - **Legend.** The bar color follows its height on the axis along the theme gradient (green to red for cost), and the legend in the bottom border says so. The mono theme has no colors and no legend.
+- **Fill.** A week or more of bars always fills the width of the plot, and fewer bars are never wider than 16 columns.
 - **Wide ranges.** When the range has more days than the chart has columns, days are added up into bars of equal length (the title says `Spend per 3 days`), so nothing is cut off. The axis, readout and cursor then speak of those bars.
 - **Small panels.** Rows go in this order when the panel is short: weekday letters, totals line, readout, dates, so the plot keeps three rows. The y axis goes when the panel is narrower than 16 columns, leaving the bars.
 

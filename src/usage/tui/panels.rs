@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The six panels: spend and token graphs, the model and project breakdowns,
-//! the live sessions and the recent events. Each is a rounded box with its
-//! key hint and title in the top border, like btop.
+//! the live sessions and the sessions of the range by day. Each is a rounded
+//! box with its key hint and title in the top border, like btop.
 
 use super::app::{App, SpendView};
 use super::chart::{self, Metric, Plot};
 use super::data::{Data, Slots};
 use super::fmt::{compact, fit, money, WEEKDAYS};
-use super::sort::{self, event_rows, group_rows, group_tokens, session_rows, Panel, Sort};
+use super::sort::{self, group_rows, group_tokens, session_day_rows, session_rows, Panel, Sort};
 use super::theme::{Fill, Ink, Palette};
 use super::view::{visible_rows, window_start};
 use crate::usage::aggregate::{date_key, Group, SECONDS_PER_DAY};
-use crate::usage::query::{clock, total_tokens, weekday, ActiveSession, ACTIVE_SECONDS};
+use crate::usage::query::{short_id, weekday, ActiveSession, ACTIVE_SECONDS};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -551,10 +551,10 @@ fn session_state(now: i64, s: &ActiveSession, pal: &Palette) -> (&'static str, C
 }
 
 /// Sessions with a message in the last 15 minutes, with state and cost so far.
-pub fn sessions(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+pub fn live(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
     let live = &data.live;
-    let focused = app.focus == Panel::Sessions;
-    let block = panel_block(pal, Panel::Sessions, "Live sessions", pal.box_proc, focused).title(
+    let focused = app.focus == Panel::Live;
+    let block = panel_block(pal, Panel::Live, "Live sessions", pal.box_proc, focused).title(
         note_line(
             pal,
             &format!(
@@ -579,9 +579,9 @@ pub fn sessions(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
         col(">cost", Constraint::Length(8), 0),
         col(">ago", Constraint::Length(4), 0),
     ];
-    let rows = session_rows(&live.active, app.sort(Panel::Sessions));
+    let rows = session_rows(&live.active, app.sort(Panel::Live));
     let peak = rows.iter().map(|s| s.cost_usd).fold(0.0, f64::max);
-    table(frame, area, app, pal, Panel::Sessions, block, &cols, |w| {
+    table(frame, area, app, pal, Panel::Live, block, &cols, |w| {
         rows.iter()
             .map(|s| {
                 let (state, color) = session_state(data.now, s, pal);
@@ -598,32 +598,64 @@ pub fn sessions(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
     });
 }
 
-/// The newest messages across all sessions.
-pub fn events(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let focused = app.focus == Panel::Events;
-    let block = panel_block(pal, Panel::Events, "Recent messages", pal.box_proc, focused)
-        .title(note_line(pal, "UTC", pal.box_proc).right_aligned());
-    if data.live.feed.is_empty() {
-        return empty(frame, area, pal, block, "No messages recorded yet.");
+/// Every session of the range, grouped by day (UTC, newest first): the day
+/// on the first row of its group, then the short session id, project, main
+/// model, messages, tokens and cost of that day.
+pub fn sessions(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    let focused = app.focus == Panel::Sessions;
+    let block = panel_block(
+        pal,
+        Panel::Sessions,
+        "Sessions per day",
+        pal.box_proc,
+        focused,
+    )
+    .title(note_line(pal, "UTC", pal.box_proc).right_aligned());
+    if data.sessions.is_empty() {
+        return empty(frame, area, pal, block, "No sessions in this range.");
     }
+    let long = area.width.saturating_sub(2) >= 56;
     let cols = [
-        col("time", Constraint::Length(8), 0),
+        col("day", Constraint::Length(if long { 9 } else { 5 }), 0),
+        col("session", Constraint::Length(8), 0),
         col("project", Constraint::Fill(1), 0),
         col("model", Constraint::Fill(1), 0),
-        col(">tokens", Constraint::Length(7), 46),
+        col(">msgs", Constraint::Length(5), 64),
+        col(">tokens", Constraint::Length(7), 64),
         col(">cost", Constraint::Length(8), 0),
     ];
-    let rows = event_rows(&data.live.feed, app.sort(Panel::Events));
-    let peak = rows.iter().map(|e| e.cost_usd).fold(0.0, f64::max);
-    table(frame, area, app, pal, Panel::Events, block, &cols, |w| {
+    let rows = session_day_rows(&data.sessions, app.sort(Panel::Sessions));
+    let peak = rows.iter().map(|s| s.cost_usd).fold(0.0, f64::max);
+    let today = data.now.div_euclid(SECONDS_PER_DAY);
+    table(frame, area, app, pal, Panel::Sessions, block, &cols, |w| {
         rows.iter()
-            .map(|e| {
+            .enumerate()
+            .map(|(i, s)| {
+                let first_of_day = i == 0 || rows[i - 1].day != s.day;
+                let day = if !first_of_day {
+                    Cell::from("")
+                } else {
+                    let date = date_key(s.day);
+                    let text = if long {
+                        format!("{} {}", WEEKDAYS[weekday(s.day)], &date[5..])
+                    } else {
+                        date[5..].to_string()
+                    };
+                    let style = if s.day == today {
+                        today_style(pal)
+                    } else {
+                        Style::default().add_modifier(Modifier::BOLD)
+                    };
+                    Cell::from(text).style(style)
+                };
                 vec![
-                    Cell::from(clock(e.timestamp)),
-                    Cell::from(fit(&e.repo, w[1])),
-                    Cell::from(fit(short_model(&e.model), w[2])),
-                    num(compact(total_tokens(e))),
-                    cost_cell(pal, e.cost_usd, peak),
+                    day,
+                    Cell::from(short_id(&s.id)),
+                    Cell::from(fit(&s.repo, w[2])),
+                    Cell::from(fit(short_model(&s.model), w[3])),
+                    num(s.messages.to_string()),
+                    num(compact(s.tokens)),
+                    cost_cell(pal, s.cost_usd, peak),
                 ]
             })
             .collect()

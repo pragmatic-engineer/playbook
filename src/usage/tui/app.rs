@@ -7,15 +7,17 @@
 use super::chart::Plot;
 use super::data::Data;
 use super::panels;
-use super::sort::{event_rows, group_rows, session_rows, Panel, Sort, PANELS};
+use super::sort::{day_rows, group_rows, session_day_rows, session_rows, Panel, Sort, PANELS};
 use super::theme::{ColorDepth, Theme};
 use super::view;
+use super::worker::DEFAULT_REFRESH_SECONDS;
 use crate::usage::aggregate::SECONDS_PER_DAY;
 use crate::usage::query::{Range, WeekStart};
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Position, Rect};
+use std::time::Duration;
 
 /// The ranges `r` steps through: the calendar ranges from the shortest to
 /// the longest, then the rolling ones.
@@ -86,6 +88,8 @@ pub struct App {
     pub mouse: bool,
     /// The screen size, for turning a click into a panel and a row.
     pub area: Rect,
+    /// How often the snapshot is refreshed, shown in the footer.
+    pub refresh_every: Duration,
 }
 
 /// What the loop must do after a key.
@@ -119,6 +123,7 @@ impl App {
             sorts: PANELS.map(Panel::default_sort),
             mouse: true,
             area: Rect::new(0, 0, 100, 30),
+            refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
         }
     }
 
@@ -132,8 +137,8 @@ impl App {
         match panel {
             Panel::Models => d.models.len(),
             Panel::Projects => d.repos.len(),
-            Panel::Sessions => d.live.active.len(),
-            Panel::Events => d.live.feed.len(),
+            Panel::Live => d.live.active.len(),
+            Panel::Sessions => d.sessions.len(),
             Panel::Spend if self.spend_view == SpendView::Daily => {
                 let today = d.now.div_euclid(SECONDS_PER_DAY);
                 d.series.iter().filter(|p| p.day <= today).count()
@@ -165,6 +170,41 @@ impl App {
         self.select(panel, (at + by).max(0) as usize);
     }
 
+    /// The row keys of a table in the order it is drawn: what a row is, so a
+    /// refresh can find the selected row again after the rows moved.
+    fn row_ids(&self, panel: Panel) -> Vec<String> {
+        let Some(d) = &self.data else {
+            return Vec::new();
+        };
+        let sort = self.sort(panel);
+        match panel {
+            Panel::Models => group_rows(&d.models, sort)
+                .iter()
+                .map(|g| g.key.clone())
+                .collect(),
+            Panel::Projects => group_rows(&d.repos, sort)
+                .iter()
+                .map(|g| g.key.clone())
+                .collect(),
+            Panel::Live => session_rows(&d.live.active, sort)
+                .iter()
+                .map(|s| s.id.clone())
+                .collect(),
+            Panel::Sessions => session_day_rows(&d.sessions, sort)
+                .iter()
+                .map(|s| format!("{}/{}", s.day, s.id))
+                .collect(),
+            Panel::Spend if self.spend_view == SpendView::Daily => {
+                let today = d.now.div_euclid(SECONDS_PER_DAY);
+                day_rows(&d.series, today, sort)
+                    .iter()
+                    .map(|p| p.day.to_string())
+                    .collect()
+            }
+            Panel::Spend | Panel::Tokens => Vec::new(),
+        }
+    }
+
     /// The text that filters the view to the selected row: its model, project
     /// or session id.
     fn selected_key(&self) -> Option<String> {
@@ -175,13 +215,31 @@ impl App {
         match panel {
             Panel::Models => group_rows(&d.models, sort).get(at).map(|g| g.key.clone()),
             Panel::Projects => group_rows(&d.repos, sort).get(at).map(|g| g.key.clone()),
-            Panel::Sessions => session_rows(&d.live.active, sort)
+            Panel::Live => session_rows(&d.live.active, sort)
                 .get(at)
                 .map(|s| s.id.clone()),
-            Panel::Events => event_rows(&d.live.feed, sort)
+            Panel::Sessions => session_day_rows(&d.sessions, sort)
                 .get(at)
-                .map(|e| e.session_id.clone()),
+                .map(|s| s.id.clone()),
             Panel::Spend | Panel::Tokens => None,
+        }
+    }
+
+    /// Takes a fresh snapshot without moving anything the user set: each
+    /// table's selected row is found again by what it is, so the selection
+    /// and the scroll that follows it stay on the same row when the rows
+    /// reorder. The cursor, focus, sorts and view are not touched.
+    pub fn refresh(&mut self, data: Data) {
+        let kept: Vec<Option<String>> = PANELS
+            .iter()
+            .map(|p| self.row_ids(*p).into_iter().nth(self.selection(*p)))
+            .collect();
+        self.data = Some(data);
+        self.error = None;
+        for (panel, id) in PANELS.iter().zip(kept) {
+            if let Some(at) = id.and_then(|id| self.row_ids(*panel).iter().position(|r| *r == id)) {
+                self.selected[panel.index()] = at;
+            }
         }
     }
 
@@ -314,9 +372,7 @@ impl App {
             return None;
         }
         let p = view::layout(self.area);
-        let rects = [
-            p.spend, p.tokens, p.models, p.projects, p.sessions, p.events,
-        ];
+        let rects = [p.spend, p.tokens, p.models, p.projects, p.live, p.sessions];
         let at = Position::new(x, y);
         let (panel, rect) = PANELS.iter().zip(rects).find(|(_, r)| r.contains(at))?;
         // Border, then the header row, then the rows.
@@ -541,8 +597,8 @@ mod tests {
         assert_eq!(app.theme, Theme::Mono);
     }
 
-    fn loaded() -> App {
-        use crate::usage::query::LiveView;
+    /// A snapshot of three models, one session each, with these costs.
+    fn data_with(costs: [f64; 3]) -> Data {
         use crate::usage::UsageEvent;
         let ev = |id: &str, model: &str, repo: &str, cost: f64| UsageEvent {
             event_id: id.into(),
@@ -554,30 +610,93 @@ mod tests {
             ..UsageEvent::default()
         };
         let events = [
-            ev("a", "opus", "alpha", 5.0),
-            ev("b", "sonnet", "beta", 1.0),
-            ev("c", "haiku", "gamma", 3.0),
+            ev("a", "opus", "alpha", costs[0]),
+            ev("b", "sonnet", "beta", costs[1]),
+            ev("c", "haiku", "gamma", costs[2]),
         ];
         let live = crate::usage::query::live_view(&events, &events, &events, 1_788_400_000);
+        Data::build(&events, live, 1_788_400_000, Range::All, "")
+    }
+
+    fn loaded() -> App {
         let mut app = App::new(Range::All);
-        app.data = Some(Data::build(&events, live, 1_788_400_000, Range::All, ""));
-        let _ = LiveView::default();
+        app.data = Some(data_with([5.0, 1.0, 3.0]));
         app
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_selected_row_when_the_rows_reorder() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('3')));
+        app.key(press(KeyCode::Down));
+        // Models by cost: opus 5, haiku 3, sonnet 1, so haiku is selected.
+        assert_eq!(app.selected_key().as_deref(), Some("haiku"));
+        app.cursor = Some(NOW.div_euclid(86_400));
+        app.spend_view = SpendView::ByModel;
+        app.error = Some("old error".into());
+
+        // Haiku now costs the most, so it moves to the top of the table.
+        app.refresh(data_with([5.0, 1.0, 9.0]));
+
+        assert_eq!(app.selected_key().as_deref(), Some("haiku"));
+        assert_eq!(app.selection(Panel::Models), 0);
+        assert_eq!(app.focus, Panel::Models);
+        assert_eq!(app.cursor, Some(NOW.div_euclid(86_400)));
+        assert_eq!(app.spend_view, SpendView::ByModel);
+        assert_eq!(app.sort(Panel::Models), Panel::Models.default_sort());
+        assert_eq!(app.error, None);
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_selection_of_every_table_and_the_filter_draft() {
+        let mut app = loaded();
+        for panel in ['4', '5', '6'] {
+            app.key(press(KeyCode::Char(panel)));
+            app.key(press(KeyCode::Down));
+        }
+        let before: Vec<usize> = PANELS.iter().map(|p| app.selection(*p)).collect();
+        app.key(press(KeyCode::Char('/')));
+        app.key(press(KeyCode::Char('x')));
+
+        app.refresh(data_with([5.0, 1.0, 3.0]));
+
+        let after: Vec<usize> = PANELS.iter().map(|p| app.selection(*p)).collect();
+        assert_eq!(before, after);
+        assert!(app.editing);
+        assert_eq!(app.draft, "x");
+    }
+
+    #[test]
+    fn a_refresh_whose_selected_row_is_gone_keeps_the_index_inside_the_rows() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('3')));
+        app.key(press(KeyCode::End));
+        assert_eq!(app.selection(Panel::Models), 2);
+        // A snapshot with no models at all.
+        app.refresh(Data::build(
+            &[],
+            crate::usage::query::LiveView::default(),
+            1_788_400_000,
+            Range::All,
+            "",
+        ));
+        assert_eq!(app.selection(Panel::Models), 0);
+        assert_eq!(app.focus, Panel::Models);
     }
 
     #[test]
     fn number_keys_and_tab_move_the_focus() {
         let mut app = App::new(Range::All);
         app.key(press(KeyCode::Char('5')));
-        assert_eq!(app.focus, Panel::Sessions);
+        assert_eq!(app.focus, Panel::Live);
         app.key(press(KeyCode::Tab));
-        assert_eq!(app.focus, Panel::Events);
+        assert_eq!(app.focus, Panel::Sessions);
         app.key(press(KeyCode::Tab));
         assert_eq!(app.focus, Panel::Spend);
         app.key(press(KeyCode::BackTab));
-        assert_eq!(app.focus, Panel::Events);
+        assert_eq!(app.focus, Panel::Sessions);
         app.key(press(KeyCode::Char('7')));
-        assert_eq!(app.focus, Panel::Events);
+        assert_eq!(app.focus, Panel::Sessions);
     }
 
     #[test]
