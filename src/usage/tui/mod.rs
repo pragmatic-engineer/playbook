@@ -72,7 +72,9 @@ fn event_loop(
         std::env::var("COLORTERM").ok().as_deref(),
         std::env::var("TERM").ok().as_deref(),
     );
-    let worker = Worker::spawn(paths.clone(), app.range, app.filter.clone());
+    let every = Duration::from_secs(super::entry::configured_refresh_seconds());
+    app.refresh_every = every;
+    let worker = Worker::spawn(paths.clone(), app.range, app.filter.clone(), every);
     while !app.quit {
         app.area = terminal.size().map(Into::into)?;
         terminal.draw(|frame| view::render(frame, &app))?;
@@ -94,8 +96,7 @@ fn event_loop(
                 Update::Data(data) => {
                     // A reply for an earlier range may still be in flight.
                     if data.range == app.range && data.filter == app.filter {
-                        app.data = Some(*data);
-                        app.error = None;
+                        app.refresh(*data);
                     }
                 }
                 Update::Error(e) => app.error = Some(e),

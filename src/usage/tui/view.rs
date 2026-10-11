@@ -7,12 +7,12 @@
 
 use super::app::App;
 use super::data::Data;
-use super::fmt::{compact, money};
+use super::fmt::{compact, fit, money};
 use super::panels;
 use super::sort::Panel;
 use super::theme::Palette;
 use crate::usage::aggregate::date_key;
-use crate::usage::query::Range;
+use crate::usage::query::{clock, Range};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -31,8 +31,8 @@ pub struct Panels {
     pub tokens: Rect,
     pub models: Rect,
     pub projects: Rect,
+    pub live: Rect,
     pub sessions: Rect,
-    pub events: Rect,
     pub footer: Rect,
 }
 
@@ -58,15 +58,15 @@ pub fn layout(area: Rect) -> Panels {
     };
     let (spend, tokens) = halves(graphs);
     let (models, projects) = halves(tables);
-    let (sessions, events) = halves(live);
+    let (live, sessions) = halves(live);
     Panels {
         header,
         spend,
         tokens,
         models,
         projects,
+        live,
         sessions,
-        events,
         footer,
     }
 }
@@ -124,8 +124,8 @@ pub fn render(frame: &mut Frame, app: &App) {
                 total,
                 None,
             );
+            panels::live(frame, p.live, app, data, &pal);
             panels::sessions(frame, p.sessions, app, data, &pal);
-            panels::events(frame, p.events, app, data, &pal);
         }
         None => {
             let body = Rect::new(p.spend.x, p.spend.y, area.width, 1);
@@ -135,7 +135,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(footer(app, &pal, area.width)), p.footer);
 }
 
-/// The key hints: each key in the accent color, its meaning in the text color.
+/// The key hints: each key in the accent color, its meaning in the text color,
+/// and at the right when the view was last refreshed.
 fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
     let dim = Style::default().fg(pal.color(pal.graph_text));
     if app.editing {
@@ -147,6 +148,9 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
     let keys = Style::default()
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD);
+    let (status, status_style) = refresh_status(app, pal, area_width);
+    // The status keeps its place at the right, so the hints get what is left.
+    let room = usize::from(area_width).saturating_sub(status.chars().count());
     let theme = format!("theme ({})", app.theme.name());
     // Listed in the order shown. When the line is too wide, hints drop in
     // `DROP` order, so the ones that matter most stay.
@@ -170,21 +174,50 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
             .sum::<usize>()
     };
     for drop in FOOTER_DROP {
-        if width(&hints) <= usize::from(area_width) {
+        if width(&hints) <= room {
             break;
         }
         hints.retain(|(k, _)| *k != drop);
     }
+    let used = width(&hints);
     let mut spans = vec![Span::raw(" ")];
     for (key, label) in hints {
         spans.push(Span::styled(key.to_string(), keys));
         spans.push(Span::styled(format!(" {label} "), dim));
     }
+    let gap = usize::from(area_width).saturating_sub(used + status.chars().count());
+    spans.push(Span::raw(" ".repeat(gap)));
+    spans.push(Span::styled(status, status_style));
     Line::from(spans)
 }
 
 /// The order footer hints are dropped in on a narrow screen.
 const FOOTER_DROP: [&str; 5] = ["x", "t", "enter", "s/S", "1-6"];
+
+/// What the right end of the footer says: when the data was last read, or why
+/// the last read failed. The time is the snapshot's own clock, so it moves only
+/// when a refresh really finished.
+fn refresh_status(app: &App, pal: &Palette, area_width: u16) -> (String, Style) {
+    if let Some(e) = &app.error {
+        let room = usize::from(area_width / 2);
+        let text = fit(&format!("refresh failed: {e} "), room);
+        return (text, Style::default().fg(pal.color(pal.error)));
+    }
+    let dim = Style::default().fg(pal.color(pal.graph_text));
+    match &app.data {
+        // The interval goes first when the line is short.
+        Some(d) if area_width >= 100 => (
+            format!(
+                "updated {} UTC, every {}s ",
+                clock(d.now),
+                app.refresh_every.as_secs()
+            ),
+            dim,
+        ),
+        Some(d) => (format!("updated {} UTC ", clock(d.now)), dim),
+        None => (String::new(), dim),
+    }
+}
 
 fn range_label(data: &Data) -> String {
     match data.range.days(data.now) {
@@ -384,7 +417,7 @@ mod tests {
             "Models",
             "Projects",
             "Live sessions",
-            "Recent messages",
+            "Sessions per day",
             "live",
             "opus-5",
         ] {
@@ -413,7 +446,7 @@ mod tests {
         let area = Rect::new(0, 0, 100, 30);
         let p = layout(area);
         let rects = [
-            p.header, p.spend, p.tokens, p.models, p.projects, p.sessions, p.events, p.footer,
+            p.header, p.spend, p.tokens, p.models, p.projects, p.live, p.sessions, p.footer,
         ];
         let cells: u32 = rects
             .iter()
@@ -453,6 +486,72 @@ mod tests {
         ] {
             assert!(text.contains(hint), "{hint}");
         }
+    }
+
+    #[test]
+    fn the_footer_shows_when_the_data_was_read_and_how_often() {
+        let app = app_with(&[]);
+        assert!(screen(&app, 150, 30).contains("updated 01:46:40 UTC, every 5s"));
+        // A short line keeps the time and drops the interval.
+        let short = screen(&app, 80, 24);
+        assert!(short.contains("updated 01:46:40 UTC"), "{short}");
+        assert!(!short.contains("every"), "{short}");
+        // A configured interval is shown.
+        let mut app = app;
+        app.refresh_every = std::time::Duration::from_secs(30);
+        assert!(screen(&app, 150, 30).contains("every 30s"));
+    }
+
+    #[test]
+    fn a_failed_refresh_is_named_in_the_footer_and_the_data_stays() {
+        let mut app = app_with(&[event("opus", "alpha", 2.0)]);
+        app.error = Some("database is busy".into());
+        let text = screen(&app, 120, 30);
+        assert!(text.contains("refresh failed: database is busy"), "{text}");
+        assert!(text.contains("$2.00"), "the last good data stays:\n{text}");
+        assert!(!text.contains("updated"), "{text}");
+    }
+
+    #[test]
+    fn the_sessions_table_names_each_day_once_and_lists_its_sessions() {
+        let session = |id: &str, ts: i64, cost: f64| UsageEvent {
+            event_id: format!("{id}{ts}"),
+            timestamp: ts,
+            session_id: id.into(),
+            model: "claude-opus-5".into(),
+            repo: "alpha".into(),
+            cost_usd: cost,
+            ..UsageEvent::default()
+        };
+        // Today is Thursday 09-03, one day back is Wednesday 09-02.
+        let events = [
+            session("aaaaaaaa-1", NOW - 60, 1.0),
+            session("bbbbbbbb-2", NOW - 50, 2.0),
+            session("cccccccc-3", NOW - 86_400, 3.0),
+        ];
+        let live = LiveView::default();
+        let mut app = App::new(Range::All);
+        app.data = Some(Data::build(&events, live, NOW, Range::All, ""));
+        let text = screen(&app, 160, 50);
+        let ids = ["aaaaaaaa", "bbbbbbbb", "cccccccc"];
+        let rows: Vec<&str> = text
+            .lines()
+            .filter_map(|l| l.split('\u{2502}').nth(3))
+            .filter(|r| ids.iter().any(|id| r.contains(id)))
+            .collect();
+        assert_eq!(rows.len(), 3, "{text}");
+        assert!(
+            rows[0].contains("Thu 09-03") && rows[0].contains("bbbbbbbb"),
+            "{rows:?}"
+        );
+        assert!(
+            !rows[1].contains("09-03") && rows[1].contains("aaaaaaaa"),
+            "{rows:?}"
+        );
+        assert!(
+            rows[2].contains("Wed 09-02") && rows[2].contains("cccccccc"),
+            "{rows:?}"
+        );
     }
 
     #[test]

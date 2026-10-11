@@ -30,7 +30,8 @@ const EIGHTHS: [char; 8] = [
 /// The shortest plot worth drawing, in rows.
 const MIN_PLOT: u16 = 3;
 /// A bar is never drawn wider than this, so a few days do not become slabs.
-const MAX_CELL: usize = 8;
+/// A week or more of bars always fills the plot instead.
+const MAX_CELL: usize = 16;
 /// The narrowest inner width that keeps a y axis.
 const MIN_AXIS_WIDTH: u16 = 16;
 
@@ -193,7 +194,9 @@ impl Geometry {
             panel.height.saturating_sub(2),
         );
         let wide = inner.width >= MIN_AXIS_WIDTH;
-        let gutter = if wide { label_width + 1 } else { 0 };
+        // The labels, a blank column before them so they do not touch the box,
+        // and the axis line.
+        let gutter = if wide { label_width + 2 } else { 0 };
         let plot_width = usize::from(inner.width.saturating_sub(gutter));
         let (per, bars) = if days == 0 || plot_width == 0 {
             (1, 0)
@@ -219,7 +222,10 @@ impl Geometry {
                 })
                 .collect()
         };
-        let rows = Rows::for_height(inner.height, per == 1 && bars > 0 && plot_width >= 7);
+        // A weekday label needs its own column and a gap, so crowded bars
+        // (a month in a narrow panel) go without the row.
+        let roomy = cells.iter().all(|c| c.1 >= 2);
+        let rows = Rows::for_height(inner.height, per == 1 && bars > 0 && roomy);
         let mut y = inner.y;
         let mut take = |rows: u16| {
             y += rows;
@@ -680,7 +686,7 @@ fn draw_axis(buf: &mut Buffer, plot: &Plot, pal: &Palette) {
         buf[(axis_x, p.y + row)]
             .set_char('\u{2524}')
             .set_style(dim(pal));
-        let label = fit(&plot.metric.axis_label(value), usize::from(geo.gutter - 1));
+        let label = fit(&plot.metric.axis_label(value), usize::from(geo.gutter - 2));
         let width = label.chars().count() as u16;
         buf.set_string(axis_x - width, p.y + row, label, dim(pal));
     }
@@ -952,15 +958,15 @@ mod tests {
 
     #[test]
     fn bars_share_the_plot_so_the_chart_fills_its_width() {
-        // 38 inner columns less a 5 column axis leaves 33.
+        // 38 inner columns less a 6 column axis gutter leaves 32.
         let g = |days| Geometry::new(Rect::new(0, 0, 40, 10), days, 4);
         let widths = |g: &Geometry| g.cells.iter().map(|c| c.1).collect::<Vec<_>>();
         let thirty = g(30);
         assert_eq!((thirty.per, thirty.bars()), (1, 30));
-        assert_eq!(widths(&thirty).iter().sum::<u16>(), 33);
+        assert_eq!(widths(&thirty).iter().sum::<u16>(), 32);
         assert!(widths(&thirty).iter().all(|w| (1..=2).contains(w)));
         let seven = g(7);
-        assert_eq!(widths(&seven).iter().sum::<u16>(), 33);
+        assert_eq!(widths(&seven).iter().sum::<u16>(), 32);
         assert!(widths(&seven).iter().all(|w| (4..=5).contains(w)));
         assert_eq!(seven.bar_width(0), seven.cells[0].1 - 1, "a gap of one");
         assert_eq!(thirty.bar_width(0), 1, "no gap at one column");
@@ -973,7 +979,7 @@ mod tests {
             let g = g(days);
             let mut end = 0;
             for (from, w) in &g.cells {
-                assert!(*from >= end && from + w <= 33, "{days}");
+                assert!(*from >= end && from + w <= 32, "{days}");
                 end = from + w;
             }
         }
@@ -1072,15 +1078,20 @@ mod tests {
     #[test]
     fn weekday_ticks_follow_the_day_and_widen_with_the_room() {
         // 2026-08-05 is a Wednesday.
-        let s = series(&vec![1.0; 30]);
+        let s = series(&[1.0; 16]);
         let (plot, buf) = draw(Rect::new(0, 0, 40, 14), &s, None);
         let y = plot.geo.weekdays_y.expect("a tall panel has a weekday row");
         let letters: String = row(&buf, y)
             .chars()
             .skip(usize::from(plot.geo.plot.x))
+            .filter(|c| !c.is_whitespace())
             .take(7)
             .collect();
         assert_eq!(letters, "WTFSSMT");
+        // A month in the same panel is too crowded for any weekday row.
+        let month = series(&[1.0; 30]);
+        let (plot, _) = draw(Rect::new(0, 0, 40, 14), &month, None);
+        assert_eq!(plot.geo.weekdays_y, None);
         let week = series(&[1.0; 7]);
         let (plot, buf) = draw(Rect::new(0, 0, 40, 14), &week, None);
         let y = plot.geo.weekdays_y.unwrap();
@@ -1090,8 +1101,29 @@ mod tests {
             .collect();
         assert_eq!(names, ["Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"]);
         // A short panel has no weekday row.
-        let (plot, _) = draw(Rect::new(0, 0, 40, 9), &s, None);
+        let (plot, _) = draw(Rect::new(0, 0, 40, 9), &week, None);
         assert_eq!(plot.geo.weekdays_y, None);
+    }
+
+    #[test]
+    fn a_week_of_bars_fills_the_plot_of_a_wide_panel() {
+        // 118 inner columns less a 6 column gutter leaves 112 for seven bars.
+        let g = Geometry::new(Rect::new(0, 0, 120, 12), 7, 4);
+        assert_eq!(g.cells.iter().map(|c| c.1).sum::<u16>(), 112);
+        assert!(g.span() >= 112 - 1, "the last bar reaches the plot edge");
+    }
+
+    #[test]
+    fn y_axis_labels_keep_a_blank_column_from_the_box() {
+        let s = series(&[1.0, 2.0, 3.0]);
+        let (plot, buf) = draw(Rect::new(0, 0, 40, 12), &s, None);
+        let p = plot.geo.plot;
+        for y in [p.y, p.y + p.height - 1] {
+            let line = row(&buf, y);
+            let label_start = line.chars().position(|c| c == '$').expect("a label");
+            assert!(label_start >= 2, "{line}");
+            assert_eq!(buf[(plot.geo.inner.x, y)].symbol(), " ", "{line}");
+        }
     }
 
     #[test]

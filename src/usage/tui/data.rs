@@ -7,7 +7,7 @@
 
 use super::theme::SERIES;
 use crate::usage::aggregate::{group_usage, unpriced_models, Dimension, Group, SECONDS_PER_DAY};
-use crate::usage::query::{self, LiveView, Range, Totals};
+use crate::usage::query::{self, LiveView, Range, SessionDay, Totals};
 use crate::usage::UsageEvent;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -104,6 +104,8 @@ pub struct Data {
     /// The series color of each model.
     pub slots: Slots,
     pub repos: Vec<Group>,
+    /// Sessions in the range, one row per session and UTC day.
+    pub sessions: Vec<SessionDay>,
     /// Messages in the range whose model has no price (counted as $0).
     pub unpriced: usize,
     /// Every day from the start of the range to today, idle days at zero.
@@ -186,6 +188,7 @@ impl Data {
             slots: Slots::of(&models),
             models,
             repos: group_usage(&inside, Dimension::Repo),
+            sessions: query::session_days(&inside),
             unpriced: unpriced_models(&inside).0,
             series: day_series(&inside, now, range),
             live,
@@ -268,6 +271,29 @@ mod tests {
         assert_eq!(all.series.len(), 3);
         let none = Data::build(&[], LiveView::default(), NOW, Range::All, "");
         assert!(none.series.is_empty());
+    }
+
+    #[test]
+    fn sessions_are_grouped_by_day_inside_the_range_and_follow_the_filter() {
+        let mut other = event(NOW - 30, "sonnet", "b", 1.0);
+        other.session_id = "s2".into();
+        let events = vec![
+            event(NOW - 60, "opus", "a", 2.0),
+            other,
+            event(NOW - 100 * 86_400, "opus", "a", 50.0),
+        ];
+        let d = Data::build(&events, LiveView::default(), NOW, Range::LastDays(30), "");
+        assert_eq!(d.sessions.len(), 2);
+        assert_eq!(d.sessions[0].id, "s1", "the dearer session first");
+        let sonnet = Data::build(
+            &events,
+            LiveView::default(),
+            NOW,
+            Range::LastDays(30),
+            "sonnet",
+        );
+        assert_eq!(sonnet.sessions.len(), 1);
+        assert_eq!(sonnet.sessions[0].id, "s2");
     }
 
     #[test]

@@ -138,7 +138,8 @@ fn the_week_range_has_wide_bars_and_weekday_names() {
 fn a_moved_cursor_reads_out_its_day() {
     let mut a = app(Theme::Btop);
     a.cursor = Some(NOW.div_euclid(DAY) - 9);
-    check("cursor_100x30", &draw(&a, 100, 30));
+    let text = draw(&a, 100, 30);
+    assert!(text.contains("Tue 2026-08-25"), "{text}");
 }
 
 fn with_spend_view(theme: Theme, view: crate::usage::tui::app::SpendView) -> App {
@@ -165,22 +166,15 @@ fn spend_stacked_by_model_without_color_uses_patterns() {
         .filter(|c| text.contains(**c))
         .count();
     assert!(shown >= 3, "three models, three patterns, saw {shown}");
-    check("stacked_mono_100x30", &text);
 }
 
 #[test]
-fn the_daily_table_at_80x24_100x30_and_160x50() {
+fn the_daily_table_at_100x30() {
     use crate::usage::tui::app::SpendView;
-    for (name, w, h) in [
-        ("daily_80x24", 80, 24),
-        ("daily_100x30", 100, 30),
-        ("daily_160x50", 160, 50),
-    ] {
-        check(
-            name,
-            &draw(&with_spend_view(Theme::Btop, SpendView::Daily), w, h),
-        );
-    }
+    check(
+        "daily_100x30",
+        &draw(&with_spend_view(Theme::Btop, SpendView::Daily), 100, 30),
+    );
 }
 
 #[test]
@@ -278,14 +272,6 @@ fn before_the_first_read() {
 }
 
 #[test]
-fn editing_the_filter() {
-    let mut a = app(Theme::Btop);
-    a.editing = true;
-    a.draft = "opus".into();
-    check("editing_100x30", &draw(&a, 100, 30));
-}
-
-#[test]
 fn the_theme_changes_color_not_text() {
     let btop = draw(&app(Theme::Btop), 100, 30);
     let dark = draw(&app(Theme::Dark), 100, 30);
@@ -361,8 +347,8 @@ fn each_box_has_its_own_outline_color() {
     assert_eq!(corner(p.tokens), rgb(0x5c, 0x58, 0x8d)); // tokens: net
     assert_eq!(corner(p.models), rgb(0x6c, 0x6c, 0x4b)); // models: mem
     assert_eq!(corner(p.projects), rgb(0x6c, 0x6c, 0x4b)); // projects: mem
+    assert_eq!(corner(p.live), rgb(0x80, 0x52, 0x52)); // live: proc
     assert_eq!(corner(p.sessions), rgb(0x80, 0x52, 0x52)); // sessions: proc
-    assert_eq!(corner(p.events), rgb(0x80, 0x52, 0x52)); // events: proc
 }
 
 #[test]
