@@ -263,6 +263,22 @@ fn fires(f: &Fire, name: &str) -> bool {
             .1;
             !out.is_empty() && out.contains("UserPromptSubmit")
         }
+        "context-hygiene" => {
+            let home = scratch(f, "h-hygiene");
+            let transcript = home.join("t.jsonl");
+            fs::write(
+                &transcript,
+                r#"{"type":"assistant","message":{"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":400000}}}"#,
+            )
+            .unwrap();
+            let payload = format!(
+                "{{\"session_id\":\"fire-hygiene\",\"transcript_path\":{}}}",
+                json_str(&transcript.display().to_string())
+            );
+            run_hook(&f.playbook, name, &payload, &home, &home, &[], &[])
+                .1
+                .contains("playbook handoff save --session fire-hygiene")
+        }
         "precompact-warn" => {
             let home = scratch(f, "h-precompact");
             run_hook(

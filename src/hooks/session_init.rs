@@ -41,13 +41,14 @@ const MEMORY_BLOCK_MIN_CHARS: usize = 300;
 
 /// The per-session counter/state files zeroed at the start of every session.
 /// `capture-crossings` has no python counterpart, so this no longer matches the retired shell original one-for-one.
-const SESSION_COUNTER_FILES: [&str; 6] = [
+const SESSION_COUNTER_FILES: [&str; 7] = [
     "search-count",
     "tool-count",
     "edit-count",
     "edits.jsonl",
     "seen-reads",
     "capture-crossings",
+    "hygiene-level",
 ];
 
 const DEFAULT_AUTO_LEARN_MAX_AGE_DAYS: i64 = 14;
@@ -90,7 +91,7 @@ pub fn run(payload: &Payload) {
     let injected = if headless {
         0
     } else {
-        append_handoff_slice(&mut extra_context)
+        append_handoff_slice(&mut extra_context, &payload.field(".source"))
     };
     if !headless || crate::common::headless::headless_memory_enabled() {
         append_memory_context(&mut extra_context, &repo_root);
@@ -255,7 +256,7 @@ fn append_memory_context(extra_context: &mut String, repo_root: &str) {
 /// The shared `crate::handoff` module keys, loads, and archives them: up to
 /// three fresh ones are injected and moved to `handoff/used/`, stale and
 /// over-cap ones are removed. Returns how many were injected. Never panics.
-fn append_handoff_slice(extra_context: &mut String) -> usize {
+fn append_handoff_slice(extra_context: &mut String, source: &str) -> usize {
     let slug = crate::handoff::current_slug();
     if slug.is_empty() {
         return 0;
@@ -281,7 +282,38 @@ fn append_handoff_slice(extra_context: &mut String) -> usize {
         };
         push_context(extra_context, &ctx);
     }
-    taken.contents.len()
+    let mut injected = taken.contents.len();
+    if source == "clear" {
+        injected += usize::from(append_cleared_handoff(extra_context, &slug));
+    }
+    injected
+}
+
+/// Ceiling for the summary of the handoff a context hygiene nudge asked for.
+/// The full text stays on disk at the path the context names.
+const CLEARED_HANDOFF_CAP_CHARS: usize = 3000;
+
+/// After `/clear`: the handoff the ended session saved for itself, cut to a
+/// short summary with a pointer to the full file. Only that session's own
+/// handoff loads (see `crate::handoff::take_cleared_in`), so a parallel
+/// session in the same directory never receives it.
+fn append_cleared_handoff(extra_context: &mut String, slug: &str) -> bool {
+    let Some(cleared) =
+        crate::handoff::take_cleared_in(&crate::handoff::root(), slug, SystemTime::now())
+    else {
+        return false;
+    };
+    let pointer = format!("Full handoff: {}", cleared.path.display());
+    let room = CONTEXT_CAP_CHARS
+        .saturating_sub(extra_context.chars().count() + MEMORY_BLOCK_CAP_CHARS)
+        .saturating_sub(pointer.chars().count() + 200)
+        .min(CLEARED_HANDOFF_CAP_CHARS);
+    let body = fit_handoff(&cleared.text, room);
+    push_context(
+        extra_context,
+        &format!("You ran /clear after saving a handoff. Resume from it:\n\n{body}\n\n{pointer}"),
+    );
+    true
 }
 
 /// Room a handoff keeps even when the rest of the context is large.

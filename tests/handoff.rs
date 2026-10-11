@@ -276,3 +276,232 @@ fn a_read_only_runtime_dir_does_not_fail_the_hook() {
         "logging is best-effort and must never fail the hook"
     );
 }
+
+// ---- context hygiene loop: nudge, save, /clear, resume ----
+
+const BIG: u64 = 300_000;
+
+impl Env {
+    fn transcript(&self, name: &str, tokens: u64) -> PathBuf {
+        let path = self.home.join(name);
+        let line = format!(
+            r#"{{"type":"assistant","isSidechain":false,"message":{{"usage":{{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":{tokens}}}}}}}"#
+        );
+        fs::write(&path, format!("{{\"type\":\"user\"}}\n{line}\n")).unwrap();
+        path
+    }
+
+    fn prompt(&self, sid: &str, transcript: &Path) -> (i32, String) {
+        let payload = format!(
+            r#"{{"hook_event_name":"UserPromptSubmit","session_id":"{sid}","transcript_path":"{}"}}"#,
+            transcript.display()
+        );
+        let (code, out, _) = self.run(&["hook", "context-hygiene"], &payload);
+        (code, out)
+    }
+
+    fn end_clear(&self, sid: &str) {
+        let payload =
+            format!(r#"{{"hook_event_name":"SessionEnd","session_id":"{sid}","reason":"clear"}}"#);
+        self.run(&["hook", "session-clean-exit"], &payload);
+    }
+
+    fn clear_start(&self, cwd: &Path, source: &str) -> String {
+        let payload = format!(
+            r#"{{"hook_event_name":"SessionStart","source":"{source}","session_id":"new-{source}"}}"#
+        );
+        let (code, out, _) = self.run_in(cwd, &["hook", "session-init"], &payload);
+        assert_eq!(code, 0);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap_or_default();
+        v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    fn save_for(&self, sid: &str, text: &str) {
+        let (code, _, err) = self.run(&["handoff", "save", "--session", sid], text);
+        assert_eq!(code, 0, "{err}");
+    }
+}
+
+#[test]
+fn below_the_threshold_the_hook_is_silent() {
+    let env = Env::new("hy-below");
+    let t = env.transcript("t.jsonl", 100_000);
+    let (code, out) = env.prompt("sess1", &t);
+    assert_eq!((code, out.trim()), (0, ""));
+}
+
+#[test]
+fn a_crossing_fires_once_with_a_short_message_naming_the_save_command() {
+    let env = Env::new("hy-once");
+    let t = env.transcript("t.jsonl", BIG);
+
+    let (_, first) = env.prompt("sess1", &t);
+    let (_, second) = env.prompt("sess1", &t);
+
+    let v: serde_json::Value = serde_json::from_str(&first).expect("one JSON message");
+    let msg = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(msg.chars().count() < 300, "{}", msg.chars().count());
+    assert!(
+        msg.contains("playbook handoff save --session sess1"),
+        "{msg}"
+    );
+    assert!(msg.contains("/clear"), "{msg}");
+    assert_eq!(second.trim(), "", "must not fire again at the same level");
+}
+
+#[test]
+fn a_disabled_config_keeps_the_hook_silent() {
+    let env = Env::new("hy-off");
+    env.run(
+        &["config", "set", "--global", "hygiene.enabled", "false"],
+        "",
+    );
+    let t = env.transcript("t.jsonl", BIG);
+    assert_eq!(env.prompt("sess1", &t).1.trim(), "");
+}
+
+#[test]
+fn the_threshold_is_configurable() {
+    let env = Env::new("hy-thresh");
+    env.run(
+        &[
+            "config",
+            "set",
+            "--global",
+            "hygiene.thresholdTokens",
+            "400000",
+        ],
+        "",
+    );
+    let t = env.transcript("t.jsonl", BIG);
+    assert_eq!(env.prompt("sess1", &t).1.trim(), "");
+}
+
+#[test]
+fn a_bad_transcript_fails_safe() {
+    let env = Env::new("hy-bad");
+    let garbage = env.home.join("garbage.jsonl");
+    fs::write(&garbage, "{{{ not json\n\u{0}\u{1}\n").unwrap();
+    let empty = env.home.join("empty.jsonl");
+    fs::write(&empty, "").unwrap();
+    for path in [garbage, empty, env.home.join("missing.jsonl")] {
+        let (code, out) = env.prompt("sess1", &path);
+        assert_eq!((code, out.trim()), (0, ""), "{}", path.display());
+    }
+    let (code, out, _) = env.run(&["hook", "context-hygiene"], "{\"session_id\":\"s\"}");
+    assert_eq!((code, out.trim()), (0, ""));
+}
+
+#[test]
+fn after_clear_the_sessions_own_handoff_loads_once_with_a_pointer() {
+    let env = Env::new("hy-loop");
+    env.save_for("sessA", "# Topic\nRESUME-ALPHA\n");
+    env.end_clear("sessA");
+
+    let ctx = env.clear_start(&env.cwd, "clear");
+    let again = env.clear_start(&env.cwd, "clear");
+
+    assert!(ctx.contains("RESUME-ALPHA"), "{ctx}");
+    assert!(ctx.contains("Full handoff: "), "{ctx}");
+    assert!(
+        ctx.contains("/used/"),
+        "pointer names the archived file: {ctx}"
+    );
+    assert!(!again.contains("RESUME-ALPHA"), "consumed: {again}");
+}
+
+#[test]
+fn a_handoff_whose_session_never_cleared_is_not_injected() {
+    let env = Env::new("hy-live");
+    env.save_for("sessA", "# Topic\nSTILL-RUNNING\n");
+
+    let ctx = env.clear_start(&env.cwd, "clear");
+    let startup = env.clear_start(&env.cwd, "startup");
+
+    assert!(!ctx.contains("STILL-RUNNING"), "{ctx}");
+    assert!(!startup.contains("STILL-RUNNING"), "{startup}");
+}
+
+#[test]
+fn only_the_cleared_session_loads_when_two_share_a_directory() {
+    let env = Env::new("hy-parallel");
+    env.save_for("sessA", "# A\nONLY-A\n");
+    env.save_for("sessB", "# B\nONLY-B\n");
+    env.end_clear("sessA");
+
+    let ctx = env.clear_start(&env.cwd, "clear");
+
+    assert!(ctx.contains("ONLY-A"), "{ctx}");
+    assert!(!ctx.contains("ONLY-B"), "{ctx}");
+    env.end_clear("sessB");
+    let later = env.clear_start(&env.cwd, "clear");
+    assert!(later.contains("ONLY-B"), "{later}");
+}
+
+#[test]
+fn another_repos_handoff_is_not_injected() {
+    let env = Env::new("hy-repo");
+    let other = env.home.join("work").join("other");
+    fs::create_dir_all(&other).unwrap();
+    let (code, _, err) = env.run(
+        &[
+            "handoff",
+            "save",
+            "--session",
+            "sessA",
+            "--dir",
+            other.to_str().unwrap(),
+        ],
+        "# O\nOTHER-REPO\n",
+    );
+    assert_eq!(code, 0, "{err}");
+    env.end_clear("sessA");
+
+    let ctx = env.clear_start(&env.cwd, "clear");
+
+    assert!(!ctx.contains("OTHER-REPO"), "{ctx}");
+}
+
+#[test]
+fn a_stale_cleared_handoff_is_not_injected() {
+    let env = Env::new("hy-stale");
+    env.save_for("sessA", "# Topic\nTOO-OLD\n");
+    env.end_clear("sessA");
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 86_400);
+    for entry in fs::read_dir(env.handoff_dir()).unwrap().flatten() {
+        if entry.path().extension().is_some_and(|e| e == "md") {
+            fs::File::options()
+                .write(true)
+                .open(entry.path())
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+    }
+
+    let ctx = env.clear_start(&env.cwd, "clear");
+
+    assert!(!ctx.contains("TOO-OLD"), "{ctx}");
+}
+
+#[test]
+fn a_huge_handoff_is_cut_to_stay_inside_the_hook_budget() {
+    let env = Env::new("hy-cap");
+    let huge = format!(
+        "# Big\nHEAD-MARK\n{}",
+        "filler line of the handoff\n".repeat(5000)
+    );
+    env.save_for("sessA", &huge);
+    env.end_clear("sessA");
+
+    let ctx = env.clear_start(&env.cwd, "clear");
+
+    assert!(ctx.contains("HEAD-MARK"), "{}", &ctx[..200.min(ctx.len())]);
+    assert!(ctx.chars().count() <= 9000, "{}", ctx.chars().count());
+    assert!(ctx.contains("Full handoff: "));
+}

@@ -85,7 +85,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
 /// `auto.budgetUsd` takes any number of at least one cent, since the spend cap
 /// is held in whole cents, so a fractional budget works.
 /// `auto.warnPct` takes a whole number within 1 to 100, `usage.refreshSeconds` one within 1 to
-/// 3600, the `fix.` and `review.stack` limits a whole number of at least 1, and every other
+/// 3600, `hygiene.thresholdTokens` one of at least 10000, the `fix.` and `review.stack` limits a whole number of at least 1, and every other
 /// numeric key 0 or more.
 fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
     let whole = value.as_i64();
@@ -101,6 +101,10 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         "usage.refreshSeconds" => (
             whole.is_some_and(|n| (1..=3600).contains(&n)),
             "a whole number between 1 and 3600",
+        ),
+        "hygiene.thresholdTokens" => (
+            whole.is_some_and(|n| n >= 10_000),
+            "a whole number of at least 10000",
         ),
         "fix.maxFiles" | "fix.maxLines" | "review.stackMaxPrs" | "review.stackMaxLines" => {
             (whole.is_some_and(|n| n >= 1), "a positive integer")

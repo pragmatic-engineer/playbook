@@ -1577,10 +1577,10 @@ fn main() {
         }
         Command::Handoff { sub } => {
             let result = match sub {
-                HandoffCommand::Save { dir } => {
+                HandoffCommand::Save { dir, session } => {
                     let mut text = String::new();
                     let _ = std::io::stdin().read_to_string(&mut text);
-                    handoff::run_save(dir.as_deref(), &text)
+                    handoff::run_save(dir.as_deref(), &text, session.as_deref())
                 }
                 HandoffCommand::Show { all, dir } => handoff::run_show(dir.as_deref(), all),
                 HandoffCommand::Status => Ok(handoff::run_status()),

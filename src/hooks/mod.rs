@@ -13,6 +13,7 @@ pub mod auto_guard;
 pub mod auto_model_detect;
 pub mod bg_await_guard;
 pub mod commit_message_sanitizer;
+pub mod context_hygiene;
 pub mod memory_anchors;
 pub mod memory_capture;
 pub mod memory_signals;
@@ -61,6 +62,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::WorktreeCreate => worktree_create::run(payload),
         HookName::WorktreeRemove => worktree_remove::run(payload),
         HookName::MigrationCheck => migration_check::run(payload),
+        HookName::ContextHygiene => context_hygiene::run(payload),
     }
 }
 

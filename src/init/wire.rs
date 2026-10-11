@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wires the 18 hooks Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command: 13 functional hooks plus 6 guards.
+//! Wires the 20 hooks Claude Code can invoke into `settings.json` as a bare
+//! `playbook hook <name>` command: 14 functional hooks plus 6 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
-//! two mirror different sources: `PORTED_HOOK_SPECS` is the 13 functional
+//! two mirror different sources: `PORTED_HOOK_SPECS` is the 14 functional
 //! hooks, while `GUARD_SPECS` is the guards
 //! `settings.json` wires directly, carrying their own `if` and `timeout`
 //! fields hooks.json never had. `wire` treats both lists identically: every
@@ -56,7 +56,7 @@ struct HookSpec {
 /// the two worktree hooks), line for line (`session-clean-exit` fires on both
 /// `Stop` and `SessionEnd`), while `auto-guard` and `auto-cost` never had a
 /// `hooks/hooks.json` entry. Together with `GUARD_SPECS` below these are exactly
-/// the 18 settings-wired `HookName` variants. The two worktree hooks ship through
+/// the 20 settings-wired `HookName` variants. The two worktree hooks ship through
 /// `hooks/hooks.json` instead, so they are not wired here.
 ///
 /// Divergence from `hooks/hooks.json`'s literal shape: that file ships
@@ -162,6 +162,14 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: None,
         name: "auto-cost",
+        if_cond: None,
+        timeout: Some(10),
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "UserPromptSubmit",
+        matcher: None,
+        name: "context-hygiene",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
