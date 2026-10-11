@@ -43,7 +43,13 @@ impl Worker {
             loop {
                 let update = match ingest_new(&paths) {
                     Ok((conn, _)) => match data::load(&conn, query.0, &query.1, now_secs()) {
-                        Ok(d) => Update::Data(Box::new(d)),
+                        Ok(mut d) => {
+                            // A limits failure never hides the rest of the view.
+                            if let Ok(l) = data::load_limits(&conn, &paths, query.0, d.now) {
+                                d.limits = l;
+                            }
+                            Update::Data(Box::new(d))
+                        }
                         Err(e) => Update::Error(e),
                     },
                     Err(e) => Update::Error(e),

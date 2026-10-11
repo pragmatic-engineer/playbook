@@ -8,8 +8,11 @@
 use super::theme::SERIES;
 use crate::usage::aggregate::{group_usage, unpriced_models, Dimension, Group, SECONDS_PER_DAY};
 use crate::usage::db;
+use crate::usage::limits::{Burn, Limit, Origin, State};
+use crate::usage::limits_source::{self, Snapshot};
 use crate::usage::period::{Comparison, Period};
-use crate::usage::query::{self, LiveView, Range, SessionDay, Totals};
+use crate::usage::query::{self, LiveView, Range, SessionDay, Totals, WeekStart};
+use crate::usage::run::Paths;
 use crate::usage::UsageEvent;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -101,6 +104,65 @@ struct DayAcc {
     models: BTreeMap<String, f64>,
 }
 
+/// The Budget panel: the known limits and the burn rate of the period on
+/// screen. Account wide: the project filter does not apply.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LimitsView {
+    /// Worst first (reached, then will exceed), then measured before manual.
+    pub limits: Vec<Limit>,
+    /// The plan limits were read more than six hours ago.
+    pub stale: bool,
+    pub period: Period,
+    pub burn: Burn,
+    pub previous: Burn,
+}
+
+impl Default for LimitsView {
+    fn default() -> Self {
+        LimitsView {
+            limits: Vec::new(),
+            stale: false,
+            period: Period::Week(WeekStart::default()),
+            burn: Burn::new(0.0, 0),
+            previous: Burn::new(0.0, 0),
+        }
+    }
+}
+
+fn severity(l: &Limit, now: i64) -> u8 {
+    match l.headroom(now).map(|h| h.state) {
+        Some(State::Exceeded) => 0,
+        Some(State::WillExceed { .. }) => 1,
+        Some(State::OnTrack) => 2,
+        _ => 3,
+    }
+}
+
+impl LimitsView {
+    /// `events` must reach back to `limits_source::events_since`. The period
+    /// is the one the range is, or this week for the other ranges.
+    pub fn build(
+        snapshot: Option<&Snapshot>,
+        budgets: &[(crate::usage::limits::LimitPeriod, f64)],
+        events: &[UsageEvent],
+        now: i64,
+        week: WeekStart,
+        range: Range,
+    ) -> LimitsView {
+        let mut limits = limits_source::all_limits(snapshot, budgets, events, now, week);
+        limits.sort_by_key(|l| (severity(l, now), l.origin == Origin::Manual));
+        let period = Period::of_range(range).unwrap_or(Period::Week(week));
+        let (burn, previous) = limits_source::burn_pair(events, period, now);
+        LimitsView {
+            limits,
+            stale: snapshot.is_some_and(|s| s.is_stale(now)),
+            period,
+            burn,
+            previous,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Data {
     pub now: i64,
@@ -134,6 +196,9 @@ pub struct Data {
     pub telemetry_rows: bool,
     /// Tool latency, errors, retries and busy time from telemetry.
     pub health: query::HealthView,
+    /// Limits and burn rate. Empty (limit unknown) until `load_limits` reads
+    /// them.
+    pub limits: LimitsView,
 }
 
 /// Days charted for today, since a single bar says nothing.
@@ -254,6 +319,7 @@ impl Data {
             skills: query::AgentView::default(),
             telemetry_rows: false,
             health: query::HealthView::default(),
+            limits: LimitsView::default(),
         }
     }
 }
@@ -286,6 +352,28 @@ pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<D
     data.health = query::load_health(conn, range, now)?;
     data.telemetry_rows = !data.agents.is_empty() || !data.health.now.is_empty();
     Ok(data)
+}
+
+/// Reads the plan limits the statusline kept and the manual budgets, and the
+/// events the burn rate needs.
+pub fn load_limits(
+    conn: &Connection,
+    paths: &Paths,
+    range: Range,
+    now: i64,
+) -> Result<LimitsView, String> {
+    let week = crate::usage::entry::configured_week_start();
+    let events = db::load_usage_events_since(conn, limits_source::events_since(now, week))?;
+    let snapshot = paths.db.parent().and_then(limits_source::load);
+    let budgets = limits_source::manual_budgets(&crate::common::session::home_dir());
+    Ok(LimitsView::build(
+        snapshot.as_ref(),
+        &budgets,
+        &events,
+        now,
+        week,
+        range,
+    ))
 }
 
 #[cfg(test)]
