@@ -45,6 +45,8 @@ The reasoning is in [Why the pieces are shaped this way](../concepts/03-why-the-
 
 Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
 
+**Main session default.** The `ccc` and `ccd` launchers add `--effort medium` to the `claude` command line when the session states no effort. Stating one turns it off: pass `--effort high` (or any level), set `effortLevel` in `~/.claude/settings.json`, or export `CLAUDE_CODE_EFFORT_LEVEL`. An effort ceiling still lowers the default. Playbook only shapes its own launcher command line and never writes Claude Code's settings or memory, so a session started without the launcher keeps the model default. See [ADR-0023](../adr/0023-commands-at-medium.md).
+
 The rule: lower effort where the work is mechanical or already decided, and never where a missed finding is costly. A wrong model costs a rerun. A reviewer that stops looking costs a bug in production, which is why risky diffs still get the `-xhigh` reviewer.
 
 | File | Model | Effort | Reasoning |
