@@ -286,16 +286,30 @@ impl AgentView {
 /// The agent split of the range, read from the telemetry tables. The
 /// transcript totals are not touched.
 pub fn load_agents(conn: &Connection, range: Range, now: i64) -> Result<AgentView, String> {
-    let (since, until) = match range.days(now) {
+    let (since, until) = window_seconds(range, now);
+    let rows = super::telemetry_db::agent_groups(conn, since, until)?;
+    let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
+    Ok(AgentView { rows, cost_usd })
+}
+
+/// Cost per skill from telemetry, in the same shape as the agent split. A
+/// request made while a skill was active carries its name; the rest are not
+/// part of any skill row.
+pub fn load_skills(conn: &Connection, range: Range, now: i64) -> Result<AgentView, String> {
+    let (since, until) = window_seconds(range, now);
+    let rows = super::telemetry_db::skill_groups(conn, since, until)?;
+    let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
+    Ok(AgentView { rows, cost_usd })
+}
+
+fn window_seconds(range: Range, now: i64) -> (i64, i64) {
+    match range.days(now) {
         Some((first, past)) => (
             first.saturating_mul(SECONDS_PER_DAY),
             past.saturating_mul(SECONDS_PER_DAY),
         ),
         None => (i64::MIN, i64::MAX),
-    };
-    let rows = super::telemetry_db::agent_groups(conn, since, until)?;
-    let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
-    Ok(AgentView { rows, cost_usd })
+    }
 }
 
 /// A session counts as active when its last message is this recent.

@@ -128,6 +128,10 @@ pub struct Data {
     /// Cost per agent from telemetry. Empty until `load` reads the store, and
     /// for a range with no telemetry.
     pub agents: query::AgentView,
+    /// Cost per skill from telemetry, same rules as `agents`.
+    pub skills: query::AgentView,
+    /// Whether telemetry has any request in the range, skill or not.
+    pub telemetry_rows: bool,
 }
 
 /// Days charted for today, since a single bar says nothing.
@@ -245,6 +249,8 @@ impl Data {
             live,
             comparison,
             agents: query::AgentView::default(),
+            skills: query::AgentView::default(),
+            telemetry_rows: false,
         }
     }
 }
@@ -273,6 +279,8 @@ pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<D
     let live = query::load_live(conn, now)?;
     let mut data = Data::build(&window, live, now, range, filter);
     data.agents = query::load_agents(conn, range, now)?;
+    data.skills = query::load_skills(conn, range, now)?;
+    data.telemetry_rows = !data.agents.is_empty();
     Ok(data)
 }
 

@@ -73,13 +73,16 @@ pub enum ProjectsView {
     Projects,
     /// Cost per agent, from telemetry.
     Agents,
+    /// Cost per skill, from telemetry.
+    Skills,
 }
 
 impl ProjectsView {
     pub fn next(self) -> ProjectsView {
         match self {
             ProjectsView::Projects => ProjectsView::Agents,
-            ProjectsView::Agents => ProjectsView::Projects,
+            ProjectsView::Agents => ProjectsView::Skills,
+            ProjectsView::Skills => ProjectsView::Projects,
         }
     }
 }
@@ -172,6 +175,7 @@ impl App {
         match panel {
             Panel::Models => pair_groups(&d.models, &d.models_before).len(),
             Panel::Projects if self.projects_view == ProjectsView::Agents => d.agents.rows.len(),
+            Panel::Projects if self.projects_view == ProjectsView::Skills => d.skills.rows.len(),
             Panel::Projects => d.repos.len(),
             Panel::Live => d.live.active.len(),
             Panel::Sessions => d.sessions.len(),
@@ -219,10 +223,10 @@ impl App {
                 .map(|p| p.key)
                 .collect(),
             Panel::Projects => {
-                let groups = if self.projects_view == ProjectsView::Agents {
-                    &d.agents.rows
-                } else {
-                    &d.repos
+                let groups = match self.projects_view {
+                    ProjectsView::Agents => &d.agents.rows,
+                    ProjectsView::Skills => &d.skills.rows,
+                    ProjectsView::Projects => &d.repos,
                 };
                 group_rows(groups, sort)
                     .iter()
@@ -260,8 +264,8 @@ impl App {
                 .into_iter()
                 .nth(at)
                 .map(|p| p.key),
-            // An agent is not a field of a usage event, so it cannot filter.
-            Panel::Projects if self.projects_view == ProjectsView::Agents => None,
+            // An agent or a skill is not a field of a usage event, so it cannot filter.
+            Panel::Projects if self.projects_view != ProjectsView::Projects => None,
             Panel::Projects => group_rows(&d.repos, sort).get(at).map(|g| g.key.clone()),
             Panel::Live => session_rows(&d.live.active, sort)
                 .get(at)

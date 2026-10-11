@@ -24,6 +24,7 @@ pub const ALLOWED_KEYS: &[&str] = &[
     "model",
     "effort",
     "agent.name",
+    "skill.name",
     "input_tokens",
     "output_tokens",
     "cache_read_tokens",
@@ -46,6 +47,7 @@ struct Fields {
     model: Option<String>,
     effort: Option<String>,
     agent: Option<String>,
+    skill: Option<String>,
     input: Option<u64>,
     output: Option<u64>,
     cache_read: Option<u64>,
@@ -114,6 +116,7 @@ fn read_attributes(attrs: &Value) -> Fields {
             "model" => f.model = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
             "effort" => f.effort = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
             "agent.name" => f.agent = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
+            "skill.name" => f.skill = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
             "input_tokens" => f.input = as_u64(value),
             "output_tokens" => f.output = as_u64(value),
             "cache_read_tokens" => f.cache_read = as_u64(value),
@@ -180,6 +183,7 @@ pub fn parse_logs(body: &[u8], now: i64) -> Result<Vec<TelemetryRequest>, String
                     model: f.model.unwrap_or_default(),
                     effort: f.effort.unwrap_or_default(),
                     agent_name: f.agent.unwrap_or_default(),
+                    skill_name: f.skill.unwrap_or_default(),
                     input_tokens: f.input.unwrap_or(0),
                     output_tokens: f.output.unwrap_or(0),
                     cache_creation_tokens: f.cache_creation.unwrap_or(0),
@@ -255,6 +259,24 @@ mod tests {
             (10, 20, 30, 40)
         );
         assert_eq!(r.cost_usd, 0.5);
+    }
+
+    #[test]
+    fn the_skill_name_is_kept_and_an_unsafe_one_is_dropped() {
+        let rows = parse_logs(
+            &body(vec![api_request(vec![s("skill.name", "tinyskill")])]),
+            5,
+        )
+        .unwrap();
+        assert_eq!(rows[0].skill_name, "tinyskill");
+        let rows = parse_logs(
+            &body(vec![api_request(vec![s("skill.name", "a b/../c d")])]),
+            5,
+        )
+        .unwrap();
+        assert_eq!(rows[0].skill_name, "");
+        let rows = parse_logs(&body(vec![api_request(vec![])]), 5).unwrap();
+        assert_eq!(rows[0].skill_name, "");
     }
 
     #[test]
