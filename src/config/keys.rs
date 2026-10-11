@@ -20,6 +20,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "worktreeCleanup.conflictGracePeriodDays",
     "mode",
     "maxEffortLevel",
+    "effort.auto",
     "memory.source",
     "agents.variants",
     "models.haiku",
@@ -79,6 +80,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "worktreeCleanup.conflictGracePeriodDays" => Some(Value::Number(90.into())),
         "mode" => Some(Value::String("ask".to_string())),
         "maxEffortLevel" => Some(Value::String("auto".to_string())),
+        "effort.auto" => Some(Value::String("off".to_string())),
         "memory.source" => Some(Value::String("both".to_string())),
         "agents.variants" => Some(Value::String("auto".to_string())),
         "models.haiku" | "models.sonnet" | "models.opus" => Some(Value::String(String::new())),
@@ -111,6 +113,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "maxEffortLevel" => Some(&["auto", "low", "medium", "high", "xhigh", "max"]),
         "memory.source" => Some(&["both", "playbook"]),
         "agents.variants" => Some(&["auto", "all", "off"]),
+        "effort.auto" => Some(&["off", "suggest", "on"]),
         "routing.escalate" => Some(&["ask", "auto", "deny"]),
         "usage.theme" => Some(&["btop", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
@@ -169,6 +172,17 @@ mod tests {
             default_value("review.stackMaxLines"),
             Some(Value::from(3000))
         );
+    }
+
+    #[test]
+    fn effort_auto_is_off_by_default_and_takes_three_values() {
+        assert!(KNOWN_KEYS.contains(&"effort.auto"));
+        assert_eq!(default_value("effort.auto"), Some(Value::from("off")));
+        assert_eq!(
+            allowed_enum_values("effort.auto"),
+            Some(&["off", "suggest", "on"][..])
+        );
+        assert!(!is_effort_component_key("effort.auto"));
     }
 
     #[test]
