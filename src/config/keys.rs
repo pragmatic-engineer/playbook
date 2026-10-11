@@ -37,6 +37,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "usage.theme",
     "usage.weekStart",
     "usage.refreshSeconds",
+    "usage.telemetry",
     "hygiene.enabled",
     "hygiene.thresholdTokens",
 ];
@@ -95,6 +96,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.theme" => Some(Value::String("btop".to_string())),
         "usage.weekStart" => Some(Value::String("monday".to_string())),
         "usage.refreshSeconds" => Some(Value::Number(5.into())),
+        "usage.telemetry" => Some(Value::String("auto".to_string())),
         "hygiene.enabled" => Some(Value::Bool(true)),
         "hygiene.thresholdTokens" => Some(Value::Number(250_000.into())),
         _ => None,
@@ -117,6 +119,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "routing.escalate" => Some(&["ask", "auto", "deny"]),
         "usage.theme" => Some(&["btop", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
+        "usage.telemetry" => Some(&["auto", "off"]),
         _ => None,
     }
 }

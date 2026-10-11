@@ -14,6 +14,7 @@ pub mod config_drift;
 pub mod launch;
 pub mod retention;
 pub mod sessions;
+pub mod telemetry;
 pub mod worktree;
 pub mod worktree_run;
 
