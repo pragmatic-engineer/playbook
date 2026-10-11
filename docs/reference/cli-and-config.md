@@ -24,6 +24,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `worktreeCleanup.conflictGracePeriodDays` | `90` | a number, see the config keys guide for the range |
 | `mode` | `ask` | `ask`, `auto` |
 | `maxEffortLevel` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `effort.auto` | `off` | `off`, `suggest`, `on` |
 | `memory.source` | `both` | `both`, `playbook` |
 | `agents.variants` | `auto` | `auto`, `all`, `off` |
 | `models.haiku` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
@@ -340,7 +341,7 @@ Example: `playbook effort xhigh`
 - `<LEVEL>`: auto, low, medium, high, xhigh or max
 - `--json`: Print the status as JSON (with no level)
 
-Subcommands: `apply`, `list`, `reset`, `resolve`, `suggest`
+Subcommands: `apply`, `choose`, `list`, `log`, `reset`, `resolve`, `suggest`
 
 ### `playbook effort apply`
 
@@ -353,10 +354,38 @@ Example: `playbook effort apply --range 90d`
 - `--range <RANGE>`: 30d, 60d, 90d, month or all
 - `--yes`: Approve without asking
 
+### `playbook effort choose`
+
+Choose an effort for one dispatch from the diff, when `effort.auto` allows
+
+Does nothing while `effort.auto` is `off` (the default). With `suggest` it logs what it would pick and the dispatch keeps the default. With `on` it names the `subagent_type` to spawn: an existing variant, picked strictly between the agent's quality floor and every ceiling, raised for risky or large diffs and lowered only for small clean ones. An agent marked costly to miss is never lowered. Any error gives the default. Every choice is appended to a local log (`playbook effort log`).
+
+Example: `playbook effort choose reviewer --base origin/main --json`
+
+- `<AGENT>`: The agent, such as `reviewer`
+- `--base <BASE>`: Read the diff shape from `git diff --numstat <ref>`
+- `--lines <LINES>`: Changed lines, when not using --base
+- `--files <FILES>`: Changed files, when not using --base
+- `--bytes <BYTES>`: Diff size in bytes
+- `--path <PATHS>`: A touched path (repeat for several), when not using --base
+- `--lens <LENS>`: The review lens, such as `security`
+- `--json`: Print JSON
+
 ### `playbook effort list`
 
 List every component with its shipped effort and effective level
 
+- `--json`: Print JSON
+
+### `playbook effort log`
+
+Show the automatic effort choices that were logged
+
+Each row has the time (UTC), component, default and chosen level, the inputs and the reason. The log is local and append only.
+
+Example: `playbook effort log --limit 20`
+
+- `--limit <LIMIT>`: How many of the latest rows to show
 - `--json`: Print JSON
 
 ### `playbook effort reset`
