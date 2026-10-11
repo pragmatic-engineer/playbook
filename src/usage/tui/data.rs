@@ -48,15 +48,22 @@ pub struct Slots {
 impl Slots {
     /// Gives every model a slot from a hash of its name, moving on to the next
     /// free one when taken, in name order. The same model keeps its color when
-    /// the range changes, unless another model in the range wants the same
-    /// one. With more models than slots the extra ones share.
-    pub fn of(models: &[Group]) -> Slots {
-        let mut names: Vec<&Group> = models.iter().collect();
-        names.sort_by(|a, b| a.key.cmp(&b.key));
+    /// the range changes, unless another model wants the same one. With more
+    /// models than slots the extra ones share. `earlier` holds the models of
+    /// the previous period: they get a color for the table but are not part of
+    /// the stacking order.
+    pub fn of(models: &[Group], earlier: &[Group]) -> Slots {
+        let mut names: Vec<&str> = models
+            .iter()
+            .chain(earlier)
+            .map(|g| g.key.as_str())
+            .collect();
+        names.sort_unstable();
+        names.dedup();
         let mut taken = [false; SERIES];
         let mut slots = BTreeMap::new();
-        for g in names {
-            let hash = g.key.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        for name in names {
+            let hash = name.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
                 (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
             });
             let start = (hash % SERIES as u64) as usize;
@@ -65,7 +72,7 @@ impl Slots {
                 .find(|s| !taken[*s])
                 .unwrap_or(start);
             taken[slot] = true;
-            slots.insert(g.key.clone(), slot);
+            slots.insert(name.to_string(), slot);
         }
         let mut order: Vec<&Group> = models.iter().collect();
         order.sort_by(|a, b| {
@@ -103,6 +110,8 @@ pub struct Data {
     /// Per UTC day, oldest first. Idle days are absent.
     pub days: Vec<Group>,
     pub models: Vec<Group>,
+    /// The models of the previous span of a period, empty for other ranges.
+    pub models_before: Vec<Group>,
     /// The series color of each model.
     pub slots: Slots,
     pub repos: Vec<Group>,
@@ -191,6 +200,20 @@ impl Data {
         let (inside, _) = query::in_range(window, &[], now, range);
         let inside: Vec<UsageEvent> = inside.into_iter().filter(|e| matches(e, filter)).collect();
         let models = group_usage(&inside, Dimension::Model);
+        let (comparison, models_before) = match Period::of_range(range) {
+            Some(period) => {
+                let windows = period.windows(now);
+                let (current, previous) = windows.split(window);
+                let keep = |events: Vec<UsageEvent>| -> Vec<UsageEvent> {
+                    events.into_iter().filter(|e| matches(e, filter)).collect()
+                };
+                let (current, previous) = (keep(current), keep(previous));
+                let before = group_usage(&previous, Dimension::Model);
+                let compared = Comparison::new(period, windows, &current, &previous);
+                (Some(compared), before)
+            }
+            None => (None, Vec::new()),
+        };
         let series = match range {
             Range::Today => {
                 let first = (now.div_euclid(SECONDS_PER_DAY) - TREND_DAYS + 1) * SECONDS_PER_DAY;
@@ -209,21 +232,15 @@ impl Data {
             filter: filter.to_string(),
             totals: Totals::of(&inside),
             days: group_usage(&inside, Dimension::Day),
-            slots: Slots::of(&models),
+            slots: Slots::of(&models, &models_before),
             models,
+            models_before,
             repos: group_usage(&inside, Dimension::Repo),
             sessions: query::session_days(&inside),
             unpriced: unpriced_models(&inside).0,
             series,
             live,
-            comparison: Period::of_range(range).map(|period| {
-                let windows = period.windows(now);
-                let (current, previous) = windows.split(window);
-                let keep = |events: Vec<UsageEvent>| -> Vec<UsageEvent> {
-                    events.into_iter().filter(|e| matches(e, filter)).collect()
-                };
-                Comparison::new(period, windows, &keep(current), &keep(previous))
-            }),
+            comparison,
         }
     }
 }
@@ -431,7 +448,7 @@ mod tests {
             group("claude-opus-5", 9.0),
             group("claude-haiku-4-5", 1.0),
         ];
-        let slots = Slots::of(&models);
+        let slots = Slots::of(&models, &[]);
         assert_eq!(
             slots.order,
             ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
@@ -443,14 +460,14 @@ mod tests {
         // The order the models arrive in does not change a color.
         let mut reversed = models.to_vec();
         reversed.reverse();
-        let again = Slots::of(&reversed);
+        let again = Slots::of(&reversed, &[]);
         for g in &models {
             assert_eq!(slots.slot(&g.key), again.slot(&g.key));
         }
         // The first model by name always keeps its hashed slot, so a model
         // alone (a filtered view) keeps its color, and one that collides with
         // an earlier model moves to the next free slot.
-        let alone = Slots::of(&[group("claude-haiku-4-5", 1.0)]);
+        let alone = Slots::of(&[group("claude-haiku-4-5", 1.0)], &[]);
         assert_eq!(
             alone.slot("claude-haiku-4-5"),
             slots.slot("claude-haiku-4-5")
@@ -462,7 +479,7 @@ mod tests {
         let many: Vec<Group> = (0..12)
             .map(|i| group(&format!("model-{i}"), f64::from(i)))
             .collect();
-        let slots = Slots::of(&many);
+        let slots = Slots::of(&many, &[]);
         assert_eq!(slots.order.len(), 12);
         assert!(many.iter().all(|g| slots.slot(&g.key) < SERIES));
         let distinct: std::collections::BTreeSet<usize> =
@@ -473,7 +490,7 @@ mod tests {
             "every color is used before any is shared"
         );
         assert_eq!(slots.slot("not-in-the-range"), 0);
-        assert!(Slots::of(&[]).order.is_empty());
+        assert!(Slots::of(&[], &[]).order.is_empty());
     }
 
     #[test]

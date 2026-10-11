@@ -1299,7 +1299,7 @@ mod tests {
             cost_usd: cost,
             ..Default::default()
         };
-        Slots::of(&[g("opus", 9.0), g("sonnet", 1.0)])
+        Slots::of(&[g("opus", 9.0), g("sonnet", 1.0)], &[])
     }
 
     fn two_models(opus: f64, sonnet: f64) -> Vec<DayPoint> {

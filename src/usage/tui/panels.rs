@@ -8,11 +8,15 @@
 use super::app::{App, SpendView};
 use super::chart::{self, Metric, Plot};
 use super::data::{Data, Slots};
-use super::fmt::{compact, fit, money, WEEKDAYS};
-use super::sort::{self, group_rows, group_tokens, session_day_rows, session_rows, Panel, Sort};
+use super::fmt::{compact, fit, money, signed_money, signed_percent, WEEKDAYS};
+use super::sort::{
+    self, cost_change, group_rows, group_tokens, pair_rows, session_day_rows, session_rows, Panel,
+    Sort,
+};
 use super::theme::{Fill, Ink, Palette};
 use super::view::{visible_rows, window_start};
-use crate::usage::aggregate::{date_key, Group, SECONDS_PER_DAY};
+use crate::usage::aggregate::{date_key, SECONDS_PER_DAY};
+use crate::usage::period::Change;
 use crate::usage::query::{short_id, weekday, ActiveSession, Range, ACTIVE_SECONDS};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -471,29 +475,117 @@ pub fn tokens(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
     chart_panel(frame, area, app, data, pal, Panel::Tokens);
 }
 
-/// Models or projects: messages, tokens, cost and share of the total cost.
-#[allow(clippy::too_many_arguments)]
-pub fn groups(
-    frame: &mut Frame,
-    area: Rect,
-    app: &App,
-    pal: &Palette,
-    panel: Panel,
-    title: &str,
-    groups: &[Group],
-    total_cost: f64,
-    slots: Option<&Slots>,
-) {
-    let focused = app.focus == panel;
-    let (box_ink, fill) = match panel {
-        Panel::Models => (pal.box_mem, pal.cached),
-        _ => (pal.box_mem, pal.avail),
-    };
-    let block = panel_block(pal, panel, title, box_ink, focused);
-    if groups.is_empty() {
+/// How a change reads in color: more spend is the warning color, less is the
+/// live green, and no change is plain. The sign in the text carries it without
+/// color.
+fn change_style(pal: &Palette, amount: f64) -> Style {
+    if amount > 0.0 {
+        fg(pal, pal.warn)
+    } else if amount < 0.0 {
+        fg(pal, pal.live)
+    } else {
+        fg(pal, pal.graph_text)
+    }
+}
+
+/// A change cell: its text in the color of its direction.
+fn change_cell(pal: &Palette, text: String, amount: f64) -> Cell<'static> {
+    num(text).style(change_style(pal, amount))
+}
+
+/// Models: messages, tokens and cost. For a period, also the cost in the
+/// previous one and the change in amount and percent, for every model of either
+/// period. Without a comparison, the share of the total cost instead.
+pub fn models(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    let focused = app.focus == Panel::Models;
+    let mut block = panel_block(pal, Panel::Models, "Models", pal.box_mem, focused);
+    if let Some(c) = &data.comparison {
+        let note = format!("vs {}", c.period.previous_label());
+        block = block.title(note_line(pal, &note, pal.box_mem).right_aligned());
+    }
+    let sorted = pair_rows(&data.models, &data.models_before, app.sort(Panel::Models));
+    if sorted.is_empty() {
         return empty(frame, area, pal, block, "No usage in this range.");
     }
-    let sorted = group_rows(groups, app.sort(panel));
+    let compared = data.comparison.is_some();
+    let mut cols = vec![
+        col("name", Constraint::Fill(1), 0),
+        col(
+            ">msgs",
+            Constraint::Length(5),
+            if compared { 64 } else { 0 },
+        ),
+        col(
+            ">tokens",
+            Constraint::Length(7),
+            if compared { 64 } else { 0 },
+        ),
+        col(">cost", Constraint::Length(if compared { 8 } else { 9 }), 0),
+    ];
+    if compared {
+        cols.extend([
+            col(">prev", Constraint::Length(8), 0),
+            col(">change", Constraint::Length(8), 0),
+            col(">%", Constraint::Length(7), 46),
+        ]);
+    } else {
+        cols.push(col("share", Constraint::Length(8), 48));
+    }
+    let total = data.totals.cost_usd;
+    table(frame, area, app, pal, Panel::Models, block, &cols, |w| {
+        sorted
+            .iter()
+            .map(|p| {
+                let name = short_model(&p.key);
+                let mut cells = vec![
+                    // A swatch in the model's color, as in the stacked chart.
+                    Cell::from(Line::from(vec![
+                        swatch(pal, data.slots.slot(&p.key)),
+                        // The space after the swatch goes first when the name is tight.
+                        Span::raw(match w[0] {
+                            0..=15 => fit(name, w[0].saturating_sub(1)),
+                            _ => format!(" {}", fit(name, w[0] - 2)),
+                        }),
+                    ])),
+                    num(p.current.messages.to_string()),
+                    num(compact(group_tokens(&p.current))),
+                    num(money(p.current.cost_usd)),
+                ];
+                if compared {
+                    let delta = cost_change(p);
+                    let percent = Change::of(p.current.cost_usd, p.previous.cost_usd).percent;
+                    cells.extend([
+                        num(money(p.previous.cost_usd)).style(fg(pal, pal.graph_text)),
+                        change_cell(pal, signed_money(delta), delta),
+                        change_cell(
+                            pal,
+                            signed_percent(percent, p.current.cost_usd > 0.0),
+                            delta,
+                        ),
+                    ]);
+                } else {
+                    let share = if total > 0.0 {
+                        p.current.cost_usd / total
+                    } else {
+                        0.0
+                    };
+                    cells.push(meter(pal, pal.cached, share, 8));
+                }
+                cells
+            })
+            .collect()
+    });
+}
+
+/// Projects of the period: messages, tokens, cost and share of the total cost.
+pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    let focused = app.focus == Panel::Projects;
+    let block = panel_block(pal, Panel::Projects, "Projects", pal.box_mem, focused);
+    if data.repos.is_empty() {
+        return empty(frame, area, pal, block, "No usage in this range.");
+    }
+    let total_cost = data.totals.cost_usd;
+    let sorted = group_rows(&data.repos, app.sort(Panel::Projects));
     let cols = [
         col("name", Constraint::Fill(1), 0),
         col(">msgs", Constraint::Length(5), 0),
@@ -501,7 +593,7 @@ pub fn groups(
         col(">cost", Constraint::Length(9), 0),
         col("share", Constraint::Length(8), 48),
     ];
-    table(frame, area, app, pal, panel, block, &cols, |w| {
+    table(frame, area, app, pal, Panel::Projects, block, &cols, |w| {
         sorted
             .iter()
             .map(|g| {
@@ -510,24 +602,12 @@ pub fn groups(
                 } else {
                     0.0
                 };
-                let name = match slots {
-                    // A swatch in the model's color, as in the stacked chart.
-                    Some(slots) => Cell::from(Line::from(vec![
-                        swatch(pal, slots.slot(&g.key)),
-                        // The space after the swatch goes first when the name is tight.
-                        Span::raw(match w[0] {
-                            0..=15 => fit(&g.key, w[0].saturating_sub(1)),
-                            _ => format!(" {}", fit(&g.key, w[0] - 2)),
-                        }),
-                    ])),
-                    None => Cell::from(fit(&g.key, w[0])),
-                };
                 vec![
-                    name,
+                    Cell::from(fit(&g.key, w[0])),
                     num(g.messages.to_string()),
                     num(compact(group_tokens(g))),
                     num(money(g.cost_usd)),
-                    meter(pal, fill, share, 8),
+                    meter(pal, pal.avail, share, 8),
                 ]
             })
             .collect()

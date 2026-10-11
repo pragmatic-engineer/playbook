@@ -35,7 +35,7 @@ The panels:
 |---|---|---|
 | `1` | Spend per day, USD | A bar chart of the cost for each UTC day in the range, with axes (below). `v` steps it through three views: the total, the same bars stacked by model, and a table with a row for each day (see below). |
 | `2` | Tokens per day | The same for tokens, in the net gradient. |
-| `3` | Models | Messages, tokens, cost and a share meter per model, with a swatch in the model's color. |
+| `3` | Models | Messages, tokens and cost per model, with a swatch in the model's color. For `today`, `week` and `month` it also shows the cost in the previous period and the change in amount and percent, for every model used in either period (a model that only the previous period used reads `$0.00` now, and one with no spend before reads `new`). Other ranges show a share meter instead. `s` also sorts by the previous cost and the change. |
 | `4` | Projects | The same, per repo. |
 | `5` | Live sessions | Sessions with a message in the last 15 minutes, with state, cost and age. |
 | `6` | Sessions per day | Every session in the range, grouped by UTC day with the newest day first. Each row has the short session id, project, main model, messages, tokens and cost for that day, and a session that runs past midnight has a row for each day. The day is named on the first row of its group, and `s` orders the sessions inside each day. `Enter` filters the view to the session. |

@@ -9,7 +9,6 @@ use super::app::App;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
 use super::panels;
-use super::sort::Panel;
 use super::theme::Palette;
 use crate::usage::aggregate::date_key;
 use crate::usage::period::{elapsed_text, Comparison, Span as TimeSpan};
@@ -106,29 +105,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         Some(data) => {
             panels::spend(frame, p.spend, app, data, &pal);
             panels::tokens(frame, p.tokens, app, data, &pal);
-            let total = data.totals.cost_usd;
-            panels::groups(
-                frame,
-                p.models,
-                app,
-                &pal,
-                Panel::Models,
-                "Models",
-                &data.models,
-                total,
-                Some(&data.slots),
-            );
-            panels::groups(
-                frame,
-                p.projects,
-                app,
-                &pal,
-                Panel::Projects,
-                "Projects",
-                &data.repos,
-                total,
-                None,
-            );
+            panels::models(frame, p.models, app, data, &pal);
+            panels::projects(frame, p.projects, app, data, &pal);
             panels::live(frame, p.live, app, data, &pal);
             panels::sessions(frame, p.sessions, app, data, &pal);
         }
@@ -638,6 +616,36 @@ mod tests {
     }
 
     #[test]
+    fn the_models_table_compares_each_model_with_the_previous_period() {
+        let app = app_for(
+            Range::Today,
+            &[
+                event("claude-opus-5", "alpha", 12.5),
+                yesterday("claude-opus-5", "alpha", 10.0),
+                yesterday("claude-haiku-5", "alpha", 0.5),
+            ],
+        );
+        let text = screen(&app, 100, 30);
+        let rows: Vec<&str> = text
+            .lines()
+            .filter_map(|l| l.split('\u{2502}').nth(1))
+            .filter(|r| r.contains("opus-5") || r.contains("haiku-5"))
+            .collect();
+        assert_eq!(rows.len(), 2, "{text}");
+        // Opus: $12.50 now, $10.00 before, +$2.50 and +25.0%.
+        let opus = rows.iter().find(|r| r.contains("opus-5")).unwrap();
+        for want in ["$12.50", "$10.00", "+$2.50", "+25.0%"] {
+            assert!(opus.contains(want), "{want}: {opus}");
+        }
+        // Haiku was used only yesterday: nothing now, down 100%.
+        let haiku = rows.iter().find(|r| r.contains("haiku-5")).unwrap();
+        for want in ["$0.00", "$0.50", "-$0.50", "-100%"] {
+            assert!(haiku.contains(want), "{want}: {haiku}");
+        }
+        assert!(text.contains("vs yesterday"), "{text}");
+    }
+
+    #[test]
     fn a_narrow_screen_drops_the_share_bar_and_keeps_the_names() {
         let app = app_with(&[event("claude-opus-5", "alpha", 12.5)]);
         let wide = screen(&app, 120, 30);
@@ -648,7 +656,7 @@ mod tests {
         );
         assert!(!narrow.contains("share"), "{narrow}");
         assert!(
-            narrow.contains("claude-opus-5") && narrow.contains("alpha"),
+            narrow.contains("opus-5") && narrow.contains("alpha"),
             "{narrow}"
         );
     }

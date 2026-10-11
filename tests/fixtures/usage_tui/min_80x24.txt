@@ -13,7 +13,7 @@
 ╰────────────────┤cost low ■■■■■ high├─╯╰──────────────┤tokens low ■■■■■ high├─╯
 ╭─┤³Models├────────────────────────────╮╭─┤⁴Projects├──────────────────────────╮
 │name            msgs  tokens     cost▼││name            msgs  tokens     cost▼│
-│■claude-opus-5    10  238.0K    $14.25││beta              10  238.0K    $11.85│
+│■opus-5           10  238.0K    $14.25││beta              10  238.0K    $11.85│
 ╰──────────────────────────────────────╯╰──────────────────────────────────────╯
 ╭─┤⁵Live sess┤hour $1.25  today $1.25├─╮╭─┤⁶Sessions per day├────────────┤UTC├─╮
 │state project   model        cost ago▲││day   session  project model     cost▼│
