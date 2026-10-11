@@ -276,6 +276,32 @@ pub fn analyze(
     }
 }
 
+/// The cost comparison sentence for a lowering: the mean cost per message in
+/// the shared bucket at the effective level and at the floor, or a note that
+/// the store has too few messages to compare. Starts with `. `.
+pub(crate) fn cost_note(r: &AgentReport) -> String {
+    let Some(floor) = r.floor else {
+        return String::new();
+    };
+    let cost = |level: &str| {
+        r.buckets
+            .iter()
+            .find(|b| b.effort == level && b.messages >= MIN_BUCKET_MESSAGES)
+    };
+    if let (Some(hi), Some(lo)) = (cost(&r.effective), cost(floor.floor)) {
+        format!(
+            ". Mean cost per message in the shared {} bucket: ${:.4} at {}, ${:.4} at {}",
+            r.model,
+            hi.mean(),
+            hi.effort,
+            lo.mean(),
+            lo.effort
+        )
+    } else {
+        ". The store has too few messages at one of the two levels to compare cost".to_string()
+    }
+}
+
 fn judge(r: &mut AgentReport, cold_start: bool) {
     let Some(floor) = r.floor else {
         r.findings.push(Finding {
@@ -373,25 +399,7 @@ fn judge(r: &mut AgentReport, cold_start: bool) {
             "may run at its floor {} instead of {} ({}). To apply: playbook config set --global effort.agents.{} {} (applies to every project)",
             floor.floor, r.effective, floor.source, r.name, floor.floor
         );
-        let cost = |level: &str| {
-            r.buckets
-                .iter()
-                .find(|b| b.effort == level && b.messages >= MIN_BUCKET_MESSAGES)
-        };
-        if let (Some(hi), Some(lo)) = (cost(&r.effective), cost(floor.floor)) {
-            text.push_str(&format!(
-                ". Mean cost per message in the shared {} bucket: ${:.4} at {}, ${:.4} at {}",
-                r.model,
-                hi.mean(),
-                hi.effort,
-                lo.mean(),
-                lo.effort
-            ));
-        } else {
-            text.push_str(
-                ". The store has too few messages at one of the two levels to compare cost",
-            );
-        }
+        text.push_str(&cost_note(r));
         r.findings.push(Finding {
             level: "lower",
             kind: "lower",
