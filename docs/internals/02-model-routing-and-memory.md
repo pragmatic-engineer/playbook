@@ -124,7 +124,7 @@ The Haiku 5.5 evaluation (#576) priced effort on Haiku: `xhigh` costs 2x `medium
 
 - `max` is never used on Haiku, whatever a role or a variant asks for.
 - Haiku roles stop at `medium` by default.
-- A role may go up to `xhigh` only when it has an entry in `OPT_INS` with a recorded reason. Today that is the `git` agent: its conventional commit type was right 42% of the time at `low` and 100% at `xhigh`, so the `git` agent itself ships at `xhigh`. Because the fork skills `commit-and-push` and `create-pull-request` name `agent: git`, the base file is the simple place for it, and a cheaper `git-low` variant stays available for a session that wants it.
+- A role may go up to `xhigh` only when it has an entry in `OPT_INS` with a recorded reason. Today that is the `git` agent: its conventional commit type was right 42% of the time at `low` and 100% at `xhigh`, so the `git` agent itself ships at `xhigh`. Because the fork skills `commit-and-push` and `create-pull-request` name `agent: playbook:git` (the prefix is required, a bare `git` forks a general purpose agent on the session model), the base file is the simple place for it, and a cheaper `git-low` variant stays available for a session that wants it.
 
 The cap is a ceiling like the others. The lowest ceiling wins, your `maxEffortLevel` still beats it when lower, and it never raises anything. It applies in `playbook effort resolve`, in the variants `ccc` and `ccd` render, and it shows in `playbook effort list` and `playbook doctor models`.
 

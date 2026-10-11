@@ -3,7 +3,7 @@ description: Use when committing staged changes with a generated message and pus
 allowed-tools: Bash, Read, Skill
 argument-hint: "[--all|-A] [--update|-u] [--amend|-a] [--no-signoff] [--auto] [--ask]"
 context: fork
-agent: git
+agent: playbook:git
 ---
 
 # Commit and Push
