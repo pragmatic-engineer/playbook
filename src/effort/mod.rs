@@ -15,6 +15,7 @@
 //! Claude Code's is as low or lower, or playbook is `auto` or `max`, the launcher adds
 //! nothing. A session started without the launcher gets no playbook ceiling.
 
+pub mod auto;
 pub mod component;
 pub mod floor;
 pub mod model_cap;

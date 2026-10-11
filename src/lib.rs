@@ -145,6 +145,56 @@ pub enum EffortCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Choose an effort for one dispatch from the diff, when `effort.auto` allows
+    ///
+    /// Does nothing while `effort.auto` is `off` (the default). With `suggest`
+    /// it logs what it would pick and the dispatch keeps the default. With
+    /// `on` it names the `subagent_type` to spawn: an existing variant, picked
+    /// strictly between the agent's quality floor and every ceiling, raised for
+    /// risky or large diffs and lowered only for small clean ones. An agent
+    /// marked costly to miss is never lowered. Any error gives the default.
+    /// Every choice is appended to a local log (`playbook effort log`).
+    ///
+    /// Example: `playbook effort choose reviewer --base origin/main --json`
+    Choose {
+        /// The agent, such as `reviewer`
+        agent: String,
+        /// Read the diff shape from `git diff --numstat <ref>`
+        #[arg(long)]
+        base: Option<String>,
+        /// Changed lines, when not using --base
+        #[arg(long)]
+        lines: Option<u64>,
+        /// Changed files, when not using --base
+        #[arg(long)]
+        files: Option<u64>,
+        /// Diff size in bytes
+        #[arg(long)]
+        bytes: Option<u64>,
+        /// A touched path (repeat for several), when not using --base
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        /// The review lens, such as `security`
+        #[arg(long)]
+        lens: Option<String>,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the automatic effort choices that were logged
+    ///
+    /// Each row has the time (UTC), component, default and chosen level, the
+    /// inputs and the reason. The log is local and append only.
+    ///
+    /// Example: `playbook effort log --limit 20`
+    Log {
+        /// How many of the latest rows to show
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Undo what `effort apply` changed, in one command
     ///
     /// Restores each key the patch changed to its earlier value, unless you

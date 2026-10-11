@@ -151,6 +151,70 @@ fn main() {
                         }
                     }
                 }
+                playbook::EffortCommand::Choose {
+                    agent,
+                    base,
+                    lines,
+                    files,
+                    bytes,
+                    paths,
+                    lens,
+                    json,
+                } => {
+                    let res = effort::component::resolve(
+                        effort::component::Kind::Agent,
+                        &agent,
+                        &home,
+                        claude.as_deref(),
+                        root.as_deref(),
+                    );
+                    let shape = match base.as_deref() {
+                        Some(base) => effort_diff_shape(base),
+                        None => Ok(effort::auto::Shape {
+                            lines: lines.unwrap_or(0),
+                            files: files.unwrap_or(paths.len() as u64),
+                            bytes,
+                            paths,
+                        }),
+                    };
+                    let graph = std::fs::read_to_string(
+                        common::paths::playbook_root_from(&home).join("memory/memory.graph.json"),
+                    )
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+                    let evidence = || {
+                        let report = effort_report(&home, claude.as_deref(), root.as_deref())?;
+                        effort::auto::evidence_from(&report, &agent)
+                    };
+                    let choice = effort::auto::choose(
+                        &home,
+                        &res,
+                        shape,
+                        graph.as_ref(),
+                        lens.as_deref(),
+                        &evidence,
+                        common::time::now_secs(),
+                    );
+                    if json {
+                        println!("{}", choice.to_json());
+                    } else {
+                        println!(
+                            "{}",
+                            choice.dispatch.as_deref().unwrap_or("no dispatch type")
+                        );
+                        if let Some(note) = &choice.note {
+                            eprintln!("{note}");
+                        }
+                    }
+                }
+                playbook::EffortCommand::Log { limit, json } => {
+                    let rows = effort::auto::read_log(&home, limit);
+                    if json {
+                        println!("{}", serde_json::Value::Array(rows));
+                    } else {
+                        println!("{}", effort::auto::log_text(&rows));
+                    }
+                }
                 playbook::EffortCommand::Reset { all } => {
                     match effort::patch::reset(&home, all, common::time::now_secs()) {
                         Ok(msg) => println!("{msg}"),
@@ -1828,4 +1892,34 @@ fn suggest_report(
             std::process::exit(1);
         }
     }
+}
+
+/// The stage 1 report over 30 days, or the reason it cannot be made.
+fn effort_report(
+    home: &std::path::Path,
+    claude: Option<&str>,
+    root: Option<&std::path::Path>,
+) -> Result<effort::suggest::Report, String> {
+    let range = usage::query::Range::parse(Some("30d")).ok_or("bad range")?;
+    effort::suggest::run(
+        home,
+        claude,
+        root,
+        &common::paths::usage_db_dir().join("usage.db"),
+        range,
+        common::time::now_secs(),
+    )
+}
+
+/// The diff shape from `git diff --numstat <base>`, or why it cannot be read.
+fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
+    let out = std::process::Command::new("git")
+        .args(["diff", "--numstat", base, "--"])
+        .output()
+        .map_err(|e| format!("could not run git: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("git diff against {base} failed"));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    effort::auto::Shape::from_numstat(&text)
 }
