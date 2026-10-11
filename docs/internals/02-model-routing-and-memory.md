@@ -239,3 +239,7 @@ Traversal depth is 1 for all edge types except `supersedes`, which is followed f
 - [Decisions and Memory](../guides/03-decisions-and-memory.md): using memory day-to-day and the `/playbook:learn-project` command.
 - [Launcher and hooks](01-launcher-and-hooks.md): the `ccc` launcher that sets the session model.
 - [Docs index](../index.md)
+
+## Forks versus fresh subagents
+
+An omitted `subagent_type` forks the parent conversation and bills its full history again. Playbook never relies on that: dispatching skills and commands set a `subagent_type` and pass a brief. `context: fork` in command frontmatter starts a fresh agent without parent history and is unaffected.
