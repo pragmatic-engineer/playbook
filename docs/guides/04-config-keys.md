@@ -55,6 +55,8 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `sessions.staleAfterDays` | `3` | whole number, 1 or more | Days without activity after which `playbook sessions` calls an unfinished session stale. |
 | `sessions.recentDays` | `7` | whole number, 1 or more | How far back `playbook sessions` looks for sessions. |
 | `usage.telemetry` | `auto` | `auto`, `off` | Whether `cc` points a session at the local usage receiver (`playbook usage collect`) so `playbook usage` can show cost per agent. With `auto` it sets the OpenTelemetry variables for that session only, and only when a receiver is running and you have set no telemetry yourself (no `CLAUDE_CODE_ENABLE_TELEMETRY` or `OTEL_*` variable in your environment or in the `env` block of a Claude Code settings file). Playbook reads those files and never writes them. `off` sets nothing. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy). |
+| `usage.budget.monthlyUsd` | `0` | number of dollars, 0 or more | A manual monthly spend limit for `playbook usage`. `0` means none. Used when the limit cannot be read from Claude Code. Set it with `--global`, like the other `usage.` keys. The month is the UTC calendar month, and the spend is the estimated cost from your local history. |
+| `usage.budget.weeklyUsd` | `0` | number of dollars, 0 or more | The same for the week (the first day comes from `usage.weekStart`). |
 
 ## Tuning effort from your usage
 
