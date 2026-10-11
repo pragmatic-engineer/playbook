@@ -26,7 +26,7 @@ Every agent file opens with five keys:
 
 A command binds to an agent one of two ways. Both are real and in use.
 
-**Whole-command fork.** The command's own frontmatter carries `context: fork` and `agent: <name>`, so the entire command body runs inside that agent. Its final message is the only thing the main conversation sees. Pick this when the whole command is the agent's job.
+**Whole-command fork.** The command's own frontmatter carries `context: fork` and `agent: <name>`, so the entire command body runs inside that agent. Its final message is the only thing the main conversation sees. Pick this when the whole command is the agent's job. Start the body, right under the title, with one line saying the reader is already the executing subagent and must not call the Skill tool again; `tests/fork_commands_agent.rs` enforces it.
 
 ```yaml
 context: fork
