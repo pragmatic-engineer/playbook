@@ -66,7 +66,10 @@ impl Env {
             .into_iter()
             .map(|l| {
                 let l = l.replacen(&format!("{PAIR} "), "", 1);
-                l.replacen(&format!(" {PAIR}"), "", 1).replacen(PAIR, "", 1)
+                let l = l.replacen(&format!(" {PAIR}"), "", 1).replacen(PAIR, "", 1);
+                l.replacen("--effort medium ", "", 1)
+                    .replacen(" --effort medium", "", 1)
+                    .replacen("--effort medium", "", 1)
             })
             .collect()
     }
@@ -90,6 +93,7 @@ impl Env {
             .env("HOME", &self.home)
             .env("PATH", self.path())
             .env_remove("CLAUDE_CODE_DISABLE_AUTO_MEMORY")
+            .env_remove("CLAUDE_CODE_EFFORT_LEVEL")
             .env("FAKE_LOG", self.log())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null");
@@ -481,6 +485,41 @@ fn the_launcher_passes_the_previous_generation_as_the_fallback() {
     assert!(
         raw[0].contains("--fallback-model claude-opus-5,claude-sonnet-5,claude-haiku-4-5"),
         "{raw:?}"
+    );
+}
+
+#[test]
+fn a_session_that_states_no_effort_runs_at_medium() {
+    let e = env("effort-default");
+    e.launch(&["fresh"]);
+    let raw = e.raw_calls();
+    assert_eq!(raw[0].matches("--effort").count(), 1, "{raw:?}");
+    assert!(raw[0].contains("--effort medium"), "{raw:?}");
+}
+
+#[test]
+fn an_effort_the_user_asked_for_is_left_alone() {
+    let e = env("effort-asked");
+    e.launch_with(&["--effort", "high", "--"], &["fresh"], &[]);
+    let raw = e.raw_calls();
+    assert_eq!(raw[0].matches("--effort").count(), 1, "{raw:?}");
+    assert!(raw[0].contains("--effort high"), "{raw:?}");
+    assert!(!raw[0].contains("--effort medium"), "{raw:?}");
+}
+
+#[test]
+fn an_effort_level_in_the_user_settings_is_left_alone_and_never_written() {
+    let e = env("effort-settings");
+    let settings = e.home.join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, r#"{"effortLevel":"high"}"#).unwrap();
+    e.launch(&["fresh"]);
+    let raw = e.raw_calls();
+    assert!(!raw[0].contains("--effort"), "{raw:?}");
+    assert_eq!(
+        fs::read_to_string(&settings).unwrap(),
+        r#"{"effortLevel":"high"}"#,
+        "the launcher must never edit Claude Code settings"
     );
 }
 
