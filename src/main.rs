@@ -485,14 +485,12 @@ fn main() {
             sub,
             json,
             summary,
-            web,
             range,
         } => {
             let paths = usage::run::Paths::real();
             let opts = usage::entry::Opts {
                 json,
                 summary,
-                web,
                 range,
             };
             match usage::entry::run(sub, &opts, &paths, usage::entry::interactive()) {
