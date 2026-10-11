@@ -47,6 +47,7 @@ const SESSION_COUNTER_FILES: [&str; 7] = [
     "edit-count",
     "edits.jsonl",
     "seen-reads",
+    "read-state.jsonl",
     "capture-crossings",
     "hygiene-level",
 ];

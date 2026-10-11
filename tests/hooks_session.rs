@@ -1127,6 +1127,7 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
         "edit-count",
         "edits.jsonl",
         "seen-reads",
+        "read-state.jsonl",
         "capture-crossings",
     ] {
         fs::write(session_dir.join(name), "stale-content").unwrap();
@@ -1152,6 +1153,7 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
         "edit-count",
         "edits.jsonl",
         "seen-reads",
+        "read-state.jsonl",
         "capture-crossings",
     ] {
         let contents = fs::read_to_string(session_dir.join(name)).unwrap();
