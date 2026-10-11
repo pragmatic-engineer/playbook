@@ -9,10 +9,13 @@
 
 use super::app::App;
 use super::data::Data;
+use super::data::LimitsView;
 use super::sort::Panel;
 use super::theme::{ColorDepth, Theme};
 use super::view::render;
-use crate::usage::query::{live_view, Range};
+use crate::usage::limits::LimitPeriod;
+use crate::usage::limits_source::{Snapshot, Window};
+use crate::usage::query::{live_view, Range, WeekStart};
 use crate::usage::UsageEvent;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -269,6 +272,114 @@ fn the_daily_table_marks_today_and_the_peak_day() {
         })
         .expect("the peak day is in the table");
     assert_eq!(buf[(p.spend.x + 2, peak_row)].fg, rgb(0xff, 0xb8, 0x14));
+}
+
+fn with_limits(
+    mut a: App,
+    snapshot: Option<&Snapshot>,
+    budgets: &[(LimitPeriod, f64)],
+    range: Range,
+) -> App {
+    let events = fixture();
+    let live = live_view(&events, &events, &events, NOW);
+    let mut data = Data::build(&events, live, NOW, range, "");
+    data.limits = LimitsView::build(snapshot, budgets, &events, NOW, WeekStart::Monday, range);
+    a.range = range;
+    a.data = Some(data);
+    a
+}
+
+fn plan_snapshot() -> Snapshot {
+    Snapshot {
+        captured_at: NOW - 60,
+        five_hour: Some(Window {
+            used_percentage: 50.0,
+            resets_at: NOW + 3 * 3600,
+        }),
+        seven_day: Some(Window {
+            used_percentage: 30.0,
+            resets_at: NOW + 4 * DAY,
+        }),
+        spend_limit: None,
+    }
+}
+
+#[test]
+fn the_budget_panel_shows_the_plan_windows_as_measured() {
+    let a = with_limits(
+        app(Theme::Btop),
+        Some(&plan_snapshot()),
+        &[],
+        Range::ThisWeek(WeekStart::Monday),
+    );
+    let text = draw(&a, 100, 36);
+    assert!(text.contains("5 hour window [measured]"));
+    assert!(text.contains("will exceed"));
+    assert!(text.contains("weekly window [measured]"));
+    check("budget_measured_100x36", &text);
+}
+
+#[test]
+fn the_budget_panel_shows_a_manual_limit_and_says_so() {
+    let a = with_limits(
+        app(Theme::Btop),
+        None,
+        &[(LimitPeriod::Monthly, 40.0), (LimitPeriod::Weekly, 5.0)],
+        Range::CurrentMonth,
+    );
+    let text = draw(&a, 160, 50);
+    assert!(text.contains("[manual]"));
+    assert!(text.contains("[local history]"));
+    check("budget_manual_160x50", &text);
+}
+
+#[test]
+fn the_budget_panel_says_how_to_set_a_limit_when_none_is_known() {
+    let text = draw(&app(Theme::Btop), 100, 36);
+    check("budget_unknown_100x36", &text);
+    assert!(text.contains("Limit unknown: playbook config set --global usage.budget.monthlyUsd"));
+}
+
+#[test]
+fn the_budget_panel_is_left_out_of_a_short_screen() {
+    for (w, h) in [(80, 24), (100, 30), (100, 35)] {
+        assert!(!draw(&app(Theme::Btop), w, h).contains("Budget"), "{w}x{h}");
+    }
+    assert!(draw(&app(Theme::Btop), 100, 36).contains("Budget"));
+}
+
+#[test]
+fn a_stale_plan_reading_is_marked() {
+    let mut snap = plan_snapshot();
+    snap.captured_at = NOW - 7 * 3600;
+    snap.five_hour = Some(Window {
+        used_percentage: 5.0,
+        resets_at: NOW + 3600,
+    });
+    let a = with_limits(app(Theme::Btop), Some(&snap), &[], Range::Today);
+    assert!(draw(&a, 160, 50).contains("[measured, stale]"));
+}
+
+#[test]
+fn the_state_wears_the_error_color_when_the_limit_will_be_exceeded() {
+    let a = with_limits(
+        app(Theme::Btop),
+        Some(&plan_snapshot()),
+        &[],
+        Range::ThisWeek(WeekStart::Monday),
+    );
+    let buf = buffer(&a, 100, 36);
+    let row = crate::usage::tui::view::layout(ratatui::layout::Rect::new(0, 0, 100, 36))
+        .budget
+        .y
+        + 1;
+    let cells: Vec<&str> = (0..100).map(|x| buf[(x, row)].symbol()).collect();
+    let at = cells
+        .windows(4)
+        .position(|w| w.concat() == "will")
+        .expect("the state is on the first limit row");
+    let pal = Theme::Btop.palette(ColorDepth::True);
+    assert_eq!(buf[(at as u16, row)].fg, pal.color(pal.error));
 }
 
 #[test]

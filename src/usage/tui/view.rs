@@ -6,6 +6,7 @@
 //! header and the footer; `panels` draws each panel.
 
 use super::app::App;
+use super::budget;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
 use super::panels;
@@ -27,6 +28,8 @@ pub const MIN_HEIGHT: u16 = 24;
 #[derive(Debug, PartialEq, Eq)]
 pub struct Panels {
     pub header: Rect,
+    /// Empty on a short screen.
+    pub budget: Rect,
     pub spend: Rect,
     pub tokens: Rect,
     pub models: Rect,
@@ -40,11 +43,22 @@ pub struct Panels {
 /// tokens and messages, between two borders.
 const HEADER_HEIGHT: u16 = 6;
 
+/// The screen height from which the Budget panel is drawn.
+const BUDGET_MIN_ROWS: u16 = 36;
+
 /// Header and footer are fixed. The rest is three rows: graphs, breakdowns,
 /// live and sessions, each split in two columns.
 pub fn layout(area: Rect) -> Panels {
-    let [header, body, footer] = Layout::vertical([
+    // The budget panel needs room: it is left out below 36 rows, which keeps
+    // the common 24 and 30 row screens as they were.
+    let budget_height = if area.height >= BUDGET_MIN_ROWS {
+        budget::HEIGHT
+    } else {
+        0
+    };
+    let [header, budget, body, footer] = Layout::vertical([
         Constraint::Length(HEADER_HEIGHT),
+        Constraint::Length(budget_height),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
@@ -65,6 +79,7 @@ pub fn layout(area: Rect) -> Panels {
     let (live, sessions) = halves(live);
     Panels {
         header,
+        budget,
         spend,
         tokens,
         models,
@@ -103,6 +118,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_header(frame, p.header, app, &pal);
     match &app.data {
         Some(data) => {
+            budget::render(frame, p.budget, data, &pal);
             panels::spend(frame, p.spend, app, data, &pal);
             panels::tokens(frame, p.tokens, app, data, &pal);
             panels::models(frame, p.models, app, data, &pal);
@@ -667,7 +683,8 @@ mod tests {
         let area = Rect::new(0, 0, 100, 30);
         let p = layout(area);
         let rects = [
-            p.header, p.spend, p.tokens, p.models, p.projects, p.live, p.sessions, p.footer,
+            p.header, p.budget, p.spend, p.tokens, p.models, p.projects, p.live, p.sessions,
+            p.footer,
         ];
         let cells: u32 = rects
             .iter()
