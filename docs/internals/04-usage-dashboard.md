@@ -166,3 +166,14 @@ Terminal view tests render into a `TestBackend` buffer, with no real terminal. `
 ## Telemetry storage (first slice)
 
 The usage database also holds two tables for OpenTelemetry data, `telemetry_requests` (one row per API request: session id, request id, model, effort, agent name, token counts and cost) and `session_sources` (which source a session reads from, `telemetry` or `transcript`). They are created next to the transcript tables and nothing reads them yet, so every total is unchanged. A session with no row in `session_sources` reads from transcripts. The rows never hold prompts, tool content, paths, emails or user ids. Dropping the two tables reverts the feature and loses no transcript data (`telemetry_db::migrate_down`). Telemetry follows [issue 769](https://github.com/pragmatic-engineer/playbook/issues/769): playbook never writes Claude Code settings, and transcripts stay the fallback.
+
+## The telemetry receiver
+
+`playbook usage collect` runs a local receiver for Claude Code's OpenTelemetry export. It is optional: without it every number comes from transcripts, as before.
+
+- **Where it listens.** 127.0.0.1 only, JSON protocol only (`http/json`). The default port is 4318. If that is taken it picks a free one and records it. `--port N` asks for a specific port and fails when it is busy.
+- **State.** `collector.json` next to the usage database (owner-only) holds the pid, the port and a bearer token. A second start finds the live collector and says so. A stale file (dead pid) is replaced. The token and port survive restarts, so a session started earlier keeps sending to the right place with the right token.
+- **Idle shutdown.** It stops after 600 seconds with no request (`--idle-seconds`, 0 means never) and clears the pid.
+- **Limits.** Headers 16 KiB, body 1 MiB (also when chunked), 50 requests per second (then 429), 5 seconds to send a request. Content type must be `application/json`, a compressed body is refused, and the bearer token is required. Paths: `/v1/logs` is stored, `/v1/metrics` and `/v1/traces` are accepted and dropped.
+- **What is stored.** Only `api_request` events, keyed by session id and request id so a redelivered batch changes nothing. An allowlist of attribute keys is read (event name, session id, request id, model, effort, agent name, the four token counts, cost). Every other attribute, including prompts, tool content, file paths, emails, user and organization ids and resource attributes, is never read. Kept names must be plain ASCII (letters, digits and `. _ - : /`), else they are dropped.
+- **Data loss.** Claude Code may drop telemetry sent while no receiver listens. Such a session is read from transcripts.

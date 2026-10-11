@@ -69,6 +69,10 @@ pub fn run(
             );
             run_ingest(paths)
         }
+        Some(UsageCommand::Collect { port, idle_seconds }) => {
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            super::collector::run_collect(paths, port, idle_seconds, &stop)
+        }
         None if opts.summary => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;
             run_summary(paths, range, crate::common::time::now_secs())

@@ -1099,7 +1099,18 @@ Example: `playbook usage --range today`
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
 - `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
 
-Subcommands: `ingest`
+Subcommands: `collect`, `ingest`
+
+### `playbook usage collect`
+
+Run the local OpenTelemetry receiver in the foreground
+
+Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free port when that one is taken) and stores API request cost and token rows from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector. It stops by itself after the idle time. Sessions that sent no telemetry are read from transcripts as before.
+
+Example: `playbook usage collect --idle-seconds 1800`
+
+- `--port <PORT>`: Port to listen on (an error when busy). Default: the last port, 4318, then any free port
+- `--idle-seconds <IDLE_SECONDS>`: Stop after this many seconds with no request; 0 means never
 
 ### `playbook usage ingest`
 
