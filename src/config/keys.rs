@@ -38,6 +38,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "usage.weekStart",
     "usage.refreshSeconds",
     "usage.telemetry",
+    "sessions.staleAfterDays",
+    "sessions.recentDays",
     "hygiene.enabled",
     "hygiene.thresholdTokens",
 ];
@@ -97,6 +99,8 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.weekStart" => Some(Value::String("monday".to_string())),
         "usage.refreshSeconds" => Some(Value::Number(5.into())),
         "usage.telemetry" => Some(Value::String("auto".to_string())),
+        "sessions.staleAfterDays" => Some(Value::Number(3.into())),
+        "sessions.recentDays" => Some(Value::Number(7.into())),
         "hygiene.enabled" => Some(Value::Bool(true)),
         "hygiene.thresholdTokens" => Some(Value::Number(250_000.into())),
         _ => None,

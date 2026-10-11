@@ -12,8 +12,8 @@ use playbook::{
     Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DoctorCommand, EvalCommand,
     GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand,
     MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand,
-    ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology, SettingsCommand,
-    SkillCommand, WorktreeCommand,
+    ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand,
+    SettingsCommand, SkillCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -581,6 +581,17 @@ fn main() {
                 }
                 Err(err) => {
                     eprintln!("usage: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::Sessions { sub, json } => {
+            let json = json || matches!(sub, Some(SessionsCommand::List { json: true }));
+            let paths = usage::run::Paths::real();
+            match playbook::sessions::run(json, &paths, &common::session::home_dir()) {
+                Ok(output) => print!("{output}"),
+                Err(err) => {
+                    eprintln!("sessions: {err}");
                     std::process::exit(1);
                 }
             }

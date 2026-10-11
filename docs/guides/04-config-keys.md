@@ -52,6 +52,8 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` | The first day of the week for the `week` and `last-week` ranges of `playbook usage` (view, `--json`, `--summary`). Days are UTC. |
 | `usage.refreshSeconds` | `5` | whole number, 1 to 3600 | How often the `playbook usage` terminal view reads new history and redraws, in seconds. |
 | `usage.theme` | `btop` | `btop`, `dark`, `light`, `mono` | The color theme `playbook usage` starts with. `t` cycles the themes inside the view. `NO_COLOR` forces `mono`. |
+| `sessions.staleAfterDays` | `3` | whole number, 1 or more | Days without activity after which `playbook sessions` calls an unfinished session stale. |
+| `sessions.recentDays` | `7` | whole number, 1 or more | How far back `playbook sessions` looks for sessions. |
 | `usage.telemetry` | `auto` | `auto`, `off` | Whether `cc` points a session at the local usage receiver (`playbook usage collect`) so `playbook usage` can show cost per agent. With `auto` it sets the OpenTelemetry variables for that session only, and only when a receiver is running and you have set no telemetry yourself (no `CLAUDE_CODE_ENABLE_TELEMETRY` or `OTEL_*` variable in your environment or in the `env` block of a Claude Code settings file). Playbook reads those files and never writes them. `off` sets nothing. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy). |
 
 ## Tuning effort from your usage

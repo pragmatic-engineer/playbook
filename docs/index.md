@@ -43,6 +43,7 @@ How the machine works.
 - [Release channels](internals/06-release-channels.md): how a tagged release reaches GitHub assets, the Homebrew tap and the marketplace, the trimmed plugin archive, and the secret it needs.
 - [Migrations](internals/07-migrations.md): how `playbook init` carries an install across breaking changes, the three migration kinds, and how edits to placed files are detected.
 - [State store](internals/08-state-store.md): where playbook keeps its internal state, how to inspect it with `playbook state list`, and the one-time import of the old files.
+- [Sessions](internals/09-sessions.md): `playbook sessions`, the read only list of recent sessions with repo, branch, worktree, PR, state, context size and cost, and what it never does.
 
 ## Decisions
 

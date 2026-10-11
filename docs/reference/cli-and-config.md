@@ -42,6 +42,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.refreshSeconds` | `5` | a number, see the config keys guide for the range |
 | `usage.telemetry` | `auto` | `auto`, `off` |
+| `sessions.staleAfterDays` | `3` | a number, see the config keys guide for the range |
+| `sessions.recentDays` | `7` | a number, see the config keys guide for the range |
 | `hygiene.enabled` | `true` | `true`, `false` |
 | `hygiene.thresholdTokens` | `250000` | a number, see the config keys guide for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
@@ -54,7 +56,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -984,6 +986,24 @@ Example: `playbook segment size --base main`
 - `--base <BASE>`: The Segment's base ref
 - `--limit <LIMIT>`: Changed lines at which a Segment is over budget
 - `--dir <DIR>`: The repository to run in; defaults to the current directory
+
+### `playbook sessions`
+
+List recent agent sessions with repo, branch, worktree, linked PR, state, context size and cost
+
+Read only. A session is done when the pull request of its branch is merged or closed, and stale after `sessions.staleAfterDays` without activity. Suggestions are printed, never acted on, and a worktree with uncommitted changes is flagged, never removed.
+
+Example: `playbook sessions --json`
+
+- `--json`: Print the sessions as JSON
+
+Subcommands: `list`
+
+### `playbook sessions list`
+
+List recent sessions (the default)
+
+- `--json`: Print the sessions as JSON
 
 ### `playbook settings`
 
