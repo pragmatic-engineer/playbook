@@ -471,6 +471,113 @@ fn metric_sum(conn: &Connection, metric: &str, since: i64, until: i64) -> Result
     Ok(v.round() as u64)
 }
 
+/// Defaults of the two telemetry size limits (config keys
+/// `usage.telemetryRetentionDays` and `usage.telemetryMaxRows`).
+pub const DEFAULT_RETENTION_DAYS: u64 = 90;
+pub const DEFAULT_MAX_ROWS: u64 = 500_000;
+
+const PRUNED_TABLES: [&str; 4] = [
+    "telemetry_requests",
+    "telemetry_tools",
+    "telemetry_errors",
+    "telemetry_metrics",
+];
+
+/// How long and how much telemetry is kept. 0 means no limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct Retention {
+    /// Rows older than this many days are deleted.
+    pub days: u64,
+    /// At most this many rows are kept per table, the newest ones.
+    pub max_rows: u64,
+}
+
+impl Default for Retention {
+    fn default() -> Self {
+        Self {
+            days: DEFAULT_RETENTION_DAYS,
+            max_rows: DEFAULT_MAX_ROWS,
+        }
+    }
+}
+
+/// Rows removed (or, in a dry run, that would be) per table.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Pruned {
+    pub requests: u64,
+    pub tools: u64,
+    pub errors: u64,
+    pub metrics: u64,
+}
+
+impl Pruned {
+    pub fn total(&self) -> u64 {
+        self.requests + self.tools + self.errors + self.metrics
+    }
+}
+
+/// Deletes telemetry rows past the limits: first those older than
+/// `retention.days`, then the oldest rows beyond `retention.max_rows` in each
+/// table. Transcript tables are never touched, and totals come from them, so
+/// no total changes. With `dry_run` nothing is deleted and the counts say what
+/// would be.
+pub fn prune(
+    conn: &Connection,
+    now: i64,
+    retention: Retention,
+    dry_run: bool,
+) -> Result<Pruned, String> {
+    let cutoff = (retention.days > 0).then(|| now - to_i64(retention.days).saturating_mul(86_400));
+    let mut out = [0u64; 4];
+    for (slot, table) in out.iter_mut().zip(PRUNED_TABLES) {
+        let fail = |e: rusqlite::Error| format!("failed to prune {table}: {e}");
+        let total: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .map_err(fail)?;
+        let old: i64 = match cutoff {
+            Some(c) => conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE timestamp < ?1"),
+                    params![c],
+                    |r| r.get(0),
+                )
+                .map_err(fail)?,
+            None => 0,
+        };
+        let excess = if retention.max_rows > 0 {
+            (total - old - to_i64(retention.max_rows)).max(0)
+        } else {
+            0
+        };
+        if !dry_run {
+            if let Some(c) = cutoff {
+                conn.execute(
+                    &format!("DELETE FROM {table} WHERE timestamp < ?1"),
+                    params![c],
+                )
+                .map_err(fail)?;
+            }
+            if excess > 0 {
+                conn.execute(
+                    &format!(
+                        "DELETE FROM {table} WHERE rowid IN
+                         (SELECT rowid FROM {table} ORDER BY timestamp, rowid LIMIT ?1)"
+                    ),
+                    params![excess],
+                )
+                .map_err(fail)?;
+            }
+        }
+        *slot = u64::try_from(old + excess).unwrap_or(0);
+    }
+    Ok(Pruned {
+        requests: out[0],
+        tools: out[1],
+        errors: out[2],
+        metrics: out[3],
+    })
+}
+
 pub fn count_requests(conn: &Connection) -> Result<i64, String> {
     conn.query_row("SELECT COUNT(*) FROM telemetry_requests", [], |r| r.get(0))
         .map_err(|e| format!("failed to count telemetry requests: {e}"))
@@ -882,6 +989,105 @@ mod tests {
         assert_eq!((h.lines_changed, h.commits, h.pull_requests), (50, 2, 1));
         assert!(!h.is_empty());
         assert!(health(&conn, 100, 200).unwrap().is_empty());
+    }
+
+    fn fill(conn: &Connection, n: i64) {
+        for i in 0..n {
+            let mut r = request(&format!("r{i}"));
+            r.timestamp = 1_000 + i;
+            insert_request(conn, &r).unwrap();
+            insert_tool(conn, &tool(&format!("t{i}"), "Bash", true, 1, 1_000 + i)).unwrap();
+            insert_error(conn, &failure(i as u64, 1, 1_000 + i)).unwrap();
+            let m = TelemetryMetric {
+                session_id: "s".into(),
+                metric: "commits".into(),
+                kind: String::new(),
+                start_ns: i,
+                end_ns: i + 1,
+                timestamp: 1_000 + i,
+                value: 1.0,
+            };
+            insert_metric(conn, &m).unwrap();
+        }
+    }
+
+    #[test]
+    fn prune_drops_rows_older_than_the_retention_in_every_table() {
+        let conn = mem();
+        fill(&conn, 10);
+        let day = 86_400;
+        // Rows are at 1000..1009; keep rows newer than now - 1 day = 1005.
+        let r = Retention {
+            days: 1,
+            max_rows: 0,
+        };
+        let dry = prune(&conn, 1_005 + day, r, true).unwrap();
+        assert_eq!(dry.total(), 20, "{dry:?}");
+        assert_eq!(
+            count_requests(&conn).unwrap(),
+            10,
+            "a dry run deletes nothing"
+        );
+        let done = prune(&conn, 1_005 + day, r, false).unwrap();
+        assert_eq!(done, dry);
+        assert_eq!(count_requests(&conn).unwrap(), 5);
+        let left: i64 = conn
+            .query_row("SELECT MIN(timestamp) FROM telemetry_metrics", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(left, 1_005);
+    }
+
+    #[test]
+    fn prune_keeps_the_newest_rows_up_to_the_row_limit_and_zero_means_no_limit() {
+        let conn = mem();
+        fill(&conn, 10);
+        let r = Retention {
+            days: 0,
+            max_rows: 4,
+        };
+        let done = prune(&conn, 5_000_000, r, false).unwrap();
+        assert_eq!(
+            (done.requests, done.tools, done.errors, done.metrics),
+            (6, 6, 6, 6)
+        );
+        let oldest: i64 = conn
+            .query_row("SELECT MIN(timestamp) FROM telemetry_requests", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(oldest, 1_006);
+        let none = Retention {
+            days: 0,
+            max_rows: 0,
+        };
+        assert_eq!(prune(&conn, 9_000_000, none, false).unwrap().total(), 0);
+        assert_eq!(count_requests(&conn).unwrap(), 4);
+    }
+
+    #[test]
+    fn prune_leaves_the_transcript_tables_alone() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE usage_events (event_id TEXT); INSERT INTO usage_events VALUES ('a');",
+        )
+        .unwrap();
+        migrate_up(&conn).unwrap();
+        prune(
+            &conn,
+            i64::MAX / 4,
+            Retention {
+                days: 1,
+                max_rows: 1,
+            },
+            false,
+        )
+        .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM usage_events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
     }
 
     #[test]

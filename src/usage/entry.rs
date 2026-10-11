@@ -83,8 +83,9 @@ pub fn run(
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             super::collector::run_collect(paths, port, idle_seconds, &stop)
         }
+        Some(UsageCommand::Prune { dry_run }) => super::collector::run_prune(paths, dry_run),
         Some(UsageCommand::Status { json }) => {
-            let status = super::collector::status(paths)?;
+            let status = super::collector::status(paths, super::collector::configured_retention())?;
             if json {
                 serde_json::to_string_pretty(&status)
                     .map_err(|e| format!("failed to encode the collector status: {e}"))

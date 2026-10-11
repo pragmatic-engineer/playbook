@@ -34,7 +34,12 @@ pub struct Config {
     pub token: Option<String>,
     /// Stop after this long with no request, or `None` to run until stopped.
     pub idle: Option<Duration>,
+    /// Prune telemetry rows past these limits every few hours while serving.
+    pub prune: Option<super::telemetry_db::Retention>,
 }
+
+/// How often a long running receiver prunes (it also prunes when it starts).
+const PRUNE_EVERY: Duration = Duration::from_secs(6 * 3600);
 
 /// A parsed request: the path (no query) and the body.
 #[derive(Debug)]
@@ -337,6 +342,7 @@ pub fn serve(
 ) -> std::io::Result<&'static str> {
     listener.set_nonblocking(true)?;
     let mut last = Instant::now();
+    let mut pruned_at = Instant::now();
     let mut limiter = RateLimiter {
         window: Instant::now(),
         count: 0,
@@ -347,6 +353,10 @@ pub fn serve(
         }
         if cfg.idle.is_some_and(|idle| last.elapsed() >= idle) {
             return Ok("idle");
+        }
+        if let Some(retention) = cfg.prune.filter(|_| pruned_at.elapsed() >= PRUNE_EVERY) {
+            pruned_at = Instant::now();
+            let _ = super::telemetry_db::prune(conn, now(), retention, false);
         }
         let mut stream = match listener.accept() {
             Ok((s, _)) => s,
@@ -400,6 +410,7 @@ mod tests {
         Config {
             token: token.map(str::to_string),
             idle: None,
+            prune: None,
         }
     }
 
@@ -588,6 +599,7 @@ mod tests {
         let c = Config {
             token: Some("tok".into()),
             idle: Some(Duration::from_millis(1500)),
+            prune: None,
         };
         let stop = Arc::new(AtomicBool::new(false));
         let client = std::thread::spawn(move || {
@@ -694,6 +706,7 @@ mod tests {
         let c = Config {
             token: None,
             idle: Some(Duration::from_millis(1200)),
+            prune: None,
         };
         let stop = Arc::new(AtomicBool::new(false));
         let done = Arc::new(AtomicBool::new(false));

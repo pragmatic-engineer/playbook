@@ -931,7 +931,7 @@ pub enum UsageCommand {
     /// Show whether the telemetry receiver is running
     ///
     /// Prints the pid, port, idle limit, how many telemetry rows are stored
-    /// (API requests, tool calls, API errors) and the time of the newest
+    /// (API requests, tool calls, API errors, metric points), the retention limits and the time of the newest
     /// event. It starts nothing and never prints the token. With `--json` it
     /// prints the same as JSON. Exit code 0 whether or not a receiver runs.
     ///
@@ -940,6 +940,20 @@ pub enum UsageCommand {
         /// Print the status as JSON
         #[arg(long)]
         json: bool,
+    },
+    /// Delete old telemetry rows
+    ///
+    /// Removes telemetry rows older than `usage.telemetryRetentionDays` (default
+    /// 90, 0 keeps them) and the oldest rows beyond `usage.telemetryMaxRows` per
+    /// table (default 500000, 0 means no limit). The receiver does the same when
+    /// it starts and every few hours. Transcript data and every total are left
+    /// alone, because totals come from transcripts.
+    ///
+    /// Example: `playbook usage prune --dry-run`
+    Prune {
+        /// Say what would be removed without deleting anything
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
