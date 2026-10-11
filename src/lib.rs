@@ -888,6 +888,24 @@ pub enum AgentsCommand {
 pub enum UsageCommand {
     /// Read new session history into the usage store (deprecated: use `playbook usage --summary`)
     Ingest,
+    /// Run the local OpenTelemetry receiver in the foreground
+    ///
+    /// Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free
+    /// port when that one is taken) and stores API request cost and token rows
+    /// from Claude Code's JSON telemetry. Prompts, tool content, paths, emails
+    /// and user ids are never stored. A second start reports the running
+    /// collector. It stops by itself after the idle time. Sessions that sent no
+    /// telemetry are read from transcripts as before.
+    ///
+    /// Example: `playbook usage collect --idle-seconds 1800`
+    Collect {
+        /// Port to listen on (an error when busy). Default: the last port, 4318, then any free port.
+        #[arg(long)]
+        port: Option<u16>,
+        /// Stop after this many seconds with no request; 0 means never
+        #[arg(long, default_value_t = 600)]
+        idle_seconds: u64,
+    },
 }
 
 /// `playbook sanitize` subcommands.
