@@ -13,6 +13,7 @@ pub mod panels;
 #[cfg(test)]
 mod parity;
 pub mod scale;
+pub mod sessions_view;
 #[cfg(test)]
 mod snapshots;
 pub mod sort;
@@ -27,6 +28,7 @@ use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
 };
 use ratatui::crossterm::execute;
+use sessions_view::SessionsView;
 use std::time::Duration;
 use theme::{ColorDepth, Theme};
 use worker::{Update, Worker};
@@ -75,12 +77,35 @@ fn event_loop(
     let every = Duration::from_secs(super::entry::configured_refresh_seconds());
     app.refresh_every = every;
     let worker = Worker::spawn(paths.clone(), app.range, app.filter.clone(), every);
+    let mut sessions = SessionsLoop::new(paths.clone());
     while !app.quit {
         app.area = terminal.size().map(Into::into)?;
-        terminal.draw(|frame| view::render(frame, &app))?;
+        sessions.poll();
+        terminal.draw(|frame| match &sessions.view {
+            Some(v) => sessions_view::render(
+                frame,
+                v,
+                &app.theme.palette(app.depth),
+                crate::common::time::now_secs(),
+            ),
+            None => view::render(frame, &app),
+        })?;
         if event::poll(TICK)? {
             // A resize needs no handling: the next draw reads the new size.
             match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press && sessions.view.is_some() => {
+                    if sessions.key(key) == sessions_view::Action::Quit {
+                        app.quit = true;
+                    }
+                }
+                Event::Key(key)
+                    if key.kind == KeyEventKind::Press
+                        && key.code == ratatui::crossterm::event::KeyCode::Char('p')
+                        && !app.editing =>
+                {
+                    sessions.open();
+                }
+                Event::Mouse(_) if sessions.view.is_some() => {}
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
                     Effect::Requery => worker.ask(app.range, &app.filter),
                     Effect::Mouse if app.mouse => execute!(std::io::stdout(), EnableMouseCapture)?,
@@ -104,4 +129,83 @@ fn event_loop(
         }
     }
     Ok(())
+}
+
+type Loaded = Result<(Vec<crate::sessions::Record>, i64), String>;
+
+/// The Sessions management view and the thread that reads it. A read asks
+/// `gh` for each branch, so it runs off the draw loop and the screen never
+/// waits on it. At most one read is in flight.
+struct SessionsLoop {
+    paths: Paths,
+    view: Option<SessionsView>,
+    reply: Option<std::sync::mpsc::Receiver<Loaded>>,
+    last_read: Option<std::time::Instant>,
+}
+
+impl SessionsLoop {
+    fn new(paths: Paths) -> Self {
+        SessionsLoop {
+            paths,
+            view: None,
+            reply: None,
+            last_read: None,
+        }
+    }
+
+    fn open(&mut self) {
+        self.view = Some(SessionsView::default());
+        self.start();
+    }
+
+    fn start(&mut self) {
+        if self.reply.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let paths = self.paths.clone();
+        std::thread::spawn(move || {
+            let home = crate::common::session::home_dir();
+            let _ = tx.send(crate::sessions::load(&paths, &home));
+        });
+        self.reply = Some(rx);
+        self.last_read = Some(std::time::Instant::now());
+    }
+
+    fn key(&mut self, key: ratatui::crossterm::event::KeyEvent) -> sessions_view::Action {
+        let action = match self.view.as_mut() {
+            Some(v) => v.key(key),
+            None => sessions_view::Action::None,
+        };
+        match action {
+            sessions_view::Action::Close => self.view = None,
+            sessions_view::Action::Refresh => self.start(),
+            _ => {}
+        }
+        action
+    }
+
+    /// Takes a finished read and starts the next one when the view is open and
+    /// the last one is old.
+    fn poll(&mut self) {
+        let Some(view) = self.view.as_mut() else {
+            self.reply = None;
+            return;
+        };
+        if let Some(rx) = &self.reply {
+            if let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok((records, now)) => view.refresh(records, now),
+                    Err(e) => view.fail(e),
+                }
+                self.reply = None;
+            }
+        }
+        let due = self
+            .last_read
+            .is_none_or(|t| t.elapsed() >= Duration::from_secs(sessions_view::REFRESH_SECONDS));
+        if due {
+            self.start();
+        }
+    }
 }

@@ -1,6 +1,6 @@
 # Sessions
 
-`playbook sessions` lists your recent agent sessions in one table, so you can see which ones still matter. It is read only. Design: [ADR-0024](../adr/0024-session-management-view-and-lifecycle.md), stage 1.
+`playbook sessions` lists your recent agent sessions in one table, so you can see which ones still matter. It is read only. The same records show in the usage terminal view (key `p`). Design: [ADR-0024](../adr/0024-session-management-view-and-lifecycle.md), stage 1.
 
 ```
 playbook sessions
@@ -21,6 +21,10 @@ playbook sessions --json
 | Cost | The whole session's cost, as in `playbook usage`. |
 
 It reads the same store as `playbook usage` (and ingests new history first), the first transcript lines of each session for its working directory, `git` for the worktree and `git status`, and `gh` for the PR. `gh` and `git` calls have timeouts. A missing `gh` or no network leaves the link empty.
+
+## The sessions view
+
+In `playbook usage`, press `p` for a full screen table of the same records, in the usage theme and in UTC. `j` and `k` move, `v` changes the order (newest activity, grouped by repo, or by state with the ones that need attention first), `r` reads again now, `p` or `Esc` goes back and `q` quits. It reads again every 30 seconds, off the drawing loop, so a slow `gh` never freezes the screen. The selected session's suggestion shows under the table. The view has no key that closes, removes or stops anything.
 
 ## What it never does
 
