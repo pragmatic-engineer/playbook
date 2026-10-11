@@ -55,6 +55,11 @@ const BODY_CAP_CHARS: usize = 1500;
 /// Hard ceiling for one prompt's whole recall message.
 const PROMPT_RECALL_CAP_CHARS: usize = 5000;
 
+/// Hard ceiling for the `PreToolUse:Edit` anchor message, in characters. The
+/// message repeated on every edit and averaged about 1,600 characters, so it is
+/// cut at a line boundary and says how many anchored facts it left out.
+const EDIT_ANCHOR_CAP_CHARS: usize = 600;
+
 /// Shortest prompt word that can match.
 const MIN_TOKEN_CHARS: usize = 3;
 
@@ -138,8 +143,51 @@ pub fn run(payload: &Payload) {
         append_seen(&bump_seen_path, &newly_bumped);
     }
 
-    let msg = format_message(&root, &relpath, &matches);
+    // Once per file per session: the facts for a file do not change between
+    // its edits, so repeating them only grows the history.
+    let files_seen_path = Path::new(&dir).join("anchor-files-seen.tsv");
+    if read_seen(&files_seen_path).contains(&relpath) {
+        return;
+    }
+    append_seen(&files_seen_path, std::slice::from_ref(&relpath));
+
+    let msg = cap_message(
+        &format_message(&root, &relpath, &matches),
+        EDIT_ANCHOR_CAP_CHARS,
+    );
     emit_pre_context("PreToolUse", &msg);
+}
+
+/// Cuts `msg` to at most `cap` characters on a line boundary, replacing the
+/// dropped lines with a count. The first line (the header) is always kept, and a
+/// single over-long line is truncated rather than dropped.
+fn cap_message(msg: &str, cap: usize) -> String {
+    if msg.chars().count() <= cap {
+        return msg.to_string();
+    }
+    let lines: Vec<&str> = msg.lines().collect();
+    let mut out = String::new();
+    let mut kept = 0;
+    for line in &lines {
+        let extra = usize::from(!out.is_empty()) + line.chars().count();
+        // Reserve room for the trailing "omitted" note.
+        if out.chars().count() + extra + 40 > cap && kept > 0 {
+            break;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+        kept += 1;
+    }
+    if out.chars().count() + 40 > cap {
+        out = out.chars().take(cap.saturating_sub(40)).collect();
+    }
+    let dropped = lines.len() - kept;
+    if dropped > 0 {
+        out.push_str(&format!("\n(+{dropped} more anchored facts omitted)"));
+    }
+    out
 }
 
 fn mem_dir() -> PathBuf {
@@ -781,6 +829,18 @@ fn write_index_atomically(idx_path: &Path, rows: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cap_message_keeps_short_text_and_cuts_long_text_on_a_line() {
+        assert_eq!(cap_message("a\nb", 600), "a\nb");
+        let long = format!("head:\n{}", "- some fact line here\n".repeat(60));
+        let capped = cap_message(&long, 600);
+        assert!(capped.chars().count() <= 600);
+        assert!(capped.starts_with("head:\n- some fact"));
+        assert!(capped.contains("more anchored facts omitted"));
+        let huge_header = "x".repeat(2000);
+        assert!(cap_message(&huge_header, 600).chars().count() <= 600);
+    }
 
     #[test]
     fn staleness_budget_is_three_seconds() {

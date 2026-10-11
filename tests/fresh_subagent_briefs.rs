@@ -61,3 +61,43 @@ fn forked_commands_use_a_prefixed_agent() {
         assert!(agent.contains("playbook:"), "{cmd}: {agent}");
     }
 }
+
+#[test]
+fn review_brief_builder_keeps_its_four_parts() {
+    let s = read("skills/delegating-subagents/references/briefs.md");
+    assert!(s.contains("## Review brief builder"));
+    assert!(s.contains("## Implementer brief builder"));
+    for part in [
+        "**Diff.**",
+        "**Excerpts.**",
+        "**Test command.**",
+        "**Limit.**",
+    ] {
+        assert!(s.contains(part), "review brief builder lacks {part}");
+    }
+    assert!(s.contains("Read or search beyond it only when a claim cannot be settled"));
+}
+
+#[test]
+fn dispatching_commands_name_the_brief_builder() {
+    for cmd in ["deep-review", "quick-review", "implement"] {
+        let s = read(&format!("commands/{cmd}.md"));
+        assert!(
+            s.contains("Review brief builder"),
+            "commands/{cmd}.md does not point at the review brief builder"
+        );
+    }
+    let imp = read("commands/implement.md");
+    assert!(imp.contains("Implementer brief builder"));
+}
+
+#[test]
+fn reviewer_and_implementer_agents_allow_reading_beyond_the_brief_only_when_needed() {
+    let r = read("agents/reviewer.md");
+    assert!(r.contains("do not Read a file the excerpts already cover"));
+    // The lens scope guardrail must survive the change.
+    assert!(r.contains("Stay within the assigned focus"));
+    let i = read("agents/implementer.md");
+    assert!(i.contains("do not explore the repository"));
+    assert!(i.contains("Read every file before you modify it"));
+}
