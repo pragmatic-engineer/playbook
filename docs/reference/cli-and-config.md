@@ -40,6 +40,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.theme` | `btop` | `btop`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.refreshSeconds` | `5` | a number, see the config keys guide for the range |
+| `hygiene.enabled` | `true` | `true`, `false` |
+| `hygiene.thresholdTokens` | `250000` | a number, see the config keys guide for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -483,6 +485,7 @@ Subcommands: `save`, `show`, `status`
 Save the handoff note read from stdin for the next session
 
 - `--dir <DIR>`: Directory the handoff belongs to (default: the current one)
+- `--session <SESSION>`: Session id the handoff is for. Only the start that follows that session's `/clear` loads it, so parallel sessions never share one
 
 ### `playbook handoff show`
 
