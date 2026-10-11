@@ -94,6 +94,10 @@ impl Env {
             .env("PATH", self.path())
             .env_remove("CLAUDE_CODE_DISABLE_AUTO_MEMORY")
             .env_remove("CLAUDE_CODE_EFFORT_LEVEL")
+            .env_remove("CLAUDE_CODE_ENABLE_TELEMETRY")
+            .env_remove("OTEL_LOGS_EXPORTER")
+            .env_remove("OTEL_METRICS_EXPORTER")
+            .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
             .env("FAKE_LOG", self.log())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null");
@@ -769,4 +773,70 @@ fn without_an_override_the_alias_variable_is_not_set() {
     e.launch(&["fresh"]);
     let logged = fs::read_to_string(format!("{}.env", e.log().display())).unwrap();
     assert_eq!(logged.trim(), "unset");
+}
+
+/// Reads the pid from `collector.json` and stops that process.
+fn stop_collector(state: &Path) {
+    let text = fs::read_to_string(state).unwrap_or_default();
+    let pid = text
+        .split("\"pid\":")
+        .nth(1)
+        .and_then(|t| t.split([',', '}']).next())
+        .unwrap_or("0")
+        .trim()
+        .to_string();
+    if pid != "0" {
+        let _ = Command::new("kill").arg(&pid).status();
+    }
+}
+
+#[test]
+fn cc_starts_the_collector_once_when_the_usage_db_exists_and_points_the_session_at_it() {
+    let e = env("collector-spawn");
+    let usage = e.home.join(".config/playbook/usage");
+    fs::create_dir_all(&usage).unwrap();
+    fs::write(usage.join("usage.db"), "").unwrap();
+    make_exec(
+        &e.root.join("bin/claude"),
+        "#!/bin/sh\nprintf '%s %s\\n' \"$OTEL_EXPORTER_OTLP_ENDPOINT\" \"$OTEL_METRICS_EXPORTER\" >> \"$FAKE_LOG.otel\"\nexit 0\n",
+    );
+    let state = usage.join("collector.json");
+    let first = e.launch(&[]);
+    let second = e.launch(&[]);
+    let seen = fs::read_to_string(e.root.join("claude.log.otel")).unwrap_or_default();
+    let note = String::from_utf8_lossy(&first.stderr).to_string();
+    let again = String::from_utf8_lossy(&second.stderr).to_string();
+    stop_collector(&state);
+    let lines: Vec<&str> = seen.lines().collect();
+    assert_eq!(lines.len(), 2, "{seen}");
+    assert!(
+        lines[0].starts_with("http://127.0.0.1:") && lines[0].ends_with(" otlp"),
+        "seen={seen:?} note={note:?}"
+    );
+    assert_eq!(lines[0], lines[1], "the second session reuses the receiver");
+    assert!(note.contains("started the usage collector"), "{note}");
+    assert!(!again.contains("started the usage collector"), "{again}");
+}
+
+#[test]
+fn cc_starts_no_collector_without_a_usage_db_or_with_telemetry_off() {
+    let e = env("collector-none");
+    make_exec(
+        &e.root.join("bin/claude"),
+        "#!/bin/sh\nprintf '%s\\n' \"${OTEL_EXPORTER_OTLP_ENDPOINT:-unset}\" >> \"$FAKE_LOG.otel\"\nexit 0\n",
+    );
+    e.launch(&[]);
+    let usage = e.home.join(".config/playbook/usage");
+    fs::create_dir_all(&usage).unwrap();
+    fs::write(usage.join("usage.db"), "").unwrap();
+    fs::create_dir_all(e.home.join(".claude")).unwrap();
+    fs::write(
+        e.home.join(".claude/settings.json"),
+        r#"{"env":{"OTEL_LOGS_EXPORTER":"none"}}"#,
+    )
+    .unwrap();
+    e.launch(&[]);
+    let seen = fs::read_to_string(e.root.join("claude.log.otel")).unwrap();
+    assert_eq!(seen, "unset\nunset\n");
+    assert!(!usage.join("collector.json").exists());
 }

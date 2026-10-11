@@ -170,7 +170,7 @@ The usage database also holds two tables for OpenTelemetry data, `telemetry_requ
 
 ## The telemetry receiver
 
-`playbook usage collect` runs a local receiver for Claude Code's OpenTelemetry export. It is optional: without it every number comes from transcripts, as before.
+`playbook usage collect` runs a local receiver for Claude Code's OpenTelemetry export. It is optional: without it every number comes from transcripts, as before. `cc` starts it for you when needed, see below.
 
 - **Where it listens.** 127.0.0.1 only, JSON protocol only (`http/json`). The default port is 4318. If that is taken it picks a free one and records it. `--port N` asks for a specific port and fails when it is busy.
 - **State.** `collector.json` next to the usage database (owner-only) holds the pid, the port and a bearer token. A second start finds the live collector and says so. A stale file (dead pid) is replaced. The token and port survive restarts, so a session started earlier keeps sending to the right place with the right token.
@@ -222,7 +222,9 @@ Two more views of the projects panel (`4`, then `v` three and four times) read t
 
 `playbook usage status` prints whether a collector is running (pid, port, start time and idle limit), how many telemetry rows are stored (API requests, tool calls, API errors) and the time of the newest event with its age. `--json` prints the same fields. It starts nothing, creates no database when there is none, never prints the bearer token, and exits 0 whether or not a collector runs, so a script reads the `running` field. When no collector is running it shows the last port it used.
 
-To keep a collector running for `cc` sessions without a terminal tab, start it in a detached tmux session. The idle limit is off here so it does not stop in a quiet hour:
+**Starting it for you.** With `usage.telemetry` at `auto`, no telemetry setting of yours and an existing usage database (so you have used the usage view once), `cc` starts `playbook usage collect` itself as a detached child when none is running, waits up to 1.5 seconds for it to record itself, and prints one line saying so. The child listens on loopback only, writes only playbook's own state file and database, and stops after 10 minutes without telemetry (a live session sends a batch every few seconds, so it stays up while you work). Two `cc` starts at the same moment share one receiver through a short lock file, `collector.spawn`, which counts as stale after 10 seconds. If the receiver does not come up the session starts without telemetry and is read from transcripts. Nothing is written for launchd or systemd and no Claude Code setting is touched. `usage.telemetry` set to `off` turns all of this off.
+
+To keep a collector running for `cc` sessions without a terminal tab, or to stop it from idling out, start it in a detached tmux session. The idle limit is off here so it does not stop in a quiet hour:
 
 ```
 tmux new-session -d -s playbook-collect 'playbook usage collect --idle-seconds 0'

@@ -916,7 +916,8 @@ pub enum UsageCommand {
     /// Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no
     /// telemetry are read from transcripts as before. While it runs, `cc`
     /// points its sessions at it unless `usage.telemetry` is `off` or you set
-    /// telemetry yourself.
+    /// telemetry yourself. When none runs, `cc` starts one itself in the
+    /// background (once the usage database exists) under the same conditions.
     ///
     /// Example: `playbook usage collect --idle-seconds 1800`
     Collect {
