@@ -127,11 +127,11 @@ Spawn ONE `reviewer` subagent at **medium effort** (Opus model, set by the agent
 
 The subagent prompt MUST include:
 
-- The PR diff and `HEAD_SHA`.
+- The PR diff and `HEAD_SHA`, plus numbered excerpts of each changed file, the scoped test command and the stated limit to read beyond them only when needed (the "Review brief builder" in `skills/delegating-subagents/references/briefs.md`).
 - How to read files: **worktree mode** → the absolute `$WT` path with "read and grep files under $WT; do not install or build"; **in-place mode** (`WT` empty) → "read the local working tree, which is at HEAD_SHA".
 - The full **Voice rules (mandatory)** and **Anti-patterns to refuse** sections from this command, verbatim, plus the instruction to load `playbook:grounding-review` for the rest of the discipline. The reviewer loads no other skill and writes no comment body.
 - The output contract in Step 3: it MUST return exactly that report of plain findings, with no `Post:` block.
-- Read every cited file at `HEAD_SHA` before drafting; quote exact evidence; tag anything unconfirmed `[unverified]`.
+- Cite from the excerpts; read a file at `HEAD_SHA` only when they cannot settle a claim. Quote exact evidence; tag anything unconfirmed `[unverified]`.
 
 Spawn it with a stable `name` (e.g. `qr-<PR_NUMBER>`). If stopping it reports `no task found`, the agent was already cleaned up: treat that as a no-op and continue to Step 3. There is no gh-api fallback; if the worktree setup in Step 1 failed, execution has already stopped.
 

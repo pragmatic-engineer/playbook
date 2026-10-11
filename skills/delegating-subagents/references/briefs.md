@@ -7,6 +7,8 @@ Why `SKILL.md` says to pass a `subagent_type` and write a stand-alone brief, and
 - Fork cost
 - Classification of spawn sites
 - Brief template
+- Review brief builder
+- Implementer brief builder
 - Checks before dispatch
 
 ## Fork cost
@@ -41,8 +43,32 @@ Constraints: <scope, do not touch, read-only or not>
 
 Agents that cannot write (the read-only roster rows) have no `Output` line; they return their findings instead, and the orchestrator treats silence as NOT RUN.
 
+## Review brief builder
+
+Reviewers (`reviewer`, `cheap-checker`) used to spend about 14 messages per run reading files the orchestrator had already read. The orchestrator builds the brief once per review run and every reviewer reuses it. A brief for a review MUST contain, in this order:
+
+1. **Diff.** The full unified diff, or the hunks for the lens's files when the lens is narrow.
+2. **Excerpts.** For each changed file, the changed ranges plus about 30 lines either side, with line numbers, under a `File <path>` header. Take the ranges from the `@@ -a,b +c,d @@` headers and merge overlapping ones. Number the lines from the file at `HEAD_SHA`:
+
+   ```bash
+   git -C "$WT" show "$HEAD_SHA:$path" | nl -ba -w1 -s': ' | sed -n "${start},${end}p"
+   ```
+
+   Cap one file at 400 numbered lines. For a larger file, send the hunks with their numbers and name the file as "Read on demand".
+3. **Test command.** The scoped verify command, and the `CHECK_OUTPUT` the orchestrator already captured. Reviewers read it as context and never re-run it.
+4. **Limit.** The sentence: "Everything needed to judge this change is above: the diff and the numbered excerpts. Read or search beyond it only when a claim cannot be settled from the excerpt (a caller, a definition, a test). Do not browse the repository."
+
+The lens, the output shape and the voice rules stay exactly as the command specifies. The limit narrows where the reviewer looks for evidence, never what it must look for: every lens still covers its whole scope, and a reviewer that needs a caller or a test still reads it.
+
+Measured on the seeded-defect fixture (`tests/fixtures/bench/reviewer-real-diffs.json`, 7 seeded bugs and 3 clean cases, 3 repeats each, Opus medium, tools on, checkout present): recall 21 of 21 before and after, clean cases 9 of 9 before and after, 3.4 to 2.2 turns per run, $0.0447 to $0.0395 per run. The fixture files are small, so the saving on a real diff is larger.
+
+## Implementer brief builder
+
+An implementer brief (the per-Work-Unit file from `playbook plan brief`) also carries: the excerpts, with line numbers, of the files the step edits and of the one or two neighbours it must match (an interface it implements, the test it extends), the scoped verify command, and the limit: "The excerpts above are the context you need. Read a file only to edit it or when the excerpt cannot settle a question. Do not explore the repository." The Edit tool needs the file read first, so a file the step changes is still read; the saving is the exploratory reads around it.
+
 ## Checks before dispatch
 
 - Is `subagent_type` set, with the `playbook:` prefix for plugin agents?
 - Could the child do this task if it saw only the brief? If not, add what it lacks, by path first.
 - Is the output file named, for an agent that can write?
+- For a reviewer or implementer: are the diff or excerpts, the test command and the limit sentence in the brief?
