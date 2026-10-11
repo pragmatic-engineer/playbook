@@ -506,6 +506,9 @@ fn agents_app(with_telemetry: bool) -> App {
             group("reviewer", 5, 0.5),
         ];
         data.agents.cost_usd = 12.0;
+        data.telemetry_rows = true;
+        data.skills.rows = vec![group("review", 9, 3.0), group("plan", 4, 1.0)];
+        data.skills.cost_usd = 4.0;
     }
     a
 }
@@ -526,4 +529,34 @@ fn the_agents_view_says_telemetry_is_off_when_there_are_no_rows() {
     let text = draw(&agents_app(false), 100, 30);
     assert!(text.contains("Telemetry off"), "{text}");
     check("agents_off_100x30", &text);
+}
+
+#[test]
+fn the_skills_view_lists_cost_per_skill_and_says_when_none_ran() {
+    use crate::usage::tui::app::ProjectsView;
+    let mut a = agents_app(true);
+    a.projects_view = ProjectsView::Skills;
+    let text = draw(&a, 100, 30);
+    assert!(text.contains("Skills") && text.contains("review"), "{text}");
+    check("skills_100x30", &text);
+
+    a.data.as_mut().unwrap().skills = Default::default();
+    let text = draw(&a, 100, 30);
+    assert!(text.contains("No skill activity"), "{text}");
+    assert!(!text.contains("Telemetry off"), "{text}");
+}
+
+#[test]
+fn the_skills_view_says_telemetry_is_off_when_there_are_no_rows() {
+    use crate::usage::tui::app::ProjectsView;
+    let mut a = agents_app(false);
+    a.projects_view = ProjectsView::Skills;
+    assert!(draw(&a, 100, 30).contains("Telemetry off"));
+}
+
+#[test]
+fn v_cycles_projects_agents_skills_and_back() {
+    use crate::usage::tui::app::ProjectsView::*;
+    assert_eq!(Projects.next().next().next(), Projects);
+    assert_eq!(Agents.next(), Skills);
 }

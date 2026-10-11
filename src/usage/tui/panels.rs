@@ -579,8 +579,10 @@ pub fn models(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
 
 /// Projects of the period: messages, tokens, cost and share of the total cost.
 pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    if app.projects_view == ProjectsView::Agents {
-        return agents(frame, area, app, data, pal);
+    match app.projects_view {
+        ProjectsView::Agents => return agents(frame, area, app, data, pal),
+        ProjectsView::Skills => return skills(frame, area, app, data, pal),
+        ProjectsView::Projects => {}
     }
     let focused = app.focus == Panel::Projects;
     let block = panel_block(pal, Panel::Projects, "Projects", pal.box_mem, focused);
@@ -620,14 +622,54 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
 /// Cost per agent, from telemetry. The transcript totals stay the totals; the
 /// note says how much of the spend telemetry covers.
 fn agents(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    telemetry_split(
+        frame,
+        area,
+        app,
+        data,
+        pal,
+        ("Agents", "agent"),
+        &data.agents,
+    );
+}
+
+/// Cost per skill, from telemetry. Only requests made while a skill was
+/// active carry its name, so the rows are a share of the telemetry cost.
+fn skills(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+    telemetry_split(
+        frame,
+        area,
+        app,
+        data,
+        pal,
+        ("Skills", "skill"),
+        &data.skills,
+    );
+}
+
+const TELEMETRY_OFF: &str =
+    "Telemetry off. Start sessions with cc and set usage.telemetry to auto, \
+                             or see docs/guides/04-config-keys.md. v switches the view.";
+
+fn telemetry_split(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    data: &Data,
+    pal: &Palette,
+    (title, label): (&str, &'static str),
+    view: &crate::usage::query::AgentView,
+) {
     let focused = app.focus == Panel::Projects;
-    let mut block = panel_block(pal, Panel::Projects, "Agents", pal.box_mem, focused);
-    if data.agents.is_empty() {
-        let text = "Telemetry off. Start sessions with cc and set usage.telemetry to auto, \
-                    or see docs/guides/04-config-keys.md. v switches back to projects.";
-        return empty(frame, area, pal, block, text);
+    let mut block = panel_block(pal, Panel::Projects, title, pal.box_mem, focused);
+    if !data.telemetry_rows {
+        return empty(frame, area, pal, block, TELEMETRY_OFF);
     }
-    let covered = data.agents.coverage(data.totals.cost_usd) * 100.0;
+    if view.is_empty() {
+        let text = format!("No {label} activity in this range. v switches the view.");
+        return empty(frame, area, pal, block, &text);
+    }
+    let covered = view.coverage(data.totals.cost_usd) * 100.0;
     block = block.title(
         note_line(
             pal,
@@ -636,10 +678,10 @@ fn agents(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) 
         )
         .right_aligned(),
     );
-    let total_cost = data.agents.cost_usd;
-    let sorted = group_rows(&data.agents.rows, app.sort(Panel::Projects));
+    let total_cost = view.cost_usd;
+    let sorted = group_rows(&view.rows, app.sort(Panel::Projects));
     let cols = [
-        col("agent", Constraint::Fill(1), 0),
+        col(label, Constraint::Fill(1), 0),
         col(">reqs", Constraint::Length(5), 0),
         col(">tokens", Constraint::Length(7), 0),
         col(">cost", Constraint::Length(9), 0),

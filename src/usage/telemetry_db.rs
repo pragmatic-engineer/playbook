@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS telemetry_requests (
     model TEXT NOT NULL,
     effort TEXT NOT NULL DEFAULT '',
     agent_name TEXT NOT NULL DEFAULT '',
+    skill_name TEXT NOT NULL DEFAULT '',
     input_tokens INTEGER NOT NULL CHECK(input_tokens >= 0),
     output_tokens INTEGER NOT NULL CHECK(output_tokens >= 0),
     cache_creation_tokens INTEGER NOT NULL CHECK(cache_creation_tokens >= 0),
@@ -85,6 +86,8 @@ pub struct TelemetryRequest {
     pub model: String,
     pub effort: String,
     pub agent_name: String,
+    /// The skill active for the request, empty when none.
+    pub skill_name: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
@@ -95,7 +98,26 @@ pub struct TelemetryRequest {
 /// Creates the telemetry tables. Safe to run any number of times.
 pub fn migrate_up(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(UP_SQL)
-        .map_err(|e| format!("failed to create telemetry tables: {e}"))
+        .map_err(|e| format!("failed to create telemetry tables: {e}"))?;
+    ensure_skill_column(conn)
+}
+
+/// Tables made before skill attribution have no `skill_name` column.
+pub(super) fn ensure_skill_column(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(telemetry_requests)")
+        .map_err(|e| format!("failed to inspect telemetry tables: {e}"))?;
+    let has = stmt
+        .query_map([], |r| r.get::<_, String>(1))
+        .map_err(|e| format!("failed to inspect telemetry tables: {e}"))?
+        .any(|c| c.is_ok_and(|n| n == "skill_name"));
+    if has {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "ALTER TABLE telemetry_requests ADD COLUMN skill_name TEXT NOT NULL DEFAULT ''",
+    )
+    .map_err(|e| format!("failed to add the skill column: {e}"))
 }
 
 /// Drops the telemetry tables and nothing else.
@@ -118,9 +140,9 @@ pub fn insert_request(conn: &Connection, r: &TelemetryRequest) -> Result<usize, 
     };
     conn.execute(
         "INSERT OR IGNORE INTO telemetry_requests (session_id, request_id, timestamp, model,
-            effort, agent_name, input_tokens, output_tokens, cache_creation_tokens,
-            cache_read_tokens, cost_usd)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            effort, agent_name, skill_name, input_tokens, output_tokens,
+            cache_creation_tokens, cache_read_tokens, cost_usd)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             r.session_id,
             r.request_id,
@@ -128,6 +150,7 @@ pub fn insert_request(conn: &Connection, r: &TelemetryRequest) -> Result<usize, 
             r.model,
             r.effort,
             r.agent_name,
+            r.skill_name,
             to_i64(r.input_tokens),
             to_i64(r.output_tokens),
             to_i64(r.cache_creation_tokens),
@@ -179,18 +202,45 @@ pub fn agent_groups(
     since: i64,
     until: i64,
 ) -> Result<Vec<super::aggregate::Group>, String> {
+    groups(conn, "agent_name", "main", since, until)
+}
+
+/// Telemetry requests in `[since, until)` grouped by the skill that was
+/// active, sorted by name. Requests made with no skill active are left out.
+pub fn skill_groups(
+    conn: &Connection,
+    since: i64,
+    until: i64,
+) -> Result<Vec<super::aggregate::Group>, String> {
+    groups(conn, "skill_name", "", since, until)
+}
+
+/// `column` is one of two fixed names, never user input.
+fn groups(
+    conn: &Connection,
+    column: &str,
+    empty_as: &str,
+    since: i64,
+    until: i64,
+) -> Result<Vec<super::aggregate::Group>, String> {
+    let filter = if empty_as.is_empty() {
+        format!("AND {column} <> ''")
+    } else {
+        String::new()
+    };
+    let sql = format!(
+        "SELECT CASE WHEN {column} = '' THEN ?3 ELSE {column} END AS k,
+                COUNT(*), SUM(input_tokens), SUM(output_tokens),
+                SUM(cache_creation_tokens), SUM(cache_read_tokens), SUM(cost_usd)
+         FROM telemetry_requests
+         WHERE timestamp >= ?1 AND timestamp < ?2 {filter}
+         GROUP BY k ORDER BY k"
+    );
     let mut stmt = conn
-        .prepare(
-            "SELECT CASE WHEN agent_name = '' THEN 'main' ELSE agent_name END AS agent,
-                    COUNT(*), SUM(input_tokens), SUM(output_tokens),
-                    SUM(cache_creation_tokens), SUM(cache_read_tokens), SUM(cost_usd)
-             FROM telemetry_requests
-             WHERE timestamp >= ?1 AND timestamp < ?2
-             GROUP BY agent ORDER BY agent",
-        )
-        .map_err(|e| format!("failed to read telemetry agents: {e}"))?;
+        .prepare(&sql)
+        .map_err(|e| format!("failed to read telemetry groups: {e}"))?;
     let rows = stmt
-        .query_map(params![since, until], |r| {
+        .query_map(params![since, until, empty_as], |r| {
             let n = |i: usize| -> rusqlite::Result<u64> {
                 Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0))
             };
@@ -205,9 +255,9 @@ pub fn agent_groups(
                 unpriced: 0,
             })
         })
-        .map_err(|e| format!("failed to read telemetry agents: {e}"))?;
+        .map_err(|e| format!("failed to read telemetry groups: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("failed to read telemetry agents: {e}"))
+        .map_err(|e| format!("failed to read telemetry groups: {e}"))
 }
 
 #[cfg(test)]
@@ -361,5 +411,47 @@ mod tests {
         assert!((groups[1].cost_usd - 0.75).abs() < 1e-9);
         assert_eq!(groups[1].messages, 2);
         assert!(agent_groups(&conn, 5_000, 6_000).unwrap().is_empty());
+    }
+
+    #[test]
+    fn skill_groups_sum_cost_per_skill_and_skip_requests_without_one() {
+        let conn = mem();
+        let mut a = request("r1");
+        a.skill_name = "review".into();
+        a.cost_usd = 0.5;
+        let mut b = request("r2");
+        b.skill_name = "review".into();
+        b.cost_usd = 0.25;
+        let mut c = request("r3");
+        c.skill_name = "plan".into();
+        let none = request("r4");
+        for r in [&a, &b, &c, &none] {
+            insert_request(&conn, r).unwrap();
+        }
+        let groups = skill_groups(&conn, 0, 1_000).unwrap();
+        let names: Vec<&str> = groups.iter().map(|g| g.key.as_str()).collect();
+        assert_eq!(names, ["plan", "review"]);
+        assert!((groups[1].cost_usd - 0.75).abs() < 1e-9);
+        assert_eq!(groups[1].messages, 2);
+    }
+
+    #[test]
+    fn a_table_made_before_skills_gains_the_column_and_keeps_its_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE telemetry_requests (
+                session_id TEXT NOT NULL, request_id TEXT NOT NULL, timestamp INTEGER NOT NULL,
+                model TEXT NOT NULL, effort TEXT NOT NULL DEFAULT '',
+                agent_name TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL,
+                output_tokens INTEGER NOT NULL, cache_creation_tokens INTEGER NOT NULL,
+                cache_read_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL,
+                PRIMARY KEY (session_id, request_id));
+             INSERT INTO telemetry_requests VALUES ('s','r',1,'m','','',1,1,0,0,0.5);",
+        )
+        .unwrap();
+        migrate_up(&conn).unwrap();
+        migrate_up(&conn).unwrap();
+        assert_eq!(count_requests(&conn).unwrap(), 1);
+        assert!(skill_groups(&conn, 0, 10).unwrap().is_empty());
     }
 }

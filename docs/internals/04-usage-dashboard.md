@@ -31,7 +31,7 @@ The panels:
 | `1` | Spend per day, USD | A bar chart of the cost for each UTC day in the range, with axes (below). `v` steps it through three views: the total, the same bars stacked by model, and a table with a row for each day (see below). |
 | `2` | Tokens per day | The same for tokens, in the net gradient. |
 | `3` | Models | Messages, tokens and cost per model, with a swatch in the model's color. For `today`, `week` and `month` it also shows the cost in the previous period and the change in amount and percent, for every model used in either period (a model that only the previous period used reads `$0.00` now, and one with no spend before reads `new`). Other ranges show a share meter instead. `s` also sorts by the previous cost and the change. |
-| `4` | Projects | The same, per repo. `v` switches it to Agents: requests, tokens and cost per agent from telemetry, with a note of how much of the spend telemetry covers. With no telemetry rows in the range it says `Telemetry off` and how to turn it on. Agent rows cannot filter the view. |
+| `4` | Projects | The same, per repo. `v` steps it through Agents and Skills: requests, tokens and cost per agent or per skill from telemetry, with a note of how much of the spend telemetry covers. With no telemetry rows in the range it says `Telemetry off` and how to turn it on. Agent and skill rows cannot filter the view. |
 | `5` | Live sessions | Sessions with a message in the last 15 minutes, with state, cost and age. |
 | `6` | Sessions per day | Every session in the range, grouped by UTC day with the newest day first. Each row has the short session id, project, main model, messages, tokens and cost for that day, and a session that runs past midnight has a row for each day. The day is named on the first row of its group, and `s` orders the sessions inside each day. `Enter` filters the view to the session. |
 
@@ -65,7 +65,7 @@ Keys:
 | `1` to `6`, `Tab`, `Shift-Tab` | Focus a panel. The focused panel's hint is a badge. |
 | `Left`, `Right` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
 | `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
-| `v` | Step the spend panel (total, by model, daily table), or with the projects panel focused, switch projects and agents. |
+| `v` | Step the spend panel (total, by model, daily table), or with the projects panel focused, step projects, agents and skills. |
 | `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
 | `S` | Reverse the sort. |
 | `Enter` | Filter the whole view to the selected row: a model, a project or a session id. `Enter` on that row again lifts the filter. |
@@ -165,7 +165,7 @@ Terminal view tests render into a `TestBackend` buffer, with no real terminal. `
 
 ## Telemetry storage (first slice)
 
-The usage database also holds two tables for OpenTelemetry data, `telemetry_requests` (one row per API request: session id, request id, model, effort, agent name, token counts and cost) and `session_sources` (which source a session reads from, `telemetry` or `transcript`). They are created next to the transcript tables. Totals never read them, so every total is unchanged. A session with no row in `session_sources` reads from transcripts. The rows never hold prompts, tool content, paths, emails or user ids. Dropping the two tables reverts the feature and loses no transcript data (`telemetry_db::migrate_down`). Telemetry follows [issue 769](https://github.com/pragmatic-engineer/playbook/issues/769): playbook never writes Claude Code settings, and transcripts stay the fallback.
+The usage database also holds two tables for OpenTelemetry data, `telemetry_requests` (one row per API request: session id, request id, model, effort, agent name, skill name, token counts and cost) and `session_sources` (which source a session reads from, `telemetry` or `transcript`). They are created next to the transcript tables. Totals never read them, so every total is unchanged. A session with no row in `session_sources` reads from transcripts. The rows never hold prompts, tool content, paths, emails or user ids. Dropping the two tables reverts the feature and loses no transcript data (`telemetry_db::migrate_down`). Telemetry follows [issue 769](https://github.com/pragmatic-engineer/playbook/issues/769): playbook never writes Claude Code settings, and transcripts stay the fallback.
 
 ## The telemetry receiver
 
@@ -175,7 +175,7 @@ The usage database also holds two tables for OpenTelemetry data, `telemetry_requ
 - **State.** `collector.json` next to the usage database (owner-only) holds the pid, the port and a bearer token. A second start finds the live collector and says so. A stale file (dead pid) is replaced. The token and port survive restarts, so a session started earlier keeps sending to the right place with the right token.
 - **Idle shutdown.** It stops after 600 seconds with no request (`--idle-seconds`, 0 means never) and clears the pid.
 - **Limits.** Headers 16 KiB, body 1 MiB (also when chunked), 50 requests per second (then 429), 5 seconds to send a request. Content type must be `application/json`, a compressed body is refused, and the bearer token is required. Paths: `/v1/logs` is stored, `/v1/metrics` and `/v1/traces` are accepted and dropped.
-- **What is stored.** Only `api_request` events, keyed by session id and request id so a redelivered batch changes nothing. An allowlist of attribute keys is read (event name, session id, request id, model, effort, agent name, the four token counts, cost). Every other attribute, including prompts, tool content, file paths, emails, user and organization ids and resource attributes, is never read. Kept names must be plain ASCII (letters, digits and `. _ - : /`), else they are dropped.
+- **What is stored.** Only `api_request` events, keyed by session id and request id so a redelivered batch changes nothing. An allowlist of attribute keys is read (event name, session id, request id, model, effort, agent name, skill name, the four token counts, cost). Every other attribute, including prompts, tool content, file paths, emails, user and organization ids and resource attributes, is never read. Kept names must be plain ASCII (letters, digits and `. _ - : /`), else they are dropped.
 - **Data loss.** Claude Code may drop telemetry sent while no receiver listens. Such a session is read from transcripts.
 
 ## Telemetry privacy
@@ -184,8 +184,6 @@ The usage database also holds two tables for OpenTelemetry data, `telemetry_requ
 - **What `cc` sets.** With `usage.telemetry` at `auto`, a running receiver and no telemetry setting of yours, `cc` sets `CLAUDE_CODE_ENABLE_TELEMETRY`, `OTEL_LOGS_EXPORTER=otlp`, the metrics and traces exporters to `none`, the `http/json` protocol, the loopback endpoint, an `Authorization` header with the receiver's token and `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false`, in the session's environment only. It never turns on `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT` or `OTEL_LOG_RAW_API_BODIES`.
 - **What it never does.** It never writes Claude Code settings and adds no `--settings` flag. If any telemetry variable is already set in your environment or in a settings `env` block (user, project, local or managed), or such a file cannot be parsed, it sets nothing, so your own configuration always wins.
 - **Where it goes.** The receiver listens on 127.0.0.1 only and the store file is private to you. `usage.telemetry` set to `off` stops `cc` from touching the environment at all.
-||||||| parent of 8a02e95a (feat(usage): show cost per agent from telemetry in the terminal view)
-
 
 ## Choosing a source per session
 
@@ -201,3 +199,7 @@ The pass is idempotent, and a failure leaves transcripts as the source.
 ## Cost per agent
 
 The Agents view (`4`, then `v`) groups `telemetry_requests` by agent name for the range (`query::load_agents`). The main session has no agent name and shows as `main`. The title note `source telemetry N% of spend` is the telemetry cost over the transcript cost of the range, capped at 100 percent. Only telemetry knows the agent, so a range with no telemetry rows shows the `Telemetry off` message instead of numbers. Totals are unchanged.
+
+## Cost per skill
+
+The Skills view (`4`, then `v` twice) groups `telemetry_requests` by skill name (`query::load_skills`). A short headless trial on Claude Code 2.1.293 (Haiku, under one cent) checked the attribute: the `api_request` event carries `skill.name` on the requests made while a skill is active (the request that follows the skill load), and requests before it carry none. So the skill row is the cost of the requests the skill shaped, not a share of the whole session. The separate `skill_activated` event redacts project and user skill names to `custom_skill`, but `api_request` showed the real name in the trial, and plugin skills were not tried. Names are stored only if they are plain ASCII, like every other name. Requests with no skill are left out of the view, so the rows are a share of telemetry cost and do not sum to the total. Tables made before this slice gain a `skill_name` column on open.

@@ -96,6 +96,7 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
         BUSY_TIMEOUT,
     )
     .map_err(|e| format!("failed to create telemetry schema: {e}"))?;
+    super::telemetry_db::ensure_skill_column(&conn)?;
     Ok(conn)
 }
 
