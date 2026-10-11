@@ -486,7 +486,7 @@ mod preread_size_check {
         // Assert
         let out = stdout_string(&output);
         assert!(out.contains(r#""permissionDecision":"deny""#), "{out}");
-        assert!(out.contains("over 1000 lines / 400000 bytes"), "{out}");
+        assert!(out.contains("over 500 lines / 400000 bytes"), "{out}");
     }
 
     #[test]
@@ -654,11 +654,11 @@ mod preread_size_check {
     }
 
     #[test]
-    fn exactly_1000_lines_passes() {
+    fn exactly_500_lines_passes() {
         // Arrange: at the line limit, not over it.
         let home = scratch_dir("size-line-limit-at");
         let fixture = home.join("at-limit.log");
-        write_numbered_lines(&fixture, 1000);
+        write_numbered_lines(&fixture, 500);
 
         // Act
         let output = run_hook(
@@ -671,16 +671,16 @@ mod preread_size_check {
         assert_eq!(
             stdout_string(&output),
             "",
-            "1000 lines is at the limit, not over it"
+            "500 lines is at the limit, not over it"
         );
     }
 
     #[test]
-    fn exactly_1001_lines_denies() {
+    fn exactly_501_lines_denies() {
         // Arrange: one line past the limit.
         let home = scratch_dir("size-line-limit-over");
         let fixture = home.join("over-limit.log");
-        write_numbered_lines(&fixture, 1001);
+        write_numbered_lines(&fixture, 501);
 
         // Act
         let output = run_hook(
@@ -692,18 +692,18 @@ mod preread_size_check {
         // Assert
         let out = stdout_string(&output);
         assert!(
-            out.contains("1001 lines"),
+            out.contains("501 lines"),
             "should deny one line past the limit, got: {out}"
         );
     }
 
     #[test]
-    fn exactly_200kb_passes() {
+    fn exactly_60000_bytes_passes() {
         // Arrange: at the byte limit, with a line count nowhere near its own
         // limit, so only the byte threshold is on trial.
         let home = scratch_dir("size-byte-limit-at");
         let fixture = home.join("at-byte-limit.log");
-        write_bytes_no_newlines(&fixture, 204_800);
+        write_bytes_no_newlines(&fixture, 60_000);
 
         // Act
         let output = run_hook(
@@ -716,16 +716,16 @@ mod preread_size_check {
         assert_eq!(
             stdout_string(&output),
             "",
-            "204800 bytes is at the limit, not over it"
+            "60000 bytes is at the limit, not over it"
         );
     }
 
     #[test]
-    fn one_byte_over_200kb_denies_even_with_few_lines() {
+    fn one_byte_over_60000_denies_even_with_few_lines() {
         // Arrange: one byte past the limit, still with no newlines at all.
         let home = scratch_dir("size-byte-limit-over");
         let fixture = home.join("over-byte-limit.log");
-        write_bytes_no_newlines(&fixture, 204_801);
+        write_bytes_no_newlines(&fixture, 60_001);
 
         // Act
         let output = run_hook(
@@ -791,7 +791,7 @@ mod preread_size_check {
         // the line count to 0.
         let home = scratch_dir("size-large-unreadable");
         let fixture = home.join("locked-big.log");
-        write_bytes_no_newlines(&fixture, 204_801);
+        write_bytes_no_newlines(&fixture, 60_001);
         let mut perms = fs::metadata(&fixture).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o000);
         fs::set_permissions(&fixture, perms).expect("chmod should succeed");
@@ -849,6 +849,60 @@ mod preread_size_check {
             rust_stdout, golden,
             "the deny JSON must be byte-identical to the frozen python output"
         );
+    }
+
+    #[test]
+    fn image_and_pdf_files_over_the_limit_are_exempt() {
+        // Arrange: a PNG ignores offset and limit, so the guard's override
+        // cannot work for it and it must never be denied.
+        let home = scratch_dir("size-image-exempt");
+        let names = [
+            "shot.png",
+            "photo.JPG",
+            "pic.jpeg",
+            "anim.gif",
+            "img.webp",
+            "doc.pdf",
+        ];
+        for name in names {
+            write_bytes_no_newlines(&home.join(name), 300_000);
+        }
+
+        // Act
+        let outputs: Vec<String> = names
+            .iter()
+            .map(|name| {
+                let file = home.join(name);
+                stdout_string(&run_hook(
+                    "preread-size-check",
+                    &home,
+                    &payload(file.to_str().unwrap(), ""),
+                ))
+            })
+            .collect();
+
+        // Assert
+        assert!(outputs.iter().all(String::is_empty), "{outputs:?}");
+    }
+
+    #[test]
+    fn deny_message_hints_at_limiting_command_output() {
+        // Arrange
+        let home = scratch_dir("size-output-hint");
+        let big = home.join("big.log");
+        write_numbered_lines(&big, 600);
+
+        // Act
+        let out = stdout_string(&run_hook(
+            "preread-size-check",
+            &home,
+            &payload(big.to_str().unwrap(), ""),
+        ));
+
+        // Assert
+        assert!(out.contains("head or tail"), "{out}");
+        assert!(out.contains("--json"), "{out}");
+        assert!(out.contains("jq"), "{out}");
     }
 }
 

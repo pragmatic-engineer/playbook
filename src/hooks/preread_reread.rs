@@ -34,8 +34,11 @@ const READ_LINE_CAP: u64 = 2000;
 /// Smallest file worth denying; below this the retry costs about as much.
 const MIN_LINES: u64 = 150;
 const STATE_FILE: &str = "read-state.jsonl";
-/// Extensions the Read tool renders or pages itself, never deduplicated.
-const EXEMPT_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "pdf", "svg", "ipynb"];
+/// Extensions the Read tool renders as an image or pages itself. Offset and
+/// limit do not apply to them, so they are never size-denied or deduplicated.
+const MEDIA_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "pdf"];
+/// Text formats the re-read guard also leaves alone.
+const DEDUP_EXEMPT_EXTENSIONS: [&str; 2] = ["svg", "ipynb"];
 
 #[derive(Serialize, Deserialize, PartialEq)]
 struct ReadRecord {
@@ -86,14 +89,18 @@ pub(crate) fn guard(payload: &Payload, file_path: &Path) -> bool {
     }
 }
 
+pub(crate) fn is_media(path: &Path) -> bool {
+    has_extension(path, &MEDIA_EXTENSIONS)
+}
+
 fn is_exempt(path: &Path) -> bool {
+    is_media(path) || has_extension(path, &DEDUP_EXEMPT_EXTENSIONS)
+}
+
+fn has_extension(path: &Path, list: &[&str]) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            EXEMPT_EXTENSIONS
-                .iter()
-                .any(|e| ext.eq_ignore_ascii_case(e))
-        })
+        .is_some_and(|ext| list.iter().any(|e| ext.eq_ignore_ascii_case(e)))
 }
 
 /// The file's identity, or None when it is not a plain full-readable text

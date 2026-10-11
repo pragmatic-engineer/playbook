@@ -18,10 +18,14 @@ use std::fs;
 use std::io::Read;
 use std::path::Path;
 
-/// Matches LINE_LIMIT in the retired shell original.
-pub(crate) const LINE_LIMIT: u64 = 1000;
-/// Matches BYTE_LIMIT in the retired shell original (200 KB).
-pub(crate) const BYTE_LIMIT: u64 = 204_800;
+/// Lines above which a whole-file Read is denied. Lowered from 1000 after
+/// measuring 5,145 full Reads in local transcripts: a 1000 line limit caught
+/// none of them, 500 catches 9.6% of full Reads and 29% of full-Read tokens.
+pub(crate) const LINE_LIMIT: u64 = 500;
+/// Bytes above which a whole-file Read is denied. Lowered from 200 KB, which
+/// the Read tool's own cap made unreachable; 60 KB is about 500 lines of 120
+/// characters, so wide-line files meet the same bar.
+pub(crate) const BYTE_LIMIT: u64 = 60_000;
 /// Most bytes scanned for a file already over `BYTE_LIMIT`, where the count
 /// only fills the message. Files at or under the limit are always counted whole.
 const SCAN_CAP: u64 = 4 * 1024 * 1024;
@@ -73,6 +77,9 @@ pub fn run(payload: &Payload) {
         return;
     }
 
+    if crate::hooks::preread_reread::is_media(file_path) {
+        return;
+    }
     if crate::hooks::preread_reread::guard(payload, file_path) {
         return;
     }
@@ -106,7 +113,7 @@ pub fn run(payload: &Payload) {
     // so the significant leading spaces on the numbered list below cannot be
     // stripped by rustfmt reindenting a multi-line string literal.
     let reason = format!(
-        "This file is {lines} lines / {num_bytes} bytes, too large to Read in full.\n\nCheaper approaches:\n  1. Grep the file first to find the relevant line ranges.\n  2. Re-call Read with offset:<line> and limit:<rows> for the section you need.\n  3. If you really need the whole file (e.g. a small minified bundle), re-issue\n     with explicit offset:0, limit:9999 to override this guard.\n\nWhy this matters: full Reads on large files burn input tokens that almost never\npay back. Most callers only use 10-20% of the content."
+        "This file is {lines} lines / {num_bytes} bytes, too large to Read in full.\n\nCheaper approaches:\n  1. Grep the file first to find the relevant line ranges.\n  2. Re-call Read with offset:<line> and limit:<rows> for the section you need.\n  3. If you really need the whole file (e.g. a small minified bundle), re-issue\n     with explicit offset:0, limit:9999 to override this guard.\n\nFor command output the same applies: pipe Bash output through head or tail, and use gh ... --json <fields> with jq to keep only what you need.\n\nWhy this matters: full Reads on large files burn input tokens that almost never\npay back. Most callers only use 10-20% of the content."
     );
     emit_pre_deny(&reason);
 }
