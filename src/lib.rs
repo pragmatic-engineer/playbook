@@ -1393,6 +1393,10 @@ pub enum GateCommand {
         /// defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
         #[arg(long)]
         source: Option<String>,
+        /// Store a FAIL report as STUCK: the revise and re-run loop stopped because the
+        /// blocking findings made no progress. Refused for any other verdict
+        #[arg(long)]
+        stuck: bool,
     },
     /// Freeze the plan draft for each gate phase about to run
     ///

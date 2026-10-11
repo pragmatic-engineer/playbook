@@ -5,7 +5,7 @@
 //! the real `open_db` the way a future CLI caller would: reopen the same
 //! path and confirm no error and no duplicate rows.
 
-use playbook::gate::db::{open_db, query_phase, upsert_phase};
+use playbook::gate::db::{open_db, query_phase, record_round, upsert_phase};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -169,4 +169,80 @@ fn gitignore_shape_check_function_and_call_site_fully_removed() {
         !source.contains("append_gitignore_entry"),
         "its gitignore-append helper must be fully removed from {path:?} too"
     );
+}
+
+#[test]
+fn open_db_rebuilds_an_old_check_constraint_so_stuck_can_be_stored() {
+    // Arrange: a database with the four-verdict CHECK and a row to keep.
+    let path = scratch_db_path("stuck-migration");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let old = rusqlite::Connection::open(&path).expect("open old conn");
+    old.execute_batch(
+        "CREATE TABLE gate_phases (
+    plan_slug TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK(verdict IN ('PASS','FAIL','WARN','INCONCLUSIVE')),
+    evidence TEXT NOT NULL,
+    command TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    source_hash TEXT,
+    PRIMARY KEY (plan_slug, phase)
+) WITHOUT ROWID;
+INSERT INTO gate_phases VALUES ('plan-a', 'adversarial', 'FAIL', 'e', 'plan', 't0', 'h0');",
+    )
+    .expect("seed old schema");
+    drop(old);
+
+    // Act
+    let conn = open_db(&path).expect("open_db migrates");
+    upsert_phase(
+        &conn,
+        "plan-a",
+        "test-review",
+        "STUCK",
+        "e",
+        "plan",
+        "t1",
+        "h1",
+    )
+    .expect("STUCK is accepted after the rebuild");
+
+    // Assert
+    let kept = query_phase(&conn, "plan-a", "adversarial")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (kept.verdict.as_str(), kept.source_hash.as_deref()),
+        ("FAIL", Some("h0"))
+    );
+    assert!(upsert_phase(&conn, "plan-a", "x", "BOGUS", "e", "plan", "t", "h").is_err());
+    let again = open_db(&path).expect("a second open is a no-op");
+    assert_eq!(
+        query_phase(&again, "plan-a", "test-review")
+            .unwrap()
+            .unwrap()
+            .verdict,
+        "STUCK"
+    );
+}
+
+#[test]
+fn rounds_count_up_through_fail_and_restart_after_pass_or_stuck() {
+    // Arrange
+    let path = scratch_db_path("rounds");
+    let conn = open_db(&path).expect("open db");
+    let round =
+        |phase: &str, verdict: &str| record_round(&conn, "plan-a", phase, verdict, "t").unwrap();
+
+    // Act, Assert: FAIL, FAIL, INCONCLUSIVE, PASS is one series of four rounds.
+    assert_eq!(round("adversarial", "FAIL"), 1);
+    assert_eq!(round("adversarial", "FAIL"), 2);
+    assert_eq!(round("adversarial", "INCONCLUSIVE"), 3);
+    assert_eq!(round("adversarial", "PASS"), 4);
+    // Phases count separately, and a PASS ends the series.
+    assert_eq!(round("test-review", "FAIL"), 1);
+    assert_eq!(round("adversarial", "FAIL"), 1);
+    // STUCK ends a series too.
+    assert_eq!(round("adversarial", "STUCK"), 2);
+    assert_eq!(round("adversarial", "FAIL"), 1);
 }

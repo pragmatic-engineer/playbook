@@ -504,6 +504,7 @@ Reads a phase agent's output, finds its `VERDICT:` line, and stores it.
 - `<PHASE>`: Which phase this verdict is for
 - `<INPUT>`: File with the phase agent's output, or "-" to read stdin
 - `--source <SOURCE>`: File with the source content the verdict covers, used to spot a stale verdict later; defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
+- `--stuck`: Store a FAIL report as STUCK: the revise and re-run loop stopped because the blocking findings made no progress. Refused for any other verdict
 
 ### `playbook gate snapshot`
 

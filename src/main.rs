@@ -618,10 +618,13 @@ fn main() {
                 phase,
                 input,
                 source,
-            } => match gate_source(source, &plan_slug, Some(&phase))
-                .and_then(|source| gate::record::run(&plan_slug, &command, &phase, &input, &source))
-            {
-                Ok(()) => println!("gate record: recorded {phase} verdict for {plan_slug}"),
+                stuck,
+            } => match gate_source(source, &plan_slug, Some(&phase)).and_then(|source| {
+                gate::record::run_with(&plan_slug, &command, &phase, &input, &source, stuck)
+            }) {
+                Ok(round) => println!(
+                    "gate record: recorded {phase} verdict for {plan_slug} (round {round})"
+                ),
                 Err(err) => {
                     eprintln!("gate record: {err}");
                     std::process::exit(1);

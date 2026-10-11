@@ -98,7 +98,7 @@ If the wanted variant is not in `allowed`, spawn the base agent. That is normal 
 
 ## Re-dispatching
 
-Every `Agent` call is a fresh spawn with no memory of any prior round, even for the same `subagent_type`. When a quality-gate phase (`critic`, `test-reviewer`, `fact-checker`) FAILs, is revised, and needs a second pass, send the COMPLETE current artifact, not a changelist. A partial re-prompt makes the agent flag things as unaddressed that the artifact already covers; treat a "still failing" or "new finding" from one with suspicion. Why: [references/evidence.md](references/evidence.md).
+Every `Agent` call is a fresh spawn with no memory of any prior round, even for the same `subagent_type`. When a quality-gate phase (`critic`, `test-reviewer`, `fact-checker`) FAILs, is revised, and needs a second pass, send the COMPLETE current artifact, not a changelist. A partial re-prompt makes the agent flag things as unaddressed that the artifact already covers; treat a "still failing" or "new finding" from one with suspicion. Why: [references/evidence.md](references/evidence.md). How many rounds a gate phase may take, and when it stops as STUCK, is in [references/gate-loop.md](references/gate-loop.md).
 
 ## Verifying delegated work
 

@@ -12,14 +12,16 @@ use crate::manifest;
 use std::fmt;
 use std::io::Read;
 
-/// One of the four verdicts a phase agent can report, matching the
-/// `gate_phases.verdict` CHECK constraint in `src/gate/db.rs`.
+/// A stored verdict, matching the `gate_phases.verdict` CHECK constraint in
+/// `src/gate/db.rs`. A phase agent reports the first four; `Stuck` is only
+/// ever set by the orchestrator through `--stuck`, never parsed from a report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     Pass,
     Fail,
     Warn,
     Inconclusive,
+    Stuck,
 }
 
 impl Verdict {
@@ -30,6 +32,7 @@ impl Verdict {
             Verdict::Fail => "FAIL",
             Verdict::Warn => "WARN",
             Verdict::Inconclusive => "INCONCLUSIVE",
+            Verdict::Stuck => "STUCK",
         }
     }
 
@@ -89,6 +92,20 @@ pub fn run(
     input: &str,
     source: &str,
 ) -> Result<(), String> {
+    run_with(plan_slug, command, phase, input, source, false).map(|_| ())
+}
+
+/// Like [`run`], and returns the round number this record is in its revise and
+/// re-run series. With `stuck`, a FAIL report is stored as STUCK (no progress
+/// between rounds); any other verdict with `stuck` is refused.
+pub fn run_with(
+    plan_slug: &str,
+    command: &str,
+    phase: &str,
+    input: &str,
+    source: &str,
+    stuck: bool,
+) -> Result<i64, String> {
     if input == "-" && source == "-" {
         return Err(
             "input and source cannot both read from stdin ('-'); stdin can only be drained once"
@@ -98,6 +115,15 @@ pub fn run(
     let raw = read_input(input)?;
     let Some(verdict) = extract_verdict(&raw) else {
         return Err(format!("no VERDICT line found in {input}"));
+    };
+    let verdict = match (stuck, verdict) {
+        (false, v) => v,
+        (true, Verdict::Fail) => Verdict::Stuck,
+        (true, v) => {
+            return Err(format!(
+                "--stuck replaces a FAIL verdict, but the report says {v}"
+            ))
+        }
     };
     let source_hash = hash::read_and_hash(source)?;
 
@@ -123,7 +149,8 @@ pub fn run(
         command,
         &recorded_at,
         &source_hash,
-    )
+    )?;
+    db::record_round(&conn, plan_slug, phase, verdict.as_str(), &recorded_at)
 }
 
 /// Read the whole of `input`: `"-"` means stdin, anything else is a file
@@ -232,5 +259,42 @@ mod tests {
             err.contains("input") && err.contains("source") && err.contains("stdin"),
             "error should name the input/source stdin conflict, got: {err}"
         );
+    }
+
+    #[test]
+    fn a_stuck_line_in_a_report_is_not_a_verdict() {
+        // Arrange: STUCK is set by the orchestrator through --stuck only.
+        let raw = "VERDICT: STUCK";
+
+        // Act, Assert
+        assert_eq!(extract_verdict(raw), None);
+        assert_eq!(Verdict::Stuck.as_str(), "STUCK");
+    }
+
+    #[test]
+    fn stuck_flag_refuses_a_report_that_is_not_fail() {
+        // Arrange: the verdict check runs before any repo or db access.
+        let dir = std::env::temp_dir().join(format!("gate-stuck-refuse-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("report.md");
+        std::fs::write(&input, "VERDICT: PASS").unwrap();
+
+        // Act
+        let result = run_with(
+            "plan-a",
+            "cmd",
+            "phase",
+            input.to_str().unwrap(),
+            "unused",
+            true,
+        );
+
+        // Assert
+        let err = result.expect_err("--stuck on a PASS report must be refused");
+        assert!(
+            err.contains("--stuck") && err.contains("PASS"),
+            "got: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

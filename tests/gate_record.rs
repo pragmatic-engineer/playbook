@@ -449,3 +449,41 @@ fn run_with_a_nonexistent_source_path_errors_and_leaves_the_database_untouched()
         "no row should have been written when the source path does not exist"
     );
 }
+
+#[test]
+fn stuck_flag_stores_stuck_and_rounds_count_up_to_it() {
+    // Arrange
+    let f = Fixture::new("stuck-rounds");
+    let fail = f.write_input("fail.md", "VERDICT: FAIL");
+    let source = f.write_input("source.txt", "content");
+    let (fail_path, source_path) = (fail.to_str().unwrap(), source.to_str().unwrap());
+
+    // Act
+    let rounds = with_repo_and_home(&f.repo, &f.home, || {
+        let first = record::run_with(
+            "plan-a",
+            "plan",
+            "adversarial",
+            fail_path,
+            source_path,
+            false,
+        );
+        let second = record::run_with(
+            "plan-a",
+            "plan",
+            "adversarial",
+            fail_path,
+            source_path,
+            true,
+        );
+        (first, second)
+    });
+
+    // Assert
+    assert_eq!(rounds, (Ok(1), Ok(2)));
+    let conn = db::open_db(&f.db_path()).expect("open db");
+    let row = db::query_phase(&conn, "plan-a", "adversarial")
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.verdict, "STUCK");
+}

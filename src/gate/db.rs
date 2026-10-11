@@ -23,12 +23,23 @@ use std::time::Duration;
 const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS gate_phases (
     plan_slug TEXT NOT NULL,
     phase TEXT NOT NULL,
-    verdict TEXT NOT NULL CHECK(verdict IN ('PASS','FAIL','WARN','INCONCLUSIVE')),
+    verdict TEXT NOT NULL CHECK(verdict IN ('PASS','FAIL','WARN','INCONCLUSIVE','STUCK')),
     evidence TEXT NOT NULL,
     command TEXT NOT NULL,
     recorded_at TEXT NOT NULL,
     source_hash TEXT,
     PRIMARY KEY (plan_slug, phase)
+) WITHOUT ROWID";
+
+/// Append-only round history: one row per `gate record` call of a revise and
+/// re-run series, so the iteration count survives the upsert on `gate_phases`.
+const ROUNDS_SQL: &str = "CREATE TABLE IF NOT EXISTS gate_rounds (
+    plan_slug TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    iteration INTEGER NOT NULL,
+    verdict TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (plan_slug, phase, iteration)
 ) WITHOUT ROWID";
 
 /// One row of `gate_phases`. Returned whole rather than just the verdict:
@@ -64,6 +75,49 @@ fn ensure_source_hash_column(conn: &rusqlite::Connection) -> Result<(), String> 
     Ok(())
 }
 
+/// Rebuilds a `gate_phases` table created before STUCK existed, whose CHECK
+/// constraint rejects it. SQLite cannot alter a CHECK in place, so the rows are
+/// copied into a fresh table. A table with no verdict CHECK needs nothing.
+fn ensure_stuck_verdict(conn: &rusqlite::Connection) -> Result<(), String> {
+    let needs_rebuild = |conn: &rusqlite::Connection| -> Result<bool, String> {
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'gate_phases'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("failed to inspect gate_phases schema: {e}"))?;
+        Ok(sql.contains("CHECK(verdict") && !sql.contains("'STUCK'"))
+    };
+    if !needs_rebuild(conn)? {
+        return Ok(());
+    }
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| format!("failed to lock gate_phases for migration: {e}"))?;
+    let rebuilt = needs_rebuild(conn).and_then(|again| {
+        if !again {
+            return Ok(());
+        }
+        conn.execute_batch(&format!(
+            "ALTER TABLE gate_phases RENAME TO gate_phases_old;
+             {SCHEMA_SQL};
+             INSERT INTO gate_phases SELECT plan_slug, phase, verdict, evidence, command, \
+                 recorded_at, source_hash FROM gate_phases_old;
+             DROP TABLE gate_phases_old;"
+        ))
+        .map_err(|e| format!("failed to add STUCK to gate_phases: {e}"))
+    });
+    match rebuilt {
+        Ok(()) => conn
+            .execute_batch("COMMIT")
+            .map_err(|e| format!("failed to commit gate_phases migration: {e}")),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
 /// Open (creating if missing) the SQLite database at `path`, ensuring the
 /// `gate_phases` schema and pragmas are in place.
 pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
@@ -89,6 +143,9 @@ pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
     conn.execute_batch(SCHEMA_SQL)
         .map_err(|e| format!("failed to create gate_phases schema: {e}"))?;
     ensure_source_hash_column(&conn)?;
+    ensure_stuck_verdict(&conn)?;
+    conn.execute_batch(ROUNDS_SQL)
+        .map_err(|e| format!("failed to create gate_rounds schema: {e}"))?;
 
     Ok(conn)
 }
@@ -121,6 +178,50 @@ pub fn upsert_phase(
     )
     .map_err(|e| format!("failed to upsert gate phase {plan_slug}/{phase}: {e}"))?;
     Ok(())
+}
+
+/// Append one round for `(plan_slug, phase)` and return its iteration number.
+/// A series continues while the previous round ended FAIL or INCONCLUSIVE (a
+/// revise and re-run); after PASS, WARN or STUCK the next record starts a new
+/// series at 1 and clears the old rounds.
+pub fn record_round(
+    conn: &rusqlite::Connection,
+    plan_slug: &str,
+    phase: &str,
+    verdict: &str,
+    recorded_at: &str,
+) -> Result<i64, String> {
+    let ctx = |e: rusqlite::Error| format!("failed to record round {plan_slug}/{phase}: {e}");
+    let tx = conn.unchecked_transaction().map_err(ctx)?;
+    let last: Option<(i64, String)> = tx
+        .query_row(
+            "SELECT iteration, verdict FROM gate_rounds WHERE plan_slug = ?1 AND phase = ?2 \
+             ORDER BY iteration DESC LIMIT 1",
+            rusqlite::params![plan_slug, phase],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(ctx)?;
+    let iteration = match last {
+        Some((n, v)) if v == "FAIL" || v == "INCONCLUSIVE" => n + 1,
+        Some(_) => {
+            tx.execute(
+                "DELETE FROM gate_rounds WHERE plan_slug = ?1 AND phase = ?2",
+                rusqlite::params![plan_slug, phase],
+            )
+            .map_err(ctx)?;
+            1
+        }
+        None => 1,
+    };
+    tx.execute(
+        "INSERT INTO gate_rounds (plan_slug, phase, iteration, verdict, recorded_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![plan_slug, phase, iteration, verdict, recorded_at],
+    )
+    .map_err(ctx)?;
+    tx.commit().map_err(ctx)?;
+    Ok(iteration)
 }
 
 /// Look up the row for `(plan_slug, phase)`, or `None` if it has never been
