@@ -1059,14 +1059,14 @@ Example: `playbook update --check`
 
 Show token and cost usage across your sessions
 
-With no subcommand, opens the terminal view. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Days are UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise. For today, week and month, `--json` adds a comparison with the previous period over the same elapsed span, and `--summary` prints it.
+With no subcommand, opens the terminal view, which opens on this week compared with last week. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Days are UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise. For today, week and month, `--json` adds a comparison with the previous period over the same elapsed span, and `--summary` prints it.
 
-Example: `playbook usage --range last-week`
+Example: `playbook usage --range today`
 
 - `--json`: Print the totals, groupings and live view as JSON
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
 - `--web`: Open the web dashboard (deprecated, removed in v0.22.0)
-- `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default 30d, or all with `--summary`
+- `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
 
 Subcommands: `dashboard`, `ingest`
 

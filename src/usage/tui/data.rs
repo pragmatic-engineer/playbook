@@ -7,6 +7,8 @@
 
 use super::theme::SERIES;
 use crate::usage::aggregate::{group_usage, unpriced_models, Dimension, Group, SECONDS_PER_DAY};
+use crate::usage::db;
+use crate::usage::period::{Comparison, Period};
 use crate::usage::query::{self, LiveView, Range, SessionDay, Totals};
 use crate::usage::UsageEvent;
 use rusqlite::Connection;
@@ -111,7 +113,13 @@ pub struct Data {
     /// Every day from the start of the range to today, idle days at zero.
     pub series: Vec<DayPoint>,
     pub live: LiveView,
+    /// Today, the week and the month so far against the previous period over
+    /// the same elapsed span. `None` for the other ranges.
+    pub comparison: Option<Comparison>,
 }
+
+/// Days charted for today, since a single bar says nothing.
+const TREND_DAYS: i64 = 7;
 
 /// One point per day from the range start (or the first event, for all time)
 /// to the end of the range (today for all time), so the graph axis is a real calendar.
@@ -126,8 +134,10 @@ fn day_series(events: &[UsageEvent], now: i64, range: Range) -> Vec<DayPoint> {
         *slot.models.entry(e.model.clone()).or_default() += e.cost_usd;
     }
     // The series covers the whole range, so a week or month in progress shows
-    // its days to come as empty bars. All time stops at today.
+    // its days to come as empty bars. Today charts the last seven days. All
+    // time stops at today.
     let (first, last) = match range.days(now) {
+        Some((first, _)) if range == Range::Today => (first - TREND_DAYS + 1, first),
         Some((first, past)) => (first, (past - 1).max(first)),
         None => match per_day.keys().next() {
             Some(day) => (*day, today.max(*day)),
@@ -168,7 +178,9 @@ pub fn matches(event: &UsageEvent, filter: &str) -> bool {
 
 impl Data {
     /// Builds the snapshot from the events of the range. `window` is every
-    /// event the range could contain (events outside it are dropped here).
+    /// event the range could contain (events outside it are dropped here),
+    /// and for a period also the previous one and, for today, the days of the
+    /// trend.
     pub fn build(
         window: &[UsageEvent],
         live: LiveView,
@@ -179,6 +191,18 @@ impl Data {
         let (inside, _) = query::in_range(window, &[], now, range);
         let inside: Vec<UsageEvent> = inside.into_iter().filter(|e| matches(e, filter)).collect();
         let models = group_usage(&inside, Dimension::Model);
+        let series = match range {
+            Range::Today => {
+                let first = (now.div_euclid(SECONDS_PER_DAY) - TREND_DAYS + 1) * SECONDS_PER_DAY;
+                let trend: Vec<UsageEvent> = window
+                    .iter()
+                    .filter(|e| e.timestamp >= first && matches(e, filter))
+                    .cloned()
+                    .collect();
+                day_series(&trend, now, range)
+            }
+            _ => day_series(&inside, now, range),
+        };
         Data {
             now,
             range,
@@ -190,15 +214,41 @@ impl Data {
             repos: group_usage(&inside, Dimension::Repo),
             sessions: query::session_days(&inside),
             unpriced: unpriced_models(&inside).0,
-            series: day_series(&inside, now, range),
+            series,
             live,
+            comparison: Period::of_range(range).map(|period| {
+                let windows = period.windows(now);
+                let (current, previous) = windows.split(window);
+                let keep = |events: Vec<UsageEvent>| -> Vec<UsageEvent> {
+                    events.into_iter().filter(|e| matches(e, filter)).collect()
+                };
+                Comparison::new(period, windows, &keep(current), &keep(previous))
+            }),
         }
     }
 }
 
+/// The oldest timestamp the snapshot needs, or `None` for every event: the
+/// start of the range, the previous span of a period, and for today the days
+/// of the trend, whichever is earliest.
+fn window_start(range: Range, now: i64) -> Option<i64> {
+    let (first_day, _) = range.days(now)?;
+    let mut start = first_day * SECONDS_PER_DAY;
+    if let Some(period) = Period::of_range(range) {
+        start = start.min(period.windows(now).previous.start);
+    }
+    if range == Range::Today {
+        start = start.min((first_day - TREND_DAYS + 1) * SECONDS_PER_DAY);
+    }
+    Some(start)
+}
+
 /// Reads the store and builds the snapshot.
 pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<Data, String> {
-    let window = query::load_window(conn, range, now)?;
+    let window = match window_start(range, now) {
+        Some(since) => db::load_usage_events_since(conn, since)?,
+        None => db::load_usage_events(conn)?,
+    };
     let live = query::load_live(conn, now)?;
     Ok(Data::build(&window, live, now, range, filter))
 }
@@ -296,6 +346,68 @@ mod tests {
         assert_eq!(sonnet.sessions[0].id, "s2");
     }
 
+    // Thursday 2026-09-03 01:46:40 UTC.
+    const DAY: i64 = 86_400;
+    const WEEK: Range = Range::ThisWeek(crate::usage::query::WeekStart::Monday);
+
+    #[test]
+    fn a_period_range_carries_the_comparison_and_the_others_do_not() {
+        let events = vec![
+            event(NOW - 60, "opus", "a", 2.0),
+            event(NOW - 30, "sonnet", "b", 1.0),
+            event(NOW - DAY - 60, "opus", "a", 4.0),
+            // Yesterday after the same time of day is outside the span.
+            event(NOW - DAY + 600, "opus", "a", 8.0),
+        ];
+        let build =
+            |range, filter: &str| Data::build(&events, LiveView::default(), NOW, range, filter);
+        let c = build(Range::Today, "").comparison.expect("today compares");
+        assert_eq!((c.current.messages, c.previous.messages), (2, 1));
+        assert!((c.cost().amount - -1.0).abs() < 1e-9);
+        // The filter narrows both spans.
+        let opus = build(Range::Today, "opus").comparison.unwrap();
+        assert_eq!((opus.current.messages, opus.previous.messages), (1, 1));
+        for range in [
+            Range::LastWeek(crate::usage::query::WeekStart::Monday),
+            Range::LastDays(30),
+            Range::All,
+        ] {
+            assert!(build(range, "").comparison.is_none(), "{range:?}");
+        }
+        assert!(build(WEEK, "").comparison.is_some());
+        assert!(build(Range::CurrentMonth, "").comparison.is_some());
+    }
+
+    #[test]
+    fn today_charts_the_last_seven_days() {
+        let events = vec![
+            event(NOW - 2 * DAY, "opus", "a", 2.0),
+            event(NOW, "opus", "a", 1.0),
+            event(NOW - 9 * DAY, "opus", "a", 9.0),
+        ];
+        let d = Data::build(&events, LiveView::default(), NOW, Range::Today, "");
+        let costs: Vec<f64> = d.series.iter().map(|p| p.cost_usd).collect();
+        assert_eq!(costs, [0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 1.0]);
+        // The totals are today's alone.
+        assert_eq!(d.totals.messages, 1);
+    }
+
+    #[test]
+    fn the_store_is_read_back_to_the_start_of_the_previous_period() {
+        let today = NOW.div_euclid(DAY);
+        // Seven trend days for today, last week's start for this week.
+        assert_eq!(window_start(Range::Today, NOW), Some((today - 6) * DAY));
+        assert_eq!(window_start(WEEK, NOW), Some((today - 10) * DAY));
+        // 2026-08-01.
+        assert_eq!(window_start(Range::CurrentMonth, NOW), Some(1_785_542_400));
+        // The other ranges read what they show, and all time reads everything.
+        assert_eq!(
+            window_start(Range::LastDays(30), NOW),
+            Some((today - 29) * DAY)
+        );
+        assert_eq!(window_start(Range::All, NOW), None);
+    }
+
     #[test]
     fn unpriced_messages_are_counted() {
         let mut e = event(NOW, "mystery", "a", 0.0);
@@ -391,10 +503,10 @@ mod tests {
             event(NOW - 20, "opus", "a", 0.5),
         ];
         let d = Data::build(&events, LiveView::default(), NOW, Range::Today, "");
-        assert_eq!(d.series.len(), 1);
-        assert_eq!(d.series[0].messages, 3);
+        let today = d.series.last().expect("today is charted");
+        assert_eq!(today.messages, 3);
         assert_eq!(
-            d.series[0].models,
+            today.models,
             vec![("opus".to_string(), 2.5), ("sonnet".to_string(), 1.0)]
         );
         assert_eq!(d.slots.order, ["opus", "sonnet"]);

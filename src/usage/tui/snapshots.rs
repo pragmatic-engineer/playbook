@@ -135,6 +135,16 @@ fn the_week_range_has_wide_bars_and_weekday_names() {
 }
 
 #[test]
+fn today_compares_with_yesterday_and_charts_the_last_seven_days() {
+    let mut a = app(Theme::Btop);
+    let events = fixture();
+    let live = live_view(&events, &events, &events, NOW);
+    a.range = Range::Today;
+    a.data = Some(Data::build(&events, live, NOW, Range::Today, ""));
+    check("today_100x30", &draw(&a, 100, 30));
+}
+
+#[test]
 fn a_moved_cursor_reads_out_its_day() {
     let mut a = app(Theme::Btop);
     a.cursor = Some(NOW.div_euclid(DAY) - 9);
@@ -322,7 +332,7 @@ fn btop_paints_a_black_ground_and_gray_text() {
         || c.bg == rgb(0x6a, 0x2f, 0x2f)
         || c.bg == rgb(0xb5, 0x40, 0x40)));
     // The header's totals use the main text color.
-    let (x, y) = find(&buf, "$", 1);
+    let (x, y) = find(&buf, "$", 2);
     assert_eq!(buf[(x, y)].fg, rgb(0xcc, 0xcc, 0xcc));
 }
 

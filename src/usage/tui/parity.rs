@@ -7,7 +7,8 @@
 
 use super::app::ranges;
 use super::data::Data;
-use crate::usage::api::data_json;
+use crate::usage::aggregate::date_key;
+use crate::usage::api::{comparison_json, data_json};
 use crate::usage::query::WeekStart;
 use crate::usage::query::{LiveView, Range};
 use crate::usage::UsageEvent;
@@ -100,7 +101,11 @@ fn the_graph_series_sums_to_the_same_cost_as_the_totals() {
     let events = events();
     for range in ranges(WeekStart::Monday) {
         let tui = Data::build(&events, LiveView::default(), NOW, range, "");
-        let graphed: f64 = tui.series.iter().map(|p| p.cost_usd).sum();
+        // Today charts seven days, so only its last bar is the total.
+        let graphed: f64 = match range {
+            Range::Today => tui.series.last().map_or(0.0, |p| p.cost_usd),
+            _ => tui.series.iter().map(|p| p.cost_usd).sum(),
+        };
         assert!((graphed - tui.totals.cost_usd).abs() < 1e-9, "{range:?}");
     }
 }
@@ -242,17 +247,134 @@ mod calendar {
         for (range, days) in [
             (Range::LastWeek(WeekStart::Monday), 7),
             (Range::LastMonth, 31),
-            (Range::Today, 1),
+            // Today charts the last seven days, and its last bar is today.
+            (Range::Today, 7),
             // A week and a month in progress show their days to come.
             (Range::ThisWeek(WeekStart::Monday), 7),
             (Range::CurrentMonth, 30),
         ] {
             let tui = Data::build(&events, LiveView::default(), NOON, range, "");
             assert_eq!(tui.series.len(), days, "{range:?}");
+            if range == Range::Today {
+                let last = tui.series.last().unwrap();
+                assert!((last.cost_usd - tui.totals.cost_usd).abs() < 1e-9);
+                continue;
+            }
             let graphed: f64 = tui.series.iter().map(|p| p.cost_usd).sum();
             assert!((graphed - tui.totals.cost_usd).abs() < 1e-9, "{range:?}");
             let messages: usize = tui.series.iter().map(|p| p.messages).sum();
             assert_eq!(messages, tui.totals.messages, "{range:?}");
         }
+    }
+
+    /// Events either side of each edge of the previous spans, a distinct power
+    /// of two each so a total names exactly the events it holds.
+    fn comparison_fixture() -> Vec<UsageEvent> {
+        [
+            (1_785_542_399, 1.0),    // 2026-07-31 23:59:59, before last month
+            (1_785_542_400, 2.0),    // 2026-08-01 00:00:00, first second of last month
+            (1_785_758_400, 4.0),    // 2026-08-03 12:00:00, last second of the month span
+            (1_785_758_401, 8.0),    // 2026-08-03 12:00:01, one second past it
+            (1_787_738_400, 16.0),   // 2026-08-26 10:00:00, last week, inside the span
+            (1_787_835_600, 32.0),   // 2026-08-27 13:00:00, last week, past the span
+            (1_788_047_999, 64.0),   // 2026-08-29 23:59:59, Saturday
+            (1_788_048_000, 128.0),  // 2026-08-30 00:00:00, Sunday
+            (1_788_134_399, 256.0),  // 2026-08-30 23:59:59
+            (1_788_134_400, 512.0),  // 2026-08-31 00:00:00, Monday
+            (1_788_220_799, 1024.0), // 2026-08-31 23:59:59
+            (1_788_220_800, 2048.0), // 2026-09-01 00:00:00, first second of this month
+            (1_788_346_800, 4096.0), // 2026-09-02 11:00:00, yesterday, inside the span
+            (1_788_354_000, 8192.0), // 2026-09-02 13:00:00, yesterday, past the span
+            (NOON, 16384.0),         // 2026-09-03 12:00:00, the second of now
+            (NOON + 1, 32768.0),     // one second after now
+        ]
+        .iter()
+        .map(|(t, c)| at(*t, *c))
+        .collect()
+    }
+
+    /// The cost of the events on the dates `first` to `last` (inclusive) at or
+    /// before `until`. It reads dates, not the period code under test.
+    fn oracle(events: &[UsageEvent], first: &str, last: &str, until: i64) -> f64 {
+        events
+            .iter()
+            .filter(|e| {
+                let d = date_key(e.timestamp.div_euclid(86_400));
+                d.as_str() >= first && d.as_str() <= last && e.timestamp <= until
+            })
+            .map(|e| e.cost_usd)
+            .sum()
+    }
+
+    #[test]
+    fn each_period_and_its_previous_span_hold_the_events_between_their_dates() {
+        let events = comparison_fixture();
+        let day = 86_400;
+        // (range, current dates, previous dates, the previous span's last second)
+        let cases = [
+            (
+                Range::Today,
+                ("2026-09-03", "2026-09-03"),
+                ("2026-09-02", "2026-09-02"),
+                NOON - day,
+            ),
+            (
+                Range::ThisWeek(WeekStart::Monday),
+                ("2026-08-31", "2026-09-06"),
+                ("2026-08-24", "2026-08-30"),
+                NOON - 7 * day,
+            ),
+            (
+                Range::ThisWeek(WeekStart::Sunday),
+                ("2026-08-30", "2026-09-05"),
+                ("2026-08-23", "2026-08-29"),
+                NOON - 7 * day,
+            ),
+            (
+                Range::CurrentMonth,
+                ("2026-09-01", "2026-09-30"),
+                ("2026-08-01", "2026-08-31"),
+                NOON - 31 * day,
+            ),
+        ];
+        for (range, now_dates, before_dates, before_until) in cases {
+            let tui = Data::build(&events, LiveView::default(), NOON, range, "");
+            let c = tui.comparison.expect("a period compares");
+            let want_now = oracle(&events, now_dates.0, now_dates.1, NOON);
+            let want_before = oracle(&events, before_dates.0, before_dates.1, before_until);
+            assert!(
+                (c.current.cost_usd - want_now).abs() < 1e-9,
+                "{range:?} now"
+            );
+            assert!(
+                (c.previous.cost_usd - want_before).abs() < 1e-9,
+                "{range:?} before"
+            );
+            // The `--json` comparison agrees with the view.
+            let period = crate::usage::period::Period::of_range(range).unwrap();
+            let json = comparison_json(&events, NOON, period);
+            let cost = |side: &str| json[side]["cost_usd"].as_f64().unwrap();
+            assert!(
+                (cost("current") - want_now).abs() < 1e-9,
+                "{range:?} json now"
+            );
+            assert!(
+                (cost("previous") - want_before).abs() < 1e-9,
+                "{range:?} json before"
+            );
+        }
+    }
+
+    #[test]
+    fn the_second_before_midnight_belongs_to_the_day_before_in_every_view() {
+        let midnight = 1_788_393_600; // 2026-09-03 00:00:00 UTC
+        let events = [at(midnight - 1, 1.0), at(midnight, 2.0)];
+        // Late on the day, so yesterday's whole day is the previous span.
+        let late = midnight + 86_400 - 1;
+        let tui = Data::build(&events, LiveView::default(), late, Range::Today, "");
+        let c = tui.comparison.unwrap();
+        assert_eq!((c.current.cost_usd, c.previous.cost_usd), (2.0, 1.0));
+        let json = comparison_json(&events, late, crate::usage::period::Period::Today);
+        assert_eq!(json["previous"]["messages"], 1);
     }
 }

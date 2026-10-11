@@ -29,6 +29,45 @@ pub fn compact(n: u64) -> String {
     n.to_string()
 }
 
+/// `+$1.20`, `-$0.50`, or `$0.00` when the change rounds to no cents.
+pub fn signed_money(usd: f64) -> String {
+    match money(usd.abs()) {
+        zero if zero == "$0.00" => zero,
+        text if usd < 0.0 => format!("-{text}"),
+        text => format!("+{text}"),
+    }
+}
+
+/// `+1.5K`, `-300`, or `0`.
+pub fn signed_compact(n: f64) -> String {
+    let abs = n.abs().round() as u64;
+    match abs {
+        0 => "0".to_string(),
+        _ if n < 0.0 => format!("-{}", compact(abs)),
+        _ => format!("+{}", compact(abs)),
+    }
+}
+
+/// `+12`, `-3`, or `0`.
+pub fn signed_count(n: f64) -> String {
+    match n.round() as i64 {
+        0 => "0".to_string(),
+        c => format!("{c:+}"),
+    }
+}
+
+/// `+21.6%`, `-4.0%`, `+250%`. With no previous value there is no percent: a
+/// current value that grew from nothing reads `new`, nothing against nothing `-`.
+pub fn signed_percent(percent: Option<f64>, grew: bool) -> String {
+    match percent {
+        None if grew => "new".to_string(),
+        None => "-".to_string(),
+        Some(p) if p.abs() < 0.05 => "0%".to_string(),
+        Some(p) if p.abs() >= 100.0 => format!("{p:+.0}%"),
+        Some(p) => format!("{p:+.1}%"),
+    }
+}
+
 /// A number with at most three decimals and no trailing zeros: `2.5`, `0.05`.
 fn trimmed(n: f64) -> String {
     let text = format!("{n:.3}");
@@ -96,6 +135,30 @@ mod tests {
         assert_eq!(money(1_000_000.0), "$1,000,000.00");
         assert_eq!(money(-0.001), "$0.00");
         assert_eq!(money(-5.5), "-$5.50");
+    }
+
+    #[test]
+    fn changes_carry_their_sign_and_no_sign_for_nothing() {
+        assert_eq!(signed_money(1.2), "+$1.20");
+        assert_eq!(signed_money(-0.5), "-$0.50");
+        assert_eq!(signed_money(0.001), "$0.00");
+        assert_eq!(signed_money(-0.001), "$0.00");
+        assert_eq!(signed_compact(1_500.0), "+1.5K");
+        assert_eq!(signed_compact(-300.0), "-300");
+        assert_eq!(signed_compact(0.2), "0");
+        assert_eq!(signed_count(12.0), "+12");
+        assert_eq!(signed_count(-3.0), "-3");
+        assert_eq!(signed_count(0.0), "0");
+    }
+
+    #[test]
+    fn a_percent_change_says_new_when_there_was_nothing_before() {
+        assert_eq!(signed_percent(Some(21.64), true), "+21.6%");
+        assert_eq!(signed_percent(Some(-4.0), true), "-4.0%");
+        assert_eq!(signed_percent(Some(250.0), true), "+250%");
+        assert_eq!(signed_percent(Some(0.01), true), "0%");
+        assert_eq!(signed_percent(None, true), "new");
+        assert_eq!(signed_percent(None, false), "-");
     }
 
     #[test]

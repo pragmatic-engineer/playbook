@@ -13,7 +13,7 @@ use super::sort::{self, group_rows, group_tokens, session_day_rows, session_rows
 use super::theme::{Fill, Ink, Palette};
 use super::view::{visible_rows, window_start};
 use crate::usage::aggregate::{date_key, Group, SECONDS_PER_DAY};
-use crate::usage::query::{short_id, weekday, ActiveSession, ACTIVE_SECONDS};
+use crate::usage::query::{short_id, weekday, ActiveSession, Range, ACTIVE_SECONDS};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -338,10 +338,16 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
         n => format!("{n} days"),
     };
     let stacked = panel == Panel::Spend && app.spend_view == SpendView::ByModel;
+    // Today charts the last seven days, which the title says.
+    let span = if data.range == Range::Today {
+        ", 7 days"
+    } else {
+        ""
+    };
     let title = match panel {
-        Panel::Tokens => format!("Tokens per {per}"),
-        _ if stacked => format!("Spend per {per} by model, USD"),
-        _ => format!("Spend per {per}, USD"),
+        Panel::Tokens => format!("Tokens per {per}{span}"),
+        _ if stacked => format!("Spend per {per} by model, USD{span}"),
+        _ => format!("Spend per {per}, USD{span}"),
     };
     let mut block = panel_block(pal, panel, &title, box_ink, focused);
     if plot.geo.stats_y.is_none() {

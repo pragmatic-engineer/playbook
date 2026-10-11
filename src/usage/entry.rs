@@ -126,7 +126,7 @@ pub fn run(
         None if interactive => {
             tui::run(
                 paths,
-                parse_range(opts.range.as_deref().unwrap_or(DEFAULT_RANGE))?,
+                parse_range(opts.range.as_deref().unwrap_or(TUI_DEFAULT_RANGE))?,
             )?;
             Ok(String::new())
         }
@@ -137,8 +137,12 @@ pub fn run(
     }
 }
 
-/// The range of the terminal view and `--json` when `--range` is not given.
+/// The range of `--json` when `--range` is not given.
 const DEFAULT_RANGE: &str = "30d";
+
+/// The range the terminal view opens on when `--range` is not given: this week
+/// against last week.
+const TUI_DEFAULT_RANGE: &str = "week";
 
 /// The first day of the week, from the `usage.weekStart` config key. Monday
 /// when the key is unset or unreadable.

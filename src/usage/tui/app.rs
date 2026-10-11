@@ -19,7 +19,7 @@ use ratatui::crossterm::event::{
 use ratatui::layout::{Position, Rect};
 use std::time::Duration;
 
-/// The ranges `r` steps through: the calendar ranges from the shortest to
+/// Every range the view can show: the calendar ranges from the shortest to
 /// the longest, then the rolling ones.
 pub fn ranges(week: WeekStart) -> [Range; 9] {
     [
@@ -33,6 +33,12 @@ pub fn ranges(week: WeekStart) -> [Range; 9] {
         Range::LastDays(90),
         Range::All,
     ]
+}
+
+/// The two ranges `r` steps between. Both are periods, so the view shows each
+/// against the one before it. The month is reached with `m`.
+pub fn default_ranges(week: WeekStart) -> [Range; 2] {
+    [Range::Today, Range::ThisWeek(week)]
 }
 
 /// What the spend panel shows. `v` steps through them.
@@ -268,13 +274,21 @@ impl App {
     }
 
     /// Moves the chart cursor by `by` bars, or to an end of the chart with
-    /// `isize::MIN` or `isize::MAX` steps. With no cursor yet it starts from the newest bar.
+    /// `isize::MIN` or `isize::MAX` steps. With no cursor yet it starts from today's bar.
     fn move_cursor(&mut self, by: isize) {
         let Some(plot) = self.plot(Panel::Spend) else {
             return;
         };
         let last = plot.bars.len().saturating_sub(1);
-        let at = self.cursor.and_then(|d| plot.index_of(d)).unwrap_or(last);
+        let today = self
+            .data
+            .as_ref()
+            .map_or(0, |d| d.now.div_euclid(SECONDS_PER_DAY));
+        let at = self
+            .cursor
+            .and_then(|d| plot.index_of(d))
+            .or_else(|| plot.default_index(today))
+            .unwrap_or(last);
         let to = at.saturating_add_signed(by).min(last);
         self.cursor = plot.bars.get(to).map(|b| b.first);
     }
@@ -322,9 +336,13 @@ impl App {
                 return Effect::Requery;
             }
             KeyCode::Char('r') => {
-                let all = ranges(self.week_start);
-                let at = all.iter().position(|r| *r == self.range).unwrap_or(0);
-                return self.set_range(all[(at + 1) % all.len()]);
+                let all = default_ranges(self.week_start);
+                // From any other range, `r` goes to the first of the two.
+                let next = match all.iter().position(|r| *r == self.range) {
+                    Some(at) => all[(at + 1) % all.len()],
+                    None => all[0],
+                };
+                return self.set_range(next);
             }
             KeyCode::Char(c @ '1'..='6') => self.focus = PANELS[usize::from(c as u8 - b'1')],
             KeyCode::Tab => self.focus_next(1),
@@ -487,17 +505,16 @@ mod tests {
     }
 
     #[test]
-    fn r_steps_through_every_range_and_wraps() {
-        let mut app = App::new(Range::LastDays(30));
-        let mut seen = Vec::new();
-        for _ in 0..ranges(WeekStart::Monday).len() {
-            assert_eq!(app.key(press(KeyCode::Char('r'))), Effect::Requery);
-            seen.push(app.range);
-        }
-        assert_eq!(seen.last(), Some(&Range::LastDays(30)));
-        assert_eq!(seen[0], Range::LastDays(60));
-        for want in ranges(WeekStart::Monday) {
-            assert!(seen.contains(&want), "{want:?}");
+    fn r_steps_between_today_and_the_week_and_starts_over_from_any_other_range() {
+        let mut app = App::new(Range::Today);
+        assert_eq!(app.key(press(KeyCode::Char('r'))), Effect::Requery);
+        assert_eq!(app.range, Range::ThisWeek(WeekStart::Monday));
+        assert_eq!(app.key(press(KeyCode::Char('r'))), Effect::Requery);
+        assert_eq!(app.range, Range::Today);
+        for other in [Range::CurrentMonth, Range::LastDays(30), Range::All] {
+            app.range = other;
+            app.key(press(KeyCode::Char('r')));
+            assert_eq!(app.range, Range::Today, "{other:?}");
         }
     }
 
@@ -864,6 +881,18 @@ mod tests {
             app.key(press(KeyCode::Left));
         }
         assert_eq!(app.cursor, Some(today() - 29), "stops on the oldest day");
+    }
+
+    // NOW is Thursday 2026-09-03, so the Monday week has bars from today - 3
+    // to today + 3 and the cursor starts on today, not on the last bar.
+    #[test]
+    fn the_cursor_starts_on_today_when_the_week_has_days_to_come() {
+        let mut app = charted(Range::ThisWeek(WeekStart::Monday), 7);
+        app.key(press(KeyCode::Left));
+        assert_eq!(app.cursor, Some(today() - 1));
+        let mut app = charted(Range::ThisWeek(WeekStart::Monday), 7);
+        app.key(press(KeyCode::Right));
+        assert_eq!(app.cursor, Some(today() + 1));
     }
 
     #[test]
