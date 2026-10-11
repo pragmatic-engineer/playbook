@@ -1,6 +1,6 @@
 ---
 name: analyst
-description: "Distills /playbook:learn-project collector findings into candidate memory facts for one assigned cluster. Structurally read-only: never writes to the memory store. Not for general-purpose work."
+description: "Structurally read-only. Distills learn-project collector findings into candidate memory facts for one cluster. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: haiku
 effort: medium

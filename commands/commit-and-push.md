@@ -1,5 +1,5 @@
 ---
-description: Use when committing staged changes with a generated message and pushing. Handles staging, formatting, a signed commit, optional rebase, and push.
+description: Use when committing staged changes and pushing. Stages, formats, makes a signed commit, and pushes.
 allowed-tools: Bash, Read, Skill
 argument-hint: "[--all|-A] [--update|-u] [--amend|-a] [--no-signoff] [--auto] [--ask]"
 context: fork

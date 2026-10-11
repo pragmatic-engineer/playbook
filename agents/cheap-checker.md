@@ -1,6 +1,6 @@
 ---
 name: cheap-checker
-description: "Structurally read-only checker for ONE narrow concern on a diff, dispatched by /playbook:deep-review and /playbook:implement Step 9 for cheap-check lenses. Returns findings in the reviewer JSON shape. Not for general-purpose work."
+description: "Structurally read-only checker for ONE narrow concern on a diff, for deep-review and implement review. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: haiku
 effort: low

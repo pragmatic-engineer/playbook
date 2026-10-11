@@ -1,6 +1,6 @@
 ---
 name: delegating-subagents
-description: Sets the file-based handoff, roster, routing, and recovery rules for subagents. Use before dispatching any subagent, and again when one finishes, fails, or goes quiet.
+description: Handoff, roster, routing, and recovery rules for subagents. Use before dispatching any subagent, and when one finishes or goes quiet.
 ---
 
 # Delegating to Subagents

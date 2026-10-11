@@ -1,5 +1,5 @@
 ---
-description: Use when an approved plan or ADR blueprint already exists and the user says let's implement this, let's build this, or start on it. Execute-only, it does not design new scope. Runs the plan on Sonnet, delegating edits to subagents, committing each Work Unit as a savepoint, and delivering PR-sized Segments as one small pull request each (independent off the default branch when disjoint, stacked when they truly depend on each other), asking the delivery strategy up front. Ends with a refinement pass and an adversarial review.
+description: Use when an approved plan or ADR blueprint exists and the user says let's implement or build this. Execute-only, no new design. Delivers each Segment as one small PR.
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill, AskUserQuestion
 argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--ask] [--no-tdd] [--no-tests] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause|land>] [--all-lenses] [--help]"
 model: sonnet

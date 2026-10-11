@@ -1,5 +1,5 @@
 ---
-description: Use on first install or to repair the local setup. Wires safety guards, seeds or merges settings.json, and asks whether to install the shell launchers and system prompt.
+description: Use on first install or to repair the local setup. Wires safety guards, settings.json, launchers and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
 argument-hint: "[--install-aliases] [--use-system-prompt] [--yes] [--auto] [--ask]"
 model: haiku

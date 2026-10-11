@@ -1,6 +1,6 @@
 ---
 name: playbook-usage
-description: Lists the /playbook:* commands and when to use each. Use when asked what the playbook plugin does, what commands exist, or which command fits a task.
+description: Lists /playbook:* commands and when to use each. Use when asked what the plugin does or which command fits a task.
 ---
 
 # Playbook Usage

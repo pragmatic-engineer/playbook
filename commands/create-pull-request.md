@@ -1,5 +1,5 @@
 ---
-description: Use when a branch is ready to open as a pull request. Runs pre-flight checks, writes a conventional-commit title and the team PR template, and opens it as a draft.
+description: Use when a branch is ready to open as a pull request. Runs pre-flight checks and opens a draft PR with a conventional title.
 allowed-tools: Bash, Read, Skill
 argument-hint: "[--help] [--ready] [--base <branch>] [--ticket <ID>] [--dir <path>] [--auto] [--ask]"
 context: fork

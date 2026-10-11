@@ -1,5 +1,5 @@
 ---
-description: Use for substantial, risky, or cross-cutting PRs. A swarm of specialist reviewer subagents (logic, test, security, data, types, perf, plus conditional) run in parallel, consolidated and fact-checked, then posted as a pending GitHub review. Heavier than /playbook:quick-review.
+description: Use for substantial, risky, or cross-cutting PRs. Parallel specialist reviewers, fact-checked, posted as a pending GitHub review. Heavier than quick-review.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
 argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--this-pr] [--whole-stack] [--auto] [--ask] [--help]"
 model: opus

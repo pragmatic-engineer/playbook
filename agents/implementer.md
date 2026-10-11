@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: "Write-capable executor for /playbook:implement. One call per RED, GREEN or REFACTOR step (or file group) of a Work Unit: writes code or tests, runs the scoped verify, commits a checkpoint. Not for general-purpose work."
+description: "Write-capable executor for /playbook:implement. One call per RED, GREEN or REFACTOR step of a Work Unit: writes, verifies, commits a checkpoint. Not for general-purpose work."
 tools: Read, Grep, Glob, Edit, Write, Bash, Skill
 model: sonnet
 effort: medium

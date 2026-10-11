@@ -1,5 +1,5 @@
 ---
-description: Use when a bug is small and well understood and the user says fix this, fix #123, or there is a bug in X. Reproduces the bug with a failing test, makes the smallest fix, verifies it, and opens one pull request. Escalates to /playbook:plan when the fix is not small.
+description: Use when a bug is small and well understood ("fix this", "fix #123"). Reproduces with a failing test, makes the smallest fix, opens one PR.
 allowed-tools: Bash, Read, Grep, Glob, Edit, Write, Skill, AskUserQuestion
 argument-hint: "[#issue | description] [--auto] [--ask]"
 model: sonnet

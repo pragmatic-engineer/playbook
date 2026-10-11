@@ -1,5 +1,5 @@
 ---
-description: Use at the start of a session after /clear, or when the saved handoff did not load. Loads the handoff the last session saved for this directory and orients from it.
+description: Use at the start of a session after /clear, or when the saved handoff did not load. Loads the last handoff for this directory.
 allowed-tools: Bash, Read
 argument-hint: "[--all]"
 model: haiku

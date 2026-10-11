@@ -1,5 +1,5 @@
 ---
-description: Use to assess an unfamiliar or long-lived repo without changing it. Runs a four-phase read-only audit (map, findings, strategy, task plan), every claim cited to file:line.
+description: Use to assess an unfamiliar or long-lived repo without changing it. Read-only four-phase audit with file:line citations.
 allowed-tools: Bash, Read, Grep, Glob, WebSearch, WebFetch
 context: fork
 agent: playbook:auditor

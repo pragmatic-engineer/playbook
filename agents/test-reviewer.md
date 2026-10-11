@@ -1,6 +1,6 @@
 ---
 name: test-reviewer
-description: "Structurally read-only test reviewer for the test review phase of /playbook:plan, /playbook:adr and /playbook:implement. Judges a test plan against engineering-standards; returns PASS, FAIL or WARN. Not for general-purpose work."
+description: "Structurally read-only test reviewer for plan, adr and implement gates. Judges a test plan against engineering-standards; returns PASS, FAIL or WARN. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
 model: haiku
 effort: low

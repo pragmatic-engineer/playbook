@@ -1,6 +1,6 @@
 ---
 name: grounding-research
-description: Evidence rules for investigating code (verify claims, cite file:line, report sourced findings). Use when exploring a codebase, tracing execution paths, or mapping dependencies. Distinct from grounding-review, which covers PRs.
+description: Evidence rules for investigating code (cite file:line). Use when exploring a codebase, tracing execution, or mapping dependencies. Not for PR review.
 ---
 
 # Research Grounding
