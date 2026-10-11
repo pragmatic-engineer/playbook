@@ -883,6 +883,42 @@ mod bg_await_guard {
     }
 
     #[test]
+    fn long_foreground_commands_without_a_timeout_get_the_background_nudge() {
+        for cmd in [
+            "gh run watch 123 --exit-status",
+            "gh pr checks 5 --watch",
+            "cargo test --all",
+            "cargo build --release",
+        ] {
+            assert!(warns(cmd, false), "foreground should nudge: {cmd}");
+        }
+    }
+
+    #[test]
+    fn the_nudge_names_background_and_timeout_and_stays_quiet_with_a_timeout() {
+        let run = |input: serde_json::Value| {
+            let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+                .env_remove("CI")
+                .env_remove("PLAYBOOK_HEADLESS")
+                .args(["hook", "bg-await-guard"])
+                .env("HOOK_INPUT", input.to_string())
+                .output()
+                .expect("playbook binary should spawn");
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        let nudged = run(serde_json::json!({"tool_input": {"command": "cargo test"}}));
+        assert!(nudged.contains("run_in_background") && nudged.contains("600000"));
+        let with_timeout =
+            run(serde_json::json!({"tool_input": {"command": "cargo test", "timeout": 600000}}));
+        assert!(
+            with_timeout.trim().is_empty(),
+            "explicit timeout: {with_timeout}"
+        );
+        let short = run(serde_json::json!({"tool_input": {"command": "cargo fmt --check"}}));
+        assert!(short.trim().is_empty());
+    }
+
+    #[test]
     fn long_running_watches_are_left_alone() {
         for cmd in [
             "npm run dev",
