@@ -18,7 +18,7 @@ Every command that shows data reads new history first, so you never need to inge
 
 The view is styled after [btop](https://github.com/aristocratos/btop), with btop's default theme as the default look: a black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), a gradient on the graphs and the meters, and a highlighted selected row. Each box has its own outline color, as in btop: spend uses the cpu green, tokens the net purple, models and projects the mem olive, sessions and messages the proc red.
 
-The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. Resizing needs no handling because every redraw reads the current size. It shows six panels under a header with the range, the cost, the tokens and the messages.
+The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. From 36 rows a Budget panel is added under the header (see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)). Resizing needs no handling because every redraw reads the current size. It shows six panels under a header with the range, the cost, the tokens and the messages.
 
 For `today`, `week` and `month` the header is a comparison: it says which two spans are compared and that they cover the same elapsed span (see [Period comparison](#period-comparison)), then shows cost, tokens and messages for both with the change in amount and percent (`new` when the previous value was zero). Increases are yellow and decreases green, and the sign says it without color. The other ranges show their own totals and say `(no previous period to compare)`. Everything is UTC and the header says so, with the first day of the week when the range is a week.
 
@@ -163,6 +163,55 @@ Terminal view tests render into a `TestBackend` buffer, with no real terminal. `
 - Live shows what the transcripts record, so a session that is thinking but has not written a message yet does not appear until it does.
 - The terminal view needs a real terminal of 80x24 or more. Use `--json` or `--summary` where there is none.
 - No LLM call is built in. The output is plain text and JSON, so the agent already running your session can read it and suggest where to cut cost.
+
+## Spending limits and budget headroom
+
+The Budget panel, `--summary` and `--json` (`limits`) show how much of a limit you have used and how fast you are using it. The code is `src/usage/limits.rs` (the math) and `src/usage/limits_source.rs` (where limits come from). All times are UTC.
+
+### Where a limit comes from
+
+| Account | What can be read | Source | Tag in the UI |
+|---|---|---|---|
+| Claude Pro or Max | The 5 hour and the weekly window: percent used and reset time. | The `rate_limits` object Claude Code passes to the statusline command on stdin ([statusline docs](https://code.claude.com/docs/en/statusline)). The playbook statusline keeps the latest copy in `~/.config/playbook/usage/rate_limits.json` (owner only). | `measured` |
+| Behind a Claude apps gateway | The spend limit: percent, reset time and, when the gateway and Claude Code are new enough, dollars used, the dollar limit and the period. | `rate_limits.spend_limit` in the same statusline input. | `measured` |
+| Enterprise or API organization | Nothing automatic. The organization budget is set in the Console and no documented API reads it. The Admin API needs an organization admin key and returns usage and cost reports, not the limit. | `usage.budget.monthlyUsd` and `usage.budget.weeklyUsd`, set by you. | `manual` |
+| Any account | Your own estimated spend, from the session transcripts. | The usage store. | `local history` |
+
+Two things to know:
+
+- The statusline input has no limit data on an API key account, and a Pro or Max account gets it only after the first response of a session. So the plan windows show up once you have used Claude Code with the playbook statusline (`playbook statusline`) in this setup. Each window can be missing, and Claude Code drops a window after its reset time, so playbook does the same. A reading older than six hours is tagged `stale`.
+- Playbook reads only what Claude Code already passes to a local command. It calls no endpoint with your login, reads no credential file, and writes nothing into Claude Code settings or memory. The stored file holds percentages, reset times and the gateway dollar limit, and no account, token or session id.
+
+A manual budget is the UTC calendar month or week (the week starts on `usage.weekStart`), and the spend is the estimated cost from your local history, which is not your bill. Set it with `playbook config set --global usage.budget.monthlyUsd 200`. `0` means no budget.
+
+### The math
+
+For a limit over a period from `start` to `end`, with `used` so far at `now` (all UTC seconds):
+
+- elapsed is `now` minus `start`, clamped to the period, and left is `end` minus `now`, clamped the same way. Before the period starts, elapsed is zero.
+- average per hour is `used / elapsed hours`, and per day is `used / elapsed days`. The first day is partial, so days are a fraction of 24 hours, not whole days. With zero elapsed time there is no average (`n/a`, JSON `null`), never a division by zero.
+- remaining is `limit` minus `used`, never below zero.
+- allowed per hour is `remaining / hours left`, and per day is `remaining / days left`. With no time left there is none.
+- projected is `used + average * time left`, the total at the end of the period at the current burn rate. It needs at least one hour of elapsed time, because the first minutes say nothing.
+- the state is `limit reached` when `used` is at or above the limit, `will exceed` with the UTC time the limit is reached at the current rate when the projection is above the limit, `on track` when the projection is between 80 percent and 100 percent of the limit, `under` below 80 percent, and `too early to project` before the first hour.
+
+A month has 28 to 31 days (a leap February has 29) and a period ends at the next UTC midnight, so there is no daylight saving. The same math serves the 5 hour and weekly windows, where the limit is 100 percent and the rates are percent per hour and per day.
+
+The panel also shows, for the period on screen (today, this week or this month, this week for other ranges), the average cost per hour and per day against the previous period over the same elapsed span, the same rule as the period comparison.
+
+### Where it shows
+
+- Terminal view: the Budget panel sits under the header and needs 36 rows of terminal. On a shorter screen it is left out, and `--summary` and `--json` have the same numbers. It lists at most two limits, worst first, and says how many more `--json` has. With no known limit it says how to set one.
+- `--summary`: a "Limits and burn rate" section.
+- `--json`: `limits` with `known`, `hint` (when nothing is known), `snapshot_captured_at`, `snapshot_stale`, `limits` (unit, period, origin, used, limit, start, end, remaining, average and allowed per hour and per day, projected, state and `exceeds_at`) and `burn` for today, week and month, each with the current and previous period.
+
+The Budget panel ignores the project filter: a limit belongs to the account, not to a repo.
+
+### What is not automatic
+
+- Enterprise and API organization budgets, as above.
+- Pro and Max windows need the playbook statusline to be the Claude Code status line. If you use another status line, set a manual budget instead, or wire `playbook statusline` in.
+- Headless `--output-format json`, OpenTelemetry and `/usage` do not carry limits in any documented way that a background process can read, so they are not used.
 
 ## Telemetry storage (first slice)
 
