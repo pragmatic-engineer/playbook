@@ -249,3 +249,7 @@ An omitted `subagent_type` forks the parent conversation and bills its full hist
 ### Inline briefs for reviewers and implementers
 
 `/playbook:deep-review`, `/playbook:quick-review` and `/playbook:implement` build the brief once per run: diff, numbered excerpts, test command, and the limit to read beyond them only when needed. On the seeded-defect reviewer fixture (7 seeded bugs, 3 clean, 3 repeats, Opus medium) recall stayed 21 of 21 and clean cases 9 of 9, turns fell from 3.4 to 2.2 per run and cost from $0.0447 to $0.0395.
+
+### Return cap
+
+Subagent returns are capped at about 300 words by the agent prompts and the `Return` line of the brief template, and `TaskOutput` carries the same compact message. The named output file is the deliverable and is not capped, so the delegating-subagents file handoff rule is unchanged.

@@ -7,6 +7,7 @@ Why `SKILL.md` says to pass a `subagent_type` and write a stand-alone brief, and
 - Fork cost
 - Classification of spawn sites
 - Brief template
+- Return cap
 - Review brief builder
 - Implementer brief builder
 - Checks before dispatch
@@ -39,9 +40,14 @@ Goal: <one sentence>
 Inputs: <absolute paths with line ranges>
 Output: write your full report to <absolute path>
 Constraints: <scope, do not touch, read-only or not>
+Return: status, findings as file:line, output path; at most about 300 words
 ```
 
 Agents that cannot write (the read-only roster rows) have no `Output` line; they return their findings instead, and the orchestrator treats silence as NOT RUN.
+
+## Return cap
+
+A subagent's final message lands in the parent context and is re-read on every later turn. Capping it at about 300 words, as status, findings with `file:line` and the output file path, keeps that growth small. The cap is in each agent's prompt and in the `Return` line of the brief. It limits the message only: the report file is never capped, and a reviewer shortens findings before it drops any (blocking and important findings always stay, so recall is unaffected). `TaskOutput` returns the same message, so the same cap keeps its result compact; read the output file for detail instead of polling.
 
 ## Review brief builder
 
