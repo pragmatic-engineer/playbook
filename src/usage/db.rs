@@ -91,6 +91,11 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
         .map_err(|e| format!("failed to create usage schema: {e}"))?;
     ensure_cache_1h_column(&conn)?;
     ensure_agent_column(&conn)?;
+    retry_busy(
+        || conn.execute_batch(super::telemetry_db::UP_SQL),
+        BUSY_TIMEOUT,
+    )
+    .map_err(|e| format!("failed to create telemetry schema: {e}"))?;
     Ok(conn)
 }
 
@@ -474,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn open_creates_all_three_tables_in_wal_mode() {
+    fn open_creates_the_usage_and_telemetry_tables_in_wal_mode() {
         let dir = scratch_dir("usage-open");
         let conn = open_db(&dir.join("usage.db")).unwrap();
 
@@ -491,7 +496,13 @@ mod tests {
 
         assert_eq!(
             tables,
-            vec!["tool_invocation_events", "usage_events", "usage_watermarks"]
+            vec![
+                "session_sources",
+                "telemetry_requests",
+                "tool_invocation_events",
+                "usage_events",
+                "usage_watermarks"
+            ]
         );
         assert_eq!(mode, "wal");
         let _ = fs::remove_dir_all(dir);

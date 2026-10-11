@@ -20,6 +20,7 @@ pub mod query;
 pub mod repo;
 pub mod run;
 pub mod summary;
+pub mod telemetry_db;
 pub mod tui;
 
 /// One assistant message's token usage and derived cost. `event_id` is the
