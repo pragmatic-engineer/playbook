@@ -101,3 +101,36 @@ fn reviewer_and_implementer_agents_allow_reading_beyond_the_brief_only_when_need
     assert!(i.contains("do not explore the repository"));
     assert!(i.contains("Read every file before you modify it"));
 }
+
+#[test]
+fn every_returning_agent_carries_the_return_cap() {
+    for agent in [
+        "reviewer",
+        "critic",
+        "fact-checker",
+        "test-reviewer",
+        "analyst",
+        "cheap-checker",
+        "implementer",
+        "collector",
+    ] {
+        let s = read(&format!("agents/{agent}.md"));
+        assert!(
+            s.contains("about 300 words"),
+            "agents/{agent}.md has no return cap"
+        );
+    }
+}
+
+#[test]
+fn the_cap_never_applies_to_the_output_file_or_drops_findings() {
+    let r = read("agents/reviewer.md");
+    assert!(r.contains("never drop a finding to fit"));
+    assert!(r.contains("does not apply to a report file you write"));
+    let skill = read("skills/delegating-subagents/SKILL.md");
+    assert!(skill
+        .contains("Return: status, findings as file:line, output path; at most about 300 words"));
+    assert!(skill.contains("Write your full report to <absolute path>."));
+    let sp = read("prompts/SYSTEM_PROMPT.md");
+    assert!(sp.contains("about 300 words"));
+}

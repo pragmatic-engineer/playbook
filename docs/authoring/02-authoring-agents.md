@@ -26,7 +26,7 @@ Every agent file opens with five keys:
 
 An `Agent` call without `subagent_type` forks the parent's whole history. Every command, skill and prompt that dispatches a subagent names a `subagent_type` and writes a stand-alone brief (goal, inputs by path, output file, constraints). The template and the per-site classification are in `skills/delegating-subagents/references/briefs.md`. `tests/fresh_subagent_briefs.rs` pins the wording.
 
-Reviewer and implementer briefs also carry the diff or numbered file excerpts, the scoped test command and a stated limit to read beyond them only when needed, so those agents skip exploratory reads. An agent prompt that tells the agent to read every file it cites defeats that; keep the guardrail worded as in `agents/reviewer.md`.
+Reviewer and implementer briefs also carry the diff or numbered file excerpts, the scoped test command and a stated limit to read beyond them only when needed, so those agents skip exploratory reads. Every agent's output contract also caps the returned message at about 300 words (status, findings with `file:line`, output file path) so the parent context grows less; the report file is never capped. New agents copy that sentence from an existing one. An agent prompt that tells the agent to read every file it cites defeats that; keep the guardrail worded as in `agents/reviewer.md`.
 
 ## The two binding mechanisms
 
