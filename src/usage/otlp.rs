@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Reads an OTLP/HTTP JSON logs body into telemetry requests.
+//! Reads an OTLP/HTTP JSON logs body into telemetry rows.
 //!
-//! Only the `api_request` event is used: it carries one API request with its
-//! own request id, so a redelivered batch cannot double count. Metrics are
-//! ignored on purpose (they have no request id).
+//! Three events are used. `api_request` carries one API request with its own
+//! request id, `tool_result` one tool call with its own tool use id, and
+//! `api_error` one failed attempt, keyed by session and event sequence. Each
+//! key makes a redelivered batch a no-op, so nothing counts twice. Metrics are
+//! ignored on purpose (they have no key).
 //!
 //! Privacy: this parser is the allowlist. Only the keys in `ALLOWED_KEYS` are
 //! ever read, so prompts, tool content, paths, emails, user ids and resource
@@ -13,7 +15,7 @@
 //! are kept (model, effort, agent name, ids) are checked for a safe charset
 //! and length, and a value that fails the check is dropped.
 
-use super::telemetry_db::TelemetryRequest;
+use super::telemetry_db::{TelemetryError, TelemetryRequest, TelemetryTool};
 use serde_json::Value;
 
 /// The attribute keys this parser reads. Everything else is ignored.
@@ -25,6 +27,13 @@ pub const ALLOWED_KEYS: &[&str] = &[
     "effort",
     "agent.name",
     "skill.name",
+    "tool_name",
+    "tool_use_id",
+    "success",
+    "duration_ms",
+    "status_code",
+    "attempt",
+    "event.sequence",
     "input_tokens",
     "output_tokens",
     "cache_read_tokens",
@@ -48,6 +57,13 @@ struct Fields {
     effort: Option<String>,
     agent: Option<String>,
     skill: Option<String>,
+    tool: Option<String>,
+    tool_use: Option<String>,
+    success: Option<bool>,
+    duration_ms: Option<u64>,
+    status: Option<u64>,
+    attempt: Option<u64>,
+    sequence: Option<u64>,
     input: Option<u64>,
     output: Option<u64>,
     cache_read: Option<u64>,
@@ -67,7 +83,7 @@ fn safe_text(value: &str, max: usize) -> Option<String> {
 
 fn any_value(v: &Value) -> Option<&Value> {
     let map = v.as_object()?;
-    ["stringValue", "intValue", "doubleValue"]
+    ["stringValue", "intValue", "doubleValue", "boolValue"]
         .iter()
         .find_map(|k| map.get(*k))
 }
@@ -80,6 +96,18 @@ fn as_u64(v: &Value) -> Option<u64> {
                 .map(|f| f as u64)
         }),
         Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+fn as_bool(v: &Value) -> Option<bool> {
+    match v {
+        Value::Bool(b) => Some(*b),
+        Value::String(s) => match s.as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -117,6 +145,13 @@ fn read_attributes(attrs: &Value) -> Fields {
             "effort" => f.effort = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
             "agent.name" => f.agent = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
             "skill.name" => f.skill = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
+            "tool_name" => f.tool = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
+            "tool_use_id" => f.tool_use = text.and_then(|t| safe_text(t, MAX_ID_LEN)),
+            "success" => f.success = as_bool(value),
+            "duration_ms" => f.duration_ms = as_u64(value),
+            "status_code" => f.status = as_u64(value),
+            "attempt" => f.attempt = as_u64(value),
+            "event.sequence" => f.sequence = as_u64(value),
             "input_tokens" => f.input = as_u64(value),
             "output_tokens" => f.output = as_u64(value),
             "cache_read_tokens" => f.cache_read = as_u64(value),
@@ -145,16 +180,29 @@ fn event_name(record: &Value, f: &Fields) -> Option<String> {
     Some(name.strip_prefix(EVENT_PREFIX).unwrap_or(&name).to_string())
 }
 
-/// Parses an OTLP JSON logs body. Records that are not a complete
-/// `api_request` (no session id, no request id, or another event) are skipped.
-/// `now` stamps a record that has no usable time.
+/// The rows of one logs body.
+#[derive(Debug, Default, PartialEq)]
+pub struct Parsed {
+    pub requests: Vec<TelemetryRequest>,
+    pub tools: Vec<TelemetryTool>,
+    pub errors: Vec<TelemetryError>,
+}
+
+/// Parses an OTLP JSON logs body into API requests only.
 pub fn parse_logs(body: &[u8], now: i64) -> Result<Vec<TelemetryRequest>, String> {
+    parse_events(body, now).map(|p| p.requests)
+}
+
+/// Parses an OTLP JSON logs body. Records that are not a complete
+/// `api_request`, `tool_result` or `api_error` (no session id, no key, or
+/// another event) are skipped. `now` stamps a record that has no usable time.
+pub fn parse_events(body: &[u8], now: i64) -> Result<Parsed, String> {
     let doc: Value = serde_json::from_slice(body).map_err(|e| format!("invalid JSON: {e}"))?;
     let resources = doc
         .get("resourceLogs")
         .and_then(Value::as_array)
         .ok_or("missing resourceLogs")?;
-    let mut out = Vec::new();
+    let mut out = Parsed::default();
     let mut seen = 0usize;
     for scopes in resources
         .iter()
@@ -170,30 +218,58 @@ pub fn parse_logs(body: &[u8], now: i64) -> Result<Vec<TelemetryRequest>, String
                     return Ok(out);
                 }
                 let f = read_attributes(record.get("attributes").unwrap_or(&Value::Null));
-                if event_name(record, &f).as_deref() != Some("api_request") {
-                    continue;
+                let timestamp = nanos_to_secs(record).unwrap_or(now);
+                match event_name(record, &f).as_deref() {
+                    Some("api_request") => out.requests.extend(request(f, timestamp)),
+                    Some("tool_result") => out.tools.extend(tool(f, timestamp)),
+                    Some("api_error") => out.errors.extend(error(f, timestamp)),
+                    _ => {}
                 }
-                let (Some(session_id), Some(request_id)) = (f.session, f.request) else {
-                    continue;
-                };
-                out.push(TelemetryRequest {
-                    session_id,
-                    request_id,
-                    timestamp: nanos_to_secs(record).unwrap_or(now),
-                    model: f.model.unwrap_or_default(),
-                    effort: f.effort.unwrap_or_default(),
-                    agent_name: f.agent.unwrap_or_default(),
-                    skill_name: f.skill.unwrap_or_default(),
-                    input_tokens: f.input.unwrap_or(0),
-                    output_tokens: f.output.unwrap_or(0),
-                    cache_creation_tokens: f.cache_creation.unwrap_or(0),
-                    cache_read_tokens: f.cache_read.unwrap_or(0),
-                    cost_usd: f.cost.unwrap_or(0.0),
-                });
             }
         }
     }
     Ok(out)
+}
+
+fn request(f: Fields, timestamp: i64) -> Option<TelemetryRequest> {
+    Some(TelemetryRequest {
+        session_id: f.session?,
+        request_id: f.request?,
+        timestamp,
+        model: f.model.unwrap_or_default(),
+        effort: f.effort.unwrap_or_default(),
+        agent_name: f.agent.unwrap_or_default(),
+        skill_name: f.skill.unwrap_or_default(),
+        input_tokens: f.input.unwrap_or(0),
+        output_tokens: f.output.unwrap_or(0),
+        cache_creation_tokens: f.cache_creation.unwrap_or(0),
+        cache_read_tokens: f.cache_read.unwrap_or(0),
+        cost_usd: f.cost.unwrap_or(0.0),
+        duration_ms: f.duration_ms.unwrap_or(0),
+    })
+}
+
+fn tool(f: Fields, timestamp: i64) -> Option<TelemetryTool> {
+    Some(TelemetryTool {
+        session_id: f.session?,
+        tool_use_id: f.tool_use?,
+        timestamp,
+        tool_name: f.tool.unwrap_or_default(),
+        success: f.success.unwrap_or(true),
+        duration_ms: f.duration_ms.unwrap_or(0),
+    })
+}
+
+fn error(f: Fields, timestamp: i64) -> Option<TelemetryError> {
+    Some(TelemetryError {
+        session_id: f.session?,
+        sequence: f.sequence?,
+        timestamp,
+        model: f.model.unwrap_or_default(),
+        status_code: f.status.unwrap_or(0),
+        attempt: f.attempt.unwrap_or(1),
+        duration_ms: f.duration_ms.unwrap_or(0),
+    })
 }
 
 #[cfg(test)]
@@ -277,6 +353,87 @@ mod tests {
         assert_eq!(rows[0].skill_name, "");
         let rows = parse_logs(&body(vec![api_request(vec![])]), 5).unwrap();
         assert_eq!(rows[0].skill_name, "");
+    }
+
+    fn tool_result(extra: Vec<Value>) -> Value {
+        let mut attrs = vec![
+            s("event.name", "tool_result"),
+            s("session.id", "sess-1"),
+            s("tool_name", "Bash"),
+            s("tool_use_id", "toolu_1"),
+            s("success", "false"),
+            s("duration_ms", "507"),
+            s("tool_input_size_bytes", "99"),
+        ];
+        attrs.extend(extra);
+        json!({"timeUnixNano": "1760000000000000000", "attributes": attrs})
+    }
+
+    fn api_error(extra: Vec<Value>) -> Value {
+        let mut attrs = vec![
+            s("event.name", "api_error"),
+            s("session.id", "sess-1"),
+            s("model", "claude-opus-5"),
+            n("status_code", 529),
+            n("attempt", 2),
+            n("duration_ms", 865),
+            n("event.sequence", 39),
+            s("error", "overloaded for user someone@example.com"),
+        ];
+        attrs.extend(extra);
+        json!({"timeUnixNano": "1760000000000000000", "attributes": attrs})
+    }
+
+    #[test]
+    fn a_tool_result_and_an_api_error_become_rows() {
+        let p = parse_events(&body(vec![tool_result(vec![]), api_error(vec![])]), 5).unwrap();
+        assert_eq!(p.tools.len(), 1);
+        let t = &p.tools[0];
+        assert_eq!(
+            (
+                t.tool_name.as_str(),
+                t.tool_use_id.as_str(),
+                t.success,
+                t.duration_ms
+            ),
+            ("Bash", "toolu_1", false, 507)
+        );
+        assert_eq!(p.errors.len(), 1);
+        let e = &p.errors[0];
+        assert_eq!(
+            (e.sequence, e.status_code, e.attempt, e.duration_ms),
+            (39, 529, 2, 865)
+        );
+        assert!(p.requests.is_empty());
+        assert!(
+            !format!("{p:?}").contains("someone"),
+            "error text must not be read"
+        );
+    }
+
+    #[test]
+    fn a_tool_result_without_an_id_or_an_error_without_a_sequence_is_skipped() {
+        let mut t = tool_result(vec![]);
+        t["attributes"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|a| a["key"] != "tool_use_id");
+        let mut e = api_error(vec![]);
+        e["attributes"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|a| a["key"] != "event.sequence");
+        let p = parse_events(&body(vec![t, e]), 5).unwrap();
+        assert!(p.tools.is_empty() && p.errors.is_empty());
+    }
+
+    #[test]
+    fn a_real_boolean_success_is_read_and_an_api_request_keeps_its_duration() {
+        let t = tool_result(vec![attr("success", json!({"boolValue": true}))]);
+        // The later duplicate key wins, like a map built from the list.
+        let p = parse_events(&body(vec![t, api_request(vec![n("duration_ms", 1200)])]), 5).unwrap();
+        assert!(p.tools[0].success);
+        assert_eq!(p.requests[0].duration_ms, 1200);
     }
 
     #[test]

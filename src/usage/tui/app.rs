@@ -75,6 +75,10 @@ pub enum ProjectsView {
     Agents,
     /// Cost per skill, from telemetry.
     Skills,
+    /// Tool latency and error rate per tool, from telemetry.
+    Tools,
+    /// API errors, retries, cache hit rate and busy time, from telemetry.
+    Health,
 }
 
 impl ProjectsView {
@@ -82,7 +86,9 @@ impl ProjectsView {
         match self {
             ProjectsView::Projects => ProjectsView::Agents,
             ProjectsView::Agents => ProjectsView::Skills,
-            ProjectsView::Skills => ProjectsView::Projects,
+            ProjectsView::Skills => ProjectsView::Tools,
+            ProjectsView::Tools => ProjectsView::Health,
+            ProjectsView::Health => ProjectsView::Projects,
         }
     }
 }
@@ -176,6 +182,8 @@ impl App {
             Panel::Models => pair_groups(&d.models, &d.models_before).len(),
             Panel::Projects if self.projects_view == ProjectsView::Agents => d.agents.rows.len(),
             Panel::Projects if self.projects_view == ProjectsView::Skills => d.skills.rows.len(),
+            Panel::Projects if self.projects_view == ProjectsView::Tools => d.health.tools.len(),
+            Panel::Projects if self.projects_view == ProjectsView::Health => panels::HEALTH_ROWS,
             Panel::Projects => d.repos.len(),
             Panel::Live => d.live.active.len(),
             Panel::Sessions => d.sessions.len(),
@@ -227,6 +235,11 @@ impl App {
                     ProjectsView::Agents => &d.agents.rows,
                     ProjectsView::Skills => &d.skills.rows,
                     ProjectsView::Projects => &d.repos,
+                    // Fixed order, one row per tool or figure.
+                    ProjectsView::Tools => {
+                        return d.health.tools.iter().map(|t| t.name.clone()).collect()
+                    }
+                    ProjectsView::Health => return Vec::new(),
                 };
                 group_rows(groups, sort)
                     .iter()
@@ -264,7 +277,7 @@ impl App {
                 .into_iter()
                 .nth(at)
                 .map(|p| p.key),
-            // An agent or a skill is not a field of a usage event, so it cannot filter.
+            // An agent, skill, tool or figure is not a field of a usage event, so it cannot filter.
             Panel::Projects if self.projects_view != ProjectsView::Projects => None,
             Panel::Projects => group_rows(&d.repos, sort).get(at).map(|g| g.key.clone()),
             Panel::Live => session_rows(&d.live.active, sort)

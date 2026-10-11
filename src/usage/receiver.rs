@@ -12,7 +12,7 @@
 //! accepted and dropped.
 
 use super::otlp;
-use super::telemetry_db::insert_request;
+use super::telemetry_db::{insert_error, insert_request, insert_tool};
 use rusqlite::Connection;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -242,12 +242,19 @@ fn dispatch(conn: &Connection, req: &Request, now: i64) -> (u16, String) {
     if req.path != "/v1/logs" {
         return (200, "{}".to_string());
     }
-    let Ok(rows) = otlp::parse_logs(&req.body, now) else {
+    let Ok(rows) = otlp::parse_events(&req.body, now) else {
         return (400, r#"{"error":"invalid OTLP JSON"}"#.to_string());
     };
     let stored = conn.unchecked_transaction().and_then(|tx| {
-        for row in &rows {
-            insert_request(&tx, row).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let bad = |_| rusqlite::Error::InvalidQuery;
+        for row in &rows.requests {
+            insert_request(&tx, row).map_err(bad)?;
+        }
+        for row in &rows.tools {
+            insert_tool(&tx, row).map_err(bad)?;
+        }
+        for row in &rows.errors {
+            insert_error(&tx, row).map_err(bad)?;
         }
         tx.commit()
     });
@@ -604,6 +611,53 @@ mod tests {
         assert_eq!(
             serve(&listener, &conn, &cfg(None), &stop, || 1).unwrap(),
             "stopped"
+        );
+    }
+
+    #[test]
+    fn tool_results_and_api_errors_are_stored_without_their_content() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate_up(&conn).unwrap();
+        let body = serde_json::json!({"resourceLogs":[{"scopeLogs":[{"logRecords":[
+            {"timeUnixNano":"1760000000000000000","attributes":[
+                {"key":"event.name","value":{"stringValue":"tool_result"}},
+                {"key":"session.id","value":{"stringValue":"s1"}},
+                {"key":"tool_use_id","value":{"stringValue":"t1"}},
+                {"key":"tool_name","value":{"stringValue":"Bash"}},
+                {"key":"success","value":{"stringValue":"false"}},
+                {"key":"duration_ms","value":{"stringValue":"42"}},
+                {"key":"tool_input","value":{"stringValue":"rm -rf secret"}}]},
+            {"timeUnixNano":"1760000000000000000","attributes":[
+                {"key":"event.name","value":{"stringValue":"api_error"}},
+                {"key":"session.id","value":{"stringValue":"s1"}},
+                {"key":"event.sequence","value":{"intValue":"7"}},
+                {"key":"attempt","value":{"intValue":"2"}},
+                {"key":"error","value":{"stringValue":"secret failure"}}]}
+        ]}]}]})
+        .to_string();
+        let req = Request {
+            path: "/v1/logs".into(),
+            body: body.into_bytes(),
+        };
+        for _ in 0..2 {
+            assert_eq!(dispatch(&conn, &req, 5).0, 200);
+        }
+        let h = crate::usage::telemetry_db::health(&conn, 0, i64::MAX).unwrap();
+        assert_eq!(
+            (h.tool_calls, h.tool_failures, h.errors, h.retried),
+            (1, 1, 1, 1)
+        );
+        let dump: String = conn
+            .query_row(
+                "SELECT (SELECT group_concat(tool_name) FROM telemetry_tools)
+                      || (SELECT group_concat(model) FROM telemetry_errors)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            !dump.contains("secret") && !dump.contains("rm -rf"),
+            "{dump}"
         );
     }
 }
