@@ -23,6 +23,7 @@ pub mod post_edit_track;
 pub mod precommit_check;
 pub mod precompact_warn;
 pub mod preread_edit_check;
+pub mod preread_reread;
 pub mod preread_size_check;
 pub mod rebuild_memory_graph;
 pub mod rm_workspace_guard;

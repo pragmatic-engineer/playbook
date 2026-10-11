@@ -6,6 +6,8 @@
 //! Claude toward Grep-first, then a targeted Read. Allowlists a small set of
 //! config/docs files that are usually needed whole.
 //!
+//! It also hosts the re-read guard (`preread_reread`).
+//!
 //! The only hook in the toolkit that returns a deny decision, so its output
 //! must match the retired shell original's `emit_pre_deny` byte for byte; see
 //! `crate::common::emit::emit_pre_deny`.
@@ -17,9 +19,9 @@ use std::io::Read;
 use std::path::Path;
 
 /// Matches LINE_LIMIT in the retired shell original.
-const LINE_LIMIT: u64 = 1000;
+pub(crate) const LINE_LIMIT: u64 = 1000;
 /// Matches BYTE_LIMIT in the retired shell original (200 KB).
-const BYTE_LIMIT: u64 = 204_800;
+pub(crate) const BYTE_LIMIT: u64 = 204_800;
 /// Most bytes scanned for a file already over `BYTE_LIMIT`, where the count
 /// only fills the message. Files at or under the limit are always counted whole.
 const SCAN_CAP: u64 = 4 * 1024 * 1024;
@@ -71,11 +73,15 @@ pub fn run(payload: &Payload) {
         return;
     }
 
+    if crate::hooks::preread_reread::guard(payload, file_path) {
+        return;
+    }
+
     let base = file_path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("");
-    if ALLOWLIST.iter().any(|pattern| glob_match(pattern, base)) {
+    if is_allowlisted(base) {
         return;
     }
 
@@ -103,6 +109,10 @@ pub fn run(payload: &Payload) {
         "This file is {lines} lines / {num_bytes} bytes, too large to Read in full.\n\nCheaper approaches:\n  1. Grep the file first to find the relevant line ranges.\n  2. Re-call Read with offset:<line> and limit:<rows> for the section you need.\n  3. If you really need the whole file (e.g. a small minified bundle), re-issue\n     with explicit offset:0, limit:9999 to override this guard.\n\nWhy this matters: full Reads on large files burn input tokens that almost never\npay back. Most callers only use 10-20% of the content."
     );
     emit_pre_deny(&reason);
+}
+
+pub(crate) fn is_allowlisted(base: &str) -> bool {
+    ALLOWLIST.iter().any(|pattern| glob_match(pattern, base))
 }
 
 struct Counted {
