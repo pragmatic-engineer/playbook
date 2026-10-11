@@ -8,6 +8,8 @@ agent: playbook:git
 
 # Create Pull Request
 
+**You are already the executing subagent for this command: run the steps below directly and never call the Skill tool to start it again.**
+
 Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `playbook:engineering-standards` (readiness, size) and `playbook:writing-style` (voice, banned words, no dashes). A PR opens as a **draft** by default, controlled by the `pr.draft` setting (`true`, the default, or `false`): `--ready` does not publish it immediately, it marks it for promotion to ready once `/playbook:finish-pull-request`'s self-review passes, since a human should never be the first reviewer of unreviewed code. With `pr.draft` set to `false`, the PR opens ready for review instead.
 
 This creates a **new** PR. If one already exists for the branch, this stops and points you at `/playbook:address-pr-comments` or `/playbook:quick-review`.

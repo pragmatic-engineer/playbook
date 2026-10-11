@@ -7,6 +7,8 @@ agent: playbook:auditor
 
 # Repo Audit & Improvement Plan.
 
+**You are already the executing subagent for this command: run the steps below directly and never call the Skill tool to start it again.**
+
 Start the audit now. Do not offer a menu or ask what to do; work the four phases below to completion and deliver the report. This command runs in an isolated subagent (`context: fork`); your final message is the only thing the main conversation sees. If you are reading this, you are already that subagent, mid-execution: never invoke the Skill tool for this command, or any command, to "start" it, since that only re-enters the execution you are already in.
 
 ## The audit
