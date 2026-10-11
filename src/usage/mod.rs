@@ -14,6 +14,7 @@ pub mod codex;
 pub mod db;
 pub mod entry;
 pub mod ingest;
+pub mod otlp;
 pub mod period;
 pub mod pricing;
 pub mod query;
