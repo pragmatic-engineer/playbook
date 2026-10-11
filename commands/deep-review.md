@@ -3,7 +3,7 @@ description: Use for substantial, risky, or cross-cutting PRs. A swarm of specia
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
 argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--this-pr] [--whole-stack] [--auto] [--ask] [--help]"
 model: opus
-effort: high
+effort: medium
 ---
 
 # Deep Review: Multi-Agent PR Review

@@ -3,7 +3,7 @@ description: Use when an idea needs to become a plan, whether it is still raw an
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill, WebFetch
 argument-hint: "[idea | PROJ-123 | ./prompt.md] [--ticket <id>] [--depth 0-2] [--adr] [--auto] [--auto-design] [--ask] [--help]"
 model: opus
-effort: high
+effort: medium
 ---
 
 # Plan: Discovery Through an Implementation Plan

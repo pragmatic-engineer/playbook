@@ -3,7 +3,7 @@ description: Use when a bug is small and well understood and the user says fix t
 allowed-tools: Bash, Read, Grep, Glob, Edit, Write, Skill, AskUserQuestion
 argument-hint: "[#issue | description] [--auto] [--ask]"
 model: sonnet
-effort: high
+effort: medium
 ---
 
 # Fix

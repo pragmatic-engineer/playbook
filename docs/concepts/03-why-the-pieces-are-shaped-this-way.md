@@ -49,6 +49,7 @@ Model choice sets how capable the work is. Effort sets how long it thinks. They 
 
 - A fixed procedure (commit, push, open a PR) needs a cheap model at **low** effort. Thinking harder does not improve it.
 - A review needs a strong model, and Opus at **medium** found as much as at high on the reviewer bench, so the reviewer ships at medium and a risky diff escalates to `xhigh` by variant.
+- Design and orchestration commands (`plan`, `adr`, `deep-review`, `address-pr-comments`, `learn-project`, `implement`, `fix`) also ship at **medium**. The maintainer chose that on 2026-10-11 using the reviewer, implementer and critic results, and no bench covers the design commands themselves. The `auditor` stays at **high** ([ADR-0023](../adr/0023-commands-at-medium.md)).
 - A small diff does not need an `xhigh` review, and a risky one might.
 
 The rule that produced the current values: **lower effort where the work is mechanical or already decided, and never where a missed finding is costly.** A model that is wrong costs a rerun. A reviewer that stops looking costs a bug in production. The table of every value and its reason is in [Effort policy](../internals/02-model-routing-and-memory.md#effort-policy).
