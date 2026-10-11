@@ -2,7 +2,7 @@
 description: Use to assess an unfamiliar or long-lived repo without changing it. Runs a four-phase read-only audit (map, findings, strategy, task plan), every claim cited to file:line.
 allowed-tools: Bash, Read, Grep, Glob, WebSearch, WebFetch
 context: fork
-agent: auditor
+agent: playbook:auditor
 ---
 
 # Repo Audit & Improvement Plan.
