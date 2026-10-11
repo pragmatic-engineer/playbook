@@ -21,6 +21,7 @@ enum PhaseState {
     Fail,
     Warn,
     Inconclusive,
+    Stuck,
     Stale,
 }
 
@@ -36,18 +37,19 @@ impl PhaseState {
             PhaseState::Fail => "FAIL",
             PhaseState::Warn => "WARN",
             PhaseState::Inconclusive => "INCONCLUSIVE",
+            PhaseState::Stuck => "STUCK",
             PhaseState::Stale => "STALE",
         }
     }
 
-    /// PASS and WARN both satisfy a gate; FAIL, INCONCLUSIVE, MISSING, and
-    /// STALE do not.
+    /// PASS and WARN both satisfy a gate; FAIL, STUCK, INCONCLUSIVE, MISSING,
+    /// and STALE do not.
     fn satisfied(&self) -> bool {
         matches!(self, PhaseState::Pass | PhaseState::Warn)
     }
 
     /// The `gate_phases.verdict` CHECK constraint (`src/gate/db.rs`)
-    /// guarantees a stored verdict is one of the four keywords matched
+    /// guarantees a stored verdict is one of the five keywords matched
     /// below; anything else can only reach here via a database written
     /// outside this crate, so it is treated as INCONCLUSIVE rather than
     /// panicking.
@@ -56,6 +58,7 @@ impl PhaseState {
             "PASS" => PhaseState::Pass,
             "FAIL" => PhaseState::Fail,
             "WARN" => PhaseState::Warn,
+            "STUCK" => PhaseState::Stuck,
             _ => PhaseState::Inconclusive,
         }
     }
@@ -174,7 +177,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn from_verdict_matches_all_four_keywords() {
+    fn from_verdict_matches_all_five_keywords() {
         // Arrange, Act, Assert
         assert_eq!(PhaseState::from_verdict("PASS"), PhaseState::Pass);
         assert_eq!(PhaseState::from_verdict("FAIL"), PhaseState::Fail);
@@ -183,6 +186,7 @@ mod tests {
             PhaseState::from_verdict("INCONCLUSIVE"),
             PhaseState::Inconclusive
         );
+        assert_eq!(PhaseState::from_verdict("STUCK"), PhaseState::Stuck);
     }
 
     #[test]
@@ -191,6 +195,7 @@ mod tests {
         assert!(PhaseState::Pass.satisfied());
         assert!(PhaseState::Warn.satisfied());
         assert!(!PhaseState::Fail.satisfied());
+        assert!(!PhaseState::Stuck.satisfied());
         assert!(!PhaseState::Inconclusive.satisfied());
         assert!(!PhaseState::Missing.satisfied());
     }
@@ -218,6 +223,7 @@ mod tests {
             PhaseState::Fail.label(),
             PhaseState::Warn.label(),
             PhaseState::Inconclusive.label(),
+            PhaseState::Stuck.label(),
         ];
 
         // Act, Assert

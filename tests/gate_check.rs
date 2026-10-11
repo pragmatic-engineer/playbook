@@ -275,9 +275,10 @@ fn warn_and_pass_mix_exits_zero_and_warn_line_is_distinguishable_from_pass() {
 #[test]
 fn each_single_phase_state_maps_to_its_own_exit_code() {
     // Arrange
-    let cases: [(&str, Option<&str>, Option<i32>); 4] = [
+    let cases: [(&str, Option<&str>, Option<i32>); 5] = [
         ("missing", None, Some(1)),
         ("fail", Some("FAIL"), Some(1)),
+        ("stuck", Some("STUCK"), Some(1)),
         ("warn", Some("WARN"), Some(0)),
         ("inconclusive", Some("INCONCLUSIVE"), Some(1)),
     ];
