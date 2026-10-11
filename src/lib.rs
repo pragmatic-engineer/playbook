@@ -31,7 +31,6 @@ pub mod models;
 pub mod planning;
 pub mod plans;
 pub mod pr;
-pub mod release;
 pub mod review;
 pub mod routing;
 pub mod sanitize;
@@ -374,14 +373,6 @@ pub enum Command {
         #[arg(long, value_name = "RANGE")]
         range: Option<String>,
     },
-    /// Render the files the release job pushes to the Homebrew tap and marketplace
-    ///
-    /// Run by the release workflow after a tag. Prints the file to stdout and
-    /// never touches the network.
-    Release {
-        #[command(subcommand)]
-        sub: ReleaseCommand,
-    },
     /// Check how well the review triage classifier sorts real pull requests
     ///
     /// Each case is a pull request with a known answer per review lens. Costs
@@ -630,22 +621,6 @@ pub enum EvalCommand {
         /// dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
         #[arg(long, value_delimiter = ',')]
         strategy: Vec<String>,
-    },
-}
-
-/// `playbook release` subcommands.
-#[derive(Subcommand, Debug)]
-pub enum ReleaseCommand {
-    /// Print the Homebrew formula for VERSION, filled from a SHA256SUMS file
-    RenderFormula { version: String, sums: PathBuf },
-    /// Print marketplace.json with the playbook plugin pinned to VERSION's archive
-    PinMarketplace {
-        version: String,
-        marketplace: PathBuf,
-        sha256: String,
-        /// The `owner/name` repository the archive URL points at
-        #[arg(long, default_value = "pragmatic-engineer/playbook")]
-        repo: String,
     },
 }
 

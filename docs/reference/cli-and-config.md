@@ -769,28 +769,6 @@ Reads the GitHub stack API, then falls back to the branch chain. Takes the argum
 
 - `<ARGS>`: The command's arguments, as one string
 
-### `playbook release`
-
-Render the files the release job pushes to the Homebrew tap and marketplace
-
-Run by the release workflow after a tag. Prints the file to stdout and never touches the network.
-
-Subcommands: `pin-marketplace`, `render-formula`
-
-### `playbook release pin-marketplace`
-
-Print marketplace.json with the playbook plugin pinned to VERSION's archive
-
-- `<MARKETPLACE>`
-- `<SHA256>`
-- `--repo <REPO>`: The `owner/name` repository the archive URL points at
-
-### `playbook release render-formula`
-
-Print the Homebrew formula for VERSION, filled from a SHA256SUMS file
-
-- `<SUMS>`
-
 ### `playbook review`
 
 Setup for the review commands
