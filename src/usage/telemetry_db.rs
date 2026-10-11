@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS telemetry_requests (
     effort TEXT NOT NULL DEFAULT '',
     agent_name TEXT NOT NULL DEFAULT '',
     skill_name TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER NOT NULL DEFAULT 0,
     input_tokens INTEGER NOT NULL CHECK(input_tokens >= 0),
     output_tokens INTEGER NOT NULL CHECK(output_tokens >= 0),
     cache_creation_tokens INTEGER NOT NULL CHECK(cache_creation_tokens >= 0),
@@ -44,13 +45,38 @@ CREATE TABLE IF NOT EXISTS session_reconcile (
     transcript_cost REAL NOT NULL,
     note TEXT NOT NULL,
     updated_at INTEGER NOT NULL
-);";
+);
+CREATE TABLE IF NOT EXISTS telemetry_tools (
+    session_id TEXT NOT NULL,
+    tool_use_id TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    tool_name TEXT NOT NULL,
+    success INTEGER NOT NULL CHECK(success IN (0, 1)),
+    duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0),
+    PRIMARY KEY (session_id, tool_use_id)
+);
+CREATE INDEX IF NOT EXISTS telemetry_tools_by_time ON telemetry_tools (timestamp);
+CREATE TABLE IF NOT EXISTS telemetry_errors (
+    session_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    timestamp INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    status_code INTEGER NOT NULL CHECK(status_code >= 0),
+    attempt INTEGER NOT NULL CHECK(attempt >= 0),
+    duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0),
+    PRIMARY KEY (session_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS telemetry_errors_by_time ON telemetry_errors (timestamp);";
 
 const DOWN_SQL: &str = "
 DROP INDEX IF EXISTS telemetry_requests_by_time;
 DROP TABLE IF EXISTS telemetry_requests;
 DROP TABLE IF EXISTS session_sources;
-DROP TABLE IF EXISTS session_reconcile;";
+DROP TABLE IF EXISTS session_reconcile;
+DROP INDEX IF EXISTS telemetry_tools_by_time;
+DROP TABLE IF EXISTS telemetry_tools;
+DROP INDEX IF EXISTS telemetry_errors_by_time;
+DROP TABLE IF EXISTS telemetry_errors;";
 
 /// Where a session's numbers come from. A session with no recorded source is
 /// read from transcripts, so history before telemetry needs no backfill.
@@ -93,31 +119,63 @@ pub struct TelemetryRequest {
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
     pub cost_usd: f64,
+    /// How long the API call took, in milliseconds.
+    pub duration_ms: u64,
+}
+
+/// One tool call as reported by telemetry. Only the tool name, the outcome
+/// and the time are kept, never the input or the result.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TelemetryTool {
+    pub session_id: String,
+    pub tool_use_id: String,
+    pub timestamp: i64,
+    pub tool_name: String,
+    pub success: bool,
+    pub duration_ms: u64,
+}
+
+/// One failed API attempt. The error text is never read.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TelemetryError {
+    pub session_id: String,
+    pub sequence: u64,
+    pub timestamp: i64,
+    pub model: String,
+    pub status_code: u64,
+    /// 1 for the first try; 2 or more means a retry was already made.
+    pub attempt: u64,
+    pub duration_ms: u64,
 }
 
 /// Creates the telemetry tables. Safe to run any number of times.
 pub fn migrate_up(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(UP_SQL)
         .map_err(|e| format!("failed to create telemetry tables: {e}"))?;
-    ensure_skill_column(conn)
+    ensure_columns(conn)
 }
 
-/// Tables made before skill attribution have no `skill_name` column.
-pub(super) fn ensure_skill_column(conn: &Connection) -> Result<(), String> {
+/// Tables made before a column existed lack it.
+pub(super) fn ensure_columns(conn: &Connection) -> Result<(), String> {
+    ensure_column(conn, "skill_name", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "duration_ms", "INTEGER NOT NULL DEFAULT 0")
+}
+
+fn ensure_column(conn: &Connection, column: &str, ddl: &str) -> Result<(), String> {
     let mut stmt = conn
         .prepare("PRAGMA table_info(telemetry_requests)")
         .map_err(|e| format!("failed to inspect telemetry tables: {e}"))?;
     let has = stmt
         .query_map([], |r| r.get::<_, String>(1))
         .map_err(|e| format!("failed to inspect telemetry tables: {e}"))?
-        .any(|c| c.is_ok_and(|n| n == "skill_name"));
+        .any(|c| c.is_ok_and(|n| n == column));
     if has {
         return Ok(());
     }
-    conn.execute_batch(
-        "ALTER TABLE telemetry_requests ADD COLUMN skill_name TEXT NOT NULL DEFAULT ''",
-    )
-    .map_err(|e| format!("failed to add the skill column: {e}"))
+    conn.execute_batch(&format!(
+        "ALTER TABLE telemetry_requests ADD COLUMN {column} {ddl}"
+    ))
+    .map_err(|e| format!("failed to add the {column} column: {e}"))
 }
 
 /// Drops the telemetry tables and nothing else.
@@ -141,8 +199,8 @@ pub fn insert_request(conn: &Connection, r: &TelemetryRequest) -> Result<usize, 
     conn.execute(
         "INSERT OR IGNORE INTO telemetry_requests (session_id, request_id, timestamp, model,
             effort, agent_name, skill_name, input_tokens, output_tokens,
-            cache_creation_tokens, cache_read_tokens, cost_usd)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            cache_creation_tokens, cache_read_tokens, cost_usd, duration_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             r.session_id,
             r.request_id,
@@ -155,10 +213,184 @@ pub fn insert_request(conn: &Connection, r: &TelemetryRequest) -> Result<usize, 
             to_i64(r.output_tokens),
             to_i64(r.cache_creation_tokens),
             to_i64(r.cache_read_tokens),
-            cost
+            cost,
+            to_i64(r.duration_ms)
         ],
     )
     .map_err(|e| format!("failed to insert telemetry request {}: {e}", r.request_id))
+}
+
+/// Stores a tool call. Keyed by session and tool use id, so a redelivered
+/// batch is a no-op.
+pub fn insert_tool(conn: &Connection, t: &TelemetryTool) -> Result<usize, String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO telemetry_tools
+            (session_id, tool_use_id, timestamp, tool_name, success, duration_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            t.session_id,
+            t.tool_use_id,
+            t.timestamp,
+            t.tool_name,
+            i64::from(t.success),
+            to_i64(t.duration_ms)
+        ],
+    )
+    .map_err(|e| format!("failed to insert telemetry tool {}: {e}", t.tool_use_id))
+}
+
+/// Stores a failed API attempt. Keyed by session and event sequence.
+pub fn insert_error(conn: &Connection, e: &TelemetryError) -> Result<usize, String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO telemetry_errors
+            (session_id, sequence, timestamp, model, status_code, attempt, duration_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            e.session_id,
+            to_i64(e.sequence),
+            e.timestamp,
+            e.model,
+            to_i64(e.status_code),
+            to_i64(e.attempt),
+            to_i64(e.duration_ms)
+        ],
+    )
+    .map_err(|err| format!("failed to insert telemetry error: {err}"))
+}
+
+/// Tool calls of one tool in a window.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ToolStat {
+    pub name: String,
+    pub calls: u64,
+    pub failures: u64,
+    pub total_ms: u64,
+    pub max_ms: u64,
+}
+
+impl ToolStat {
+    /// Failures over calls, 0 to 1.
+    pub fn error_rate(&self) -> f64 {
+        if self.calls == 0 {
+            0.0
+        } else {
+            self.failures as f64 / self.calls as f64
+        }
+    }
+
+    pub fn avg_ms(&self) -> f64 {
+        if self.calls == 0 {
+            0.0
+        } else {
+            self.total_ms as f64 / self.calls as f64
+        }
+    }
+}
+
+/// The tools used in `[since, until)`, busiest first, then by name.
+pub fn tool_stats(conn: &Connection, since: i64, until: i64) -> Result<Vec<ToolStat>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT CASE WHEN tool_name = '' THEN 'unknown' ELSE tool_name END AS n,
+                    COUNT(*), SUM(1 - success), SUM(duration_ms), MAX(duration_ms)
+             FROM telemetry_tools WHERE timestamp >= ?1 AND timestamp < ?2
+             GROUP BY n ORDER BY COUNT(*) DESC, n",
+        )
+        .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
+    let rows = stmt
+        .query_map(params![since, until], |r| {
+            let n = |i: usize| -> rusqlite::Result<u64> {
+                Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0))
+            };
+            Ok(ToolStat {
+                name: r.get(0)?,
+                calls: n(1)?,
+                failures: n(2)?,
+                total_ms: n(3)?,
+                max_ms: n(4)?,
+            })
+        })
+        .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("failed to read telemetry tools: {e}"))
+}
+
+/// The health figures of a window: API calls and their failures, tool calls,
+/// and the time spent waiting on the API and on tools.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Health {
+    pub requests: u64,
+    pub api_ms: u64,
+    pub errors: u64,
+    /// Failed attempts that came after at least one earlier try.
+    pub retried: u64,
+    pub tool_calls: u64,
+    pub tool_failures: u64,
+    pub tool_ms: u64,
+}
+
+impl Health {
+    /// Whether the window has any telemetry row of any kind.
+    pub fn is_empty(&self) -> bool {
+        self.requests == 0 && self.errors == 0 && self.tool_calls == 0
+    }
+
+    /// Time waiting on the API or on tools. This is a floor for the time
+    /// Claude Code was working, not its own active time metric.
+    pub fn busy_ms(&self) -> u64 {
+        self.api_ms + self.tool_ms
+    }
+
+    /// Failed attempts over all attempts (requests that finished plus
+    /// failures), 0 to 1.
+    pub fn api_error_rate(&self) -> f64 {
+        ratio(self.errors, self.requests + self.errors)
+    }
+
+    pub fn tool_error_rate(&self) -> f64 {
+        ratio(self.tool_failures, self.tool_calls)
+    }
+}
+
+fn ratio(part: u64, whole: u64) -> f64 {
+    if whole == 0 {
+        0.0
+    } else {
+        part as f64 / whole as f64
+    }
+}
+
+/// The figures of `[since, until)`.
+pub fn health(conn: &Connection, since: i64, until: i64) -> Result<Health, String> {
+    let one = |sql: &str| -> Result<Vec<u64>, String> {
+        conn.query_row(sql, params![since, until], |r| {
+            (0..r.as_ref().column_count())
+                .map(|i| Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0)))
+                .collect()
+        })
+        .map_err(|e| format!("failed to read telemetry health: {e}"))
+    };
+    let req = one(
+        "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM telemetry_requests
+                   WHERE timestamp >= ?1 AND timestamp < ?2",
+    )?;
+    let err = one(
+        "SELECT COUNT(*), COALESCE(SUM(attempt > 1), 0) FROM telemetry_errors
+                   WHERE timestamp >= ?1 AND timestamp < ?2",
+    )?;
+    let tool = one(
+        "SELECT COUNT(*), COALESCE(SUM(1 - success), 0), COALESCE(SUM(duration_ms), 0)
+                    FROM telemetry_tools WHERE timestamp >= ?1 AND timestamp < ?2",
+    )?;
+    Ok(Health {
+        requests: req[0],
+        api_ms: req[1],
+        errors: err[0],
+        retried: err[1],
+        tool_calls: tool[0],
+        tool_failures: tool[1],
+        tool_ms: tool[2],
+    })
 }
 
 pub fn count_requests(conn: &Connection) -> Result<i64, String> {
@@ -365,6 +597,8 @@ mod tests {
         assert!(!table_exists(&conn, "telemetry_requests"));
         assert!(!table_exists(&conn, "session_sources"));
         assert!(!table_exists(&conn, "session_reconcile"));
+        assert!(!table_exists(&conn, "telemetry_tools"));
+        assert!(!table_exists(&conn, "telemetry_errors"));
         assert!(table_exists(&conn, "usage_events"));
         migrate_up(&conn).unwrap();
         assert_eq!(count_requests(&conn).unwrap(), 0);
@@ -453,5 +687,110 @@ mod tests {
         migrate_up(&conn).unwrap();
         assert_eq!(count_requests(&conn).unwrap(), 1);
         assert!(skill_groups(&conn, 0, 10).unwrap().is_empty());
+    }
+
+    fn tool(id: &str, name: &str, ok: bool, ms: u64, ts: i64) -> TelemetryTool {
+        TelemetryTool {
+            session_id: "s1".into(),
+            tool_use_id: id.into(),
+            timestamp: ts,
+            tool_name: name.into(),
+            success: ok,
+            duration_ms: ms,
+        }
+    }
+
+    fn failure(seq: u64, attempt: u64, ts: i64) -> TelemetryError {
+        TelemetryError {
+            session_id: "s1".into(),
+            sequence: seq,
+            timestamp: ts,
+            status_code: 529,
+            attempt,
+            duration_ms: 100,
+            ..TelemetryError::default()
+        }
+    }
+
+    #[test]
+    fn tool_and_error_rows_dedupe_on_their_keys() {
+        let conn = mem();
+        assert_eq!(
+            insert_tool(&conn, &tool("t1", "Bash", true, 5, 1)).unwrap(),
+            1
+        );
+        assert_eq!(
+            insert_tool(&conn, &tool("t1", "Bash", true, 5, 1)).unwrap(),
+            0
+        );
+        assert_eq!(insert_error(&conn, &failure(1, 1, 1)).unwrap(), 1);
+        assert_eq!(insert_error(&conn, &failure(1, 1, 1)).unwrap(), 0);
+        assert_eq!(insert_error(&conn, &failure(2, 1, 1)).unwrap(), 1);
+    }
+
+    #[test]
+    fn tool_stats_give_calls_failures_and_latency_busiest_first() {
+        let conn = mem();
+        for t in [
+            tool("a", "Bash", true, 100, 10),
+            tool("b", "Bash", false, 300, 20),
+            tool("c", "Read", true, 10, 30),
+            tool("d", "Read", true, 10, 5_000),
+            tool("e", "", true, 1, 40),
+        ] {
+            insert_tool(&conn, &t).unwrap();
+        }
+        let stats = tool_stats(&conn, 0, 1_000).unwrap();
+        let names: Vec<&str> = stats.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["Bash", "Read", "unknown"]);
+        let bash = &stats[0];
+        assert_eq!((bash.calls, bash.failures, bash.max_ms), (2, 1, 300));
+        assert_eq!(bash.avg_ms(), 200.0);
+        assert_eq!(bash.error_rate(), 0.5);
+        assert_eq!(
+            stats[1].calls, 1,
+            "the call outside the window is not counted"
+        );
+        assert!(tool_stats(&conn, 9_000, 9_100).unwrap().is_empty());
+    }
+
+    #[test]
+    fn health_sums_requests_errors_retries_and_busy_time() {
+        let conn = mem();
+        let mut r = request("r1");
+        r.duration_ms = 1_000;
+        insert_request(&conn, &r).unwrap();
+        insert_tool(&conn, &tool("a", "Bash", false, 500, 10)).unwrap();
+        insert_error(&conn, &failure(1, 1, 10)).unwrap();
+        insert_error(&conn, &failure(2, 2, 10)).unwrap();
+        let h = health(&conn, 0, 1_000).unwrap();
+        assert_eq!((h.requests, h.errors, h.retried), (1, 2, 1));
+        assert_eq!((h.tool_calls, h.tool_failures), (1, 1));
+        assert_eq!(h.busy_ms(), 1_500);
+        assert!((h.api_error_rate() - 2.0 / 3.0).abs() < 1e-9);
+        assert_eq!(h.tool_error_rate(), 1.0);
+        assert!(!h.is_empty());
+        let none = health(&conn, 5_000, 6_000).unwrap();
+        assert!(none.is_empty());
+        assert_eq!((none.api_error_rate(), none.tool_error_rate()), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_table_from_before_slice_two_gains_the_duration_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE telemetry_requests (
+                session_id TEXT NOT NULL, request_id TEXT NOT NULL, timestamp INTEGER NOT NULL,
+                model TEXT NOT NULL, effort TEXT NOT NULL DEFAULT '',
+                agent_name TEXT NOT NULL DEFAULT '', skill_name TEXT NOT NULL DEFAULT '',
+                input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+                cache_creation_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL,
+                cost_usd REAL NOT NULL, PRIMARY KEY (session_id, request_id));
+             INSERT INTO telemetry_requests VALUES ('s','r',1,'m','','','',1,1,0,0,0.5);",
+        )
+        .unwrap();
+        migrate_up(&conn).unwrap();
+        assert_eq!(health(&conn, 0, 10).unwrap().api_ms, 0);
+        insert_request(&conn, &request("r2")).unwrap();
     }
 }

@@ -96,7 +96,7 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
         BUSY_TIMEOUT,
     )
     .map_err(|e| format!("failed to create telemetry schema: {e}"))?;
-    super::telemetry_db::ensure_skill_column(&conn)?;
+    super::telemetry_db::ensure_columns(&conn)?;
     Ok(conn)
 }
 
@@ -500,7 +500,9 @@ mod tests {
             vec![
                 "session_reconcile",
                 "session_sources",
+                "telemetry_errors",
                 "telemetry_requests",
+                "telemetry_tools",
                 "tool_invocation_events",
                 "usage_events",
                 "usage_watermarks"

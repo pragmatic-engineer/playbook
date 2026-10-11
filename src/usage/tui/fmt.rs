@@ -56,6 +56,36 @@ pub fn signed_count(n: f64) -> String {
     }
 }
 
+/// `0%`, `12%`, `3.5%`: a share from 0 to 1.
+pub fn percent(fraction: f64) -> String {
+    let p = fraction * 100.0;
+    if p == 0.0 {
+        "0%".to_string()
+    } else if p < 10.0 {
+        format!("{p:.1}%")
+    } else {
+        format!("{p:.0}%")
+    }
+}
+
+/// `507ms`, `1.2s`, `2m05s`, `1h03m`.
+pub fn duration_ms(ms: f64) -> String {
+    let ms = ms.max(0.0);
+    if ms < 1_000.0 {
+        return format!("{ms:.0}ms");
+    }
+    let secs = ms / 1_000.0;
+    if secs < 60.0 {
+        return format!("{secs:.1}s");
+    }
+    let total = secs.round() as u64;
+    if total < 3_600 {
+        format!("{}m{:02}s", total / 60, total % 60)
+    } else {
+        format!("{}h{:02}m", total / 3_600, total % 3_600 / 60)
+    }
+}
+
 /// `+21.6%`, `-4.0%`, `+250%`. With no previous value there is no percent: a
 /// current value that grew from nothing reads `new`, nothing against nothing `-`.
 pub fn signed_percent(percent: Option<f64>, grew: bool) -> String {
@@ -201,5 +231,18 @@ mod tests {
         assert_eq!(fit("short", 10), "short");
         assert_eq!(fit("abcdefgh", 5), "abcd~");
         assert_eq!(fit("abc", 0), "");
+    }
+
+    #[test]
+    fn percent_and_durations_read_at_a_glance() {
+        assert_eq!(percent(0.0), "0%");
+        assert_eq!(percent(0.035), "3.5%");
+        assert_eq!(percent(0.12), "12%");
+        assert_eq!(percent(1.0), "100%");
+        assert_eq!(duration_ms(507.0), "507ms");
+        assert_eq!(duration_ms(1_234.0), "1.2s");
+        assert_eq!(duration_ms(125_000.0), "2m05s");
+        assert_eq!(duration_ms(3_780_000.0), "1h03m");
+        assert_eq!(duration_ms(-4.0), "0ms");
     }
 }

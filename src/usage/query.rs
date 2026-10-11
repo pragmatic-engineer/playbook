@@ -302,6 +302,38 @@ pub fn load_skills(conn: &Connection, range: Range, now: i64) -> Result<AgentVie
     Ok(AgentView { rows, cost_usd })
 }
 
+/// Tool latency and errors, API errors and retries, and busy time from
+/// telemetry, for the range and, for a period, the previous span of the same
+/// length. All of it comes from telemetry, so a range with no rows is empty.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HealthView {
+    pub tools: Vec<super::telemetry_db::ToolStat>,
+    pub tools_before: Vec<super::telemetry_db::ToolStat>,
+    pub now: super::telemetry_db::Health,
+    /// `None` for a range that is not a period.
+    pub before: Option<super::telemetry_db::Health>,
+}
+
+pub fn load_health(conn: &Connection, range: Range, now: i64) -> Result<HealthView, String> {
+    use super::telemetry_db::{health, tool_stats};
+    if let Some(period) = super::period::Period::of_range(range) {
+        let w = period.windows(now);
+        return Ok(HealthView {
+            tools: tool_stats(conn, w.current.start, w.current.end)?,
+            tools_before: tool_stats(conn, w.previous.start, w.previous.end)?,
+            now: health(conn, w.current.start, w.current.end)?,
+            before: Some(health(conn, w.previous.start, w.previous.end)?),
+        });
+    }
+    let (since, until) = window_seconds(range, now);
+    Ok(HealthView {
+        tools: tool_stats(conn, since, until)?,
+        tools_before: Vec::new(),
+        now: health(conn, since, until)?,
+        before: None,
+    })
+}
+
 fn window_seconds(range: Range, now: i64) -> (i64, i64) {
     match range.days(now) {
         Some((first, past)) => (
@@ -877,5 +909,31 @@ mod tests {
         assert_eq!(v.burn.len(), BURN_MINUTES as usize);
         assert!((v.burn.iter().map(|b| b.1).sum::<f64>() - 0.5).abs() < 1e-9);
         assert_eq!(v.feed.len(), 1);
+    }
+
+    #[test]
+    fn health_for_a_period_compares_the_same_span_of_the_previous_one() {
+        use crate::usage::telemetry_db::{insert_tool, migrate_up, TelemetryTool};
+        let conn = Connection::open_in_memory().unwrap();
+        migrate_up(&conn).unwrap();
+        let tool = |id: &str, ts: i64| TelemetryTool {
+            session_id: "s".into(),
+            tool_use_id: id.into(),
+            timestamp: ts,
+            tool_name: "Bash".into(),
+            success: true,
+            duration_ms: 10,
+        };
+        let day = NOW.div_euclid(SECONDS_PER_DAY) * SECONDS_PER_DAY;
+        insert_tool(&conn, &tool("today", day)).unwrap();
+        insert_tool(&conn, &tool("yesterday", day - SECONDS_PER_DAY + 60)).unwrap();
+        insert_tool(&conn, &tool("old", day - 3 * SECONDS_PER_DAY)).unwrap();
+        let v = load_health(&conn, Range::Today, NOW).unwrap();
+        assert_eq!(v.now.tool_calls, 1);
+        assert_eq!(v.before.as_ref().unwrap().tool_calls, 1);
+        assert_eq!(v.tools_before.len(), 1);
+        let v = load_health(&conn, Range::LastDays(30), NOW).unwrap();
+        assert_eq!(v.now.tool_calls, 3);
+        assert!(v.before.is_none() && v.tools_before.is_empty());
     }
 }
