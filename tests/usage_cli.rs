@@ -347,3 +347,58 @@ fn the_week_start_key_moves_the_week_in_the_json_range() {
     let bad = home.run(&["config", "set", "--global", "usage.weekStart", "friday"]);
     assert!(!bad.status.success());
 }
+
+#[test]
+fn usage_status_says_not_running_and_prints_json_without_a_token() {
+    let home = Home::new("status-none");
+
+    let text = home.run(&["usage", "status"]);
+    let json = home.run(&["usage", "status", "--json"]);
+
+    assert!(text.status.success() && json.status.success());
+    let text = stdout(&text);
+    assert!(text.contains("collector: not running"), "{text}");
+    assert!(text.contains("last event: none"), "{text}");
+    let doc: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
+    assert_eq!(doc["running"], false);
+    assert_eq!(doc["requests"], 0);
+    assert!(doc.get("token").is_none());
+}
+
+#[test]
+fn a_collector_is_seen_by_status_and_idles_out_even_while_status_polls_it() {
+    let home = Home::new("status-live");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["usage", "collect", "--port", "0", "--idle-seconds", "2"])
+        .env("HOME", &home.0)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let started = std::time::Instant::now();
+    let mut seen = false;
+    // Keep probing for a while: probes must not keep the collector alive.
+    while started.elapsed() < std::time::Duration::from_millis(1500) {
+        let json = home.run(&["usage", "status", "--json"]);
+        let doc: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
+        seen |= doc["running"] == true && doc["idle_seconds"] == 2;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(seen, "status never saw the running collector");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let status = loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            break s;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            panic!("the collector did not stop by itself while status polled it");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    assert!(status.success());
+    let after = stdout(&home.run(&["usage", "status"]));
+    assert!(after.contains("not running"), "{after}");
+}

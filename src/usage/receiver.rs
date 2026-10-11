@@ -342,7 +342,6 @@ pub fn serve(
             }
             Err(e) => return Err(e),
         };
-        last = Instant::now();
         let _ = stream.set_nonblocking(false);
         let _ = stream.set_read_timeout(Some(READ_DEADLINE));
         let _ = stream.set_write_timeout(Some(READ_DEADLINE));
@@ -353,6 +352,10 @@ pub fn serve(
         let check = |m: &str, p: &str, h: &[(String, String)]| precheck(cfg, m, p, h);
         match read_request(&mut stream, &check) {
             Ok(req) => {
+                // Only a real request keeps the collector alive. A bare
+                // connect (a liveness probe from `cc` or `usage status`) or a
+                // rejected request does not, so polling cannot hold it open.
+                last = Instant::now();
                 let (status, body) = dispatch(conn, &req, now());
                 respond(&mut stream, status, &body);
             }
@@ -659,5 +662,32 @@ mod tests {
             !dump.contains("secret") && !dump.contains("rm -rf"),
             "{dump}"
         );
+    }
+
+    #[test]
+    fn a_probe_that_sends_nothing_does_not_keep_the_server_alive() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate_up(&conn).unwrap();
+        let listener = bind(0).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let c = Config {
+            token: None,
+            idle: Some(Duration::from_millis(1200)),
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        let prober = std::thread::spawn(move || {
+            while !flag.load(Ordering::SeqCst) {
+                let _ = std::net::TcpStream::connect(("127.0.0.1", port));
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let started = Instant::now();
+        let why = serve(&listener, &conn, &c, &stop, || 1).unwrap();
+        done.store(true, Ordering::SeqCst);
+        prober.join().unwrap();
+        assert_eq!(why, "idle");
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 }

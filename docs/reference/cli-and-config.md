@@ -1100,13 +1100,13 @@ Example: `playbook usage --range today`
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
 - `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
 
-Subcommands: `collect`, `ingest`
+Subcommands: `collect`, `ingest`, `status`
 
 ### `playbook usage collect`
 
 Run the local OpenTelemetry receiver in the foreground
 
-Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free port when that one is taken) and stores API request cost and token rows from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector. It stops by itself after the idle time. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself.
+Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free port when that one is taken) and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector (`playbook usage status` shows it too). It stops by itself after the idle time, counted from the last real telemetry request, so a status check does not keep it alive. Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself.
 
 Example: `playbook usage collect --idle-seconds 1800`
 
@@ -1116,6 +1116,16 @@ Example: `playbook usage collect --idle-seconds 1800`
 ### `playbook usage ingest`
 
 Read new session history into the usage store (deprecated: use `playbook usage --summary`)
+
+### `playbook usage status`
+
+Show whether the telemetry receiver is running
+
+Prints the pid, port, idle limit, how many telemetry rows are stored (API requests, tool calls, API errors) and the time of the newest event. It starts nothing and never prints the token. With `--json` it prints the same as JSON. Exit code 0 whether or not a receiver runs.
+
+Example: `playbook usage status --json`
+
+- `--json`: Print the status as JSON
 
 ### `playbook version`
 

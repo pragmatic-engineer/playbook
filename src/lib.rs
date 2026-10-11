@@ -891,10 +891,13 @@ pub enum UsageCommand {
     /// Run the local OpenTelemetry receiver in the foreground
     ///
     /// Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free
-    /// port when that one is taken) and stores API request cost and token rows
-    /// from Claude Code's JSON telemetry. Prompts, tool content, paths, emails
-    /// and user ids are never stored. A second start reports the running
-    /// collector. It stops by itself after the idle time. Sessions that sent no
+    /// port when that one is taken) and stores API request cost and token rows,
+    /// tool call timings and API errors from Claude Code's JSON telemetry.
+    /// Prompts, tool content, paths, emails and user ids are never stored. A
+    /// second start reports the running collector (`playbook usage status`
+    /// shows it too). It stops by itself after the idle time, counted from the
+    /// last real telemetry request, so a status check does not keep it alive.
+    /// Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no
     /// telemetry are read from transcripts as before. While it runs, `cc`
     /// points its sessions at it unless `usage.telemetry` is `off` or you set
     /// telemetry yourself.
@@ -907,6 +910,19 @@ pub enum UsageCommand {
         /// Stop after this many seconds with no request; 0 means never
         #[arg(long, default_value_t = 600)]
         idle_seconds: u64,
+    },
+    /// Show whether the telemetry receiver is running
+    ///
+    /// Prints the pid, port, idle limit, how many telemetry rows are stored
+    /// (API requests, tool calls, API errors) and the time of the newest
+    /// event. It starts nothing and never prints the token. With `--json` it
+    /// prints the same as JSON. Exit code 0 whether or not a receiver runs.
+    ///
+    /// Example: `playbook usage status --json`
+    Status {
+        /// Print the status as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 

@@ -30,12 +30,19 @@ use std::time::Duration;
 pub const DEFAULT_PORT: u16 = 4318;
 pub const DEFAULT_IDLE_SECONDS: u64 = 600;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct State {
     /// 0 when no collector is running.
     pub pid: u32,
     pub port: u16,
     pub token: String,
+    /// When the collector started, in unix seconds. 0 in a file written by an
+    /// older version.
+    #[serde(default)]
+    pub started_at: i64,
+    /// The idle limit it runs with, in seconds; 0 means never.
+    #[serde(default)]
+    pub idle_seconds: u64,
 }
 
 pub fn state_path(paths: &Paths) -> PathBuf {
@@ -96,6 +103,112 @@ fn new_token() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// What `playbook usage status` reports.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Status {
+    pub running: bool,
+    pub pid: Option<u32>,
+    /// The port of the running collector, else the one it used last.
+    pub port: Option<u16>,
+    pub started_at: Option<i64>,
+    pub idle_seconds: Option<u64>,
+    pub requests: i64,
+    pub tool_calls: i64,
+    pub api_errors: i64,
+    /// Time of the newest stored event, unix seconds.
+    pub last_event: Option<i64>,
+}
+
+/// Reads the collector state file and the telemetry row counts. Starts
+/// nothing, and never shows the token.
+pub fn status(paths: &Paths) -> Result<Status, String> {
+    let state = read_state(&state_path(paths));
+    let live = state.as_ref().filter(|s| running(s));
+    let (mut requests, mut tool_calls, mut api_errors, mut last_event) = (0, 0, 0, None);
+    if paths.db.exists() {
+        let conn = super::db::open_db(&paths.db)?;
+        let count = |table: &str| -> Result<(i64, Option<i64>), String> {
+            conn.query_row(
+                &format!("SELECT COUNT(*), MAX(timestamp) FROM {table}"),
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| format!("failed to read {table}: {e}"))
+        };
+        let (r, tr) = count("telemetry_requests")?;
+        let (t, tt) = count("telemetry_tools")?;
+        let (e, te) = count("telemetry_errors")?;
+        (requests, tool_calls, api_errors) = (r, t, e);
+        last_event = [tr, tt, te].into_iter().flatten().max();
+    }
+    Ok(Status {
+        running: live.is_some(),
+        pid: live.map(|s| s.pid),
+        port: state.as_ref().map(|s| s.port),
+        started_at: live.map(|s| s.started_at).filter(|t| *t > 0),
+        idle_seconds: live.map(|s| s.idle_seconds),
+        requests,
+        tool_calls,
+        api_errors,
+        last_event,
+    })
+}
+
+impl Status {
+    /// The text a person reads.
+    pub fn text(&self, now: i64) -> String {
+        use crate::common::time::iso_utc;
+        let mut lines = Vec::new();
+        match (self.running, self.pid, self.port) {
+            (true, Some(pid), Some(port)) => {
+                lines.push(format!(
+                    "collector: running (pid {pid}) on 127.0.0.1:{port}"
+                ));
+                if let Some(t) = self.started_at {
+                    lines.push(format!("started: {}", iso_utc(t)));
+                }
+                lines.push(match self.idle_seconds {
+                    Some(0) | None => "idle shutdown: never".to_string(),
+                    Some(s) => format!("idle shutdown: after {s} s with no request"),
+                });
+            }
+            _ => {
+                lines.push("collector: not running".to_string());
+                lines.push(
+                    "start it with `playbook usage collect`, or see the usage dashboard guide for a background setup"
+                        .to_string(),
+                );
+                if let Some(port) = self.port {
+                    lines.push(format!("last port: {port}"));
+                }
+            }
+        }
+        lines.push(format!(
+            "rows: {} requests, {} tool calls, {} api errors",
+            self.requests, self.tool_calls, self.api_errors
+        ));
+        lines.push(match self.last_event {
+            Some(t) => format!(
+                "last event: {} ({} ago)",
+                iso_utc(t),
+                age(now.saturating_sub(t))
+            ),
+            None => "last event: none".to_string(),
+        });
+        lines.join("\n")
+    }
+}
+
+/// `45s`, `7m`, `3h`, `2d`.
+fn age(seconds: i64) -> String {
+    match seconds.max(0) {
+        s if s < 60 => format!("{s}s"),
+        s if s < 3_600 => format!("{}m", s / 60),
+        s if s < 86_400 => format!("{}h", s / 3_600),
+        s => format!("{}d", s / 86_400),
+    }
+}
+
 /// Runs the collector in the foreground until idle or stopped. `port` is an
 /// explicit request (an error when busy); `None` prefers the last port, then
 /// the default, then any free port.
@@ -134,6 +247,8 @@ pub fn run_collect(
         pid: std::process::id(),
         port: actual,
         token: token.clone(),
+        started_at: crate::common::time::now_secs(),
+        idle_seconds,
     };
     write_state(&path, &state)?;
     let cfg = Config {
@@ -172,6 +287,7 @@ mod tests {
             pid: 0,
             port: 1,
             token: "t".into(),
+            ..State::default()
         };
         assert!(!running(&dead));
         assert!(pid_alive(std::process::id()));
@@ -201,6 +317,7 @@ mod tests {
             pid: std::process::id(),
             port,
             token: "t".into(),
+            ..State::default()
         };
         std::fs::create_dir_all(state_path(&p).parent().unwrap()).unwrap();
         write_state(&state_path(&p), &state).unwrap();
@@ -217,6 +334,7 @@ mod tests {
             pid: 999_999,
             port: 1,
             token: "keep".into(),
+            ..State::default()
         };
         write_state(&state_path(&p), &stale).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
@@ -250,5 +368,103 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn status_with_nothing_set_up_says_not_running_and_creates_no_files() {
+        let p = paths("collector-status-none");
+        let s = status(&p).unwrap();
+        assert!(!s.running && s.pid.is_none() && s.last_event.is_none());
+        assert_eq!((s.requests, s.tool_calls, s.api_errors), (0, 0, 0));
+        assert!(!p.db.exists(), "status must not create the database");
+        let text = s.text(1_000);
+        assert!(
+            text.contains("not running") && text.contains("last event: none"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn status_reports_a_live_collector_its_rows_and_the_last_event_without_the_token() {
+        use crate::usage::telemetry_db::{
+            insert_request, insert_tool, TelemetryRequest, TelemetryTool,
+        };
+        let p = paths("collector-status-live");
+        let listener = bind(0).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::fs::create_dir_all(state_path(&p).parent().unwrap()).unwrap();
+        let state = State {
+            pid: std::process::id(),
+            port,
+            token: "supersecrettoken".into(),
+            started_at: 1_760_000_000,
+            idle_seconds: 600,
+        };
+        write_state(&state_path(&p), &state).unwrap();
+        let conn = crate::usage::db::open_db(&p.db).unwrap();
+        let request = TelemetryRequest {
+            session_id: "s".into(),
+            request_id: "r".into(),
+            timestamp: 1_760_000_100,
+            ..TelemetryRequest::default()
+        };
+        insert_request(&conn, &request).unwrap();
+        let tool = TelemetryTool {
+            session_id: "s".into(),
+            tool_use_id: "t".into(),
+            timestamp: 1_760_000_200,
+            ..TelemetryTool::default()
+        };
+        insert_tool(&conn, &tool).unwrap();
+        drop(conn);
+
+        let s = status(&p).unwrap();
+        assert!(s.running);
+        assert_eq!((s.pid, s.port), (Some(std::process::id()), Some(port)));
+        assert_eq!((s.requests, s.tool_calls, s.api_errors), (1, 1, 0));
+        assert_eq!(s.last_event, Some(1_760_000_200));
+        let text = s.text(1_760_000_260);
+        assert!(
+            text.contains("running") && text.contains("after 600 s"),
+            "{text}"
+        );
+        assert!(
+            text.contains("1 requests, 1 tool calls, 0 api errors"),
+            "{text}"
+        );
+        assert!(text.contains("(1m ago)"), "{text}");
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!text.contains("supersecret") && !json.contains("supersecret"));
+    }
+
+    #[test]
+    fn a_stale_state_reads_as_not_running_and_keeps_the_last_port() {
+        let p = paths("collector-status-stale");
+        std::fs::create_dir_all(state_path(&p).parent().unwrap()).unwrap();
+        let stale = State {
+            pid: 999_999,
+            port: 4318,
+            token: "t".into(),
+            ..State::default()
+        };
+        write_state(&state_path(&p), &stale).unwrap();
+        let s = status(&p).unwrap();
+        assert!(!s.running);
+        assert!(s.text(1).contains("last port: 4318"));
+    }
+
+    #[test]
+    fn a_state_file_from_an_older_version_still_reads() {
+        let old = br#"{"pid":5,"port":4318,"token":"abc"}"#;
+        let state: State = serde_json::from_slice(old).unwrap();
+        assert_eq!((state.started_at, state.idle_seconds), (0, 0));
+    }
+
+    #[test]
+    fn ages_read_in_their_largest_unit() {
+        assert_eq!(
+            [age(5), age(125), age(7_300), age(200_000)],
+            ["5s", "2m", "2h", "2d"]
+        );
     }
 }
