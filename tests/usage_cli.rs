@@ -217,11 +217,14 @@ fn an_unknown_range_is_refused_with_the_valid_values() {
 fn conflicting_flags_are_refused() {
     let home = Home::new("conflict");
 
-    for args in [
-        ["usage", "--json", "--summary"],
-        ["usage", "--web", "--json"],
-        ["usage", "--summary", "--web"],
-    ] {
+    assert!(!home.run(&["usage", "--json", "--summary"]).status.success());
+}
+
+#[test]
+fn the_web_dashboard_flag_and_subcommand_are_gone() {
+    let home = Home::new("no-web");
+
+    for args in [["usage", "--web"], ["usage", "dashboard"]] {
         assert!(!home.run(&args).status.success(), "{args:?}");
     }
 }
