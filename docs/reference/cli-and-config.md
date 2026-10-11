@@ -50,7 +50,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage dashboard, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `release`, `review`, `route`, `run-context`, `sanitize`, `segment`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
