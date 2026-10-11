@@ -15,6 +15,8 @@ pub mod collector;
 pub mod db;
 pub mod entry;
 pub mod ingest;
+pub mod limits;
+pub mod limits_source;
 pub mod otlp;
 pub mod period;
 pub mod pricing;

@@ -66,11 +66,24 @@ pub fn run() -> i32 {
     let _ = std::io::stdin().read_to_end(&mut raw);
     let input = String::from_utf8_lossy(&raw);
     let now = crate::common::time::now_secs();
+    remember_rate_limits(&input, now);
     let out = render(&input, &Env::from_process(), now);
     let mut stdout = std::io::stdout().lock();
     let _ = stdout.write_all(&out);
     let _ = stdout.flush();
     0
+}
+
+/// Keeps the plan limits Claude Code passes in (`rate_limits`, Pro and Max or
+/// a gateway only) for `playbook usage`. Best effort and local: only
+/// percentages, reset times and the gateway dollar limit are stored.
+fn remember_rate_limits(input: &str, now: i64) {
+    if !input.contains("rate_limits") {
+        return;
+    }
+    if let Some(snap) = crate::usage::limits_source::Snapshot::from_statusline(input, now) {
+        crate::usage::limits_source::save(&crate::common::paths::usage_db_dir(), &snap);
+    }
 }
 
 /// Whether the terminal is known to support OSC 8 hyperlinks.
