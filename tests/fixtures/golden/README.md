@@ -102,3 +102,10 @@ entries. These are intentional additions, not a drift to hide.
 **Note (2026-10-07):** the two `init.*.json` fixtures were regenerated
 again to add the `commit-message-sanitizer` hook to the `Bash` `PreToolUse` group
 and a `Bash` `PostToolUse` group. Intentional additions, not a drift to hide.
+
+**Note (2026-10-11):** `preread-size-check.deny.txt` was edited by hand to add
+one paragraph to the deny message, telling the model to pipe big Bash output
+through `head` or `tail` and to use `gh ... --json` with `jq`. This is an
+intentional message change, not a drift to hide. The thresholds also moved
+(500 lines, 60,000 bytes), but the golden fixture has 1500 lines so only the
+message text differs.

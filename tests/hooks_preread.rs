@@ -741,7 +741,7 @@ mod preread_size_check {
             "should deny purely on byte size, got: {out}"
         );
         assert!(
-            out.contains("204801 bytes"),
+            out.contains("60001 bytes"),
             "should report the byte count, got: {out}"
         );
     }
@@ -810,7 +810,7 @@ mod preread_size_check {
             "a large unreadable file should still be denied on byte size, got: {out}"
         );
         assert!(
-            out.contains("204801 bytes"),
+            out.contains("60001 bytes"),
             "should report the byte count from stat, got: {out}"
         );
         assert!(
