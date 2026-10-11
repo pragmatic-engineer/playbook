@@ -26,7 +26,7 @@ flowchart TD
 /playbook:plan ./tasks/feature-brief.md
 ```
 
-It runs on Opus at high effort and reads the codebase and memory first, so it asks only what it cannot find out.
+It runs on Opus at medium effort and reads the codebase and memory first, so it asks only what it cannot find out.
 
 1. **Divergent.** It challenges the premise, weighs 2 or 3 approaches, and asks you to approve a design. It can route to `/playbook:adr` when the decision is hard to reverse.
 2. **Convergent.** In the same session, it interviews you for Work Units and Segments, one question at a time, each with a recommended answer.

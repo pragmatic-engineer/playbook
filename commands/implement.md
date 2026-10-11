@@ -3,7 +3,7 @@ description: Use when an approved plan or ADR blueprint already exists and the u
 allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill, AskUserQuestion
 argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--ask] [--no-tdd] [--no-tests] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause|land>] [--all-lenses] [--help]"
 model: sonnet
-effort: high
+effort: medium
 ---
 
 # Implement: Execute a Verified Plan

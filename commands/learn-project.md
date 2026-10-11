@@ -3,7 +3,7 @@ description: Use when starting on a repo the memory store knows nothing about, o
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill, WebFetch
 argument-hint: "[--refresh] [--graph-only] [--stage] [--from-staged] [--max-prs N] [--max-commits N] [--auto] [--ask]"
 model: opus
-effort: high
+effort: medium
 ---
 
 # Learn Project

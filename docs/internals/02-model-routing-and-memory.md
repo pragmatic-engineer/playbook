@@ -64,9 +64,9 @@ To undo the Haiku moves, set `model: sonnet` and `effort: high` in the agent fil
 
 The `implementer` stays on Sonnet and moves from `high` to `medium`. Round 1 (2026-10-10, 8 cases, 3 runs) and round 2 (20 repo tasks in `tests/fixtures/bench/implementer-repo-tasks.json` and `-2.json`: a stub to fill, a refactor, multi file changes, a bug whose root is in a helper, existing patterns to follow, a tempting hardcode, a test that must not be edited, scope and input mutation traps) apply each reply in a temp dir, run visible and hidden tests, and fail any edit to a test file or to a file outside the allowed list, with no judge model. Round 2 with 5 runs per case (100 calls per cell): Haiku low 89%, medium 88%, high 91% at $0.0003 to $0.0004 a call; Sonnet low 99%, medium 96%, high 95% at $0.0035 to $0.0037. With one fixture bug fixed (a hidden input the spec never asked for) and 10 runs per case (200 calls per cell): Sonnet medium 200/200 at $0.0027, Sonnet low 199/200 at $0.0027, Sonnet high 198/200 at $0.0029. Haiku never reaches 95% on 20 tasks (it drops the file sections or misses a multi file thread), so it stays out. On Sonnet, effort barely changes the cost of a single reply, so the saving here is about 7%, and `medium` is a no-loss setting rather than a big saving. The bench is a single turn with no tools, so it does not measure reading a real repo, running the verify command or committing, which is why `low` is not taken even though it scored the same.
 | `agents/implementer` | sonnet | `medium` (was high) | See the paragraph above. |
-| `agents/auditor` | opus | `high` (kept) | A whole repository audit whose findings people act on; no headless bench exists for it. |
-| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `high` (kept) | Judgment and orchestration; mistakes propagate to every spawned agent. |
-| `commands/commit-and-push`, `create-pull-request`, `repo-audit` | fork into git (haiku) and auditor (opus) | none | They fork into `git` (`low`) and `auditor` (`high`), which set the effort. |
+| `agents/auditor` | opus | `high` (kept) | A whole repository audit whose findings people act on; no headless bench exists for it. The maintainer kept it at `high` on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). |
+| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands; the evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
+| `commands/commit-and-push`, `create-pull-request`, `repo-audit` | fork into git (haiku) and auditor (opus) | none | They fork into `git` (`xhigh`) and `auditor` (`high`), which set the effort. |
 | `commands/doctor`, `session-start`, `setup` | haiku (was sonnet) | `low` (kept) | Run compiled helpers and print the result, or load a saved handoff. Mechanical, so the cheapest tier fits (about 95% less per call, 20x cheaper per token). Checked live (see PR). |
 | per-session variants such as `reviewer-low` | same as base | any tier | Not files. Rendered from the base agent by `ccc` and `ccd` into a throwaway session plugin (`--plugin-dir`), spawned as `playbook-variants:<name>`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
 | `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
@@ -91,16 +91,16 @@ This table lists every agent, command and skill with the model and effort in its
 | agent | `review-triage` | `haiku` | `low` | A three-way classifier. A bad or missing answer falls back to a full lens. |
 | agent | `reviewer` | `opus` | `medium` | Opus medium 199/200 against high 200/200 on the reviewer bench, 19% cheaper. Risky diffs go to `reviewer-xhigh` and small ones to `reviewer-low` (ADR-0021). |
 | agent | `test-reviewer` | `haiku` | `low` | Pilot (18 calls per cell): Haiku low, medium and high 18/18, Sonnet high 18/18, Sonnet low 16/18. |
-| command | `address-pr-comments` | `opus` | `high` | Judgment on review threads and replies that go public. |
-| command | `adr` | `opus` | `high` | A hard-to-reverse decision record. |
+| command | `address-pr-comments` | `opus` | `medium` | Judgment on review threads and replies that go public. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
+| command | `adr` | `opus` | `medium` | A hard-to-reverse decision record. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `commit-and-push` | - | - | Forks into the git agent, which sets the model and effort. |
 | command | `create-pull-request` | - | - | Forks into the git agent, which sets the model and effort. |
-| command | `deep-review` | `opus` | `high` | Orchestrates the reviewer swarm. A missed finding is the cost. |
+| command | `deep-review` | `opus` | `medium` | Orchestrates the reviewer swarm. A missed finding is the cost. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `doctor` | `haiku` | `low` | Runs compiled helpers and prints the result. Mechanical. |
-| command | `fix` | `sonnet` | `high` | Small, well understood bugs, with code changes. |
-| command | `implement` | `sonnet` | `high` | Executes an approved plan and delegates edits. |
-| command | `learn-project` | `opus` | `high` | Builds durable memory from a whole repo. Mistakes persist. |
-| command | `plan` | `opus` | `high` | Design work. A weak plan is expensive. |
+| command | `fix` | `sonnet` | `medium` | Small, well understood bugs, with code changes. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
+| command | `implement` | `sonnet` | `medium` | Executes an approved plan and delegates edits. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
+| command | `learn-project` | `opus` | `medium` | Builds durable memory from a whole repo. Mistakes persist. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
+| command | `plan` | `opus` | `medium` | Design work. A weak plan is expensive. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `quick-review` | `sonnet` | `medium` | One pass over a diff. Its reviewer runs on Opus at medium, the reviewer's own effort. |
 | command | `repo-audit` | - | - | Forks into the auditor agent, which sets the model and effort. |
 | command | `session-start` | `haiku` | `low` | Loads a saved handoff. Mechanical. |
