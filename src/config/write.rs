@@ -44,6 +44,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
         Value::Bool(_) => "boolean",
         Value::String(_) => "string",
         Value::Number(_) => "number",
+        Value::Array(_) => "array of paths",
         _ => "value",
     };
     let type_matches = matches!(
@@ -51,6 +52,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
         (Value::Bool(_), Value::Bool(_))
             | (Value::String(_), Value::String(_))
             | (Value::Number(_), Value::Number(_))
+            | (Value::Array(_), Value::Array(_))
     );
     if !type_matches {
         return Err(ConfigError::WrongType {
@@ -78,6 +80,49 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
     }
     if matches!(default, Value::Number(_)) {
         validate_number(key, value)?;
+    }
+    if key == "hooks.rmGuard.allowedRoots" {
+        validate_root_list(key, value)?;
+    }
+    Ok(())
+}
+
+/// `hooks.rmGuard.allowedRoots` takes strings that are an absolute path or a
+/// `~/` path, with no `..` segment and no glob or quote characters, naming a
+/// directory at least two levels deep. A root such as `/`, `~` or `/Users` would
+/// hand the guard's allowance to far more than a scratch tree.
+fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
+    const CONSTRAINT: &str =
+        "absolute or ~/ paths, at least two levels deep, with no .., glob or quote characters";
+    let bad = || ConfigError::OutOfRange {
+        key: key.to_string(),
+        value: value.to_string(),
+        constraint: CONSTRAINT,
+    };
+    let Some(items) = value.as_array() else {
+        return Err(bad());
+    };
+    for item in items {
+        let text = item.as_str().ok_or_else(bad)?;
+        let rest = match text.strip_prefix("~/") {
+            Some(rest) => rest,
+            None if text.starts_with('/') => text,
+            None => return Err(bad()),
+        };
+        let segments: Vec<&str> = rest
+            .split('/')
+            .filter(|s| !s.is_empty() && *s != ".")
+            .collect();
+        let depth_ok = if text.starts_with('~') {
+            !segments.is_empty()
+        } else {
+            segments.len() >= 2
+        };
+        let clean = !text.contains(['*', '?', '[', '{', '$', '`', '"', '\'', '\\'])
+            && segments.iter().all(|s| *s != "..");
+        if !depth_ok || !clean {
+            return Err(bad());
+        }
     }
     Ok(())
 }

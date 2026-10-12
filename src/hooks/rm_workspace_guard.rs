@@ -2,8 +2,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Ports the retired shell original: denies an `rm` whose target sits outside
-//! the safe roots, `~/.claude/**`, and the scratch trees `/tmp` and
-//! `~/.cache` (contents only, not those roots themselves).
+//! the safe roots, `~/.claude/**`, and the scratch trees (contents only, never
+//! the tree root itself or a parent of it): `/tmp`, `/private/tmp`, the macOS
+//! per-user temp folder `/private/var/folders/*/*/T`, `~/.cache`, the shared
+//! `.worktrees` folder next to the repo (or next to the main checkout when run
+//! inside a linked worktree), `WORKTREE_BASE_DIR` when set, and the
+//! `hooks.rmGuard.allowedRoots` config list.
+//!
+//! Targets are judged after resolving symlinks and `..` against the real
+//! filesystem, so a link inside an allowed root that leaves it is denied. A
+//! glob directly under a scratch root (`/tmp/*`) is denied because it would take
+//! out other programs' files; a named prefix of at least three literal
+//! characters (`/tmp/pb-*`) is allowed. A glob anywhere else under a scratch
+//! root is denied because its expansions cannot be resolved. Under the repo and
+//! the configured safe roots a glob is judged as before.
+//!
+//! ACCEPTED RISKS, pinned here: a check-then-use race (a link created between
+//! the guard and the `rm`) cannot be closed by a pre-execution hook; the
+//! `.worktrees` allowance covers every repo's folder there, not only this
+//! repo's; `rmdir`, `unlink` and `find -delete` are not seen, as before.
 //!
 //! Best-effort protection against an accidental `rm`, NOT a security boundary.
 //! It only sees `rm`, so `find -delete`, `unlink` and `>` truncation pass, and
@@ -71,10 +88,11 @@ pub fn run(payload: &Payload) {
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
-    let claude_dir = PathBuf::from(&home).join(".claude");
+    let claude_dir = resolve_existing(&PathBuf::from(&home).join(".claude"));
     let safe_roots = safe_roots();
+    let scratch_roots = scratch_roots(&home);
 
-    let outside = offending_targets(&cmd, &home, &claude_dir, &safe_roots);
+    let outside = offending_targets(&cmd, &home, &claude_dir, &safe_roots, &scratch_roots);
     if outside.is_empty() {
         return;
     }
@@ -91,6 +109,12 @@ pub fn run(payload: &Payload) {
     // Comma with no space: the shell built this with `IFS=', '` and `${arr[*]}`,
     // which joins on the FIRST character of IFS only. Matching bash's quirk
     // rather than the prettier form keeps the message byte-identical.
+    let scratch = scratch_roots
+        .iter()
+        .map(|r| format!("{}/*", r.display()))
+        .chain(std::iter::once(MACOS_TEMP_LABEL.to_string()))
+        .collect::<Vec<_>>()
+        .join(", ");
     let state_root = crate::common::paths::playbook_root();
     let state_root = state_root.to_string_lossy();
     let hint = if outside.iter().any(|t| t.ends_with(".lock")) {
@@ -103,7 +127,7 @@ pub fn run(payload: &Payload) {
         ""
     };
     emit_pre_deny(&format!(
-        "rm blocked: {} is outside {roots} and ~/.claude/**. Allowed: rm inside the repo or those roots. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path. If the label is `<command substitution>`, a `$VAR` or a relative path after `cd`, the guard cannot resolve it: run the rm as its own call with a literal absolute path.{hint}",
+        "rm blocked: {} is outside {roots}, ~/.claude/** and the scratch roots {scratch} (contents only, symlinks resolved, no bare glob such as /tmp/* but a named prefix such as /tmp/pb-* is fine). Allowed: rm inside the repo or those roots. Extra roots go in the `hooks.rmGuard.allowedRoots` config key. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path. If the label is `<command substitution>`, a `$VAR` or a relative path after `cd`, the guard cannot resolve it: run the rm as its own call with a literal absolute path.{hint}",
         outside.join(",")
     ));
 }
@@ -115,12 +139,88 @@ fn safe_roots() -> Vec<PathBuf> {
     let configured = std::env::var("PLAYBOOK_SAFE_ROOTS").unwrap_or_default();
     if configured.is_empty() {
         let root = git_repo_root().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        return vec![canon(&root)];
+        return vec![resolve_existing(&root)];
     }
     configured
         .split(':')
         .filter(|r| !r.is_empty())
-        .map(|r| canon(Path::new(r)))
+        .map(|r| resolve_existing(Path::new(r)))
+        .collect()
+}
+
+/// Label for the macOS per-user temp folder in the denial message.
+const MACOS_TEMP_LABEL: &str = "/private/var/folders/*/*/T/*";
+
+/// The directories whose CONTENTS may be deleted, resolved through symlinks.
+/// The macOS per-user temp folder is matched by shape in `strict_base`, because
+/// its name is a hash.
+fn scratch_roots(home: &str) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = TEMP_ROOTS
+        .iter()
+        .map(|r| resolve_existing(Path::new(r)))
+        .collect();
+    if !home.is_empty() {
+        // Derived from HOME, deliberately NOT from `XDG_CACHE_HOME`, which could
+        // be set to `/`.
+        roots.push(resolve_existing(&Path::new(home).join(".cache")));
+    }
+    let repo = git_repo_root();
+    if let Some(parent) =
+        main_checkout(repo.as_deref()).and_then(|m| m.parent().map(Path::to_path_buf))
+    {
+        roots.push(resolve_existing(&parent.join(".worktrees")));
+    }
+    if let Ok(base) = std::env::var("WORKTREE_BASE_DIR") {
+        if base.starts_with('/') {
+            roots.push(resolve_existing(Path::new(&base)));
+        }
+    }
+    roots.extend(configured_roots(home));
+    roots.sort();
+    roots.dedup();
+    // A root that is `/`, the home directory or a parent of it would turn
+    // "contents only" into "nearly everything", so it is dropped, whatever
+    // produced it.
+    let home_real = resolve_existing(Path::new(home));
+    roots
+        .retain(|r| r.components().count() >= 2 && !(home_real.starts_with(r) && !home.is_empty()));
+    roots
+}
+
+/// The main checkout of the repo, which is the repo itself outside a linked
+/// worktree. `.worktrees` is a sibling of THIS one.
+fn main_checkout(repo: Option<&Path>) -> Option<PathBuf> {
+    let repo = repo?;
+    let porcelain = crate::common::git::raw(repo, &["worktree", "list", "--porcelain"])?;
+    crate::cc::worktree::main_worktree(&porcelain)
+        .map(PathBuf::from)
+        .or_else(|| Some(repo.to_path_buf()))
+}
+
+/// `hooks.rmGuard.allowedRoots`, `~/` expanded. An unreadable or malformed
+/// value yields nothing, which only narrows the allowance.
+fn configured_roots(home: &str) -> Vec<PathBuf> {
+    if home.is_empty() {
+        return Vec::new();
+    }
+    let home_path = Path::new(home);
+    let slug = crate::common::mode::hook_slug(home_path);
+    let Ok((value, _)) =
+        crate::config::resolve("hooks.rmGuard.allowedRoots", home_path, slug.as_deref())
+    else {
+        return Vec::new();
+    };
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|t| !t.contains(['*', '?', '[', '{', '$', '`']))
+        .filter_map(|t| match t.strip_prefix("~/") {
+            Some(rest) => Some(home_path.join(rest)),
+            None => t.starts_with('/').then(|| PathBuf::from(t)),
+        })
+        .map(|p| resolve_existing(&p))
         .collect()
 }
 
@@ -140,69 +240,141 @@ fn git_repo_root() -> Option<PathBuf> {
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
-/// Resolves `.` and `..` lexically, never touching the filesystem, because the
-/// target of an `rm` may not exist. This is what closes the `..` traversal
-/// bypass: `~/Workspace/../secrets` collapses outside the allowlist and blocks.
-fn canon(path: &Path) -> PathBuf {
+/// Resolves `.`, `..` and every symlink along the path, the way the kernel
+/// would, but tolerating missing components: the target of an `rm` may not exist,
+/// and a missing component can hold no link. `..` is applied AFTER a link is
+/// followed, so `/tmp/link/../x` is judged where it really points. `None` means
+/// the link chain is too deep to trust.
+fn resolve(path: &Path) -> Option<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-
-    let text = absolute.to_string_lossy().into_owned();
-    let mut out: Vec<&str> = Vec::new();
-    for seg in text.split('/') {
-        match seg {
-            "" | "." => {}
+    let mut pending: std::collections::VecDeque<String> = absolute
+        .to_string_lossy()
+        .split('/')
+        .map(str::to_string)
+        .collect();
+    let mut stack: Vec<String> = Vec::new();
+    let mut follows = 0usize;
+    while let Some(seg) = pending.pop_front() {
+        match seg.as_str() {
+            "" | "." => continue,
             ".." => {
-                out.pop();
+                stack.pop();
+                continue;
             }
-            other => out.push(other),
+            _ => stack.push(seg),
+        }
+        let here = PathBuf::from(format!("/{}", stack.join("/")));
+        let is_link = std::fs::symlink_metadata(&here).is_ok_and(|m| m.file_type().is_symlink());
+        if !is_link {
+            continue;
+        }
+        follows += 1;
+        if follows > 40 {
+            return None;
+        }
+        let target = std::fs::read_link(&here).ok()?;
+        stack.pop();
+        if target.is_absolute() {
+            stack.clear();
+        }
+        for part in target.to_string_lossy().rsplit('/') {
+            pending.push_front(part.to_string());
         }
     }
-    if out.is_empty() {
-        return PathBuf::from("/");
-    }
-    PathBuf::from(format!("/{}", out.join("/")))
+    Some(PathBuf::from(format!("/{}", stack.join("/"))))
 }
 
-fn is_allowed(target: &str, home: &str, claude_dir: &Path, safe_roots: &[PathBuf]) -> bool {
-    let expanded = match target.strip_prefix('~') {
-        Some(rest) if !home.is_empty() => format!("{home}{rest}"),
-        _ => target.to_string(),
-    };
-    let path = canon(Path::new(&expanded));
-    if path == claude_dir || path.starts_with(claude_dir) {
-        return true;
+/// `resolve` for a root, where an unresolvable chain falls back to a path that
+/// matches nothing real, so a loop cannot widen the allowance.
+fn resolve_existing(path: &Path) -> PathBuf {
+    resolve(path).unwrap_or_else(|| PathBuf::from("/nonexistent-unresolvable-root"))
+}
+
+/// The scratch root `path` is at or below, or `None`. The macOS per-user temp
+/// folder is matched by shape: `/private/var/folders/<xx>/<hash>/T`.
+fn strict_base(path: &Path, scratch_roots: &[PathBuf]) -> Option<PathBuf> {
+    if let Some(root) = scratch_roots.iter().find(|r| path.starts_with(r)) {
+        return Some(root.clone());
     }
-    // Scratch space, allowed whatever the roots say. `starts_with` compares whole
-    // components, so `/tmpfoo` does not match `/tmp`, and `canon` has already
-    // collapsed `..`, so `/tmp/../etc` is judged as `/etc` and still blocks.
-    if TEMP_ROOTS
+    let parts: Vec<_> = path.components().collect();
+    let temp_shape =
+        parts.len() >= 7 && path.starts_with("/private/var/folders") && parts[6].as_os_str() == "T";
+    temp_shape.then(|| parts[..7].iter().collect())
+}
+
+fn is_glob_char(c: char) -> bool {
+    matches!(c, '*' | '?' | '[' | '{')
+}
+
+/// Literal characters before the first glob character of one path component.
+fn literal_prefix_len(component: &str) -> usize {
+    component.chars().take_while(|c| !is_glob_char(*c)).count()
+}
+
+fn is_allowed(
+    target: &str,
+    home: &str,
+    claude_dir: &Path,
+    safe_roots: &[PathBuf],
+    scratch_roots: &[PathBuf],
+) -> bool {
+    // One pair of surrounding quotes is shell syntax; any other quote or a
+    // backslash means the shell would see a different word than this one.
+    let target = ["\"", "'"]
         .iter()
-        .any(|root| path.starts_with(root) && path != Path::new(root))
-    {
-        return true;
+        .find_map(|q| target.strip_prefix(q).and_then(|t| t.strip_suffix(q)))
+        .unwrap_or(target);
+    if target.contains(['"', '\'', '\\']) {
+        return false;
     }
-    // `~/.cache` is regenerable scratch by definition, and it is where this
-    // repo's own test fixtures live. Derived from HOME the same way `~/.claude`
-    // is, deliberately NOT from `XDG_CACHE_HOME`: that variable can be set to
-    // `/`, which would hand the whole filesystem to the allowlist, whereas the
-    // worst a bad HOME yields here is a narrow `<junk>/.cache`.
-    //
-    // Contents only, following TEMP_ROOTS rather than `~/.claude`: no cleanup
-    // needs to delete the cache root itself, and doing so by accident costs
-    // every rebuild on the machine.
-    if !home.is_empty() {
-        let cache_dir = Path::new(home).join(".cache");
-        if path.starts_with(&cache_dir) && path != cache_dir {
-            return true;
+    // Only `~` and `~/...` are the caller's home. `~other` is somebody else's.
+    let expanded = if target == "~" || target.starts_with("~/") {
+        if home.is_empty() {
+            return false;
         }
+        format!("{home}{}", &target[1..])
+    } else if target.starts_with('~') {
+        return false;
+    } else {
+        target.to_string()
+    };
+
+    let trailing_slash = expanded.len() > 1 && expanded.ends_with('/');
+    let parts: Vec<&str> = expanded.split('/').collect();
+    let glob_at = parts.iter().position(|p| p.chars().any(is_glob_char));
+    let literal_len = glob_at.unwrap_or(parts.len());
+    // A `..` after a glob cannot be resolved, because the expansion may be a link.
+    if glob_at.is_some_and(|g| parts[g..].contains(&"..")) {
+        return false;
     }
-    safe_roots
-        .iter()
-        .any(|root| path == *root || path.starts_with(root))
+    let literal = parts[..literal_len].join("/");
+    let literal = if literal.is_empty() && expanded.starts_with('/') {
+        "/".to_string()
+    } else {
+        literal
+    };
+    let Some(dir) = resolve(Path::new(&literal)) else {
+        return false;
+    };
+
+    if dir.starts_with(claude_dir) || safe_roots.iter().any(|root| dir.starts_with(root)) {
+        return true;
+    }
+    let Some(base) = strict_base(&dir, scratch_roots) else {
+        return false;
+    };
+    let Some(g) = glob_at else {
+        // Contents only: the root itself and its parents stay blocked.
+        return dir != base;
+    };
+    // A glob under a scratch root: the last component only, no trailing slash,
+    // and directly under the root it needs a named prefix.
+    let last = g == parts.len() - 1 && !trailing_slash;
+    last && (dir != base || literal_prefix_len(parts[g]) >= 3)
 }
 
 /// The delimiter of a heredoc opened on this line, if any.
@@ -347,6 +519,7 @@ fn offending_targets(
     home: &str,
     claude_dir: &Path,
     safe_roots: &[PathBuf],
+    scratch_roots: &[PathBuf],
 ) -> Vec<String> {
     let mut outside = Vec::new();
     let mut in_rm = false;
@@ -434,7 +607,7 @@ fn offending_targets(
         let unresolvable = whole.contains('$')
             || whole.contains('`')
             || (saw_cd && !token.starts_with('/') && !token.starts_with('~'));
-        if unresolvable || !is_allowed(token, home, claude_dir, safe_roots) {
+        if unresolvable || !is_allowed(token, home, claude_dir, safe_roots, scratch_roots) {
             outside.push(token.to_string());
         }
     }
