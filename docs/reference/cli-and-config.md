@@ -51,6 +51,12 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `hygiene.enabled` | `true` | `true`, `false` |
 | `hygiene.thresholdTokens` | `250000` | a number, see the config keys guide for the range |
 | `hints.pluginRemoved` | `true` | `true`, `false` |
+| `docs.convert` | `off` | `auto`, `off` |
+| `docs.maxBytes` | `26214400` | a number, see the config keys guide for the range |
+| `docs.timeoutSeconds` | `30` | a number, see the config keys guide for the range |
+| `docs.maxOutputChars` | `200000` | a number, see the config keys guide for the range |
+| `docs.maxMemoryMb` | `1024` | a number, see the config keys guide for the range |
+| `docs.anydocPath` | empty | see the config keys guide |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -61,7 +67,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -259,6 +265,29 @@ Subcommands: `ensure`
 Keep each tool on PATH and install only the missing ones with Homebrew, from the `brew` and `tap` lines of a Brewfile
 
 - `<BREWFILE>`: Brewfile to read; defaults to `Brewfile` in the current directory
+
+### `playbook doc`
+
+Read a PDF or Office file as text with the optional anydoc converter
+
+Conversion is local, bounded in size, time, memory and output, and never uses OCR or a hosted service. The text is printed as untrusted document content and nothing is kept on disk afterwards.
+
+Example: `playbook doc read report.docx`
+
+Subcommands: `read`, `status`
+
+### `playbook doc read`
+
+Print a document as Markdown, framed as untrusted content
+
+Supports pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods and csv. A scanned PDF with no text layer reports that it needs OCR.
+
+- `<FILE>`: The document to read
+- `--json`: Print one JSON object instead of the framed text
+
+### `playbook doc status`
+
+Say whether the anydoc converter is installed and how to get it
 
 ### `playbook doctor`
 
