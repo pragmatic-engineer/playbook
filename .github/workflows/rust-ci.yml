@@ -18,6 +18,10 @@ on:
   merge_group:
   push:
     branches: [main]
+  # Daily full matrix on main. The merge queue runs Linux only, so this
+  # catches a platform-only break within a day.
+  schedule:
+    - cron: "17 5 * * *"
 
 permissions: {}
 
@@ -95,6 +99,10 @@ jobs:
       # Single source of truth for the cache key and the install command
       # below, so they can't drift apart. Bump deliberately, not implicitly.
       CARGO_AUDIT_VERSION: "0.22.2"
+      # Smaller target dir (no debuginfo, no incremental data) means a faster
+      # cache restore and faster links.
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         # Linux-only action; it self-skips on macOS with a confusing warning
@@ -114,11 +122,11 @@ jobs:
             static.rust-lang.org:443
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
 
       - name: Cache cargo registry and build output (build-test)
-        if: needs.changes.outputs.docs_only != 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -132,31 +140,31 @@ jobs:
       # reviewer can confirm the pin took effect from the job log instead of
       # trusting rustup's documented override behavior on faith.
       - name: rustc --version
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: rustc --version
 
       - name: Ensure rustfmt and clippy components
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: rustup component add rustfmt clippy
 
       - name: cargo fmt --check
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: cargo fmt --check
 
       - name: cargo clippy
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: cargo clippy --all-targets -- -D warnings
 
       # Non-test code must not panic on bad input: unwrap and expect are errors
       # there. Tests may use them, so this covers the library and the binary only.
       - name: cargo clippy (no unwrap or expect outside tests)
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: cargo clippy --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
       # `tests/plugin_archive.rs` runs `claude plugin validate`, and fails in CI
       # when the CLI is missing. Pinned to a release older than two weeks.
       - name: Install the Claude Code CLI
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: npm install --global @anthropic-ai/claude-code@2.1.282
 
       # nextest schedules every test across all test binaries, where
@@ -164,24 +172,24 @@ jobs:
       # other tools: the action to a commit SHA, the tool to a release older
       # than two weeks. It downloads a prebuilt binary from github.com.
       - name: Install cargo-nextest
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: nextest@0.9.145
 
       - name: cargo nextest run
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: cargo nextest run --config-file .github/nextest.toml --profile ci
 
       # nextest does not run doctests.
       - name: cargo test --doc
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: cargo test --doc
 
       # Moved out of shell-ci with the port: the seed validator is now a
       # subcommand, so it needs a built binary and belongs on this lane.
       - name: Validate the shipped settings seed
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: |
           cargo build
           ./target/debug/playbook settings check \
@@ -191,12 +199,12 @@ jobs:
       # validator is now a subcommand too, so it needs the binary already
       # built by the step above.
       - name: Validate the tracked-file manifest
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: ./target/debug/playbook manifest check .
 
       # Moved out of shell-ci for the same reason as the two validators above.
       - name: Validate agent definitions
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: ./target/debug/playbook agents check
 
       # cargo-audit's own `cargo install --locked` compiles it from source
@@ -219,14 +227,14 @@ jobs:
       # first real run's harden-runner insights to confirm the cache
       # actually populates rather than assuming this holds forever.
       - name: Cache cargo-audit binary
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-audit
           key: cargo-audit-${{ runner.os }}-${{ env.CARGO_AUDIT_VERSION }}
 
       - name: cargo audit
-        if: needs.changes.outputs.docs_only != 'true'
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: |
           if [ ! -x "$HOME/.cargo/bin/cargo-audit" ]; then
             cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
@@ -236,6 +244,18 @@ jobs:
           # repo at scan time, so caching the binary doesn't freeze which
           # CVEs get caught, only skips recompiling the same binary.
           cargo audit
+
+      # Saved only after a push to main. PR and queue runs restore the main
+      # cache and skip the multi-minute save of a multi-GiB target dir.
+      - name: Save cargo registry and build output (build-test)
+        if: github.event_name == 'push' && success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-build-test-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
 
   # Cheap lane for docs-only changes: the only cargo tests that read docs
   # (generated reference page drift, config-key coverage, README and index
@@ -289,7 +309,8 @@ jobs:
   # unix-only APIs and making them portable is separate work.
   windows-check:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    # Already ran on the PR head; the queue re-runs Linux build-test only.
+    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group'
     runs-on: windows-latest
     permissions:
       contents: read
@@ -349,7 +370,8 @@ jobs:
   # pushed tag or workflow_dispatch, never on a pull request.
   container-smoke:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    # Already ran on the PR head; the queue re-runs Linux build-test only.
+    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group'
     strategy:
       fail-fast: false
       matrix:
