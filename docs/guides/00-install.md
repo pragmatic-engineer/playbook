@@ -4,6 +4,17 @@ To see every change `playbook init` makes before you agree to it, read [What ini
 
 The quickest route is one command. This page covers every route, requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
 
+## Pick an install mode
+
+| Mode | Commands, in order | You get | You lack |
+|---|---|---|---|
+| Skills only (plugin) | `claude plugin marketplace add pragmatic-engineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer` | Skills and subagent text you can read and follow | Safety guards, status line, hooks, usage, and every command that calls `playbook ...` |
+| Skills plus binary (recommended) | Pick one. Install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash`. Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init`. Plugin: the two plugin commands above, then `/playbook:setup` | Everything: slash commands, guards, hooks, status line, memory, usage | Nothing |
+
+Which one? Choose skills only if you want to read the skills and nothing else runs on your machine. Choose skills plus binary for everything else. The binary is a hard dependency of the commands, hooks, guards, status line and usage. Only the skill text works without it.
+
+A plugin with no binary is not a working install. The first `playbook` call from a command runs the shipped installer once, and prints a notice first. See [Plugin only](#plugin-only-and-the-binary).
+
 ## Requirements
 
 | Tool | Status | Why |
@@ -141,6 +152,13 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 - **Started with `ccc` or `ccd`:** the launcher adds the binary's directory when it is missing.
 - **Started from a desktop app or IDE:** hooks find `playbook` only if its directory is already on that `PATH`. Use `ccc`, or install with `PLAYBOOK_BIN_DIR` set to a directory that environment has.
 
+## Plugin only and the binary
+
+`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases` and `--system-prompt`, each with a `--no-` form. Hooks, status line and `PATH` are on by default, the permissions rules (`--security`), launcher and system prompt are off.
+
+With the plugin alone, the guards and status line are not wired, and `/playbook:doctor` reports them as missing. Run `/playbook:setup` to finish.
+
+"""
 ## Settings merge
 
 `playbook init` merges the shipped template into your `settings.json` and never overwrites it. The template carries three things, each behind its own part: the `hooks` block, the `statusLine` and, only when you opt in, the `permissions` block. It ships no display options, notification toggles or `env` entries, because no hook or launcher reads them. Keys you customised stay as you set them. Keys an older template shipped (`cleanupPeriodDays`, `outputStyle`, `env` and the like) stay in your file too, and init never removes them.
