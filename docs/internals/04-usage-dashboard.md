@@ -238,7 +238,7 @@ The usage database also holds tables for OpenTelemetry data, created next to the
 
 Totals never read them, so every total is unchanged, and a session with no row in `session_sources` reads from transcripts. The rows never hold prompts, tool content, paths, emails or user ids. Dropping the tables reverts the feature and loses no transcript data (`telemetry_db::migrate_down`). Telemetry follows [issue 769](https://github.com/pragmatic-engineer/playbook/issues/769): playbook never writes Claude Code settings, and transcripts stay the fallback. Rows are kept for 90 days and 500000 rows per table unless you change the [retention keys](../guides/04-config-keys.md).
 
-Plain `claude` sessions (not started through `cc`) send nothing to the receiver unless you export the OpenTelemetry variables yourself, so they are read from transcripts.
+Plain `claude` sessions (not started through `cc`) send nothing to the receiver unless the OpenTelemetry variables are set for them. `playbook init --telemetry` writes those variables into your Claude Code settings, with your consent, see [Telemetry by default](#telemetry-by-default). Without them, such sessions are read from transcripts.
 
 ## The telemetry receiver
 
@@ -251,11 +251,33 @@ Plain `claude` sessions (not started through `cc`) send nothing to the receiver 
 - **What is stored.** `api_request`, `tool_result` and `api_error` events, keyed by session id and request id, tool use id, or event sequence, and four delta counters from the metrics (see Active time and counters), keyed by their interval, so a redelivered batch changes nothing. An allowlist of attribute keys is read (event name, session id, request id, model, effort, agent name, skill name, tool name, tool use id, success, duration, status code, attempt, event sequence, the four token counts, cost). Every other attribute, including prompts, tool content, file paths, emails, user and organization ids and resource attributes, is never read. Kept names must be plain ASCII (letters, digits and `. _ - : /`), else they are dropped.
 - **Data loss.** Claude Code may drop telemetry sent while no receiver listens. Such a session is read from transcripts.
 
+## Telemetry by default
+
+Telemetry is the default source for the per agent, skill and latency views, and transcripts stay the authority for every total. `usage.telemetry` is `auto` unless you set it to `off`. What that does depends on the client:
+
+| Client | What happens |
+| :- | :- |
+| `cc` (and `ccc`, `ccd`) | Sets the variables for that session only, when you have set no telemetry yourself, and starts the collector in the background if none runs. |
+| Plain `claude`, the IDE, the desktop app | Nothing is set by playbook on its own. If you ran `playbook init --telemetry` (or answered yes to its question), the variables are in the `env` block of `~/.claude/settings.json`, which these clients read. Otherwise they are read from transcripts. |
+
+Playbook never changes your Claude Code settings on its own. Only `init` writes them, after you say yes, and only when no telemetry variable exists in your environment or in any settings file (user, project, local, managed). A value you set is never overridden: if you turned telemetry off, or point it at your own endpoint, playbook leaves it and reads transcripts. `init` records what it wrote in `~/.config/playbook/telemetry-env.json`, and `playbook uninstall` removes exactly those keys, unless you changed them since. The shared settings template no longer pins `CLAUDE_CODE_ENABLE_TELEMETRY` to `0`; an install made earlier keeps that value until you remove it, and it counts as your setting.
+
+`playbook usage status` and the usage view's footer say which case you are in:
+
+- `telemetry: on, collector running`
+- `telemetry: on, collector not running`, with the fix: `cc` starts the collector, or run `playbook usage collect`.
+- `telemetry: off (disabled in your Claude Code settings, using transcripts)`, with the fix: remove `CLAUDE_CODE_ENABLE_TELEMETRY` from the `env` block of your settings, then run `playbook init --telemetry`.
+- `telemetry: off (set up by you for another endpoint, using transcripts)`
+- `telemetry: off (usage.telemetry is off, using transcripts)`, with the fix: `playbook config set usage.telemetry auto`.
+- `telemetry: off (not configured)`, with the fix: `playbook init --telemetry`, or start sessions with `cc`.
+
+If the collector is not running when a session starts, Claude Code may drop what it sends, and that session is read from transcripts.
+
 ## Telemetry privacy
 
 - **What is stored.** Only `api_request` rows with the session id, request id, model, effort, agent name, the four token counts, the cost and the call duration, plus one row per tool call (tool name, outcome, duration), per failed API attempt (status code, attempt number, duration) and per metric point of active time, lines of code, commits or pull requests (session id, type, interval, value). Prompts, tool content, file paths, emails, user, account and organization ids, and resource attributes are dropped when the receiver parses a request and never reach the database.
 - **What `cc` sets.** With `usage.telemetry` at `auto`, a running receiver (started by `cc` when needed) and no telemetry setting of yours, `cc` sets `CLAUDE_CODE_ENABLE_TELEMETRY`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`, the traces exporter to `none`, the `http/json` protocol, the loopback endpoint, an `Authorization` header with the receiver's token and `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false`, in the session's environment only. It never turns on `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT` or `OTEL_LOG_RAW_API_BODIES`.
-- **What it never does.** It never writes Claude Code settings and adds no `--settings` flag. If any telemetry variable is already set in your environment or in a settings `env` block (user, project, local or managed), or such a file cannot be parsed, it sets nothing, so your own configuration always wins.
+- **What it never does.** `cc` never writes Claude Code settings and adds no `--settings` flag. Only `playbook init --telemetry`, with your consent, writes the same variables (and nothing else) into the `env` block of your settings. If any telemetry variable is already set in your environment or in a settings `env` block (user, project, local or managed), or such a file cannot be parsed, it sets nothing, so your own configuration always wins.
 - **How long it is kept.** 90 days and 500000 rows per table by default (`usage.telemetryRetentionDays`, `usage.telemetryMaxRows`), pruned automatically and by `playbook usage prune`.
 - **Where it goes.** The receiver listens on 127.0.0.1 only and the store file is private to you. `usage.telemetry` set to `off` stops `cc` from touching the environment at all.
 

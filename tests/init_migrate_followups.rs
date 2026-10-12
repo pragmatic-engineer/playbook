@@ -44,6 +44,7 @@ fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPath
         hooks: true,
         statusline: true,
         security: false,
+        telemetry: false,
         path_setup: None,
         repo,
     }

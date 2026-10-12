@@ -300,7 +300,16 @@ fn refresh_status(app: &App, pal: &Palette, area_width: u16) -> (String, Style) 
         return (format!("indexing {done}/{total} files "), dim);
     }
     match &app.data {
-        // The interval goes first when the line is short.
+        // The telemetry state and the interval go first when the line is short.
+        Some(d) if area_width >= 130 => (
+            format!(
+                "{}  updated {} UTC, every {}s ",
+                app.telemetry.map_or("", |m| m.footer()),
+                clock(d.now),
+                app.refresh_every.as_secs()
+            ),
+            dim,
+        ),
         Some(d) if area_width >= 100 => (
             format!(
                 "updated {} UTC, every {}s ",
@@ -965,6 +974,17 @@ mod tests {
         let mut app = app;
         app.refresh_every = std::time::Duration::from_secs(30);
         assert!(screen(&app, 150, 30).contains("every 30s"));
+    }
+
+    #[test]
+    fn the_footer_names_the_telemetry_state_on_a_wide_screen_only() {
+        use crate::usage::telemetry_status::Mode;
+        let mut app = app_with(&[]);
+        app.telemetry = Some(Mode::OffNotConfigured);
+        assert!(screen(&app, 150, 30).contains("telemetry: off (not configured)"));
+        assert!(!screen(&app, 80, 24).contains("telemetry:"));
+        app.telemetry = Some(Mode::OnRunning);
+        assert!(screen(&app, 150, 30).contains("telemetry: on, collector running"));
     }
 
     #[test]

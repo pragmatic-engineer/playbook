@@ -147,6 +147,8 @@ pub struct App {
     pub indexing: Option<(usize, usize)>,
     /// Where transcripts are read from, named in the empty states.
     pub sources: String,
+    /// How telemetry is configured, named in the footer.
+    pub telemetry: Option<crate::usage::telemetry_status::Mode>,
     /// How often the snapshot is refreshed, shown in the footer.
     pub refresh_every: Duration,
 }
@@ -185,6 +187,7 @@ impl App {
             help: None,
             indexing: None,
             sources: String::new(),
+            telemetry: None,
             refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
         }
     }

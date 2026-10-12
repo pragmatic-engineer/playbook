@@ -84,6 +84,16 @@ pub fn settings_changes(before: &Value, after: &Value) -> Vec<(&'static str, Str
                 let added = hook_entries(after).difference(&was).count();
                 out.push(("hooks", format!("add {added} hook entries")));
             }
+            ("env", old_env) => {
+                // Only the telemetry part writes `env` entries.
+                let no_env = serde_json::Map::new();
+                let old_env = old_env.and_then(Value::as_object).unwrap_or(&no_env);
+                for (k, v) in new.as_object().into_iter().flatten() {
+                    if old_env.get(k) != Some(v) {
+                        out.push(("telemetry", format!("add env.{k}")));
+                    }
+                }
+            }
             (_, None) => out.push((part_of_key(key), format!("add {key}"))),
             (_, Some(_)) => out.push((part_of_key(key), format!("change {key}"))),
         }
@@ -174,6 +184,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         hooks: paths.hooks,
         statusline: paths.statusline,
         security: paths.security,
+        telemetry: paths.telemetry,
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
             bin_dir: s.bin_dir.clone(),
             shell: s.shell,
@@ -182,6 +193,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     };
     let epoch = crate::common::time::now_epoch_secs();
     let (settings_step, hooks_step) = run::settings_and_hooks_steps(&scratch_paths, epoch);
+    let telemetry_step = run::telemetry_step(&scratch_paths, epoch);
     let path_step = run::path_step(&sh, scratch_paths.path_setup.as_ref());
     let after_path = rc_snapshot(&sh);
     let shim_step = run::rewire_rc_file_step(&sh, scratch_paths.shell_kind, scratch_paths.aliases);
@@ -208,6 +220,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("path", choices.path),
         ("aliases", choices.aliases),
         ("system-prompt", choices.system_prompt),
+        ("telemetry", choices.telemetry),
     ];
     for (id, enabled) in flags {
         let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{id} ({})\n", on(enabled)));
@@ -237,6 +250,14 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                             "already as configured"
                         }
                     )]
+                } else {
+                    mine
+                }
+            }
+            "telemetry" => {
+                let mine = grouped(&changes, id, &settings_file);
+                if mine.is_empty() {
+                    vec![format!("{settings_file}: {}", telemetry_step.detail)]
                 } else {
                     mine
                 }

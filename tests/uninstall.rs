@@ -480,3 +480,50 @@ fn uninstall_prints_no_manual_steps_when_nothing_remains() {
     assert!(!shown.contains("claude plugin"), "{shown}");
     assert!(!shown.contains("remaining manual steps"), "{shown}");
 }
+
+#[test]
+fn init_telemetry_then_uninstall_removes_exactly_the_variables_init_wrote() {
+    let sb = Sandbox::new("telemetry");
+    sb.write(".claude/settings.json", "{\"env\":{\"MY_OWN\":\"1\"}}\n");
+    let run = |args: &[&str]| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+        cmd.args(args)
+            .env("HOME", &sb.home)
+            .env("SHELL", "/bin/zsh")
+            .env("PLAYBOOK_BIN_DIR", &sb.bin_dir)
+            .env("CLAUDE_PLUGIN_ROOT", env!("CARGO_MANIFEST_DIR"))
+            .current_dir(&sb.home);
+        for (name, _) in std::env::vars() {
+            if name.starts_with("OTEL_") || name == "CLAUDE_CODE_ENABLE_TELEMETRY" {
+                cmd.env_remove(name);
+            }
+        }
+        cmd.output().expect("playbook should spawn")
+    };
+    let init = run(&[
+        "init",
+        "--telemetry",
+        "--no-hooks",
+        "--no-statusline",
+        "--no-path",
+        "--yes",
+    ]);
+    assert!(init.status.success(), "{}", text(&init));
+    let after_init = sb.read(".claude/settings.json");
+    assert!(
+        after_init.contains("CLAUDE_CODE_ENABLE_TELEMETRY"),
+        "{after_init}"
+    );
+    assert!(after_init.contains("MY_OWN"), "{after_init}");
+    assert!(
+        !after_init.contains("OTEL_LOG_USER_PROMPTS"),
+        "{after_init}"
+    );
+
+    let gone = run(&["uninstall", "--yes"]);
+    assert!(gone.status.success(), "{}", text(&gone));
+    let after = sb.read(".claude/settings.json");
+    assert!(!after.contains("OTEL_"), "{after}");
+    assert!(!after.contains("CLAUDE_CODE_ENABLE_TELEMETRY"), "{after}");
+    assert!(after.contains("MY_OWN"), "{after}");
+}

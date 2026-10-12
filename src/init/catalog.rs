@@ -95,6 +95,16 @@ pub const PARTS: &[Part] = &[
         undo: "`playbook uninstall` removes the file.",
     },
     Part {
+        id: "telemetry",
+        asked: true,
+        default_on: false,
+        flags: "--telemetry, --no-telemetry",
+        question: "Write the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (nothing is written if you already set telemetry up)",
+        does: "Points Claude Code at a collector on 127.0.0.1 (`playbook usage collect`). Prompt text, tool content, emails and tokens are never sent. Written only when you have no telemetry variable in your environment or any Claude Code settings file. Without it, `cc` still does this for its own sessions and `playbook usage` reads transcripts.",
+        changes: "~/.claude/settings.json (the env block) and ~/.config/playbook/telemetry-env.json (a record of what was written)",
+        undo: "`playbook uninstall` removes exactly the keys init wrote, unless you changed them.",
+    },
+    Part {
         id: "memory-migration",
         asked: false,
         default_on: true,
