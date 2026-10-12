@@ -23,6 +23,8 @@ pub struct SearchOptions {
     pub path: Option<String>,
     pub lang: Option<String>,
     pub kind: Option<String>,
+    /// Match chunks holding any query word instead of all of them.
+    pub any_word: bool,
     pub limit: usize,
     pub scan_cap: usize,
 }
@@ -34,6 +36,7 @@ impl SearchOptions {
             path: None,
             lang: None,
             kind: None,
+            any_word: false,
             limit: DEFAULT_LIMIT,
             scan_cap: DEFAULT_SCAN_CAP,
         }
@@ -90,6 +93,12 @@ pub fn tokens(query: &str) -> Vec<String> {
 /// An FTS5 query that ANDs every token as a quoted string, or `None` when the
 /// query has no tokens.
 pub fn fts_query(query: &str) -> Option<String> {
+    fts_query_mode(query, false)
+}
+
+/// Like `fts_query`, and with `any` set the tokens are joined with `OR`, so a
+/// chunk needs only one of them. The operator comes from here, never from the input.
+pub fn fts_query_mode(query: &str, any: bool) -> Option<String> {
     let toks = tokens(query);
     if toks.is_empty() {
         return None;
@@ -98,7 +107,7 @@ pub fn fts_query(query: &str) -> Option<String> {
         toks.iter()
             .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
             .collect::<Vec<_>>()
-            .join(" "),
+            .join(if any { " OR " } else { " " }),
     )
 }
 
@@ -273,7 +282,7 @@ pub(super) fn fts_hits(
     fetch: usize,
 ) -> Result<(Vec<Hit>, usize), String> {
     let toks = tokens(&opts.query);
-    let Some(query) = fts_query(&opts.query) else {
+    let Some(query) = fts_query_mode(&opts.query, opts.any_word) else {
         return Ok((Vec::new(), 0));
     };
     let (rows, total) = fts_rows(conn, &query, opts, fetch)?;

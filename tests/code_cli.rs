@@ -437,3 +437,28 @@ fn refs_lists_labelled_candidates_in_json_and_text() {
         "{stdout}"
     );
 }
+
+#[test]
+fn context_prints_snippets_and_a_stable_json_document() {
+    // Arrange
+    let fx = Fixture::new("context", true);
+    fx.write(
+        "pay.ts",
+        "export function processPayment() {\n  return 1;\n}\n",
+    );
+    assert!(fx.playbook(&["code", "index"]).status.success());
+
+    // Act
+    let first = fx.playbook(&["code", "context", "fix the payment", "--json"]);
+    let second = fx.playbook(&["code", "context", "fix the payment", "--json"]);
+    let text = fx.playbook(&["code", "context", "fix the payment"]);
+    let small = fx.playbook(&["code", "context", "payment", "--max-tokens", "199"]);
+
+    // Assert
+    assert_eq!(first.stdout, second.stdout);
+    let doc = json_of(&first);
+    assert_eq!(doc["command"], "context");
+    assert_eq!(doc["results"]["snippets"][0]["path"], "pay.ts");
+    assert!(String::from_utf8_lossy(&text.stdout).contains("== pay.ts:1-3"));
+    assert!(!small.status.success());
+}
