@@ -6,7 +6,7 @@
 //! code and checks each entry against the page, so a new hook cannot ship
 //! without a row.
 
-use playbook::init::wire;
+use playbook::init::wire::{self, wired_hooks, PLUGIN_HOOKS};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
@@ -163,5 +163,82 @@ fn the_new_pages_are_linked_from_the_readme_the_index_and_the_install_guide() {
             text.contains("reference/hooks.md"),
             "{file} does not link to the hook reference"
         );
+    }
+}
+
+fn table_entries(
+    specs: impl Iterator<Item = &'static wire::HookSpec>,
+) -> BTreeSet<(String, String, String)> {
+    specs
+        .map(|h| {
+            (
+                h.event.to_string(),
+                h.matcher.unwrap_or("none").to_string(),
+                h.name.to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_hook_table_in_code_is_exactly_what_init_wires() {
+    let wired: BTreeSet<_> = wired_entries().into_iter().collect();
+
+    assert_eq!(table_entries(wired_hooks()), wired);
+}
+
+#[test]
+fn the_plugin_hook_table_in_code_is_exactly_the_plugin_hooks_file() {
+    let plugin: Value = serde_json::from_str(&read("hooks/hooks.json")).unwrap();
+    let from_file: BTreeSet<_> = entries(&plugin).into_iter().collect();
+
+    assert_eq!(table_entries(PLUGIN_HOOKS.iter()), from_file);
+}
+
+#[test]
+fn the_reference_says_what_each_hook_does_in_the_words_the_table_uses() {
+    let page = read(REFERENCE);
+
+    for h in wired_hooks().chain(PLUGIN_HOOKS) {
+        let matcher = h.matcher.unwrap_or("none").to_string();
+        let prefix = row_prefix(&(h.event.to_string(), matcher, h.name.to_string()));
+        let row = page
+            .lines()
+            .find(|l| l.starts_with(&prefix))
+            .unwrap_or_else(|| panic!("no row for {}", h.name));
+        assert!(
+            row.contains(&format!("| {} |", h.purpose)),
+            "the row for {} {} does not carry its purpose: {}",
+            h.event,
+            h.name,
+            h.purpose
+        );
+    }
+}
+
+#[test]
+fn every_hook_sits_under_the_heading_of_its_group() {
+    let page = read(REFERENCE);
+
+    for group in wire::Group::ALL {
+        let heading = format!("## {}\n", group.label());
+        let start = page
+            .find(&heading)
+            .unwrap_or_else(|| panic!("no heading for {}", group.label()));
+        let end = page[start + heading.len()..]
+            .find("\n## ")
+            .map_or(page.len(), |n| start + heading.len() + n);
+        let section = &page[start..end];
+        for h in wired_hooks()
+            .chain(PLUGIN_HOOKS)
+            .filter(|h| h.group == group)
+        {
+            assert!(
+                section.contains(&format!("`playbook hook {}`", h.name)),
+                "{} is not under {}",
+                h.name,
+                group.label()
+            );
+        }
     }
 }

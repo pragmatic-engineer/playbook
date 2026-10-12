@@ -34,21 +34,100 @@ use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// One hook registration `wire` ensures exists in `settings.json`: which
-/// event it fires on, the matcher grouping it belongs to (`None` for events
-/// hooks.json never gave a matcher, such as `SessionStart`), the hook name
-/// to invoke, any `if` guard or `timeout` carried over unchanged from the
-/// entry it replaces.
-struct HookSpec {
-    event: &'static str,
-    matcher: Option<&'static str>,
-    name: &'static str,
-    if_cond: Option<&'static str>,
-    timeout: Option<u64>,
+/// What a hook is for. The hook reference and `playbook hooks list` group by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    Safety,
+    Session,
+    Usage,
+    Memory,
+    Hygiene,
+    Worktree,
+}
+
+impl Group {
+    /// Every group, in the order the reference page lists them.
+    pub const ALL: [Group; 6] = [
+        Group::Safety,
+        Group::Session,
+        Group::Usage,
+        Group::Memory,
+        Group::Hygiene,
+        Group::Worktree,
+    ];
+
+    /// The heading the reference page uses.
+    pub fn label(self) -> &'static str {
+        match self {
+            Group::Safety => "Safety guards",
+            Group::Session => "Session lifecycle",
+            Group::Usage => "Usage tracking and auto mode",
+            Group::Memory => "Memory",
+            Group::Hygiene => "Hygiene",
+            Group::Worktree => "Worktree",
+        }
+    }
+}
+
+/// One hook registration: which event it fires on, the matcher grouping it
+/// belongs to (`None` for events with no matcher, such as `SessionStart`), the
+/// hook name to invoke, any `if` guard or `timeout` it carries, its group and
+/// one plain sentence of purpose. This table is the single source for `wire`,
+/// `playbook init --explain`, `playbook hooks list` and the hook reference
+/// page, whose "What it does" column a test keeps equal to `purpose`.
+pub struct HookSpec {
+    pub event: &'static str,
+    pub matcher: Option<&'static str>,
+    pub name: &'static str,
+    pub group: Group,
+    /// One plain sentence. No pipe characters, so it fits a table cell.
+    pub purpose: &'static str,
+    pub if_cond: Option<&'static str>,
+    pub timeout: Option<u64>,
     /// A prior hook name this spec's install also replaces in place, so a
     /// rename never leaves an orphaned entry behind.
-    also_replaces: Option<&'static str>,
+    pub also_replaces: Option<&'static str>,
 }
+
+/// Every hook entry `wire` writes into `settings.json`, in write order.
+pub fn wired_hooks() -> impl Iterator<Item = &'static HookSpec> {
+    PORTED_HOOK_SPECS.iter().chain(GUARD_SPECS)
+}
+
+/// The hooks the plugin registers in its own `hooks/hooks.json`. `wire` never
+/// writes these, so a test keeps this list equal to that file.
+pub const PLUGIN_HOOKS: &[HookSpec] = &[
+    HookSpec {
+        event: "SessionStart",
+        matcher: None,
+        name: "migration-check",
+        group: Group::Session,
+        purpose: "Tells you to re-run `playbook init` when a plugin update arrived without it. Silent once settings are wired.",
+        if_cond: None,
+        timeout: None,
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "WorktreeCreate",
+        matcher: None,
+        name: "worktree-create",
+        group: Group::Worktree,
+        purpose: "Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old.",
+        if_cond: None,
+        timeout: Some(180),
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "WorktreeRemove",
+        matcher: None,
+        name: "worktree-remove",
+        group: Group::Worktree,
+        purpose: "Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it.",
+        if_cond: None,
+        timeout: Some(120),
+        also_replaces: None,
+    },
+];
 
 /// The functional hooks, already ported to Rust, rewired here to the bare
 /// `playbook hook <name>` form. Eleven were ported from the old
@@ -72,6 +151,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "SessionStart",
         matcher: None,
         name: "session-init",
+        group: Group::Session,
+        purpose: "Prepares the session directory, warns when a resumed session's config drifted, and adds a handoff, an auto-learn nudge and a small memory block to the context. Also sweeps stale worktrees.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -80,6 +161,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Read"),
         name: "preread-edit-check",
+        group: Group::Hygiene,
+        purpose: "Reminds the model not to re-read a file it just edited.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -88,6 +171,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Read"),
         name: "preread-size-check",
+        group: Group::Hygiene,
+        purpose: "Denies a whole-file Read of a large file, and a repeat full Read of an unchanged file, and points to a targeted Read.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -96,6 +181,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Read|Grep|Glob|Edit|Write|NotebookEdit"),
         name: "search-counter",
+        group: Group::Usage,
+        purpose: "Counts exploration calls and suggests the Explore subagent once, at the eighth.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -104,6 +191,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Edit|Write"),
         name: "memory-anchors",
+        group: Group::Memory,
+        purpose: "Shows the memory facts anchored to the file you are about to edit.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -114,6 +203,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         // ADR 0008: prompt-time recall, same hook name and binary as the
         // PreToolUse entry above.
         name: "memory-anchors",
+        group: Group::Memory,
+        purpose: "Adds the memory facts that match your prompt or the files touched this session.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -122,6 +213,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PostToolUse",
         matcher: Some("Edit|Write|NotebookEdit"),
         name: "post-edit-track",
+        group: Group::Usage,
+        purpose: "Records which files this session edited.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -130,6 +223,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PostToolUse",
         matcher: Some("Edit|Write|NotebookEdit"),
         name: "rebuild-memory-graph",
+        group: Group::Memory,
+        purpose: "Rebuilds the memory graph after a fact file is saved. Does nothing for any other file.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -138,6 +233,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "UserPromptSubmit",
         matcher: None,
         name: "auto-model-detect",
+        group: Group::Hygiene,
+        purpose: "Suggests `/playbook:plan`, `/playbook:adr` or `/playbook:implement` when your prompt looks like design or build work.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -146,6 +243,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("AskUserQuestion"),
         name: "auto-guard",
+        group: Group::Usage,
+        purpose: "In `auto` mode, denies questions to you so an unattended run does not stall.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -154,6 +253,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "UserPromptSubmit",
         matcher: None,
         name: "auto-guard",
+        group: Group::Usage,
+        purpose: "In `auto` mode, advises a trusted permission mode once per session.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -162,6 +263,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: None,
         name: "auto-cost",
+        group: Group::Usage,
+        purpose: "In `auto` mode, tracks session spend against `auto.budgetUsd` and denies tools at the cap.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -170,6 +273,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "UserPromptSubmit",
         matcher: None,
         name: "context-hygiene",
+        group: Group::Hygiene,
+        purpose: "Nudges the model to save a handoff when the context passes `hygiene.thresholdTokens`.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -178,6 +283,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "PreCompact",
         matcher: None,
         name: "precompact-warn",
+        group: Group::Session,
+        purpose: "Warns you that the context is about to be compacted and logs the event.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -186,6 +293,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "Stop",
         matcher: None,
         name: "session-clean-exit",
+        group: Group::Session,
+        purpose: "Records that the session ended cleanly after each turn, so the next start can spot a crash.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -194,6 +303,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "Stop",
         matcher: None,
         name: "memory-capture",
+        group: Group::Memory,
+        purpose: "Once per context threshold crossing, asks the model to write down durable facts before it continues.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -202,6 +313,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         event: "SessionEnd",
         matcher: None,
         name: "session-clean-exit",
+        group: Group::Session,
+        purpose: "Writes the clean-exit marker when the session truly ends.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -221,6 +334,8 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Bash"),
         name: "rm-workspace-guard",
+        group: Group::Safety,
+        purpose: "Stops an `rm` whose target is outside your safe roots. Runs only for `rm` commands.",
         if_cond: Some("Bash(rm:*)"),
         timeout: Some(10),
         also_replaces: None,
@@ -229,6 +344,8 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Bash"),
         name: "bg-await-guard",
+        group: Group::Safety,
+        purpose: "Warns when a command backgrounds an install, build or typecheck that a later step needs.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -237,6 +354,8 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Bash"),
         name: "no-slop-guard",
+        group: Group::Safety,
+        purpose: "Denies a posting command (commit, PR text) that contains an em or en dash.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: Some("no-dash-guard"),
@@ -245,6 +364,8 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Bash"),
         name: "precommit-check",
+        group: Group::Safety,
+        purpose: "Warns about debug leftovers, secret-shaped file names and oversized commits in the staged diff. Runs only for `git commit`.",
         if_cond: Some("Bash(git commit:*)"),
         timeout: Some(10),
         also_replaces: None,
@@ -253,6 +374,8 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Bash"),
         name: "commit-message-sanitizer",
+        group: Group::Safety,
+        purpose: "Removes AI attribution from commit, tag, merge and PR messages, and adds `-s` to a commit that has no sign-off.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -261,6 +384,8 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Bash"),
         name: "policy-guard",
+        group: Group::Safety,
+        purpose: "Denies skipped git hooks or signing, a hand-run `gh pr create`, and memory writes outside playbook's store.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -271,6 +396,8 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PostToolUse",
         matcher: Some("Bash"),
         name: "commit-message-sanitizer",
+        group: Group::Safety,
+        purpose: "Backstop for what the PreToolUse rewrite did not see. It can amend a signed commit and edit a PR.",
         if_cond: None,
         timeout: Some(60),
         also_replaces: None,
@@ -279,6 +406,8 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Edit|Write"),
         name: "no-slop-guard",
+        group: Group::Safety,
+        purpose: "Denies new code that carries a slop comment.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -287,6 +416,8 @@ const GUARD_SPECS: &[HookSpec] = &[
         event: "PreToolUse",
         matcher: Some("Edit|Write"),
         name: "policy-guard",
+        group: Group::Safety,
+        purpose: "Denies writes to Claude Code's own memory paths. Shows the fact format when a fact file is written to playbook's store.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -453,11 +584,7 @@ pub fn unwire_at(
 
     let mut drop_hooks_key = false;
     if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
-        let managed: Vec<String> = PORTED_HOOK_SPECS
-            .iter()
-            .chain(GUARD_SPECS)
-            .map(|spec| bare_command(spec.name))
-            .collect();
+        let managed: Vec<String> = wired_hooks().map(|spec| bare_command(spec.name)).collect();
         let mut touched_events = Vec::new();
         for (event, groups) in hooks.iter_mut() {
             let Some(groups) = groups.as_array_mut() else {

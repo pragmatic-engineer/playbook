@@ -61,7 +61,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -558,6 +558,18 @@ Print this directory's handoff without using it up
 
 Show recent session starts and this directory's handoff counts
 
+### `playbook hooks`
+
+List the hooks that `playbook init` wires into Claude Code
+
+Subcommands: `list`
+
+### `playbook hooks list`
+
+Print every hook with its event, matcher and what it does
+
+Lists the hooks init adds to settings.json, grouped by purpose, and the ones the plugin registers itself. Changes nothing.
+
 ### `playbook init`
 
 Install or repair your local Claude Code setup
@@ -565,6 +577,8 @@ Install or repair your local Claude Code setup
 Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, settings, status line, PATH, the `ccc` launcher, the system prompt) unless you answer with a flag. Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`, unanswered parts use their defaults: hooks, settings and PATH on, the launcher and system prompt off.
 
 The security defaults (permissions rules and the autoupdater switch) are never asked about and stay off unless you pass `--security` or set `security.defaults` to true. Without them, `init` leaves any permissions you already have untouched.
+
+Before it asks anything, init prints a plan of each part and the files it edits. `--dry-run` shows what would change on your machine and changes nothing. `--explain` describes a part, or every part, and changes nothing.
 
 Example: `playbook init --no-hooks --aliases`
 
@@ -583,6 +597,8 @@ Example: `playbook init --no-hooks --aliases`
 - `--system-prompt`: Install the playbook system prompt (an existing copy is refreshed either way)
 - `--no-system-prompt`: Do not install the system prompt
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
+- `--dry-run`: Print what would change for each part and change nothing
+- `--explain <PART>`: Describe a part, or every part when none is named, and change nothing
 
 ### `playbook learn`
 

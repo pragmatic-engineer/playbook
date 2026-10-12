@@ -2,6 +2,16 @@
 
 `playbook init` changes files on your machine. This page lists every change, what each part is for, how to say no, and how to undo it. Read it before you answer the questions `init` asks. The per-hook detail is in the [hook reference](../reference/hooks.md).
 
+## See it before you say yes
+
+- `playbook init` prints a short plan first: each part, what it does and the files it edits. Then it asks about each part, and each question names the files it will edit.
+- `playbook init --dry-run` prints exactly what would change for each part and changes nothing.
+- `playbook init --explain` describes every part. `playbook init --explain <part>` describes one, for example `--explain hooks`.
+- `playbook hooks list` prints every hook with its event, matcher and one line of purpose.
+- After a real run, `init` prints a summary of what changed and how to undo each part.
+
+All of these read from the same tables in the code, and a test keeps the [hook reference](../reference/hooks.md) in line with them.
+
 ## Privacy
 
 - Playbook stores everything on your machine, under `~/.config/playbook/` and the files named below.

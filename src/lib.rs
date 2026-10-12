@@ -233,10 +233,20 @@ pub enum Command {
     /// `security.defaults` to true. Without them, `init` leaves any
     /// permissions you already have untouched.
     ///
+    /// Before it asks anything, init prints a plan of each part and the files
+    /// it edits. `--dry-run` shows what would change on your machine and
+    /// changes nothing. `--explain` describes a part, or every part, and
+    /// changes nothing.
+    ///
     /// Example: `playbook init --no-hooks --aliases`
     Init {
         #[command(flatten)]
         flags: init::choices::Flags,
+    },
+    /// List the hooks that `playbook init` wires into Claude Code
+    Hooks {
+        #[command(subcommand)]
+        sub: HooksCommand,
     },
     /// Remove what playbook installed from this machine
     ///
@@ -1760,6 +1770,16 @@ pub enum HookName {
     WorktreeRemove,
     MigrationCheck,
     ContextHygiene,
+}
+
+/// `playbook hooks` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum HooksCommand {
+    /// Print every hook with its event, matcher and what it does
+    ///
+    /// Lists the hooks init adds to settings.json, grouped by purpose, and the
+    /// ones the plugin registers itself. Changes nothing.
+    List,
 }
 
 /// `playbook cc` subcommands.
