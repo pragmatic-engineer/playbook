@@ -21,18 +21,16 @@ const NET_TIMEOUT: Duration = Duration::from_secs(120);
 fn net_timeout() -> Duration {
     std::env::var("REVIEW_NET_TIMEOUT_SECONDS")
         .ok()
-        .and_then(|v| v.parse().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|secs| (1..=3600).contains(secs))
         .map_or(NET_TIMEOUT, Duration::from_secs)
 }
 
-/// `git <args>` that can never wait on a person: no credential prompt, and
+/// `git <args>` that can never wait on a person: no terminal credential prompt, and
 /// standard input is null (the runner sets that).
 fn git_command(args: &[&str]) -> Command {
     let mut command = Command::new("git");
-    command
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "true");
+    command.args(args).env("GIT_TERMINAL_PROMPT", "0");
     command
 }
 
@@ -207,7 +205,11 @@ pub fn setup_with_url(pr: &str, head_sha: &str, known_url: Option<&str>) -> Resu
     let add_args = [
         "worktree", "add", "--detach", "--lock", "--reason", &reason, &dir_str, head_sha,
     ];
-    if !git_loud(&add_args) {
+    // A checkout can be large or pull LFS objects, so it gets the network limit.
+    if !loud(
+        run_with_timeout(&mut git_command(&add_args), net_timeout()),
+        &add_args,
+    ) {
         // A concurrent setup for the same PR and sha may have won the race.
         if is_locked(&dir_str) {
             return Err(format!("review already in progress for PR {pr}"));

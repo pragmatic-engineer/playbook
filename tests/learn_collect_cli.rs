@@ -106,3 +106,37 @@ fn an_unknown_role_is_refused() {
         .unwrap();
     assert!(!out.status.success());
 }
+
+#[test]
+fn a_hung_git_scan_is_named_in_scans_timed_out() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = repo("hung");
+    let real = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let real = String::from_utf8_lossy(&real.stdout).trim().to_string();
+    let bin = dir.join("fakebin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let fake = bin.join("git");
+    std::fs::write(
+        &fake,
+        format!("#!/bin/sh\ncase \"$*\" in *rev-list*) sleep 60;; esac\nexec {real} \"$@\"\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["learn", "collect", "git"])
+        .current_dir(&dir)
+        .env("PATH", path)
+        .env("LEARN_SCAN_TIMEOUT_SECONDS", "1")
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let timed_out = json["git"]["scans_timed_out"].to_string();
+    assert!(timed_out.contains("rev-list"), "{json}");
+}

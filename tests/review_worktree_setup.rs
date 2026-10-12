@@ -412,7 +412,12 @@ fn a_hung_gh_repo_view_times_out_instead_of_hanging() {
         "stderr: {}",
         stderr(&out)
     );
-    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+    let waited = started.elapsed();
+    assert!(
+        waited >= std::time::Duration::from_secs(1),
+        "the deadline was reached: {waited:?}"
+    );
+    assert!(waited < std::time::Duration::from_secs(20));
 }
 
 #[test]
@@ -437,11 +442,16 @@ fn a_hung_git_fetch_times_out_instead_of_hanging() {
 
     assert!(!out.status.success());
     assert!(
-        stderr(&out).contains("failed to fetch"),
+        stderr(&out).contains("timed out or could not start"),
         "stderr: {}",
         stderr(&out)
     );
-    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+    let waited = started.elapsed();
+    assert!(
+        waited >= std::time::Duration::from_secs(1),
+        "the deadline was reached: {waited:?}"
+    );
+    assert!(waited < std::time::Duration::from_secs(20));
 }
 
 #[test]
@@ -450,6 +460,7 @@ fn the_worktree_is_locked_with_the_pid_when_it_is_created() {
 
     let out = f.setup("7", &f.sha);
 
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
     let wt = stdout(&out);
     let admin = git_ok(Path::new(&wt), &["rev-parse", "--git-dir"]);
     let reason = fs::read_to_string(Path::new(&admin).join("locked")).unwrap();

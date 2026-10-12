@@ -20,12 +20,25 @@ const SUBJECTS: usize = 300;
 /// empty scan instead of a command that never returns.
 const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-fn git(dir: &Path, args: &[&str]) -> String {
+/// The scan limit; `LEARN_SCAN_TIMEOUT_SECONDS` overrides it.
+fn scan_timeout() -> std::time::Duration {
+    std::env::var("LEARN_SCAN_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .map_or(SCAN_TIMEOUT, std::time::Duration::from_secs)
+}
+
+/// Stdout of a scan, or `None` when git could not start or ran out of time.
+fn git_opt(dir: &Path, args: &[&str]) -> Option<String> {
     let mut command = crate::common::git::command(dir);
     command.args(args);
-    crate::common::proc::run_with_timeout(&mut command, SCAN_TIMEOUT)
+    crate::common::proc::run_with_timeout(&mut command, scan_timeout())
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default()
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    git_opt(dir, args).unwrap_or_default()
 }
 
 /// The `limit` highest counts, ties broken by name so the output is stable.
@@ -64,46 +77,44 @@ pub fn commit_type(subject: &str) -> Option<&str> {
 /// History facts: who commits, where the churn is, how commits are named,
 /// the recent tags and the monthly cadence.
 pub fn git_history(dir: &Path) -> Value {
-    let total = git(dir, &["rev-list", "--count", "HEAD"])
-        .trim()
-        .to_string();
-    let authors = git(dir, &["log", "--format=%an"]);
+    // A scan that times out reads as empty history, so each one is named in
+    // `scans_timed_out` and an empty answer is never mistaken for a real one.
+    let timed_out = std::cell::RefCell::new(Vec::<String>::new());
+    let scan = |args: &[&str]| -> String {
+        git_opt(dir, args).unwrap_or_else(|| {
+            timed_out.borrow_mut().push(args.join(" "));
+            String::new()
+        })
+    };
+    let total = scan(&["rev-list", "--count", "HEAD"]).trim().to_string();
+    let authors = scan(&["log", "--format=%an"]);
     let contributors = top(tally(authors.lines()), 10);
-    let names = git(
-        dir,
-        &[
-            "log",
-            &format!("-{CHURN_COMMITS}"),
-            "--format=",
-            "--name-only",
-        ],
-    );
+    let names = scan(&[
+        "log",
+        &format!("-{CHURN_COMMITS}"),
+        "--format=",
+        "--name-only",
+    ]);
     let churn = top(tally(names.lines()), 15);
-    let subjects = git(dir, &["log", &format!("-{SUBJECTS}"), "--format=%s"]);
+    let subjects = scan(&["log", &format!("-{SUBJECTS}"), "--format=%s"]);
     let subject_count = subjects.lines().filter(|l| !l.is_empty()).count();
     let types = tally(subjects.lines().filter_map(commit_type));
     let conventional: usize = types.values().sum();
-    let branches = git(dir, &["branch", "-r", "--format=%(refname:short)"]);
+    let branches = scan(&["branch", "-r", "--format=%(refname:short)"]);
     let prefixes = tally(
         branches
             .lines()
             .filter_map(|b| b.split_once('/').map(|(_, rest)| rest))
             .filter_map(|rest| rest.split_once('/').map(|(p, _)| p)),
     );
-    let tags = git(
-        dir,
-        &[
-            "for-each-ref",
-            "--sort=-creatordate",
-            "--count=10",
-            "--format=%(refname:short) %(creatordate:short)",
-            "refs/tags",
-        ],
-    );
-    let months = git(
-        dir,
-        &["log", "-3000", "--format=%ad", "--date=format:%Y-%m"],
-    );
+    let tags = scan(&[
+        "for-each-ref",
+        "--sort=-creatordate",
+        "--count=10",
+        "--format=%(refname:short) %(creatordate:short)",
+        "refs/tags",
+    ]);
+    let months = scan(&["log", "-3000", "--format=%ad", "--date=format:%Y-%m"]);
     let mut cadence: Vec<(String, usize)> = tally(months.lines()).into_iter().collect();
     cadence.sort_by(|a, b| b.0.cmp(&a.0));
     cadence.truncate(6);
@@ -119,6 +130,7 @@ pub fn git_history(dir: &Path) -> Value {
         "remote_branch_prefixes": rows(top(prefixes, 8), "prefix"),
         "recent_tags": tags.lines().map(str::to_string).collect::<Vec<_>>(),
         "commits_per_month_latest_first": rows(cadence, "month"),
+        "scans_timed_out": timed_out.into_inner(),
     })
 }
 

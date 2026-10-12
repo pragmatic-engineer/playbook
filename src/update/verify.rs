@@ -86,8 +86,15 @@ impl Attest for GhAttest {
             .arg(file)
             .args(["--repo", REPO, "--signer-workflow"])
             .arg(format!("{REPO}/.github/workflows/release.yml"));
-        let output = run_with_timeout(&mut verify, VERIFY_TIMEOUT)
-            .ok_or("could not run gh (missing or timed out)")?;
+        let Some(output) = run_with_timeout(&mut verify, VERIFY_TIMEOUT) else {
+            return if strict {
+                Err("gh attestation verify did not finish in time".into())
+            } else {
+                Ok(Some(
+                    "checksum only, provenance not verified: gh attestation verify did not finish in time".into(),
+                ))
+            };
+        };
         if output.status.success() {
             return Ok(None);
         }

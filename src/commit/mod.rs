@@ -15,8 +15,8 @@ use std::path::Path;
 use std::process::{Command, Output};
 use std::time::Duration;
 
-/// Longest a local read or index write may take.
-const GIT_TIMEOUT: Duration = crate::common::git::SLOW_TIMEOUT;
+/// Longest a local read or index write (`add -A` on a big tree) may take.
+const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Longest a commit (with its hooks and signing), fetch, rebase or push may
 /// take. Bounded so a stuck network or credential prompt cannot hang forever.
 const GIT_LONG_TIMEOUT: Duration = Duration::from_secs(600);
