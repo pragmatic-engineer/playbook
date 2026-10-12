@@ -1827,6 +1827,7 @@ pub enum HookName {
     WorktreeRemove,
     MigrationCheck,
     ContextHygiene,
+    DocReadHint,
 }
 
 /// `playbook hooks` subcommands.
@@ -1932,6 +1933,7 @@ mod tests {
             "session-clean-exit",
             "memory-capture",
             "context-hygiene",
+            "doc-read-hint",
             "rm-workspace-guard",
             "bg-await-guard",
             "no-slop-guard",

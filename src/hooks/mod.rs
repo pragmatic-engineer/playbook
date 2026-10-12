@@ -14,6 +14,7 @@ pub mod auto_model_detect;
 pub mod bg_await_guard;
 pub mod commit_message_sanitizer;
 pub mod context_hygiene;
+pub mod doc_read_hint;
 pub mod memory_anchors;
 pub mod memory_capture;
 pub mod memory_signals;
@@ -64,6 +65,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::WorktreeRemove => worktree_remove::run(payload),
         HookName::MigrationCheck => migration_check::run(payload),
         HookName::ContextHygiene => context_hygiene::run(payload),
+        HookName::DocReadHint => doc_read_hint::run(payload),
     }
 }
 

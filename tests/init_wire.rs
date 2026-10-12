@@ -250,6 +250,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "session-clean-exit",
         "memory-capture",
         "context-hygiene",
+        "doc-read-hint",
         "rm-workspace-guard",
         "bg-await-guard",
         "no-slop-guard",
