@@ -1,6 +1,8 @@
 # Confluence with acli
 
-Read this when you need to find or read Confluence pages. Verified against acli 1.3.39-stable (`acli confluence --help` lists `auth`, `blog`, `page`, `space`).
+Read this when you need to find or read Confluence pages.
+
+**Source of truth is the binary.** The published acli reference (https://developer.atlassian.com/cloud/acli/reference/commands/) covers Jira, auth and admin but not the Confluence subcommands. Everything below was read from `--help` on acli 1.3.39-stable (`acli confluence --help` lists `auth`, `blog`, `page`, `space`). After an acli upgrade, re-check with `acli confluence <group> <command> --help`.
 
 ## Commands
 
@@ -31,6 +33,17 @@ acli confluence page view --id <child-id> --json --include-direct-children
 `blog list` filters: `--space-id`, `--title`, `--id`, `--status`, `--sort`, `--limit` (default 25), `--cursor`, `--body-format`, and `--json` or `--csv`. `space view` takes `--id` plus `--labels`, `--permissions`, `--properties`, `--operations`, `--include-all`.
 
 `auth` has `login` (OAuth or API token), `logout`, `status` and `switch`. Confluence auth is separate from Jira auth.
+
+## Write commands (verified `--help`, 1.3.39-stable)
+
+These change Confluence state. Never run them during research.
+
+- `space create`: `--key`, `--name`, `--description`, `--alias`, `--private`, `--template-key`, `--json`.
+- `space update`: `--key`, `--name`, `--description`, `--status`, `--type`, `--json`.
+- `space archive` and `space restore`: `--key`, `--json`.
+- `blog create`: `--space-id`, `--title`, `--body` (storage format XHTML), `--from-file`, `--from-json`, `--generate-json`, `--status` (for example `draft`), `--private`, `--created-at`, `--json`.
+
+Read differences to watch: `blog view` takes `--id`, `--body-format` (default `view`), `--draft`, `--version`, `--include labels,properties,...` and `--json`, while `page view` uses `--get-draft` and separate `--include-*` flags. `auth login` takes `--web` for OAuth, or `--site`, `--email` and `--token` (token read from standard input) for an API token.
 
 ## What acli can and cannot do for Confluence
 
