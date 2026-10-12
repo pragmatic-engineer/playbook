@@ -279,6 +279,36 @@ fn fires(f: &Fire, name: &str) -> bool {
                 .1
                 .contains("playbook handoff save --session fire-hygiene")
         }
+        "doc-read-hint" => {
+            let home = scratch(f, "h-doc-hint");
+            let bin = home.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            let fake = bin.join("anydoc");
+            fs::write(&fake, "#!/bin/sh\nexit 0\n").unwrap();
+            fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            playbook::config::write::set(
+                playbook::config::write::Tier::Global,
+                "docs.convert",
+                serde_json::json!("auto"),
+                &home,
+                None,
+            )
+            .unwrap();
+            let path = format!("{}:/usr/bin:/bin", bin.display());
+            let payload = r#"{"tool_input":{"file_path":"/tmp/report.docx"}}"#;
+            run_hook(
+                &f.playbook,
+                name,
+                payload,
+                &home,
+                &home,
+                &[("PATH", &path)],
+                &[],
+            )
+            .1
+            .contains("playbook doc read /tmp/report.docx")
+        }
         "precompact-warn" => {
             let home = scratch(f, "h-precompact");
             run_hook(

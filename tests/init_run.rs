@@ -137,6 +137,7 @@ const PORTED_HOOK_NAMES: &[&str] = &[
     "session-clean-exit",
     "memory-capture",
     "context-hygiene",
+    "doc-read-hint",
     "auto-guard",
     "auto-cost",
 ];

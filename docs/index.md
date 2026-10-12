@@ -23,6 +23,7 @@ Task-oriented workflows.
 - [Config keys](guides/04-config-keys.md): every `playbook config` key with its default, allowed values and what it does.
 - [Auto mode](guides/05-auto-mode.md): run commands without questions, with a spend cap.
 - [What init installs](guides/06-what-init-installs.md): every change `playbook init` makes, what stays on your machine, and how to undo each part.
+- [Reading documents](guides/07-reading-documents.md): read a PDF or Office file as cheaper text with the optional anydoc converter.
 - [Hook reference](reference/hooks.md): every hook init wires, with its event, matcher, what it reads and writes, and how to turn it off.
 - [CLI and config reference](reference/cli-and-config.md): every command, flag and config key, generated from the code so it cannot drift.
 
