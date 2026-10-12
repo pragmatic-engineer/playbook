@@ -221,3 +221,32 @@ fn denials_tell_an_unattended_run_what_to_do_when_the_sanctioned_path_fails() {
         assert!(denial(&out).is_some(), "gpgsign={value} must be denied");
     }
 }
+
+#[test]
+fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
+    let reason_of = |input: String| denial(&run(&input, &[]).0);
+    for command in [
+        "playbook config set --global hooks.rmGuard.allowedRoots '[\"/a/b\"]'",
+        "nohup playbook config import f.json",
+        "WORKTREE_BASE_DIR=/ rm -rf /tmp/x",
+        "printf x > /Users/tester/.config/playbook/config.json",
+    ] {
+        let reason = reason_of(bash(command)).unwrap_or_default();
+        assert!(reason.contains("with `!`"), "{command}: {reason}");
+    }
+    for path in [
+        "/Users/tester/.config/playbook/playbook.db",
+        "/Users/tester/.config/playbook/config.json",
+    ] {
+        assert!(reason_of(write_to(path)).is_some(), "{path}");
+    }
+    assert!(reason_of(write_to("/Users/tester/.config/playbook/memory/a.md")).is_none());
+    let settings = json!({"tool_name": "Edit", "tool_input": {
+        "file_path": "/Users/tester/.claude/settings.json",
+        "new_string": "\"WORKTREE_BASE_DIR\": \"/\""
+    }})
+    .to_string();
+    assert!(reason_of(settings).is_some());
+    assert!(reason_of(bash("playbook config get hooks.rmGuard.allowedRoots")).is_none());
+    assert!(reason_of(bash("git commit -m 'mention playbook.db'")).is_none());
+}
