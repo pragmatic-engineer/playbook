@@ -75,7 +75,7 @@ impl Env {
         let _ = fs::remove_dir_all(&base);
         let home = base.join("home");
         let plugin = base.join("plugin");
-        fs::create_dir_all(home.join(".config/playbook/usage")).unwrap();
+        fs::create_dir_all(home.join(".config/playbook")).unwrap();
         fs::create_dir_all(plugin.join("agents")).unwrap();
         for (name, model, effort) in agents {
             fs::write(
@@ -88,7 +88,7 @@ impl Env {
     }
 
     fn db(&self) -> PathBuf {
-        self.home.join(".config/playbook/usage/usage.db")
+        self.home.join(".config/playbook/usage.db")
     }
 
     fn run(&self, args: &[&str]) -> Output {

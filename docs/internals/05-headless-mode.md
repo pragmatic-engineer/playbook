@@ -27,7 +27,7 @@ All run with `CI=true`, stdin from `/dev/null`, and an empty `HOME`.
 | `pr prepare --help` | yes | exit 0, so a caller can detect support |
 | `init` | yes | no prompt; second run changes nothing; with no plugin root it wires hooks and skips the rest |
 
-Nothing needed anything from `~/.claude` except `init`, which writes `~/.claude/settings.json`. The state directories created under an empty `HOME` are `~/.config/playbook/usage`, `runtime/` (handoffs, session folders, `session-start.log`), `memory/`, and `repos/<owner>/<repo>/<worktree>/state.db` for the gate.
+Nothing needed anything from `~/.claude` except `init`, which writes `~/.claude/settings.json`. The state directories created under an empty `HOME` are `usage.db` in `~/.config/playbook`, `runtime/` (handoffs, session folders, `session-start.log`), `memory/`, and `repos/<owner>/<repo>/<worktree>/state.db` for the gate.
 
 ## Running Claude headless
 

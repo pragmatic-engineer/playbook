@@ -33,9 +33,11 @@ pub fn runtime_root() -> PathBuf {
     playbook_root().join("runtime")
 }
 
-/// `$HOME/.config/playbook/usage`: the durable, cross-project usage store.
+/// `$HOME/.config/playbook`: the folder holding `usage.db`, the durable,
+/// cross-project usage store shared with playbook-telemetry, and the lock and
+/// receiver files next to it.
 pub fn usage_db_dir() -> PathBuf {
-    playbook_root().join("usage")
+    playbook_root()
 }
 
 /// `$HOME/.config/playbook/cc-state`: per-project config-drift baselines.

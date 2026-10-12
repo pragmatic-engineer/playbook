@@ -320,7 +320,7 @@ fn fires(f: &Fire, name: &str) -> bool {
                 &[],
                 &[],
             );
-            let stamp = home.join(".config/playbook/usage/auto-ingest.stamp");
+            let stamp = home.join(".config/playbook/auto-ingest.stamp");
             let mut seen = false;
             for _ in 0..100 {
                 if stamp.is_file() {
