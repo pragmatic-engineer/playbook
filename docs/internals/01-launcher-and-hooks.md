@@ -20,6 +20,10 @@ On every launch the launcher:
 
 A session started without the launcher gets none of this except the hooks.
 
+### The `claude` function
+
+`playbook init --claude-override` (or `playbook config set launcher.claudeOverride true`) makes `playbook shell-init` also define a `claude` function. A plain interactive `claude` then goes through the launcher, so the playbook system prompt loads every time. Calls that use their own flags, subcommands, `-p`, piped or scripted use, and `PLAYBOOK_BYPASS=1` run the real binary untouched, and an existing `claude` alias or function is never replaced. Init writes only this playbook key, with your consent. It never changes Claude Code settings or memory and never passes `--settings`.
+
 ### Subcommands
 
 | Command | Behavior |

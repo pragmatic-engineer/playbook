@@ -53,6 +53,9 @@ pub struct InitPaths {
     /// Whether to write the OpenTelemetry variables for the local collector
     /// into the `env` block of settings.json (never over an existing setup).
     pub telemetry: bool,
+    /// Whether the user consented to the `claude` shell function: writes
+    /// `launcher.claudeOverride` to playbook's own config, never to Claude Code.
+    pub claude_override: bool,
     /// Where the binary lives and the shell to wire it for. `None` skips the
     /// `path` step.
     pub path_setup: Option<path::Setup>,
@@ -169,6 +172,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);
 
     let telemetry_step = telemetry_step(paths, epoch);
+    let override_step = claude_override_step(&paths.home, paths.claude_override);
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
     let shim_step = rewire_rc_file_step(&paths.home, paths.shell_kind, paths.aliases);
 
@@ -179,6 +183,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         settings_step,
         hooks_step,
         telemetry_step,
+        override_step,
         path_step,
         shim_step,
     ];
@@ -228,6 +233,33 @@ pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepRe
         StepReport::skipped("hooks", "not requested; pass --hooks to opt in")
     };
     (settings_step, hooks_step)
+}
+
+/// The claude-override part: records the user's consent in playbook's own
+/// config. Nothing happens unless asked, and nothing in Claude Code changes.
+pub(crate) fn claude_override_step(home: &Path, requested: bool) -> StepReport {
+    if !requested {
+        return StepReport::skipped(
+            "claude-override",
+            "not requested; pass --claude-override to opt in",
+        );
+    }
+    if super::shell_init::claude_override_enabled(home) {
+        return StepReport::already_correct("claude-override", "launcher.claudeOverride is on");
+    }
+    match crate::config::write::set(
+        crate::config::write::Tier::Global,
+        "launcher.claudeOverride",
+        serde_json::Value::Bool(true),
+        home,
+        None,
+    ) {
+        Ok(()) => StepReport::wired(
+            "claude-override",
+            "launcher.claudeOverride set to true; `playbook shell-init` now defines a claude function",
+        ),
+        Err(err) => StepReport::failed("claude-override", format!("could not write config: {err}")),
+    }
 }
 
 /// The telemetry part: writes the collector variables when asked and when the
