@@ -47,7 +47,10 @@ fn remove(payload: &Payload) -> Result<String, String> {
     }
     let default = default_branch(&main_root);
     if !fully_published(&path, "HEAD", &default)? {
-        return Err("it has commits not on any remote or the main branch".to_string());
+        return Err(format!(
+            "it has commits not on any remote or the main branch; to discard it yourself run `git worktree remove --force '{}'`",
+            path.display()
+        ));
     }
     let branch = git(&path, &["symbolic-ref", "--quiet", "--short", "HEAD"])
         .map(|s| s.trim().to_string())
@@ -79,7 +82,39 @@ fn fully_published(dir: &Path, rev: &str, default: &str) -> Result<bool, String>
         args.push(&local_default);
     }
     let count = git(dir, &args)?;
-    Ok(count.trim() == "0")
+    if count.trim() == "0" {
+        return Ok(true);
+    }
+    Ok(squash_merged(dir, rev, default))
+}
+
+/// True when merging `rev` into the default branch changes nothing while `rev`
+/// does carry a net change, which is how a squash-merged branch looks once its
+/// remote branch is gone. A branch with no net change (a commit and its revert)
+/// is not counted, since its commits would be lost.
+fn squash_merged(dir: &Path, rev: &str, default: &str) -> bool {
+    let targets = [
+        format!("refs/remotes/origin/{default}"),
+        format!("refs/heads/{default}"),
+    ];
+    targets.iter().any(|target| {
+        if git(dir, &["show-ref", "--verify", "--quiet", target]).is_err() {
+            return false;
+        }
+        let Ok(base) = git(dir, &["merge-base", target, rev]) else {
+            return false;
+        };
+        if git(dir, &["diff", "--quiet", base.trim(), rev]).is_ok() {
+            return false;
+        }
+        let Ok(merged) = git(dir, &["merge-tree", "--write-tree", target, rev]) else {
+            return false;
+        };
+        let Ok(tree) = git(dir, &["rev-parse", &format!("{target}^{{tree}}")]) else {
+            return false;
+        };
+        merged.lines().next().map(str::trim) == Some(tree.trim())
+    })
 }
 
 /// The published default branch, else the main worktree's current branch.
