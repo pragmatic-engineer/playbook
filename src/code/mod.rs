@@ -12,6 +12,7 @@ pub mod cli;
 pub mod db;
 pub mod host;
 pub mod index;
+pub mod lang;
 pub mod location;
 pub mod output;
 pub mod search;
