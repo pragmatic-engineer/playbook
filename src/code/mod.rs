@@ -17,6 +17,7 @@ pub mod location;
 pub mod output;
 pub mod ranked;
 pub mod search;
+pub mod source;
 pub mod status;
 #[cfg(test)]
 pub(crate) mod testkit;

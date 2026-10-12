@@ -94,6 +94,39 @@ pub enum CodeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// List the declarations in one file
+    ///
+    /// Parses the file as it is on disk, so it works without an index and never
+    /// shows old text. Prints at most 500 declarations, indented by nesting.
+    ///
+    /// Example: `playbook code outline lib/payment/service`
+    Outline {
+        /// The file to outline
+        path: String,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print numbered lines of one file
+    ///
+    /// Reads the file as it is on disk. Prints at most 400 lines or 32 KiB. A
+    /// range that ends past the file is cut at the end with a warning.
+    ///
+    /// Example: `playbook code read lib/payment/service 10:40`
+    Read {
+        /// The file to read
+        path: String,
+        /// First and last line, 1 based and inclusive, as START:END
+        #[arg(value_parser = parse_range_arg)]
+        lines: (usize, usize),
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+fn parse_range_arg(spec: &str) -> Result<(usize, usize), String> {
+    super::source::parse_range(spec)
 }
 
 /// What a command needs from its surroundings.
@@ -129,6 +162,8 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
             let mode = if text { Mode::Text } else { Mode::Ranked };
             render_search(env, &opts, mode, json)
         }
+        CodeCommand::Outline { path, json } => render_outline(env, &path, json),
+        CodeCommand::Read { path, lines, json } => render_read(env, &path, lines, json),
         CodeCommand::Symbol {
             name,
             kind,
@@ -273,6 +308,116 @@ fn render_search(
         ));
     } else if out.result.hits.is_empty() {
         text.push_str("no matches\n");
+    }
+    Ok(text)
+}
+
+fn render_outline(env: &Env, input: &str, json: bool) -> Result<String, String> {
+    let root = super::location::repo_root(&env.cwd)?;
+    let out = super::source::outline(&root, &env.cwd, input, super::source::OUTLINE_CAP)?;
+    let mut warnings = Vec::new();
+    if out.partial {
+        warnings
+            .push("the file has syntax errors, so some declarations may be missing".to_string());
+    }
+    if json {
+        let rows: Vec<serde_json::Value> = out
+            .entries
+            .iter()
+            .map(|e| {
+                json!({
+                    "depth": e.depth,
+                    "kind": e.kind,
+                    "name": e.name,
+                    "qualified_name": e.qualified_name,
+                    "signature": e.signature,
+                    "start_line": e.start_line,
+                    "end_line": e.end_line,
+                    "exported": e.exported,
+                })
+            })
+            .collect();
+        let mut envelope = Envelope::new(
+            "outline",
+            IndexState::NotUsed,
+            String::new(),
+            json!({"path": out.path, "lang": out.lang, "entries": rows}),
+        );
+        envelope.truncated = out.truncated;
+        envelope.omitted = out.omitted;
+        envelope.warnings = warnings;
+        return Ok(envelope.to_json());
+    }
+    for warning in &warnings {
+        eprintln!("code: {warning}");
+    }
+    let mut text = String::new();
+    for e in &out.entries {
+        text.push_str(&format!(
+            "{}{}:{}-{}  {}\n",
+            "  ".repeat(e.depth),
+            e.kind,
+            e.start_line,
+            e.end_line,
+            e.signature.as_deref().unwrap_or(&e.name)
+        ));
+    }
+    if out.truncated {
+        text.push_str(&format!("{} more declarations not shown\n", out.omitted));
+    }
+    if out.entries.is_empty() {
+        text.push_str("no declarations\n");
+    }
+    Ok(text)
+}
+
+fn render_read(
+    env: &Env,
+    input: &str,
+    range: (usize, usize),
+    json: bool,
+) -> Result<String, String> {
+    let root = super::location::repo_root(&env.cwd)?;
+    let out = super::source::read_lines(
+        &root,
+        &env.cwd,
+        input,
+        range,
+        super::source::Caps::default(),
+    )?;
+    let mut warnings = Vec::new();
+    if out.clamped {
+        warnings.push(format!(
+            "the range ends past the file; showing up to line {} of {}",
+            out.end, out.total_lines
+        ));
+    }
+    if json {
+        let mut envelope = Envelope::new(
+            "read",
+            IndexState::NotUsed,
+            String::new(),
+            json!({
+                "path": out.path,
+                "start_line": out.start,
+                "end_line": out.end,
+                "total_lines": out.total_lines,
+                "text": out.text,
+            }),
+        );
+        envelope.truncated = out.truncated;
+        envelope.warnings = warnings;
+        return Ok(envelope.to_json());
+    }
+    for warning in &warnings {
+        eprintln!("code: {warning}");
+    }
+    let mut text = String::new();
+    for (offset, line) in out.text.lines().enumerate() {
+        text.push_str(&format!("{:>6}  {line}\n", out.start + offset));
+    }
+    if out.truncated {
+        text.push_str("output truncated\n");
     }
     Ok(text)
 }
