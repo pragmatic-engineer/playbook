@@ -536,3 +536,23 @@ fn save_exits_one_on_unreadable_stdin_and_writes_nothing() {
     );
     assert!(!env.handoff_dir().exists() || fs::read_dir(env.handoff_dir()).unwrap().count() == 0);
 }
+
+#[test]
+fn template_check_and_facts_back_the_handoff_command() {
+    let env = Env::new("compose");
+    let (code, out, _) = env.run(&["handoff", "template"], "");
+    assert_eq!(code, 0);
+    assert!(out.contains("## Next steps") && out.contains("Clean stop. No pending work."));
+    let good = "## Where we are now\n- a\n\n## Decisions made\n- b. Why: c.\n\n## Next steps\nClean stop. No pending work.\n";
+    let (code, out, _) = env.run(&["handoff", "check"], good);
+    assert_eq!(code, 0, "{out}");
+    let (code, _, err) = env.run(&["handoff", "check"], "## Next steps\n1. x \u{2014} y\n");
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("dash") && err.contains("missing section"),
+        "{err}"
+    );
+    let (code, out, _) = env.run(&["handoff", "facts"], "");
+    assert_eq!(code, 0);
+    assert!(out.starts_with("- "), "{out}");
+}
