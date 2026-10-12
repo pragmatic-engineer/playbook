@@ -32,6 +32,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `models.opus` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
 | `routing.escalate` | `ask` | `ask`, `auto`, `deny` |
 | `auto.budgetUsd` | `5` | a number, see the config keys guide for the range |
+| `auto.agentBudgetUsd` | `5` | a number, see the config keys guide for the range |
+| `auto.sessionCeilingUsd` | `0` | a number, see the config keys guide for the range |
 | `auto.warnPct` | `70` | a number, see the config keys guide for the range |
 | `fix.maxFiles` | `3` | a number, see the config keys guide for the range |
 | `fix.maxLines` | `500` | a number, see the config keys guide for the range |

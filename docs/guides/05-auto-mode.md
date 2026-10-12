@@ -38,14 +38,20 @@ Two hooks watch every session whose resolved mode is `auto`.
 
 **Question hook (`auto-guard`).** It denies the question tool, so the model takes the recommended option. In the default permission mode it also advises, once per session, launching with a trusted permission mode. The standing auto-mode rule comes from `session-init` at SessionStart.
 
-**Spend cap hook (`auto-cost`).** It totals what the session has cost. At `auto.warnPct` (default 70) of `auto.budgetUsd` (default 5, in US dollars) it warns once. At the cap it denies every tool except reading files, `git status`, `git diff`, `playbook mode status`, and writing a short note about where the work stopped.
+**Spend cap hook (`auto-cost`).** The budget applies to each agent, so one chatty subagent no longer stops the others.
 
-- Cost is the larger of the session transcript total (subagent files included) and the cost the status line reports.
-- If the cost cannot be read, the hook treats it as over the cap: it stops the session and asks the model to report, without a park note.
-- The cap is per session, so `/clear` or a resume starts a new count.
-- Change it with `playbook config set auto.budgetUsd <usd>`.
+- The main session has `auto.budgetUsd` (default 5, in US dollars), counted on its own transcript. Each subagent has `auto.agentBudgetUsd` (default 5), counted on its own transcript. At `auto.warnPct` (default 70) of its own cap an agent hears one warning about its own budget.
+- At its cap, only that agent is parked. It cannot start new work (edits, builds, merges, releases, new agents), and the others carry on.
+- A parked agent can still deliver finished work: the `playbook:create-pull-request` and `playbook:commit-and-push` skills (and `playbook:writing-style` and `playbook:engineering-standards`, which they load), `git add`, `git commit`, `git push` (never forced), `git status`, `git diff`, `git log`, `git worktree list`, read-only `gh` (`pr view`, `pr list`, `pr checks`, `run view`, `api` with GET), `playbook pr create`, `playbook pr prepare`, `playbook pr rules`, `playbook commit run`, `playbook commit prepare`, `playbook config get`, `playbook mode status`, reading files, and writing its own park note. A command chained to anything else is denied, and so is one that uses `$(...)`, `$VAR` or a backtick, so give `git commit` a plain message or use `playbook commit run`.
+- `auto.sessionCeilingUsd` caps the whole tree. At the ceiling no new agent starts, and everything else follows the per-agent caps. The default, 0, means ten times `auto.budgetUsd`.
+- The denial names the two commands that unblock the agent: `playbook config set auto.budgetUsd <usd>` (`auto.agentBudgetUsd` for a subagent, `auto.sessionCeilingUsd` at the ceiling) and `playbook mode ask`. Raising a cap takes effect on the next tool call.
+- The hook knows who is calling from the `agent_id` that Claude Code puts in the hook input of a subagent's tool calls. A call with no `agent_id`, as from a Claude Code version that does not send one, counts as the main session. Then a subagent's own cap cannot be enforced, and the ceiling is the backstop.
+- A subagent's cost is its own transcript. When that file holds a model missing from the price table and no status line cost exists, the cost is unreadable.
+- If the cost of the calling agent cannot be read, the hook treats it as over the cap. The closing steps and the park note still work, so finished work is delivered.
+- The caps are per session, so `/clear` or a resume starts a new count.
+- Change them with `playbook config set auto.budgetUsd <usd>`, `auto.agentBudgetUsd` and `auto.sessionCeilingUsd`.
 
-While auto is on, the model cannot switch the mode, change the `mode`, `auto.*` or `fix.*` settings, or edit the config files. Only you can, by typing the command yourself. At the cap it also cannot raise the cap. The one exception is an unreadable cost: then it may run `playbook mode ask` to leave auto.
+While auto is on, the model cannot switch the mode, change the `mode`, `auto.*` or `fix.*` settings, or edit the config files. This covers `auto.agentBudgetUsd` and `auto.sessionCeilingUsd`. Only you can, by typing the command yourself. At a cap it also cannot raise the cap. The one exception is an unreadable cost: then it may run `playbook mode ask` to leave auto.
 
 ## Flags do not reach hooks
 
@@ -59,5 +65,5 @@ The cap and the hooks guard against runaway spend and honest mistakes. They are 
 
 ## See also
 
-- [Config keys](04-config-keys.md): `mode`, `auto.budgetUsd`, `auto.warnPct`.
+- [Config keys](04-config-keys.md): `mode`, `auto.budgetUsd`, `auto.agentBudgetUsd`, `auto.sessionCeilingUsd`, `auto.warnPct`.
 - [Plan and implement](01-plan-and-implement.md): how `--auto` flows through the commands.
