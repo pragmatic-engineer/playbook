@@ -250,13 +250,13 @@ pub enum Command {
     /// Install or repair your local Claude Code setup
     ///
     /// Safe to run again: it only touches what is missing or out of date.
-    /// In a terminal it asks about each optional part (hooks, settings, status
-    /// line, PATH, the `ccc` launcher, the system prompt) unless you answer with a flag.
+    /// In a terminal it asks about each optional part (hooks, status line,
+    /// PATH, the `ccc` launcher, the system prompt) unless you answer with a flag.
     /// Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`,
-    /// unanswered parts use their defaults: hooks, settings and PATH on, the
+    /// unanswered parts use their defaults: hooks, the status line and PATH on, the
     /// launcher and system prompt off.
     ///
-    /// The security defaults (permissions rules and the autoupdater switch)
+    /// The security defaults (permissions rules)
     /// are never asked about and stay off unless you pass `--security` or set
     /// `security.defaults` to true. Without them, `init` leaves any
     /// permissions you already have untouched.

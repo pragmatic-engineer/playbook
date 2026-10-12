@@ -122,7 +122,10 @@ fn a_clean_install_matches_the_golden_settings() {
 fn a_contested_key_matches_the_golden_bytes_and_leaves_a_skip_report() {
     let sb = Sandbox::new("golden-skip");
     let (settings, base) = golden("init.skip-triggering.json");
-    sb.write(".claude/settings.json", "{\"cleanupPeriodDays\": 999}\n");
+    sb.write(
+        ".claude/settings.json",
+        "{\"statusLine\":{\"type\":\"command\",\"command\":\"my-status\"}}\n",
+    );
     sb.init("/bin/bash", &[]);
     assert_eq!(sb.read(".claude/settings.json"), settings);
     assert_eq!(sb.read(".claude/.settings.base.json"), base);
@@ -285,8 +288,8 @@ fn no_hooks_leaves_every_hook_entry_out_and_says_so() {
     let settings = h.read(".claude/settings.json");
     assert!(!settings.contains("playbook hook"), "{settings}");
     assert!(
-        settings.contains("cleanupPeriodDays"),
-        "shared settings still merged"
+        settings.contains("playbook statusline"),
+        "the status line part still applies"
     );
 }
 
@@ -333,10 +336,8 @@ fn a_no_flag_overrides_its_yes_twin() {
     assert!(t.contains("not installed"), "{t}");
 }
 
-const SECURITY_ENV: &str = "DISABLE_AUTOUPDATER";
-
 fn has_security(settings: &Value) -> bool {
-    settings.get("permissions").is_some() || settings["env"].get(SECURITY_ENV).is_some()
+    settings.get("permissions").is_some()
 }
 
 #[test]
@@ -345,7 +346,7 @@ fn a_plain_init_applies_no_security_defaults() {
     let out = sb.init("/bin/bash", &[]);
     let settings = json(&sb.read(".claude/settings.json"));
     assert!(!has_security(&settings), "{settings}");
-    assert!(settings["env"].get("DO_NOT_TRACK").is_some(), "{settings}");
+    assert!(settings.get("env").is_none(), "{settings}");
     assert!(text(&out).contains("--security"), "{}", text(&out));
 }
 
@@ -355,7 +356,10 @@ fn the_security_flag_applies_the_defaults_and_a_rerun_is_stable() {
     sb.init("/bin/bash", &["--security"]);
     let first = sb.read(".claude/settings.json");
     let settings = json(&first);
-    assert_eq!(settings["env"][SECURITY_ENV], "1");
+    assert!(
+        settings.get("env").is_none(),
+        "no autoupdater switch: {settings}"
+    );
     assert_eq!(settings["permissions"]["deny"][0], "Read(**/.env)");
     assert!(settings["permissions"]["ask"]
         .to_string()
@@ -401,9 +405,68 @@ fn a_plain_init_never_strips_security_entries_the_user_already_has() {
     mine.init("/bin/bash", &[]);
     let settings = json(&mine.read(".claude/settings.json"));
     assert_eq!(settings["permissions"], json(r#"{"allow":["Read"]}"#));
-    assert_eq!(settings["env"][SECURITY_ENV], "0");
+    assert_eq!(settings["env"]["DISABLE_AUTOUPDATER"], "0");
     assert_eq!(settings["env"]["MINE"], "1");
     mine.init("/bin/bash", &["--security"]);
     let settings = json(&mine.read(".claude/settings.json"));
     assert_eq!(settings["permissions"], json(r#"{"allow":["Read"]}"#));
+}
+
+#[test]
+fn an_existing_install_keeps_every_key_an_older_template_shipped() {
+    let sb = Sandbox::new("retired-keys");
+    let old = r#"{"cleanupPeriodDays":14,"outputStyle":"Concise & Direct","tui":"fullscreen","env":{"DO_NOT_TRACK":"1","DISABLE_AUTOUPDATER":"1"},"worktree":{"baseRef":"head"}}"#;
+    sb.write(".claude/settings.json", old);
+    sb.write(".claude/.settings.base.json", old);
+
+    sb.init("/bin/bash", &[]);
+
+    let settings = json(&sb.read(".claude/settings.json"));
+    assert_eq!(settings["cleanupPeriodDays"], 14);
+    assert_eq!(settings["outputStyle"], "Concise & Direct");
+    assert_eq!(settings["tui"], "fullscreen");
+    assert_eq!(settings["env"]["DO_NOT_TRACK"], "1");
+    assert_eq!(settings["env"]["DISABLE_AUTOUPDATER"], "1");
+    assert_eq!(settings["worktree"]["baseRef"], "head");
+    assert!(settings.get("hooks").is_some());
+}
+
+#[test]
+fn the_retired_settings_flags_are_refused() {
+    let sb = Sandbox::new("no-settings-flag");
+
+    for flag in ["--settings", "--no-settings"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["init", flag])
+            .env("HOME", &sb.home)
+            .current_dir(&sb.home)
+            .output()
+            .expect("playbook should spawn");
+        assert!(!out.status.success(), "{flag} should be refused");
+    }
+}
+
+#[test]
+fn a_fresh_install_adds_no_personal_preference_key() {
+    let sb = Sandbox::new("no-prefs");
+    sb.init("/bin/bash", &[]);
+
+    let settings = json(&sb.read(".claude/settings.json"));
+
+    let keys: Vec<&String> = settings.as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["hooks", "statusLine"], "{keys:?}");
+}
+
+#[test]
+fn turning_every_settings_part_off_leaves_settings_json_alone() {
+    let sb = Sandbox::new("all-off");
+    sb.write(".claude/settings.json", "{\"theme\":\"dark\"}\n");
+
+    let t = text(&sb.init(
+        "/bin/bash",
+        &["--no-hooks", "--no-statusline", "--no-security"],
+    ));
+
+    assert_eq!(sb.read(".claude/settings.json"), "{\"theme\":\"dark\"}\n");
+    assert!(t.contains("settings.json is not merged"), "{t}");
 }

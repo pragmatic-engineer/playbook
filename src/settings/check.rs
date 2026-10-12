@@ -9,7 +9,7 @@
 //! Message wording and exit status match the python exactly, because
 //! `tests/settings_check.rs` diffs the two implementations.
 
-use crate::settings::keys::{SHIPPABLE_ENV, SHIPPABLE_KEYS};
+use crate::settings::keys::SHIPPABLE_KEYS;
 use crate::HookName;
 use clap::ValueEnum;
 use serde_json::Value;
@@ -71,9 +71,9 @@ pub fn check(
         ));
     }
 
-    if template.get("skipAutoPermissionPrompt") != Some(&Value::Bool(false)) {
+    if template.get("skipAutoPermissionPrompt") == Some(&Value::Bool(true)) {
         return Err(format!(
-            ".skipAutoPermissionPrompt must be false in {template_display}"
+            ".skipAutoPermissionPrompt must not be true in {template_display}"
         ));
     }
 
@@ -83,8 +83,8 @@ pub fn check(
     Ok(format!("check-shared-settings: OK ({template_display})"))
 }
 
-/// Every template key must be on `SHIPPABLE_KEYS`, and every `env` key on
-/// `SHIPPABLE_ENV`: the allowlist inversion of the old personal-key denylist.
+/// Every template key must be on `SHIPPABLE_KEYS`: the allowlist inversion of
+/// the old personal-key denylist.
 fn check_shippable_keys(template: &Value, template_path: &Path) -> Result<(), String> {
     let Some(obj) = template.as_object() else {
         return Ok(());
@@ -103,20 +103,6 @@ fn check_shippable_keys(template: &Value, template_path: &Path) -> Result<(), St
         ));
     }
 
-    if let Some(env) = obj.get("env").and_then(Value::as_object) {
-        let offending_env: Vec<&str> = env
-            .keys()
-            .map(String::as_str)
-            .filter(|k| !SHIPPABLE_ENV.contains(k))
-            .collect();
-        if !offending_env.is_empty() {
-            return Err(format!(
-                "env key(s) not in the shippable allowlist in {}: {}",
-                template_path.display(),
-                offending_env.join(", ")
-            ));
-        }
-    }
     Ok(())
 }
 

@@ -186,7 +186,6 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         system_prompt: false,
         aliases: true,
         hooks: true,
-        settings: true,
         statusline: true,
         security: false,
         path_setup: None,
@@ -433,17 +432,17 @@ fn zero_hook_commands_point_under_claude_hooks_dir_after_a_full_init() {
 #[test]
 fn withheld_customisation_produces_a_skip_report_alongside_the_backup() {
     // Arrange: BASE differs from both what the template ships
-    // (`cleanupPeriodDays: 14` in `settings.shared.json`) and what the user
+    // (the `statusLine` in `settings.shared.json`) and what the user
     // customised, so the key is genuinely contested.
     let home = scratch_home("skip-report");
     let claude_home = claude_home_of(&home);
     write_json(
         &claude_home.join(".settings.base.json"),
-        &json!({"cleanupPeriodDays": 999}),
+        &json!({"statusLine": {"type": "command", "command": "base-line"}}),
     );
     write_json(
         &claude_home.join("settings.json"),
-        &json!({"cleanupPeriodDays": 500}),
+        &json!({"statusLine": {"type": "command", "command": "my-line"}}),
     );
     let paths = base_paths(&home, Some(ShellKind::Bash));
 
@@ -486,9 +485,9 @@ fn withheld_customisation_produces_a_skip_report_alongside_the_backup() {
         1,
         "expected exactly one withheld key: {entries:?}"
     );
-    assert_eq!(entries[0]["key"], "cleanupPeriodDays");
-    assert_eq!(entries[0]["template_had"], 14);
-    assert_eq!(entries[0]["yours"], 500);
+    assert_eq!(entries[0]["key"], "statusLine");
+    assert_eq!(entries[0]["template_had"]["command"], "playbook statusline");
+    assert_eq!(entries[0]["yours"]["command"], "my-line");
 }
 
 /// WU-14 scenarios 2, 3 and 4: table-driven, since all three share the same
@@ -808,7 +807,6 @@ fn missing_self_root_skips_template_dependent_steps() {
         system_prompt: false,
         aliases: true,
         hooks: true,
-        settings: true,
         statusline: true,
         security: false,
         path_setup: None,
@@ -864,7 +862,6 @@ fn aliases_false_skips_shim_entirely() {
         system_prompt: false,
         aliases: false,
         hooks: true,
-        settings: true,
         statusline: true,
         security: false,
         path_setup: None,

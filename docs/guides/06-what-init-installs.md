@@ -26,12 +26,14 @@ Each part has a flag pair. With no flag, `init` asks in a terminal and uses the 
 
 | Part | Default | Flags | Files it edits |
 | :- | :- | :- | :- |
-| Hooks | on | `--hooks`, `--no-hooks` | `~/.claude/settings.json` |
-| Shared settings and status line | on | `--settings`, `--no-settings` | `~/.claude/settings.json`, `~/.claude/.settings.base.json` |
+| Hooks | on | `--hooks`, `--no-hooks` | `~/.claude/settings.json`, `~/.claude/.settings.base.json` |
+| Status line | on | `--statusline`, `--no-statusline` | `~/.claude/settings.json` |
 | Security defaults | off | `--security`, `--no-security` | `~/.claude/settings.json` |
 | PATH block | on | `--path`, `--no-path` | your shell startup files |
 | Launcher shortcuts `ccc` and `ccd` | off | `--aliases`, `--no-aliases` | your shell rc file |
 | System prompt | off | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md` |
+
+`--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
 
 Three steps run every time and have no flag: the memory migration, the trust step and the retired config-hash cleanup. They are described below.
 
@@ -45,21 +47,23 @@ While the plugin is disabled in Claude Code, every hook and the status line paus
 
 Init adds or updates its own entries only. A hook you added by hand, or an event group init does not manage, stays as it is. Running init twice changes nothing the second time.
 
-### Shared settings and status line
+### Status line and the settings merge
 
-Init three-way merges the shipped `settings.shared.json` into `~/.claude/settings.json`. A key you set yourself is kept. A key you never touched takes the template value. The merge records its base in `~/.claude/.settings.base.json` so the next run can tell your edits from the template's.
+When the hooks, status line or security part is on, init three-way merges the shipped `settings.shared.json` into `~/.claude/settings.json`. A key you set yourself is kept. A key you never touched takes the template value. The merge records its base in `~/.claude/.settings.base.json` so the next run can tell your edits from the template's.
 
 The template includes:
 
 - A `statusLine` entry that runs `playbook statusline`. It reads the session data Claude Code passes on stdin, the git state of the working directory, and PR and CI state through `gh` when `gh` is installed. It caches PR lookups under your cache directory. It writes nothing to your repo.
-- `env` entries that turn off Claude Code telemetry and non-essential traffic, and a few display options.
 - The `hooks` block, which is the same guards as the Hooks part.
+- The `permissions` block, only when you opt in to the security defaults.
+
+The template ships nothing else. Earlier templates also carried display options, notification toggles and `env` entries such as telemetry opt-outs and `DISABLE_AUTOUPDATER`. No hook or launcher reads them, so they are gone. A value you already have stays as it is: init never removes a key from your file. A fresh install gets none of them, so Claude Code keeps its own defaults and your update control stays yours (`playbook update` and Homebrew).
 
 When a merge skips a key because you changed it, init writes a `settings-merge-skipped.<time>.json` report next to the backup. Init keeps the five newest backups and reports.
 
 ### Security defaults
 
-Off unless you pass `--security` or set `security.defaults` to true. When on, init also applies the template's `permissions` block (allow, ask and deny lists) and `env.DISABLE_AUTOUPDATER`. When off, init leaves your values for both exactly as they are, and never removes ones you already have. To go back, run `playbook init --no-security` and delete the entries from `~/.claude/settings.json` by hand.
+Off unless you pass `--security` or set `security.defaults` to true. When on, init also applies the template's `permissions` block (allow, ask and deny lists). Nothing else changes, and update control (the Claude Code autoupdater) stays with you, `playbook update` and Homebrew. When off, init leaves your value exactly as it is, and never removes one you already have. To go back, run `playbook init --no-security` and delete the permissions entries from `~/.claude/settings.json` by hand.
 
 ### PATH block
 
@@ -88,6 +92,7 @@ Older installs placed `~/.config/playbook/hooks/lib/config-hash.sh`. The config 
 ## Undo
 
 - `playbook uninstall` removes the hook entries and status line init wrote, the launcher block, and the files init placed under `~/.config/playbook`. Run it with `--dry-run` first to see the list. Add `--remove-binary` to remove the binary and its PATH block too.
+- If you remove the plugin and leave the hooks behind, the status line and the session start add one hint line that tells you to run `playbook uninstall --yes`. Set `playbook config set --global hints.pluginRemoved false` to hide it. Nothing is removed for you.
 - Memory, your own settings, sessions, history and earlier backups are never removed.
 - Backups of `settings.json` are timestamped files next to it, named `settings.json.bak.<time>`.
 - Any single part can be turned off by running `init` again with its `--no-` flag, then removing the entries by hand. Init never deletes a value you have.

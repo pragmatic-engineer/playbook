@@ -34,7 +34,7 @@ fn part_of_key(key: &str) -> &'static str {
         "hooks" => "hooks",
         "statusLine" => "statusline",
         "permissions" => "security",
-        _ => "settings",
+        _ => "hooks", // a key no part claims, never shipped
     }
 }
 
@@ -84,18 +84,6 @@ pub fn settings_changes(before: &Value, after: &Value) -> Vec<(&'static str, Str
                 let added = hook_entries(after).difference(&was).count();
                 out.push(("hooks", format!("add {added} hook entries")));
             }
-            ("env", Some(Value::Object(old_env))) => {
-                for (k, v) in new.as_object().into_iter().flatten() {
-                    if old_env.get(k) != Some(v) {
-                        let part = if k == "DISABLE_AUTOUPDATER" {
-                            "security"
-                        } else {
-                            "settings"
-                        };
-                        out.push((part, format!("set env.{k}")));
-                    }
-                }
-            }
             (_, None) => out.push((part_of_key(key), format!("add {key}"))),
             (_, Some(_)) => out.push((part_of_key(key), format!("change {key}"))),
         }
@@ -106,7 +94,7 @@ pub fn settings_changes(before: &Value, after: &Value) -> Vec<(&'static str, Str
 /// One line per kind of change for a part: `add keys: a, b`, `change keys: c`.
 fn grouped(changes: &[(&'static str, String)], id: &str, file: &str) -> Vec<String> {
     let mut lines = Vec::new();
-    for verb in ["add", "set", "change"] {
+    for verb in ["add", "change"] {
         let names: Vec<&str> = changes
             .iter()
             .filter(|(p, _)| *p == id)
@@ -184,7 +172,6 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         system_prompt: false,
         aliases: paths.aliases,
         hooks: paths.hooks,
-        settings: paths.settings,
         statusline: paths.statusline,
         security: paths.security,
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
@@ -216,7 +203,6 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     let on = |b: bool| if b { "on" } else { "off" };
     let flags = [
         ("hooks", choices.hooks),
-        ("settings", choices.settings),
         ("statusline", choices.statusline),
         ("security", choices.security),
         ("path", choices.path),
@@ -230,7 +216,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
             continue;
         }
         let lines: Vec<String> = match id {
-            "hooks" | "settings" | "statusline" | "security" => {
+            "hooks" | "statusline" | "security" => {
                 let mine = grouped(&changes, id, &settings_file);
                 if mine.is_empty() {
                     let step = if id == "hooks" {
@@ -245,7 +231,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                         } else {
                             "no change, "
                         },
-                        if id == "hooks" || id == "settings" {
+                        if id == "hooks" {
                             step.detail.as_str()
                         } else {
                             "already as configured"

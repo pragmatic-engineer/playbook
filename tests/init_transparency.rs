@@ -156,7 +156,6 @@ fn explain_without_a_part_describes_every_part() {
 
     for part in [
         "hooks",
-        "settings",
         "statusline",
         "security",
         "path",
