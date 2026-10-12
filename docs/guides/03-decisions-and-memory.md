@@ -43,7 +43,7 @@ Sources it reads (when available):
 - Git history: churn hotspots, commit conventions, contributors.
 - Code structure: entry points, build/test/lint tooling, CI/CD, migrations.
 - Pull requests (via `gh`): recurring themes, review norms, notable decisions.
-- JIRA and Confluence (via MCP or `acli` when reachable).
+- JIRA and Confluence (via MCP, `acli` or `twg` when reachable).
 
 It collects in parallel, then analyses findings into clusters: architecture, conventions, domain glossary, decisions, infrastructure, setup, scripts, database, and data access patterns. Before writing anything, it shows you a table of candidate facts and asks once. It won't write without your confirmation.
 

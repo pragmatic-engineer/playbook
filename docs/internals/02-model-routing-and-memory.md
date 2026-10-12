@@ -108,7 +108,7 @@ This table lists every agent, command and skill with the model and effort in its
 | command | `session-handoff` | `haiku` | `low` | Writes and saves a handoff using binary-supplied rules and facts. |
 | command | `session-start` | `haiku` | `low` | Loads a saved handoff. Mechanical. |
 | command | `setup` | `haiku` | `low` | Runs compiled helpers and asks questions. Mechanical. |
-| skill | `atlassian-cli` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `atlassian` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `delegating-subagents` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `engineering-standards-javascript` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `engineering-standards` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
