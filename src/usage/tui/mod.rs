@@ -84,7 +84,7 @@ fn event_loop(
                 frame,
                 v,
                 &app.theme.palette(app.depth),
-                crate::common::time::now_secs(),
+                crate::usage::util::time::now_secs(),
             ),
             None => view::render(frame, &app),
         })?;

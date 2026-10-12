@@ -12,6 +12,7 @@ pub mod backfill;
 pub mod claude_code;
 pub mod codex;
 pub mod collector;
+pub mod command;
 pub mod db;
 pub mod entry;
 pub mod host;
@@ -26,10 +27,13 @@ pub mod receiver;
 pub mod reconcile;
 pub mod repo;
 pub mod run;
+pub mod session_view;
 pub mod summary;
 pub mod telemetry_db;
+pub mod telemetry_detect;
 pub mod telemetry_status;
 pub mod tui;
+pub mod util;
 pub mod warm;
 
 /// One assistant message's token usage and derived cost. `event_id` is the

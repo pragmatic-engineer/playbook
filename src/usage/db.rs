@@ -7,7 +7,7 @@
 //! other processes, which is what WAL mode and `busy_timeout` are for.
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
-use crate::common::atomic::{ensure_private_dir, make_db_file_private};
+use crate::usage::util::atomic::{ensure_private_dir, make_db_file_private};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
@@ -435,7 +435,7 @@ pub fn load_tool_events(conn: &Connection) -> Result<Vec<ToolInvocationEvent>, S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use crate::usage::util::scratch_dir;
     use std::fs;
 
     #[cfg(unix)]

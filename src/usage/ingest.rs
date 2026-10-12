@@ -32,7 +32,7 @@ pub fn ingest(
     account: &str,
     conn: &Connection,
 ) -> Result<IngestStats, String> {
-    ingest_at(source, account, conn, crate::common::time::now_secs())
+    ingest_at(source, account, conn, crate::usage::util::time::now_secs())
 }
 
 fn ingest_at(
@@ -126,7 +126,7 @@ pub fn ingest_claude(
     if db::get_watermark(conn, name)? > 0 || db::get_watermark(conn, BACKFILL_DONE)? > 0 {
         return ingest(source, account, conn);
     }
-    let started = crate::common::time::now_secs();
+    let started = crate::usage::util::time::now_secs();
     let mut files: Vec<(PathBuf, i64, u64)> = source
         .files()
         .into_iter()
@@ -188,8 +188,8 @@ pub fn ingest_claude(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
     use crate::usage::claude_code::ClaudeCodeSource;
+    use crate::usage::util::scratch_dir;
     use crate::usage::{Events, ToolKind, UsageEvent};
     use std::fs;
     use std::path::PathBuf;
@@ -404,11 +404,11 @@ mod tests {
     /// after the epoch plus a base, so a higher index is newer.
     fn transcripts(name: &str, n: usize) -> (PathBuf, ClaudeCodeSource) {
         let root = scratch_dir(name);
-        let now = crate::common::time::now_secs();
+        let now = crate::usage::util::time::now_secs();
         for i in 0..n {
             let dir = root.join(format!("proj{}", i % 3));
             fs::create_dir_all(&dir).unwrap();
-            let ts = crate::common::time::iso_utc(now - 3_600 * 24 + i as i64);
+            let ts = crate::usage::util::time::iso_utc(now - 3_600 * 24 + i as i64);
             let line = format!(
                 r#"{{"type":"assistant","timestamp":"{ts}","sessionId":"s{i}","cwd":"/fake/p","message":{{"id":"msg_{i}","model":"claude-sonnet-5","usage":{{"input_tokens":10,"output_tokens":5}}}}}}"#
             );

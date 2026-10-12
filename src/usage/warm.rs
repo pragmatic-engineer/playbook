@@ -155,7 +155,7 @@ pub fn minutes(home: &Path) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use crate::usage::util::scratch_dir;
 
     fn dir(name: &str) -> PathBuf {
         let d = scratch_dir(name);

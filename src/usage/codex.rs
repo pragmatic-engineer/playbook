@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn rerunning_ingest_does_not_duplicate_events() {
-        let dir = crate::common::test_support::scratch_dir("codex-ingest");
+        let dir = crate::usage::util::scratch_dir("codex-ingest");
         let conn = db::open_db(&dir.join("usage.db")).unwrap();
         let source = CodexSource::new(root());
         let first = ingest(&source, "unknown", &conn).unwrap();
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn every_thread_count_gives_the_same_codex_events() {
-        let dir = crate::common::test_support::scratch_dir("codex-threads");
+        let dir = crate::usage::util::scratch_dir("codex-threads");
         let mut originals = Vec::new();
         collect_jsonl(&root(), &mut originals);
         for n in 0..12 {

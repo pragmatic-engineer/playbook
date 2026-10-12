@@ -56,10 +56,10 @@ pub fn state_dir() -> PathBuf {
 }
 
 /// The clap enum of `usage` subcommands, owned by the host's CLI.
-pub use crate::UsageCommand;
+pub use super::command::UsageCommand;
 
 /// How the host launches Claude Code with telemetry, for the status view.
-pub use crate::cc::telemetry::{configured as telemetry_configured, Configured};
+pub use super::telemetry_detect::{configured as telemetry_configured, Configured};
 
 /// The sessions view's record types, owned by the host's `sessions` feature.
 pub use crate::sessions::{

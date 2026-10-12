@@ -19,7 +19,7 @@
 use super::receiver::{bind, serve, Config};
 use super::run::Paths;
 use super::telemetry_db::{migrate_up, prune, Pruned, Retention};
-use crate::common::atomic::write_atomic_private;
+use crate::usage::util::atomic::write_atomic_private;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -202,7 +202,7 @@ pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
 impl Status {
     /// The text a person reads.
     pub fn text(&self, now: i64) -> String {
-        use crate::common::time::iso_utc;
+        use crate::usage::util::time::iso_utc;
         let mut lines = vec![self.telemetry.clone()];
         if let Some(fix) = &self.telemetry_fix {
             lines.push(format!("fix: {fix}"));
@@ -298,7 +298,12 @@ pub fn run_prune(paths: &Paths, dry_run: bool) -> Result<String, String> {
     let conn = super::db::open_db(&paths.db)?;
     migrate_up(&conn)?;
     let retention = configured_retention();
-    let p: Pruned = prune(&conn, crate::common::time::now_secs(), retention, dry_run)?;
+    let p: Pruned = prune(
+        &conn,
+        crate::usage::util::time::now_secs(),
+        retention,
+        dry_run,
+    )?;
     let verb = if dry_run { "would remove" } else { "removed" };
     Ok(format!(
         "{verb} {} requests, {} tool calls, {} api errors, {} metric points (keeping {} days, {} rows per table; 0 means no limit)",
@@ -344,12 +349,17 @@ pub fn run_collect(
         pid: std::process::id(),
         port: actual,
         token: token.clone(),
-        started_at: crate::common::time::now_secs(),
+        started_at: crate::usage::util::time::now_secs(),
         idle_seconds,
     };
     write_state(&path, &state)?;
     let retention = configured_retention();
-    let _ = prune(&conn, crate::common::time::now_secs(), retention, false);
+    let _ = prune(
+        &conn,
+        crate::usage::util::time::now_secs(),
+        retention,
+        false,
+    );
     let cfg = Config {
         token: Some(token),
         idle: (idle_seconds > 0).then(|| Duration::from_secs(idle_seconds)),
@@ -359,7 +369,13 @@ pub fn run_collect(
         "usage collect: listening on 127.0.0.1:{actual} (pid {})",
         state.pid
     );
-    let result = serve(&listener, &conn, &cfg, stop, crate::common::time::now_secs);
+    let result = serve(
+        &listener,
+        &conn,
+        &cfg,
+        stop,
+        crate::usage::util::time::now_secs,
+    );
     state.pid = 0;
     let _ = write_state(&path, &state);
     match result {
@@ -371,7 +387,7 @@ pub fn run_collect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use crate::usage::util::scratch_dir;
     use std::sync::atomic::Ordering;
 
     fn paths(name: &str) -> Paths {

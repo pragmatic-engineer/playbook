@@ -16,7 +16,7 @@ use super::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
 use super::query::WeekStart;
 use super::UsageEvent;
-use crate::common::atomic::write_atomic_private;
+use crate::usage::util::atomic::write_atomic_private;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -321,7 +321,7 @@ pub fn describe(l: &Limit, now: i64) -> String {
         State::OnTrack => "on track".to_string(),
         State::WillExceed { at } => format!(
             "will exceed at about {} UTC",
-            crate::common::time::iso_utc(at)
+            crate::usage::util::time::iso_utc(at)
                 .replace('T', " ")
                 .trim_end_matches('Z')
         ),

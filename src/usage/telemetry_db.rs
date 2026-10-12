@@ -791,7 +791,7 @@ mod tests {
 
     #[test]
     fn opening_the_usage_db_creates_the_tables_and_leaves_transcript_ingest_alone() {
-        let dir = crate::common::test_support::scratch_dir("telemetry-open");
+        let dir = crate::usage::util::scratch_dir("telemetry-open");
         let conn = open_db(&dir.join("usage.db")).unwrap();
         assert!(table_exists(&conn, "telemetry_requests"));
         let event = UsageEvent {
