@@ -52,11 +52,11 @@ A stack is a series of PRs where each one targets the branch of the PR below it.
 
 A PR outside a stack is reviewed with no extra question. When the PR sits in a stack, even with a single open PR, both commands print the size and always ask:
 
-1. This PR only.
-2. Whole stack, quick review. This is the default.
+1. This PR only. This is the default.
+2. Whole stack, quick review.
 3. Whole stack, deep review.
 
-Pass `--this-pr` or `--whole-stack` to skip the question. In auto mode the command takes option 2 and logs the assumption.
+Pass `--this-pr` or `--whole-stack` to skip the question. In auto mode the command takes option 1 and logs the assumption. Either way it first says which PRs are below and above and which branch the PR's own diff is taken against.
 
 ```bash
 /playbook:quick-review 123 --whole-stack   # quick review of the stack PR #123 belongs to

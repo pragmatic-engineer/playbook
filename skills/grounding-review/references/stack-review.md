@@ -24,21 +24,27 @@ If the PR you were given is `context` or `skip`, say so in one line and stop: th
 
 If `ask` is false, the PR is not in a stack: there is no question and nothing changes. A PR in a stack always gets the question, even when only one PR in the stack is still open. Merged PRs are never reviewed, but are always read as background context.
 
-If `ask` is true, print one line first: `Stack of <n> PRs (<open_count> open, <merged_count> merged), <open_lines> changed lines in the open PRs.` Then pick the scope:
+If `ask` is true, say it plainly first, in two lines. Line one: `Stack of <n> PRs (<open_count> open, <merged_count> merged), <open_lines> changed lines in the open PRs.` Line two names this PR's neighbours from `prs` by `position`: `This is #<PR_NUMBER>. Below: #<a> (<head>), #<b>. Above: #<c>, #<d>. Own diff base: <base>.` Write `none` for an empty side. `<base>` is this PR's own `base` (the parent PR's branch, not the default branch). Then pick the scope:
 
 - `--this-pr` in the arguments: this PR only, no question.
 - `--whole-stack` in the arguments: the whole stack, no question.
-- Auto mode: take the recommended answer, the whole stack with a quick review, unless `--this-pr` was passed. Log it with `Assumed: whole stack, quick review (auto mode).` If `over_budget` is true, take this PR only instead and log `Assumed: this PR only, the stack is over budget (<reasons>).`
+- Auto mode: take this PR only, unless `--whole-stack` was passed. Log it with `Assumed: this PR only (auto mode).`
 - Otherwise ask, with these three options:
-  1. This PR only.
-  2. Whole stack, quick review. This is the default.
+  1. This PR only. This is the default.
+  2. Whole stack, quick review.
   3. Whole stack, deep review.
 
-  `/playbook:quick-review` recommends option 2 and `/playbook:deep-review` recommends option 3. When the answer is for the other command, hand over: invoke that command with the Skill tool, passing `<PR_NUMBER> --whole-stack` and the same mode flags, then stop.
+  Both commands recommend option 1. When the answer is for the other command, hand over: invoke that command with the Skill tool, passing `<PR_NUMBER> --whole-stack` and the same mode flags, then stop.
 
 When the scope is a whole stack and `over_budget` is true, ask once more before starting, naming the reasons from `over_budget_reasons`: continue anyway, this PR only, or stop. The limits are `review.stackMaxPrs` and `review.stackMaxLines`.
 
+## 2b. This PR only
+
+Review only this PR's own diff against its real base, the parent PR's branch from `prs`, never the default branch. `gh pr diff <PR_NUMBER>` already gives exactly that, so use it and do not run `git diff` against the default branch or read the lower PRs' changes as part of this PR. Tell the reviewer the base branch and that the lower PRs are out of scope. A finding that needs a lower or upper PR to make sense is raised as a `question:` naming that PR, not as a defect in this one. Then skip section 3 and go on with Steps 2 to 4 of the command.
+
 ## 3. Build the shared context
+
+Whole-stack scope only.
 
 ```bash
 playbook pr stack <PR_NUMBER> --context --max-prs <n> --max-lines <n>
