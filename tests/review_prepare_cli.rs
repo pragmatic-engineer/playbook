@@ -147,7 +147,7 @@ fn only_the_flags_and_auto_are_report_only() {
             &text(&s.run(&["review", "prepare", "quick", "7", "--auto"])),
             "SELF_MODE"
         ),
-        "true"
+        "false"
     );
     let t = text(&s.run(&["review", "prepare", "quick"]));
     assert_eq!(field(&t, "PR_NUMBER"), "7");

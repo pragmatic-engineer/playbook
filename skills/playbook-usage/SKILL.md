@@ -19,7 +19,7 @@ description: Lists /playbook:* commands and when to use each. Use when asked wha
 
 | Command | Use when |
 |---|---|
-| `/playbook:quick-review` | A routine PR review, or a quick check of your own branch. Single pass, posts a pending GitHub review, or only reports with `--self` or when the PR is yours. |
+| `/playbook:quick-review` | A routine PR review, or a quick check of your own branch. Single pass, asks which findings to post as a pending GitHub review, or only reports with `--self` or `--no-post`. |
 | `/playbook:deep-review` | A substantial, risky or cross-cutting PR. A parallel swarm of specialist reviewers, fact-checked into one pending review. |
 | `/playbook:address-pr-comments` | Working through open review feedback on a PR, one comment at a time. |
 

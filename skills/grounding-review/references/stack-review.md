@@ -60,7 +60,7 @@ The Verification Sweep checks the anchor: the finding must sit on the PR that ow
 
 ## 5. Post
 
-Not in `SELF_MODE` (report only, and always in auto mode). Otherwise, after the tier question, write the kept findings as JSON (`file`, `line`, `body`, `pr`) and map them:
+Not in `SELF_MODE` (report only, set only by `--self` or `--no-post`). Otherwise, after the tier question, write the kept findings as JSON (`file`, `line`, `body`, `pr`) and map them:
 
 ```bash
 playbook pr stack map --stack <stack_file> --findings <findings.json> --out <mapped.json>

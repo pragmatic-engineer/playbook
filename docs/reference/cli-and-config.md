@@ -874,7 +874,7 @@ Example: `playbook review prepare deep "#4265 --self"`
 
 - `<KIND>`: Which review: `quick` or `deep` (one of `quick`, `deep`)
 - `<ARGS>`: The review command's arguments, as one string
-- `--auto`: Treat the run mode as auto (implies report-only)
+- `--auto`: Accepted for compatibility; auto mode does not skip the post question
 
 ### `playbook review ref`
 

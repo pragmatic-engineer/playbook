@@ -56,7 +56,7 @@ A PR outside a stack is reviewed with no extra question. When the PR sits in a s
 2. Whole stack, quick review. This is the default.
 3. Whole stack, deep review.
 
-Pass `--this-pr` or `--whole-stack` to skip the question. In auto mode the command takes option 2 and logs the assumption. Nothing is posted in auto mode.
+Pass `--this-pr` or `--whole-stack` to skip the question. In auto mode the command takes option 2 and logs the assumption.
 
 ```bash
 /playbook:quick-review 123 --whole-stack   # quick review of the stack PR #123 belongs to

@@ -31,14 +31,24 @@ fn both_commands_name_no_post_and_ask_what_to_post() {
 }
 
 #[test]
-fn auto_prints_the_post_command_and_never_posts() {
+fn auto_mode_does_not_skip_the_question() {
     for name in COMMANDS {
         let text = read(name);
-        let line = format!("To post: /playbook:{name} <PR_NUMBER> --ask");
-        assert!(text.contains(&line), "{name}: no `{line}`");
         assert!(
-            text.contains("Auto mode never posts"),
+            text.contains("Auto mode does not change posting."),
             "{name}: auto rule missing"
+        );
+        assert!(
+            text.contains("Pipelines and unattended callers must pass `--self`."),
+            "{name}: pipelines rule missing"
+        );
+        assert!(
+            !text.contains("To post: /playbook"),
+            "{name}: stale auto line"
+        );
+        assert!(
+            !text.contains("or the run mode is auto"),
+            "{name}: auto still skips"
         );
     }
 }

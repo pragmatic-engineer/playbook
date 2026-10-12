@@ -26,7 +26,7 @@ Only you should run these. If auto comes from `PLAYBOOK_MODE`, unset the variabl
 ## What auto will not do
 
 - `/playbook:setup`, `/playbook:adr` and `/playbook:address-pr-comments` refuse to run in auto and say why.
-- Reviews never post to GitHub. `/playbook:quick-review` and `/playbook:deep-review` run as `--self`.
+- Reviews still ask what to post. `/playbook:quick-review` and `/playbook:deep-review` skip the question only with `--self` or `--no-post`, so pipelines must pass one of them.
 - `/playbook:learn-project` stages its candidates and writes nothing to live memory.
 - Auto never force-pushes.
 - Auto does not run the self-review on a new pull request.

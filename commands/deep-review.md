@@ -33,7 +33,7 @@ OPTIONS:
                     PR number is given, or when the PR is yours)
   --this-pr         When the PR is in a stack, review only this PR
   --whole-stack     When the PR is in a stack, review the whole stack
-  --auto            Run unattended; implies --self
+  --auto            Auto run mode; does not skip the post question, pass --self
   --ask             Force the interactive mode
 
 EXAMPLES:
@@ -43,7 +43,7 @@ EXAMPLES:
   /playbook:deep-review 123 --self    Review PR #123, report only, never posts
 ```
 
-With no PR number the current branch's PR is reviewed and the post question is asked as usual. Only `--self`, `--no-post` and auto mode skip it. On your own PR GitHub blocks approve and request-changes, so the submit verb is limited to comment or skip.
+With no PR number the current branch's PR is reviewed and the post question is asked as usual. Only `--self` and `--no-post` skip it, auto mode included. On your own PR GitHub blocks approve and request-changes, so the submit verb is limited to comment or skip.
 
 ## Step 0: Read the run mode
 
@@ -58,11 +58,11 @@ The JSON has `mode`, `source`, `hook_mode`, `warning` and `ceiling`. Read `playb
 **Routing.** Where you choose what to spawn, also run `playbook route review --json` and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on.
 
 - **`ask` mode:** behave exactly as this file describes.
-- **`auto` mode:** follow the Auto path below.
+- **`auto` mode:** follow the Posting in auto mode paragraph below: it changes nothing about posting.
 
-### Auto path
+### Posting in auto mode
 
-Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set `RUN_MODE=auto` at the top of the Step 1 block (use `ask` otherwise), so `SELF_MODE` is true. The review runs and reports locally, and nothing is posted to GitHub, because a posted review speaks as you. Auto mode never posts, and it never skips the question silently: after the report, print the single command that posts, `/playbook:deep-review <PR_NUMBER> --ask`, so the user can opt in.
+Auto mode does not change posting. Only `--self` or `--no-post` skips the post question, so a run from chat always asks. Pipelines and unattended callers must pass `--self`.
 
 ## Reviewer Swarm
 
@@ -113,14 +113,14 @@ Findings are plain: label, `file:line`, evidence, a short failure scenario, and 
 playbook review prepare deep "$ARGUMENTS"
 ```
 
-Add `--auto` when Step 0 read auto mode (auto implies report-only). The command resolves the PR (a number or `#N`, else a branch name, else the current branch's PR with report-only), works out `SELF_MODE`, decides in-place or worktree and sets the worktree up, creates the folder of `REVIEW_JSON`, and prints these lines: `PR`, `REPO`, `PR_NUMBER`, `HEAD_SHA`, `AUTHOR`, `SELF_REVIEW`, `SELF_MODE`, `MODE`, `WT` (empty when in place) and `REVIEW_JSON`. On a problem it prints `error: ...` and exits 1: stop and show it. Then read the PR with the number it printed:
+Add `--auto` when Step 0 read auto mode (it does not skip the post question). The command resolves the PR (a number or `#N`, else a branch name, else the current branch's PR), works out `SELF_MODE`, decides in-place or worktree and sets the worktree up, creates the folder of `REVIEW_JSON`, and prints these lines: `PR`, `REPO`, `PR_NUMBER`, `HEAD_SHA`, `AUTHOR`, `SELF_REVIEW`, `SELF_MODE`, `MODE`, `WT` (empty when in place) and `REVIEW_JSON`. On a problem it prints `error: ...` and exits 1: stop and show it. Then read the PR with the number it printed:
 
 ```bash
 gh pr view <PR_NUMBER>
 gh pr diff <PR_NUMBER>
 ```
 
-Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, only when `--self` or `--no-post` is passed or the run mode is auto. `SELF_REVIEW` (the PR is yours) does not set it: it only narrows the submit verb to `comment` or `skip`.
+Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, only when `--self` or `--no-post` is passed. `SELF_REVIEW` (the PR is yours) does not set it: it only narrows the submit verb to `comment` or `skip`.
 
 In worktree mode, `WT` holds the absolute path to the isolated checkout. In in-place mode it is empty. Subagents use `$WT` for all reads; if empty, they read from the local working tree.
 
@@ -259,7 +259,7 @@ Present the report with each draft shown under its finding as a `Draft:` block. 
 
 ## Step 6: Orchestrate posting
 
-If `SELF_MODE` (`--self` or `--no-post` passed, or the run mode is auto), or nothing postable, stop here: the report IS the deliverable, no GitHub posting. In auto mode end with the one line `To post: /playbook:deep-review <PR_NUMBER> --ask`. The post question is skipped only by the flag or by auto mode.
+If `SELF_MODE` (`--self` or `--no-post` passed), or nothing postable, stop here: the report IS the deliverable, no GitHub posting. The post question is skipped only by the flag.
 
 Otherwise, **print every finding first (MUST).** Before asking anything, print all surviving findings in the chat, none left out and none summarized away: a code (F1, F2, and so on), the label, severity, `file:line` and a one-line description each. With zero findings, say so. The questions come only after this list, and the options refer to findings by code. A question with no list above it is a bug (#593).
 

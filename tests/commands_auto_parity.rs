@@ -30,7 +30,8 @@ enum Auto {
     Dedicated,
     /// Stops at Step 0 with a one-line refusal naming the command and why.
     Refuses,
-    /// Behaves as `--self`: reports locally and never posts a review.
+    /// Auto mode does not skip the post question; only `--self` and
+    /// `--no-post` do.
     ReportsOnly,
     /// Behaves as `--stage`: collects candidates and skips the write prompt.
     Stages,
@@ -770,33 +771,32 @@ fn is_post_call(line: &str) -> bool {
 }
 
 #[test]
-fn review_step0_says_auto_implies_self() {
+fn review_step0_says_auto_does_not_skip_the_post_question() {
     // Arrange
-    let implies = Regex::new(r"(?is)\bauto\b[^.]*\bimplies\b[^.]*--self").expect("implies pattern");
+    let rule = Regex::new(r"(?is)\bauto\b[^.]*\bdoes not change posting\b[^.]*\.[^.]*--self")
+        .expect("rule pattern");
+    let old = Regex::new(r"(?i)auto[^.]*implies[^.]*--self").expect("old pattern");
     let mut failures = Vec::new();
 
     for spec in rows(Auto::ReportsOnly) {
         let file = load(spec.name);
 
         // Act
-        let step0 = file.step0();
+        let text = file.text_of(&file.step0().expect("Step 0"));
 
         // Assert
-        match step0 {
-            None => failures.push(format!("{}: no `Step 0` section", spec.name)),
-            Some(s) if !implies.is_match(&file.text_of(&s)) => failures.push(format!(
-                "{}: Step 0 never says auto implies `--self`",
+        if !rule.is_match(&text) {
+            failures.push(format!("{}: Step 0 lacks the auto posting rule", spec.name));
+        }
+        if old.is_match(&text) {
+            failures.push(format!(
+                "{}: Step 0 still says auto implies --self",
                 spec.name
-            )),
-            Some(_) => {}
+            ));
         }
     }
 
-    assert!(
-        failures.is_empty(),
-        "review Step 0 problems:\n{}",
-        failures.join("\n")
-    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
