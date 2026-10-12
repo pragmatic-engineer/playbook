@@ -109,6 +109,7 @@ impl Tree {
         value["transcript_path"] = json!(self.main().to_string_lossy());
         value["tool_name"] = json!(tool);
         value["tool_input"] = input;
+        value["cwd"] = json!(auto_env::feature_repo(&self.s).to_string_lossy());
         if let Some(id) = agent {
             value["agent_id"] = json!(id);
             value["agent_type"] = json!("general-purpose");

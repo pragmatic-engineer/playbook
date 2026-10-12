@@ -59,7 +59,7 @@ fn repo_from_markers(cwd: &str) -> Option<String> {
     if let Some(root) = cwd.strip_suffix(GIT_DIR_END) {
         return named(last_segment(root));
     }
-    let (_, rest) = cwd.split_once(super::host::REPOS_MARKER)?;
+    let (_, rest) = cwd.split_once(super::host::repos_marker()?)?;
     let mut parts = rest.split('/');
     let _owner = parts.next()?;
     named(parts.next()?.to_string())

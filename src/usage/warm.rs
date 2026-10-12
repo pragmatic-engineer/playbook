@@ -125,7 +125,8 @@ pub fn maybe_spawn(home: &Path, paths: &Paths, exe: &Path) {
         return;
     }
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["usage", "warm"])
+    cmd.args(super::host::launch_args())
+        .arg("warm")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
