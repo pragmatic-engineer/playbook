@@ -47,6 +47,10 @@ If anything fails, the hook says why on stderr and falls back to `<repo>/.claude
 
 **Remove.** The hook acts only on a registered worktree of the repo and never on the main worktree. It keeps the worktree, prints a reason on stderr, and exits 0 when the tree has uncommitted or untracked changes, or when any commit is not reachable from a remote-tracking ref or the local default branch. Otherwise it runs `git worktree remove` without `--force`, then deletes the branch only if its name starts with `worktree-` (so a launcher branch is never touched) and it passes the same reachability rule.
 
+## Delivery from a worktree
+
+`playbook deliver` (code in `src/deliver/`) never depends on the session's working directory. It runs `git` and `gh` with fixed argument vectors and the worktree as their directory, so a subagent that cannot change its cwd still delivers its own branch. The base is `--base`, then the open PR's base, then the nearest open PR branch that is an ancestor of HEAD (a stacked PR), then the default branch. The module imports only `common/` helpers and its own `sys` adapter. The pre-commit step relies on the repo's own git hooks, which always run.
+
 ## See also
 
 - [Launcher and hooks](01-launcher-and-hooks.md): the `ccc` launcher that sets up the worktree.
