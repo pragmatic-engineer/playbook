@@ -823,7 +823,7 @@ fn stop_collector(state: &Path) {
 #[test]
 fn cc_starts_the_collector_once_when_the_usage_db_exists_and_points_the_session_at_it() {
     let e = env("collector-spawn");
-    let usage = e.home.join(".config/playbook");
+    let usage = e.home.join(".config/playbook/data");
     fs::create_dir_all(&usage).unwrap();
     fs::write(usage.join("usage.db"), "").unwrap();
     make_exec(
@@ -856,7 +856,7 @@ fn cc_starts_no_collector_without_a_usage_db_or_with_telemetry_off() {
         "#!/bin/sh\nprintf '%s\\n' \"${OTEL_EXPORTER_OTLP_ENDPOINT:-unset}\" >> \"$FAKE_LOG.otel\"\nexit 0\n",
     );
     e.launch(&[]);
-    let usage = e.home.join(".config/playbook");
+    let usage = e.home.join(".config/playbook/data");
     fs::create_dir_all(&usage).unwrap();
     fs::write(usage.join("usage.db"), "").unwrap();
     fs::create_dir_all(e.home.join(".claude")).unwrap();

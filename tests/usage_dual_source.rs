@@ -67,7 +67,7 @@ impl Home {
     }
 
     fn db(&self) -> Connection {
-        Connection::open(self.0.join(".config/playbook/usage.db")).unwrap()
+        Connection::open(self.0.join(".config/playbook/data/usage.db")).unwrap()
     }
 }
 

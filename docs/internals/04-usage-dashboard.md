@@ -147,7 +147,7 @@ Four details are worth knowing:
 
 ## Storage
 
-One SQLite database at `~/.config/playbook/usage.db`, not tied to any repo, because spend only makes sense as a total. The standalone [playbook-telemetry](https://github.com/pragmatic-engineer/playbook-telemetry) tool (`playbook-telemetry`, short alias `pbtop`) reads and writes the same file, so both show the same numbers. The first run moves an older database from `~/.config/playbook/usage/usage.db` or `~/.local/state/playbook-usage/usage.db` into place and renames the old file to `usage.db.migrated`. Events stay there after Claude Code or `ccc` prunes old sessions. Connection setup follows `src/gate/db.rs`: `busy_timeout` first, then WAL mode, because a refresh reads while `ingest` writes from other processes.
+One SQLite database at `~/.config/playbook/data/usage.db`, not tied to any repo, because spend only makes sense as a total. The standalone [playbook-telemetry](https://github.com/pragmatic-engineer/playbook-telemetry) tool (`playbook-telemetry`, short alias `pbtop`) reads and writes the same file, so both show the same numbers. The first run moves an older database from `~/.config/playbook/usage.db`, `~/.config/playbook/usage/usage.db` or `~/.local/state/playbook-usage/usage.db` into place and renames the old file to `usage.db.migrated`. Events stay there after Claude Code or `ccc` prunes old sessions. Connection setup follows `src/gate/db.rs`: `busy_timeout` first, then WAL mode, because a refresh reads while `ingest` writes from other processes.
 
 The first ingest after upgrading from an older version runs a one-time repair (`src/backfill.rs`): it rescans the transcripts and corrects the repo and the cache lifetime split on rows stored earlier. A row whose transcript is gone keeps its old repo and is priced as five minute cache.
 
@@ -181,7 +181,7 @@ The Budget panel, `--summary` and `--json` (`limits`) show how much of a limit y
 
 | Account | What can be read | Source | Tag in the UI |
 |---|---|---|---|
-| Claude Pro or Max | The 5 hour and the weekly window: percent used and reset time. | The `rate_limits` object Claude Code passes to the statusline command on stdin ([statusline docs](https://code.claude.com/docs/en/statusline)). The playbook statusline keeps the latest copy in `~/.config/playbook/rate_limits.json` (owner only). | `measured` |
+| Claude Pro or Max | The 5 hour and the weekly window: percent used and reset time. | The `rate_limits` object Claude Code passes to the statusline command on stdin ([statusline docs](https://code.claude.com/docs/en/statusline)). The playbook statusline keeps the latest copy in `~/.config/playbook/data/rate_limits.json` (owner only). | `measured` |
 | Behind a Claude apps gateway | The spend limit: percent, reset time and, when the gateway and Claude Code are new enough, dollars used, the dollar limit and the period. | `rate_limits.spend_limit` in the same statusline input. | `measured` |
 | Enterprise or API organization | Nothing automatic. The organization budget is set in the Console and no documented API reads it. The Admin API needs an organization admin key and returns usage and cost reports, not the limit. | `usage.budget.monthlyUsd` and `usage.budget.weeklyUsd`, set by you. | `manual` |
 | Any account | Your own estimated spend, from the session transcripts. | The usage store. | `local history` |

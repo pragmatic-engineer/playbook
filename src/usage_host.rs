@@ -40,7 +40,7 @@ impl Host for Playbook {
     }
 
     fn state_dir_from(&self, home: &Path) -> PathBuf {
-        crate::common::paths::playbook_root_from(home)
+        crate::usage::data::data_dir(home)
     }
 
     fn state_dir(&self) -> PathBuf {

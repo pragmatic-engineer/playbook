@@ -11,7 +11,7 @@ license = "Apache-2.0"
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }
 libc = "=0.2.189"
-playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook-telemetry", tag = "v0.1.5" }
+playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook-telemetry", tag = "v0.1.6" }
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
 regex = "=1.13.1"
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
