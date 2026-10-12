@@ -8,10 +8,10 @@
 //! it can be extracted. The caller supplies the commit message, the PR title
 //! and the PR body; this module checks them, never writes them.
 //!
-//! Exit codes: 0 delivered, 2 nothing to do, 3 refused (a safety or text
-//! rule), 4 rebase conflict, 5 a git or gh call failed, 6 the PR closed or a
-//! required check failed while waiting, 7 the wait timed out, 8 auto-merge
-//! did not queue.
+//! Exit codes: 0 delivered, 3 refused (a safety or text rule), 4 rebase
+//! conflict, 5 a git or gh call failed, 6 the PR closed or a required check
+//! failed while waiting, 7 the wait timed out, 8 auto-merge did not queue, 9
+//! nothing to do.
 
 pub mod check;
 pub mod pr;
@@ -25,7 +25,7 @@ use sys::{Sys, Wait};
 
 pub mod exit {
     pub const OK: i32 = 0;
-    pub const NOTHING: i32 = 2;
+    pub const NOTHING: i32 = 9;
     pub const REFUSED: i32 = 3;
     pub const CONFLICT: i32 = 4;
     pub const FAILED: i32 = 5;
