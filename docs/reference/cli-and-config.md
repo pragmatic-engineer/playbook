@@ -74,7 +74,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -311,6 +311,33 @@ Writes to the repo tier unless you pass `--org` or `--global`.
 - `<VALUE>`: New value; it is read as the type the setting expects
 - `--org`: Write to the org tier instead of the repo tier
 - `--global`: Write to the global tier instead of the repo tier
+
+### `playbook deliver`
+
+Commit, push and open or update a pull request from any worktree
+
+Stages per flag, commits when something is staged (message from `--message` or `--message-file`), rebases onto the base, pushes, then opens or updates the PR through `gh`. Refuses the default or a protected branch and a detached HEAD, never skips hooks or signing, and only force-pushes with a lease after its own rebase. Exit codes: 0 delivered, 3 refused, 4 rebase conflict, 5 a git or gh call failed, 6 PR closed or a required check failed, 7 wait timed out, 8 auto-merge did not queue, 9 nothing to do.
+
+Example: `playbook deliver --dir ../wt -A --message "fix(x): y" --title "fix(x): y" --ready`
+
+- `--dir <DIR>`: Worktree to deliver from (default: the current directory)
+- `-A`: Stage everything first (`git add -A`)
+- `-u`: Stage tracked changes first (`git add -u`)
+- `--staged`: Commit only what is already staged (the default)
+- `--message <MESSAGE>`: Commit message
+- `--message-file <MESSAGE_FILE>`: File with the commit message
+- `--title <TITLE>`: PR title
+- `--body <BODY>`: PR body
+- `--body-file <BODY_FILE>`: File with the PR body
+- `--base <BASE>`: Base branch (default: the open PR's base, a parent PR branch, or the default branch)
+- `--ready`: Open or mark the PR ready for review
+- `--draft`: Open or return the PR as a draft
+- `--auto-merge`: Queue auto-merge and verify it queued
+- `--wait`: Wait until the PR merges, closes, or a required check fails
+- `--timeout <TIMEOUT>`: Seconds to wait with `--wait`
+- `--dry-run`: Print the plan and change nothing
+- `--allow-large`: Allow a change over 1500 lines
+- `--json`: Print JSON instead of text
 
 ### `playbook deps`
 
