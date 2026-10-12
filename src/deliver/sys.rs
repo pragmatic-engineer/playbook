@@ -90,10 +90,9 @@ impl Sys {
 
 /// Hides anything shaped like a token or a credential in a URL.
 pub fn scrub(text: &str) -> String {
-    let token = regex::Regex::new(
+    let token = crate::common::re::static_regex(
         r"(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|://[^/@\s]+:[^/@\s]+@)",
-    )
-    .expect("static pattern");
+    );
     token.replace_all(text, "[redacted]").into_owned()
 }
 

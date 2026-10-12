@@ -254,9 +254,9 @@ pub fn template(dir: &Path) -> Option<String> {
 
 /// `Closes #N` and `Ticket:` lines found in `texts`, in order, once each.
 pub fn kept_lines<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<String> {
-    let re =
-        regex::Regex::new(r"(?i)^\s*((close[sd]?|fix(e[sd])?|resolve[sd]?)\s+#\d+|ticket:\s*\S+)")
-            .expect("static pattern");
+    let re = crate::common::re::static_regex(
+        r"(?i)^\s*((close[sd]?|fix(e[sd])?|resolve[sd]?)\s+#\d+|ticket:\s*\S+)",
+    );
     let mut out: Vec<String> = Vec::new();
     for text in texts {
         for line in text.lines().filter(|l| re.is_match(l)) {
