@@ -57,6 +57,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `docs.maxOutputChars` | `200000` | a number, see the config keys guide for the range |
 | `docs.maxMemoryMb` | `1024` | a number, see the config keys guide for the range |
 | `docs.anydocPath` | empty | see the config keys guide |
+| `launcher.claudeOverride` | `false` | `true`, `false` |
+| `launcher.systemPromptMode` | `append` | `append`, `replace` |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -67,7 +69,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `code`, `commit`, `config`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -161,6 +163,16 @@ Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"
 
 - `<BRANCH>`: Branch to create the worktree for
 - `<ENV_BASE>`: Folder (relative to the repo root) holding the `.env` to copy in
+
+### `playbook ccd`
+
+Start a session with permission prompts skipped
+
+The same launcher as `playbook cc launch`, with `--dangerously-skip-permissions` added. The `ccd` shortcut calls it. Run it directly to skip the shell shortcuts.
+
+Example: `playbook ccd fresh`
+
+- `<ARGS>`: Subcommand and arguments, passed through to claude
 
 ### `playbook ci`
 

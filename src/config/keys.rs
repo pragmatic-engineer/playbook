@@ -53,6 +53,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "docs.maxOutputChars",
     "docs.maxMemoryMb",
     "docs.anydocPath",
+    "launcher.claudeOverride",
+    "launcher.systemPromptMode",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -123,6 +125,8 @@ pub fn default_value(key: &str) -> Option<Value> {
         "docs.maxOutputChars" => Some(Value::Number(200_000.into())),
         "docs.maxMemoryMb" => Some(Value::Number(1024.into())),
         "docs.anydocPath" => Some(Value::String(String::new())),
+        "launcher.claudeOverride" => Some(Value::Bool(false)),
+        "launcher.systemPromptMode" => Some(Value::String("append".to_string())),
         _ => None,
     }
 }
@@ -145,6 +149,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.telemetry" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
+        "launcher.systemPromptMode" => Some(&["append", "replace"]),
         _ => None,
     }
 }

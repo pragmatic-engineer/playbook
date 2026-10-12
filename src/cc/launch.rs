@@ -68,6 +68,32 @@ fn playbook_memory_only(home: &Path) -> bool {
     )
 }
 
+/// Flags that set the system prompt text. Any of them in the user's arguments
+/// means the playbook prompt is not added.
+const SYSTEM_PROMPT_FLAGS: [&str; 4] = [
+    "--system-prompt",
+    "--system-prompt-file",
+    "--append-system-prompt",
+    "--append-system-prompt-file",
+];
+
+fn has_system_prompt_flag(args: &[String]) -> bool {
+    args.iter().any(|a| {
+        SYSTEM_PROMPT_FLAGS
+            .iter()
+            .any(|f| a == f || a.strip_prefix(f).is_some_and(|r| r.starts_with('=')))
+    })
+}
+
+/// The flag that loads the playbook prompt: `launcher.systemPromptMode`
+/// `append` (default) keeps Claude Code's own prompt, `replace` swaps it out.
+fn prompt_flag(home: &Path) -> &'static str {
+    match crate::config::resolve("launcher.systemPromptMode", home, None) {
+        Ok((serde_json::Value::String(v), _)) if v == "replace" => "--system-prompt-file",
+        _ => "--append-system-prompt-file",
+    }
+}
+
 /// Runs the launcher and returns the exit code of the session (or the failure).
 pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     let mut all: Vec<String> = Vec::new();
@@ -75,8 +101,9 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         all.push("--dangerously-skip-permissions".into());
     }
     let prompt = crate::common::paths::playbook_root().join(SYSTEM_PROMPT_REL);
-    if prompt.is_file() {
-        all.push("--system-prompt-file".into());
+    // The user's own system prompt flags win: playbook adds nothing then.
+    if prompt.is_file() && !has_system_prompt_flag(args) {
+        all.push(prompt_flag(&crate::common::home_dir()).into());
         all.push(prompt.to_string_lossy().into_owned());
     }
     let cwd_now = PathBuf::from(super::logical_cwd());
