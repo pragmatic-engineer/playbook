@@ -147,7 +147,7 @@ Four details are worth knowing:
 
 ## Storage
 
-One SQLite database at `~/.config/playbook/usage/usage.db`, not tied to any repo, because spend only makes sense as a total. Events stay there after Claude Code or `ccc` prunes old sessions. Connection setup follows `src/gate/db.rs`: `busy_timeout` first, then WAL mode, because a refresh reads while `ingest` writes from other processes.
+One SQLite database at `~/.config/playbook/usage.db`, not tied to any repo, because spend only makes sense as a total. The standalone [playbook-telemetry](https://github.com/pragmatic-engineer/playbook-telemetry) tool (`playbook-telemetry`, short alias `pbtop`) reads and writes the same file, so both show the same numbers. The first run moves an older database from `~/.config/playbook/usage/usage.db` or `~/.local/state/playbook-usage/usage.db` into place and renames the old file to `usage.db.migrated`. Events stay there after Claude Code or `ccc` prunes old sessions. Connection setup follows `src/gate/db.rs`: `busy_timeout` first, then WAL mode, because a refresh reads while `ingest` writes from other processes.
 
 The first ingest after upgrading from an older version runs a one-time repair (`src/backfill.rs`): it rescans the transcripts and corrects the repo and the cache lifetime split on rows stored earlier. A row whose transcript is gone keeps its old repo and is priced as five minute cache.
 
