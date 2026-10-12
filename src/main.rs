@@ -103,6 +103,7 @@ fn main() {
             }
             None => std::process::exit(cc::launch::run(false, &[])),
         },
+        Command::Ccd { args } => std::process::exit(cc::launch::run(true, &args)),
         Command::Effort { sub: Some(sub), .. } => {
             let home = common::home_dir();
             let claude_home = home.join(".claude");
@@ -314,7 +315,10 @@ fn main() {
                 .or_else(|| std::env::var("SHELL").ok())
                 .and_then(|s| ShellKind::detect(&s))
                 .unwrap_or(ShellKind::Bash);
-            print!("{}", init::shell_init::script(kind));
+            print!(
+                "{}",
+                init::shell_init::script_for_config(kind, &common::home_dir())
+            );
         }
         Command::Uninstall {
             yes,
