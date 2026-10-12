@@ -1,3 +1,7 @@
+# shellcheck shell=bash
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+
 # Optional claude override, emitted by `playbook shell-init` when the config
 # key launcher.claudeOverride is true. Valid in bash and zsh.
 #
