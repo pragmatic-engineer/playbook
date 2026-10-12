@@ -1,6 +1,6 @@
 ---
 description: Use when an approved plan or ADR blueprint exists and the user says let's implement or build this. Execute-only, no new design. Delivers each Segment as one small PR.
-allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill, AskUserQuestion
+allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, SendMessage, TaskStop, Skill, AskUserQuestion
 argument-hint: "[plan | adr-blueprint | #issue | KEY-123 | ./spec.md | text] [--auto] [--ask] [--no-tdd] [--no-tests] [--force] [--pr-strategy=<stacked|independent|single>] [--boundary=<savepoint|pause|land>] [--all-lenses] [--help]"
 model: sonnet
 effort: medium

@@ -985,11 +985,11 @@ fn learn_project_step0_stages_in_auto_and_skips_the_write_question() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn create_pull_request_step0_skips_the_clear_self_review_in_auto() {
+fn create_pull_request_step0_skips_the_self_review_in_auto() {
     // Arrange
     let file = load("create-pull-request");
     let step0 = require_section(&file, file.step0(), "`Step 0`");
-    let skips = Regex::new(r"(?is)\bauto\b[^.]*\bskips?\b[^.]*/clear").expect("skip pattern");
+    let skips = Regex::new(r"(?is)\bauto\b[^.]*\bskips?\b[^.]*self-review").expect("skip pattern");
     let why = Regex::new(r"(?is)\bimplement\b[^.]*\bopened\b[^.]*\breview\b[^.]*\bcovered\b")
         .expect("why pattern");
     let reports =
@@ -1001,7 +1001,7 @@ fn create_pull_request_step0_skips_the_clear_self_review_in_auto() {
     // Assert
     assert!(
         skips.is_match(&text),
-        "Step 0 must say that in auto the `/clear` self-review is skipped"
+        "Step 0 must say that in auto the self-review is skipped"
     );
     assert!(
         why.is_match(&text),

@@ -1,6 +1,6 @@
 ---
 description: Use for a routine PR review or a quick check of your own branch. Single pass; asks which findings to post as a pending review; skips posting only with --self or --no-post.
-allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
+allowed-tools: Bash, Read, Grep, Glob, Write, Agent, SendMessage, TaskStop, Skill
 argument-hint: "[--help] [PR number] [--self] [--no-post] [--this-pr] [--whole-stack] [--auto] [--ask]"
 model: sonnet
 effort: medium
@@ -118,6 +118,8 @@ playbook skill ref grounding-review stack-review
 Read the file it prints and follow it. A PR that is not in a stack gets no question and nothing changes in this file. When the PR is in a stack, that file decides the scope (this PR only, the whole stack, or the whole stack with deep review), builds one shared context, and says how Steps 2 to 4 and the posting step differ for a whole stack. Strip `--this-pr` and `--whole-stack` before reading the other arguments.
 
 ## Step 2: Delegate the review pass (isolated reviewer subagent)
+
+If you have no `Agent` tool (a delegated or forked caller), do the review pass yourself in this session, say in the report that no subagent was used, and never report APPROVE.
 
 Reading and analysing the changed files is where main-context rot accumulates, so it runs in an isolated `reviewer` subagent, not the main session. The orchestrator keeps only the returned report, never the file contents.
 
