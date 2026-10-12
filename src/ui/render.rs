@@ -280,7 +280,8 @@ impl Counts {
         for s in statuses {
             match s {
                 Status::Done => c.done += 1,
-                Status::Unchanged | Status::Info => c.unchanged += 1,
+                Status::Unchanged => c.unchanged += 1,
+                Status::Info => {}
                 Status::Planned => c.planned += 1,
                 Status::Warn => c.warned += 1,
                 Status::Skipped => c.skipped += 1,

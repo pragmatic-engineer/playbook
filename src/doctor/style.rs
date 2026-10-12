@@ -31,9 +31,7 @@ pub fn render(caps: &Caps, rows: &[Row]) -> String {
             out.push('\n');
         }
     }
-    // The closing lines of the plain table carry the remediation, reuse them.
-    let plain = super::check::render(rows);
-    let closing: Vec<&str> = plain.lines().skip(rows.len()).collect();
+    let closing = super::check::closing(rows);
     out.push_str(&render::next_steps(
         caps,
         Counts::tally(&statuses),
@@ -75,6 +73,25 @@ mod tests {
         assert!(got.contains("[fail] binary missing"));
         assert!(got.contains("1 done, 0 unchanged, 0 skipped, 1 failed, 1 warnings"));
         assert!(got.contains("Run /playbook:setup to fix layers 1 to 5."));
+    }
+
+    #[test]
+    fn info_rows_are_not_counted_and_multiline_messages_keep_the_closing_lines() {
+        let rows = vec![
+            row(Level::Info, "note", None),
+            row(
+                Level::Fail,
+                "hook points at a missing file: cd /x &&\n bash /y.sh",
+                Some("fix"),
+            ),
+        ];
+        let got = render(&Caps::plain(80), &rows);
+        assert!(
+            got.contains("0 done, 0 unchanged, 0 skipped, 1 failed"),
+            "{got}"
+        );
+        assert!(got.contains("Run /playbook:setup to fix layers 1 to 5."));
+        assert!(!got.contains("  bash /y.sh --"));
     }
 
     #[test]
