@@ -23,6 +23,8 @@ The installer adds the plugin, installs the `playbook` binary (checksum verified
 
 To see what `playbook init` changes before you agree, read [What init installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
 
+Optional: the standalone usage dashboard for machines without playbook, `brew install pragmatic-engineer/tap/playbook-telemetry`, installs `playbook-telemetry` and the short alias `pbtop`. With playbook installed you do not need it, because `playbook usage` runs the same code.
+
 Pin a version with `PLAYBOOK_REF=v0.24.0`. Update later with `playbook update`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
 
 | Mode | What you get | Commands |
