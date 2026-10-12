@@ -3,7 +3,7 @@
 
 //! SessionStart hook the plugin registers in `hooks/hooks.json`. It detects a
 //! `settings.json` that `playbook init` never wired (a plugin update with no
-//! matching `playbook init` run) and tells the user to re-run the installer.
+//! matching `playbook init` run) and tells the user to run /playbook:setup.
 //!
 //! It runs through the plugin's `bin/playbook` shim, which prints the same
 //! warning when no binary is installed. Silent once settings.json carries the
@@ -18,7 +18,8 @@ const MARKER: &str = "playbook hook session-init";
 
 /// The warning text. `bin/playbook` carries a copy for the no-binary case, and
 /// a test keeps the two equal.
-const MESSAGE: &str = "Your playbook hooks are not wired to the installed binary yet. Re-run the installer to fix this: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash";
+const MESSAGE: &str =
+    "playbook is installed as a plugin only. Run /playbook:setup to install the binary and guards.";
 
 /// Hook entry point.
 pub fn run(_payload: &Payload) {
@@ -30,9 +31,12 @@ pub fn run(_payload: &Payload) {
 /// The warning to show, or `None` when `settings.json` under `home` is wired.
 /// A missing or unreadable file counts as unwired.
 pub fn warning(home: &Path) -> Option<&'static str> {
-    let wired = fs::read_to_string(home.join(".claude/settings.json"))
-        .is_ok_and(|text| text.contains(MARKER));
-    (!wired).then_some(MESSAGE)
+    (!is_wired(&home.join(".claude/settings.json"))).then_some(MESSAGE)
+}
+
+/// True when the `settings.json` at `path` carries the ported hooks.
+pub fn is_wired(path: &Path) -> bool {
+    fs::read_to_string(path).is_ok_and(|text| text.contains(MARKER))
 }
 
 #[cfg(test)]

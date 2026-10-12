@@ -497,3 +497,27 @@ fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
         assert_eq!(b.run(&[&dir], "/bin/zsh", None), first);
     }
 }
+
+// Plugin-only row
+
+#[test]
+fn plugin_only_is_named_with_the_single_fix_when_nothing_is_wired() {
+    let b = Box::new("plugin-only");
+    b.settings(r#"{"hooks":{}}"#);
+    let rows = b.run(&[], "/bin/bash", None);
+    let info = layer(&rows, "-");
+    let row = info
+        .iter()
+        .find(|r| r["message"].as_str().unwrap().starts_with("plugin only"))
+        .expect("plugin only row");
+    assert_eq!(row["level"], "WARN");
+    assert_eq!(row["hint"], "run /playbook:setup");
+}
+
+#[test]
+fn plugin_only_row_is_silent_once_hooks_are_wired() {
+    let b = Box::new("plugin-wired");
+    b.settings(&hook("playbook hook session-init"));
+    let rows = b.run(&[], "/bin/bash", None);
+    assert!(!text(&layer(&rows, "-")).contains("plugin only"));
+}
