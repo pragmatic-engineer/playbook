@@ -139,7 +139,7 @@ fn unwrap_group<'a>(words: &[&'a str]) -> Vec<&'a str> {
 }
 
 /// `cat > <dir>/pr-body.md <<'EOF'`: the one file write the pull request
-/// skill makes before `playbook pr create`. The body must be a quoted heredoc.
+/// skill makes before `playbook deliver`. The body must be a quoted heredoc.
 fn is_pr_body_write(command: &Command) -> bool {
     let words: Vec<&str> = command.words.iter().map(String::as_str).collect();
     let [cat, ">", target, ..] = words.as_slice() else {
@@ -420,6 +420,10 @@ fn is_get_api(args: &[&str]) -> bool {
 fn is_playbook_step(args: &[&str]) -> bool {
     match args {
         ["commit", "run", rest @ ..] => rest.contains(&"--auto"),
+        // Delivery only: promoting a draft, queueing a merge or waiting on one is new work.
+        ["deliver", rest @ ..] => !rest
+            .iter()
+            .any(|a| matches!(*a, "--ready" | "--auto-merge" | "--wait")),
         ["pr", "create" | "prepare" | "rules", ..]
         | ["commit", "prepare", ..]
         | ["worktree", "review", "teardown", ..]
@@ -510,6 +514,8 @@ mod tests {
             "gh api repos/o/r/pulls/12",
             "gh api -X GET repos/o/r/pulls",
             "playbook pr create --title \"fix: x\" --body-file b.md",
+            "playbook deliver --json --title \"fix: x\" --body-file b.md",
+            "cat > \"/tmp/state/pr-body.md\" <<'PRBODY_EOF'\nbody\nPRBODY_EOF\nplaybook deliver --json --title \"fix: x\" --body-file /tmp/state/pr-body.md",
             "playbook commit run --auto",
             "git push origin HEAD:refs/heads/feat/x",
             "git log --oneline 2>&1 | head -5",
@@ -530,6 +536,9 @@ mod tests {
             "playbook commit run --auto <<'MSG'\nfeat: x\nMSG",
         ];
         let new_work = [
+            "playbook deliver --ready --auto-merge",
+            "playbook deliver --wait",
+            "playbook deliver --ready",
             "cargo build",
             "npm test",
             "rm -rf target",

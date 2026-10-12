@@ -527,6 +527,19 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         ));
     }
     report.commits = commits.clone();
+    for c in &commits {
+        let message = sys
+            .git_out(&["log", "-1", "--format=%B", c])
+            .unwrap_or_default();
+        let problems = check::commit_message(&message);
+        if !problems.is_empty() {
+            let short = c.get(..8).unwrap_or(c);
+            return Err(refuse_all(
+                problems,
+                &format!("commit {short} breaks a text rule; amend it first"),
+            ));
+        }
+    }
 
     // 6. Push.
     let head = sys.git_out(&["rev-parse", "HEAD"]).unwrap_or_default();

@@ -18,18 +18,18 @@ This creates a **new** PR. If one already exists for the branch, this stops and 
 
 Execute the steps below immediately, end to end, running every command for real. Do **not** narrate a plan, summarize `git status`, offer a numbered menu, or ask "what would you like me to do?" / "proceed? [Y/n]". There is **no confirmation gate**.
 
-The mechanical work (base and ticket detection, pre-flight checks, diff gathering, push, PR creation, base check) lives in two compiled commands, `playbook pr prepare` and `playbook pr create`. Your job is the judgment in between: read the diff, then write the title and the body. Readiness problems (uncommitted work, a diff over the soft or enforced size limit, no tests) print as warnings and never pause. Only the hard aborts (on the base branch, nothing ahead of base, an existing PR, a diff over the 1500-line hard size limit) stop the run.
+The mechanical work (base and ticket detection, pre-flight checks, diff gathering, push, PR creation, base check) lives in two compiled commands, `playbook pr prepare` and `playbook deliver`. Your job is the judgment in between: read the diff, then write the title and the body. Readiness problems (uncommitted work, a diff over the soft or enforced size limit, no tests) print as warnings and never pause. Only the hard aborts (on the base branch, nothing ahead of base, an existing PR, a diff over the 1500-line hard size limit) stop the run.
 
 This command is built to run in an isolated subagent (`context: fork`) so the diff and drafting stay out of the main context. When it forks, your final message is the only thing the main conversation sees, so end with a concise outcome summary (the PR URL, title, base, and draft state). If you are instead reading this in the main conversation, run it here exactly the same way; do not wait for a fork and do not defer to the user.
 
 ## Argument flags
 
-Read these from `$ARGUMENTS` once and remember them. `--base`, `--ticket`, and `--dir` go straight onto the two `playbook pr` calls, and `--ready` is read by `/playbook:finish-pull-request`.
+Read these from `$ARGUMENTS` once and remember them. `--base`, `--ticket`, and `--dir` go straight onto the two calls, and `--ready` is read by `/playbook:finish-pull-request`.
 
 - `--ready` → promote the PR to ready once `/playbook:finish-pull-request`'s self-review passes, instead of leaving it a draft. Does NOT change how the PR opens: that is decided only by `pr.draft`.
-- `--base <branch>` → override the base branch. Pass it to both `playbook pr` calls.
+- `--base <branch>` → override the base branch. Pass it to both calls.
 - `--ticket <ID>` → force the ticket, skipping branch auto-detect (`none` omits the line). Pass it to `playbook pr prepare`.
-- `--dir <path>` → publish the branch checked out in this directory. A caller that names a directory or branch outside the shell's current directory (for example `/playbook:implement` publishing a Segment that lives in a git worktree) passes it here. Pass it to both `playbook pr` calls. A forked shell can reset to the main checkout between calls, so without `--dir` the command acts on whatever repo the shell is in.
+- `--dir <path>` → publish the branch checked out in this directory. A caller that names a directory or branch outside the shell's current directory (for example `/playbook:implement` publishing a Segment that lives in a git worktree) passes it here. Pass it to both calls. A forked shell can reset to the main checkout between calls, so without `--dir` the command acts on whatever repo the shell is in.
 - `--auto` or `--ask` → set the run mode for this run. Step 0 reads it.
 - `--help` → print the argument-hint line from this file's frontmatter and stop.
 
@@ -39,7 +39,7 @@ There is no confirmation flag or gate: the command always runs end to end.
 
 1. Run every command for real. Do not simulate output; use the real result to drive the next step.
 2. Do not assume git state, diff contents, or `gh` output. Check them.
-3. Copy what `playbook pr prepare` and `playbook pr create` print. Never recompute or restate a value one of them already computed.
+3. Copy what `playbook pr prepare` and `playbook deliver` print. Never recompute or restate a value one of them already computed.
 4. Never run destructive git commands (`reset --hard`, `push --force`, `clean -f`) or skip hooks (`--no-verify`).
 5. Derive the title and body from the actual diff and commit log, never from the branch name alone or from memory.
 6. Pass the PR body with `--body-file`, never inline, to preserve formatting.
@@ -103,7 +103,7 @@ Derive the title from the diff and commit log gathered in Step 1.
 - Format: `type(scope): summary`, e.g. `feat(auth): add SSO retry logic`. Scope is optional.
 - Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`. Pick the type from what the files in the diff are, not from words in it: only docs files is `docs`, only tests is `test`, only CI files is `ci`, a dependency bump (lock files, or manifests next to a lock file) is `build` or `chore`, and a change that restructures code and keeps behavior is `refactor`, not `fix`.
 - Imperative mood ("add", not "added" or "adds"), no trailing period.
-- **Length: 72 characters maximum**, counting the entire line including the `type(scope):` prefix. This is a hard limit, not a target. If the draft exceeds it, tighten the summary (drop the scope, cut filler, shorten wording) until it fits; never open a PR with a title over 72 characters. `playbook pr create` re-checks the length and refuses a longer title before it pushes anything.
+- **Length: 72 characters maximum**, counting the entire line including the `type(scope):` prefix. This is a hard limit, not a target. If the draft exceeds it, tighten the summary (drop the scope, cut filler, shorten wording) until it fits; never open a PR with a title over 72 characters. `playbook deliver` re-checks the length and refuses a longer title before it pushes anything.
 - The summary states the **effect** of the change, not a list of files.
 - The ticket goes in the body, not the title.
 
@@ -139,23 +139,23 @@ Rules for filling it:
 4. **Notes for reviewers**: drop the heading entirely if empty. Don't leave "N/A".
 5. **Related work**: drop the heading entirely if empty.
 6. No trailing "generated by" footer. No test-count noise. If CI covers it, the reviewer sees CI.
-7. The body must carry no AI attribution (no `Claude-Session:` trailer, no `claude.ai/code/session` link, no co-author line naming Claude or Anthropic, no "generated with" footer) and no em or en dashes outside code. `playbook pr create` checks the title, the body, and every commit message, and refuses to push if it finds any.
+7. The body must carry no AI attribution (no `Claude-Session:` trailer, no `claude.ai/code/session` link, no co-author line naming Claude or Anthropic, no "generated with" footer) and no em or en dashes outside code. `playbook deliver` checks the title, the body, and every commit message, and refuses to push if it finds any.
 
 ## Step 4: Push and create
 
-`playbook pr create` reads the `pr.draft` setting itself (`playbook config get pr.draft`, default `true`) and passes `--draft` to `gh` only when it is `true`, so do not add a draft flag yourself. With the default, the PR opens as a draft. With `pr.draft` set to `false`, it opens ready for review. `--ready` is not used here: `/playbook:finish-pull-request` reads it, after the self-review, to decide whether to promote a draft.
+`playbook deliver` reads the `pr.draft` setting itself (`playbook config get pr.draft`, default `true`) and passes `--draft` to `gh` only when it is `true`, so do not add a draft flag yourself. With the default, the PR opens as a draft. With `pr.draft` set to `false`, it opens ready for review. `--ready` is not used here: `/playbook:finish-pull-request` reads it, after the self-review, to decide whether to promote a draft.
 
-Write the finished body to `<state_dir>/pr-body.md` (the `state_dir=` value from Step 1) and create the PR in one command:
+Write the finished body to `<state_dir>/pr-body.md` (the `state_dir=` value from Step 1) and deliver it in one command. `playbook deliver` is the single path for the push and the PR: it rebases onto the base if the branch is behind, pushes (a force-with-lease only after its own rebase of commits it already had), and opens the PR. It commits nothing here, since no `--message` is passed. If anything is staged it refuses with "something is staged but no commit message was given" (exit 3): report the staged files and stop, and do not rewrite the title or body. Always pass `--base` with the branch Step 1 printed on its `base=` line, so the PR targets the base the title and body were written against:
 
 ```bash
 cat > "<state_dir>/pr-body.md" <<'PRBODY_EOF'
 <the filled template goes here>
 PRBODY_EOF
-playbook pr create --title "<title>" --body-file "<state_dir>/pr-body.md" [--base <branch>] [--dir <path>]
+playbook deliver --json --title "<title>" --body-file "<state_dir>/pr-body.md" --base <base from Step 1> [--dir <path>]
 ```
 
-It checks the title length and the attribution and dash rules, pushes (a rejected push stops the run before any PR exists), confirms the remote carries your HEAD, opens the PR (as a draft unless `pr.draft` is `false`), and checks that the PR's base matches the one resolved in Step 1, correcting it if not. It prints `PR: <url>` and a one-line summary.
+It checks the title length and the attribution and dash rules, pushes (a rejected push stops the run before any PR exists), confirms the remote carries your HEAD, and opens the PR (as a draft unless `pr.draft` is `false`) against the base resolved in Step 1. It prints a JSON report with `url`, `base`, `draft`, `pr_number` and `outcome`. Exit codes: 0 delivered, 3 refused, 4 rebase conflict, 5 a git or gh call failed, 9 nothing to do.
 
-If it refuses with a list of problems, nothing was pushed or created: fix the title or body (or amend the named commit) and run it again. If a run fails after the PR already exists, running it again reuses the open PR and finishes the base check.
+If it refuses with a list of problems (exit 3), nothing was pushed or created: fix the title or body (or amend the named commit, which it names) and run it again. On a rebase conflict (exit 4) it aborts the rebase and lists the files; report them and stop. If a run fails after the PR already exists, running it again reuses the open PR.
 
-Report the PR URL and a one-line summary (title, base, draft state), and say whether `--ready` was passed. Unless the caller said the code was already reviewed (for example `/playbook:implement`), end the report with the line "Next: invoke playbook:finish-pull-request for this PR." and add "--ready" to it when `--ready` was passed. This forked agent cannot run the self-review, fix, promote and merge work: the orchestrating session that receives this report does, through that skill.
+Report the PR URL and a one-line summary (title, base, and the `draft` value from the report), and say whether `--ready` was passed. Unless the caller said the code was already reviewed (for example `/playbook:implement`), end the report with the line "Next: invoke playbook:finish-pull-request for this PR." and add "--ready" to it when `--ready` was passed. This forked agent cannot run the self-review, fix, promote and merge work: the orchestrating session that receives this report does, through that skill.
