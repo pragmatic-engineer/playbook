@@ -14,7 +14,33 @@ pub mod commit;
 pub mod common;
 pub mod config;
 pub mod deps;
+#[cfg(unix)]
 pub mod doc;
+/// Document conversion needs process groups and signals, so on other
+/// platforms the command reports that it is unavailable.
+#[cfg(not(unix))]
+pub mod doc {
+    use std::path::Path;
+
+    pub mod convert {
+        pub fn find_anydoc(
+            _configured: &str,
+            _path_var: Option<&std::ffi::OsStr>,
+        ) -> Option<std::path::PathBuf> {
+            None
+        }
+    }
+
+    pub fn read(_home: &Path, _file: &Path, _json: bool) -> i32 {
+        eprintln!("doc read: not supported on this platform");
+        1
+    }
+
+    pub fn status(_home: &Path) -> i32 {
+        println!("anydoc: document conversion is not supported on this platform");
+        1
+    }
+}
 pub mod doctor;
 pub mod effort;
 pub mod eval;
