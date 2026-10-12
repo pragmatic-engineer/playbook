@@ -1231,7 +1231,7 @@ Example: `playbook usage --range today`
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
 - `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
 
-Subcommands: `collect`, `ingest`, `prune`, `status`
+Subcommands: `collect`, `prune`, `status`
 
 ### `playbook usage collect`
 
@@ -1243,10 +1243,6 @@ Example: `playbook usage collect --idle-seconds 1800`
 
 - `--port <PORT>`: Port to listen on (an error when busy). Default: the last port, 4318, then any free port
 - `--idle-seconds <IDLE_SECONDS>`: Stop after this many seconds with no request; 0 means never
-
-### `playbook usage ingest`
-
-Read new session history into the usage store (deprecated: use `playbook usage --summary`)
 
 ### `playbook usage prune`
 
