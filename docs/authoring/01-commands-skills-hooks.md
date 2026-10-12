@@ -48,6 +48,8 @@ Weigh the cost of a wrong match before sharpening a trigger. A skill loads text 
 
 Skills live in `skills/<name>/SKILL.md` and load on demand when the session decides a task matches.
 
+A skill and a command must never share a name. Claude Code exposes every skill as `/playbook:<name>` too, so a same-named command and skill collide. `tests/name_collisions.rs` fails on the pair.
+
 The frontmatter has two fields:
 
 | Field | Purpose |

@@ -1532,7 +1532,7 @@ mod memory_capture {
         fs::write(dir.join("start-ts"), epoch_secs.to_string()).unwrap();
     }
 
-    /// Writes a handoff file the way `skills/session-handoff/SKILL.md` does:
+    /// Writes a handoff file the way `commands/session-handoff.md` does:
     /// `<slug>-<suffix>.md` under `~/.config/playbook/runtime/handoff`.
     fn write_handoff(home: &Path, cwd: &Path) -> PathBuf {
         let slug = project_slug(&cwd.to_string_lossy());
