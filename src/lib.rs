@@ -1331,7 +1331,7 @@ pub enum ReviewCommand {
         /// The review command's arguments, as one string
         #[arg(default_value = "")]
         args: String,
-        /// Treat the run mode as auto (implies report-only)
+        /// Accepted for compatibility; auto mode does not skip the post question
         #[arg(long)]
         auto: bool,
     },

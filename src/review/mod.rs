@@ -70,12 +70,12 @@ pub fn parse(args: &str) -> Parsed {
     Parsed { target, self_flag }
 }
 
-/// Report-only when the user passed `--self` or `--no-post`, or the run mode
-/// is auto (a posted review speaks as the user, so auto never posts). Naming
-/// no PR or reviewing your own PR does not skip the post question: the
-/// command narrows the submit verbs for your own PR instead.
-pub fn self_mode(parsed: &Parsed, run_mode_auto: bool) -> bool {
-    parsed.self_flag || run_mode_auto
+/// Report-only only when the user passed `--self` or `--no-post`. The run
+/// mode, naming no PR and reviewing your own PR do not skip the post
+/// question: the command narrows the submit verbs for your own PR instead.
+/// Pipelines pass `--self`.
+pub fn self_mode(parsed: &Parsed) -> bool {
+    parsed.self_flag
 }
 
 fn git_ok(args: &[&str]) -> bool {
@@ -102,7 +102,7 @@ fn parse_repo_json(raw: &str) -> Result<(String, String), String> {
 }
 
 /// Everything the command file needs, printed as `KEY=value` lines.
-pub fn prepare(kind: Kind, args: &str, run_mode_auto: bool) -> Result<String, String> {
+pub fn prepare(kind: Kind, args: &str, _run_mode_auto: bool) -> Result<String, String> {
     let parsed = parse(args);
     let pr_number = match &parsed.target {
         Target::Number(n) => n.clone(),
@@ -173,7 +173,7 @@ pub fn prepare(kind: Kind, args: &str, run_mode_auto: bool) -> Result<String, St
     let (repo_json, head_sha, author, me) = (repo_json?, head_sha?, author?, me?);
     let (repo, repo_url) = parse_repo_json(&repo_json)?;
     let self_review = author == me;
-    let report_only = self_mode(&parsed, run_mode_auto);
+    let report_only = self_mode(&parsed);
 
     let in_place = git_text(&["rev-parse", "HEAD"]) == head_sha
         && git_text(&["status", "--porcelain", "--untracked-files=no"]).is_empty();
@@ -229,13 +229,13 @@ mod tests {
     }
 
     #[test]
-    fn report_only_follows_the_flag_and_auto_only() {
+    fn report_only_follows_the_flags_only() {
         let p = parse("12");
-        assert!(!self_mode(&p, false));
-        assert!(self_mode(&p, true));
-        assert!(self_mode(&parse("12 --self"), false));
-        assert!(self_mode(&parse("12 --no-post"), false));
-        // No target still asks what to post.
-        assert!(!self_mode(&parse(""), false));
+        assert!(!self_mode(&p));
+        assert!(self_mode(&parse("12 --self")));
+        assert!(self_mode(&parse("12 --no-post")));
+        // No target and `--auto` still ask what to post.
+        assert!(!self_mode(&parse("")));
+        assert!(!self_mode(&parse("12 --auto")));
     }
 }
