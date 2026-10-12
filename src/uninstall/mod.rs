@@ -167,6 +167,27 @@ fn settings_step(
     if !path.is_file() {
         return done(false);
     }
+    let verb = if opts.dry_run {
+        "would remove"
+    } else {
+        "removed"
+    };
+    match crate::init::telemetry::remove(&opts.home, &path, stamp, opts.dry_run) {
+        Ok(out) if out.keys > 0 => {
+            report.lines.push(format!(
+                "{verb} {} telemetry variables init wrote from {}",
+                out.keys,
+                path.display()
+            ));
+            if let Some(backup) = out.backup {
+                report.lines.push(format!("backup: {}", backup.display()));
+            }
+        }
+        Ok(_) => {}
+        Err(err) => report
+            .errors
+            .push(format!("telemetry variables left unchanged: {err}")),
+    }
     match wire::unwire_at(&path, &opts.home, stamp, opts.dry_run) {
         Ok(out) if out.hooks_removed == 0 && !out.statusline_removed => done(false),
         Ok(out) => {

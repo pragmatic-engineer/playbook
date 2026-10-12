@@ -417,6 +417,7 @@ fn main() {
                 hooks: choices.hooks,
                 statusline: choices.statusline,
                 security: choices.security,
+                telemetry: choices.telemetry,
             };
             if flags.dry_run {
                 print!("{}", init::preview::dry_run(&paths, &choices));

@@ -189,6 +189,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         hooks: true,
         statusline: true,
         security: false,
+        telemetry: false,
         path_setup: None,
         repo: None,
     }
@@ -230,7 +231,7 @@ fn fresh_config_gets_fully_wired() {
         }
         // `memory` has nothing to migrate on a fresh machine with no
         // legacy `~/.claude/memory`.
-        if step.name == "memory" || step.name == "trust" || step.name == "path" {
+        if ["memory", "trust", "path", "telemetry"].contains(&step.name) {
             assert_eq!(
                 step.status,
                 StepStatus::Skipped,
@@ -694,11 +695,12 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     for step in &second.steps {
         // `system-prompt` and `memory` stay `Skipped` on both runs: neither
         // has anything to act on in this fixture.
-        let expected = if ["system-prompt", "memory", "trust", "path"].contains(&step.name) {
-            StepStatus::Skipped
-        } else {
-            StepStatus::AlreadyCorrect
-        };
+        let expected =
+            if ["system-prompt", "memory", "trust", "path", "telemetry"].contains(&step.name) {
+                StepStatus::Skipped
+            } else {
+                StepStatus::AlreadyCorrect
+            };
         assert_eq!(
             step.status, expected,
             "expected '{}' to report no change on a second run: {}",
@@ -810,6 +812,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         hooks: true,
         statusline: true,
         security: false,
+        telemetry: false,
         path_setup: None,
         repo: None,
     };
@@ -865,6 +868,7 @@ fn aliases_false_skips_shim_entirely() {
         hooks: true,
         statusline: true,
         security: false,
+        telemetry: false,
         path_setup: None,
         repo: None,
     };

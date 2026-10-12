@@ -47,6 +47,12 @@ pub struct Flags {
     /// Do not install the system prompt
     #[arg(long, overrides_with = "system_prompt")]
     pub no_system_prompt: bool,
+    /// Write the OpenTelemetry variables for the local usage collector into settings.json (only when you have no telemetry set up)
+    #[arg(long, overrides_with = "no_telemetry")]
+    pub telemetry: bool,
+    /// Do not write telemetry variables into settings.json
+    #[arg(long, overrides_with = "telemetry")]
+    pub no_telemetry: bool,
     /// Never ask: use the default for every part you did not answer with a flag
     #[arg(long, short = 'y')]
     pub yes: bool,
@@ -67,6 +73,7 @@ pub struct Choices {
     pub path: bool,
     pub aliases: bool,
     pub system_prompt: bool,
+    pub telemetry: bool,
 }
 
 fn pick(on: bool, off: bool) -> Option<bool> {
@@ -125,6 +132,12 @@ pub fn resolve(
             catalog::question("system-prompt"),
             false,
         ),
+        telemetry: decide(
+            flags.telemetry,
+            flags.no_telemetry,
+            catalog::question("telemetry"),
+            false,
+        ),
     }
 }
 
@@ -173,7 +186,8 @@ mod tests {
                 security: false,
                 path: true,
                 aliases: false,
-                system_prompt: false
+                system_prompt: false,
+                telemetry: false
             }
         );
     }
@@ -193,7 +207,7 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.aliases);
-        assert_eq!(asked.len(), 3, "{asked:?}");
+        assert_eq!(asked.len(), 4, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && !q.contains("ccc")));

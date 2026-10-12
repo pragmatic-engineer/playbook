@@ -990,7 +990,9 @@ pub enum UsageCommand {
     },
     /// Show whether the telemetry receiver is running
     ///
-    /// Prints the pid, port, idle limit, how many telemetry rows are stored
+    /// Prints how telemetry is configured (on with the collector running, off because you
+    /// disabled it in your Claude Code settings, or off because nothing sets it) with a one-line
+    /// fix, then the pid, port, idle limit, how many telemetry rows are stored
     /// (API requests, tool calls, API errors, metric points), the retention limits and the time of the newest
     /// event. It starts nothing and never prints the token. With `--json` it
     /// prints the same as JSON. Exit code 0 whether or not a receiver runs.

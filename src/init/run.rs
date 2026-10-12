@@ -50,6 +50,9 @@ pub struct InitPaths {
     /// (the `permissions` block). False leaves the user's value exactly as it
     /// is; see `merge_filtered`.
     pub security: bool,
+    /// Whether to write the OpenTelemetry variables for the local collector
+    /// into the `env` block of settings.json (never over an existing setup).
+    pub telemetry: bool,
     /// Where the binary lives and the shell to wire it for. `None` skips the
     /// `path` step.
     pub path_setup: Option<path::Setup>,
@@ -165,6 +168,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 
     let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);
 
+    let telemetry_step = telemetry_step(paths, epoch);
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
     let shim_step = rewire_rc_file_step(&paths.home, paths.shell_kind, paths.aliases);
 
@@ -174,6 +178,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         system_prompt_step,
         settings_step,
         hooks_step,
+        telemetry_step,
         path_step,
         shim_step,
     ];
@@ -223,6 +228,22 @@ pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepRe
         StepReport::skipped("hooks", "not requested; pass --hooks to opt in")
     };
     (settings_step, hooks_step)
+}
+
+/// The telemetry part: writes the collector variables when asked and when the
+/// user has no telemetry setup of their own.
+pub(crate) fn telemetry_step(paths: &InitPaths, epoch: u64) -> StepReport {
+    if !paths.telemetry {
+        return StepReport::skipped("telemetry", "not requested; pass --telemetry to opt in");
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| paths.home.clone());
+    super::telemetry::apply(
+        &paths.home,
+        &paths.claude_home,
+        &cwd,
+        epoch,
+        crate::cc::telemetry::process_configured(),
+    )
 }
 
 /// Puts the binary's directory on PATH for every shell start. A failure is

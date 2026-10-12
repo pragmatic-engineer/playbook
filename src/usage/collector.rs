@@ -103,6 +103,38 @@ fn new_token() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// The collector state with a token and port recorded, creating the file when
+/// there is none (no process, `pid` 0). `init --telemetry` uses this so the
+/// settings it writes name the same port and token the collector reuses.
+pub fn ensure_state(paths: &Paths) -> Result<State, String> {
+    let path = state_path(paths);
+    if let Some(state) = read_state(&path).filter(|s| !s.token.is_empty() && s.port != 0) {
+        return Ok(state);
+    }
+    let previous = read_state(&path).unwrap_or_default();
+    let state = State {
+        pid: if running(&previous) { previous.pid } else { 0 },
+        port: if previous.port == 0 {
+            DEFAULT_PORT
+        } else {
+            previous.port
+        },
+        token: if previous.token.is_empty() {
+            new_token()?
+        } else {
+            previous.token
+        },
+        started_at: previous.started_at,
+        idle_seconds: previous.idle_seconds,
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
+    }
+    write_state(&path, &state)?;
+    Ok(state)
+}
+
 /// What `playbook usage status` reports.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Status {
@@ -120,12 +152,16 @@ pub struct Status {
     pub retention: Retention,
     /// Time of the newest stored event, unix seconds.
     pub last_event: Option<i64>,
+    /// How telemetry is configured, in words, and the one-line fix if any.
+    pub telemetry: String,
+    pub telemetry_fix: Option<String>,
 }
 
 /// Reads the collector state file and the telemetry row counts. Starts
 /// nothing, and never shows the token.
 pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
     let state = read_state(&state_path(paths));
+    let mode = super::telemetry_status::detect_here(paths);
     let live = state.as_ref().filter(|s| running(s));
     let (mut requests, mut tool_calls, mut api_errors, mut metric_points, mut last_event) =
         (0, 0, 0, 0, None);
@@ -158,6 +194,8 @@ pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
         metric_points,
         retention,
         last_event,
+        telemetry: mode.text().to_string(),
+        telemetry_fix: mode.fix().map(str::to_string),
     })
 }
 
@@ -165,7 +203,10 @@ impl Status {
     /// The text a person reads.
     pub fn text(&self, now: i64) -> String {
         use crate::common::time::iso_utc;
-        let mut lines = Vec::new();
+        let mut lines = vec![self.telemetry.clone()];
+        if let Some(fix) = &self.telemetry_fix {
+            lines.push(format!("fix: {fix}"));
+        }
         match (self.running, self.pid, self.port) {
             (true, Some(pid), Some(port)) => {
                 lines.push(format!(

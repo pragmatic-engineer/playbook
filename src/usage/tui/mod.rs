@@ -75,6 +75,7 @@ fn event_loop(
     );
     let every = Duration::from_secs(super::entry::configured_refresh_seconds());
     app.refresh_every = every;
+    app.telemetry = Some(super::telemetry_status::detect_here(paths));
     let worker = Worker::spawn(paths.clone(), app.range, app.filter.clone(), every);
     let mut sessions = SessionsLoop::new(paths.clone());
     while !app.quit {
@@ -111,6 +112,7 @@ fn event_loop(
                     // A reply for an earlier range may still be in flight.
                     if data.range == app.range && data.filter == app.filter {
                         app.refresh(*data);
+                        app.telemetry = Some(super::telemetry_status::detect_here(paths));
                     }
                 }
                 Update::Error(e) => app.error = Some(e),

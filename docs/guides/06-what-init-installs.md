@@ -17,7 +17,7 @@ All of these read from the same tables in the code, and a test keeps the [hook r
 - Playbook stores everything on your machine, under `~/.config/playbook/` and the files named below.
 - Playbook sends nothing anywhere. No hook, and no part of `init`, makes a network call. The only commands that reach the network are `playbook update` (it downloads a release from GitHub) and the status line, which calls the `gh` tool you already have to show PR and CI state.
 - No hook reads a secret value. `precommit-check` looks at file names only, to flag names that look like credentials.
-- `playbook usage` reads local Claude Code history. With `usage.telemetry` on `auto`, `ccc` points a session at a receiver on your own machine. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy).
+- `playbook usage` reads local Claude Code history. With `usage.telemetry` on `auto`, `ccc` points a session at a receiver on your own machine, and `init --telemetry` can do the same for plain `claude`, the IDE and the desktop app. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy).
 - Claude Code's own settings are yours. Playbook edits `~/.claude/settings.json` only when you agree to it in `init`, and takes a timestamped backup first.
 
 ## The parts
@@ -32,6 +32,7 @@ Each part has a flag pair. With no flag, `init` asks in a terminal and uses the 
 | PATH block | on | `--path`, `--no-path` | your shell startup files |
 | Launcher shortcuts `ccc` and `ccd` | off | `--aliases`, `--no-aliases` | your shell rc file |
 | System prompt | off | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md` |
+| Usage telemetry | off, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
 
 `--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
 
@@ -76,6 +77,8 @@ Init adds a block that starts with `# playbook binary` to your shell startup fil
 ### System prompt
 
 `--system-prompt` copies `SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/`. Claude Code uses it only when you start it through `ccc` or `ccd`. If you already have a copy, init refreshes it on every run, unless you edited it, in which case your copy stays. Without the flag and without an existing copy, nothing is placed.
+
+`--telemetry` writes the OpenTelemetry variables that point Claude Code at a collector on 127.0.0.1 into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage` too. It asks a question of its own, and nothing is written without a yes. It writes nothing when your environment or any Claude Code settings file (user, project, local, managed) already names a telemetry variable, so a setting you made, including one that turns telemetry off, is never overridden. Prompt text, tool content, emails and tokens are not sent, and the account id stays out of the metrics. `playbook uninstall` removes exactly the keys init wrote, unless you changed them. See [telemetry by default](../internals/04-usage-dashboard.md#telemetry-by-default).
 
 ### Memory migration
 
