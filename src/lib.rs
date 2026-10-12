@@ -439,7 +439,9 @@ pub enum Command {
     /// today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks
     /// start on Monday unless `usage.weekStart` says otherwise. For today,
     /// week and month, `--json` adds a comparison with the previous period
-    /// over the same elapsed span, and `--summary` prints it.
+    /// over the same elapsed span, and `--summary` prints it. The cost per
+    /// agent and skill, tool latency and health views come from Claude Code's
+    /// OpenTelemetry export when it is available, see `playbook usage collect`.
     ///
     /// Example: `playbook usage --range today`
     Usage {

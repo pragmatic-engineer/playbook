@@ -11,6 +11,9 @@
 | `playbook usage --json` | Prints the totals, the groups and the live view as JSON, for scripts. For `today`, `week` and `month` it adds a `comparison` object. |
 | `playbook usage --range <name>` | Sets the range for the terminal view, `--json` and `--summary`. See [Ranges](#ranges). The default is `week` for the terminal view, `30d` for `--json` and all time for `--summary`. |
 | `playbook usage ingest` | Reads anything new into the store. Deprecated, use `--summary` or `--json`. |
+| `playbook usage collect` | Runs the local OpenTelemetry receiver in the foreground. `cc` starts it for you when needed. See [The telemetry receiver](#the-telemetry-receiver). |
+| `playbook usage status [--json]` | Shows whether the receiver runs, the telemetry row counts and the retention limits. Starts nothing. |
+| `playbook usage prune [--dry-run]` | Deletes telemetry rows past the retention limits. See [Checking and running the collector](#checking-and-running-the-collector). |
 
 Every command that shows data reads new history first, so you never need to ingest by hand.
 
@@ -213,9 +216,22 @@ The Budget panel ignores the project filter: a limit belongs to the account, not
 - Pro and Max windows need the playbook statusline to be the Claude Code status line. If you use another status line, set a manual budget instead, or wire `playbook statusline` in.
 - Headless `--output-format json`, OpenTelemetry and `/usage` do not carry limits in any documented way that a background process can read, so they are not used.
 
-## Telemetry storage (first slice)
+## Telemetry storage
 
-The usage database also holds two tables for OpenTelemetry data, `telemetry_requests` (one row per API request: session id, request id, model, effort, agent name, skill name, token counts and cost) and `session_sources` (which source a session reads from, `telemetry` or `transcript`). They are created next to the transcript tables. Totals never read them, so every total is unchanged. A session with no row in `session_sources` reads from transcripts. The rows never hold prompts, tool content, paths, emails or user ids. Dropping the two tables reverts the feature and loses no transcript data (`telemetry_db::migrate_down`). Telemetry follows [issue 769](https://github.com/pragmatic-engineer/playbook/issues/769): playbook never writes Claude Code settings, and transcripts stay the fallback.
+The usage database also holds tables for OpenTelemetry data, created next to the transcript tables when it is opened:
+
+| Table | One row per |
+|---|---|
+| `telemetry_requests` | API request: session id, request id, model, effort, agent name, skill name, token counts, cost, call duration. |
+| `telemetry_tools` | Tool call: tool name, success, duration. |
+| `telemetry_errors` | Failed API attempt: status code, attempt number, duration. |
+| `telemetry_metrics` | Metric point of four counters: active time, lines of code, commits, pull requests. |
+| `session_sources` | Session: which source it reads from, `telemetry` or `transcript`. |
+| `session_reconcile` | Session with telemetry: the verdict and the numbers compared. |
+
+Totals never read them, so every total is unchanged, and a session with no row in `session_sources` reads from transcripts. The rows never hold prompts, tool content, paths, emails or user ids. Dropping the tables reverts the feature and loses no transcript data (`telemetry_db::migrate_down`). Telemetry follows [issue 769](https://github.com/pragmatic-engineer/playbook/issues/769): playbook never writes Claude Code settings, and transcripts stay the fallback. Rows are kept for 90 days and 500000 rows per table unless you change the [retention keys](../guides/04-config-keys.md).
+
+Plain `claude` sessions (not started through `cc`) send nothing to the receiver unless you export the OpenTelemetry variables yourself, so they are read from transcripts.
 
 ## The telemetry receiver
 
@@ -225,14 +241,15 @@ The usage database also holds two tables for OpenTelemetry data, `telemetry_requ
 - **State.** `collector.json` next to the usage database (owner-only) holds the pid, the port and a bearer token. A second start finds the live collector and says so. A stale file (dead pid) is replaced. The token and port survive restarts, so a session started earlier keeps sending to the right place with the right token.
 - **Idle shutdown.** It stops after 600 seconds with no telemetry request (`--idle-seconds`, 0 means never) and clears the pid. Only a request that was read counts: a bare connect, such as the liveness probe `cc` makes or `playbook usage status`, does not reset the timer, and a test polls status while the collector idles out to prove it. A session that is still open when the collector stops loses its export from then on and is read from transcripts, so use `--idle-seconds 0` for a collector that should outlive quiet periods.
 - **Limits.** Headers 16 KiB, body 1 MiB (also when chunked), 50 requests per second (then 429), 5 seconds to send a request. Content type must be `application/json`, a compressed body is refused, and the bearer token is required. Paths: `/v1/logs` and `/v1/metrics` are stored, `/v1/traces` is accepted and dropped.
-- **What is stored.** `api_request`, `tool_result` and `api_error` events, keyed by session id and request id, tool use id, or event sequence, so a redelivered batch changes nothing. An allowlist of attribute keys is read (event name, session id, request id, model, effort, agent name, skill name, tool name, tool use id, success, duration, status code, attempt, event sequence, the four token counts, cost). Every other attribute, including prompts, tool content, file paths, emails, user and organization ids and resource attributes, is never read. Kept names must be plain ASCII (letters, digits and `. _ - : /`), else they are dropped.
+- **What is stored.** `api_request`, `tool_result` and `api_error` events, keyed by session id and request id, tool use id, or event sequence, and four delta counters from the metrics (see Active time and counters), keyed by their interval, so a redelivered batch changes nothing. An allowlist of attribute keys is read (event name, session id, request id, model, effort, agent name, skill name, tool name, tool use id, success, duration, status code, attempt, event sequence, the four token counts, cost). Every other attribute, including prompts, tool content, file paths, emails, user and organization ids and resource attributes, is never read. Kept names must be plain ASCII (letters, digits and `. _ - : /`), else they are dropped.
 - **Data loss.** Claude Code may drop telemetry sent while no receiver listens. Such a session is read from transcripts.
 
 ## Telemetry privacy
 
-- **What is stored.** Only `api_request` rows with the session id, request id, model, effort, agent name, the four token counts, the cost and the call duration, plus one row per tool call (tool name, outcome, duration) and per failed API attempt (status code, attempt number, duration). Prompts, tool content, file paths, emails, user, account and organization ids, and resource attributes are dropped when the receiver parses a request and never reach the database.
-- **What `cc` sets.** With `usage.telemetry` at `auto`, a running receiver and no telemetry setting of yours, `cc` sets `CLAUDE_CODE_ENABLE_TELEMETRY`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`, the traces exporter to `none`, the `http/json` protocol, the loopback endpoint, an `Authorization` header with the receiver's token and `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false`, in the session's environment only. It never turns on `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT` or `OTEL_LOG_RAW_API_BODIES`.
+- **What is stored.** Only `api_request` rows with the session id, request id, model, effort, agent name, the four token counts, the cost and the call duration, plus one row per tool call (tool name, outcome, duration), per failed API attempt (status code, attempt number, duration) and per metric point of active time, lines of code, commits or pull requests (session id, type, interval, value). Prompts, tool content, file paths, emails, user, account and organization ids, and resource attributes are dropped when the receiver parses a request and never reach the database.
+- **What `cc` sets.** With `usage.telemetry` at `auto`, a running receiver (started by `cc` when needed) and no telemetry setting of yours, `cc` sets `CLAUDE_CODE_ENABLE_TELEMETRY`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`, the traces exporter to `none`, the `http/json` protocol, the loopback endpoint, an `Authorization` header with the receiver's token and `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false`, in the session's environment only. It never turns on `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT` or `OTEL_LOG_RAW_API_BODIES`.
 - **What it never does.** It never writes Claude Code settings and adds no `--settings` flag. If any telemetry variable is already set in your environment or in a settings `env` block (user, project, local or managed), or such a file cannot be parsed, it sets nothing, so your own configuration always wins.
+- **How long it is kept.** 90 days and 500000 rows per table by default (`usage.telemetryRetentionDays`, `usage.telemetryMaxRows`), pruned automatically and by `playbook usage prune`.
 - **Where it goes.** The receiver listens on 127.0.0.1 only and the store file is private to you. `usage.telemetry` set to `off` stops `cc` from touching the environment at all.
 
 ## Choosing a source per session
