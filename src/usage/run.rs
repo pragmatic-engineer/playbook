@@ -9,7 +9,7 @@ use super::backfill;
 use super::claude_code::ClaudeCodeSource;
 use super::codex::CodexSource;
 use super::db::{load_tool_events, load_usage_events, open_db};
-use super::ingest::{ingest, IngestStats};
+use super::ingest::{ingest, ingest_claude, IngestStats};
 use super::limits::LimitPeriod;
 use super::limits_source;
 use super::query::Range;
@@ -57,23 +57,47 @@ impl Paths {
 }
 
 /// Ingests new transcript events into the store and returns what was added.
+/// Blocks until done. A first read of a large history that runs past two
+/// seconds says how far it is on stderr, as a file count.
 pub fn ingest_new(paths: &Paths) -> Result<(Connection, IngestStats), String> {
     let conn = open_db(&paths.db)?;
+    let started = std::time::Instant::now();
+    let mut shown = false;
+    let stats = ingest_into(paths, &conn, &mut |done, total| {
+        if started.elapsed() >= std::time::Duration::from_secs(2) && total > 0 {
+            eprint!("\rindexing {done}/{total} files");
+            shown = true;
+        }
+        true
+    })?;
+    if shown {
+        eprintln!();
+    }
+    Ok((conn, stats))
+}
+
+/// The steps of `ingest_new` on an open store. `on_batch(done, total)` reports
+/// the first-run backfill after each committed batch.
+pub fn ingest_into(
+    paths: &Paths,
+    conn: &Connection,
+    on_batch: &mut dyn FnMut(usize, usize) -> bool,
+) -> Result<IngestStats, String> {
     let source = ClaudeCodeSource::new(paths.claude_projects.clone());
-    backfill::run_once(&source, &conn)?;
+    backfill::run_once(&source, conn)?;
     let account = account_label(&paths.claude_json);
-    let mut stats = ingest(&source, &account, &conn)?;
+    let mut stats = ingest_claude(&source, &account, conn, on_batch)?;
     if paths.codex_sessions.is_dir() {
         let codex = CodexSource::new(paths.codex_sessions.clone());
-        let more = ingest(&codex, UNKNOWN_ACCOUNT, &conn)?;
+        let more = ingest(&codex, UNKNOWN_ACCOUNT, conn)?;
         stats.usage_inserted += more.usage_inserted;
         stats.usage_updated += more.usage_updated;
         stats.tools_inserted += more.tools_inserted;
         stats.duplicates_skipped += more.duplicates_skipped;
     }
     // Telemetry never changes the totals; a failure here leaves transcripts as the source.
-    let _ = super::reconcile::reconcile(&conn, crate::common::time::now_secs());
-    Ok((conn, stats))
+    let _ = super::reconcile::reconcile(conn, crate::common::time::now_secs());
+    Ok(stats)
 }
 
 /// `playbook usage ingest`.

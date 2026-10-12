@@ -128,6 +128,7 @@ fn event_loop(
                     }
                 }
                 Update::Error(e) => app.error = Some(e),
+                Update::Indexing(progress) => app.indexing = progress,
             }
         }
     }

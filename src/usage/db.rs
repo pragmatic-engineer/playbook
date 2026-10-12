@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS tool_invocation_events (
     kind TEXT NOT NULL CHECK(kind IN ('skill','agent')),
     name TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS usage_backfill_files (
+    path TEXT PRIMARY KEY,
+    mtime INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS usage_watermarks (
     source TEXT PRIMARY KEY,
     watermark INTEGER NOT NULL
@@ -255,6 +259,46 @@ pub fn upsert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<usize, St
 pub fn count_usage_events(conn: &Connection) -> Result<i64, String> {
     conn.query_row("SELECT COUNT(*) FROM usage_events", [], |row| row.get(0))
         .map_err(|e| format!("failed to count usage events: {e}"))
+}
+
+/// The transcripts a first-run backfill has finished, with the modification
+/// time each had when it was read.
+pub fn backfilled_files(
+    conn: &Connection,
+) -> Result<std::collections::HashMap<String, i64>, String> {
+    let mut stmt = conn
+        .prepare("SELECT path, mtime FROM usage_backfill_files")
+        .map_err(|e| format!("failed to read the backfill progress: {e}"))?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+        .map_err(|e| format!("failed to read the backfill progress: {e}"))?;
+    rows.collect::<Result<_, _>>()
+        .map_err(|e| format!("failed to read the backfill progress: {e}"))
+}
+
+pub fn record_backfilled_file(conn: &Connection, path: &str, mtime: i64) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO usage_backfill_files (path, mtime) VALUES (?1, ?2)",
+        rusqlite::params![path, mtime],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("failed to record the backfill progress: {e}"))
+}
+
+pub fn clear_backfilled_files(conn: &Connection) -> Result<(), String> {
+    conn.execute("DELETE FROM usage_backfill_files", [])
+        .map(|_| ())
+        .map_err(|e| format!("failed to clear the backfill progress: {e}"))
+}
+
+/// The newest usage timestamp stored for an agent, or 0.
+pub fn newest_usage_of(conn: &Connection, agent: &str) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COALESCE(MAX(timestamp), 0) FROM usage_events WHERE agent = ?1",
+        [agent],
+        |r| r.get(0),
+    )
+    .map_err(|e| format!("failed to read the newest usage event: {e}"))
 }
 
 /// The message count and the first and last timestamp of the whole store.
@@ -521,6 +565,7 @@ mod tests {
                 "telemetry_requests",
                 "telemetry_tools",
                 "tool_invocation_events",
+                "usage_backfill_files",
                 "usage_events",
                 "usage_watermarks"
             ]

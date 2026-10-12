@@ -52,15 +52,30 @@ impl ClaudeCodeSource {
     /// the sorted file list, and the slices are merged in file order, so the
     /// result never depends on the thread count.
     pub(crate) fn events_since_with(&self, watermark: i64, threads: usize) -> Events {
-        let mut files = Vec::new();
-        collect_jsonl(&self.root, &mut files);
-        files.sort();
+        let mut files = self.files();
         // A file last modified before the watermark cannot hold a newer
         // event, so unchanged transcripts are never re-read. This keeps a
         // repeated ingest (the terminal view polls every few seconds) cheap.
         files.retain(|f| !modified_before(f, watermark));
+        self.events_from_files(&files, watermark, threads)
+    }
 
-        let records = map_files(&files, threads, Dedup::default, |file, repos, seen| {
+    /// Every transcript under the root, sorted by path.
+    pub(crate) fn files(&self) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        collect_jsonl(&self.root, &mut files);
+        files.sort();
+        files
+    }
+
+    /// The events of `files` (in the order given) at or after `watermark`.
+    pub(crate) fn events_from_files(
+        &self,
+        files: &[PathBuf],
+        watermark: i64,
+        threads: usize,
+    ) -> Events {
+        let records = map_files(files, threads, Dedup::default, |file, repos, seen| {
             let mut out = Vec::new();
             read_lines(file, &mut |line| {
                 if let Some(record) = line_record(line, watermark, repos, seen) {
