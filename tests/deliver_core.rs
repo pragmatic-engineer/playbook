@@ -624,3 +624,23 @@ fn auto_merge_on_a_pr_that_already_merged_reports_merged() {
     assert_eq!(report.outcome, "merged");
     assert_eq!(report.code, exit::OK);
 }
+
+#[test]
+fn an_earlier_commit_with_ai_attribution_is_refused_before_the_push() {
+    let rig = Rig::new();
+    rig.write("b.txt", "new\n");
+    rig.git(&["add", "-A"]);
+    let trailer = format!("Co-Authored-By: {} <noreply@{}.com>", "Claude", "anthropic");
+    rig.git(&[
+        "commit",
+        "-q",
+        "-m",
+        &format!("feat(x): add b\n\n{trailer}"),
+    ]);
+
+    let err = deliver::run(&rig.opts()).expect_err("refused");
+
+    assert_eq!(err.code, exit::REFUSED);
+    assert!(!rig.gh_log().contains("pr create"));
+    assert!(rig.git(&["ls-remote", "origin", "feat/x"]).is_empty());
+}
