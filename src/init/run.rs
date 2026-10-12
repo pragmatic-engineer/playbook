@@ -45,6 +45,9 @@ pub struct InitPaths {
     pub hooks: bool,
     /// Whether to merge the shared settings template into settings.json.
     pub settings: bool,
+    /// Whether init may set or change `statusLine` in settings.json. False
+    /// drops it from the merge and skips the legacy command migration.
+    pub statusline: bool,
     /// Whether the settings merge also applies the security defaults
     /// (`permissions` and `env.DISABLE_AUTOUPDATER`). False leaves the user's
     /// values for both exactly as they are; see `merge_filtered`.
@@ -151,7 +154,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         self_root: paths.self_root.clone(),
         repo: paths.repo.clone(),
     };
-    let migrated = migrate::run_pending(&ctx);
+    let migrated = migrate::run_pending_for(&ctx, paths.statusline);
 
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
     if step_confirmed(&system_prompt_step) {
@@ -169,6 +172,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
             epoch,
             paths.hooks,
             paths.security,
+            paths.statusline,
         )
     } else {
         StepReport::skipped("settings", "not requested; pass --settings to opt in")
@@ -178,6 +182,11 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         settings_step
             .detail
             .push_str("; security defaults not applied, pass --security to opt in");
+    }
+    if !paths.statusline && has_playbook_status_line(&settings_path) {
+        settings_step.detail.push_str(
+            "; status line not changed, the existing playbook status line stays (`playbook uninstall` removes it)",
+        );
     }
     let hooks_step = if paths.hooks {
         wire_hooks(&settings_path, epoch)
@@ -331,6 +340,7 @@ fn seed_or_merge_settings(
     epoch: u64,
     with_hooks: bool,
     with_security: bool,
+    with_statusline: bool,
 ) -> StepReport {
     let Some(self_root) = self_root else {
         return StepReport::skipped(
@@ -358,7 +368,7 @@ fn seed_or_merge_settings(
     }
 
     let base_path = claude_home.join(".settings.base.json");
-    if !with_hooks || !with_security {
+    if !with_hooks || !with_security || !with_statusline {
         return merge_filtered(
             claude_home,
             &template_path,
@@ -368,6 +378,7 @@ fn seed_or_merge_settings(
             Filters {
                 hooks: with_hooks,
                 security: with_security,
+                statusline: with_statusline,
             },
         );
     }
@@ -378,11 +389,24 @@ fn seed_or_merge_settings(
     }
 }
 
+/// Whether settings.json already points `statusLine.command` at playbook.
+fn has_playbook_status_line(settings_path: &Path) -> bool {
+    fs::read_to_string(settings_path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| {
+            v.pointer("/statusLine/command")
+                .and_then(|c| c.as_str().map(|c| c.contains("playbook statusline")))
+        })
+        .unwrap_or(false)
+}
+
 /// Which optional slices of the template a merge applies.
 #[derive(Clone, Copy)]
 struct Filters {
     hooks: bool,
     security: bool,
+    statusline: bool,
 }
 
 /// Point the template's security slice at the user's own values, so the merge
@@ -426,6 +450,10 @@ fn neutralise_security(template: &mut serde_json::Value, user: &serde_json::Valu
 
 /// The settings merge when part of the template is left out.
 ///
+/// `statusline: false` (`--no-statusline`): the template's `statusLine` is
+/// dropped and the user's own value (or its absence) is restored after the
+/// merge, so the three-way merge cannot add, change or remove it.
+///
 /// `hooks: false` (`--no-hooks`): the template's `hooks` block (the
 /// `PreToolUse` guards) is dropped, and whatever hooks the user's file already
 /// has are kept as they are. The merge runs against a scratch base, so the
@@ -458,13 +486,18 @@ fn merge_filtered(
                 map.shift_remove("hooks");
             }
         }
+        if !filters.statusline {
+            if let Some(map) = template.as_object_mut() {
+                map.shift_remove("statusLine");
+            }
+        }
         if !filters.security {
             neutralise_security(&mut template, &user);
         }
         fs::write(&tpl_tmp, template.to_string()).map_err(|e| e.to_string())?;
         // Without hooks the recorded base must keep describing the full
         // template, so the merge works on a scratch copy of it.
-        let (base_in, base_out) = if filters.hooks {
+        let (base_in, base_out) = if filters.hooks && filters.statusline {
             (base_path, base_path)
         } else {
             if base_path.is_file() {
@@ -478,6 +511,21 @@ fn merge_filtered(
                 merge::MergeError::Io(err) => err.to_string(),
             },
         )?;
+        if !filters.statusline {
+            let mut merged: serde_json::Value =
+                serde_json::from_str(&outcome.stdout).map_err(|e| e.to_string())?;
+            if let Some(map) = merged.as_object_mut() {
+                match user.get("statusLine") {
+                    Some(line) => {
+                        map.insert("statusLine".to_string(), line.clone());
+                    }
+                    None => {
+                        map.remove("statusLine");
+                    }
+                }
+            }
+            outcome.stdout = serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())?;
+        }
         if !filters.hooks {
             let mut merged: serde_json::Value =
                 serde_json::from_str(&outcome.stdout).map_err(|e| e.to_string())?;

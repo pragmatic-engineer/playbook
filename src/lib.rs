@@ -222,8 +222,8 @@ pub enum Command {
     /// Install or repair your local Claude Code setup
     ///
     /// Safe to run again: it only touches what is missing or out of date.
-    /// In a terminal it asks about each optional part (hooks, settings, PATH,
-    /// the `ccc` launcher, the system prompt) unless you answer with a flag.
+    /// In a terminal it asks about each optional part (hooks, settings, status
+    /// line, PATH, the `ccc` launcher, the system prompt) unless you answer with a flag.
     /// Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`,
     /// unanswered parts use their defaults: hooks, settings and PATH on, the
     /// launcher and system prompt off.

@@ -187,6 +187,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         aliases: true,
         hooks: true,
         settings: true,
+        statusline: true,
         security: false,
         path_setup: None,
         repo: None,
@@ -808,6 +809,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         aliases: true,
         hooks: true,
         settings: true,
+        statusline: true,
         security: false,
         path_setup: None,
         repo: None,
@@ -863,6 +865,7 @@ fn aliases_false_skips_shim_entirely() {
         aliases: false,
         hooks: true,
         settings: true,
+        statusline: true,
         security: false,
         path_setup: None,
         repo: None,
@@ -1303,4 +1306,67 @@ fn without_a_binary_location_the_path_step_is_skipped() {
     let outcome = run(&base_paths(&home, Some(ShellKind::Zsh)));
     assert_eq!(find_step(&outcome, "path").status, StepStatus::Skipped);
     assert!(!home.join(".zshenv").exists());
+}
+
+#[test]
+fn a_fresh_init_without_the_statusline_leaves_statusline_out_of_settings() {
+    // Arrange: no settings yet, status line answered no.
+    let home = scratch_home("no-statusline-fresh");
+    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    paths.statusline = false;
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    assert!(outcome.ok());
+    let settings = read_json(&claude_home_of(&home).join("settings.json"));
+    assert!(settings.get("statusLine").is_none(), "{settings}");
+}
+
+#[test]
+fn init_without_the_statusline_keeps_a_custom_command_and_does_not_rewrite_the_old_one() {
+    // Arrange: the legacy script command is set, status line answered no.
+    let home = scratch_home("no-statusline-legacy");
+    let claude_home = claude_home_of(&home);
+    let legacy = "bash $HOME/.config/playbook/statusline.sh";
+    write_json(
+        &claude_home.join("settings.json"),
+        &serde_json::json!({"statusLine": {"type": "command", "command": legacy}}),
+    );
+    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    paths.statusline = false;
+
+    // Act: twice, so the three-way merge cannot re-add or change it.
+    run(&paths);
+    let outcome = run(&paths);
+
+    // Assert
+    assert!(outcome.ok());
+    assert_eq!(
+        status_line_command(&claude_home),
+        Value::String(legacy.into())
+    );
+}
+
+#[test]
+fn init_without_the_statusline_says_an_existing_playbook_status_line_stays() {
+    // Arrange: a playbook status line from an earlier init.
+    let home = scratch_home("no-statusline-existing");
+    let claude_home = claude_home_of(&home);
+    run(&base_paths(&home, Some(ShellKind::Bash)));
+    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    paths.statusline = false;
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    assert_eq!(
+        status_line_command(&claude_home),
+        Value::String("playbook statusline".into())
+    );
+    assert!(find_step(&outcome, "settings")
+        .detail
+        .contains("status line not changed"));
 }
