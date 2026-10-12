@@ -44,6 +44,9 @@ impl Sys {
     fn run(&self, program: &str, args: &[&str], wait: Wait) -> Out {
         let mut command = Command::new(program);
         command.args(args).current_dir(&self.dir);
+        for key in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"] {
+            command.env_remove(key);
+        }
         command
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GH_PROMPT_DISABLED", "1");

@@ -195,6 +195,16 @@ fn default_branch(sys: &Sys) -> String {
             return name.to_string();
         }
     }
+    let symref = sys
+        .git_wait(&["ls-remote", "--symref", "origin", "HEAD"], Wait::Net)
+        .stdout;
+    if let Some(name) = symref
+        .lines()
+        .find_map(|l| l.strip_prefix("ref: refs/heads/"))
+        .and_then(|l| l.split_whitespace().next())
+    {
+        return name.to_string();
+    }
     for name in ["main", "master"] {
         if sys
             .git(&[
