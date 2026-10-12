@@ -43,13 +43,13 @@ The panels:
 The two charts are bar charts drawn with eighth blocks, one bar per UTC day, with idle days at zero and the days still to come in a week or month in progress left empty. Today charts the last seven days, since one bar says nothing, and the title says so (`Spend per day, USD, 7 days`).
 
 - **y axis.** Labels at the bottom, middle and top, with a blank column between them and the box, in dollars or tokens with units (`$0`, `$2.5`, `$250`, `$2.5K`, `500K`, `2.5M`). The top is a round value above the peak (1, 1.2, 1.6, 2, 2.5, 3, 4, 5, 6 or 8 times a power of ten), so the labels are round and the middle is half the top. Faint dotted guides mark the top and the middle.
-- **x axis.** The first, middle and last date under the bars (with the year when it fits), and a row of weekday letters or names when the panel is tall enough and every bar is wide enough for a letter and a gap (a month in a narrow panel has none). Today's weekday is bold and underlined, the peak day's is yellow, and the cursor's is highlighted.
+- **x axis.** One bar a day (a week, a month that fits, today's seven days) shows the weekday on one row and the day of the month, 1 to 31, on the row directly below it, for every bar where each cell is wide enough for the label and a gap. The weekday row needs a letter and a gap in every cell, so a month in a narrow panel has only the numbers. When the numbers do not fit, every second, third or seventh day is labeled, always with the first and the last bar (a number that would touch the last one is left out). No full dates sit on the axis: the header carries the period's UTC dates (`this week Oct 6 to Oct 12 until 12:00`, `last 30 days Sep 13 to Oct 12, 2026`), and the readout line names the day under the cursor in full. When a bar holds several days (a wide range), the axis keeps the short first, middle and last date. Today's labels are bold and underlined, the peak day's are yellow, and the cursor's are highlighted.
 - **Totals line.** The total, the peak (with its date) and the average per day that has happened, for the range.
 - **Cursor.** `Left` and `Right` move it one bar, `Home` and `End` jump to the first and last bar while a chart has the focus. A readout line gives the day, its cost, messages, tokens and top model with its share (the token chart leads with tokens). It starts on today, and both charts share it. Changing the range resets it.
 - **Legend.** The bar color follows its height on the axis along the theme gradient (green to red for cost), and the legend in the bottom border says so. The mono theme has no colors and no legend.
 - **Fill.** A week or more of bars always fills the width of the plot, and fewer bars are never wider than 16 columns.
 - **Wide ranges.** When the range has more days than the chart has columns, days are added up into bars of equal length (the title says `Spend per 3 days`), so nothing is cut off. The axis, readout and cursor then speak of those bars.
-- **Small panels.** Rows go in this order when the panel is short: weekday letters, totals line, readout, dates, so the plot keeps three rows. The y axis goes when the panel is narrower than 16 columns, leaving the bars.
+- **Small panels.** Rows go in this order when the panel is short: weekday letters, totals line, readout, day numbers, so the plot keeps three rows. With no totals line the peak sits in the bottom border, so the top border keeps room for the `v view: <name>` tag. The y axis goes when the panel is narrower than 16 columns, leaving the bars.
 
 ### Daily cost and cost per model
 
@@ -89,7 +89,7 @@ The view is keyboard only, so the terminal's own text selection and scrolling ke
 
 ### Ranges
 
-Every range is a set of whole UTC days, shown in the header with its name and exact dates (`last week 2026-08-24 to 2026-08-30 UTC`). The time zone is UTC everywhere in the view, and the JSON, so there is no daylight saving: a day is always 86,400 seconds and a week is always seven days.
+Every range is a set of whole UTC days, shown in the header with its name and exact dates (`last week Aug 24 to Aug 30, 2026`, with `UTC` in the border). The time zone is UTC everywhere in the view, and the JSON, so there is no daylight saving: a day is always 86,400 seconds and a week is always seven days.
 
 | Name (`--range`) | Days |
 |---|---|

@@ -1,5 +1,5 @@
 ╭─┤playbook usage├──┤UTC, weeks start Mon├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│this week 08-31 to 09-03 until 01:46  vs  last week 08-24 to 08-27 until 01:46  (same span 3d 1h)                                                             │
+│this week Aug 31 to Sep 3 until 01:46  vs  last week Aug 24 to Aug 27 until 01:46  (same span 3d 1h)                                                          │
 │cost           $3.05   vs      $6.21      -$3.16   -50.9%                                                                                                     │
 │tokens         95.2K   vs      71.4K      +23.8K   +33.3%                                                                                                     │
 │messages           4   vs          3          +1   +33.3%                                                                                                     │
@@ -22,7 +22,7 @@
 │   │          ██████████           ██████████                                 ││    │          █████████            █████████                                 │
 │ $0┤          ██████████           ██████████                                 ││   0┤          █████████            █████████                                 │
 │    Mon       Tue        Wed       Thu        Fri       Sat        Sun        ││     Mon       Tue       Wed        Thu       Fri        Sat       Sun        │
-│    2026-08-31                     2026-09-03                      2026-09-06 ││     2026-08-31                     2026-09-03                     2026-09-06 │
+│    31        1          2         3          4         5          6          ││     31        1         2          3         4          5         6          │
 ╰────────────────────────────────────────────────────────┤cost low ■■■■■ high├─╯╰──────────────────────────────────────────────────────┤tokens low ■■■■■ high├─╯
 ╭─┤³Models├─────────────────────────────────────────────────────┤vs last week├─╮╭─┤⁴Projects├─┤v view: projects├───────────────────────────────────────────────╮
 │name                           msgs  tokens    cost▼     prev   change       %││name                                           msgs  tokens     cost▼ share   │

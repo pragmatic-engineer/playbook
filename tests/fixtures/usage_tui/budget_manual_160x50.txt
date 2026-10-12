@@ -1,5 +1,5 @@
 ╭─┤playbook usage├──┤UTC├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│this month 09-01 to 09-03 until 01:46  vs  last month 08-01 to 08-03 until 01:46  (same span 2d 1h)                                                           │
+│this month Sep 1 to Sep 3 until 01:46  vs  last month Aug 1 to Aug 3 until 01:46  (same span 2d 1h)                                                           │
 │cost           $3.05   vs      $0.00      +$3.05      new                                                                                                     │
 │tokens         95.2K   vs          0      +95.2K      new                                                                                                     │
 │messages           4   vs          0          +4      new                                                                                                     │
@@ -22,7 +22,7 @@
 │   │█   ██                                                                    ││    │█   ██                                                                   │
 │ $0┤█   ██                                                                    ││   0┤█   ██                                                                   │
 │    T W T  F S  S M  T W  T F  S S  M T  W T F  S S  M T  W T  F S  S M  T W  ││     T W T  F S  S M  T W T  F S  S M  T W T  F S  S M  T W T  F S  S M  T W  │
-│    2026-09-01                           2026-09-16                2026-09-30 ││     2026-09-01                          2026-09-16                2026-09-30 │
+│    1   3    5    7    9    11   13   15   17   19   21   23   25   27     30 ││     1   3    5    7    9    11   13   15  17   19   21   23   25   27     30 │
 ╰────────────────────────────────────────────────────────┤cost low ■■■■■ high├─╯╰──────────────────────────────────────────────────────┤tokens low ■■■■■ high├─╯
 ╭─┤³Models├────────────────────────────────────────────────────┤vs last month├─╮╭─┤⁴Projects├─┤v view: projects├───────────────────────────────────────────────╮
 │name                           msgs  tokens    cost▼     prev   change       %││name                                           msgs  tokens     cost▼ share   │
