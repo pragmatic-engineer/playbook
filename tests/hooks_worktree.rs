@@ -654,8 +654,6 @@ fn remove_kept_message_names_the_manual_command() {
     assert!(path.exists());
     assert!(stderr(&out).contains(&format!("git worktree remove --force '{}'", path.display())));
 }
-||||||| parent of ce8a286b (fix(hooks): tighten rm, no-slop and policy guard messages)
-
 
 #[test]
 fn create_clears_an_empty_unregistered_leftover_directory() {
