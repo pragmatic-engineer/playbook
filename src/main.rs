@@ -1776,6 +1776,20 @@ fn main() {
                 }
                 HandoffCommand::Show { all, dir } => handoff::run_show(dir.as_deref(), all),
                 HandoffCommand::Status => Ok(handoff::run_status()),
+                HandoffCommand::Template => Ok(handoff::compose::TEMPLATE.to_string()),
+                HandoffCommand::Facts { dir } => Ok(handoff::compose::facts(std::path::Path::new(
+                    dir.as_deref().unwrap_or("."),
+                ))),
+                HandoffCommand::Check => {
+                    let mut text = String::new();
+                    let _ = std::io::stdin().read_to_string(&mut text);
+                    let problems = handoff::compose::check(&text);
+                    if problems.is_empty() {
+                        Ok("handoff ok".to_string())
+                    } else {
+                        Err(problems.join("; "))
+                    }
+                }
             };
             match result {
                 Ok(output) => println!("{output}"),
