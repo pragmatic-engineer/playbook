@@ -197,7 +197,7 @@ Index and search the repository's source code
 
 The index is a cache kept under the playbook state folder for this worktree. Nothing is written inside the repository.
 
-Subcommands: `index`, `search`, `status`
+Subcommands: `index`, `search`, `status`, `symbol`
 
 ### `playbook code index`
 
@@ -212,15 +212,16 @@ Example: `playbook code index --json`
 
 ### `playbook code search`
 
-Search the indexed text of this repository
+Search symbols, imports and text of this repository
 
-Shows repo relative paths, line ranges and short excerpts. Words in the query are matched as plain text, so operators have no special meaning. Results are marked stale when a file changed after it was indexed.
+Without the text flag, results are ranked in tiers: exact qualified name, exact name, name ignoring case, name prefix, import, text, then a plain substring scan. With it, only indexed text is searched. Words in the query are matched as plain text, so operators have no special meaning. Results are marked stale when a file changed after indexing.
 
-Example: `playbook code search --text retry`
+Example: `playbook code search retry --lang python`
 
 - `<QUERY>`: Words to look for
-- `--text`: Search indexed text
+- `--text`: Search indexed text only
 - `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
+- `--lang <LANG>`: Only files of this language: rust, typescript, javascript or python
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document
 
@@ -232,6 +233,21 @@ Hashes every file git lists, so it is slower than the quick check that search co
 
 Example: `playbook code status --json`
 
+- `--json`: Print one JSON document
+
+### `playbook code symbol`
+
+Find where a name is declared
+
+Matches the name, then the name ignoring case, then the name as a prefix. A dotted or scoped name matches the qualified name first.
+
+Example: `playbook code symbol PaymentService --kind class`
+
+- `<NAME>`: The name to look up
+- `--kind <KIND>`: Only this kind, for example `function`, `class` or `method`
+- `--lang <LANG>`: Only files of this language: rust, typescript, javascript or python
+- `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
+- `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document
 
 ### `playbook commit`

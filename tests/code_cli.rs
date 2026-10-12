@@ -279,3 +279,93 @@ fn search_without_an_index_exits_one_and_says_to_index_first() {
     let err = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(err.contains("no index yet"), "{err}");
 }
+
+#[test]
+fn symbol_finds_a_declaration_and_prints_a_stable_json_document() {
+    // Arrange
+    let fx = Fixture::new("symbol-json", true);
+    fx.write(
+        "lib/pay.py",
+        "class Pay:\n    def run(self):\n        pass\n",
+    );
+    assert!(fx.playbook(&["code", "index"]).status.success());
+
+    // Act
+    let first = fx.playbook(&["code", "symbol", "Pay", "--json"]);
+    let second = fx.playbook(&["code", "symbol", "Pay", "--json"]);
+
+    // Assert
+    assert!(first.status.success());
+    assert_eq!(first.stdout, second.stdout);
+    let doc = json_of(&first);
+    assert_eq!(doc["command"], "symbol");
+    assert_eq!(doc["results"][0]["qualified_name"], "Pay");
+    assert_eq!(doc["results"][0]["kind"], "class");
+    assert_eq!(doc["results"][0]["lang"], "python");
+    assert_eq!(doc["results"][0]["tier"], 1);
+}
+
+#[test]
+fn symbol_text_output_and_filters_work_end_to_end() {
+    // Arrange
+    let fx = Fixture::new("symbol-text", true);
+    fx.write("a.py", "def target():\n    pass\n");
+    fx.write("b.ts", "function target() {}\n");
+    assert!(fx.playbook(&["code", "index"]).status.success());
+
+    // Act
+    let out = fx.playbook(&["code", "symbol", "target", "--lang", "python"]);
+
+    // Assert
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(stdout.starts_with("a.py:1-2"), "{stdout}");
+    assert!(!stdout.contains("b.ts"), "{stdout}");
+}
+
+#[test]
+fn ranked_search_without_the_text_flag_finds_symbols() {
+    // Arrange
+    let fx = Fixture::new("ranked", true);
+    fx.write("a.rs", "fn needle_fn() {}\n");
+    assert!(fx.playbook(&["code", "index"]).status.success());
+
+    // Act
+    let out = fx.playbook(&["code", "search", "needle_fn", "--json"]);
+
+    // Assert
+    let doc = json_of(&out);
+    assert_eq!(doc["results"][0]["match_type"], "symbol");
+    assert_eq!(doc["results"][0]["path"], "a.rs");
+}
+
+#[test]
+fn limits_of_zero_and_two_hundred_and_one_are_argument_errors() {
+    // Arrange
+    let fx = Fixture::new("limits", true);
+    fx.write("a.rs", "fn a() {}\n");
+    assert!(fx.playbook(&["code", "index"]).status.success());
+
+    // Act, Assert
+    for bad in ["0", "201"] {
+        let out = fx.playbook(&["code", "symbol", "a", "--limit", bad]);
+        assert!(!out.status.success(), "limit {bad}");
+    }
+    for good in ["1", "200"] {
+        let out = fx.playbook(&["code", "symbol", "a", "--limit", good]);
+        assert!(out.status.success(), "limit {good}");
+    }
+}
+
+#[test]
+fn symbol_without_an_index_exits_one_and_says_to_index_first() {
+    // Arrange
+    let fx = Fixture::new("symbol-missing", true);
+
+    // Act
+    let out = fx.playbook(&["code", "symbol", "x"]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(err.contains("no index yet"), "{err}");
+}
