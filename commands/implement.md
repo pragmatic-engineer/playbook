@@ -411,7 +411,7 @@ Complete the map in code. Write the triage return text to a file (or pipe it wit
 playbook review triage-merge --lenses correctness,behaviour-drift,principles,scope,tests --tiers <file>
 ```
 
-It prints the full tier map as JSON plus a `Triage:` line. A dispatch that failed or returned nothing, a lens the map left out, and a `tier` other than `skip`, `cheap-check` or `full-lens` all become `full-lens`; lenses triage did classify keep their tier. Use the printed map below.
+It prints the full tier map as JSON plus a `Triage:` line. Failed, empty or unknown triage results become `full-lens` (rules in the triage-tiers reference). Use the printed map below.
 
 **Under `--no-tests` (or an explicit "No new tests" answer),** the `tests` lens resolves to `skip` with the recorded reason "no new tests by explicit user choice", overriding triage for that lens only; the other four lenses triage as usual: add `--force 'tests=skip:no new tests by explicit user choice'` to the `triage-merge` call. Tell every dispatched reviewer that missing new tests is intentional and not a finding. A broken existing test is still a finding.
 
@@ -425,11 +425,7 @@ Dispatch it as a swarm of lens-specialized reviewers in parallel (each reads the
 - **Scope:** anything built beyond the plan; anything the plan required but is missing.
 - **Tests:** weak assertions, missing boundary or regression coverage, flakiness.
 
-A `cheap-check` lens dispatches a `cheap-checker` agent (`subagent_type: playbook:cheap-checker`) instead of `reviewer`. Its prompt names the lens's narrow concern, taken from the tier map's `reason` field for that lens, the full branch diff, the plan, the refinement notes, and ONE reference file path to read for criteria. Resolve it with `playbook review ref <lens>`, which prints the absolute path: the lens's grounding-review reference file, or the full `SKILL.md` for a lens with no matching file (`behaviour-drift`, `principles`, `tests`). Hand `cheap-checker` that absolute path, never a bare repo-relative string: it has no `Bash`. The narrow concern text, not the reference file, is what scopes the check.
-
-A `skip` lens dispatches nothing. Track it explicitly as skipped in the triage summary above, e.g. "Triage: correctness=full-lens, tests=cheap-check, scope=skip"; a skipped lens is never conflated with a dispatched lens that returned nothing below, since it was never dispatched at all and so has no return value to lose.
-
-**Trust gate.** This tiered dispatch mechanism ships and functions as soon as this Work Unit lands: a `full-lens` tier still gets the exact reviewer it always did, a `cheap-check` tier gets a real narrow-scope pass from `cheap-checker`, and a `skip` tier is a real, tracked decision to run nothing. But a `skip` or `cheap-check` decision should not be treated as validated judgment yet: `playbook eval review-triage` (a later Work Unit) has not yet recorded a pass verdict against a real fixture set. Until it has, treat triage's tier choices as best-effort, not proven: a `skip` verdict is not yet evidence a lens truly had nothing to find, and a `cheap-check` narrow pass is not yet guaranteed to have caught everything the full lens would have.
+A `cheap-check` lens dispatches a `cheap-checker` agent and a `skip` lens dispatches nothing. For the cheap-check prompt (its prompt here also carries the full branch diff, the plan and the refinement notes), the reference file path (resolved with `playbook review ref <lens>`), skip tracking and the trust gate, read `playbook skill ref grounding-review triage-tiers` and follow it. In the triage summary above, an example line is "Triage: correctness=full-lens, tests=cheap-check, scope=skip".
 
 Give each reviewer Task a stable `name`.
 
