@@ -60,8 +60,15 @@ fn create(payload: &Payload) -> Result<PathBuf, String> {
     }
     // The branch may already be checked out at another path (an older run, or
     // the fallback location); git refuses a second checkout, so reuse that one.
-    if let Some(existing) = checked_out_path(&porcelain, &branch).filter(|p| p.is_dir()) {
-        return Ok(existing);
+    if let Some(existing) =
+        checked_out_path(&porcelain, &branch).filter(|p| !same_path(p, &main_root))
+    {
+        if existing.is_dir() {
+            return Ok(existing);
+        }
+        // Registered at a folder that is gone: drop the stale entry so git
+        // lets the branch be checked out again.
+        git(&main_root, &["worktree", "prune"])?;
     }
     let primary = primary_target(&main_root, &name)?;
     let placed = match add_worktree(&main_root, &primary, &branch, &base_commit) {

@@ -579,6 +579,68 @@ fn remove_treats_a_squash_merged_branch_as_published() {
     let out = remove(&f.repo, &path);
     assert!(out.status.success());
     assert!(!path.exists(), "stderr: {}", stderr(&out));
+    assert!(git_ok(&f.repo, &["branch", "--list", "worktree-sq"])
+        .trim()
+        .is_empty());
+}
+
+#[test]
+fn remove_keeps_a_squash_merged_branch_that_gained_another_commit() {
+    let f = fixture("rm-squash-extra");
+    let path = created_path(&create(&f.repo, "sqx"));
+    fs::write(path.join("a.txt"), "work\n").unwrap();
+    git_ok(&path, &["add", "."]);
+    git_ok(&path, &["commit", "-q", "-m", "a"]);
+    git_ok(&f.repo, &["merge", "--squash", "worktree-sqx"]);
+    git_ok(&f.repo, &["commit", "-q", "-m", "squashed"]);
+    git_ok(&f.repo, &["push", "-q", "origin", "main"]);
+    fs::write(path.join("late.txt"), "late\n").unwrap();
+    git_ok(&path, &["add", "."]);
+    git_ok(&path, &["commit", "-q", "-m", "late"]);
+    let out = remove(&f.repo, &path);
+    assert!(path.exists(), "stderr: {}", stderr(&out));
+}
+
+#[test]
+fn remove_keeps_a_branch_whose_commits_cancel_out() {
+    let f = fixture("rm-cancel");
+    let path = created_path(&create(&f.repo, "cancel"));
+    fs::write(path.join("a.txt"), "work\n").unwrap();
+    git_ok(&path, &["add", "."]);
+    git_ok(&path, &["commit", "-q", "-m", "add"]);
+    git_ok(&path, &["rm", "-q", "a.txt"]);
+    git_ok(&path, &["commit", "-q", "-m", "undo"]);
+    let out = remove(&f.repo, &path);
+    assert!(path.exists(), "stderr: {}", stderr(&out));
+}
+
+#[test]
+fn create_prunes_a_branch_registered_at_a_deleted_other_path() {
+    let f = fixture("gone-elsewhere");
+    let old = f.root.join("old-place");
+    git_ok(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "worktree-lost",
+            old.to_str().unwrap(),
+        ],
+    );
+    fs::remove_dir_all(&old).unwrap();
+    let out = create(&f.repo, "lost");
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(created_path(&out).is_dir());
+}
+
+#[test]
+fn create_never_hands_back_the_main_checkout() {
+    let f = fixture("main-branch");
+    git_ok(&f.repo, &["checkout", "-q", "-b", "worktree-main-held"]);
+    let out = create(&f.repo, "main-held");
+    assert_ne!(stdout(&out).trim(), f.repo.to_str().unwrap());
 }
 
 #[test]
@@ -589,5 +651,6 @@ fn remove_kept_message_names_the_manual_command() {
     git_ok(&path, &["add", "."]);
     git_ok(&path, &["commit", "-q", "-m", "local only"]);
     let out = remove(&f.repo, &path);
-    assert!(stderr(&out).contains("git worktree remove"));
+    assert!(path.exists());
+    assert!(stderr(&out).contains(&format!("git worktree remove --force '{}'", path.display())));
 }
