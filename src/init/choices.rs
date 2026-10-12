@@ -159,6 +159,16 @@ pub fn stdio_is_interactive() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
+/// A line for stderr when a person at a terminal is not asked because output
+/// is piped, so the defaults that apply are not a silent surprise. `None`
+/// when the run is interactive, scripted with `--yes`, or a dry run.
+pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Option<&'static str> {
+    (stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
+        "init: output is not a terminal, so no questions were asked and the defaults apply; \
+         pass --yes to accept them or the --x/--no-x flags (see --explain) to choose",
+    )
+}
+
 /// Ask on the terminal. An empty answer or end of input gives `default`.
 pub fn ask_on_terminal(question: &str, default: bool) -> bool {
     let hint = if default { "[Y/n]" } else { "[y/N]" };
@@ -182,6 +192,25 @@ fn parse_answer(line: &str, default: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn piped_output_at_a_terminal_gets_a_defaults_notice() {
+        let flags = Flags::default();
+
+        assert!(defaults_notice(true, false, &flags).is_some());
+        assert!(defaults_notice(true, true, &flags).is_none());
+        assert!(defaults_notice(false, false, &flags).is_none());
+        let yes = Flags {
+            yes: true,
+            ..Flags::default()
+        };
+        assert!(defaults_notice(true, false, &yes).is_none());
+        let dry = Flags {
+            dry_run: true,
+            ..Flags::default()
+        };
+        assert!(defaults_notice(true, false, &dry).is_none());
+    }
+
     use super::*;
 
     fn never(_: &str, _: bool) -> bool {

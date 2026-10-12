@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 /// How a row reads in the status table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,12 +128,13 @@ fn on_path(env: &Env, name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Longest one doctor probe may run.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 fn output_of(mut cmd: Command) -> Option<String> {
-    let out = cmd
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
+    // A hung `claude` or `playbook` must not hang the doctor: a probe that
+    // does not answer in time reads as one that could not run.
+    let out = crate::common::proc::run_with_timeout(&mut cmd, PROBE_TIMEOUT)?;
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 

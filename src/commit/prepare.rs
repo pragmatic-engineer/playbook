@@ -6,8 +6,13 @@
 //! the context a commit message is drafted from.
 
 use super::{current_branch, git_in, git_success, git_text};
+use crate::common::proc::run_with_timeout;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::time::Duration;
+
+/// Longest the formatter or `git add` may run before the commit moves on.
+const FORMAT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// What to stage and whether the last commit is being replaced.
 #[derive(Debug, Clone, Copy, Default)]
@@ -103,20 +108,13 @@ pub fn run(dir: &Path, opts: Options) -> Result<String, String> {
     if !files.is_empty() {
         if let Some(fmt) = formatter(dir) {
             // A formatter that is missing or fails must not stop the commit.
-            let _ = Command::new(fmt[0])
-                .args(&fmt[1..])
-                .args(&files)
-                .current_dir(dir)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            let mut command = Command::new(fmt[0]);
+            command.args(&fmt[1..]).args(&files).current_dir(dir);
+            let _ = run_with_timeout(&mut command, FORMAT_TIMEOUT);
         }
-        let _ = Command::new("git")
-            .arg("add")
-            .args(&files)
-            .current_dir(dir)
-            .stderr(Stdio::null())
-            .status();
+        let mut add = Command::new("git");
+        add.arg("add").args(&files).current_dir(dir);
+        let _ = run_with_timeout(&mut add, FORMAT_TIMEOUT);
     }
 
     let nothing_staged = git_success(dir, &["diff", "--staged", "--quiet"]);

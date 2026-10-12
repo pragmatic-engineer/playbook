@@ -25,6 +25,7 @@ pub mod re;
 pub mod repo;
 pub mod session;
 pub mod shell;
+pub mod stdin;
 pub mod time;
 
 pub use atomic::atomic_append;
