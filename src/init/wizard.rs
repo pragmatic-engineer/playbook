@@ -25,6 +25,7 @@ pub fn flag_for(flags: &Flags, id: &str) -> Option<bool> {
         "system-prompt" => (flags.system_prompt, flags.no_system_prompt),
         "telemetry" => (flags.telemetry, flags.no_telemetry),
         "claude-override" => (flags.claude_override, flags.no_claude_override),
+        "short-name" => (flags.short_name, flags.no_short_name),
         _ => return None,
     };
     match pair {
@@ -67,6 +68,10 @@ fn extra_lines(id: &str) -> Vec<String> {
                     .to_string(),
             ]
         }
+        "short-name" => vec![
+            "Runs the equivalent of `playbook config set launcher.shortName true`, only when `pb` is free on your PATH."
+                .to_string(),
+        ],
         _ => Vec::new(),
     }
 }
@@ -81,6 +86,7 @@ fn decline_line(id: &str) -> &'static str {
         "system-prompt" => "No file is copied. The launchers start without the playbook prompt.",
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
         "claude-override" => "`claude` stays the plain Claude Code command.",
+        "short-name" => "`pb` is not defined. Use `playbook` in full.",
         _ => "Nothing changes for this part.",
     }
 }
@@ -227,6 +233,7 @@ mod tests {
             system_prompt: true,
             telemetry: true,
             claude_override: true,
+            short_name: true,
             ..Flags::default()
         };
         for p in catalog::PARTS.iter().filter(|p| p.asked) {
@@ -305,7 +312,7 @@ mod tests {
             guided_answer(&guided, q, d)
         });
         assert!(!c.hooks && !c.statusline && !c.path);
-        assert!(c.aliases && c.system_prompt && c.telemetry && c.claude_override);
+        assert!(c.aliases && c.system_prompt && c.telemetry && c.claude_override && c.short_name);
     }
 
     #[test]
