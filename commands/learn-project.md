@@ -63,8 +63,6 @@ It prints `Repo:`, `Root:`, `Store:` and `Commits:` lines, then `gh:` and `acli:
 Then, before collecting:
 
 - **Atlassian access:** the `jira` and `confluence` collectors have no MCP tools, so brief them to use `acli` (they load `playbook:atlassian`) whenever `acli` is present and authenticated, even if `mcp__atlassian__*` tools exist here. When only MCP is available, run the Atlassian reads yourself and pass the results in the collectors' briefs. The `playbook:atlassian` skill carries the real command surface and the Confluence page-discovery workaround; load it before any Atlassian call. Jira and Confluence authenticate separately, so treat the two probes above independently: Jira reachable and Confluence not is a normal state, not an error. With neither, mark JIRA/Confluence **unavailable** and record it for the report.
-||||||| parent of e4b1832b (feat(skills): route Atlassian use through the atlassian skill with a drift test)
-- **Atlassian access:** if `mcp__atlassian__*` tools are available in this session, use them. Else follow the fallback order in the `playbook:atlassian` skill (**load it first**), which carries the real command surface and the Confluence page-discovery workaround. Jira and Confluence authenticate separately, so treat the two probes above independently: Jira reachable and Confluence not is a normal state, not an error. Else mark JIRA/Confluence **unavailable** and record it for the report.
 - **Targets:** resolve the JIRA project key(s) from the histogram and the Confluence space from README/links. If ambiguous, ask the user once.
 - **Capture:** `REPO`, `ROOT`, scope caps, and which sources are reachable. You need these in every later phase.
 
