@@ -308,6 +308,80 @@ fn cut_at_boundary(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
+/// How much each term tells apart: rare names weigh more than common ones.
+fn term_weights(conn: &Connection, words: &[String]) -> Result<Vec<f64>, String> {
+    let total: i64 = conn
+        .query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0))
+        .map_err(sql_err)?;
+    let mut out = Vec::new();
+    for word in words {
+        let pattern = format!("%{}%", word.replace('\\', "\\\\").replace('_', "\\_"));
+        let df: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM symbols WHERE lower(name) LIKE ?1 ESCAPE '\\'",
+                [pattern],
+                |r| r.get(0),
+            )
+            .map_err(sql_err)?;
+        out.push((2.0 + total as f64 / (1.0 + df as f64)).ln());
+    }
+    Ok(out)
+}
+
+/// Weighted count of the query terms a candidate holds in its path, its
+/// symbol names and its text. A term in a symbol name counts twice.
+fn score(
+    cand: &Cand,
+    words: &[String],
+    weights: &[f64],
+    root: &Path,
+    cache: &mut HashMap<String, Option<Loaded>>,
+) -> f64 {
+    let loaded = cache
+        .entry(cand.path.clone())
+        .or_insert_with(|| load(root, &cand.path));
+    let body = loaded.as_ref().map_or(String::new(), |l| {
+        let end = cand
+            .end
+            .min(l.lines.len())
+            .min(cand.start + MAX_SNIPPET_LINES - 1);
+        if cand.start == 0 || cand.start > end {
+            String::new()
+        } else {
+            l.lines[cand.start - 1..end].join("\n")
+        }
+    });
+    let haystack = format!("{}\n{}", cand.path, body).to_lowercase();
+    let names = cand.reason.to_lowercase();
+    words
+        .iter()
+        .zip(weights)
+        .map(|(w, weight)| {
+            let mut got = 0.0;
+            if haystack.contains(w.as_str()) {
+                got += weight;
+            }
+            if names.contains(w.as_str()) {
+                got += weight;
+            }
+            got
+        })
+        .sum()
+}
+
+/// Candidates best first: score, then tier, path and line.
+fn rank(cands: &[Cand], scores: &[f64]) -> Vec<Cand> {
+    let mut idx: Vec<usize> = (0..cands.len()).collect();
+    idx.sort_by(|&a, &b| {
+        scores[b]
+            .total_cmp(&scores[a])
+            .then_with(|| cands[a].tier.cmp(&cands[b].tier))
+            .then_with(|| cands[a].path.cmp(&cands[b].path))
+            .then_with(|| cands[a].start.cmp(&cands[b].start))
+    });
+    idx.into_iter().map(|i| cands[i].clone()).collect()
+}
+
 /// Builds the context for `opts.query`.
 pub fn build(
     conn: &Connection,
@@ -329,8 +403,13 @@ pub fn build(
     let text = text_cands(conn, root, &words, "text", 20)?;
     cands.extend(text.into_iter().filter(|c| !is_test_path(&c.path)));
     let merged = merge(cands);
-    let mut ordered = merged.clone();
-    ordered.sort_by(|a, b| (a.tier, &a.path, a.start).cmp(&(b.tier, &b.path, b.start)));
+    let weights = term_weights(conn, &words)?;
+    let mut cache: HashMap<String, Option<Loaded>> = HashMap::new();
+    let scores: Vec<f64> = merged
+        .iter()
+        .map(|c| score(c, &words, &weights, root, &mut cache))
+        .collect();
+    let mut ordered = rank(&merged, &scores);
 
     let mut top_paths: Vec<String> = Vec::new();
     for c in &ordered {
@@ -371,8 +450,11 @@ pub fn build(
         })
         .collect();
     extra.sort_by(|a, b| (a.tier, &a.path, a.start).cmp(&(b.tier, &b.path, b.start)));
-    ordered = merged;
-    ordered.sort_by(|a, b| (a.tier, &a.path, a.start).cmp(&(b.tier, &b.path, b.start)));
+    let scores: Vec<f64> = merged
+        .iter()
+        .map(|c| score(c, &words, &weights, root, &mut cache))
+        .collect();
+    ordered = rank(&merged, &scores);
     ordered.extend(extra);
 
     fill(&mut result, root, &ordered, opts.byte_ceiling());
