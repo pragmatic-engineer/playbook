@@ -16,6 +16,7 @@
 //! still there a moment later.
 
 use std::io::{Read, Write};
+use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -71,6 +72,25 @@ pub fn run_with_timeout(command: &mut Command, timeout: Duration) -> Option<Outp
 /// does not read it cannot stall the deadline.
 pub fn run_with_input(command: &mut Command, input: &[u8], timeout: Duration) -> Option<Output> {
     run_bounded(command, Some(input.to_vec()), timeout)
+}
+
+/// Trimmed stdout of `program args` run in `dir` when it exits zero within
+/// `timeout`. `None` on spawn failure, timeout or a non-zero exit. Standard
+/// input is null and standard error is captured and dropped.
+pub fn text_in(program: &str, args: &[&str], dir: &Path, timeout: Duration) -> Option<String> {
+    let mut command = Command::new(program);
+    command.args(args).current_dir(dir);
+    let out = run_with_timeout(&mut command, timeout)?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Whether `program args` run in `dir` exits zero within `timeout`.
+pub fn succeeds_in(program: &str, args: &[&str], dir: &Path, timeout: Duration) -> bool {
+    let mut command = Command::new(program);
+    command.args(args).current_dir(dir);
+    run_with_timeout(&mut command, timeout).is_some_and(|o| o.status.success())
 }
 
 /// Asks `child` to stop with SIGTERM and waits for it to go, then kills it if
@@ -242,6 +262,36 @@ mod tests {
 
         let output = got.expect("cat should finish well within the deadline");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "from stdin");
+    }
+
+    #[test]
+    fn text_in_returns_trimmed_stdout_and_none_on_failure_or_timeout() {
+        let dir = std::env::temp_dir();
+
+        assert_eq!(
+            text_in("echo", &["hi"], &dir, Duration::from_secs(5)).as_deref(),
+            Some("hi")
+        );
+        assert_eq!(text_in("false", &[], &dir, Duration::from_secs(5)), None);
+        let started = Instant::now();
+        assert_eq!(
+            text_in("sleep", &["5"], &dir, Duration::from_millis(50)),
+            None
+        );
+        assert!(started.elapsed() < Duration::from_secs(4));
+    }
+
+    #[test]
+    fn succeeds_in_is_false_for_a_hung_child() {
+        let dir = std::env::temp_dir();
+
+        assert!(succeeds_in("true", &[], &dir, Duration::from_secs(5)));
+        assert!(!succeeds_in(
+            "sleep",
+            &["5"],
+            &dir,
+            Duration::from_millis(50)
+        ));
     }
 
     #[test]

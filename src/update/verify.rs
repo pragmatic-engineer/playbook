@@ -5,9 +5,16 @@
 //! same policy as install.sh (lenient by default, strict with
 //! `PLAYBOOK_REQUIRE_ATTESTATION=1`).
 
+use crate::common::proc::run_with_timeout;
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::time::Duration;
+
+/// Longest the `gh attestation --help` probe may run.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Longest `gh attestation verify` may run; it makes network calls.
+const VERIFY_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub const REPO: &str = "pragmatic-engineer/playbook";
 
@@ -62,14 +69,10 @@ fn is_gap(err: &str) -> bool {
 
 impl Attest for GhAttest {
     fn verify(&self, file: &Path, strict: bool) -> Result<Option<String>, String> {
-        let has_gh = Command::new("gh")
-            .args(["attestation", "--help"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+        let mut probe = Command::new("gh");
+        probe.args(["attestation", "--help"]);
+        let has_gh =
+            run_with_timeout(&mut probe, PROBE_TIMEOUT).is_some_and(|o| o.status.success());
         if !has_gh {
             return if strict {
                 Err("PLAYBOOK_REQUIRE_ATTESTATION=1 but gh with 'attestation' support is not available".into())
@@ -77,14 +80,14 @@ impl Attest for GhAttest {
                 Ok(Some("checksum only, provenance not verified: install gh to check the build attestation".into()))
             };
         }
-        let output = Command::new("gh")
+        let mut verify = Command::new("gh");
+        verify
             .args(["attestation", "verify"])
             .arg(file)
             .args(["--repo", REPO, "--signer-workflow"])
-            .arg(format!("{REPO}/.github/workflows/release.yml"))
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|err| format!("could not run gh: {err}"))?;
+            .arg(format!("{REPO}/.github/workflows/release.yml"));
+        let output = run_with_timeout(&mut verify, VERIFY_TIMEOUT)
+            .ok_or("could not run gh (missing or timed out)")?;
         if output.status.success() {
             return Ok(None);
         }

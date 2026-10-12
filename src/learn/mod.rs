@@ -9,30 +9,18 @@ pub mod collect;
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::time::Duration;
+
+/// Longest a preflight probe (`git`, `gh`, `acli`) may run before it counts
+/// as unavailable, so a hung network never hangs the command.
+const PROBE_TIMEOUT: Duration = crate::common::git::SLOW_TIMEOUT;
 
 fn run(program: &str, args: &[&str], dir: &Path) -> Option<String> {
-    let out = Command::new(program)
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    crate::common::proc::text_in(program, args, dir, PROBE_TIMEOUT)
 }
 
 fn ok(program: &str, args: &[&str], dir: &Path) -> bool {
-    Command::new(program)
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    crate::common::proc::succeeds_in(program, args, dir, PROBE_TIMEOUT)
 }
 
 /// `owner/name` from an origin URL such as `git@host:owner/name.git`.
