@@ -215,10 +215,6 @@ pub fn resolve_valid(
     repo_slug: Option<&str>,
 ) -> Result<(Value, Source, Option<IgnoredValue>), ConfigError> {
     let (value, source) = resolve(key, home, repo_slug)?;
-    let value = match value.as_str().and_then(|s| keys::legacy_value(key, s)) {
-        Some(current) => Value::String(current.to_string()),
-        None => value,
-    };
     if let Some(problem) = value
         .as_str()
         .and_then(|s| keys::model_override_error(key, s))
@@ -311,16 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn an_older_theme_value_in_the_config_file_reads_as_the_current_name_without_a_warning() {
-        let home = scratch_home("legacy-theme");
-        let file = home.join(".config/playbook/config.json");
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        let old = format!(r#"{{"usage.theme": "{}"}}"#, keys::LEGACY_THEME_ALIAS);
-        fs::write(&file, old).unwrap();
-        let (value, _, ignored) = resolve_valid("usage.theme", &home, None).unwrap();
-        assert_eq!(value, Value::String("default".into()));
-        assert!(ignored.is_none(), "{ignored:?}");
-        // An unknown theme is still refused.
+    fn an_invalid_theme_value_in_the_config_file_falls_back_to_the_default_theme() {
         let home = scratch_home("unknown-theme");
         let file = home.join(".config/playbook/config.json");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
