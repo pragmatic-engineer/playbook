@@ -19,7 +19,7 @@ Every command that shows data reads new history first, so you never need to inge
 
 ## The terminal view
 
-The view is styled after [btop](https://github.com/aristocratos/btop), with btop's default theme as the default look: a black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), a gradient on the graphs and the meters, and a highlighted selected row. Each box has its own outline color, as in btop: spend uses the cpu green, tokens the net purple, models and projects the mem olive, sessions and messages the proc red.
+The view is styled after a classic terminal system monitor, and the `default` theme is that look: a black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), a gradient on the graphs and the meters, and a highlighted selected row. Each box has its own outline color: spend uses the cpu green, tokens the net purple, models and projects the mem olive, sessions and messages the proc red.
 
 The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. From 36 rows a Budget panel is added under the header (see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)). Resizing needs no handling because every redraw reads the current size. It shows six panels under a header with the range, the cost, the tokens and the messages.
 
@@ -80,7 +80,7 @@ Keys:
 | `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. |
 | `c` | Clear the filter. |
 | `p` | Open the [Sessions management view](09-sessions.md#the-sessions-view), a full screen table of recent sessions with their PR, state and suggestions. |
-| `t` | Cycle the theme: btop, dark, light, mono. |
+| `t` | Cycle the theme: default, dark, light, mono. |
 | `q`, `Esc`, `Ctrl-C` | Quit. |
 
 The view is keyboard only, so the terminal's own text selection and scrolling keep working.
@@ -120,7 +120,7 @@ While you type a filter every key is text, so `q` and `r` do not quit or change 
 
 | Theme | Look |
 |---|---|
-| `btop` | The default. btop's built-in default theme: black ground, `#cc` text, `#ee` titles, `#b54040` key hints, `#6a2f2f` selected row, per box outline colors, and three point gradients (start, mid, end) for the graphs and meters. |
+| `default` | The default look: black ground, `#cc` text, `#ee` titles, `#b54040` key hints, `#6a2f2f` selected row, per box outline colors, and three point gradients (start, mid, end) for the graphs and meters. |
 | `dark` | The terminal's own ground with single colors. |
 | `light` | The same with darker colors for a white ground. |
 | `mono` | No color. The selected row is shown in reverse video. |
@@ -129,9 +129,9 @@ While you type a filter every key is text, so `q` and `r` do not quit or change 
 
 When there is nothing to chart, the body says why instead of showing empty panels. If the range has no messages but the store has some, it names the dates the store covers and the keys that widen the range (`a` all time, `m` month, `w` week), and when a filter is set it says how to clear it (`c`). If the store is empty, it names the folder transcripts are read from, how to check it, and `CLAUDE_CONFIG_DIR`, which moves that folder when Claude Code uses it. A failed read fills the body with the error before the first data and shows a banner over the last good numbers after it.
 
-The theme comes from the `usage.theme` config key (`btop`, `dark`, `light`, `mono`; see [config keys](../guides/04-config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
+The theme comes from the `usage.theme` config key (`default`, `dark`, `light`, `mono`; see [config keys](../guides/04-config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
-Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the btop values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither it goes to the nearest of the 16 basic colors. The values come from btop's `Default_theme` and the code in `src/usage/tui/theme.rs` says so. btop is Apache 2.0 like playbook, and the attribution is in `NOTICE`.
+Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the `default` values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither it goes to the nearest of the 16 basic colors. The values are adapted from a third party theme under the Apache License 2.0, like playbook, and the attribution is in `NOTICE`.
 
 The code is in `src/usage/tui/`. `data.rs` builds one immutable snapshot from the store, `worker.rs` refreshes it on a thread so a slow read never blocks a key, `app.rs` holds the state and the keys, `view.rs` and `panels.rs` draw (`chart.rs` is the bar chart with its axes and cursor, `scale.rs` the round axis values, `sort.rs` the panel list and the row sorts), and `theme.rs` holds the colors. The numbers come from `src/usage/query.rs`, the same layer the web JSON uses, so the same range gives the same totals in both. The reasons for ratatui and the measured binary cost are in [ADR-0020](../adr/0020-usage-terminal-ui.md).
 

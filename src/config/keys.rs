@@ -106,7 +106,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "review.stackMaxPrs" => Some(Value::Number(6.into())),
         "review.stackMaxLines" => Some(Value::Number(3000.into())),
         "security.defaults" => Some(Value::Bool(false)),
-        "usage.theme" => Some(Value::String("btop".to_string())),
+        "usage.theme" => Some(Value::String("default".to_string())),
         "usage.weekStart" => Some(Value::String("monday".to_string())),
         "usage.refreshSeconds" => Some(Value::Number(5.into())),
         "usage.telemetry" => Some(Value::String("auto".to_string())),
@@ -141,13 +141,25 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "agents.variants" => Some(&["auto", "all", "off"]),
         "effort.auto" => Some(&["off", "suggest", "on"]),
         "routing.escalate" => Some(&["ask", "auto", "deny"]),
-        "usage.theme" => Some(&["btop", "dark", "light", "mono"]),
+        "usage.theme" => Some(&["default", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.telemetry" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
         _ => None,
     }
 }
+
+/// The value an older release used for `key`, as it is called now. A config
+/// file written then keeps working: `resolve_valid` reads it as the new name.
+pub fn legacy_value(key: &str, value: &str) -> Option<&'static str> {
+    match key {
+        "usage.theme" if value == LEGACY_THEME_ALIAS => Some("default"),
+        _ => None,
+    }
+}
+
+/// The `usage.theme` value that `default` replaced.
+pub const LEGACY_THEME_ALIAS: &str = "btop";
 
 /// The problem with a `models.<tier>` value, or `None` when it is fine.
 /// Fine is empty (no override) or `claude-<tier>-<major>[-<minor>]`, so a
@@ -175,6 +187,19 @@ pub fn model_override_error(key: &str, value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_older_theme_value_reads_as_the_current_name_and_nothing_else_does() {
+        assert_eq!(
+            legacy_value("usage.theme", LEGACY_THEME_ALIAS),
+            Some("default")
+        );
+        assert_eq!(legacy_value("usage.theme", "dark"), None);
+        assert_eq!(legacy_value("usage.weekStart", LEGACY_THEME_ALIAS), None);
+        // The current names are the only ones a write accepts.
+        let allowed = allowed_enum_values("usage.theme").unwrap();
+        assert!(allowed.contains(&"default") && !allowed.contains(&LEGACY_THEME_ALIAS));
+    }
 
     #[test]
     fn model_overrides_must_name_a_model_of_their_own_tier() {

@@ -38,7 +38,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `review.stackMaxPrs` | `6` | a number, see the config keys guide for the range |
 | `review.stackMaxLines` | `3000` | a number, see the config keys guide for the range |
 | `security.defaults` | `false` | `true`, `false` |
-| `usage.theme` | `btop` | `btop`, `dark`, `light`, `mono` |
+| `usage.theme` | `default` | `default`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.refreshSeconds` | `5` | a number, see the config keys guide for the range |
 | `usage.telemetry` | `auto` | `auto`, `off` |

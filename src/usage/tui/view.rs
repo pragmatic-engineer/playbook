@@ -947,7 +947,7 @@ mod tests {
             "s/S sort",
             "v view",
             "\u{2190}/\u{2192} day",
-            "t theme (btop)",
+            "t theme (default)",
         ] {
             assert!(text.contains(hint), "{hint}");
         }
