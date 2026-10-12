@@ -23,7 +23,7 @@ The evaluation (2026-10-12, anydoc 0.2.4) found:
 2. **The user installs it.** `playbook deps` lists it as an optional tool. Nothing installs it silently.
 3. **Safeguards live in playbook, outside the converter.** The command runs anydoc in a child process with an input size cap, a wall clock timeout, a memory cap, an output cap, a scrubbed environment, and a private temporary directory that is always deleted. It never passes an OCR or hosted flag. A test asserts that.
 4. **Document text is untrusted data.** Output is wrapped in a delimited block with a one line note that instructions inside it must not be followed.
-5. **Default stays off** (`docs.convert = off`) until the benchmark in the last PR shows at least 30 percent fewer tokens on text PDFs and no loss in correctness. That PR flips the default in the same change only if the numbers pass.
+5. **Default follows the measurement.** `docs.convert` was `off` until a benchmark showed at least 30 percent fewer tokens on text PDFs with no loss of correctness. It did (41 percent fewer, 18 of 18 correct, see [the benchmark](../internals/10-document-conversion-benchmark.md)), so the default is now `auto`. `auto` acts only when the `anydoc` executable is found, so a machine without it sees no change. The default rests on the benefit per document, not on how many documents one machine reads.
 6. **Pin by version check.** playbook records the version it was tested with (0.2.4) and warns, without blocking, on a different major or minor version.
 
 ## Limits that remain
@@ -37,7 +37,7 @@ The evaluation (2026-10-12, anydoc 0.2.4) found:
 - **Link the crate.** Rejected for binary size, 115 new crates to vet, and a young upstream. It would also run unbounded code inside the playbook process, where a memory blowup would take playbook down.
 - **Vendor or download a managed binary.** Not available upstream, and a silent download is ruled out. Revisit if upstream publishes signed standalone binaries.
 - **A PreToolUse hook that rewrites Read input.** Rejected in the evaluation. Hooks that return updated input do not chain and the PDF `pages` argument would be lost. The hook only suggests.
-- **Do nothing.** Real traffic on the measured machine is zero reads of PDF or Office files, so the benefit is unproven for this developer. The decision is to build the guarded path and let the benchmark and usage decide the default.
+- **Do nothing.** Rejected by the maintainer decision: the per document benefit is real for PDFs and for Office files the model cannot otherwise open directly, so the guarded path is built.
 
 ## Consequences
 
