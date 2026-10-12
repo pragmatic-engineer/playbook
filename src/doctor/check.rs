@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 10] = [
+const PROBES: [Probe; 11] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -106,6 +106,7 @@ const PROBES: [Probe; 10] = [
     config_rows,
     worktree_rows,
     migration_rows,
+    plugin_only_rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -526,6 +527,21 @@ fn migration_rows(env: &Env) -> Vec<Row> {
         .into_iter()
         .map(|l| Row::new("-", Level::Info, format!("migration {l}")))
         .collect()
+}
+
+/// A `settings.json` with no playbook hooks means a plugin-only install: the
+/// binary runs this check but nothing is wired. One row names it and gives the
+/// single fix. (With no binary at all, commands/doctor.md prints the message.)
+fn plugin_only_rows(env: &Env) -> Vec<Row> {
+    if crate::hooks::migration_check::is_wired(&env.settings()) {
+        return Vec::new();
+    }
+    vec![Row::new(
+        "-",
+        Level::Warn,
+        "plugin only: playbook hooks and guards are not wired in settings.json, so they do not run",
+    )
+    .hint("run /playbook:setup")]
 }
 
 /// The table as text: `LEVEL  message -- hint`, one row per line, then the

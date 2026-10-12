@@ -20,7 +20,7 @@ Print its output as the status table. Add `--json` for the same rows as JSON
 (`layer`, `level`, `message`, `hint`).
 
 If the command fails with `command not found`, the binary is not on PATH: print
-`FAIL  playbook binary not on PATH -- every ported hook is dead` and the install
+`FAIL  plugin only, binary missing: every ported hook is dead -- run /playbook:setup` and the install
 hint from Layer 6 below, and stop. If it fails with
 `unrecognized subcommand 'check'`, the installed binary is older than this
 plugin: print "playbook binary is older than the plugin, run `playbook update`."

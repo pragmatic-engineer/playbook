@@ -43,7 +43,7 @@ pub fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
 /// Creates the file owner only on unix before SQLite opens it, and tightens a
 /// wider existing file.
 pub fn make_file_private(path: &Path) -> Result<(), String> {
-    crate::usage::db::make_db_file_private(path)
+    crate::common::atomic::make_db_file_private(path)
 }
 
 /// The command line a user runs for `args`, for error messages.
