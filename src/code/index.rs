@@ -9,6 +9,7 @@
 
 use super::db::{self, OpenMode};
 use super::host;
+use super::lang;
 use super::walker::{self, Skipped};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -111,6 +112,11 @@ struct Prepared {
     mtime_ns: i64,
     status: &'static str,
     chunks: Vec<Chunk>,
+    lang: Option<&'static str>,
+    symbols: Vec<lang::Symbol>,
+    imports: Vec<lang::Import>,
+    /// The file went through a Tree-sitter parser.
+    parsed: bool,
 }
 
 enum Outcome {
@@ -220,6 +226,16 @@ fn make_chunks(text: &str, chunk_lines: usize) -> Vec<Chunk> {
         .collect()
 }
 
+/// What the parser found in one file.
+#[derive(Default)]
+struct Syntax {
+    lang: Option<&'static str>,
+    symbols: Vec<lang::Symbol>,
+    imports: Vec<lang::Import>,
+    partial: bool,
+    parsed: bool,
+}
+
 fn prepare(root: &Path, path: &str, existing: Option<&Existing>, opts: &Options) -> Outcome {
     let full = root.join(path);
     let meta = match std::fs::metadata(&full) {
@@ -263,13 +279,35 @@ fn prepare(root: &Path, path: &str, existing: Option<&Existing>, opts: &Options)
     }
     let valid = std::str::from_utf8(&bytes).is_ok();
     let text = String::from_utf8_lossy(&bytes);
+    let mut syntax = Syntax::default();
+    if let Some(language) = lang::Lang::for_path(path) {
+        syntax.lang = Some(language.name());
+        match lang::parse(language, &bytes) {
+            Ok(tree) => {
+                let found = lang::extract(language, &tree, &bytes);
+                syntax.partial = tree.partial;
+                syntax.symbols = found.symbols;
+                syntax.imports = found.imports;
+                syntax.parsed = true;
+            }
+            Err(_) => syntax.partial = true,
+        }
+    }
     Outcome::Write(Box::new(Prepared {
         path: path.to_string(),
         sha,
         size,
         mtime_ns: mtime,
-        status: if valid { "ok" } else { "partial" },
+        status: if valid && !syntax.partial {
+            "ok"
+        } else {
+            "partial"
+        },
         chunks: make_chunks(&text, opts.chunk_lines),
+        lang: syntax.lang,
+        symbols: syntax.symbols,
+        imports: syntax.imports,
+        parsed: syntax.parsed,
     }))
 }
 
@@ -300,6 +338,7 @@ fn upsert_file(
     mtime_ns: i64,
     status: &str,
     error: Option<&str>,
+    lang: Option<&str>,
     now_s: i64,
 ) -> rusqlite::Result<i64> {
     let size = i64::try_from(size).unwrap_or(i64::MAX);
@@ -307,18 +346,54 @@ fn upsert_file(
         clear_children(conn, id)?;
         conn.execute(
             "UPDATE files SET sha256 = ?2, size = ?3, mtime_ns = ?4, indexed_at = ?5,
-                 status = ?6, error = ?7 WHERE id = ?1",
-            params![id, sha, size, mtime_ns, now_s, status, error],
+                 status = ?6, error = ?7, lang = ?8 WHERE id = ?1",
+            params![id, sha, size, mtime_ns, now_s, status, error, lang],
         )?;
         Ok(id)
     } else {
         conn.execute(
-            "INSERT INTO files(path, sha256, size, mtime_ns, indexed_at, status, error)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![path, sha, size, mtime_ns, now_s, status, error],
+            "INSERT INTO files(path, sha256, size, mtime_ns, indexed_at, status, error, lang)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![path, sha, size, mtime_ns, now_s, status, error, lang],
         )?;
         Ok(conn.last_insert_rowid())
     }
+}
+
+/// Stores a file's symbols and imports; `parent_id` follows the extractor's parent index.
+fn insert_syntax(conn: &Connection, file_id: i64, p: &Prepared) -> rusqlite::Result<()> {
+    let to_i64 = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
+    let mut ids: Vec<i64> = Vec::with_capacity(p.symbols.len());
+    for sym in &p.symbols {
+        let parent_id = sym.parent.and_then(|i| ids.get(i).copied());
+        conn.execute(
+            "INSERT INTO symbols(file_id, parent_id, name, qualified_name, kind, signature,
+                 signature_cut, exported, start_byte, end_byte, start_line, end_line)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                file_id,
+                parent_id,
+                sym.name,
+                sym.qualified_name,
+                sym.kind,
+                sym.signature,
+                sym.signature_cut,
+                sym.exported,
+                to_i64(sym.start_byte),
+                to_i64(sym.end_byte),
+                to_i64(sym.start_line),
+                to_i64(sym.end_line),
+            ],
+        )?;
+        ids.push(conn.last_insert_rowid());
+    }
+    for import in &p.imports {
+        conn.execute(
+            "INSERT INTO imports(file_id, module, names, line) VALUES (?1, ?2, ?3, ?4)",
+            params![file_id, import.module, import.names, to_i64(import.line)],
+        )?;
+    }
+    Ok(())
 }
 
 fn apply(conn: &Connection, outcome: &Outcome, opts: &Options, now_s: i64) -> Result<(), String> {
@@ -327,9 +402,10 @@ fn apply(conn: &Connection, outcome: &Outcome, opts: &Options, now_s: i64) -> Re
         Outcome::Write(p) => {
             opts.before_file(&p.path)?;
             let id = upsert_file(
-                conn, &p.path, &p.sha, p.size, p.mtime_ns, p.status, None, now_s,
+                conn, &p.path, &p.sha, p.size, p.mtime_ns, p.status, None, p.lang, now_s,
             )
             .map_err(sql)?;
+            insert_syntax(conn, id, p).map_err(sql)?;
             for chunk in &p.chunks {
                 conn.execute(
                     "INSERT INTO chunks(file_id, start_line, end_line) VALUES (?1, ?2, ?3)",
@@ -353,6 +429,7 @@ fn apply(conn: &Connection, outcome: &Outcome, opts: &Options, now_s: i64) -> Re
                 s.mtime_ns,
                 "skipped",
                 Some(s.reason.as_str()),
+                None,
                 now_s,
             )
             .map_err(sql)?;
@@ -412,8 +489,11 @@ fn write_batch(
         match apply(&sp, outcome, opts, now_s) {
             Ok(()) => {
                 sp.commit().map_err(|e| e.to_string())?;
-                if matches!(outcome, Outcome::Write(_)) {
+                if let Outcome::Write(p) = outcome {
                     report.changed += 1;
+                    if p.parsed {
+                        report.parsed += 1;
+                    }
                 }
             }
             Err(error) => {
@@ -1165,6 +1245,132 @@ mod tests {
             (status.as_str(), error.as_str(), size),
             ("skipped", "binary", 3)
         );
+    }
+
+    fn symbol_names(conn: &Connection, path: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT s.qualified_name FROM symbols s JOIN files f ON f.id = s.file_id
+                 WHERE f.path = ?1 ORDER BY s.start_line, s.id",
+            )
+            .expect("prepare");
+        stmt.query_map([path], |r| r.get::<_, String>(0))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect()
+    }
+
+    #[test]
+    fn symbols_and_imports_are_stored_per_language_with_parents_and_paths() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-symbols");
+        write(
+            &f.root,
+            "a.rs",
+            b"use std::io;
+struct P;
+impl P { fn go(&self) {} }
+",
+        );
+        write(&f.root, "b.ts", b"export class C {\n  run() {}\n}\n");
+        write(&f.root, "c.py", b"import os\ndef top():\n    pass\n");
+        write(&f.root, "d.txt", b"plain text\n");
+
+        // Act
+        let report = f.run();
+
+        // Assert
+        let conn = f.conn();
+        assert_eq!(symbol_names(&conn, "a.rs"), vec!["P", "P::go"]);
+        assert_eq!(symbol_names(&conn, "b.ts"), vec!["C", "C.run"]);
+        assert_eq!(symbol_names(&conn, "c.py"), vec!["top"]);
+        assert!(symbol_names(&conn, "d.txt").is_empty());
+        let parent: Option<String> = conn
+            .query_row(
+                "SELECT p.name FROM symbols s JOIN symbols p ON p.id = s.parent_id
+                 WHERE s.qualified_name = 'C.run'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .expect("parent");
+        assert_eq!(parent.as_deref(), Some("C"));
+        let langs: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT path, lang FROM files ORDER BY path")
+            .expect("prepare")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect();
+        assert_eq!(langs[0].1.as_deref(), Some("rust"));
+        assert_eq!(langs[1].1.as_deref(), Some("typescript"));
+        assert_eq!(langs[2].1.as_deref(), Some("python"));
+        assert_eq!(langs[3].1, None);
+        let imports: i64 = conn
+            .query_row("SELECT COUNT(*) FROM imports", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(imports, 2);
+        assert_eq!(report.parsed, 3);
+    }
+
+    #[test]
+    fn a_renamed_function_leaves_only_the_new_name() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-rename-symbol");
+        write(&f.root, "a.rs", b"fn old_name() {}\n");
+        f.run();
+
+        // Act
+        write(&f.root, "a.rs", b"fn new_name() {}\n");
+        f.run();
+
+        // Assert
+        assert_eq!(symbol_names(&f.conn(), "a.rs"), vec!["new_name"]);
+    }
+
+    #[test]
+    fn a_syntax_error_marks_the_file_partial_and_keeps_earlier_symbols() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-partial-syntax");
+        write(&f.root, "a.rs", b"fn good() {}\nfn broken( {\n");
+
+        // Act
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        let status: String = conn
+            .query_row("SELECT status FROM files WHERE path = 'a.rs'", [], |r| {
+                r.get(0)
+            })
+            .expect("status");
+        assert_eq!(status, "partial");
+        assert!(symbol_names(&conn, "a.rs").contains(&"good".to_string()));
+    }
+
+    #[test]
+    fn parsed_counts_five_then_zero_then_one_after_an_edit() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-parsed-counts");
+        for i in 0..5 {
+            write(
+                &f.root,
+                &format!("f{i}.rs"),
+                format!("fn f{i}() {{}}\n").as_bytes(),
+            );
+        }
+        write(&f.root, "a.txt", b"one\n");
+        write(&f.root, "b.md", b"two\n");
+
+        // Act, Assert
+        assert_eq!(f.run().parsed, 5);
+        assert_eq!(f.run().parsed, 0);
+        write(&f.root, "f0.rs", b"fn changed() {}\n");
+        assert_eq!(f.run().parsed, 1);
     }
 
     #[test]
