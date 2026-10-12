@@ -6,6 +6,7 @@
 //! use no Tree-sitter queries.
 
 pub mod rust;
+pub mod typescript;
 
 use tree_sitter::{Parser, Tree};
 
@@ -152,7 +153,10 @@ pub fn clean_signature(raw: &str) -> (String, bool) {
 pub fn extract(lang: Lang, parsed: &Parsed, source: &[u8]) -> Extracted {
     match lang {
         Lang::Rust => rust::extract(parsed.tree.root_node(), source),
-        Lang::TypeScript | Lang::Tsx | Lang::JavaScript | Lang::Python => Extracted::default(),
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
+            typescript::extract(parsed.tree.root_node(), source)
+        }
+        Lang::Python => Extracted::default(),
     }
 }
 
