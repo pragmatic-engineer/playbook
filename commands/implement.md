@@ -29,7 +29,7 @@ TASK SOURCES:
   Plan file      /playbook:implement $(playbook path plans)/user-avatar-upload.md
   ADR blueprint  /playbook:implement docs/adr/0001-websocket-push-blueprint.md
   GitHub issue   /playbook:implement #42   |   /playbook:implement https://github.com/org/repo/issues/42
-  Jira ticket    /playbook:implement PROJ-123   (via Atlassian MCP/acli, when reachable)
+  Jira ticket    /playbook:implement PROJ-123   (via Atlassian, see `playbook:atlassian`)
   File spec      /playbook:implement ./tasks/feature-spec.md
   Plain text     /playbook:implement "Add user avatar upload"
 
@@ -123,7 +123,7 @@ Otherwise, resolve `$ARGUMENTS` (minus flags) by format:
 
 - **Plan/blueprint file** (a file under `playbook path plans`, `docs/adr/*-blueprint.md`, or any path ending `.md`): Read it. This is the plan.
 - **GitHub issue** (`#N`, or a github.com issue URL): `gh issue view <N> --json title,body,url,labels,state`.
-- **Jira ticket** (`ABC-123`): use `mcp__atlassian__*` tools if available, else `acli` if present, else ask the user to paste the ticket. (Same availability rule as `/playbook:learn-project`.)
+- **Jira ticket** (`ABC-123`): load `playbook:atlassian` first and follow its selection order; if no route works, ask the user to paste the ticket.
 - **Other file path:** Read it.
 - **Plain text:** the text is the task statement.
 

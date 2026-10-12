@@ -1,6 +1,6 @@
 # Jira with acli
 
-Verified against acli 1.3.22-stable. Trust `acli jira --help` over this table if they differ.
+Verified against acli 1.3.22-stable and 1.3.39-stable. Trust `acli jira --help` over this table if they differ.
 
 | Group | Commands |
 |---|---|

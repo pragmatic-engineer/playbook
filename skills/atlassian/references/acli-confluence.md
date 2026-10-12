@@ -1,6 +1,6 @@
 # Confluence with acli
 
-Read this when you need to find or read Confluence pages. Verified against acli 1.3.22-stable.
+Read this when you need to find or read Confluence pages. Verified against acli 1.3.39-stable (`acli confluence --help` lists `auth`, `blog`, `page`, `space`).
 
 ## Commands
 
@@ -26,7 +26,15 @@ acli confluence page view --id <child-id> --json --include-direct-children
 
 `--include-labels` on `page view` is the cheapest way to spot runbooks, decision records and onboarding pages without reading every body.
 
-Useful `page view` flags: `--body-format storage|atlas_doc_format|view`, `--include-labels`, `--include-direct-children`, `--include-version`, `--status current,draft,archived`, `--version <n>` for a specific revision.
+`page view` flags: `--id`, `--json`, `--body-format storage|atlas_doc_format|view`, `--get-draft`, `--status current,draft,archived`, `--version <n>`, and the `--include-*` flags: `collaborators`, `direct-children`, `favorited-by-current-user-status`, `labels`, `likes`, `operations`, `properties`, `version`, `versions`, `webresources`.
+
+`blog list` filters: `--space-id`, `--title`, `--id`, `--status`, `--sort`, `--limit` (default 25), `--cursor`, `--body-format`, and `--json` or `--csv`. `space view` takes `--id` plus `--labels`, `--permissions`, `--properties`, `--operations`, `--include-all`.
+
+`auth` has `login` (OAuth or API token), `logout`, `status` and `switch`. Confluence auth is separate from Jira auth.
+
+## What acli can and cannot do for Confluence
+
+Can: view a page by ID, view and list spaces, list and view blog posts, create blogs, create and update spaces. Cannot: search pages, list pages, create or edit pages. For those use the MCP server or twg (`twg confluence search text`, `twg confluence content list`), see references/twg.md in this skill.
 
 `space list` filters: `--keys`, `--type global|personal`, `--status current|archived`, `--limit` (default 50), `--expand description,homepage,permissions`.
 
