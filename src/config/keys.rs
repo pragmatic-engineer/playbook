@@ -47,6 +47,12 @@ pub const KNOWN_KEYS: &[&str] = &[
     "hygiene.enabled",
     "hygiene.thresholdTokens",
     "hints.pluginRemoved",
+    "docs.convert",
+    "docs.maxBytes",
+    "docs.timeoutSeconds",
+    "docs.maxOutputChars",
+    "docs.maxMemoryMb",
+    "docs.anydocPath",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -111,6 +117,12 @@ pub fn default_value(key: &str) -> Option<Value> {
         "sessions.recentDays" => Some(Value::Number(7.into())),
         "hygiene.enabled" | "hints.pluginRemoved" => Some(Value::Bool(true)),
         "hygiene.thresholdTokens" => Some(Value::Number(250_000.into())),
+        "docs.convert" => Some(Value::String("off".to_string())),
+        "docs.maxBytes" => Some(Value::Number(26_214_400.into())),
+        "docs.timeoutSeconds" => Some(Value::Number(30.into())),
+        "docs.maxOutputChars" => Some(Value::Number(200_000.into())),
+        "docs.maxMemoryMb" => Some(Value::Number(1024.into())),
+        "docs.anydocPath" => Some(Value::String(String::new())),
         _ => None,
     }
 }
@@ -132,6 +144,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.theme" => Some(&["btop", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.telemetry" => Some(&["auto", "off"]),
+        "docs.convert" => Some(&["auto", "off"]),
         _ => None,
     }
 }
