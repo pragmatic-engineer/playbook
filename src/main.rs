@@ -33,6 +33,10 @@ fn restore_sigpipe() {}
 /// Run one hook: read the payload from stdin, then dispatch it.
 fn run_hook(name: playbook::HookName) {
     let raw = read_hook_input();
+    // Plugin disabled in Claude Code: succeed silently, with no side effects.
+    if common::plugin_state::paused() {
+        return;
+    }
     let payload = Payload::parse(&raw);
     if matches!(name, playbook::HookName::WorktreeCreate) {
         std::process::exit(hooks::worktree_create::execute(&payload));
