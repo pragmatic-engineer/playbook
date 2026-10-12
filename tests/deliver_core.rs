@@ -57,6 +57,9 @@ struct Rig {
 fn sh(dir: &Path, env: &[(String, String)], program: &str, args: &[&str]) -> String {
     let mut c = Command::new(program);
     c.args(args).current_dir(dir);
+    for k in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"] {
+        c.env_remove(k);
+    }
     for (k, v) in env {
         c.env(k, v);
     }
@@ -215,7 +218,8 @@ fn ready_creates_a_non_draft_pr() {
 fn the_default_branch_is_refused() {
     let rig = Rig::new();
     rig.git(&["checkout", "-q", "main"]);
-    let opts = dirty(&rig);
+    let mut opts = dirty(&rig);
+    opts.protected = Vec::new();
 
     let err = deliver::run(&opts).expect_err("refused");
 
@@ -261,11 +265,9 @@ fn a_diverged_remote_without_our_rebase_is_refused() {
     let err = deliver::run(&rig.opts()).expect_err("refused");
 
     assert_eq!(err.code, exit::REFUSED);
-    assert!(
-        err.message
-            .contains("force-pushes only after its own rebase")
-            || err.message.contains("force-pushes after")
-    );
+    assert!(err
+        .message
+        .contains("only force-pushes after its own rebase"));
 }
 
 #[test]
@@ -489,7 +491,13 @@ fn dry_run_changes_nothing() {
     assert_eq!(rig.git(&["rev-parse", "HEAD"]), head);
     assert!(rig.git(&["status", "--porcelain"]).contains("?? b.txt"));
     assert!(!rig.gh_log().contains("pr create"));
-    assert!(sh(&rig.origin, &[], "git", &["branch", "--list", "feat/x"]).is_empty());
+    assert!(sh(
+        &rig.origin,
+        &rig.env(),
+        "git",
+        &["branch", "--list", "feat/x"]
+    )
+    .is_empty());
 }
 
 #[test]
@@ -584,11 +592,18 @@ fn the_default_branch_is_found_from_the_remote_when_origin_head_is_missing() {
         "git",
         &["symbolic-ref", "HEAD", "refs/heads/dev"],
     );
-    rig.git(&["remote", "set-head", "origin", "-d"]);
     rig.git(&["fetch", "-q", "origin"]);
+    rig.git(&["remote", "set-head", "origin", "-d"]);
     rig.git(&["checkout", "-q", "-B", "dev", "origin/dev"]);
     let mut opts = dirty(&rig);
     opts.protected = Vec::new();
+    let head = Command::new("git")
+        .args(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
+        .current_dir(&rig.work)
+        .envs(rig.env())
+        .output()
+        .unwrap();
+    assert!(!head.status.success(), "origin/HEAD must be missing");
 
     let err = deliver::run(&opts).expect_err("refused");
 
