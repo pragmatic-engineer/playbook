@@ -329,6 +329,26 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         timeout: None,
         also_replaces: None,
     },
+    HookSpec {
+        event: "SessionStart",
+        matcher: None,
+        name: "usage-warm",
+        group: Group::Usage,
+        purpose: "Starts a short background read of new session history, so `playbook usage` opens with data. Prints nothing and waits for nothing.",
+        if_cond: None,
+        timeout: Some(5),
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "SessionEnd",
+        matcher: None,
+        name: "usage-warm",
+        group: Group::Usage,
+        purpose: "Starts the same background read when a session ends, so the finished session is already stored.",
+        if_cond: None,
+        timeout: Some(5),
+        also_replaces: None,
+    },
 ];
 
 /// The always-on safety guards, wired identically to `PORTED_HOOK_SPECS`:

@@ -33,6 +33,7 @@ pub mod search_counter;
 pub mod session_clean_exit;
 pub mod session_init;
 pub mod staleness;
+pub mod usage_warm;
 pub mod worktree_create;
 pub mod worktree_remove;
 pub mod worktree_setup;
@@ -66,6 +67,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::MigrationCheck => migration_check::run(payload),
         HookName::ContextHygiene => context_hygiene::run(payload),
         HookName::DocReadHint => doc_read_hint::run(payload),
+        HookName::UsageWarm => usage_warm::run(payload),
     }
 }
 

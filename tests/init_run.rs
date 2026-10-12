@@ -138,6 +138,7 @@ const PORTED_HOOK_NAMES: &[&str] = &[
     "memory-capture",
     "context-hygiene",
     "doc-read-hint",
+    "usage-warm",
     "auto-guard",
     "auto-cost",
 ];
