@@ -42,6 +42,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.refreshSeconds` | `5` | a number, see the config keys guide for the range |
 | `usage.telemetry` | `auto` | `auto`, `off` |
+| `usage.telemetryRetentionDays` | `90` | a number, see the config keys guide for the range |
+| `usage.telemetryMaxRows` | `500000` | a number, see the config keys guide for the range |
 | `usage.budget.monthlyUsd` | `0` | a number, see the config keys guide for the range |
 | `usage.budget.weeklyUsd` | `0` | a number, see the config keys guide for the range |
 | `sessions.staleAfterDays` | `3` | a number, see the config keys guide for the range |
@@ -1123,7 +1125,7 @@ Example: `playbook usage --range today`
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
 - `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
 
-Subcommands: `collect`, `ingest`, `status`
+Subcommands: `collect`, `ingest`, `prune`, `status`
 
 ### `playbook usage collect`
 
@@ -1140,11 +1142,21 @@ Example: `playbook usage collect --idle-seconds 1800`
 
 Read new session history into the usage store (deprecated: use `playbook usage --summary`)
 
+### `playbook usage prune`
+
+Delete old telemetry rows
+
+Removes telemetry rows older than `usage.telemetryRetentionDays` (default 90, 0 keeps them) and the oldest rows beyond `usage.telemetryMaxRows` per table (default 500000, 0 means no limit). The receiver does the same when it starts and every few hours. Transcript data and every total are left alone, because totals come from transcripts.
+
+Example: `playbook usage prune --dry-run`
+
+- `--dry-run`: Say what would be removed without deleting anything
+
 ### `playbook usage status`
 
 Show whether the telemetry receiver is running
 
-Prints the pid, port, idle limit, how many telemetry rows are stored (API requests, tool calls, API errors) and the time of the newest event. It starts nothing and never prints the token. With `--json` it prints the same as JSON. Exit code 0 whether or not a receiver runs.
+Prints the pid, port, idle limit, how many telemetry rows are stored (API requests, tool calls, API errors, metric points), the retention limits and the time of the newest event. It starts nothing and never prints the token. With `--json` it prints the same as JSON. Exit code 0 whether or not a receiver runs.
 
 Example: `playbook usage status --json`
 

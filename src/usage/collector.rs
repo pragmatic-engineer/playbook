@@ -18,7 +18,7 @@
 
 use super::receiver::{bind, serve, Config};
 use super::run::Paths;
-use super::telemetry_db::migrate_up;
+use super::telemetry_db::{migrate_up, prune, Pruned, Retention};
 use crate::common::atomic::write_atomic_private;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -115,16 +115,20 @@ pub struct Status {
     pub requests: i64,
     pub tool_calls: i64,
     pub api_errors: i64,
+    pub metric_points: i64,
+    /// The limits telemetry rows are pruned to.
+    pub retention: Retention,
     /// Time of the newest stored event, unix seconds.
     pub last_event: Option<i64>,
 }
 
 /// Reads the collector state file and the telemetry row counts. Starts
 /// nothing, and never shows the token.
-pub fn status(paths: &Paths) -> Result<Status, String> {
+pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
     let state = read_state(&state_path(paths));
     let live = state.as_ref().filter(|s| running(s));
-    let (mut requests, mut tool_calls, mut api_errors, mut last_event) = (0, 0, 0, None);
+    let (mut requests, mut tool_calls, mut api_errors, mut metric_points, mut last_event) =
+        (0, 0, 0, 0, None);
     if paths.db.exists() {
         let conn = super::db::open_db(&paths.db)?;
         let count = |table: &str| -> Result<(i64, Option<i64>), String> {
@@ -138,8 +142,9 @@ pub fn status(paths: &Paths) -> Result<Status, String> {
         let (r, tr) = count("telemetry_requests")?;
         let (t, tt) = count("telemetry_tools")?;
         let (e, te) = count("telemetry_errors")?;
-        (requests, tool_calls, api_errors) = (r, t, e);
-        last_event = [tr, tt, te].into_iter().flatten().max();
+        let (m, tm) = count("telemetry_metrics")?;
+        (requests, tool_calls, api_errors, metric_points) = (r, t, e, m);
+        last_event = [tr, tt, te, tm].into_iter().flatten().max();
     }
     Ok(Status {
         running: live.is_some(),
@@ -150,6 +155,8 @@ pub fn status(paths: &Paths) -> Result<Status, String> {
         requests,
         tool_calls,
         api_errors,
+        metric_points,
+        retention,
         last_event,
     })
 }
@@ -184,8 +191,20 @@ impl Status {
             }
         }
         lines.push(format!(
-            "rows: {} requests, {} tool calls, {} api errors",
-            self.requests, self.tool_calls, self.api_errors
+            "rows: {} requests, {} tool calls, {} api errors, {} metric points",
+            self.requests, self.tool_calls, self.api_errors, self.metric_points
+        ));
+        let limit = |n: u64, unit: &str| {
+            if n == 0 {
+                "no limit".to_string()
+            } else {
+                format!("{n} {unit}")
+            }
+        };
+        lines.push(format!(
+            "retention: {}, {} per table (usage.telemetryRetentionDays, usage.telemetryMaxRows)",
+            limit(self.retention.days, "days"),
+            limit(self.retention.max_rows, "rows")
         ));
         lines.push(match self.last_event {
             Some(t) => format!(
@@ -207,6 +226,45 @@ fn age(seconds: i64) -> String {
         s if s < 86_400 => format!("{}h", s / 3_600),
         s => format!("{}d", s / 86_400),
     }
+}
+
+/// The telemetry limits from the `usage.telemetryRetentionDays` and
+/// `usage.telemetryMaxRows` config keys, the defaults when unset or invalid.
+pub fn configured_retention() -> Retention {
+    let home = crate::common::session::home_dir();
+    let read = |key: &str, default: u64| {
+        crate::config::resolve_valid(key, &home, None)
+            .ok()
+            .and_then(|(value, _, _)| value.as_u64())
+            .unwrap_or(default)
+    };
+    Retention {
+        days: read(
+            "usage.telemetryRetentionDays",
+            super::telemetry_db::DEFAULT_RETENTION_DAYS,
+        ),
+        max_rows: read(
+            "usage.telemetryMaxRows",
+            super::telemetry_db::DEFAULT_MAX_ROWS,
+        ),
+    }
+}
+
+/// `playbook usage prune`: deletes telemetry rows past the limits, or with
+/// `dry_run` only counts them. Creates no database when there is none.
+pub fn run_prune(paths: &Paths, dry_run: bool) -> Result<String, String> {
+    if !paths.db.exists() {
+        return Ok("nothing to prune: no usage database yet".to_string());
+    }
+    let conn = super::db::open_db(&paths.db)?;
+    migrate_up(&conn)?;
+    let retention = configured_retention();
+    let p: Pruned = prune(&conn, crate::common::time::now_secs(), retention, dry_run)?;
+    let verb = if dry_run { "would remove" } else { "removed" };
+    Ok(format!(
+        "{verb} {} requests, {} tool calls, {} api errors, {} metric points (keeping {} days, {} rows per table; 0 means no limit)",
+        p.requests, p.tools, p.errors, p.metrics, retention.days, retention.max_rows
+    ))
 }
 
 /// Runs the collector in the foreground until idle or stopped. `port` is an
@@ -251,9 +309,12 @@ pub fn run_collect(
         idle_seconds,
     };
     write_state(&path, &state)?;
+    let retention = configured_retention();
+    let _ = prune(&conn, crate::common::time::now_secs(), retention, false);
     let cfg = Config {
         token: Some(token),
         idle: (idle_seconds > 0).then(|| Duration::from_secs(idle_seconds)),
+        prune: Some(retention),
     };
     eprintln!(
         "usage collect: listening on 127.0.0.1:{actual} (pid {})",
@@ -373,7 +434,7 @@ mod tests {
     #[test]
     fn status_with_nothing_set_up_says_not_running_and_creates_no_files() {
         let p = paths("collector-status-none");
-        let s = status(&p).unwrap();
+        let s = status(&p, Retention::default()).unwrap();
         assert!(!s.running && s.pid.is_none() && s.last_event.is_none());
         assert_eq!((s.requests, s.tool_calls, s.api_errors), (0, 0, 0));
         assert!(!p.db.exists(), "status must not create the database");
@@ -418,7 +479,7 @@ mod tests {
         insert_tool(&conn, &tool).unwrap();
         drop(conn);
 
-        let s = status(&p).unwrap();
+        let s = status(&p, Retention::default()).unwrap();
         assert!(s.running);
         assert_eq!((s.pid, s.port), (Some(std::process::id()), Some(port)));
         assert_eq!((s.requests, s.tool_calls, s.api_errors), (1, 1, 0));
@@ -433,8 +494,44 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("(1m ago)"), "{text}");
+        assert!(
+            text.contains("0 metric points")
+                && text.contains("retention: 90 days, 500000 rows per table"),
+            "{text}"
+        );
         let json = serde_json::to_string(&s).unwrap();
         assert!(!text.contains("supersecret") && !json.contains("supersecret"));
+    }
+
+    #[test]
+    fn prune_says_so_without_a_database_and_otherwise_removes_old_rows() {
+        let p = paths("collector-prune");
+        assert!(run_prune(&p, false).unwrap().contains("no usage database"));
+        assert!(!p.db.exists(), "prune must not create the database");
+        std::fs::create_dir_all(p.db.parent().unwrap()).unwrap();
+        let conn = super::super::db::open_db(&p.db).unwrap();
+        migrate_up(&conn).unwrap();
+        let old = crate::usage::telemetry_db::TelemetryTool {
+            session_id: "s".into(),
+            tool_use_id: "old".into(),
+            timestamp: 1_000,
+            ..Default::default()
+        };
+        crate::usage::telemetry_db::insert_tool(&conn, &old).unwrap();
+        drop(conn);
+        let dry = run_prune(&p, true).unwrap();
+        assert!(
+            dry.starts_with("would remove 0 requests, 1 tool calls"),
+            "{dry}"
+        );
+        let done = run_prune(&p, false).unwrap();
+        assert!(
+            done.starts_with("removed 0 requests, 1 tool calls"),
+            "{done}"
+        );
+        assert!(run_prune(&p, false)
+            .unwrap()
+            .starts_with("removed 0 requests, 0 tool calls"));
     }
 
     #[test]
@@ -448,7 +545,7 @@ mod tests {
             ..State::default()
         };
         write_state(&state_path(&p), &stale).unwrap();
-        let s = status(&p).unwrap();
+        let s = status(&p, Retention::default()).unwrap();
         assert!(!s.running);
         assert!(s.text(1).contains("last port: 4318"));
     }
