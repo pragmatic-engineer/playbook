@@ -15,6 +15,33 @@ pub mod commit;
 pub mod common;
 pub mod config;
 pub mod deps;
+#[cfg(unix)]
+pub mod doc;
+/// Document conversion needs process groups and signals, so on other
+/// platforms the command reports that it is unavailable.
+#[cfg(not(unix))]
+pub mod doc {
+    use std::path::Path;
+
+    pub mod convert {
+        pub fn find_anydoc(
+            _configured: &str,
+            _path_var: Option<&std::ffi::OsStr>,
+        ) -> Option<std::path::PathBuf> {
+            None
+        }
+    }
+
+    pub fn read(_home: &Path, _file: &Path, _json: bool) -> i32 {
+        eprintln!("doc read: not supported on this platform");
+        1
+    }
+
+    pub fn status(_home: &Path) -> i32 {
+        println!("anydoc: document conversion is not supported on this platform");
+        1
+    }
+}
 pub mod doctor;
 pub mod effort;
 pub mod eval;
@@ -316,6 +343,17 @@ pub enum Command {
     Deps {
         #[command(subcommand)]
         sub: DepsCommand,
+    },
+    /// Read a PDF or Office file as text with the optional anydoc converter
+    ///
+    /// Conversion is local, bounded in size, time, memory and output, and
+    /// never uses OCR or a hosted service. The text is printed as untrusted
+    /// document content and nothing is kept on disk afterwards.
+    ///
+    /// Example: `playbook doc read report.docx`
+    Doc {
+        #[command(subcommand)]
+        sub: DocCommand,
     },
     /// Read single facts that the health check uses
     ///
@@ -1575,6 +1613,24 @@ pub enum DoctorCommand {
         /// Only count this event (default: every event)
         event: Option<String>,
     },
+}
+
+/// `playbook doc` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum DocCommand {
+    /// Print a document as Markdown, framed as untrusted content
+    ///
+    /// Supports pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods
+    /// and csv. A scanned PDF with no text layer reports that it needs OCR.
+    Read {
+        /// The document to read
+        file: PathBuf,
+        /// Print one JSON object instead of the framed text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Say whether the anydoc converter is installed and how to get it
+    Status,
 }
 
 /// `playbook deps` subcommands.

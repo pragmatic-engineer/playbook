@@ -119,6 +119,9 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         "fix.maxFiles" | "fix.maxLines" | "review.stackMaxPrs" | "review.stackMaxLines" => {
             (whole.is_some_and(|n| n >= 1), "a positive integer")
         }
+        "docs.maxBytes" | "docs.timeoutSeconds" | "docs.maxOutputChars" | "docs.maxMemoryMb" => {
+            (whole.is_some_and(|n| n >= 1), "a positive integer")
+        }
         _ => {
             return match whole {
                 Some(n) if n >= 0 => Ok(()),
