@@ -7,9 +7,14 @@
 //! request on Sonnet or Opus instead of the Haiku `git` agent.
 
 use std::fs;
+use std::path::PathBuf;
+
+fn root(rel: &str) -> PathBuf {
+    PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join(rel)
+}
 
 fn frontmatter_value(file: &str, key: &str) -> Option<String> {
-    let text = fs::read_to_string(file).expect("command file");
+    let text = fs::read_to_string(root(file)).expect("command file");
     text.lines()
         .skip(1)
         .take_while(|line| *line != "---")
@@ -78,7 +83,7 @@ fn the_auditor_agent_runs_on_opus_at_high_effort() {
 #[test]
 fn every_forked_command_opens_with_the_do_not_reinvoke_note() {
     let mut checked = 0;
-    for entry in fs::read_dir("commands").expect("commands dir") {
+    for entry in fs::read_dir(root("commands")).expect("commands dir") {
         let path = entry.expect("entry").path();
         let text = fs::read_to_string(&path).expect("command file");
         if !text.lines().any(|l| l == "context: fork") {

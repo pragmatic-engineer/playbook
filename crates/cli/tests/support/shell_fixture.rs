@@ -15,7 +15,9 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// The repository root.
 pub fn repo_root() -> PathBuf {
-    PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
+    // The config value ends in "/.", so normalise it for path comparisons.
+    let root = PathBuf::from(env!("PLAYBOOK_REPO_ROOT"));
+    root.canonicalize().unwrap_or(root)
 }
 
 /// A scratch directory removed on drop.

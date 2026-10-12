@@ -36,7 +36,7 @@ const ALLOW_FILES: [&str; 15] = [
 ];
 
 /// Top-level directories any tracked file may live under.
-const ALLOW_DIRS: [&str; 14] = [
+const ALLOW_DIRS: [&str; 13] = [
     "bin",
     "prompts",
     "skills",
@@ -48,8 +48,7 @@ const ALLOW_DIRS: [&str; 14] = [
     "output-styles",
     ".github",
     ".claude-plugin",
-    "src",
-    "tests",
+    "crates",
     ".cargo",
 ];
 
