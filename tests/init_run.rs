@@ -988,7 +988,7 @@ fn binary_malformed_settings_json_exits_non_zero() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("step(s) failed"), "{stderr}");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("FAILED"), "{stdout}");
+    assert!(stdout.contains("[fail]"), "{stdout}");
 }
 
 /// The other half of the "fully wired" and "idempotent" library-level tests,
@@ -1026,11 +1026,11 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
     let first_out = String::from_utf8_lossy(&first.stdout);
     let second_out = String::from_utf8_lossy(&second.stdout);
     assert!(
-        first_out.lines().all(|l| !l.contains(": ok -")),
+        first_out.lines().all(|l| !l.starts_with("[=]")),
         "first run should report only changes: {first_out}"
     );
     assert!(
-        second_out.lines().all(|l| !l.contains(": wired -")),
+        second_out.lines().all(|l| !l.starts_with("[ok]")),
         "second run should report no changes: {second_out}"
     );
 }
