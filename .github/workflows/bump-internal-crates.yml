@@ -140,6 +140,7 @@ jobs:
             github.com:443
             index.crates.io:443
             objects.githubusercontent.com:443
+            registry.npmjs.org:443
             release-assets.githubusercontent.com:443
             static.crates.io:443
             static.rust-lang.org:443
@@ -187,6 +188,19 @@ jobs:
             git diff --stat
           fi
 
+      # Same runner as rust-ci: nextest runs each test in its own process, which
+      # the collector tests need (plain `cargo test` shares one port between them).
+      - name: Install cargo-nextest
+        if: steps.bump.outputs.changed == 'true'
+        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: nextest@0.9.145
+
+      # tests/plugin_archive.rs runs `claude plugin validate` (same pin as rust-ci).
+      - name: Install the Claude Code CLI
+        if: steps.bump.outputs.changed == 'true'
+        run: npm install --global @anthropic-ai/claude-code@2.1.282
+
       - name: Build, lint and test
         if: steps.bump.outputs.changed == 'true'
         run: |
@@ -194,7 +208,8 @@ jobs:
           cargo build --locked
           cargo clippy --locked --all-targets -- -D warnings
           cargo clippy --locked --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
-          cargo test --locked
+          cargo nextest run --locked --config-file .github/nextest.toml --profile ci
+          cargo test --locked --doc
 
       - name: Commit, open the PR and enable auto-merge
         if: steps.bump.outputs.changed == 'true'
