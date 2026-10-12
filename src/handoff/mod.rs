@@ -9,6 +9,8 @@
 //! the hook has loaded moves to `handoff/used/` for 14 days, so `show` can
 //! still print it after the session start consumed it.
 
+pub mod compose;
+
 use crate::common::atomic::ensure_private_dir;
 use std::fs;
 use std::io::Write;
