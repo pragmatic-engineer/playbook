@@ -25,7 +25,7 @@ fn ok(program: &str, args: &[&str], dir: &Path) -> bool {
 
 /// `owner/name` from an origin URL such as `git@host:owner/name.git`.
 fn repo_from_url(url: &str) -> Option<String> {
-    let url = url.trim().trim_end_matches(".git");
+    let url = url.trim().trim_end_matches('/').trim_end_matches(".git");
     let mut parts = url.rsplit(['/', ':']);
     let name = parts.next().filter(|n| !n.is_empty())?;
     let owner = parts.next().filter(|o| !o.is_empty())?;
@@ -131,6 +131,10 @@ mod tests {
         );
         assert_eq!(
             repo_from_url("https://github.com/o/r").as_deref(),
+            Some("o/r")
+        );
+        assert_eq!(
+            repo_from_url("https://github.com/o/r/").as_deref(),
             Some("o/r")
         );
         assert_eq!(repo_from_url(""), None);

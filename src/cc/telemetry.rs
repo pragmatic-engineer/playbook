@@ -28,7 +28,7 @@
 //! Prompt, tool detail, tool content and raw body logging are never turned on
 //! and the account uuid is left out of the metrics.
 
-use crate::usage::collector::{read_state, running, state_path, State};
+use crate::usage::collector::{probe, read_state, running, state_path, Probe, State};
 use crate::usage::run::Paths;
 pub use crate::usage::telemetry_detect::{
     configured, files_configured, process_configured, Configured,
@@ -174,7 +174,10 @@ pub fn session_env(home: &Path, cwd: &Path) -> Vec<(String, String)> {
     // Settings that init wrote already point the session at the collector,
     // so only the collector needs to be up; nothing more is set here.
     let wanted = matches!(kind, Configured::Nothing | Configured::Playbook);
-    let down = !collector.as_ref().is_some_and(running);
+    // A listener that is not a playbook collector (a reused port) is down.
+    let down = !collector
+        .as_ref()
+        .is_some_and(|s| running(s) && probe(s.port) == Probe::Collector);
     if wanted && down && state_file.with_file_name("usage.db").exists() {
         if let Ok(exe) = std::env::current_exe() {
             let mut started = false;

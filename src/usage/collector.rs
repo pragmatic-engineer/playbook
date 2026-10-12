@@ -368,6 +368,7 @@ pub fn run_collect(
 ) -> Result<String, String> {
     let path = state_path(paths);
     let previous = read_state(&path);
+    let mut foreign = false;
     if let Some(prev) = previous.as_ref().filter(|p| running(p)) {
         match probe(prev.port) {
             Probe::Collector => {
@@ -378,12 +379,12 @@ pub fn run_collect(
             }
             Probe::Silent => {
                 return Err(format!(
-                    "pid {} holds port {} but does not answer; stop it (kill {}) and run again",
-                    prev.pid, prev.port, prev.pid
+                    "something on port {} does not answer (recorded collector pid {}); check what holds the port before stopping anything, then run again",
+                    prev.port, prev.pid
                 ));
             }
             // The pid now belongs to another program: the state is stale.
-            Probe::Foreign => {}
+            Probe::Foreign => foreign = true,
         }
     }
     let conn = super::db::open_db(&paths.db)?;
@@ -399,8 +400,10 @@ pub fn run_collect(
         }
     };
     let actual = listener.local_addr().map_err(|e| e.to_string())?.port();
+    // A foreign program held the recorded port, so sessions may have sent it
+    // the old bearer token; a fresh collector gets a fresh one.
     let token = match previous {
-        Some(p) if !p.token.is_empty() => p.token,
+        Some(p) if !p.token.is_empty() && !foreign => p.token,
         _ => new_token()?,
     };
     let mut state = State {
@@ -564,6 +567,11 @@ mod tests {
 
         let _ = server.join();
         assert!(!msg.contains("already running"), "{msg}");
+        assert_ne!(
+            read_state(&state_path(&p)).unwrap().token,
+            "t",
+            "the old token may have reached the foreign program"
+        );
     }
 
     #[test]
