@@ -146,18 +146,18 @@ jobs:
           if git ls-files -- \
               ':!.github/workflows/shell-ci.yml' \
               ':!docs/adr/**' \
-              ':!src/hooks/rm_workspace_guard.rs' \
-              ':!src/hooks/commit_message_sanitizer/engine.rs' \
-              ':!src/hooks/commit_message_sanitizer/git.rs' \
-              ':!src/init/wire.rs' \
-              ':!tests/fixtures/golden/init.clean-install.json' \
-              ':!tests/fixtures/golden/init.skip-triggering.json' \
-              ':!tests/hooks_commit_message_sanitizer.rs' \
-              ':!tests/hooks_guards.rs' \
-              ':!tests/init_wire.rs' \
-              ':!tests/settings_check.rs' \
-              ':!tests/settings_gen.rs' \
-              ':!tests/support/sanitizer_lab.rs' \
+              ':!crates/cli/src/hooks/rm_workspace_guard.rs' \
+              ':!crates/cli/src/hooks/commit_message_sanitizer/engine.rs' \
+              ':!crates/cli/src/hooks/commit_message_sanitizer/git.rs' \
+              ':!crates/cli/src/init/wire.rs' \
+              ':!crates/cli/tests/fixtures/golden/init.clean-install.json' \
+              ':!crates/cli/tests/fixtures/golden/init.skip-triggering.json' \
+              ':!crates/cli/tests/hooks_commit_message_sanitizer.rs' \
+              ':!crates/cli/tests/hooks_guards.rs' \
+              ':!crates/cli/tests/init_wire.rs' \
+              ':!crates/cli/tests/settings_check.rs' \
+              ':!crates/cli/tests/settings_gen.rs' \
+              ':!crates/cli/tests/support/sanitizer_lab.rs' \
               | xargs grep -nE 'Workspace/|atlassian\.net|\brtk\b|isantos'; then
             echo "::error::personal identifier or maintainer-specific string found in tracked files (see above)"
             exit 1

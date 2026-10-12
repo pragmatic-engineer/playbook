@@ -71,9 +71,9 @@ build:
 
 # Everything CI runs, so a green local run means a green PR.
 check: build
-    cargo fmt --check
-    cargo clippy --all-targets -- -D warnings
-    cargo clippy --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
+    cargo fmt --all --check
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
     just test
     git ls-files '*.sh' | xargs shellcheck --severity=warning
     @for f in $(git ls-files '*.sh'); do bash -n "$f"; done
@@ -83,8 +83,8 @@ check: build
 # Run the test suite with cargo-nextest (install: `cargo install cargo-nextest --locked`),
 # which schedules tests across every test binary at once. Doctests run apart.
 test *args:
-    cargo nextest run --config-file .github/nextest.toml {{ args }}
-    cargo test --doc
+    cargo nextest run --workspace --config-file .github/nextest.toml {{ args }}
+    cargo test --workspace --doc
 
 # Run every behavioural shell suite exactly the way CI does.
 test-shell:

@@ -1,42 +1,28 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: Apache-2.0
 
-[package]
-name = "playbook"
+[workspace]
+resolver = "2"
+members = ["crates/cli"]
+
+[workspace.package]
 version = "0.25.0"
 edition = "2021"
-description = "Claude Code plugin toolkit: hooks, launcher and installer in one binary"
 license = "Apache-2.0"
 
-[dependencies]
-clap = { version = "=4.6.6", features = ["derive"] }
-libc = "=0.2.189"
-playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook-telemetry", tag = "v0.1.6" }
-ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
-regex = "=1.13.1"
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = { version = "=1.0.151", features = ["preserve_order"] }
-sha2 = "=0.10.9"
-tree-sitter = "=0.27.0"
-tree-sitter-javascript = "=0.25.0"
-tree-sitter-python = "=0.25.0"
-tree-sitter-rust = "=0.24.2"
-tree-sitter-typescript = "=0.23.2"
-ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
+# Curated lints, run with `-D warnings` in CI. Deliberately not all of
+# `clippy::pedantic`. The `unwrap_used` and `expect_used` lints cover only
+# non-test code, so they run from the justfile and CI as a separate step.
+[workspace.lints.clippy]
+uninlined_format_args = "warn"
+manual_let_else = "warn"
+undocumented_unsafe_blocks = "warn"
+
 
 # Measured 2026-10-09 on macOS arm64: 10.0 MB without a profile, 8.2 MB with
 # strip and thin LTO at opt-level 3, 5.8 MB with opt-level s and fat LTO, with no
 # slowdown on the hooks. panic stays unwind: abort would change the exit code of
 # a panicking hook from 101 to 134.
-# Curated lints, run with `-D warnings` in CI. Deliberately not all of
-# `clippy::pedantic`. The `unwrap_used` and `expect_used` lints cover only
-# non-test code, so they run from the justfile and CI as a separate step.
-[lints.clippy]
-uninlined_format_args = "warn"
-manual_let_else = "warn"
-undocumented_unsafe_blocks = "warn"
-
 [profile.release]
 opt-level = "s"
 strip = true
