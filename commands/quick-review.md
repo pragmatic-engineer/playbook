@@ -1,7 +1,7 @@
 ---
-description: Use for a routine PR review or a quick check of your own branch. Single pass; posts a pending review, or only reports with --self or no PR named.
+description: Use for a routine PR review or a quick check of your own branch. Single pass; asks which findings to post as a pending review; skips posting only with --self or --no-post, and in auto mode prints the post command.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[--help] [PR number] [--self] [--this-pr] [--whole-stack] [--auto] [--ask]"
+argument-hint: "[--help] [PR number] [--self] [--no-post] [--this-pr] [--whole-stack] [--auto] [--ask]"
 model: sonnet
 effort: medium
 ---
@@ -12,7 +12,7 @@ Review a pull request with grounding-review discipline. Output a structured repo
 
 ## Argument parsing
 
-Parse `$ARGUMENTS` (strip `--self`, `--auto` and `--ask` before reading the rest, and `--help` (print the argument-hint line and stop)):
+Parse `$ARGUMENTS` (strip `--self`, `--no-post`, `--auto` and `--ask` before reading the rest, and `--help` (print the argument-hint line and stop)):
 
 - **Integer or `#N`** (e.g. `4265`, `#4265`) → explicit PR number; resolve `HEAD_SHA` via `gh pr view <PR_NUMBER> --json headRefOid -q .headRefOid`.
 - **Branch name** (anything that isn't an integer and isn't empty, and passes `git check-ref-format --branch <arg>`) → resolve to its open PR number via:
@@ -20,9 +20,9 @@ Parse `$ARGUMENTS` (strip `--self`, `--auto` and `--ask` before reading the rest
   PR_NUMBER=$(gh pr list --head <branch> --json number -q '.[0].number' 2>/dev/null)
   ```
   Error (abort) if no PR found: `error: no open PR for branch <name>; create one first or pass a PR number`.
-- **Empty (no PR number or branch left after stripping `--self`)** → resolve the current branch's PR via `gh pr view --json number,headRefOid,author,headRefName`, and set `SELF_MODE=true`: nothing was named to post to, so review report-only, same as passing `--self` explicitly.
+- **Empty (no PR number or branch left after stripping `--self`)** → resolve the current branch's PR via `gh pr view --json number,headRefOid,author,headRefName`, and post to it exactly as for an explicit number: the current branch's PR is the one the user means.
 
-`--self` forces `SELF_MODE=true` regardless of whether a PR number was also given: review and report, skip Step 4's posting orchestration entirely. `SELF_MODE` also becomes true whenever the resolved PR turns out to be authored by you, even with an explicit PR number: GitHub rejects `APPROVE` and `REQUEST_CHANGES` from a PR's own author, and a comment-only review of your own PR has no independent reviewer behind it, so self-authorship gets the same report-only treatment as `--self` rather than a narrower posting path.
+`--self` and `--no-post` (the same flag) force `SELF_MODE=true` regardless of whether a PR number was also given: review and report, skip Step 4's posting orchestration entirely. Those flags and auto mode are the only causes: no PR number and self-authorship never skip the posting question. When the PR is yours, GitHub rejects `APPROVE` and `REQUEST_CHANGES`, so Q2 offers `comment` and `skip` only.
 
 ## Step 0: Read the run mode
 
@@ -41,11 +41,11 @@ The JSON has `mode`, `source`, `hook_mode`, `warning` and `ceiling`. Read `playb
 
 ### Auto path
 
-Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set `RUN_MODE=auto` at the top of the Step 1 block (use `ask` otherwise), so `SELF_MODE` is true. The review runs and reports locally, and nothing is posted to GitHub, because a posted review speaks as you.
+Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set `RUN_MODE=auto` at the top of the Step 1 block (use `ask` otherwise), so `SELF_MODE` is true. The review runs and reports locally, and nothing is posted to GitHub, because a posted review speaks as you. Auto mode never posts, and it never skips the question silently: after the report, print the single command that posts, `/playbook:quick-review <PR_NUMBER> --ask`, so the user can opt in.
 
 ## Self-review awareness
 
-`SELF_REVIEW` (the resolved PR is authored by you, detected by comparing `gh pr view --json author -q .author.login` against `gh api /user -q .login`) is computed for every run and is one of the four conditions that sets `SELF_MODE=true` (the others: an empty argument list, explicit `--self`, or the run mode being auto). It stays a distinct variable purely so the status line can log it independently, but it never posts a restricted review on its own: once `SELF_REVIEW` is true, `SELF_MODE` is true too, and Step 4 never runs.
+`SELF_REVIEW` (the resolved PR is authored by you, detected by comparing `gh pr view --json author -q .author.login` against `gh api /user -q .login`) is computed for every run and does not set `SELF_MODE`. It only narrows Q2 to `comment` and `skip`, because GitHub blocks approve and request-changes from a PR's own author.
 
 ## Worktree vs in-place mode
 
@@ -55,7 +55,7 @@ After resolving `PR_NUMBER` and `HEAD_SHA`, decide how to read the PR's files:
 1. `git rev-parse HEAD` equals `HEAD_SHA`
 2. `git status --porcelain --untracked-files=no` is empty (no staged or unstaged tracked-file changes)
 
-With no argument (`SELF_MODE`), the in-place predicate runs the same check. If the current branch's HEAD matches `HEAD_SHA` and the tree is clean, review in place.
+With no argument, the in-place predicate runs the same check. If the current branch's HEAD matches `HEAD_SHA` and the tree is clean, review in place.
 
 **Worktree mode** (all other cases): set up an isolated worktree:
 
@@ -163,7 +163,7 @@ Only now continue. In `SELF_MODE`, or when nothing is postable (zero findings, o
 
 ## Step 4: Orchestrate posting
 
-If `SELF_MODE` is true (explicit `--self`, no PR number/branch was given, the run mode is auto, or the resolved PR is authored by you), or nothing is postable (zero findings, or only `Report-only` ones), stop here: the report IS the deliverable, no `playbook:writing-style` load, no question, no GitHub posting.
+If `SELF_MODE` is true (explicit `--self` or `--no-post`, or the run mode is auto), or nothing is postable (zero findings, or only `Report-only` ones), stop here: the report IS the deliverable, no `playbook:writing-style` load, no question, no GitHub posting. In auto mode end the report with the one line `To post: /playbook:quick-review <PR_NUMBER> --ask`. The post question is skipped only by the flag or by auto mode, never silently otherwise.
 
 ### Draft the comments (not in `SELF_MODE`, and only when something is postable)
 
@@ -212,7 +212,7 @@ gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews --input "$REVIEW_JSON" --jq
 
 Confirm `state: PENDING` and capture the review id + html_url. Show the user the link.
 
-**Q2**: "Submit verb? approve / comment / request-changes / skip." Reaching this question already means `SELF_MODE` was false, so the PR is never self-authored here and all four verbs are always valid; GitHub's author restriction is exactly why `SELF_REVIEW` forces `SELF_MODE` earlier instead of trying to offer a narrower menu here.
+**Q2**: "Submit verb? approve / comment / request-changes / skip." When `SELF_REVIEW` is true, offer only `comment` and `skip`, because GitHub rejects approve and request-changes on your own PR.
 
 If `skip`, stop. The pending review stays for manual submit from the UI. Otherwise:
 
@@ -232,7 +232,7 @@ Confirm the returned `state` flipped from `PENDING` to the corresponding termina
 
 Final user-facing message: one sentence per outcome.
 
-- `SELF_MODE`: "Report-only, nothing posted. N findings above."
+- `SELF_MODE`: "Report-only, nothing posted. N findings above." In auto mode add the `To post:` line.
 - "Pending review id `<id>` created, 7 inline comments queued. Submit from the UI when ready."
 - OR: "Submitted as `COMMENT` at <timestamp>. Author will get one notification."
 

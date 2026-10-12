@@ -1,7 +1,7 @@
 ---
-description: Use for substantial, risky, or cross-cutting PRs. Parallel specialist reviewers, fact-checked, posted as a pending GitHub review. Heavier than quick-review.
+description: Use for substantial, risky, or cross-cutting PRs. Parallel specialist reviewers, fact-checked, asks which findings to post as a pending GitHub review. Heavier than quick-review.
 allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
-argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--this-pr] [--whole-stack] [--auto] [--ask] [--help]"
+argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--no-post] [--this-pr] [--whole-stack] [--auto] [--ask] [--help]"
 model: opus
 effort: medium
 ---
@@ -28,6 +28,7 @@ OPTIONS:
   --help            Show this help
   --all             Run every reviewer regardless of diff content
   --preset <name>   Named reviewer set: security | architecture | data | docs
+  --no-post         Same as --self
   --self            Local self-review, never posts to GitHub (default when no
                     PR number is given, or when the PR is yours)
   --this-pr         When the PR is in a stack, review only this PR
@@ -36,13 +37,13 @@ OPTIONS:
   --ask             Force the interactive mode
 
 EXAMPLES:
-  /playbook:deep-review               Review the current branch's PR, report only, never posts
+  /playbook:deep-review               Review the current branch's PR and ask what to post
   /playbook:deep-review 123           Review and post to PR #123 (unless #123 is your own PR)
   /playbook:deep-review 123 --all     PR #123 with every reviewer, posts (unless it's yours)
   /playbook:deep-review 123 --self    Review PR #123, report only, never posts
 ```
 
-No PR number given means no posting: with nothing to disambiguate which PR you meant to publish to, the safe default is a local report, same as passing `--self` explicitly. A PR authored by you never posts either, even with a PR number given: GitHub blocks approve/request-changes from the author, and a comment-only review of your own PR has no independent reviewer behind it, so it gets the same report-only treatment as `--self`. Pass a PR number for someone else's PR to post.
+With no PR number the current branch's PR is reviewed and the post question is asked as usual. Only `--self`, `--no-post` and auto mode skip it. On your own PR GitHub blocks approve and request-changes, so the submit verb is limited to comment or skip.
 
 ## Step 0: Read the run mode
 
@@ -61,7 +62,7 @@ The JSON has `mode`, `source`, `hook_mode`, `warning` and `ceiling`. Read `playb
 
 ### Auto path
 
-Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set `RUN_MODE=auto` at the top of the Step 1 block (use `ask` otherwise), so `SELF_MODE` is true. The review runs and reports locally, and nothing is posted to GitHub, because a posted review speaks as you.
+Auto mode implies `--self`: treat the arguments as if `--self` were passed. Set `RUN_MODE=auto` at the top of the Step 1 block (use `ask` otherwise), so `SELF_MODE` is true. The review runs and reports locally, and nothing is posted to GitHub, because a posted review speaks as you. Auto mode never posts, and it never skips the question silently: after the report, print the single command that posts, `/playbook:deep-review <PR_NUMBER> --ask`, so the user can opt in.
 
 ## Reviewer Swarm
 
@@ -119,7 +120,7 @@ gh pr view <PR_NUMBER>
 gh pr diff <PR_NUMBER>
 ```
 
-Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, when `--self` is passed explicitly, when no PR number/branch was given in `$ARGUMENTS` at all (nothing named to post to), when the run mode is auto, or when `SELF_REVIEW` is true (the resolved PR is authored by the caller). `SELF_REVIEW` stays a separate fact purely for logging (the status line prints it independently), but it never leaves posting partially enabled on its own: once it is true, `SELF_MODE` is true too, so Step 6 never reaches the submit-verb question in the first place.
+Capture `REPO`, `PR_NUMBER`, `HEAD_SHA`, `SELF_REVIEW`, `SELF_MODE`, `REVIEW_JSON`. `SELF_MODE` is true, and posting is skipped entirely, only when `--self` or `--no-post` is passed or the run mode is auto. `SELF_REVIEW` (the PR is yours) does not set it: it only narrows the submit verb to `comment` or `skip`.
 
 In worktree mode, `WT` holds the absolute path to the isolated checkout. In in-place mode it is empty. Subagents use `$WT` for all reads; if empty, they read from the local working tree.
 
@@ -258,7 +259,7 @@ Present the report with each draft shown under its finding as a `Draft:` block. 
 
 ## Step 6: Orchestrate posting
 
-If `SELF_MODE` (`--self` passed explicitly, no PR number/branch was given so `PR_NUMBER` came from the current-branch fallback, the run mode is auto, or the resolved PR is authored by the caller), or nothing postable, stop here: the report IS the deliverable, no GitHub posting.
+If `SELF_MODE` (`--self` or `--no-post` passed, or the run mode is auto), or nothing postable, stop here: the report IS the deliverable, no GitHub posting. In auto mode end with the one line `To post: /playbook:deep-review <PR_NUMBER> --ask`. The post question is skipped only by the flag or by auto mode.
 
 Otherwise, **print every finding first (MUST).** Before asking anything, print all surviving findings in the chat, none left out and none summarized away: a code (F1, F2, and so on), the label, severity, `file:line` and a one-line description each. With zero findings, say so. The questions come only after this list, and the options refer to findings by code. A question with no list above it is a bug (#593).
 
@@ -280,7 +281,7 @@ gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews --input "$REVIEW_JSON" --jq
 ```
 
 - **Pre-post verification (MUST):** the Step 4b sweep already settled each finding's truth, label and anchor. Before this call, only confirm the PR is still OPEN and not CONFLICTING (`gh pr view "$PR_NUMBER" --json state,mergeable`). Don't post on a merged/closed/conflicting PR.
-- **Q2:** "Submit verb? approve / comment / request-changes / skip." Reaching this question already means `SELF_MODE` was false, so the PR is never self-authored here and all four verbs are always valid; GitHub's author restriction is exactly why `SELF_REVIEW` forces `SELF_MODE` earlier instead of trying to offer a narrower menu here. On `skip`, leave it PENDING. Otherwise:
+- **Q2:** "Submit verb? approve / comment / request-changes / skip." When `SELF_REVIEW` is true, offer only `comment` and `skip`, because GitHub rejects approve and request-changes on your own PR. On `skip`, leave it PENDING. Otherwise:
 - **Q3:** "Add a comment for the review?" (optional free text, blank to skip). Leave `BODY` empty on a blank answer, except: on `approve` with a blank answer, default `BODY` to `LGTM`.
 
 ```bash
@@ -296,7 +297,7 @@ Never fabricate URLs; use the `html_url` the API returns.
 ## Step 7: Capture and wrap up
 
 - If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/` (derive `<owner>/<repo>` from `git remote get-url origin`), persist each POSTED blocking/non-blocking finding as a project memory fact (`type: project`, tag it a review gotcha, `anchors:` to the file), deduping against existing memory first. Skip suggestions/nitpicks and anything not posted; if there's no project store, skip silently.
-- If non-self-review and the PR has unaddressed review threads, offer to run `/playbook:address-pr-comments $PR_NUMBER`.
+- If not `SELF_MODE` and the PR has unaddressed review threads, offer to run `/playbook:address-pr-comments $PR_NUMBER`.
 - Final message: one line per outcome (pending review id + count, or submitted verb + timestamp).
 
 ## Step 8: Teardown (MUST run, even on failure, abort, or skip)

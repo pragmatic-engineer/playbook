@@ -36,7 +36,7 @@ pub enum Target {
     Number(String),
     /// A branch name to resolve to its open PR.
     Branch(String),
-    /// Nothing: the current branch's PR, report-only.
+    /// Nothing: the current branch's PR.
     Current,
 }
 
@@ -54,7 +54,7 @@ pub fn parse(args: &str) -> Parsed {
     let mut target = Target::Current;
     for word in args.split_whitespace() {
         if word.starts_with("--") {
-            self_flag |= word == "--self";
+            self_flag |= word == "--self" || word == "--no-post";
             continue;
         }
         if !matches!(target, Target::Current) {
@@ -70,12 +70,12 @@ pub fn parse(args: &str) -> Parsed {
     Parsed { target, self_flag }
 }
 
-/// Report-only when the user asked, the run mode is auto, nothing was named,
-/// or the PR is the caller's own (GitHub blocks approve and request-changes
-/// from the author, and a comment-only review of your own PR has no
-/// independent reviewer behind it).
-pub fn self_mode(parsed: &Parsed, run_mode_auto: bool, self_review: bool) -> bool {
-    parsed.self_flag || run_mode_auto || matches!(parsed.target, Target::Current) || self_review
+/// Report-only when the user passed `--self` or `--no-post`, or the run mode
+/// is auto (a posted review speaks as the user, so auto never posts). Naming
+/// no PR or reviewing your own PR does not skip the post question: the
+/// command narrows the submit verbs for your own PR instead.
+pub fn self_mode(parsed: &Parsed, run_mode_auto: bool) -> bool {
+    parsed.self_flag || run_mode_auto
 }
 
 fn git_ok(args: &[&str]) -> bool {
@@ -173,7 +173,7 @@ pub fn prepare(kind: Kind, args: &str, run_mode_auto: bool) -> Result<String, St
     let (repo_json, head_sha, author, me) = (repo_json?, head_sha?, author?, me?);
     let (repo, repo_url) = parse_repo_json(&repo_json)?;
     let self_review = author == me;
-    let report_only = self_mode(&parsed, run_mode_auto, self_review);
+    let report_only = self_mode(&parsed, run_mode_auto);
 
     let in_place = git_text(&["rev-parse", "HEAD"]) == head_sha
         && git_text(&["status", "--porcelain", "--untracked-files=no"]).is_empty();
@@ -229,12 +229,13 @@ mod tests {
     }
 
     #[test]
-    fn report_only_follows_the_four_causes() {
+    fn report_only_follows_the_flag_and_auto_only() {
         let p = parse("12");
-        assert!(!self_mode(&p, false, false));
-        assert!(self_mode(&p, true, false));
-        assert!(self_mode(&p, false, true));
-        assert!(self_mode(&parse("12 --self"), false, false));
-        assert!(self_mode(&parse(""), false, false));
+        assert!(!self_mode(&p, false));
+        assert!(self_mode(&p, true));
+        assert!(self_mode(&parse("12 --self"), false));
+        assert!(self_mode(&parse("12 --no-post"), false));
+        // No target still asks what to post.
+        assert!(!self_mode(&parse(""), false));
     }
 }

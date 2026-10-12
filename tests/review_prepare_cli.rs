@@ -118,19 +118,26 @@ fn deep_names_its_own_review_json() {
 }
 
 #[test]
-fn your_own_pr_is_report_only() {
+fn your_own_pr_still_asks_what_to_post() {
     let s = Sandbox::new("own", "bob", "bob");
     let t = text(&s.run(&["review", "prepare", "deep", "7"]));
     assert_eq!(field(&t, "SELF_REVIEW"), "true");
-    assert_eq!(field(&t, "SELF_MODE"), "true");
+    assert_eq!(field(&t, "SELF_MODE"), "false");
 }
 
 #[test]
-fn self_flag_auto_and_no_target_are_each_report_only() {
+fn only_the_flags_and_auto_are_report_only() {
     let s = Sandbox::new("modes", "alice", "bob");
     assert_eq!(
         field(
             &text(&s.run(&["review", "prepare", "quick", "7 --self"])),
+            "SELF_MODE"
+        ),
+        "true"
+    );
+    assert_eq!(
+        field(
+            &text(&s.run(&["review", "prepare", "quick", "7 --no-post"])),
             "SELF_MODE"
         ),
         "true"
@@ -144,7 +151,7 @@ fn self_flag_auto_and_no_target_are_each_report_only() {
     );
     let t = text(&s.run(&["review", "prepare", "quick"]));
     assert_eq!(field(&t, "PR_NUMBER"), "7");
-    assert_eq!(field(&t, "SELF_MODE"), "true");
+    assert_eq!(field(&t, "SELF_MODE"), "false");
 }
 
 #[test]
