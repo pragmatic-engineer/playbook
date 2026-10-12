@@ -51,7 +51,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `hygiene.enabled` | `true` | `true`, `false` |
 | `hygiene.thresholdTokens` | `250000` | a number, see the config keys guide for the range |
 | `hints.pluginRemoved` | `true` | `true`, `false` |
-| `docs.convert` | `off` | `auto`, `off` |
+| `docs.convert` | `auto` | `auto`, `off` |
 | `docs.maxBytes` | `26214400` | a number, see the config keys guide for the range |
 | `docs.timeoutSeconds` | `30` | a number, see the config keys guide for the range |
 | `docs.maxOutputChars` | `200000` | a number, see the config keys guide for the range |

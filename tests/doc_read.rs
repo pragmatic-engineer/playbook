@@ -454,7 +454,7 @@ fn the_scratch_root_is_private() {
 }
 
 #[test]
-fn the_docs_keys_default_to_off_and_sane_limits() {
+fn the_docs_keys_default_to_auto_and_sane_limits() {
     // Arrange
     let env = Env::new("keys");
 
@@ -462,7 +462,7 @@ fn the_docs_keys_default_to_off_and_sane_limits() {
     let get = |k: &str| playbook::config::resolve(k, &env.home, None).unwrap().0;
 
     // Assert
-    assert_eq!(get("docs.convert"), Value::from("off"));
+    assert_eq!(get("docs.convert"), Value::from("auto"));
     assert_eq!(get("docs.timeoutSeconds"), Value::from(30));
     assert_eq!(get("docs.maxBytes"), Value::from(26_214_400));
     assert_eq!(get("docs.maxOutputChars"), Value::from(200_000));
