@@ -37,6 +37,7 @@ fixture() {
 [dependencies]
 libc = "=0.2.189"
 playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook-telemetry", tag = "v0.1.3" }
+playbook-data = { git = "https://github.com/pragmatic-engineer/playbook-data", tag = "v0.1.0" }
 other = { git = "https://github.com/pragmatic-engineer/other", tag = "v0.1.3" }
 TOML
   export BUMP_ROOT="$work/root"
@@ -79,6 +80,13 @@ check "refuses a release without SHA256SUMS" 1 "$(run playbook-telemetry $T v0.1
 fixture; mkstubs v0.1.4 "SHA256SUMS"
 check "refuses an unknown crate" 1 "$(run missing $T v0.1.4)"
 check "refuses a mismatched repo" 1 "$(run playbook-telemetry pragmatic-engineer/other-repo v0.1.4)"
+fixture; mkstubs v0.1.1 "SHA256SUMS a-source.tar.gz"
+check "bumps playbook-data" 0 "$(run playbook-data pragmatic-engineer/playbook-data v0.1.1)"
+check "rewrote the playbook-data tag" 1 "$(grep -c 'playbook-data.*tag = "v0.1.1"' "$work/root/Cargo.toml")"
+check "left playbook-telemetry alone" 1 "$(grep -c 'playbook-telemetry.*tag = "v0.1.3"' "$work/root/Cargo.toml")"
+check "refuses playbook-data from another repo" 1 "$(run playbook-data $T v0.1.1)"
+
+fixture; mkstubs v0.1.4 "SHA256SUMS"
 check "rejects a floating tag" 2 "$(run playbook-telemetry $T latest)"
 check "rejects missing args" 2 "$(run playbook-telemetry)"
 

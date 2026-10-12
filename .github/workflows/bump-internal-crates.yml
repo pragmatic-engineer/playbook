@@ -78,11 +78,12 @@ jobs:
           IN_TAG: ${{ github.event.client_payload.tag || inputs.tag }}
         run: |
           set -euo pipefail
-          # Registry of internal crates. Add playbook-code here once it has a
-          # release and a dependency line in Cargo.toml.
+          # Registry of internal crates. A crate with no dependency line in
+          # Cargo.toml yet is skipped, so a new crate only needs its registry line here.
           declare -A REG=(
             [playbook-telemetry]=pragmatic-engineer/playbook-telemetry
             [playbook-code]=pragmatic-engineer/playbook-code
+            [playbook-data]=pragmatic-engineer/playbook-data
           )
           items='[]'
           add() { # crate repo tag
