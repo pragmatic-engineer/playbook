@@ -1782,12 +1782,16 @@ fn main() {
                 ))),
                 HandoffCommand::Check => {
                     let mut text = String::new();
-                    let _ = std::io::stdin().read_to_string(&mut text);
-                    let problems = handoff::compose::check(&text);
-                    if problems.is_empty() {
-                        Ok("handoff ok".to_string())
-                    } else {
-                        Err(problems.join("; "))
+                    match std::io::stdin().read_to_string(&mut text) {
+                        Err(e) => Err(format!("could not read stdin: {e}")),
+                        Ok(_) => {
+                            let problems = handoff::compose::check(&text);
+                            if problems.is_empty() {
+                                Ok("handoff ok".to_string())
+                            } else {
+                                Err(problems.join("; "))
+                            }
+                        }
                     }
                 }
             };

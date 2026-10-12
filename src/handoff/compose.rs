@@ -17,6 +17,19 @@ const SECTIONS: [&str; 4] = [
     "Open questions",
 ];
 
+/// Sections that must appear; the last one is optional.
+const REQUIRED: usize = SECTIONS.len() - 1;
+
+/// Placeholder tokens from the template that must not survive into a handoff.
+const PLACEHOLDERS: [&str; 6] = [
+    "<fact>",
+    "<chosen path>",
+    "<reason>",
+    "<action>",
+    "<gap>",
+    "<decision or task>",
+];
+
 /// The rules and the template `playbook handoff template` prints.
 pub const TEMPLATE: &str = "\
 Write for a reader who has not seen this conversation: a future session, a teammate, or the user in a week.
@@ -71,22 +84,36 @@ pub fn check(text: &str) -> Vec<String> {
                 bodies.push(String::new());
                 continue;
             }
+            problems.push(format!("unknown section heading: {}", line.trim()));
+            bodies.push(String::new());
+            found.push((usize::MAX, "unknown"));
+            continue;
         }
         if let Some(body) = bodies.last_mut() {
             body.push_str(line.trim());
         }
     }
-    for (i, name) in SECTIONS.iter().enumerate().take(3) {
+    for (i, name) in SECTIONS.iter().enumerate().take(REQUIRED) {
         if !found.iter().any(|(j, _)| *j == i) {
             problems.push(format!("missing section: {name}"));
         }
     }
-    if found.windows(2).any(|w| w[0].0 >= w[1].0) {
+    let known: Vec<usize> = found
+        .iter()
+        .map(|f| f.0)
+        .filter(|i| *i != usize::MAX)
+        .collect();
+    if known.windows(2).any(|w| w[0] >= w[1]) {
         problems.push("sections are out of order or repeated".to_string());
     }
     for ((_, name), body) in found.iter().zip(&bodies) {
+        if *name == "unknown" {
+            continue;
+        }
         if body.is_empty() {
             problems.push(format!("empty section: {name}"));
+        } else if PLACEHOLDERS.iter().any(|p| body.contains(p)) {
+            problems.push(format!("unfilled placeholder in section: {name}"));
         }
     }
     problems
@@ -101,7 +128,7 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
         .ok()?;
     out.status
         .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .then(|| String::from_utf8_lossy(&out.stdout).trim_end().to_string())
 }
 
 /// The "Where we are now" facts for `dir`, as Markdown bullets.
@@ -129,7 +156,7 @@ pub fn facts(dir: &Path) -> String {
             out.push_str(&format!("  - {line}\n"));
         }
     }
-    out.trim_end().to_string()
+    out.trim_end().replace(['\u{2014}', '\u{2013}'], "-")
 }
 
 #[cfg(test)]
@@ -162,6 +189,66 @@ mod tests {
     fn out_of_order_sections_fail() {
         let t = "## Next steps\n1. x\n## Where we are now\n- a\n## Decisions made\n- b\n";
         assert!(check(t).iter().any(|m| m.contains("out of order")));
+    }
+
+    #[test]
+    fn placeholders_and_unknown_headings_fail() {
+        let p = check(&GOOD.replace("- a", "- <fact>"));
+        assert!(p.iter().any(|m| m.contains("placeholder")), "{p:?}");
+        let p = check(&GOOD.replace("## Decisions made", "## Decisions made (all)"));
+        assert!(p.iter().any(|m| m.contains("unknown section")), "{p:?}");
+    }
+
+    #[test]
+    fn the_template_names_every_section_heading() {
+        for name in SECTIONS {
+            assert!(TEMPLATE.contains(&format!("## {name}")), "{name}");
+        }
+    }
+
+    #[test]
+    fn facts_report_a_repo_branch_and_unstaged_status() {
+        let dir = crate::common::test_support::scratch_dir("facts");
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = |args: &[&str]| {
+            Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .unwrap();
+        };
+        run(&["init", "-q"]);
+        run(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "first",
+        ]);
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        run(&["add", "a.txt"]);
+        run(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "second",
+        ]);
+        std::fs::write(dir.join("a.txt"), "y").unwrap();
+        let f = facts(&dir);
+        assert!(f.contains("- Branch: ") && f.contains("second"), "{f}");
+        assert!(
+            f.contains("1 changed file(s)") && f.contains("  -  M a.txt"),
+            "{f}"
+        );
     }
 
     #[test]

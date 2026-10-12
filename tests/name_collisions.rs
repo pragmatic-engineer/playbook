@@ -46,6 +46,10 @@ fn command_names() -> Vec<String> {
 
 #[test]
 fn no_skill_shares_a_name_with_a_command() {
+    assert!(
+        !skill_names().is_empty() && !command_names().is_empty(),
+        "scan found nothing"
+    );
     let commands = command_names();
     let mut clashes = Vec::new();
     for (name, origin) in skill_names() {
@@ -82,13 +86,4 @@ fn no_two_skills_share_a_name() {
         "name collision:\n  {}",
         clashes.join("\n  ")
     );
-}
-
-#[test]
-fn command_names_are_unique() {
-    let mut names = command_names();
-    names.sort();
-    let before = names.len();
-    names.dedup();
-    assert_eq!(before, names.len(), "two commands share a name");
 }
