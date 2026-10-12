@@ -14,7 +14,7 @@ Three routes reach Atlassian. Use the first route that works, in the order below
 3. **twg.** Else if `command -v twg` succeeds and `twg doctor` passes, use it. Best at Confluence search and cross-product Teamwork Graph queries, which acli cannot do. Commands in [references/twg.md](references/twg.md).
 4. Else mark Atlassian unavailable and say so. Never guess at contents.
 
-Strengths, as notes on the order above: acli is strongest on Jira work items; it has no Confluence page search, so the acli walk is slow for page discovery, so twg search is the useful fallback there. twg alone offers cross-product Teamwork Graph queries.
+Strengths, as notes on the order above: acli is strongest on Jira work items; it has no Confluence page search, so page discovery by walking the tree is slow and twg search is the useful fallback there. twg alone offers cross-product Teamwork Graph queries.
 
 ## Auth checks
 

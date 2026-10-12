@@ -153,7 +153,7 @@ These split collection from the write decision, so a run can happen unattended (
 One tight summary:
 
 - Facts written / updated / superseded, per cluster and per store.
-- Sources used, and **sources skipped with the reason** (e.g. "Confluence: no MCP and acli absent").
+- Sources used, and **sources skipped with the reason** (e.g. "Confluence: no MCP, acli or twg").
 - The `memory.graph.json` path, node and edge counts, and any dangling anchors or edges flagged during the build.
 
 ## Teardown (MUST run, even on failure or abort)
