@@ -6,6 +6,8 @@
 
 use super::host;
 use super::output::{Envelope, IndexState};
+use super::search::SearchOptions;
+use super::status;
 use clap::Subcommand;
 use serde_json::json;
 use std::path::PathBuf;
@@ -38,6 +40,32 @@ pub enum CodeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Search the indexed text of this repository
+    ///
+    /// Shows repo relative paths, line ranges and short excerpts. Words in the
+    /// query are matched as plain text, so operators have no special meaning.
+    /// Results are marked stale when a file changed after it was indexed.
+    ///
+    /// Example: `playbook code search --text retry`
+    Search {
+        /// Words to look for
+        query: String,
+        /// Search indexed text
+        #[arg(long, required = true)]
+        text: bool,
+        /// Only files under this path prefix, for example `lib/payment/`
+        #[arg(long)]
+        path: Option<String>,
+        /// Only files of this language
+        #[arg(long)]
+        lang: Option<String>,
+        /// Most results to show, from 1 to 200
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// What a command needs from its surroundings.
@@ -58,7 +86,96 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
     match sub {
         CodeCommand::Index { json, rebuild } => render_index(env, json, rebuild),
         CodeCommand::Status { json } => render_status(env, json),
+        CodeCommand::Search {
+            query,
+            path,
+            lang,
+            limit,
+            json,
+            ..
+        } => render_search(env, &query, path, lang, limit as usize, json),
     }
+}
+
+fn render_search(
+    env: &Env,
+    query: &str,
+    path: Option<String>,
+    lang: Option<String>,
+    limit: usize,
+    json: bool,
+) -> Result<String, String> {
+    let mut opts = SearchOptions::new(query);
+    opts.path = path;
+    opts.lang = lang;
+    opts.limit = limit;
+    let out = super::search_text(&env.cwd, &opts)?;
+    let state = status::state_of(&out.drift);
+    let mut warnings = Vec::new();
+    if state == IndexState::Stale {
+        warnings.push(status::stale_warning(&out.drift));
+    }
+    if out.result.hits.iter().any(|h| h.stale) {
+        warnings.push("some results changed after they were indexed".to_string());
+    }
+    if json {
+        let results: Vec<serde_json::Value> = out
+            .result
+            .hits
+            .iter()
+            .map(|h| {
+                json!({
+                    "path": h.path,
+                    "start_line": h.start_line,
+                    "end_line": h.end_line,
+                    "line": h.line,
+                    "match_type": h.match_type,
+                    "tier": h.tier,
+                    "excerpt": h.excerpt,
+                    "stale": h.stale,
+                })
+            })
+            .collect();
+        let mut envelope = Envelope::new(
+            "search",
+            state,
+            out.index_path.display().to_string(),
+            serde_json::Value::Array(results),
+        );
+        envelope.truncated = out.result.truncated;
+        envelope.omitted = out.result.omitted;
+        envelope.warnings = warnings;
+        if let Some(n) = out.result.files_scanned {
+            envelope.stats = Some(json!({"files_scanned": n}));
+        }
+        return Ok(envelope.to_json());
+    }
+    for warning in &warnings {
+        eprintln!("code: {warning}");
+    }
+    let mut text = String::new();
+    for h in &out.result.hits {
+        let first = h
+            .excerpt
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("");
+        let stale = if h.stale { " (stale)" } else { "" };
+        text.push_str(&format!(
+            "{}:{}-{}{stale}  {}\n",
+            h.path,
+            h.start_line,
+            h.end_line,
+            first.trim()
+        ));
+    }
+    if out.result.truncated {
+        text.push_str(&format!("{} more results not shown\n", out.result.omitted));
+    }
+    if out.result.hits.is_empty() {
+        text.push_str("no matches\n");
+    }
+    Ok(text)
 }
 
 fn render_status(env: &Env, json: bool) -> Result<String, String> {

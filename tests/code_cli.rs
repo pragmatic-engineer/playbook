@@ -222,3 +222,59 @@ fn status_is_fresh_after_indexing_and_stale_after_an_added_file() {
     assert_eq!(stale["results"]["added"]["paths"][0], "new.rs");
     assert!(!stale["warnings"].as_array().expect("warnings").is_empty());
 }
+
+#[test]
+fn search_after_an_added_file_warns_on_stderr_in_text_mode() {
+    // Arrange
+    let fx = Fixture::new("search-text-warn", true);
+    fx.write("a.txt", "needleword here\n");
+    assert!(fx.playbook(&["code", "index"]).status.success());
+    fx.write("new.txt", "other\n");
+
+    // Act
+    let out = fx.playbook(&["code", "search", "--text", "needleword"]);
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(stdout.starts_with("a.txt:1-1"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(stderr.contains("stale"), "{stderr}");
+}
+
+#[test]
+fn search_after_an_added_file_puts_the_warning_in_the_json_document() {
+    // Arrange
+    let fx = Fixture::new("search-json-warn", true);
+    fx.write("a.txt", "needleword here\n");
+    assert!(fx.playbook(&["code", "index"]).status.success());
+    fx.write("new.txt", "other\n");
+
+    // Act
+    let out = fx.playbook(&["code", "search", "--text", "needleword", "--json"]);
+
+    // Assert
+    let doc = json_of(&out);
+    assert_eq!(doc["index"]["state"], "stale");
+    assert_eq!(doc["results"][0]["path"], "a.txt");
+    assert_eq!(doc["results"][0]["start_line"], 1);
+    assert!(!doc["warnings"].as_array().expect("warnings").is_empty());
+}
+
+#[test]
+fn search_without_an_index_exits_one_and_says_to_index_first() {
+    // Arrange
+    let fx = Fixture::new("search-missing", true);
+
+    // Act
+    let out = fx.playbook(&["code", "search", "--text", "x"]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(err.contains("no index yet"), "{err}");
+}

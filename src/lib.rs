@@ -2145,6 +2145,24 @@ mod tests {
     }
 
     #[test]
+    fn code_search_needs_text_and_limits_run_from_one_to_two_hundred() {
+        // Arrange
+        let parse = |limit: &str| {
+            Cli::try_parse_from([
+                "playbook", "code", "search", "--text", "x", "--limit", limit,
+            ])
+        };
+
+        // Act, Assert
+        assert!(Cli::try_parse_from(["playbook", "code", "search", "x"]).is_err());
+        assert!(Cli::try_parse_from(["playbook", "code", "search", "--text", "x"]).is_ok());
+        assert!(parse("0").is_err());
+        assert!(parse("1").is_ok());
+        assert!(parse("200").is_ok());
+        assert!(parse("201").is_err());
+    }
+
+    #[test]
     fn json_and_hook_are_hidden_but_still_parse() {
         // Arrange
         let cmd = Cli::command();

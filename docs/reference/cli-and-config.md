@@ -194,7 +194,7 @@ Index and search the repository's source code
 
 The index is a cache kept under the playbook state folder for this worktree. Nothing is written inside the repository.
 
-Subcommands: `index`, `status`
+Subcommands: `index`, `search`, `status`
 
 ### `playbook code index`
 
@@ -206,6 +206,21 @@ Example: `playbook code index --json`
 
 - `--json`: Print one JSON document
 - `--rebuild`: Delete the cache first and index everything again
+
+### `playbook code search`
+
+Search the indexed text of this repository
+
+Shows repo relative paths, line ranges and short excerpts. Words in the query are matched as plain text, so operators have no special meaning. Results are marked stale when a file changed after it was indexed.
+
+Example: `playbook code search --text retry`
+
+- `<QUERY>`: Words to look for
+- `--text`: Search indexed text
+- `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
+- `--lang <LANG>`: Only files of this language
+- `--limit <LIMIT>`: Most results to show, from 1 to 200
+- `--json`: Print one JSON document
 
 ### `playbook code status`
 
