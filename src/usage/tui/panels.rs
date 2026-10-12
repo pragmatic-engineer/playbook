@@ -274,8 +274,8 @@ fn gradient_legend(pal: &Palette, fill: Fill, what: &str, box_ink: Ink) -> Optio
     Some(Line::from(spans))
 }
 
-/// The chart a panel shows, laid out for its box. The same layout answers
-/// mouse hits (`App::mouse`), so a click lands on the bar it points at.
+/// The chart a panel shows, laid out for its box. The cursor keys use the same
+/// layout, so the cursor lands on the bar drawn.
 pub fn chart_plot(area: Rect, data: &Data, panel: Panel) -> Plot {
     let metric = match panel {
         Panel::Tokens => Metric::Tokens,

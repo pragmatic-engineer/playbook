@@ -201,7 +201,6 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
         ("enter", "pick".to_string()),
         ("p", "sessions".to_string()),
         ("t", theme),
-        ("x", "mouse".to_string()),
         ("q", "quit".to_string()),
     ];
     let width = |hints: &[(&str, String)]| {
@@ -229,7 +228,7 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
 }
 
 /// The order footer hints are dropped in on a narrow screen.
-const FOOTER_DROP: [&str; 6] = ["p", "x", "t", "enter", "s/S", "1-6"];
+const FOOTER_DROP: [&str; 5] = ["p", "t", "enter", "s/S", "1-6"];
 
 /// What the right end of the footer says: when the data was last read, or why
 /// the last read failed. The time is the snapshot's own clock, so it moves only
@@ -957,14 +956,8 @@ mod tests {
         let app = App::new(Range::All);
         let wide = screen(&app, 120, 30);
         let narrow = screen(&app, 80, 24);
-        assert!(
-            wide.contains("x mouse") && wide.contains("t theme"),
-            "{wide}"
-        );
-        assert!(
-            !narrow.contains("x mouse") && !narrow.contains("t theme"),
-            "{narrow}"
-        );
+        assert!(wide.contains("t theme"), "{wide}");
+        assert!(!narrow.contains("t theme"), "{narrow}");
         for kept in ["r range", "d/w/W/m/M/a jump", "/ filter", "q quit"] {
             assert!(narrow.contains(kept), "{kept}:\n{narrow}");
         }
