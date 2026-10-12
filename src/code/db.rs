@@ -13,7 +13,7 @@ use std::time::Duration;
 
 /// Bumped when the table layout changes. A different non-zero value in
 /// `PRAGMA user_version` makes the next `index` run rebuild the file.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 
@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS symbols (
     qualified_name TEXT NOT NULL,
     kind TEXT NOT NULL,
     signature TEXT,
+    signature_cut INTEGER NOT NULL DEFAULT 0,
+    exported INTEGER NOT NULL DEFAULT 0,
     start_byte INTEGER NOT NULL,
     end_byte INTEGER NOT NULL,
     start_line INTEGER NOT NULL,
@@ -295,7 +297,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn open_creates_a_private_dir_and_file_at_schema_version_one() {
+    fn open_creates_a_private_dir_and_file_at_the_current_schema_version() {
         use std::os::unix::fs::PermissionsExt;
         // Arrange
         let dir = scratch_dir("code-db-modes");
@@ -320,7 +322,7 @@ mod tests {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .expect("version");
-        assert_eq!(version, 1);
+        assert_eq!(version, SCHEMA_VERSION);
         let fk: i64 = conn
             .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
             .expect("fk");
@@ -355,7 +357,7 @@ mod tests {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .expect("version");
-        assert_eq!(version, 1);
+        assert_eq!(version, SCHEMA_VERSION);
         let _ = std::fs::remove_dir_all(dir);
     }
 
