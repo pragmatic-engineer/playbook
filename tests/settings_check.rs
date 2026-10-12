@@ -70,7 +70,7 @@ impl Fixture {
 fn good_template() -> String {
     format!(
         r#"{{
-  "skipAutoPermissionPrompt": false,
+  "statusLine": {{ "type": "command", "command": "playbook statusline" }},
   "permissions": {PERMISSIONS},
   "hooks": {{
     "SessionStart": [
@@ -124,10 +124,10 @@ fn a_pinned_model_is_rejected() {
     let f = Fixture::new("bad-model");
     let bad = good_template().replace(
         r#"{
-  "skipAutoPermissionPrompt": false,"#,
+  "statusLine": { "type": "command", "command": "playbook statusline" },"#,
         r#"{
   "model": "opus",
-  "skipAutoPermissionPrompt": false,"#,
+  "statusLine": { "type": "command", "command": "playbook statusline" },"#,
     );
     let t = f.template("bad-model", &bad);
     let out = f.run(&t);
@@ -140,17 +140,18 @@ fn a_pinned_model_is_rejected() {
 }
 
 #[test]
-fn skip_auto_permission_prompt_must_be_false() {
+fn skip_auto_permission_prompt_must_not_be_true() {
     let f = Fixture::new("bad-skip");
     let bad = good_template().replace(
-        r#""skipAutoPermissionPrompt": false"#,
-        r#""skipAutoPermissionPrompt": true"#,
+        r#""statusLine": { "type": "command", "command": "playbook statusline" },"#,
+        r#""skipAutoPermissionPrompt": true,
+  "statusLine": { "type": "command", "command": "playbook statusline" },"#,
     );
     let t = f.template("bad-skip", &bad);
     let out = f.run(&t);
     assert_eq!(out.status.code(), Some(1));
     assert!(
-        stderr_of(&out).contains("skipAutoPermissionPrompt must be false"),
+        stderr_of(&out).contains("skipAutoPermissionPrompt must not be true"),
         "got: {}",
         stderr_of(&out)
     );
@@ -188,11 +189,11 @@ fn novel_keys_not_in_allowlist_are_rejected() {
         let f = Fixture::new(&format!("novel-{key}"));
         let bad = good_template().replace(
             r#"{
-  "skipAutoPermissionPrompt": false,"#,
+  "statusLine": { "type": "command", "command": "playbook statusline" },"#,
             &format!(
                 r#"{{
   "{key}": "x",
-  "skipAutoPermissionPrompt": false,"#
+  "statusLine": {{ "type": "command", "command": "playbook statusline" }},"#
             ),
         );
         let t = f.template("novel", &bad);
@@ -207,7 +208,7 @@ fn novel_keys_not_in_allowlist_are_rejected() {
 }
 
 #[test]
-fn env_key_not_in_allowlist_is_rejected() {
+fn an_env_block_is_rejected_because_no_env_entry_ships() {
     let f = Fixture::new("bad-env");
     let bad = good_template().replace(
         r#""hooks": {"#,
@@ -218,7 +219,8 @@ fn env_key_not_in_allowlist_is_rejected() {
     let out = f.run(&t);
     assert_eq!(out.status.code(), Some(1));
     assert!(
-        stderr_of(&out).contains("NOT_SHIPPABLE_ENV_KEY"),
+        stderr_of(&out).contains("not in the shippable allowlist")
+            && stderr_of(&out).contains("env"),
         "got: {}",
         stderr_of(&out)
     );
@@ -348,7 +350,7 @@ fn unreadable_and_malformed_inputs_are_named() {
 fn missing_permissions_block_is_rejected() {
     let f = Fixture::new("no-perms");
     let bad = r#"{
-  "skipAutoPermissionPrompt": false,
+  "statusLine": { "type": "command", "command": "playbook statusline" },
   "hooks": {}
 }"#;
     let t = f.template("no-perms", bad);

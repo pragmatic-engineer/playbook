@@ -109,3 +109,11 @@ through `head` or `tail` and to use `gh ... --json` with `jq`. This is an
 intentional message change, not a drift to hide. The thresholds also moved
 (500 lines, 60,000 bytes), but the golden fixture has 1500 lines so only the
 message text differs.
+
+**Note (2026-10-12):** the two `init.*.json` fixtures were regenerated
+because the shipped template now carries only `hooks`, `statusLine` and
+`permissions`. The display options, notification toggles and `env` entries
+were personal preferences no hook or launcher reads, so they were removed.
+The `gen-shared-settings.*.json` fixtures lost the `env` and
+`skipAutoPermissionPrompt` entries for the same reason. Intentional, not a
+drift to hide.

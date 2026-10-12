@@ -22,7 +22,7 @@ The quickest route is one command. This page covers every route, requirements, h
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
 
-It installs the `playbook` binary into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) after checking its SHA256 and a `--version` smoke test, and puts that directory on `PATH`. Then it runs `playbook init`, which wires the guards and hooks into `settings.json`, merges the shared settings and installs the status line. It also installs the plugin, and asks before adding the launcher and system prompt. Open a new terminal afterward.
+It installs the `playbook` binary into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) after checking its SHA256 and a `--version` smoke test, and puts that directory on `PATH`. Then it runs `playbook init`, which wires the guards and hooks into `settings.json`, and sets the status line. It also installs the plugin, and asks before adding the launcher and system prompt. Open a new terminal afterward.
 
 Pass `--yes` to accept every default. Flags go after `-s --` when piping:
 
@@ -143,11 +143,13 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Settings merge
 
-`playbook init` merges the shipped template into your `settings.json` and never overwrites it. New product config lands automatically. Keys you customised stay as you set them.
+`playbook init` merges the shipped template into your `settings.json` and never overwrites it. The template carries three things, each behind its own part: the `hooks` block, the `statusLine` and, only when you opt in, the `permissions` block. It ships no display options, notification toggles or `env` entries, because no hook or launcher reads them. Keys you customised stay as you set them. Keys an older template shipped (`cleanupPeriodDays`, `outputStyle`, `env` and the like) stay in your file too, and init never removes them.
+
+The retired `--settings` and `--no-settings` flags are gone. Use `--hooks`, `--statusline` and `--security` and their `--no-` forms instead.
 
 It tracks a baseline in `~/.claude/.settings.base.json` and compares it with the new template and your live file. After each run, `$CLAUDE_HOME/settings-merge-skipped.<epoch>.json` lists every key where your value won, as `{"key":"...", "template_had":..., "yours":...}`. Review it and adopt template values by hand if you want them.
 
-The security defaults, the `permissions` block and `DISABLE_AUTOUPDATER`, are opt-in. A plain `playbook init` does not add them and never removes ones you have. Pass `--security` or set `security.defaults` to true to merge them. `permissions` is one top-level key. If you customised it, the whole block counts as contested and the template's version is withheld, so your rules win. See [Security](../../README.md#security).
+The security defaults, the `permissions` block, are opt-in. A plain `playbook init` does not add them and never removes ones you have. Update control (the Claude Code autoupdater) is left to you, `playbook update` and Homebrew. Pass `--security` or set `security.defaults` to true to merge them. `permissions` is one top-level key. If you customised it, the whole block counts as contested and the template's version is withheld, so your rules win. See [Security](../../README.md#security).
 
 If a run is interrupted between writing `settings.json` and the baseline, delete `.settings.base.json`. The next run treats the missing baseline as empty and only adds keys.
 

@@ -1,5 +1,4 @@
 {
-  "env": {},
   "permissions": {
     "allow": [
       "Read",
@@ -12,6 +11,5 @@
       "Bash(curl:*)"
     ],
     "defaultMode": "auto"
-  },
-  "skipAutoPermissionPrompt": false
+  }
 }

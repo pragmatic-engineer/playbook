@@ -43,14 +43,12 @@ pub struct InitPaths {
     pub aliases: bool,
     /// Whether to wire the hook entries into settings.json.
     pub hooks: bool,
-    /// Whether to merge the shared settings template into settings.json.
-    pub settings: bool,
     /// Whether init may set or change `statusLine` in settings.json. False
     /// drops it from the merge and skips the legacy command migration.
     pub statusline: bool,
     /// Whether the settings merge also applies the security defaults
-    /// (`permissions` and `env.DISABLE_AUTOUPDATER`). False leaves the user's
-    /// values for both exactly as they are; see `merge_filtered`.
+    /// (the `permissions` block). False leaves the user's value exactly as it
+    /// is; see `merge_filtered`.
     pub security: bool,
     /// Where the binary lives and the shell to wire it for. `None` skips the
     /// `path` step.
@@ -192,7 +190,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepReport, StepReport) {
     let settings_path = paths.claude_home.join("settings.json");
     let self_root = paths.self_root.as_deref();
-    let settings_step = if paths.settings {
+    let settings_step = if paths.hooks || paths.statusline || paths.security {
         seed_or_merge_settings(
             self_root,
             &paths.claude_home,
@@ -203,10 +201,13 @@ pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepRe
             paths.statusline,
         )
     } else {
-        StepReport::skipped("settings", "not requested; pass --settings to opt in")
+        StepReport::skipped(
+            "settings",
+            "hooks, statusline and security are all off; settings.json is not merged",
+        )
     };
     let mut settings_step = settings_step;
-    if !paths.security && settings_step.status != StepStatus::Failed && paths.settings {
+    if !paths.security && settings_step.status != StepStatus::Failed {
         settings_step
             .detail
             .push_str("; security defaults not applied, pass --security to opt in");
@@ -378,6 +379,7 @@ fn seed_or_merge_settings(
     }
 
     let base_path = claude_home.join(".settings.base.json");
+    forget_retired_keys(&base_path, &template_path);
     if !with_hooks || !with_security || !with_statusline {
         return merge_filtered(
             claude_home,
@@ -396,6 +398,39 @@ fn seed_or_merge_settings(
         Ok(outcome) => finish_merge(settings_path, &outcome, epoch),
         Err(merge::MergeError::Validation(err)) => StepReport::failed("settings", err.to_string()),
         Err(merge::MergeError::Io(err)) => StepReport::failed("settings", err.to_string()),
+    }
+}
+
+/// Drop from the recorded base every top-level key the template no longer
+/// ships. The three-way merge removes a key the template dropped when the user
+/// never changed it, which would take a value out of an existing user's file
+/// (older templates shipped display options and `env` entries). With the key
+/// gone from the base, the merge sees a key only the user has, and keeps it.
+fn forget_retired_keys(base_path: &Path, template_path: &Path) {
+    let read = |p: &Path| {
+        fs::read_to_string(p)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    };
+    let (Some(mut base), Some(template)) = (read(base_path), read(template_path)) else {
+        return;
+    };
+    let (Some(base_map), Some(template_map)) = (base.as_object_mut(), template.as_object()) else {
+        return;
+    };
+    let retired: Vec<String> = base_map
+        .keys()
+        .filter(|k| !template_map.contains_key(*k))
+        .cloned()
+        .collect();
+    if retired.is_empty() {
+        return;
+    }
+    for key in retired {
+        base_map.shift_remove(&key);
+    }
+    if let Ok(text) = serde_json::to_string_pretty(&base) {
+        let _ = fs::write(base_path, format!("{text}\n"));
     }
 }
 
@@ -420,9 +455,9 @@ struct Filters {
 }
 
 /// Point the template's security slice at the user's own values, so the merge
-/// sees "nothing to change" there. The slice is the whole `permissions` key
-/// and `env.DISABLE_AUTOUPDATER`: the user's value is copied in when they have
-/// one, and the entry is left out of the template when they do not. Whatever
+/// sees "nothing to change" there. The slice is the whole `permissions` key:
+/// the user's value is copied in when they have one, and the entry is left out
+/// of the template when they do not. Whatever
 /// the user has, the merge hands back unchanged, and the recorded base keeps
 /// describing what the user had, so a later opt-in merges as if this run had
 /// never happened.
@@ -437,22 +472,6 @@ fn neutralise_security(template: &mut serde_json::Value, user: &serde_json::Valu
             }
             None => {
                 map.shift_remove(*key);
-            }
-        }
-    }
-    let user_env = user.get("env");
-    if let Some(env) = map
-        .get_mut("env")
-        .and_then(serde_json::Value::as_object_mut)
-    {
-        for key in crate::settings::keys::SECURITY_ENV {
-            match user_env.and_then(|e| e.get(key)) {
-                Some(v) => {
-                    env.insert((*key).to_string(), v.clone());
-                }
-                None => {
-                    env.shift_remove(*key);
-                }
             }
         }
     }

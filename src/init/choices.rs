@@ -17,19 +17,13 @@ pub struct Flags {
     /// Add no playbook hook entries, including the guards in the shared settings
     #[arg(long, overrides_with = "hooks")]
     pub no_hooks: bool,
-    /// Merge playbook's shared settings (options, without the status line) into settings.json
-    #[arg(long, overrides_with = "no_settings")]
-    pub settings: bool,
-    /// Do not touch the shared settings
-    #[arg(long, overrides_with = "settings")]
-    pub no_settings: bool,
     /// Use the playbook status line (sets statusLine.command to `playbook statusline`)
     #[arg(long, overrides_with = "no_statusline")]
     pub statusline: bool,
     /// Do not set or change statusLine in settings.json
     #[arg(long, overrides_with = "statusline")]
     pub no_statusline: bool,
-    /// Also apply the security defaults (permissions rules, autoupdater off); off unless asked or `security.defaults` is true
+    /// Also apply the security defaults (permissions rules); off unless asked or `security.defaults` is true
     #[arg(long, overrides_with = "no_security")]
     pub security: bool,
     /// Do not apply the security defaults, even when `security.defaults` is true
@@ -68,7 +62,6 @@ pub struct Flags {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Choices {
     pub hooks: bool,
-    pub settings: bool,
     pub statusline: bool,
     pub security: bool,
     pub path: bool,
@@ -110,12 +103,6 @@ pub fn resolve(
             flags.hooks,
             flags.no_hooks,
             catalog::question("hooks"),
-            true,
-        ),
-        settings: decide(
-            flags.settings,
-            flags.no_settings,
-            catalog::question("settings"),
             true,
         ),
         statusline: decide(
@@ -182,7 +169,6 @@ mod tests {
             c,
             Choices {
                 hooks: true,
-                settings: true,
                 statusline: true,
                 security: false,
                 path: true,
@@ -207,7 +193,7 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.aliases);
-        assert_eq!(asked.len(), 4, "{asked:?}");
+        assert_eq!(asked.len(), 3, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && !q.contains("ccc")));
@@ -219,7 +205,7 @@ mod tests {
             q.contains("hooks")
         });
         assert!(c.hooks);
-        assert!(!c.settings && !c.statusline && !c.path && !c.aliases && !c.system_prompt);
+        assert!(!c.statusline && !c.path && !c.aliases && !c.system_prompt);
     }
 
     #[test]
@@ -229,11 +215,11 @@ mod tests {
             ..Flags::default()
         };
         let c = resolve(&flags, true, false, &mut never);
-        assert!(c.hooks && c.settings && c.statusline && c.path && !c.aliases && !c.system_prompt);
+        assert!(c.hooks && c.statusline && c.path && !c.aliases && !c.system_prompt);
     }
 
     #[test]
-    fn the_statusline_question_comes_after_settings_and_before_path() {
+    fn the_statusline_question_comes_after_hooks_and_before_path() {
         let mut order = Vec::new();
         resolve(&Flags::default(), true, false, &mut |q, d| {
             order.push(q.to_string());
@@ -245,7 +231,7 @@ mod tests {
                 .position(|q| q == catalog::question(id))
                 .unwrap()
         };
-        assert!(pos("settings") < pos("statusline"));
+        assert!(pos("hooks") < pos("statusline"));
         assert!(pos("statusline") < pos("path"));
         assert!(order.iter().any(|q| q == catalog::question("statusline")));
     }

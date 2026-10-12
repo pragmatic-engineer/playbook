@@ -4,54 +4,15 @@
 //! Single-sourced allowlist for `settings.shared.json`: the only keys `gen`
 //! may keep and `check` may accept, so both agree on what ships.
 
-/// Current `settings.shared.json` top-level keys minus `autoMode` and
-/// `enabledPlugins`, both machine-specific plugin/mode state.
-pub const SHIPPABLE_KEYS: &[&str] = &[
-    "$schema",
-    "cleanupPeriodDays",
-    "env",
-    "includeCoAuthoredBy",
-    "includeGitInstructions",
-    "permissions",
-    "hooks",
-    "worktree",
-    "statusLine",
-    "outputStyle",
-    "feedbackSurveyRate",
-    "spinnerTipsEnabled",
-    "awaySummaryEnabled",
-    "autoUpdatesChannel",
-    "tui",
-    "skipDangerousModePermissionPrompt",
-    "editorMode",
-    "teammateMode",
-    "remoteControlAtStartup",
-    "inputNeededNotifEnabled",
-    "agentPushNotifEnabled",
-    "skipAutoPermissionPrompt",
-    "useAutoModeDuringPlan",
-];
-
-/// `env` keys safe to ship: telemetry opt-outs and per-install toggles.
-/// Dropped as machine/demo/experimental: `IS_DEMO`,
-/// `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`.
-pub const SHIPPABLE_ENV: &[&str] = &[
-    "CLAUDE_CODE_ENABLE_TELEMETRY",
-    "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-    "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS",
-    "DISABLE_UPGRADE_COMMAND",
-    "DISABLE_COST_WARNINGS",
-    "DISABLE_AUTOUPDATER",
-    "DISABLE_TELEMETRY",
-    "ENABLE_TOOL_SEARCH",
-    "DO_NOT_TRACK",
-];
+/// The `settings.shared.json` top-level keys that may ship: the three things
+/// `playbook init` applies for a part the user agrees to. `hooks` is the guard
+/// entries, `statusLine` is the status line and `permissions` is the security
+/// defaults. Display options, notification toggles and `env` entries are
+/// personal preferences that no hook or launcher depends on, so they never ship.
+pub const SHIPPABLE_KEYS: &[&str] = &["permissions", "hooks", "statusLine"];
 
 /// The security section of the template: the whole `permissions` key. A fresh
 /// `playbook init` leaves it out unless the user opts in, see
-/// `init::run::neutralise_security`.
+/// `init::run::neutralise_security`. Update control (the autoupdater) is left
+/// to the user, `playbook update` and Homebrew.
 pub const SECURITY_KEYS: &[&str] = &["permissions"];
-
-/// `env` entries in the security section: autoupdates ship disabled.
-pub const SECURITY_ENV: &[&str] = &["DISABLE_AUTOUPDATER"];

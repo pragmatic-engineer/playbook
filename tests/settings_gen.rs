@@ -35,7 +35,7 @@
 //! - `playbook settings gen` works from the CLI: `settings_gen_works_from_the_cli`
 //! - Allowlist coverage added for the shippable-key inversion:
 //!   `novel_top_level_key_is_dropped_and_named_on_stderr`,
-//!   `novel_env_key_is_dropped_shippable_env_key_survives`,
+//!   `an_env_block_is_dropped_whole`,
 //!   `auto_mode_and_enabled_plugins_are_dropped`,
 //!   `shape_valid_but_nonexistent_hook_name_is_dropped`
 
@@ -148,7 +148,10 @@ fn happy_path_canned_perms_model_stripped_only_shippable_keys_survive() {
         "permissions should be replaced with the canned object"
     );
     assert!(result.get("model").is_none(), "model should be stripped");
-    assert_eq!(result["skipAutoPermissionPrompt"], false);
+    assert!(
+        result.get("skipAutoPermissionPrompt").is_none(),
+        "skipAutoPermissionPrompt is a personal preference and must not ship"
+    );
     for key in [
         "effortLevel",
         "theme",
@@ -161,10 +164,9 @@ fn happy_path_canned_perms_model_stripped_only_shippable_keys_survive() {
         );
     }
     assert!(
-        result["env"].get("IS_DEMO").is_none(),
-        "IS_DEMO is demo-only and must not ship"
+        result.get("env").is_none(),
+        "no env entry ships, including DISABLE_AUTOUPDATER"
     );
-    assert_eq!(result["env"]["DISABLE_AUTOUPDATER"], "1");
     assert!(result.get("hooks").is_some(), "hooks should pass through");
     assert!(
         result.get("statusLine").is_some(),
@@ -195,10 +197,7 @@ fn model_absent_in_source_stays_absent() {
     // survived the old denylist and no longer survives the allowlist.
     let result: Value = serde_json::from_str(&rust_output).unwrap();
     assert!(result.get("model").is_none());
-    assert!(
-        result["env"].get("IS_DEMO").is_none(),
-        "IS_DEMO is demo-only and must not ship"
-    );
+    assert!(result.get("env").is_none(), "no env entry ships");
 }
 
 // C: model set in source -> stripped from the template.
@@ -415,14 +414,17 @@ fn new_and_old_config_paths_are_both_filtered_out_identically() {
 // the divergence in a named direction rather than leaving it to a comment.
 #[test]
 fn non_ascii_value_diverges_from_python_named_direction() {
-    // Arrange: a value with non-ASCII characters, carried in a SHIPPABLE_ENV
+    // Arrange: a value with non-ASCII characters, carried in a shippable
     // key so it survives the allowlist (the golden fixture below still used
     // customUnknownKey, which the allowlist now drops before this divergence
     // could even be observed).
     let dir = scratch_dir("non-ascii");
     let src_path = dir.join("src.json");
     let perms_path = dir.join("perms.json");
-    write_file(&src_path, r#"{"env":{"DISABLE_TELEMETRY":"café ☃"}}"#);
+    write_file(
+        &src_path,
+        r#"{"statusLine":{"type":"command","command":"café ☃"}}"#,
+    );
     write_file(&perms_path, CANNED_PERMS);
 
     // Act
@@ -460,7 +462,7 @@ fn non_ascii_value_diverges_from_python_named_direction() {
 }
 
 /// A second, mutated copy of `SRC_FULL`: the one shippable env key
-/// (`DISABLE_AUTOUPDATER`) changed, so the generated output must differ.
+/// (status line command) changed, so the generated output must differ.
 /// `env.IS_DEMO` is not used for the mutation any more: the allowlist now
 /// drops it regardless of its value, which would make the mutation a no-op.
 const SRC_MUTATED: &str = r#"{
@@ -473,7 +475,7 @@ const SRC_MUTATED: &str = r#"{
   "permissions": { "allow": ["Bash"], "deny": [], "ask": [], "defaultMode": "auto" },
   "env": { "IS_DEMO": "1", "DISABLE_AUTOUPDATER": "0" },
   "hooks": { "SessionStart": [{ "hooks": [] }] },
-  "statusLine": { "type": "command", "command": "bash x" },
+  "statusLine": { "type": "command", "command": "bash y" },
   "customUnknownKey": { "keep": "me" }
 }"#;
 
@@ -502,7 +504,7 @@ fn regression_pin_mutating_a_shippable_key_changes_the_output() {
     // output, proving this pin can fail rather than passing vacuously.
     assert_ne!(
         rust_output, mutated_output,
-        "a mutated shippable env value should change the generated output"
+        "a mutated shippable value should change the generated output"
     );
 }
 
@@ -628,17 +630,16 @@ fn novel_top_level_key_is_dropped_and_named_on_stderr() {
     );
 }
 
-// A novel env key, not on SHIPPABLE_ENV, is dropped; a shippable env key in
-// the same object survives.
+// No env entry ships: the template carries no `env` block at all.
 #[test]
-fn novel_env_key_is_dropped_shippable_env_key_survives() {
+fn an_env_block_is_dropped_whole() {
     // Arrange
-    let dir = scratch_dir("novel-env-key");
+    let dir = scratch_dir("env-dropped");
     let src_path = dir.join("src.json");
     let perms_path = dir.join("perms.json");
     write_file(
         &src_path,
-        r#"{"env":{"TOTALLY_NOVEL_ENV_KEY":"x","DISABLE_TELEMETRY":"1"}}"#,
+        r#"{"env":{"TOTALLY_NOVEL_ENV_KEY":"x","DISABLE_TELEMETRY":"1","DISABLE_AUTOUPDATER":"1"}}"#,
     );
     write_file(&perms_path, CANNED_PERMS);
 
@@ -647,8 +648,7 @@ fn novel_env_key_is_dropped_shippable_env_key_survives() {
 
     // Assert
     let result: Value = serde_json::from_str(&rust_output).unwrap();
-    assert!(result["env"].get("TOTALLY_NOVEL_ENV_KEY").is_none());
-    assert_eq!(result["env"]["DISABLE_TELEMETRY"], "1");
+    assert!(result.get("env").is_none());
 }
 
 // autoMode and enabledPlugins are machine/plugin state, never shippable.

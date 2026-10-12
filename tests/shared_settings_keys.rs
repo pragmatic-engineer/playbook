@@ -7,31 +7,7 @@
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-const EXPECTED: [&str; 23] = [
-    "$schema",
-    "agentPushNotifEnabled",
-    "autoUpdatesChannel",
-    "awaySummaryEnabled",
-    "cleanupPeriodDays",
-    "editorMode",
-    "env",
-    "feedbackSurveyRate",
-    "hooks",
-    "includeCoAuthoredBy",
-    "includeGitInstructions",
-    "inputNeededNotifEnabled",
-    "outputStyle",
-    "permissions",
-    "remoteControlAtStartup",
-    "skipAutoPermissionPrompt",
-    "skipDangerousModePermissionPrompt",
-    "spinnerTipsEnabled",
-    "statusLine",
-    "teammateMode",
-    "tui",
-    "useAutoModeDuringPlan",
-    "worktree",
-];
+const EXPECTED: [&str; 3] = ["hooks", "permissions", "statusLine"];
 
 fn keys_of(value: &Value) -> BTreeSet<String> {
     value
@@ -81,9 +57,33 @@ fn an_extra_key_is_reported_by_name() {
 #[test]
 fn a_removed_key_is_reported_by_name() {
     let mut v = seed();
-    v.as_object_mut().unwrap().remove("editorMode");
+    v.as_object_mut().unwrap().remove("statusLine");
     let actual = keys_of(&v);
     let exp = expected();
     let missing: Vec<_> = exp.difference(&actual).cloned().collect();
-    assert_eq!(missing, vec!["editorMode".to_string()]);
+    assert_eq!(missing, vec!["statusLine".to_string()]);
+}
+
+#[test]
+fn no_personal_preference_key_ships() {
+    let actual = keys_of(&seed());
+
+    for key in [
+        "outputStyle",
+        "tui",
+        "editorMode",
+        "spinnerTipsEnabled",
+        "teammateMode",
+        "feedbackSurveyRate",
+        "cleanupPeriodDays",
+        "env",
+        "worktree",
+    ] {
+        assert!(!actual.contains(key), "{key} must not ship in the template");
+    }
+}
+
+#[test]
+fn the_autoupdater_switch_does_not_ship() {
+    assert!(!seed().to_string().contains("DISABLE_AUTOUPDATER"));
 }

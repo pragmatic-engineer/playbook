@@ -3,13 +3,12 @@
 
 //! Settings seed generator, ported from the retired shell original. That
 //! file's header comment was the original specification: replace
-//! `.permissions` with a canned permissions object, force
-//! `skipAutoPermissionPrompt: false`, and filter `.hooks` down to entries
+//! `.permissions` with a canned permissions object, and filter `.hooks` down to entries
 //! whose command matches the safety pattern. Output is
 //! `json.dumps(result, indent=2)` followed by the newline `print` adds.
 //!
-//! Top-level and `env` keys are now filtered through `settings::keys`'s
-//! `SHIPPABLE_KEYS`/`SHIPPABLE_ENV` ALLOWLIST, inverted from the python
+//! Top-level keys are now filtered through `settings::keys`'s
+//! `SHIPPABLE_KEYS` ALLOWLIST, inverted from the python
 //! original's `PERSONAL_KEYS` denylist: any key not explicitly shippable is
 //! dropped, rather than any key not explicitly personal leaking through.
 //!
@@ -33,7 +32,7 @@
 //!   scenario exercises the omitted-PERMS default, and the Makefile
 //!   invocation this serves already passes both paths explicitly.
 
-use crate::settings::keys::{SHIPPABLE_ENV, SHIPPABLE_KEYS};
+use crate::settings::keys::SHIPPABLE_KEYS;
 use crate::HookName;
 use clap::ValueEnum;
 use serde_json::{Map, Value};
@@ -163,24 +162,15 @@ fn keep_only(map: &mut Map<String, Value>, allowed: &[&str]) -> Vec<String> {
 }
 
 /// The transform itself, ported from the retired shell original's
-/// `main`: replace `.permissions`, force `skipAutoPermissionPrompt: false`,
-/// keep only shippable top-level and `env` keys, and filter `.hooks` if
+/// `main`: replace `.permissions`, keep only the shippable top-level keys, and filter `.hooks` if
 /// present. `serde_json`'s `Map::insert` updates a key already present in
 /// place and appends a genuinely new key at the end, so key order in `src`
 /// decides key order in the result exactly as it does in the python
 /// original.
 fn build(mut src: Map<String, Value>, perms: Value) -> Map<String, Value> {
     src.insert("permissions".to_string(), perms);
-    src.insert("skipAutoPermissionPrompt".to_string(), Value::Bool(false));
 
-    let mut dropped = keep_only(&mut src, SHIPPABLE_KEYS);
-    if let Some(Value::Object(env)) = src.get_mut("env") {
-        dropped.extend(
-            keep_only(env, SHIPPABLE_ENV)
-                .into_iter()
-                .map(|k| format!("env.{k}")),
-        );
-    }
+    let dropped = keep_only(&mut src, SHIPPABLE_KEYS);
     if !dropped.is_empty() {
         eprintln!("gen-shared-settings: dropped {}", dropped.join(", "));
     }

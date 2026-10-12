@@ -41,17 +41,7 @@ pub const PARTS: &[Part] = &[
         flags: "--hooks, --no-hooks",
         question: "Wire the playbook hooks into ~/.claude/settings.json? (see them with `playbook hooks list`)",
         does: "Adds playbook's hooks: safety guards, session helpers, memory and token hygiene checks.",
-        changes: "~/.claude/settings.json (the hooks block)",
-        undo: SETTINGS_UNDO,
-    },
-    Part {
-        id: "settings",
-        asked: true,
-        default_on: true,
-        flags: "--settings, --no-settings",
-        question: "Merge playbook's shared options into ~/.claude/settings.json? (a backup is saved first and your own values stay)",
-        does: "Merges the shared options (env entries, worktree base, display options) into your settings. A value you set yourself is kept.",
-        changes: "~/.claude/settings.json and ~/.claude/.settings.base.json",
+        changes: "~/.claude/settings.json (the hooks block) and ~/.claude/.settings.base.json",
         undo: SETTINGS_UNDO,
     },
     Part {
@@ -70,9 +60,9 @@ pub const PARTS: &[Part] = &[
         default_on: false,
         flags: "--security, --no-security",
         question: "",
-        does: "Adds permission rules (allow, ask, deny) and turns off the Claude Code autoupdater. Off unless you pass --security or set `security.defaults`. It is never asked about.",
-        changes: "~/.claude/settings.json (permissions, env.DISABLE_AUTOUPDATER)",
-        undo: "Run `playbook init --no-security`, then delete the entries from settings.json by hand. Init never removes a value you have.",
+        does: "Adds permission rules (allow, ask, deny). Off unless you pass --security or set `security.defaults`. It is never asked about. Update control stays with you, `playbook update` and Homebrew.",
+        changes: "~/.claude/settings.json (the permissions block)",
+        undo: "Run `playbook init --no-security`, then delete the permissions entries from settings.json by hand. Init never removes a value you have.",
     },
     Part {
         id: "path",
@@ -189,11 +179,21 @@ fn part_for_step(step: &str) -> &str {
 
 /// What to print after a real run: one line per part that changed, with how to
 /// undo it, then where the backups are. Empty when nothing changed.
-pub fn summary(changed_steps: &[&str]) -> String {
-    let parts: Vec<&Part> = changed_steps
-        .iter()
-        .filter_map(|s| part(part_for_step(s)))
-        .collect();
+pub fn summary(changed_steps: &[&str], on_parts: &[&str]) -> String {
+    let mut ids: Vec<&str> = Vec::new();
+    for step in changed_steps {
+        if *step == "settings" {
+            // The settings merge carries the status line and the security defaults.
+            ids.extend(
+                ["statusline", "security"]
+                    .iter()
+                    .filter(|p| on_parts.contains(p)),
+            );
+        } else {
+            ids.push(part_for_step(step));
+        }
+    }
+    let parts: Vec<&Part> = ids.into_iter().filter_map(part).collect();
     if parts.is_empty() {
         return String::new();
     }
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn the_summary_says_how_to_undo_each_changed_part() {
-        let text = summary(&["hooks", "shim"]);
+        let text = summary(&["hooks", "shim"], &[]);
         assert!(
             text.contains("hooks: edited ~/.claude/settings.json"),
             "{text}"
@@ -361,9 +361,22 @@ mod tests {
     }
 
     #[test]
+    fn the_settings_step_is_reported_as_the_parts_that_use_it() {
+        let text = summary(&["settings"], &["statusline", "path"]);
+        assert!(text.contains("statusline: edited"), "{text}");
+        assert!(!text.contains("security:"), "{text}");
+    }
+
+    #[test]
+    fn there_is_no_part_for_the_retired_settings_flag() {
+        assert!(part("settings").is_none());
+    }
+
+    #[test]
     fn the_summary_is_empty_when_nothing_changed() {
-        assert_eq!(summary(&[]), "");
-        assert_eq!(summary(&["unknown-step"]), "");
+        assert_eq!(summary(&[], &[]), "");
+        assert_eq!(summary(&["unknown-step"], &[]), "");
+        assert_eq!(summary(&["settings"], &[]), "");
     }
 
     #[test]

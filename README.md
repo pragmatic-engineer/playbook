@@ -19,7 +19,7 @@ playbook init
 
 Then open a Claude Code session and run `/playbook:doctor`. It checks every layer and tells you how to fix a miss.
 
-The installer adds the plugin, installs the `playbook` binary (checksum verified), wires the guards and hooks, merges `settings.json` and installs the status line. It asks before adding the launcher and system prompt. Pass `--yes` to accept every default.
+The installer adds the plugin, installs the `playbook` binary (checksum verified), wires the guards and hooks, and sets the status line in `settings.json`. It asks before adding the launcher and system prompt. Pass `--yes` to accept every default.
 
 To see what `playbook init` changes before you agree, read [What init installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
 
@@ -145,9 +145,9 @@ playbook init --security
 playbook config set --global security.defaults true   # then every `playbook init` applies them
 ```
 
-They are the `permissions` block and `env.DISABLE_AUTOUPDATER` of the shipped `settings.shared.json`. The permissions default is conservative. It removes bare `Bash` and keychain commands from auto-allow, and moves twelve interpreters (`node`, `python3`, `npx`, `npm`, `make`, `awk`, `go`, `source`, `xargs`, `sqlite3`, `psql`, `docker`) from allow to ask. It also adds `Read(**/.env)` deny rules and ships autoupdates disabled through `DISABLE_AUTOUPDATER`. Running it again changes nothing. It follows the usual settings merge, so a `permissions` block you customised wins.
+They are the `permissions` block of the shipped `settings.shared.json`. The permissions default is conservative. It removes bare `Bash` and keychain commands from auto-allow, and moves twelve interpreters (`node`, `python3`, `npx`, `npm`, `make`, `awk`, `go`, `source`, `xargs`, `sqlite3`, `psql`, `docker`) from allow to ask. It also adds `Read(**/.env)` deny rules Running it again changes nothing. It follows the usual settings merge, so a `permissions` block you customised wins.
 
-Without the opt-in, `init` leaves the `permissions` block and `DISABLE_AUTOUPDATER` in your `settings.json` as they are. It stops adding them and never removes ones you already have. To turn the defaults off, run `playbook init --no-security` or set `playbook config set --global security.defaults false`, then delete the `permissions` entries and `DISABLE_AUTOUPDATER` from `~/.claude/settings.json` by hand.
+Without the opt-in, `init` leaves the `permissions` block in your `settings.json` as it is. It stops adding it and never removes one you already have. To turn the defaults off, run `playbook init --no-security` or set `playbook config set --global security.defaults false`, then delete the `permissions` entries from `~/.claude/settings.json` by hand.
 
 It is not a sandbox. `git`, `gh`, `find -exec` and the `sed` e-command still run without a prompt. The `Read(**/.env)` deny rules cover the `Read` tool only, so `cat .env` still runs.
 

@@ -99,11 +99,7 @@ fn a_fresh_install_seeds_settings_and_wires_the_ported_hooks() {
     }
     // The security defaults are opt-in: a default install leaves them out.
     assert!(settings.get("permissions").is_none(), "{settings}");
-    assert!(
-        settings["env"].get("DISABLE_AUTOUPDATER").is_none(),
-        "{settings}"
-    );
-    assert_eq!(settings["env"]["DO_NOT_TRACK"], "1");
+    assert!(settings.get("env").is_none(), "{settings}");
     assert!(
         ported_hooks(&settings) >= 18,
         "got {}",
