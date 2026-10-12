@@ -21,15 +21,15 @@ Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MU
 gh pr ready "$BRANCH"
 ```
 
-**Do NOT invoke `playbook:finish-pull-request` (it runs `/clear`, then `/playbook:deep-review --self`), and do NOT pass `--ready` to `/playbook:create-pull-request`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Its `/clear` is context isolation by hand for a session that wrote the code itself; subagent dispatch is context isolation by construction. And `/clear` cannot be issued programmatically at all, so instructing it inside an autonomous loop would mean stopping to ask the user to type it, once per Segment, which is exactly what `land` exists to remove. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
+**Do NOT invoke `playbook:finish-pull-request` (it runs `/playbook:deep-review --self`), and do NOT pass `--ready` to `/playbook:create-pull-request`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Reviewers are dispatched subagents, so they are fresh by construction. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
 
 **2. Gate on required checks.** Poll with a deadline; never `--watch` unbounded.
 
 ```bash
-playbook pr ci-wait "$PR"
+playbook pr ci-wait "$PR" --required --settle 120 --timeout 300 --interval 30
 ```
 
-`--required` is deliberate: the merge gate is what the repo enforces, not every check that exists. A failing NON-required check does not block the merge, but MUST be reported as a follow-up rather than silently dropped. `CI_VERDICT=NONE` (the repo requires no checks) is a legitimate pass; record it as `NONE`, never as `PASS`, so the ledger does not claim a gate that never ran. `CI_VERDICT=TIMEOUT` parks the Segment; do not merge a PR whose checks never finished.
+Run it with the Bash `timeout` set to 600000. On `CI_VERDICT=TIMEOUT` repeat it up to 5 times, then park the Segment. `--required` is deliberate: the merge gate is what the repo enforces, not every check that exists. A failing NON-required check does not block the merge, but MUST be reported as a follow-up rather than silently dropped. `CI_VERDICT=NONE` (the repo requires no checks) is a legitimate pass; record it as `NONE`, never as `PASS`, so the ledger does not claim a gate that never ran. `CI_VERDICT=TIMEOUT` parks the Segment; do not merge a PR whose checks never finished.
 
 **3. CI-fix loop (two budgets, counted separately).** **3 fix attempts** per Segment, matching the existing `--auto: WU fails after 3 retries -> stop` rule, plus **2 reruns** per Segment. A rerun is not a fix and MUST NOT consume the fix budget.
 
@@ -52,7 +52,7 @@ Either case: `gh run rerun <id> --failed`, then return to step 2. Max 2 reruns; 
 **4. Re-review the fix, tiered by what the fix actually is.** Re-running the full 5-lens swarm for a one-line format fix is waste; skipping review for a logic change is not. Classify the fix diff mechanically, do not judge:
 
 - **Tier 0, no re-review.** The fix diff is empty (rerun only), or the fix is confined to CI workflow config that touches no shipped code, or the fix is provably tool-generated. Prove the last case, don't assert it: from the pre-fix tree, re-run the formatter/codegen and confirm it reproduces the fix exactly (`git diff --quiet` against the fix's tree). If the tool reproduces it, there is no human-authored change to review.
-- **Tier 1, one scoped lens.** Touches production or test code, under 50 changed lines, and no file outside the Segment's `Files`. Dispatch ONE `reviewer-low` (`subagent_type: reviewer-low` when `playbook effort resolve agents reviewer --json` lists it in `allowed`, else `playbook:reviewer`, small diff per "Pick the tier" in `playbook:delegating-subagents`) with focus `correctness` (plus `tests` when the fix touched test files), scoped to `git diff <pre-fix-sha>..HEAD`, the fix diff only, never the whole Segment diff.
+- **Tier 1, one scoped lens.** Touches production or test code, under 50 changed lines, and no file outside the Segment's `Files`. Dispatch ONE `reviewer-low` (the `subagentType` that `playbook effort resolve agents reviewer --json` returns, else `playbook:reviewer`, small diff per "Pick the tier" in `playbook:delegating-subagents`) with focus `correctness` (plus `tests` when the fix touched test files), scoped to `git diff <pre-fix-sha>..HEAD`, the fix diff only, never the whole Segment diff.
 - **Tier 2, full Step 9 swarm scoped to this Segment.** Any one of: a file outside the Segment's `Files`; over 50 changed lines; a changed public signature, or a deleted or weakened assertion; the failing check was a security check (secret scanning, dependency/vulnerability scanning) rather than build/lint/test; **or this is the 2nd or 3rd fix attempt**. Repeated failure means the first root-cause diagnosis was wrong, which is exactly when a narrow re-look is worthless.
 
 Record the tier and its finding count in the ledger. Fix Tier 1/2 findings per Step 9's rules, then return to step 2.
@@ -68,10 +68,10 @@ Route in this order, first match wins:
 
 1. `state == "MERGED"` -> go to step 8.
 2. `state == "CLOSED"` and `mergedAt == null` -> the PR was closed out from under this run. `mergeable`/`mergeStateStatus` will sit at `UNKNOWN` forever and look like GitHub computation lag; it is not. Under `land` no sibling PR is ever open, so this should be impossible: report it as an invariant violation and STOP. Do not auto-reopen.
-3. `isDraft == true` -> step 1 did not take; re-run `gh pr ready` once, then re-read.
+3. `isDraft == true` -> step 1 did not take; re-run `gh pr ready` once, then re-read. Still a draft: park with the `gh` error.
 4. `mergeable == "CONFLICTING"` or `mergeStateStatus == "DIRTY"` -> **conflict, a different problem entirely.** This is not a permissions question and `--admin` cannot bypass it. `git fetch origin <default-branch>` and `git rebase origin/<default-branch>`, resolve, `git push` (chained with `&&`, never as a separate statement), return to step 2. If a conflict hunk falls in a file outside the Segment's `Files`, STOP and report: resolving it would silently rewrite work this Segment does not own. Max 2 conflict-resolution attempts, then park as `CONFLICT`.
 5. `mergeable == "UNKNOWN"` -> GitHub is still computing. Re-read after 10s, up to 6 times. Route 2 already ruled out the closed-PR case that makes `UNKNOWN` permanent.
-6. `mergeStateStatus == "BEHIND"` -> the base moved while CI ran. Rebase onto `origin/<default-branch>` and push; do not merge and do not park. Return to step 2.
+6. `mergeStateStatus == "BEHIND"` -> the base moved while CI ran. Rebase onto `origin/<default-branch>` and push; do not merge. Return to step 2. At most 3 rebases per Segment, then park as `BEHIND_LOOP`.
 7. `reviewDecision == "CHANGES_REQUESTED"` -> **park unconditionally** (step 7). A human looked and objected; that is categorically different from nobody having looked yet, and it MUST NOT be bypassed even where `--admin` would succeed.
 8. Otherwise -> step 6.
 
@@ -86,7 +86,7 @@ No strategy flag: where a merge queue is required it sets the strategy, and pass
 Then poll to a terminal state, re-reading rather than believing `merge_rc`:
 
 ```bash
-playbook pr land-wait "$PR"
+playbook pr land-wait "$PR" --timeout 540 --interval 15
 ```
 
 `RESTATE` returns to step 5. `TIMEOUT` with everything green falls through to the admin escalation below; a merge queue can hold a PR for its full batching window, so a deadline shorter than that window would escalate needlessly.
@@ -135,7 +135,7 @@ That last diff MUST be empty. A squash-merge collapses the branch's internal sha
 
 | Situation | Action |
 |---|---|
-| `land`: Segment's PR just opened | `gh pr ready <branch>` directly; do NOT invoke `playbook:finish-pull-request` (`/clear` + `deep-review --self`) and do NOT pass `--ready`: Steps 8-9 already reviewed this diff, and `/clear` cannot be issued programmatically (Step 10) |
+| `land`: Segment's PR just opened | `gh pr ready <branch>` directly; do NOT invoke `playbook:finish-pull-request` (`deep-review --self`) and do NOT pass `--ready`: Steps 8-9 already reviewed this diff (Step 10) |
 | `land`: required checks green (or none required) | Attempt `gh pr merge <n> --auto`; re-read `state`/`autoMergeRequest` before believing the exit code, in either direction (Step 10) |
 | `land`: `mergeable: CONFLICTING` / `mergeStateStatus: DIRTY` | Conflict, not permissions: rebase on the fetched default branch, push `&&`-chained, re-run CI. Never `--admin`; it cannot bypass a conflict (Step 10) |
 | `land`: `mergeStateStatus: BEHIND` | Rebase onto `origin/<default>` and push; don't merge, don't park (Step 10) |

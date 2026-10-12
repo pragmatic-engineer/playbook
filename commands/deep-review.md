@@ -1,6 +1,6 @@
 ---
 description: Use for substantial, risky, or cross-cutting PRs. Parallel specialist reviewers, fact-checked, asks which findings to post as a pending GitHub review. Heavier than quick-review.
-allowed-tools: Bash, Read, Grep, Glob, Write, Agent, Skill
+allowed-tools: Bash, Read, Grep, Glob, Write, Agent, SendMessage, TaskStop, Skill
 argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--no-post] [--this-pr] [--whole-stack] [--auto] [--ask] [--help]"
 model: opus
 effort: medium
@@ -177,6 +177,8 @@ Report the `Triage:` line it printed (e.g. "Triage: security=full-lens, docs=che
 Only now, with the lenses and tiers settled, load what the run needs. The orchestrator invokes `playbook:grounding-review` (for the sweep and the report format) and loads no `playbook:writing-style` here. Each dispatched `reviewer` loads `playbook:grounding-review` plus the one reference file mapped to its lens (Step 3). A `cheap-checker` reads only that resolved file. A skipped lens loads nothing.
 
 ## Step 3: Spawn the reviewer swarm (parallel reviewer subagents)
+
+If you have no `Agent` tool (a delegated or forked caller), run the selected lenses yourself in this session, say in the report that the swarm was not used, and never report APPROVE.
 
 **Concurrency cap (MUST).** Dispatch at most 8 reviewers at once. When the selected set (Step 2) is 8 or fewer, dispatch it in one wave exactly as below. When it's larger (only possible under `--all`, up to 14 lenses), split into waves of at most 8: issue the first wave's `Agent` calls in one message, wait for them to return, then issue the remaining lenses as a second wave. This bounds concurrent spawns; it never drops a lens to stay under the cap; every selected reviewer still runs, just possibly across two waves instead of one.
 

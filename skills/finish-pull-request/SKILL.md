@@ -5,13 +5,13 @@ description: Self-reviews a freshly opened PR, fixes findings, promotes the draf
 
 # Finish Pull Request
 
-Run this in the orchestrating session right after `/playbook:create-pull-request` returns a PR URL. That command forks into the `git` agent, which has no `Agent` tool and cannot spawn review swarms, so the self-review, fix, promote and merge work lives here, in the session that can.
+Run this in the main session or in a delegated or forked agent that holds the `Agent` tool, right after `/playbook:create-pull-request` returns a PR URL. That command forks into the `git` agent, which has no `Agent` tool and cannot spawn review swarms, so the self-review, fix, promote and merge work lives here, in the session that can.
 
 Inputs from the create-pull-request report: the PR number or URL, its branch, and whether `--ready` was passed. If any is missing, read it with `gh pr view`.
 
 ## Run mode
 
-Run `playbook mode status --json` (add `--flag auto` or `--flag ask` if the session was started with `--auto` or `--ask`). The `mode` key is `ask` or `auto`. In auto mode, skip the `/clear` self-review below when `/playbook:implement` opened this PR, because its review already covered the code. Any other caller gets no review here, and the final report says that no self-review ran. If `--ready` was passed, it still promotes the draft. The `autoReview.fix` and `autoMerge.enabled` settings still apply in auto mode, except that this skill never merges a PR whose code no review covered.
+Run `playbook mode status --json` (add `--flag auto` or `--flag ask` if the session was started with `--auto` or `--ask`). The `mode` key is `ask` or `auto`. In auto mode, skip the self-review below when `/playbook:implement` opened this PR, because its review already covered the code. Any other caller gets no review here, and the final report says that no self-review ran. If `--ready` was passed, it still promotes the draft. The `autoReview.fix` and `autoMerge.enabled` settings still apply in auto mode, except that this skill never merges a PR whose code no review covered.
 
 ## Reading a setting
 
@@ -22,10 +22,11 @@ Run `playbook mode status --json` (add `--flag auto` or `--flag ask` if the sess
 1. Decide whether a review runs, and which one, before touching the PR further.
    - `playbook config get autoReview.enabled`. If it prints `false`, skip the review and say so in the final report ("auto-review is disabled for this repo, review skipped"). If it prints `true`, or the key is unset (it defaults to `true`), read `playbook config get autoReview.type`, which is `auto` (the default), `deep` or `quick`.
    - `auto`: run `playbook pr review-triage --pr <n>` and read its first line, `review=quick` or `review=deep`. It prints `quick` only when three small-model reads agree. If the command exits non-zero or prints anything else, use `deep`: a triage failure never skips or lightens the review.
-   - `deep`: run `/clear`, then `/playbook:deep-review --self` against the PR just created (a draft is a real PR, so this works).
-   - `quick`: run `/clear`, then `/playbook:quick-review --self`.
-   - Config read error on either call: do not block and do not skip. Run `/clear`, then `/playbook:deep-review --self`.
-2. After the review (a `/clear` drops what was read before it), read `playbook config get autoReview.fix` and `playbook config get autoMerge.enabled`. Both default to `false`, apply in ask and auto mode alike, and need no question.
+   - `deep`: run `/playbook:deep-review <n> --self` against the PR just created (a draft is a real PR, so this works).
+   - `quick`: run `/playbook:quick-review <n> --self`.
+   - Config read error on either call: do not block and do not skip. Run `/playbook:deep-review <n> --self`.
+   - Never issue `/clear` here: a model cannot, and the reviewers are fresh subagents that never saw the code. A person may clear first, but nothing depends on it. If this session has no `Agent` tool, the review command runs its lenses inline and says so in its report; treat that report as the review.
+2. After the review, read `playbook config get autoReview.fix` and `playbook config get autoMerge.enabled`. Both default to `false`, apply in ask and auto mode alike, and need no question.
 3. Fix the findings. A push updates the draft, no new PR needed.
    - `autoReview.fix` is `false`: fix any findings the review surfaced, as you judge best.
    - `autoReview.fix` is `true`: fix every finding that survived the review's sweep. Commit through `/playbook:commit-and-push`, then re-run the scoped checks for the changed area and fix what they report. If no review ran, there are no findings to fix: say so.

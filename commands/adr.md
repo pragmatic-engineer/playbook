@@ -1,6 +1,6 @@
 ---
 description: Use when recording a significant, hard-to-reverse architectural decision, or choosing between named options that are expensive to undo. Writes a fact-checked ADR to docs/adr/.
-allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, Skill
+allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent, SendMessage, TaskStop, Skill
 argument-hint: "<topic> [--record-only] [--list] [--auto] [--ask] [--help]"
 model: opus
 effort: medium
