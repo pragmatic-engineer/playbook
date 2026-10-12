@@ -179,6 +179,28 @@ fn stage(tmp: &Path, content: &[u8], private: bool) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The data names the account, repos, and branches, so the file is owner-only
+/// on unix. Created first so SQLite never makes it with the default umask, and
+/// the WAL and shm files copy this mode. An older, wider file is tightened.
+pub fn make_db_file_private(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let error = |e: std::io::Error| format!("failed to secure {}: {e}", path.display());
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(path)
+            .map_err(error)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(error)?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,5 +397,27 @@ mod tests {
             fs::metadata(&file).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn make_db_file_private_creates_and_tightens_to_owner_only() {
+        // Arrange
+        use std::os::unix::fs::PermissionsExt;
+        let root = scratch_dir("atomic-db-private");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("x.db");
+        fs::write(&path, b"").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        // Act
+        make_db_file_private(&path).unwrap();
+        let fresh = root.join("fresh.db");
+        make_db_file_private(&fresh).unwrap();
+
+        // Assert
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(&fresh), 0o600);
     }
 }
