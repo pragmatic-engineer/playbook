@@ -67,8 +67,9 @@ fn current() -> &'static dyn Host {
 }
 
 /// Inside playbook's own tests there is no `main` to install the host, so the
-/// playbook host is the default there. A standalone build deletes this one
-/// function body's test branch.
+/// playbook host is the default there. The standalone crate replaces this
+/// test branch with a small test host of its own, because the unit tests of
+/// `warm` and `repo` expect playbook's config and repo layout.
 #[cfg(test)]
 fn default_host() -> Box<dyn Host> {
     crate::usage_host::playbook()

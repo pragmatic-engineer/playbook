@@ -21,9 +21,16 @@ const NAME: &str = "playbook-usage";
 
 pub struct Standalone;
 
+/// `$var` when `home` is the real home and the variable holds an absolute
+/// path, else `home/fallback`. A scratch home in a test never leaks into the
+/// real directories.
 fn env_dir(var: &str, home: &Path, fallback: &str) -> PathBuf {
     match std::env::var_os(var) {
-        Some(v) if !v.is_empty() && Path::new(&v).is_absolute() => PathBuf::from(v),
+        Some(v)
+            if !v.is_empty() && Path::new(&v).is_absolute() && home == super::util::home_dir() =>
+        {
+            PathBuf::from(v)
+        }
         _ => home.join(fallback),
     }
 }

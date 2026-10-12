@@ -38,6 +38,23 @@ fn foreign(line: &str) -> Vec<String> {
     found
 }
 
+/// The longest run of `super::` in `line`.
+fn super_depth(line: &str) -> usize {
+    let mut best = 0;
+    let mut rest = line;
+    while let Some(at) = rest.find("super::") {
+        let mut n = 0;
+        let mut tail = &rest[at..];
+        while let Some(t) = tail.strip_prefix("super::") {
+            n += 1;
+            tail = t;
+        }
+        best = best.max(n);
+        rest = &rest[at + "super::".len()..];
+    }
+    best
+}
+
 #[test]
 fn usage_names_the_host_crate_only_in_host_and_util() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/usage");
@@ -50,10 +67,22 @@ fn usage_names_the_host_crate_only_in_host_and_util() {
         if in_root && HOST_FILES.contains(&name) {
             continue;
         }
+        // How many `super::` the file may chain before it leaves `usage`.
+        let rel = file.strip_prefix(&root).expect("under src/usage");
+        let nested = rel.components().count() - 1;
+        let is_mod = name == "mod.rs";
+        let allowed = if is_mod { nested } else { nested + 1 };
         let text = fs::read_to_string(&file).expect("read file");
         for (i, line) in text.lines().enumerate() {
             if line.trim_start().starts_with("//") {
                 continue;
+            }
+            if super_depth(line) > allowed {
+                bad.push(format!(
+                    "{}:{}: super:: leaves src/usage",
+                    file.display(),
+                    i + 1
+                ));
             }
             for path in foreign(line) {
                 bad.push(format!("{}:{}: {path}", file.display(), i + 1));
