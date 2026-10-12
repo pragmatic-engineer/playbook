@@ -570,8 +570,17 @@ fi
 # the v0.10.0 binary, which predates that flag, made `init` exit non-zero with
 # "unexpected argument", so the install finished having written no settings.json
 # at all. Probing costs one process and removes the whole class of failure.
+#
+# The help text is captured first and matched with `case`, not piped into
+# `grep -q`. grep -q exits on its first match, which closes the pipe while the
+# binary is still writing; under `set -o pipefail` that SIGPIPE made the probe
+# report "unsupported" at random, so --aliases was sometimes dropped.
 _init_supports() {
-    "$PLAYBOOK_BIN_DIR/playbook" init --help 2>/dev/null | grep -q -- "$1"
+    _help="$("$PLAYBOOK_BIN_DIR/playbook" init --help 2>/dev/null)" || return 1
+    case "$_help" in
+        *"$1"*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 _INIT_ARGS=""
