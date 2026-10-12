@@ -8,6 +8,7 @@
 pub mod download;
 pub mod pathcheck;
 pub mod resolve;
+pub mod style;
 pub mod swap;
 pub mod verify;
 
