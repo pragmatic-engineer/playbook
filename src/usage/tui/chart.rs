@@ -9,7 +9,7 @@
 //! a row of weekday letters, a row of dates. Rows are dropped from the least
 //! useful when the panel is short, and the y axis when it is narrow, so the
 //! chart still draws at any size. `Plot` is the geometry and the data; drawing
-//! and mouse hits both use it, so a click lands on the bar it points at.
+//! uses it, so the cursor lands on the bar it points at.
 
 use super::data::{DayPoint, Slots};
 use super::fmt::{axis_money, axis_tokens, compact, fit, money, WEEKDAYS};
@@ -247,23 +247,6 @@ impl Geometry {
             per,
             cells,
         }
-    }
-
-    /// The bar under a screen cell, counting the plot and the rows under it.
-    pub fn bar_at(&self, x: u16, y: u16) -> Option<usize> {
-        let bottom = self
-            .dates_y
-            .or(self.weekdays_y)
-            .unwrap_or(self.plot.y + self.plot.height);
-        let inside = x >= self.plot.x && y >= self.plot.y && y <= bottom && self.plot.height > 0;
-        let off = x.checked_sub(self.plot.x)?;
-        inside
-            .then(|| {
-                self.cells
-                    .iter()
-                    .position(|(from, w)| off >= *from && off < from + w)
-            })
-            .flatten()
     }
 
     pub fn bars(&self) -> usize {
@@ -1215,29 +1198,6 @@ mod tests {
         // Before the readout is moved it shows today, not the last day.
         assert_eq!(plot.default_index(FIRST + 1), Some(1));
         assert_eq!(plot.default_index(FIRST + 99), Some(3));
-    }
-
-    #[test]
-    fn a_hit_on_the_plot_or_the_rows_under_it_finds_the_bar() {
-        let s = series(&[1.0; 7]);
-        let (plot, _) = draw(Rect::new(0, 0, 40, 14), &s, None);
-        let g = &plot.geo;
-        // Each bar takes four or five columns with its gap.
-        let (from1, _) = g.cells[1];
-        assert_eq!(g.bar_at(g.plot.x, g.plot.y), Some(0));
-        assert_eq!(g.bar_at(g.plot.x + from1 - 1, g.plot.y), Some(0));
-        assert_eq!(g.bar_at(g.plot.x + from1, g.plot.y + 1), Some(1));
-        assert_eq!(g.bar_at(g.plot.x + from1, g.dates_y.unwrap()), Some(1));
-        let end = g.plot.x + g.plot.width;
-        assert_eq!(g.bar_at(end - 1, g.plot.y), Some(6));
-        assert_eq!(g.bar_at(end, g.plot.y), None, "past the plot");
-        assert_eq!(g.bar_at(g.plot.x - 1, g.plot.y), None, "on the axis");
-        assert_eq!(
-            g.bar_at(g.plot.x, g.stats_y.unwrap()),
-            None,
-            "above the plot"
-        );
-        assert_eq!(g.bar_at(0, 0), None);
     }
 
     #[test]
