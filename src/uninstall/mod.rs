@@ -37,6 +37,7 @@ const PLACED: &[(&str, Option<&str>)] = &[
     ("statusline.sh", Some("statusline")),
     ("prompts/SYSTEM_PROMPT.md", Some("system-prompt")),
     ("hooks/lib/config-hash.sh", None),
+    ("plugin-seen", None),
 ];
 
 /// Directories earlier installs filled, removed whole.
@@ -63,6 +64,7 @@ pub fn run(opts: &Options) -> Report {
                 .to_string(),
         );
         remove_claude_home_files(&claude_home, verb, opts.dry_run, &mut report);
+        manual_steps(&opts.home, &mut report);
         return report;
     }
     let status_line_in_use = !settings.statusline_removed
@@ -107,7 +109,32 @@ pub fn run(opts: &Options) -> Report {
     if opts.remove_binary {
         binary_step(opts, verb, &mut report);
     }
+    manual_steps(&opts.home, &mut report);
     report
+}
+
+/// The steps playbook never runs for the user, because they change Claude
+/// Code's own plugin state. Only the ones that still apply are listed.
+fn manual_steps(home: &Path, report: &mut Report) {
+    use crate::common::plugin_state::{
+        installed_in, marketplace_known_in, MARKETPLACE, PLUGIN_KEY,
+    };
+    let mut steps = Vec::new();
+    if installed_in(home) == Some(true) {
+        steps.push(format!("claude plugin uninstall {PLUGIN_KEY}"));
+    }
+    if marketplace_known_in(home) {
+        steps.push(format!("claude plugin marketplace remove {MARKETPLACE}"));
+    }
+    if steps.is_empty() {
+        return;
+    }
+    report.lines.push(
+        "remaining manual steps (playbook does not change Claude Code's plugins):".to_string(),
+    );
+    report
+        .lines
+        .extend(steps.into_iter().map(|s| format!("  {s}")));
 }
 
 fn remove_claude_home_files(claude_home: &Path, verb: &str, dry_run: bool, report: &mut Report) {

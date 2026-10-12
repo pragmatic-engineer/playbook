@@ -154,6 +154,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         self_root: paths.self_root.clone(),
         repo: paths.repo.clone(),
     };
+    // Remember that the plugin is installed, so a later removal can be noticed.
+    crate::common::plugin_state::record_seen(&paths.home);
     let migrated = migrate::run_pending_for(&ctx, paths.statusline);
 
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);

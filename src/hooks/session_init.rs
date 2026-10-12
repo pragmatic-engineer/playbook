@@ -88,6 +88,12 @@ pub fn run(payload: &Payload) {
 
     if !headless {
         append_auto_learn_nudge(&mut extra_context, &repo_root);
+        // Not on compaction, which is the same session again.
+        if payload.field(".source") != "compact" {
+            if let Some(hint) = crate::common::plugin_state::removed_hint(&home_dir()) {
+                push_context(&mut extra_context, hint);
+            }
+        }
     }
     let injected = if headless {
         0
