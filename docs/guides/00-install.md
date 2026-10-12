@@ -151,6 +151,10 @@ The security defaults, the `permissions` block and `DISABLE_AUTOUPDATER`, are op
 
 If a run is interrupted between writing `settings.json` and the baseline, delete `.settings.base.json`. The next run treats the missing baseline as empty and only adds keys.
 
+## Disabling the plugin
+
+Disabling `playbook@pragmatic-engineer` in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook init` wrote stay in `settings.json`. Enable the plugin again to resume. Only an explicit `false` pauses: with no entry (Homebrew only), `true`, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
+
 ## Uninstall
 
 ```bash

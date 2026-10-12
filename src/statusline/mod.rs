@@ -65,6 +65,10 @@ pub fn run() -> i32 {
     let mut raw = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut raw);
     let input = String::from_utf8_lossy(&raw);
+    // Plugin disabled in Claude Code: print nothing.
+    if crate::common::plugin_state::paused() {
+        return 0;
+    }
     let now = crate::common::time::now_secs();
     remember_rate_limits(&input, now);
     let out = render(&input, &Env::from_process(), now);
