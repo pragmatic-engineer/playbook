@@ -8,6 +8,8 @@
 //! time, and every opener that can race another process uses it around the
 //! journal mode switch and the schema batch.
 
+// `usage` keeps its own copy of this helper: it may not import `crate::common`
+// (see `tests/usage_boundary.rs`).
 use std::time::{Duration, Instant};
 
 /// Pause between retries of a busy statement.

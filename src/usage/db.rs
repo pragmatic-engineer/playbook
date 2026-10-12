@@ -7,7 +7,6 @@
 //! other processes, which is what WAL mode and `busy_timeout` are for.
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
-use crate::common::sqlite::retry_busy;
 use crate::usage::util::atomic::{ensure_private_dir, make_db_file_private};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
@@ -51,6 +50,28 @@ CREATE TABLE IF NOT EXISTS usage_watermarks (
 );";
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
+
+const BUSY_PAUSE: Duration = Duration::from_millis(20);
+
+/// Retries `op` while SQLite reports BUSY, until `budget` has elapsed. The busy
+/// handler is skipped when waiting could deadlock (for example while another
+/// opener switches to WAL), so `busy_timeout` alone returns BUSY at once.
+fn retry_busy<T>(
+    mut op: impl FnMut() -> rusqlite::Result<T>,
+    budget: Duration,
+) -> rusqlite::Result<T> {
+    let start = std::time::Instant::now();
+    loop {
+        match op() {
+            Err(rusqlite::Error::SqliteFailure(err, _))
+                if err.code == rusqlite::ErrorCode::DatabaseBusy && start.elapsed() < budget =>
+            {
+                std::thread::sleep(BUSY_PAUSE);
+            }
+            other => return other,
+        }
+    }
+}
 
 /// Open (creating if missing) the usage database at `path`.
 pub fn open_db(path: &Path) -> Result<Connection, String> {

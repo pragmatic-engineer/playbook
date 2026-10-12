@@ -68,8 +68,7 @@ pub(crate) fn with_dir_lock_aged<T>(
     stale_age: Duration,
     f: impl FnOnce() -> T,
 ) -> (bool, T) {
-    remove_stale_lock_dir(lock_path, stale_age);
-    let acquired = acquire_dir_lock(lock_path, retries, delay);
+    let acquired = acquire_dir_lock_aged(lock_path, retries, delay, stale_age);
     (acquired, f())
 }
 
@@ -130,6 +129,17 @@ pub(crate) fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
 /// Try to `mkdir` `lock_path`, retrying up to `retries` times with `delay`
 /// between attempts. Returns whether this call created the directory.
 pub(crate) fn acquire_dir_lock(lock_path: &Path, retries: u32, delay: Duration) -> bool {
+    acquire_dir_lock_aged(lock_path, retries, delay, STALE_LOCK_AGE)
+}
+
+/// [`acquire_dir_lock`] that treats a lock older than `stale_age` as left by a
+/// dead holder, for a critical section longer than [`STALE_LOCK_AGE`].
+pub(crate) fn acquire_dir_lock_aged(
+    lock_path: &Path,
+    retries: u32,
+    delay: Duration,
+    stale_age: Duration,
+) -> bool {
     let mut attempts = 0;
     loop {
         if fs::create_dir(lock_path).is_ok() {
@@ -138,7 +148,7 @@ pub(crate) fn acquire_dir_lock(lock_path: &Path, retries: u32, delay: Duration) 
         if attempts == 0 {
             // A holder killed mid-section leaves its directory behind; clear
             // it once and try again instead of waiting out the whole budget.
-            remove_stale_lock_dir(lock_path, STALE_LOCK_AGE);
+            remove_stale_lock_dir(lock_path, stale_age);
             if fs::create_dir(lock_path).is_ok() {
                 return true;
             }
@@ -311,7 +321,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn atomic_append_recovers_from_a_stale_lock() {
-        let root = scratch_dir("atomic-append-stale");
+        let root = scratch_dir("atomic-append-stale-with-lock");
         let file = root.join("a.log");
         let lock = root.join("a.log.lock");
         fs::create_dir_all(&lock).unwrap();
