@@ -47,4 +47,4 @@
 │                                                                              ││                                                                              │
 │                                                                              ││                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────╯
- 1-6 panel r range d/w/W/m/M/a jump ←/→ day v view / filter s/S sort enter pick p sessions t theme (btop) x mouse q quit         updated 01:46:40 UTC, every 5s
+ 1-6 panel r range d/w/W/m/M/a jump ←/→ day v view / filter s/S sort enter pick p sessions t theme (btop) q quit                 updated 01:46:40 UTC, every 5s

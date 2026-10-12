@@ -10,6 +10,7 @@ pub mod agents;
 pub mod brief;
 pub mod cc;
 pub mod ci;
+pub mod code;
 pub mod commit;
 pub mod common;
 pub mod config;
