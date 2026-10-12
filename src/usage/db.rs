@@ -257,6 +257,22 @@ pub fn count_usage_events(conn: &Connection) -> Result<i64, String> {
         .map_err(|e| format!("failed to count usage events: {e}"))
 }
 
+/// The message count and the first and last timestamp of the whole store.
+pub fn usage_span(conn: &Connection) -> Result<super::tui::data::StoreSpan, String> {
+    conn.query_row(
+        "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM usage_events",
+        [],
+        |row| {
+            Ok(super::tui::data::StoreSpan {
+                events: row.get(0)?,
+                first: row.get(1)?,
+                last: row.get(2)?,
+            })
+        },
+    )
+    .map_err(|e| format!("failed to read the usage span: {e}"))
+}
+
 /// Corrects the two fields an older ingest got wrong. Returns rows changed.
 pub fn set_repo_and_cache_tier(
     conn: &Connection,

@@ -41,7 +41,18 @@ impl Paths {
     pub fn real() -> Self {
         let mut paths = Self::from_home(&crate::common::home_dir());
         paths.db = usage_db_dir().join("usage.db");
-        paths
+        let config = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty());
+        paths.with_claude_dir(config.map(PathBuf::from).as_deref())
+    }
+
+    /// Reads Claude Code history from `dir` when it is set: Claude Code keeps
+    /// its history there instead of in `~/.claude` under `CLAUDE_CONFIG_DIR`.
+    pub fn with_claude_dir(mut self, dir: Option<&Path>) -> Self {
+        if let Some(dir) = dir {
+            self.claude_projects = dir.join("projects");
+            self.claude_json = dir.join(".claude.json");
+        }
+        self
     }
 }
 
@@ -115,4 +126,20 @@ pub fn limits_json(paths: &Paths, events: &[UsageEvent], now: i64) -> serde_json
         now,
         super::entry::configured_week_start(),
     )
+}
+
+#[cfg(test)]
+mod claude_dir_tests {
+    use super::*;
+
+    #[test]
+    fn a_claude_config_dir_moves_the_transcripts_and_the_account_file() {
+        let base = Paths::from_home(Path::new("/fake/home"));
+        let moved = base.clone().with_claude_dir(Some(Path::new("/fake/cfg")));
+        assert_eq!(moved.claude_projects, Path::new("/fake/cfg/projects"));
+        assert_eq!(moved.claude_json, Path::new("/fake/cfg/.claude.json"));
+        assert_eq!(moved.db, base.db);
+        let same = base.clone().with_claude_dir(None);
+        assert_eq!(same.claude_projects, base.claude_projects);
+    }
 }

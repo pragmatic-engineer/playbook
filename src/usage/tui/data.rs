@@ -163,6 +163,15 @@ impl LimitsView {
     }
 }
 
+/// What the whole store holds, whatever the range: how many messages and the
+/// first and last timestamps. It lets an empty range say where the data is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StoreSpan {
+    pub events: i64,
+    pub first: Option<i64>,
+    pub last: Option<i64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Data {
     pub now: i64,
@@ -199,6 +208,8 @@ pub struct Data {
     /// Limits and burn rate. Empty (limit unknown) until `load_limits` reads
     /// them.
     pub limits: LimitsView,
+    /// The whole store, set by `load`.
+    pub store: StoreSpan,
 }
 
 /// Days charted for today, since a single bar says nothing.
@@ -320,6 +331,7 @@ impl Data {
             telemetry_rows: false,
             health: query::HealthView::default(),
             limits: LimitsView::default(),
+            store: StoreSpan::default(),
         }
     }
 }
@@ -351,6 +363,7 @@ pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<D
     data.skills = query::load_skills(conn, range, now)?;
     data.health = query::load_health(conn, range, now)?;
     data.telemetry_rows = !data.agents.is_empty() || !data.health.now.is_empty();
+    data.store = crate::usage::db::usage_span(conn)?;
     Ok(data)
 }
 
