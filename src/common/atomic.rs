@@ -22,11 +22,9 @@
 //! lock directory, and leaves removing it entirely up to the caller: a
 //! caller that never acquired the lock must not remove a directory another
 //! process still owns. `atomic_append` honours that and only removes the
-//! lock directory it created. `incr_counter` (counter.rs) does not: it
-//! removes the lock directory unconditionally, including on the
-//! exhausted-retries path, because that is what python's and bash's
-//! `incr_counter` both do. That quirk is preserved there deliberately; it is
-//! not repeated here.
+//! lock directory it created, and so does `incr_counter` (counter.rs).
+//! `acquire_dir_lock` clears a lock directory older than `STALE_LOCK_AGE`
+//! before it starts waiting, so a killed holder cannot slow every later call.
 
 use std::fs;
 use std::io::Write;
@@ -64,8 +62,28 @@ pub(crate) fn remove_stale_lock_dir(lock_path: &Path, max_age: Duration) {
         .and_then(|meta| meta.modified())
         .ok()
         .and_then(|modified| modified.elapsed().ok());
-    if age.is_some_and(|age| age > max_age) {
-        let _ = fs::remove_dir(lock_path);
+    if !age.is_some_and(|age| age > max_age) {
+        return;
+    }
+    // Rename first, so of several callers that saw the same stale lock only
+    // one claims it, and a lock another caller has just taken is put back.
+    let claimed = lock_path.with_extension(format!(
+        "stale-{}-{}",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    if fs::rename(lock_path, &claimed).is_err() {
+        return;
+    }
+    let still_old = fs::metadata(&claimed)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age > max_age);
+    if still_old {
+        let _ = fs::remove_dir(&claimed);
+    } else {
+        let _ = fs::rename(&claimed, lock_path);
     }
 }
 
@@ -88,6 +106,14 @@ pub(crate) fn acquire_dir_lock(lock_path: &Path, retries: u32, delay: Duration) 
     loop {
         if fs::create_dir(lock_path).is_ok() {
             return true;
+        }
+        if attempts == 0 {
+            // A holder killed mid-section leaves its directory behind; clear
+            // it once and try again instead of waiting out the whole budget.
+            remove_stale_lock_dir(lock_path, STALE_LOCK_AGE);
+            if fs::create_dir(lock_path).is_ok() {
+                return true;
+            }
         }
         attempts += 1;
         if attempts >= retries {
@@ -286,6 +312,45 @@ mod tests {
         fs::File::open(dir)
             .and_then(|handle| handle.set_modified(past))
             .expect("a directory's mtime is settable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn append_clears_a_stale_lock_and_takes_it_without_waiting_out_the_retries() {
+        // Arrange
+        let root = scratch_dir("atomic-append-stale");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("log.jsonl");
+        let lock = root.join("log.jsonl.lock");
+        fs::create_dir_all(&lock).unwrap();
+        age_dir(&lock, STALE_LOCK_AGE * 3);
+
+        // Act
+        atomic_append(file.to_str().unwrap(), "one");
+
+        // Assert
+        assert_eq!(fs::read_to_string(&file).unwrap(), "one\n");
+        assert!(!lock.exists(), "the lock this call took must be released");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn append_leaves_a_fresh_foreign_lock_alone() {
+        // Arrange
+        let root = scratch_dir("atomic-append-fresh");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("log.jsonl");
+        let lock = root.join("log.jsonl.lock");
+        fs::create_dir_all(&lock).unwrap();
+
+        // Act
+        atomic_append(file.to_str().unwrap(), "one");
+
+        // Assert
+        assert!(lock.exists(), "a live holder's lock must not be removed");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "one\n");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[cfg(unix)]

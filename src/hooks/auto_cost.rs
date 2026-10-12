@@ -21,7 +21,7 @@
 //! cap it also denies the model changing its own guard: the `mode`, `auto.*`
 //! and `fix.*` settings and the config files.
 
-use crate::common::atomic::{remove_stale_lock_dir, with_dir_lock, STALE_LOCK_AGE};
+use crate::common::atomic::with_dir_lock;
 use crate::common::mode::{hook_slug, resolve, resolve_for_hook_at, Mode, Source};
 use crate::common::paths::playbook_root_from;
 use crate::common::payload::Payload;
@@ -43,6 +43,9 @@ mod closing;
 const INTERVAL_VAR: &str = "PLAYBOOK_AUTO_COST_INTERVAL_MS";
 const DEFAULT_INTERVAL_MS: u64 = 2000;
 const STATE_FILE: &str = "auto-cost.json";
+/// Left in the session dir while the main session is denied work, so hooks
+/// that ask for writes (the memory capture Stop hook) stand down.
+const PARKED_MARKER: &str = "parked";
 const TELEMETRY_TAIL_BYTES: u64 = 16 * 1024;
 
 #[derive(Default, Serialize, Deserialize)]
@@ -114,7 +117,9 @@ pub fn run(payload: &Payload) {
     let root = playbook_root_from(&home);
     let is_auto = resolve_for_hook_at(env.as_deref(), &home, slug).mode == Mode::Auto;
     if is_auto || config_broke_mid_session(payload, &root, &home, slug) {
-        enforce(payload, &Limits::read(&home, slug), &root);
+        let mut limits = Limits::read(&home, slug);
+        limits.mode_from_env = from_env.source == Source::Env;
+        enforce(payload, &limits, &root);
     }
 }
 
@@ -143,6 +148,9 @@ struct Limits {
     pct: u64,
     budget_is_valid: bool,
     agent_budget_is_valid: bool,
+    /// `PLAYBOOK_MODE` is set in the environment, which beats the config, so
+    /// `playbook mode ask` cannot lift a guard.
+    mode_from_env: bool,
 }
 
 impl Limits {
@@ -172,6 +180,7 @@ impl Limits {
             pct,
             budget_is_valid: budget.is_some(),
             agent_budget_is_valid: agent_budget.is_some(),
+            mode_from_env: false,
         }
     }
 
@@ -306,21 +315,28 @@ fn enforce(payload: &Payload, limits: &Limits, root: &Path) {
         if allowed && !guard || call.is_mode_escape() {
             return;
         }
-        emit_pre_deny(if allowed {
-            SELF_PROTECTION_REASON
+        if !allowed && *caller == Caller::Main {
+            set_parked(&dir, true);
+        }
+        emit_pre_deny(&if allowed {
+            SELF_PROTECTION_REASON.to_string()
         } else {
-            UNREADABLE_REASON
+            unreadable_reason(limits.mode_from_env)
         });
         return;
     };
     let cap = limits.cap_of(caller);
-    if spend >= cap || state.effective_cents >= limits.ceiling {
+    let over_ceiling = state.effective_cents >= limits.ceiling;
+    if *caller == Caller::Main {
+        set_parked(&dir, spend >= cap || over_ceiling);
+    }
+    if spend >= cap || over_ceiling {
         if !call.is_allowed_when_parked(park_note.as_deref()) {
             let note = park_note.unwrap_or_default();
             let reason = if spend >= cap {
-                budget_reached_reason(caller, cap, &note)
+                budget_reached_reason(caller, cap, &note, limits.mode_from_env)
             } else {
-                ceiling_reason(limits.ceiling, &note)
+                ceiling_reason(limits.ceiling, &note, limits.mode_from_env)
             };
             emit_pre_deny(&reason);
         } else if guard {
@@ -351,6 +367,20 @@ fn enforce(payload: &Payload, limits: &Limits, root: &Path) {
     }
 }
 
+/// Creates or removes the marker. Best effort: a session dir that cannot be
+/// written to has nothing to protect.
+fn set_parked(dir: &Path, parked: bool) {
+    if dir.as_os_str().is_empty() {
+        return;
+    }
+    let marker = dir.join(PARKED_MARKER);
+    if parked {
+        let _ = File::create(marker);
+    } else {
+        let _ = fs::remove_file(marker);
+    }
+}
+
 fn park_note_name(caller: &Caller) -> String {
     match caller {
         Caller::Main => "park-note.md".to_string(),
@@ -359,32 +389,59 @@ fn park_note_name(caller: &Caller) -> String {
 }
 
 const UNREADABLE_REASON: &str = "cost unreadable: the spend can't be checked. Stop here and report to the user. Reading files, the closing steps (commit, push, pull request) and a park note still work, and `playbook mode ask` is allowed.";
+const UNREADABLE_REASON_ENV: &str = "cost unreadable: the spend can't be checked. Stop here and report to the user. Reading files, the closing steps (commit, push, pull request) and a park note still work. PLAYBOOK_MODE is set in the environment, so `playbook mode ask` will not lift this: tell the user to unset PLAYBOOK_MODE and restart the session.";
+
+fn unreadable_reason(mode_from_env: bool) -> String {
+    if mode_from_env {
+        UNREADABLE_REASON_ENV
+    } else {
+        UNREADABLE_REASON
+    }
+    .to_string()
+}
+
+/// How the user can lift a guard: `playbook mode ask` when auto comes from the
+/// config, or unsetting the variable when it comes from the environment.
+fn user_exit(mode_from_env: bool) -> &'static str {
+    if mode_from_env {
+        "unset PLAYBOOK_MODE in the environment and restart the session"
+    } else {
+        "run `playbook mode ask`"
+    }
+}
 const SELF_PROTECTION_REASON: &str =
-    "Auto mode settings are locked while auto is on. Ask the user to run this command themselves.";
-const INVALID_BUDGET_NOTE: &str = "auto.budgetUsd must be a number of at least 0.01, so the default cap of $5 applies. Fix it with `playbook config set auto.budgetUsd <usd>`.";
-const INVALID_AGENT_BUDGET_NOTE: &str = "auto.agentBudgetUsd must be a number of at least 0.01, so the default agent cap of $5 applies. Fix it with `playbook config set auto.agentBudgetUsd <usd>`.";
+    "Auto mode settings are locked while auto is on. Ask the user to run this command themselves (in Claude Code, the `!` prefix runs it in the session).";
+const INVALID_BUDGET_NOTE: &str = "auto.budgetUsd must be a number of at least 0.01, so the default cap of $5 applies. Ask the user to run `playbook config set auto.budgetUsd <usd>`, since the model cannot change it.";
+const INVALID_AGENT_BUDGET_NOTE: &str = "auto.agentBudgetUsd must be a number of at least 0.01, so the default agent cap of $5 applies. Ask the user to run `playbook config set auto.agentBudgetUsd <usd>`, since the model cannot change it.";
 
 fn dollars(cents: i64) -> String {
     format!("${:.2}", cents as f64 / 100.0)
 }
 
-fn budget_reached_reason(caller: &Caller, cap: i64, park_note: &Path) -> String {
+fn budget_reached_reason(
+    caller: &Caller,
+    cap: i64,
+    park_note: &Path,
+    mode_from_env: bool,
+) -> String {
     let (who, key) = match caller {
         Caller::Main => ("the main session", "auto.budgetUsd"),
         Caller::Agent(_) => ("this agent", "auto.agentBudgetUsd"),
     };
     format!(
-        "budget reached: {who} has spent its {} cap. New work is denied. If there is finished work to deliver, the closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. To go on, the user can run `playbook config set {key} <usd>` or `playbook mode ask`.",
+        "budget reached: {who} has spent its {} cap. New work is denied. If there is finished work to deliver, the closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. To go on, the user can run `playbook config set {key} <usd>` or {}.",
         dollars(cap),
-        park_note.display()
+        park_note.display(),
+        user_exit(mode_from_env)
     )
 }
 
-fn ceiling_reason(ceiling: i64, park_note: &Path) -> String {
+fn ceiling_reason(ceiling: i64, park_note: &Path, mode_from_env: bool) -> String {
     format!(
-        "session ceiling reached: the agents together have spent the {} ceiling, so every agent is parked and new work is denied. The closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. To go on, the user can run `playbook config set auto.sessionCeilingUsd <usd>` or `playbook mode ask`.",
+        "session ceiling reached: the agents together have spent the {} ceiling, so every agent is parked and new work is denied. The closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. To go on, the user can run `playbook config set auto.sessionCeilingUsd <usd>` or {}.",
         dollars(ceiling),
-        park_note.display()
+        park_note.display(),
+        user_exit(mode_from_env)
     )
 }
 
@@ -414,6 +471,7 @@ struct ToolCall {
     command: String,
     file_path: String,
     skill: String,
+    cwd: String,
 }
 
 impl ToolCall {
@@ -423,6 +481,7 @@ impl ToolCall {
             command: payload.field(".tool_input.command"),
             file_path: payload.field(".tool_input.file_path"),
             skill: payload.field(".tool_input.skill"),
+            cwd: payload.field(".cwd"),
         }
     }
 
@@ -432,7 +491,7 @@ impl ToolCall {
     fn is_allowed_when_parked(&self, park_note: Option<&Path>) -> bool {
         match self.tool.as_str() {
             tool if SAFE_TOOLS.contains(&tool) => true,
-            "Bash" => closing::is_closing_command(&self.command),
+            "Bash" => closing::is_closing_command_in(&self.command, Some(Path::new(&self.cwd))),
             "Skill" => closing::is_closing_skill(&self.skill),
             "Write" => park_note.is_some_and(|note| is_same_path(Path::new(&self.file_path), note)),
             _ => false,
@@ -560,7 +619,6 @@ fn refresh(payload: &Payload) -> Option<State> {
     }
 
     let lock = dir.join("auto-cost.lock");
-    remove_stale_lock_dir(&lock, STALE_LOCK_AGE);
     let (acquired, state) = with_dir_lock(&lock, 50, Duration::from_millis(10), || {
         let loaded = load::<State>(&state_path);
         let has_baseline = loaded.is_some();

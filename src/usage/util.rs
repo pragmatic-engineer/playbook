@@ -6,6 +6,7 @@
 //! is one of the two files that name the host crate; a standalone build
 //! replaces it with its own copies.
 
+pub use crate::common::session::home_dir;
 pub use crate::common::{atomic, git, time};
 
 #[cfg(test)]
