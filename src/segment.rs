@@ -46,8 +46,11 @@ pub fn branch_name(kind: &str, plan_slug: &str, n: u32, suffix: &str, title: &st
     format!("{kind}/{plan_slug}-s{n}{suffix}-{}", slug(title))
 }
 
+/// Longest one git call may run. Generous because fetch and switch can be slow.
+const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = crate::common::git::run(Some(dir), args, crate::common::git::SLOW_TIMEOUT)
+    let out = crate::common::git::run(Some(dir), args, GIT_TIMEOUT)
         .ok_or_else(|| format!("git {}: could not run or timed out", args.join(" ")))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())

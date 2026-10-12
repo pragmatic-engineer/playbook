@@ -505,3 +505,34 @@ fn a_huge_handoff_is_cut_to_stay_inside_the_hook_budget() {
     assert!(ctx.chars().count() <= 9000, "{}", ctx.chars().count());
     assert!(ctx.contains("Full handoff: "));
 }
+
+#[test]
+fn save_exits_one_on_unreadable_stdin_and_writes_nothing() {
+    let env = Env::new("badutf8");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["handoff", "save"])
+        .current_dir(&env.cwd)
+        .env("HOME", &env.home)
+        .env("CLAUDE_PLUGIN_ROOT", env!("CARGO_MANIFEST_DIR"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&[0xff, 0xfe])
+        .unwrap();
+
+    let out = child.wait_with_output().unwrap();
+
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("cannot read stdin"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!env.handoff_dir().exists() || fs::read_dir(env.handoff_dir()).unwrap().count() == 0);
+}

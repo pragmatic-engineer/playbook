@@ -163,7 +163,17 @@ pub fn stdio_is_interactive() -> bool {
 /// is piped, so the defaults that apply are not a silent surprise. `None`
 /// when the run is interactive, scripted with `--yes`, or a dry run.
 pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Option<&'static str> {
-    (stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
+    let undecided = [
+        (flags.hooks, flags.no_hooks),
+        (flags.statusline, flags.no_statusline),
+        (flags.path, flags.no_path),
+        (flags.aliases, flags.no_aliases),
+        (flags.system_prompt, flags.no_system_prompt),
+        (flags.telemetry, flags.no_telemetry),
+    ]
+    .iter()
+    .any(|&(on, off)| pick(on, off).is_none());
+    (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "init: output is not a terminal, so no questions were asked and the defaults apply; \
          pass --yes to accept them or the --x/--no-x flags (see --explain) to choose",
     )
@@ -204,6 +214,16 @@ mod tests {
             ..Flags::default()
         };
         assert!(defaults_notice(true, false, &yes).is_none());
+        let all_set = Flags {
+            hooks: true,
+            no_statusline: true,
+            path: true,
+            no_aliases: true,
+            system_prompt: true,
+            no_telemetry: true,
+            ..Flags::default()
+        };
+        assert!(defaults_notice(true, false, &all_set).is_none());
         let dry = Flags {
             dry_run: true,
             ..Flags::default()
