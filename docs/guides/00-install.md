@@ -159,6 +159,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 With the plugin alone, the guards and status line are not wired, and `/playbook:doctor` reports them as missing. Run `/playbook:setup` to finish. The first session after a plugin-only install also prints one line: "playbook is installed as a plugin only. Run /playbook:setup to install the binary and guards." It goes away once the hooks are wired, and Homebrew and install script users never see it after `playbook init`.
 
 When no binary exists, the first bare `playbook` call from a command runs the plugin's installer once. It prints what it does first: it downloads the release, checks its SHA256, adds the install directory to your shell `PATH` and wires hooks in `settings.json`. To stop that, set `PLAYBOOK_NO_AUTO_INSTALL=1`, or create the file `~/.config/playbook/no-auto-install`. The shim then exits with the manual install command and installs nothing.
+
 ## Settings merge
 
 `playbook init` merges the shipped template into your `settings.json` and never overwrites it. The template carries three things, each behind its own part: the `hooks` block, the `statusLine` and, only when you opt in, the `permissions` block. It ships no display options, notification toggles or `env` entries, because no hook or launcher reads them. Keys you customised stay as you set them. Keys an older template shipped (`cleanupPeriodDays`, `outputStyle`, `env` and the like) stay in your file too, and init never removes them.
