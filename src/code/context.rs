@@ -81,6 +81,8 @@ pub struct ContextResult {
     pub omitted: Vec<Omitted>,
     /// How many candidates did not fit, which may exceed the listed `omitted`.
     pub omitted_count: usize,
+    /// Candidates whose file could no longer be read.
+    pub unreadable: usize,
     pub truncated: bool,
     pub bytes: usize,
 }
@@ -124,11 +126,11 @@ fn symbol_cands(conn: &Connection, term: &str) -> Result<Vec<Cand>, String> {
             "SELECT f.path, f.sha256, s.name, s.qualified_name, s.start_line, s.end_line
              FROM symbols s JOIN files f ON f.id = s.file_id
              WHERE lower(s.name) LIKE ?1 ESCAPE '\\'
-             ORDER BY f.path, s.start_line, s.id LIMIT ?2",
+             ORDER BY (lower(s.name) = ?3) DESC, f.path, s.start_line, s.id LIMIT ?2",
         )
         .map_err(sql_err)?;
     let rows = stmt
-        .query_map(params![pattern, LOOKUP_LIMIT as i64], |r| {
+        .query_map(params![pattern, LOOKUP_LIMIT as i64, term], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -143,7 +145,14 @@ fn symbol_cands(conn: &Connection, term: &str) -> Result<Vec<Cand>, String> {
     for row in rows {
         let (path, sha, name, qualified, start, end) = row.map_err(sql_err)?;
         let lower = name.to_lowercase();
-        let tier = if lower == term { 2 } else { 4 };
+        let pieces = super::index::identifier_pieces(&name);
+        let tier = if lower == term {
+            2
+        } else if pieces.iter().any(|p| p == term) {
+            4
+        } else {
+            6
+        };
         out.push(Cand {
             path,
             sha,
@@ -192,7 +201,8 @@ fn text_cands(
     if words.is_empty() {
         return Ok(Vec::new());
     }
-    let opts = SearchOptions::new(&words.join(" "));
+    let mut opts = SearchOptions::new(&words.join(" "));
+    opts.any_word = true;
     let (hits, _) = fts_hits(conn, root, &opts, fetch)?;
     let mut out = Vec::new();
     for hit in hits {
@@ -218,7 +228,8 @@ fn merge(mut cands: Vec<Cand>) -> Vec<Cand> {
     let mut out: Vec<Cand> = Vec::new();
     for c in cands {
         if let Some(last) = out.last_mut() {
-            if last.path == c.path && c.start <= last.end {
+            let union = last.end.max(c.end) - last.start + 1;
+            if last.path == c.path && c.start <= last.end && union <= MAX_SNIPPET_LINES {
                 last.end = last.end.max(c.end);
                 last.tier = last.tier.min(c.tier);
                 if !last.reason.split("; ").any(|r| r == c.reason) {
@@ -234,7 +245,18 @@ fn merge(mut cands: Vec<Cand>) -> Vec<Cand> {
 
 fn is_test_path(path: &str) -> bool {
     let lower = path.to_lowercase();
-    lower.contains("test") || lower.contains("spec")
+    let mut parts = lower.split('/').collect::<Vec<_>>();
+    let file = parts.pop().unwrap_or("");
+    let in_test_dir = parts
+        .iter()
+        .any(|d| matches!(*d, "test" | "tests" | "spec" | "specs" | "__tests__"));
+    let stem = file.split('.').next().unwrap_or("");
+    let marked = file.contains(".test.")
+        || file.contains(".spec.")
+        || stem.ends_with("_test")
+        || stem.ends_with("_spec")
+        || stem.starts_with("test_");
+    in_test_dir || marked
 }
 
 /// Import lines of `paths` that mention a term or a top symbol name.
@@ -331,7 +353,7 @@ pub fn build(
     extra.extend(tests.into_iter().filter(|c| is_test_path(&c.path)));
     // An extra inside a snippet already chosen adds its reason to that snippet.
     let mut merged = merged;
-    let mut extra: Vec<Cand> = extra
+    let mut extra: Vec<Cand> = merge(extra)
         .into_iter()
         .filter(|c| {
             let host = merged
@@ -361,6 +383,7 @@ pub fn build(
 fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usize) {
     let mut cache: HashMap<String, Option<Loaded>> = HashMap::new();
     let mut full = false;
+    let mut stale_cache: HashMap<String, bool> = HashMap::new();
     for cand in ordered {
         let omit = |result: &mut ContextResult, cand: &Cand| {
             result.omitted_count += 1;
@@ -381,7 +404,7 @@ fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usiz
             .entry(cand.path.clone())
             .or_insert_with(|| load(root, &cand.path));
         let Some(loaded) = loaded.as_ref() else {
-            omit(result, cand);
+            result.unreadable += 1;
             continue;
         };
         let end = cand
@@ -399,6 +422,12 @@ fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usiz
         } else {
             (text, false)
         };
+        // A cut snippet ends on the last line it still shows.
+        let end = if cut {
+            cand.start + text.matches('\n').count()
+        } else {
+            end
+        };
         if text.is_empty() {
             full = true;
             result.truncated = true;
@@ -412,7 +441,9 @@ fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usiz
             end_line: end,
             reason: cand.reason.clone(),
             tier: cand.tier,
-            stale: !loaded.same(&cand.sha),
+            stale: *stale_cache
+                .entry(cand.path.clone())
+                .or_insert_with(|| !loaded.same(&cand.sha)),
             text,
         });
         if cut || result.bytes >= ceiling {
@@ -605,6 +636,91 @@ mod tests {
             // Assert
             assert_eq!(got.bytes, body_bytes.min(1024), "{body_bytes}");
             assert_eq!(got.truncated, truncated, "{body_bytes}");
+        }
+    }
+
+    #[test]
+    fn a_multi_term_query_finds_text_where_the_terms_sit_on_different_lines() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("cx-any-word");
+        f.write(
+            "notes.txt",
+            "gather alpha here\nsome filler line\nand omega over there\n",
+        );
+        f.run();
+
+        // Act
+        let got = ctx(&f, "alpha omega");
+
+        // Assert
+        assert!(got
+            .snippets
+            .iter()
+            .any(|s| s.path == "notes.txt" && s.reason == "text"));
+    }
+
+    #[test]
+    fn a_cut_inside_a_multibyte_character_keeps_valid_text_and_a_true_end_line() {
+        let _g = pinned();
+        // Arrange: each e-acute is two bytes, so a 5 byte ceiling lands inside the third.
+        let f = fx("cx-multibyte");
+        f.write(
+            "a.ts",
+            "function retry() {\n  // \u{e9}\u{e9}\u{e9}\u{e9}\n}\n",
+        );
+        f.run();
+        let mut opts = ContextOptions::new("retry");
+        opts.ceiling = Some(25);
+
+        // Act
+        let got = build(&f.conn(), &f.root, &opts).expect("context");
+
+        // Assert
+        assert!(got.bytes <= 25);
+        assert!(got.truncated);
+        let s = &got.snippets[0];
+        assert_eq!(s.end_line, s.start_line + s.text.matches('\n').count());
+    }
+
+    #[test]
+    fn a_long_declaration_is_capped_at_120_lines() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("cx-line-cap");
+        let body = "  work();\n".repeat(200);
+        f.write("a.ts", &format!("function retry() {{\n{body}}}\n"));
+        f.run();
+
+        // Act
+        let got = ctx(&f, "retry");
+
+        // Assert
+        let s = &got.snippets[0];
+        assert_eq!(s.end_line - s.start_line + 1, 120);
+    }
+
+    #[test]
+    fn paths_are_tests_by_directory_or_name_pattern_only() {
+        // Arrange, Act, Assert
+        for yes in [
+            "tests/a.rs",
+            "src/__tests__/a.ts",
+            "a.test.ts",
+            "b/a.spec.js",
+            "x_test.go",
+            "test_x.py",
+        ] {
+            assert!(is_test_path(yes), "{yes}");
+        }
+        for no in [
+            "src/inspect.ts",
+            "respect.py",
+            "src/specification/a.rs",
+            "latest.ts",
+            "contest/a.rs",
+        ] {
+            assert!(!is_test_path(no), "{no}");
         }
     }
 

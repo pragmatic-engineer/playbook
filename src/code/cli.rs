@@ -152,7 +152,7 @@ pub enum CodeCommand {
     Context {
         /// The task, in words
         query: String,
-        /// Budget in tokens, counted as four bytes each
+        /// Budget in tokens of snippet text, counted as four bytes each
         #[arg(long, default_value_t = 4000, value_parser = clap::value_parser!(u32).range(200..=65536))]
         max_tokens: u32,
         /// Print one JSON document
@@ -383,6 +383,12 @@ fn render_context(env: &Env, query: &str, max_tokens: usize, json: bool) -> Resu
     }
     if out.result.snippets.iter().any(|s| s.stale) {
         warnings.push("some snippets changed after they were indexed".to_string());
+    }
+    if out.result.unreadable > 0 {
+        warnings.push(format!(
+            "{} matches were skipped because their files can no longer be read",
+            out.result.unreadable
+        ));
     }
     if json {
         let snippets: Vec<serde_json::Value> = out
