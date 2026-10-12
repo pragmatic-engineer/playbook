@@ -153,18 +153,6 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
     }
 }
 
-/// The value an older release used for `key`, as it is called now. A config
-/// file written then keeps working: `resolve_valid` reads it as the new name.
-pub fn legacy_value(key: &str, value: &str) -> Option<&'static str> {
-    match key {
-        "usage.theme" if value == LEGACY_THEME_ALIAS => Some("default"),
-        _ => None,
-    }
-}
-
-/// The `usage.theme` value that `default` replaced.
-pub const LEGACY_THEME_ALIAS: &str = "btop";
-
 /// The problem with a `models.<tier>` value, or `None` when it is fine.
 /// Fine is empty (no override) or `claude-<tier>-<major>[-<minor>]`, so a
 /// `models.sonnet` value can only name a Sonnet model. `None` for other keys.
@@ -193,16 +181,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_older_theme_value_reads_as_the_current_name_and_nothing_else_does() {
-        assert_eq!(
-            legacy_value("usage.theme", LEGACY_THEME_ALIAS),
-            Some("default")
-        );
-        assert_eq!(legacy_value("usage.theme", "dark"), None);
-        assert_eq!(legacy_value("usage.weekStart", LEGACY_THEME_ALIAS), None);
-        // The current names are the only ones a write accepts.
+    fn the_theme_key_accepts_only_the_current_names() {
         let allowed = allowed_enum_values("usage.theme").unwrap();
-        assert!(allowed.contains(&"default") && !allowed.contains(&LEGACY_THEME_ALIAS));
+        assert!(allowed.contains(&"default") && !allowed.contains(&"solarized"));
     }
 
     #[test]
