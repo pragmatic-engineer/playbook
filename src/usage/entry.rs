@@ -4,11 +4,11 @@
 //! `playbook usage` and its subcommands: picks the terminal view or the text or
 //! JSON output.
 
+use super::host::UsageCommand;
 use super::period::Period;
 use super::query::{self, Range, WeekStart};
 use super::run::{ingest_new, run_ingest, run_summary, Paths};
 use super::{api, db, tui};
-use crate::UsageCommand;
 use rusqlite::Connection;
 
 /// The release that removes the old `usage ingest` subcommand.
@@ -75,7 +75,10 @@ pub fn run(
         Some(UsageCommand::Ingest) => {
             deprecated(
                 "`usage ingest`",
-                "Use `playbook usage --summary`, which also reads new session history.",
+                &format!(
+                    "Use `{}`, which also reads new session history.",
+                    super::host::command("usage --summary")
+                ),
             );
             run_ingest(paths)
         }
@@ -127,20 +130,16 @@ const TUI_DEFAULT_RANGE: &str = "week";
 /// The first day of the week, from the `usage.weekStart` config key. Monday
 /// when the key is unset or unreadable.
 pub fn configured_week_start() -> WeekStart {
-    let home = crate::common::session::home_dir();
-    crate::config::resolve_valid("usage.weekStart", &home, None)
-        .ok()
-        .and_then(|(value, _, _)| value.as_str().and_then(WeekStart::parse))
+    super::host::config_value_now("usage.weekStart")
+        .and_then(|value| value.as_str().and_then(WeekStart::parse))
         .unwrap_or_default()
 }
 
 /// Seconds between refreshes of the terminal view, from the
 /// `usage.refreshSeconds` config key.
 pub fn configured_refresh_seconds() -> u64 {
-    let home = crate::common::session::home_dir();
-    crate::config::resolve_valid("usage.refreshSeconds", &home, None)
-        .ok()
-        .and_then(|(value, _, _)| value.as_u64())
+    super::host::config_value_now("usage.refreshSeconds")
+        .and_then(|value| value.as_u64())
         .filter(|n| *n > 0)
         .unwrap_or(tui::worker::DEFAULT_REFRESH_SECONDS)
 }

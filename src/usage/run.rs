@@ -15,7 +15,6 @@ use super::limits_source;
 use super::query::Range;
 use super::summary;
 use super::UsageEvent;
-use crate::common::paths::{playbook_root_from, usage_db_dir};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
@@ -34,13 +33,13 @@ impl Paths {
             claude_projects: home.join(".claude").join("projects"),
             claude_json: home.join(".claude.json"),
             codex_sessions: home.join(".codex").join("sessions"),
-            db: playbook_root_from(home).join("usage").join("usage.db"),
+            db: super::host::state_dir_from(home).join("usage.db"),
         }
     }
 
     pub fn real() -> Self {
-        let mut paths = Self::from_home(&crate::common::home_dir());
-        paths.db = usage_db_dir().join("usage.db");
+        let mut paths = Self::from_home(&super::host::home_dir());
+        paths.db = super::host::state_dir().join("usage.db");
         let config = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty());
         paths.with_claude_dir(config.map(PathBuf::from).as_deref())
     }
@@ -135,7 +134,7 @@ pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<Stri
 /// The stored plan limits and the manual budgets from the config.
 fn limit_inputs(paths: &Paths) -> (Option<limits_source::Snapshot>, Vec<(LimitPeriod, f64)>) {
     let snapshot = paths.db.parent().and_then(limits_source::load);
-    let budgets = limits_source::manual_budgets(&crate::common::session::home_dir());
+    let budgets = limits_source::manual_budgets(&super::host::home_dir());
     (snapshot, budgets)
 }
 

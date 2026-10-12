@@ -12,7 +12,6 @@ use std::path::Path;
 const CLAUDE_WORKTREES: &str = "/.claude/worktrees/";
 const GIT_DIR: &str = "/.git/";
 const GIT_DIR_END: &str = "/.git";
-const PLAYBOOK_REPOS: &str = "/.config/playbook/repos/";
 
 /// Resolves many working directories, asking git once per distinct one.
 #[derive(Default)]
@@ -60,7 +59,7 @@ fn repo_from_markers(cwd: &str) -> Option<String> {
     if let Some(root) = cwd.strip_suffix(GIT_DIR_END) {
         return named(last_segment(root));
     }
-    let (_, rest) = cwd.split_once(PLAYBOOK_REPOS)?;
+    let (_, rest) = cwd.split_once(super::host::REPOS_MARKER)?;
     let mut parts = rest.split('/');
     let _owner = parts.next()?;
     named(parts.next()?.to_string())

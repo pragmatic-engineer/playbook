@@ -209,7 +209,7 @@ pub fn manual_budgets(home: &Path) -> Vec<(LimitPeriod, f64)> {
     ]
     .into_iter()
     .filter_map(|(key, period)| {
-        let (value, _, _) = crate::config::resolve_valid(key, home, None).ok()?;
+        let value = super::host::config_value(key, home)?;
         let usd = value.as_f64().filter(|n| n.is_finite() && *n > 0.0)?;
         Some((period, usd))
     })

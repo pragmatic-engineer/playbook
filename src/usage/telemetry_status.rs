@@ -8,8 +8,8 @@
 //! changes what the cost-per-agent and latency views can show, never a total.
 
 use super::collector::{read_state, running, state_path, State};
+use super::host::{telemetry_configured as configured, Configured};
 use super::run::Paths;
-use crate::cc::telemetry::{configured, Configured};
 use serde_json::Value;
 use std::path::Path;
 
@@ -89,8 +89,8 @@ pub fn decide(config_auto: bool, kind: Configured, collector_running: bool) -> M
 /// Reads the real inputs for `home` and `cwd`.
 pub fn detect(home: &Path, cwd: &Path, paths: &Paths) -> Mode {
     let config_auto = matches!(
-        crate::config::resolve_valid("usage.telemetry", home, None),
-        Ok((Value::String(v), _, _)) if v == "auto"
+        super::host::config_value("usage.telemetry", home),
+        Some(Value::String(v)) if v == "auto"
     );
     let state: Option<State> = read_state(&state_path(paths));
     let kind = configured(home, cwd, state.as_ref().map(|s| s.port));
@@ -100,7 +100,7 @@ pub fn detect(home: &Path, cwd: &Path, paths: &Paths) -> Mode {
 /// `detect` for the real home and the current directory.
 pub fn detect_here(paths: &Paths) -> Mode {
     let cwd = std::env::current_dir().unwrap_or_default();
-    detect(&crate::common::home_dir(), &cwd, paths)
+    detect(&super::host::home_dir(), &cwd, paths)
 }
 
 #[cfg(test)]

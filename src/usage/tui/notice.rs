@@ -70,7 +70,10 @@ fn read_failure(app: &App, error: &str) -> Notice {
             error.to_string(),
             String::new(),
             format!("Transcripts are read from {}", app.sources),
-            "Run `playbook usage --summary` to see the same error in plain text.".into(),
+            format!(
+                "Run `{}` to see the same error in plain text.",
+                crate::usage::host::command("usage --summary")
+            ),
             "The view retries on its own; press q to quit.".into(),
         ],
         error: true,
@@ -88,7 +91,10 @@ fn empty_store(app: &App) -> Notice {
                 .into(),
             "If Claude Code keeps its history elsewhere, set CLAUDE_CONFIG_DIR before starting."
                 .into(),
-            "`playbook usage --summary` reads the same places and prints what it finds.".into(),
+            format!(
+                "`{}` reads the same places and prints what it finds.",
+                crate::usage::host::command("usage --summary")
+            ),
         ],
         error: false,
     }

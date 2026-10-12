@@ -378,7 +378,7 @@ pub fn load_limits(
     let week = crate::usage::entry::configured_week_start();
     let events = db::load_usage_events_since(conn, limits_source::events_since(now, week))?;
     let snapshot = paths.db.parent().and_then(limits_source::load);
-    let budgets = limits_source::manual_budgets(&crate::common::session::home_dir());
+    let budgets = limits_source::manual_budgets(&crate::usage::host::home_dir());
     Ok(LimitsView::build(
         snapshot.as_ref(),
         &budgets,
