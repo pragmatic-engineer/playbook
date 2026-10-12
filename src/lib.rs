@@ -76,6 +76,7 @@ pub mod usage;
 pub mod worktree;
 
 use clap::{Parser, Subcommand, ValueEnum};
+pub use code::cli::CodeCommand;
 use std::path::PathBuf;
 
 /// Configure and support Claude Code from the command line.
@@ -597,6 +598,14 @@ pub enum Command {
     Gate {
         #[command(subcommand)]
         sub: GateCommand,
+    },
+    /// Index and search the repository's source code
+    ///
+    /// The index is a cache kept under the playbook state folder for this
+    /// worktree. Nothing is written inside the repository.
+    Code {
+        #[command(subcommand)]
+        sub: CodeCommand,
     },
     /// Remove AI attribution lines from message text
     ///
@@ -2058,6 +2067,28 @@ mod tests {
                 "help for `{place}` has a dash: {text}"
             );
         }
+    }
+
+    #[test]
+    fn code_index_parses_with_its_flags() {
+        // Arrange, Act
+        let plain = Cli::try_parse_from(["playbook", "code", "index"]);
+        let flags = Cli::try_parse_from(["playbook", "code", "index", "--json", "--rebuild"]);
+
+        // Assert
+        assert!(plain.is_ok());
+        let Ok(Cli {
+            command:
+                Command::Code {
+                    sub: CodeCommand::Index { json, rebuild },
+                },
+            ..
+        }) = flags
+        else {
+            panic!("code index --json --rebuild did not parse as Code Index");
+        };
+        assert!(json && rebuild);
+        assert!(Cli::try_parse_from(["playbook", "code", "--help"]).is_err());
     }
 
     #[test]

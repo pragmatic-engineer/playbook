@@ -5,8 +5,7 @@
 //! corrupt file is deleted and rebuilt by `index`, and query commands never
 //! delete anything. Connection setup follows the usage store's ordering.
 
-use crate::common::atomic::ensure_private_dir;
-use crate::usage::db::make_db_file_private;
+use super::host;
 use rusqlite::{Connection, ErrorCode};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -42,7 +41,7 @@ pub enum DbError {
 impl std::fmt::Display for DbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DbError::Missing => f.write_str("no index yet; run `playbook code index` first"),
+            DbError::Missing => write!(f, "no index yet; run `{}` first", host::command("index")),
             DbError::NeedsRebuild(msg) | DbError::Failed(msg) => f.write_str(msg),
         }
     }
@@ -145,8 +144,9 @@ pub fn delete_index_files(path: &Path) -> Result<(), String> {
 
 fn rebuild_hint(path: &Path, why: &str) -> String {
     format!(
-        "the code index at {} {why}; run `playbook code index --rebuild`",
-        path.display()
+        "the code index at {} {why}; run `{}`",
+        path.display(),
+        host::command("index --rebuild")
     )
 }
 
@@ -168,7 +168,7 @@ fn open_index_with(
     match try_open(path, mode) {
         Err(DbError::NeedsRebuild(first)) if mode == OpenMode::Index => {
             delete(path).map_err(|e| {
-                DbError::Failed(format!("{e}; run `playbook code index --rebuild`"))
+                DbError::Failed(format!("{e}; run `{}`", host::command("index --rebuild")))
             })?;
             try_open(path, mode).map_err(|second| {
                 DbError::Failed(rebuild_hint(
@@ -202,14 +202,14 @@ fn step(path: &Path, what: &str, err: rusqlite::Error) -> DbError {
 fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
     if mode == OpenMode::Index {
         if let Some(parent) = path.parent() {
-            ensure_private_dir(parent).map_err(|e| {
+            host::ensure_private_dir(parent).map_err(|e| {
                 DbError::Failed(format!(
                     "failed to create directory {}: {e}",
                     parent.display()
                 ))
             })?;
         }
-        make_db_file_private(path).map_err(DbError::Failed)?;
+        host::make_file_private(path).map_err(DbError::Failed)?;
     }
     let conn = Connection::open(path).map_err(|e| step(path, "open the database", e))?;
     conn.busy_timeout(BUSY_TIMEOUT)
@@ -222,7 +222,7 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
         .map_err(|e| step(path, "set synchronous", e))?;
     if !fts5_available(&conn) {
         return Err(DbError::Failed(
-            "this playbook build has no SQLite FTS5; rebuild with FTS5 enabled".to_string(),
+            "this build has no SQLite FTS5; rebuild with FTS5 enabled".to_string(),
         ));
     }
     let version: i64 = conn

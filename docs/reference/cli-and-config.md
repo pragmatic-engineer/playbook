@@ -67,7 +67,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ci`, `commit`, `config`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `cc`, `ci`, `code`, `commit`, `config`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -173,6 +173,25 @@ Example: `playbook ci --strict`
 - `--json`: Print one JSON object instead of text
 - `--strict`: Also exit 1 when a check is skipped (for example in the wrong directory)
 - `--dir <DIR>`: Run in this directory instead of the current one
+
+### `playbook code`
+
+Index and search the repository's source code
+
+The index is a cache kept under the playbook state folder for this worktree. Nothing is written inside the repository.
+
+Subcommands: `index`
+
+### `playbook code index`
+
+Build or refresh the code index for this repository
+
+Hashes every file git lists, and reads only the ones that changed. Only one run at a time is allowed.
+
+Example: `playbook code index --json`
+
+- `--json`: Print one JSON document
+- `--rebuild`: Delete the cache first and index everything again
 
 ### `playbook commit`
 

@@ -81,3 +81,14 @@ fn help_and_error_output_still_come_from_clap() {
     assert_ne!(code, 0);
     assert!(err.contains("invalid value"), "{err}");
 }
+
+#[test]
+fn a_code_argv_is_never_taken_by_the_fast_path() {
+    for parts in [
+        &["playbook", "code", "index"][..],
+        &["playbook", "code", "index", "--json"],
+        &["playbook", "code"],
+    ] {
+        assert!(classify(&argv(parts)).is_none(), "{parts:?}");
+    }
+}
