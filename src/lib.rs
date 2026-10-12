@@ -72,6 +72,7 @@ pub mod statusline;
 #[doc(hidden)]
 pub mod testing;
 pub mod trust;
+pub mod ui;
 pub mod uninstall;
 pub mod update;
 pub mod usage;
@@ -2079,6 +2080,24 @@ mod tests {
         };
         assert!(json && rebuild);
         assert!(Cli::try_parse_from(["playbook", "code", "--help"]).is_err());
+    }
+
+    #[test]
+    fn code_search_needs_text_and_limits_run_from_one_to_two_hundred() {
+        // Arrange
+        let parse = |limit: &str| {
+            Cli::try_parse_from([
+                "playbook", "code", "search", "--text", "x", "--limit", limit,
+            ])
+        };
+
+        // Act, Assert
+        assert!(Cli::try_parse_from(["playbook", "code", "search", "x"]).is_err());
+        assert!(Cli::try_parse_from(["playbook", "code", "search", "--text", "x"]).is_ok());
+        assert!(parse("0").is_err());
+        assert!(parse("1").is_ok());
+        assert!(parse("200").is_ok());
+        assert!(parse("201").is_err());
     }
 
     #[test]

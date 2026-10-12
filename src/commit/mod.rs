@@ -10,16 +10,35 @@ pub mod prepare;
 pub mod run;
 pub mod typecheck;
 
+use crate::common::proc::run_with_timeout;
 use std::path::Path;
 use std::process::{Command, Output};
+use std::time::Duration;
 
-/// Runs `git` in `dir`.
-pub(crate) fn git_in(dir: &Path, args: &[&str]) -> Option<Output> {
-    Command::new("git")
+/// Longest a local read or index write may take.
+const GIT_TIMEOUT: Duration = crate::common::git::SLOW_TIMEOUT;
+/// Longest a commit (with its hooks and signing), fetch, rebase or push may
+/// take. Bounded so a stuck network or credential prompt cannot hang forever.
+const GIT_LONG_TIMEOUT: Duration = Duration::from_secs(600);
+
+fn git_with(dir: &Path, args: &[&str], timeout: Duration) -> Option<Output> {
+    let mut command = Command::new("git");
+    command
         .args(args)
         .current_dir(dir)
-        .output()
-        .ok()
+        .env("GIT_TERMINAL_PROMPT", "0");
+    run_with_timeout(&mut command, timeout)
+}
+
+/// Runs `git` in `dir`, giving up after [`GIT_TIMEOUT`].
+pub(crate) fn git_in(dir: &Path, args: &[&str]) -> Option<Output> {
+    git_with(dir, args, GIT_TIMEOUT)
+}
+
+/// Like [`git_in`] for commit, fetch, rebase and push, which can run hooks or
+/// wait on the network.
+pub(crate) fn git_in_long(dir: &Path, args: &[&str]) -> Option<Output> {
+    git_with(dir, args, GIT_LONG_TIMEOUT)
 }
 
 /// Trimmed stdout of a git call that succeeded, else `None`.

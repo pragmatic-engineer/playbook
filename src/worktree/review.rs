@@ -7,14 +7,41 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output};
+use std::time::Duration;
+
+use crate::common::proc::run_with_timeout;
+
+/// Longest a local git call may run.
+const LOCAL_TIMEOUT: Duration = crate::common::git::SLOW_TIMEOUT;
+/// Longest a call that touches the network (`git fetch`, `gh repo view`) may
+/// run. `REVIEW_NET_TIMEOUT_SECONDS` overrides it.
+const NET_TIMEOUT: Duration = Duration::from_secs(120);
+
+fn net_timeout() -> Duration {
+    std::env::var("REVIEW_NET_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map_or(NET_TIMEOUT, Duration::from_secs)
+}
+
+/// `git <args>` that can never wait on a person: no credential prompt, and
+/// standard input is null (the runner sets that).
+fn git_command(args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "true");
+    command
+}
 
 /// Default age past which a review worktree's lock counts as stale.
 const DEFAULT_TTL_SECS: i64 = 86_400;
 
 /// `git <args>` in the current directory, trimmed stdout on success.
 fn git_out(args: &[&str]) -> Option<String> {
-    let out = Command::new("git").args(args).output().ok()?;
+    let out = run_with_timeout(&mut git_command(args), LOCAL_TIMEOUT)?;
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
@@ -22,20 +49,30 @@ fn git_out(args: &[&str]) -> Option<String> {
 
 /// Like [`git_ok`] but lets git's stderr reach the caller's.
 fn git_loud(args: &[&str]) -> bool {
-    Command::new("git")
-        .args(args)
-        .stdout(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    loud(
+        run_with_timeout(&mut git_command(args), LOCAL_TIMEOUT),
+        args,
+    )
+}
+
+/// Passes a failed or timed-out call's stderr to ours, true on success.
+fn loud(out: Option<Output>, args: &[&str]) -> bool {
+    match out {
+        Some(o) => {
+            if !o.status.success() {
+                eprint!("{}", String::from_utf8_lossy(&o.stderr));
+            }
+            o.status.success()
+        }
+        None => {
+            eprintln!("git {} timed out or could not start", args.join(" "));
+            false
+        }
+    }
 }
 
 fn git_ok(args: &[&str]) -> bool {
-    Command::new("git")
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    run_with_timeout(&mut git_command(args), LOCAL_TIMEOUT).is_some_and(|o| o.status.success())
 }
 
 /// Removes every unlocked, or lock-expired, worktree under
@@ -104,30 +141,34 @@ pub fn setup_with_url(pr: &str, head_sha: &str, known_url: Option<&str>) -> Resu
         Ok(url) if !url.is_empty() => url,
         _ if known_url.is_some_and(|u| !u.is_empty()) => known_url.unwrap_or_default().to_string(),
         _ => {
-            let out = Command::new("gh")
-                .args(["repo", "view", "--json", "url", "-q", ".url"])
-                .stderr(Stdio::inherit())
-                .output();
-            match out {
-                Ok(o) if o.status.success() => {
+            let mut gh = Command::new("gh");
+            gh.args(["repo", "view", "--json", "url", "-q", ".url"]);
+            match run_with_timeout(&mut gh, net_timeout()) {
+                Some(o) if o.status.success() => {
                     String::from_utf8_lossy(&o.stdout).trim().to_string()
                 }
-                _ => {
+                Some(o) => {
+                    eprint!("{}", String::from_utf8_lossy(&o.stderr));
                     return Err(
                         "failed to resolve repo URL via gh (not authenticated or not a \
                                 GitHub repo)"
                             .to_string(),
+                    );
+                }
+                None => {
+                    return Err(
+                        "failed to resolve repo URL via gh (gh missing or timed out)".to_string(),
                     )
                 }
             }
         }
     };
     let pull_ref = format!("refs/pull/{pr}/head");
-    let fetched = Command::new("git")
-        .args(["fetch", &fetch_url, &pull_ref])
-        .stdout(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success());
+    let fetch_args = ["fetch", &fetch_url, &pull_ref];
+    let fetched = loud(
+        run_with_timeout(&mut git_command(&fetch_args), net_timeout()),
+        &["fetch", &pull_ref],
+    );
     if !fetched {
         return Err(format!("failed to fetch {pull_ref}"));
     }
@@ -156,22 +197,22 @@ pub fn setup_with_url(pr: &str, head_sha: &str, known_url: Option<&str>) -> Resu
     if let Some(parent) = dir.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let added = Command::new("git")
-        .args(["worktree", "add", "--detach", &dir_str, head_sha])
-        .stdout(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success());
-    if !added {
-        return Err(format!("failed to add worktree at {dir_str}"));
-    }
-
+    // Create and lock in one step. A separate `worktree lock` left a gap in
+    // which a concurrent sweep saw an unlocked worktree and removed it.
     let reason = format!(
         "review pr={pr} pid={} ts={}",
         std::process::id(),
         crate::common::time::now_secs()
     );
-    if !git_loud(&["worktree", "lock", "--reason", &reason, &dir_str]) {
-        return Err(format!("failed to lock worktree at {dir_str}"));
+    let add_args = [
+        "worktree", "add", "--detach", "--lock", "--reason", &reason, &dir_str, head_sha,
+    ];
+    if !git_loud(&add_args) {
+        // A concurrent setup for the same PR and sha may have won the race.
+        if is_locked(&dir_str) {
+            return Err(format!("review already in progress for PR {pr}"));
+        }
+        return Err(format!("failed to add worktree at {dir_str}"));
     }
     Ok(dir_str)
 }

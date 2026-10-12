@@ -467,8 +467,18 @@ pub fn lock_path(index: &Path) -> PathBuf {
     index.with_file_name("index.lock")
 }
 
+/// The held run lock. Dropping it unlocks explicitly, so a copy of the file
+/// descriptor that a concurrent fork briefly holds cannot keep the lock alive.
+pub struct RunLock(File);
+
+impl Drop for RunLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 /// Takes the exclusive run lock, or says another run holds it.
-pub fn acquire_lock(index: &Path) -> Result<File, String> {
+pub fn acquire_lock(index: &Path) -> Result<RunLock, String> {
     if let Some(parent) = index.parent() {
         host::ensure_private_dir(parent)
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
@@ -480,7 +490,7 @@ pub fn acquire_lock(index: &Path) -> Result<File, String> {
         .open(lock_path(index))
         .map_err(|e| format!("failed to open the index lock: {e}"))?;
     match file.try_lock() {
-        Ok(()) => Ok(file),
+        Ok(()) => Ok(RunLock(file)),
         Err(TryLockError::WouldBlock) => Err("another index run is in progress".to_string()),
         Err(TryLockError::Error(e)) => Err(format!("failed to lock the index: {e}")),
     }
@@ -954,6 +964,23 @@ mod tests {
         );
         drop(held);
         assert!(run(&f.root, &f.index, false, &Options::default()).is_ok());
+    }
+
+    #[test]
+    fn the_lock_is_released_while_a_copy_of_the_descriptor_is_still_open() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-lock-dup");
+        write(&f.root, "a.rs", b"x\n");
+        let held = acquire_lock(&f.index).expect("first lock");
+        let copy = held.0.try_clone().expect("clone");
+
+        // Act
+        drop(held);
+
+        // Assert
+        assert!(acquire_lock(&f.index).is_ok());
+        drop(copy);
     }
 
     #[test]
