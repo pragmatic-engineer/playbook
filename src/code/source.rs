@@ -7,6 +7,7 @@
 use super::lang::{self, Lang};
 use super::location;
 use super::walker::Limits;
+use std::io::Read;
 use std::path::Path;
 
 /// Most declarations an outline prints.
@@ -56,7 +57,14 @@ fn read_file(root: &Path, cwd: &Path, input: &str) -> Result<(String, Vec<u8>), 
     if meta.len() > Limits::default().max_file_bytes {
         return Err(format!("file is too large to read: {rel}"));
     }
-    let bytes = std::fs::read(&full).map_err(|e| format!("cannot read {rel}: {e}"))?;
+    let cap = Limits::default().max_file_bytes;
+    let mut bytes = Vec::new();
+    std::fs::File::open(&full)
+        .and_then(|f| f.take(cap + 1).read_to_end(&mut bytes))
+        .map_err(|e| format!("cannot read {rel}: {e}"))?;
+    if bytes.len() as u64 > cap {
+        return Err(format!("file is too large to read: {rel}"));
+    }
     Ok((rel, bytes))
 }
 
@@ -126,6 +134,8 @@ pub struct Slice {
     pub truncated: bool,
     /// The requested end was past the end of the file.
     pub clamped: bool,
+    /// The last returned line was cut by the byte cap.
+    pub last_line_partial: bool,
 }
 
 /// Parses `START:END`, both 1 based and inclusive.
@@ -175,6 +185,7 @@ pub fn read_lines(
     let mut out = String::new();
     let mut last = start - 1;
     let mut truncated = false;
+    let mut partial = false;
     for (offset, line) in lines[start - 1..end].iter().enumerate() {
         let n = start + offset;
         if offset >= caps.lines {
@@ -184,13 +195,14 @@ pub fn read_lines(
         let sep = usize::from(offset > 0);
         if out.len() + sep + line.len() > caps.bytes {
             let room = caps.bytes.saturating_sub(out.len() + sep);
-            if offset > 0 {
-                out.push('\n');
-            }
             let piece = cut_at_boundary(line, room);
             if !piece.is_empty() {
+                if offset > 0 {
+                    out.push('\n');
+                }
                 out.push_str(piece);
                 last = n;
+                partial = true;
             }
             truncated = true;
             break;
@@ -209,6 +221,7 @@ pub fn read_lines(
         total_lines: lines.len(),
         truncated,
         clamped,
+        last_line_partial: partial,
     })
 }
 
@@ -313,6 +326,47 @@ mod tests {
     }
 
     #[test]
+    fn earlier_lines_filling_the_cap_leave_no_stray_newline() {
+        let _g = pinned();
+        // Arrange: two 4-byte lines make 9 bytes with the newline, and the cap is 9.
+        let f = fx("src-fill");
+        f.write("a.txt", "aaaa\nbbbb\ncccc\n");
+        let caps = Caps {
+            lines: 400,
+            bytes: 9,
+        };
+
+        // Act
+        let got = read(&f, "a.txt", (1, 3), caps).expect("read");
+
+        // Assert
+        assert_eq!(got.text, "aaaa\nbbbb");
+        assert_eq!(
+            (got.end, got.truncated, got.last_line_partial),
+            (2, true, false)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_a_file_outside_the_repo_is_refused() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("src-link-out");
+        let outside = crate::common::test_support::scratch_dir("src-link-target");
+        std::fs::create_dir_all(&outside).expect("dir");
+        std::fs::write(outside.join("secret.txt"), "private\n").expect("write");
+        std::os::unix::fs::symlink(outside.join("secret.txt"), f.root.join("link.txt"))
+            .expect("link");
+
+        // Act
+        let err = read(&f, "link.txt", (1, 1), Caps::default()).expect_err("outside");
+
+        // Assert
+        assert!(err.contains("outside the repository"), "{err}");
+    }
+
+    #[test]
     fn a_path_outside_the_repo_is_refused() {
         let _g = pinned();
         // Arrange
@@ -323,7 +377,7 @@ mod tests {
         let err = read(&f, "../outside", (1, 1), Caps::default()).expect_err("outside");
 
         // Assert
-        assert!(err.contains("outside") || err.contains("no such"), "{err}");
+        assert!(err.contains("outside the repository"), "{err}");
     }
 
     #[test]

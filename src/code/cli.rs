@@ -99,7 +99,7 @@ pub enum CodeCommand {
     /// Parses the file as it is on disk, so it works without an index and never
     /// shows old text. Prints at most 500 declarations, indented by nesting.
     ///
-    /// Example: `playbook code outline lib/payment/service`
+    /// Example: `playbook code outline lib/payment/service.ts`
     Outline {
         /// The file to outline
         path: String,
@@ -112,7 +112,7 @@ pub enum CodeCommand {
     /// Reads the file as it is on disk. Prints at most 400 lines or 32 KiB. A
     /// range that ends past the file is cut at the end with a warning.
     ///
-    /// Example: `playbook code read lib/payment/service 10:40`
+    /// Example: `playbook code read lib/payment/service.ts 10:40`
     Read {
         /// The file to read
         path: String,
@@ -312,6 +312,20 @@ fn render_search(
     Ok(text)
 }
 
+/// Control characters other than tab as visible escapes, so file text cannot
+/// drive the terminal.
+fn visible(line: &str) -> String {
+    line.chars()
+        .flat_map(|c| {
+            if c.is_control() && c != '\t' {
+                c.escape_default().collect::<Vec<_>>()
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
+}
+
 fn render_outline(env: &Env, input: &str, json: bool) -> Result<String, String> {
     let root = super::location::repo_root(&env.cwd)?;
     let out = super::source::outline(&root, &env.cwd, input, super::source::OUTLINE_CAP)?;
@@ -354,12 +368,13 @@ fn render_outline(env: &Env, input: &str, json: bool) -> Result<String, String> 
     let mut text = String::new();
     for e in &out.entries {
         text.push_str(&format!(
-            "{}{}:{}-{}  {}\n",
+            "{}{}:{}-{}  {}  {}\n",
             "  ".repeat(e.depth),
             e.kind,
             e.start_line,
             e.end_line,
-            e.signature.as_deref().unwrap_or(&e.name)
+            e.qualified_name,
+            e.signature.as_deref().unwrap_or("")
         ));
     }
     if out.truncated {
@@ -403,6 +418,7 @@ fn render_read(
                 "end_line": out.end,
                 "total_lines": out.total_lines,
                 "text": out.text,
+                "last_line_partial": out.last_line_partial,
             }),
         );
         envelope.truncated = out.truncated;
@@ -413,8 +429,10 @@ fn render_read(
         eprintln!("code: {warning}");
     }
     let mut text = String::new();
-    for (offset, line) in out.text.lines().enumerate() {
-        text.push_str(&format!("{:>6}  {line}\n", out.start + offset));
+    if out.end >= out.start {
+        for (offset, line) in out.text.split('\n').enumerate() {
+            text.push_str(&format!("{:>6}  {}\n", out.start + offset, visible(line)));
+        }
     }
     if out.truncated {
         text.push_str("output truncated\n");
@@ -502,7 +520,13 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_prefix;
+    use super::{normalize_prefix, visible};
+
+    #[test]
+    fn control_characters_print_as_escapes_and_tabs_stay() {
+        // Arrange, Act, Assert
+        assert_eq!(visible("a\u{1b}[31mb\rc\td"), "a\\u{1b}[31mb\\rc\td");
+    }
 
     #[test]
     fn a_prefix_loses_leading_dot_slashes_and_backslashes() {
