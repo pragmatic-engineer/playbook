@@ -4,7 +4,7 @@
 //! `~/.config/playbook/memory/memory.signals.json` data layer: hit counters, staleness
 //! stamps, and a consolidation cursor. Every reader/writer of this file goes through this module's lock, so no caller's update is silently dropped by another's.
 
-use crate::common::atomic::{remove_stale_lock_dir, with_dir_lock, STALE_LOCK_AGE};
+use crate::common::atomic::with_dir_lock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -75,7 +75,6 @@ struct NodeSignals {
 /// whichever write finishes second silently discards the other's change.
 pub fn modify_locked(mem_dir: &Path, f: impl FnOnce(&mut SignalsStore)) {
     let lock_path = mem_dir.join("memory.signals.json.lock");
-    remove_stale_lock_dir(&lock_path, STALE_LOCK_AGE);
     let (acquired, ()) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
         if let Some(mut store) = read_store(mem_dir) {
             store.version = 1;

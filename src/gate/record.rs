@@ -139,7 +139,7 @@ pub fn run_with(
     let db_path = dest_base.join("state.db");
     let recorded_at = recorded_at_now();
 
-    let conn = db::open_db(&db_path)?;
+    let conn = db::open_db(&db_path).map_err(with_retry_hint)?;
     db::upsert_phase(
         &conn,
         plan_slug,
@@ -193,8 +193,29 @@ fn recorded_at_now() -> String {
     crate::common::time::now_epoch_secs().to_string()
 }
 
+/// Adds a one line recovery hint to an open failure caused by another
+/// process holding the database, so a skill knows the verdict can be retried.
+fn with_retry_hint(err: String) -> String {
+    let lower = err.to_lowercase();
+    if lower.contains("locked") || lower.contains("busy") {
+        format!("{err}; the database is in use by another process, retry in a few seconds")
+    } else {
+        err
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_busy_open_error_gets_a_retry_hint_and_others_do_not() {
+        let busy =
+            with_retry_hint("failed to set journal_mode=WAL: database is locked".to_string());
+        let other = with_retry_hint("failed to open database at /x: permission denied".to_string());
+
+        assert!(busy.ends_with("retry in a few seconds"), "{busy}");
+        assert!(!other.contains("retry"), "{other}");
+    }
+
     use super::*;
 
     #[test]

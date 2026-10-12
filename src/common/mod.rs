@@ -25,6 +25,7 @@ pub mod re;
 pub mod repo;
 pub mod session;
 pub mod shell;
+pub mod sqlite;
 pub mod stdin;
 pub mod time;
 
