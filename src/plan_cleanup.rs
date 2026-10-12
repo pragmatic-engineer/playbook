@@ -13,16 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-/// A slug is kebab-case: lower case letters and digits joined by single hyphens.
-pub fn valid_slug(slug: &str) -> bool {
-    !slug.is_empty()
-        && !slug.starts_with('-')
-        && !slug.ends_with('-')
-        && !slug.contains("--")
-        && slug
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
+/// Same rule `plan checkpoint` uses to create the files, so every slug that can
+/// leave scratch files can also clear them.
+pub use crate::planning::valid_slug;
 
 /// The slug a scratch file name belongs to, or `None` when the name is not one
 /// of the three scratch shapes.
@@ -92,7 +85,7 @@ fn remove_one(path: &Path) -> std::io::Result<()> {
 pub fn cleanup_slug(dir: &Path, slug: &str, dry_run: bool) -> Result<Vec<String>, String> {
     if !valid_slug(slug) {
         return Err(format!(
-            "invalid slug '{slug}': use lower case letters, digits and single '-' only"
+            "invalid slug '{slug}': use letters, digits, '-', '_' and '.', not starting with '.'"
         ));
     }
     let found = scratch_for(dir, slug);
@@ -196,6 +189,14 @@ mod tests {
     }
 
     #[test]
+    fn slugs_the_checkpoint_command_accepts_are_accepted() {
+        let d = tmp("wide");
+        fs::write(d.join("My_Plan.v2.checkpoint.md"), "x").expect("w");
+        let got = cleanup_slug(&d, "My_Plan.v2", false).expect("ok");
+        assert_eq!(got, vec!["My_Plan.v2.checkpoint.md"]);
+    }
+
+    #[test]
     fn dry_run_changes_nothing_and_second_run_is_idempotent() {
         let d = tmp("dry");
         seed(&d);
@@ -208,7 +209,7 @@ mod tests {
     #[test]
     fn bad_slugs_are_rejected() {
         let d = tmp("bad");
-        for s in ["", "../x", "a/b", "A", "a_b", "-a", "a--b", ".a", "a.b"] {
+        for s in ["", "../x", "a/b", ".a", "..", "a b"] {
             assert!(cleanup_slug(&d, s, false).is_err(), "{s}");
         }
     }

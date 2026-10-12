@@ -210,7 +210,7 @@ fn plan_cleanup_removes_scratch_only_and_is_idempotent() {
 fn plan_cleanup_rejects_bad_slugs() {
     let s = Sandbox::new("cleanbad");
     seed_plans(&s);
-    for slug in ["../demo", "a/b", "Demo", ".."] {
+    for slug in ["../demo", "a/b", ".hidden", ".."] {
         let o = s.run(&["plan", "cleanup", slug]);
         assert_eq!(o.status.code(), Some(1), "{slug}");
     }

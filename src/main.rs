@@ -1217,7 +1217,7 @@ fn main() {
             } else {
                 let slug = slug.unwrap_or_default();
                 if !plan_cleanup::valid_slug(&slug) {
-                    eprintln!("error: invalid slug '{slug}': use lower case letters, digits and single '-' only");
+                    eprintln!("error: invalid slug '{slug}': use letters, digits, '-', '_' and '.', not starting with '.'");
                     std::process::exit(1);
                 }
                 (plan_cleanup::cleanup_slug(&dir, &slug, dry_run), dry_run)
