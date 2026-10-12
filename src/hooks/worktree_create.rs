@@ -58,6 +58,18 @@ fn create(payload: &Payload) -> Result<PathBuf, String> {
     if base_commit.is_empty() {
         worktree_setup::refresh_origin_head(&main_root);
     }
+    // The branch may already be checked out at another path (an older run, or
+    // the fallback location); git refuses a second checkout, so reuse that one.
+    if let Some(existing) =
+        checked_out_path(&porcelain, &branch).filter(|p| !same_path(p, &main_root))
+    {
+        if existing.is_dir() {
+            return Ok(existing);
+        }
+        // Registered at a folder that is gone: drop the stale entry so git
+        // lets the branch be checked out again.
+        git(&main_root, &["worktree", "prune"])?;
+    }
     let primary = primary_target(&main_root, &name)?;
     let placed = match add_worktree(&main_root, &primary, &branch, &base_commit) {
         Ok(created) => Ok((primary, created)),
@@ -179,6 +191,16 @@ pub(crate) fn is_registered(repo: &Path, path: &Path) -> bool {
     registered_paths(&porcelain)
         .iter()
         .any(|p| same_path(p, path))
+}
+
+/// The registered worktree path that has `branch` checked out, if any.
+fn checked_out_path(porcelain: &str, branch: &str) -> Option<PathBuf> {
+    let wanted = format!("branch refs/heads/{branch}");
+    porcelain
+        .split("\n\n")
+        .find(|block| block.lines().any(|l| l == wanted))
+        .and_then(|block| block.lines().find_map(|l| l.strip_prefix("worktree ")))
+        .map(PathBuf::from)
 }
 
 pub(crate) fn registered_paths(porcelain: &str) -> Vec<PathBuf> {

@@ -10,7 +10,6 @@
 
 use crate::review::size::parse_numstat;
 use std::path::Path;
-use std::process::Command;
 
 /// Changed lines at which a Segment must be split. Segments target well under
 /// this; it is the hard limit a pull request never crosses.
@@ -48,12 +47,8 @@ pub fn branch_name(kind: &str, plan_slug: &str, n: u32, suffix: &str, title: &st
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git: {e}"))?;
+    let out = crate::common::git::run(Some(dir), args, crate::common::git::SLOW_TIMEOUT)
+        .ok_or_else(|| format!("git {}: could not run or timed out", args.join(" ")))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
