@@ -11,6 +11,15 @@
 //! - writing memory outside playbook's store: Claude Code's own auto memory
 //!   (`~/.claude/projects/*/memory/`) or the retired `~/.claude/memory/`.
 //!
+//! - changing the `rm` guard's own allowance: `playbook config set` on a
+//!   `hooks.rmGuard.*` key, `config import`, `config unset` or `config edit`,
+//!   anything naming the config database, a write to a config file, or an
+//!   inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=` assignment. A model
+//!   that could widen the roots could delete anything it likes, so this holds
+//!   in `ask` mode too, unlike the `auto_cost` guard, which covers `mode`,
+//!   `auto.*` and `fix.*` in `auto` mode only. The inline assignments cannot
+//!   reach the hook process, so denying them is defense in depth.
+//!
 //! It also shows the memory fact format (`MEMORY_SCHEMA`) when a fact file is
 //! written to playbook's store, so the system prompt does not carry it.
 //!
@@ -91,6 +100,8 @@ describes: a directory (`src/auth/`), a file (`src/auth/login.py`) or a symbol \
 `<owner>/` for one owner's repos, the root for everything. Inside a scoped folder do not repeat the \
 owner or repo in the text.";
 
+const RM_GUARD_CONFIG_REASON: &str = "The rm guard's allowed roots are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Until then, clean up inside the repo, or leave the path and say so.";
+
 const MEMORY_REASON: &str = "Claude Code's own memory is off limits here. Save the fact in playbook's store instead: ~/.config/playbook/memory/ for a global fact, <owner>/<repo>/ under it for a project fact.";
 
 pub fn run(payload: &Payload) {
@@ -123,6 +134,44 @@ fn is_fact_file(path: &str, memory_dir: &Path) -> bool {
         && !path.components().any(|c| c == Component::ParentDir)
 }
 
+/// Whether this simple command can widen the `rm` guard's allowance.
+fn changes_rm_guard_config(words: &[String], program_at: usize) -> bool {
+    let assigns = words[..program_at].iter().any(|w| {
+        w.split_once('=')
+            .is_some_and(|(name, _)| matches!(name, "WORKTREE_BASE_DIR" | "PLAYBOOK_SAFE_ROOTS"))
+    });
+    // Any program pointed at the config database can change any setting.
+    if assigns
+        || words
+            .iter()
+            .any(|w| w.to_lowercase().contains("playbook.db"))
+    {
+        return true;
+    }
+    let mut args = &words[program_at + 1..];
+    match program_name(&words[program_at]).as_str() {
+        "playbook" => {}
+        "cargo" => {
+            let Some(dashes) = args.iter().position(|w| w == "--") else {
+                return false;
+            };
+            args = &args[dashes + 1..];
+        }
+        _ => return false,
+    }
+    let Some(at) = args.iter().position(|w| w == "config") else {
+        return false;
+    };
+    match args[at + 1..].first().map(String::as_str) {
+        Some("import" | "unset" | "edit") => true,
+        Some("set") => args[at + 2..]
+            .iter()
+            .find(|w| !w.starts_with('-'))
+            .is_some_and(|key| key.to_lowercase().starts_with("hooks.rmguard")),
+        _ => false,
+    }
+}
+
 /// The reason to deny `command`, or `None` to allow it.
 fn check_command(command: &str, home: &str) -> Option<&'static str> {
     if !mentions_a_guarded_program(command) {
@@ -133,6 +182,9 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
             continue;
         };
         let args = &words[at + 1..];
+        if changes_rm_guard_config(&words, at) {
+            return Some(RM_GUARD_CONFIG_REASON);
+        }
         let found = match program_name(&words[at]).as_str() {
             "git" => check_git(args),
             "gh" => check_gh(args),
@@ -155,7 +207,18 @@ fn mentions_a_guarded_program(command: &str) -> bool {
         .filter(|c| !matches!(c, '\'' | '"' | '\\'))
         .collect::<String>()
         .to_lowercase();
-    bare.contains("git") || bare.contains("gh") || bare.contains(".claude") || bare.contains('~')
+    [
+        "git",
+        "gh",
+        ".claude",
+        "~",
+        "playbook",
+        "cargo",
+        "worktree_base_dir",
+        "safe_roots",
+    ]
+    .iter()
+    .any(|needle| bare.contains(needle))
 }
 
 fn check_git(args: &[String]) -> Option<&'static str> {
@@ -268,6 +331,14 @@ fn redirects(word: &str) -> bool {
 
 /// The reason to deny a write to `path`, or `None` to allow it.
 fn check_path(path: &str, home: &str) -> Option<&'static str> {
+    if !home.is_empty()
+        && super::auto_cost::is_config_file(
+            Path::new(path),
+            &crate::common::paths::playbook_root_from(Path::new(home)),
+        )
+    {
+        return Some(RM_GUARD_CONFIG_REASON);
+    }
     is_claude_memory_path(path, home).then_some(MEMORY_REASON)
 }
 
@@ -319,6 +390,60 @@ mod tests {
     use super::*;
 
     const HOME: &str = "/Users/me";
+
+    #[test]
+    fn changes_to_the_rm_guard_allowance_are_denied() {
+        for command in [
+            "playbook config set --global hooks.rmGuard.allowedRoots '[\"/opt/a/b\"]'",
+            "playbook config set hooks.rmGuard.allowedRoots ~/x/y",
+            "playbook config set --org hooks.rmguard.allowedroots x",
+            "/usr/local/bin/playbook config import cfg.json",
+            "playbook config unset hooks.rmGuard.allowedRoots",
+            "playbook config edit",
+            "cargo run -q -- config set hooks.rmGuard.allowedRoots /a/b",
+            "cd x && playbook config set hooks.rmGuard.allowedRoots /a/b",
+            "env playbook config set hooks.rmGuard.allowedRoots /a/b",
+            "sqlite3 ~/.config/playbook/playbook.db 'update x'",
+            "WORKTREE_BASE_DIR=/tmp/x rm -rf /tmp/x/y",
+            "PLAYBOOK_SAFE_ROOTS=/ rm -rf /etc/x",
+            "env WORKTREE_BASE_DIR=/Users/me playbook worktree sweep",
+        ] {
+            assert_eq!(deny(command), Some(RM_GUARD_CONFIG_REASON), "{command}");
+        }
+    }
+
+    #[test]
+    fn ordinary_config_use_and_prose_are_left_alone() {
+        for command in [
+            "playbook config get hooks.rmGuard.allowedRoots",
+            "playbook config list",
+            "playbook config export",
+            "playbook config set --global commit.signOff true",
+            "echo \"playbook config set hooks.rmGuard.allowedRoots x\"",
+            "git commit -m 'document hooks.rmGuard.allowedRoots'",
+            "cargo test --test hooks_guards",
+        ] {
+            assert_eq!(deny(command), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn writes_to_the_config_files_are_denied() {
+        let root = format!("{HOME}/.config/playbook");
+        for path in [
+            format!("{root}/playbook.db"),
+            format!("{root}/config.json"),
+            format!("{root}/orgs/acme/config.json"),
+            format!("{root}/x/../playbook.db"),
+        ] {
+            assert_eq!(
+                check_path(&path, HOME),
+                Some(RM_GUARD_CONFIG_REASON),
+                "{path}"
+            );
+        }
+        assert_eq!(check_path(&format!("{root}/memory/a.md"), HOME), None);
+    }
 
     fn deny(command: &str) -> Option<&'static str> {
         check_command(command, HOME)

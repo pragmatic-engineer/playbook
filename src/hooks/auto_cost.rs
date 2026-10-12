@@ -570,7 +570,7 @@ fn cargo_run_args(args: &[String]) -> Option<&[String]> {
 /// The three config tier files under `root`, with the owner and repo as
 /// wildcards. `.` and `..` are resolved lexically, never on disk, and case is
 /// ignored because the default macOS and Windows filesystems ignore it.
-fn is_config_file(path: &Path, root: &Path) -> bool {
+pub(super) fn is_config_file(path: &Path, root: &Path) -> bool {
     let lowercase = |path: &Path| PathBuf::from(path.to_string_lossy().to_lowercase());
     let (path, root) = (lowercase(path), lowercase(root));
     let mut normal = PathBuf::new();
