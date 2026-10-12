@@ -1235,22 +1235,22 @@ fn the_safe_list_at_budget_reached_allows_read_only_tools() {
 }
 
 #[test]
-fn bash_is_safe_at_budget_reached_only_for_the_four_exact_commands() {
+fn bash_at_budget_reached_allows_the_read_only_commands_and_denies_the_rest() {
     // Arrange
     let session = Session::at_budget("safe-bash", AutoFrom::Config);
     let allowed = [
         "git status",
         "git diff",
+        "git status --short",
         "playbook mode status",
         "playbook mode status --json",
     ];
     let denied = [
-        "git push",
-        "git status --short",
-        "git diff HEAD",
+        "git push --force",
         "playbook mode status --jsonx",
         "playbook mode ask",
         "playbook mode auto",
+        "npm test",
     ];
 
     // Act and Assert
@@ -1266,21 +1266,18 @@ fn bash_is_safe_at_budget_reached_only_for_the_four_exact_commands() {
 }
 
 #[test]
-fn a_shell_metacharacter_appended_to_a_safe_command_is_denied() {
+fn a_safe_command_chained_to_other_work_is_denied() {
     // Arrange
     let session = Session::at_budget("safe-bash-meta", AutoFrom::Config);
     let suffixes = [
-        ";",
-        "&",
-        "&&",
-        "|",
-        "`",
-        "$(x)",
-        ">",
-        "<",
+        " && rm -rf x",
+        "; rm -rf x",
+        " | sh",
+        " `x`",
+        " $(x)",
+        " > out",
+        " < in",
         "\nrm -rf x",
-        " ",
-        "\n",
     ];
 
     for suffix in suffixes {
@@ -1373,7 +1370,7 @@ fn an_unreadable_cost_fails_closed_and_only_then_allows_mode_ask() {
         reason.contains("`playbook mode ask` is allowed"),
         "reason: {reason}"
     );
-    write.reason("Write");
+    assert!(!write.is_denied(), "the park note stays writable");
     assert!(!read.is_denied(), "the safe list stays allowed");
     assert!(!escape.is_denied(), "exact playbook mode ask is the escape");
     not_exact.reason("mode ask is exact match only");

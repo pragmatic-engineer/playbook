@@ -20,6 +20,10 @@ On every launch the launcher:
 
 A session started without the launcher gets none of this except the hooks.
 
+### The `claude` function
+
+`playbook init --claude-override` (or `playbook config set launcher.claudeOverride true`) makes `playbook shell-init` also define a `claude` function. A plain interactive `claude` then goes through the launcher, so the playbook system prompt loads every time. Calls that use their own flags, subcommands, `-p`, piped or scripted use, and `PLAYBOOK_BYPASS=1` run the real binary untouched, and an existing `claude` alias or function is never replaced. Init writes only this playbook key, with your consent. It never changes Claude Code settings or memory and never passes `--settings`.
+
 ### Subcommands
 
 | Command | Behavior |
@@ -79,7 +83,7 @@ Set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` to run hooks and the status line anyway.
 | `Read` | `preread-edit-check` | When the target file was edited by this session in the last 30 minutes, injects a reminder that the post-edit state is already in context. Info only; never blocks. |
 | `Read` | `preread-size-check` | Denies a full-file read of a large file (over 500 lines or 60,000 bytes) when no `offset`/`limit` is set, pushing toward grep-first, then a targeted read. The note also tells the model to pipe big command output through `head` or `tail` and to use `gh ... --json` with `jq`. Images (png, jpg, jpeg, gif, webp) and PDFs are never denied, since `offset` and `limit` cannot override the guard for them. Allowlists a small set of config and docs files usually needed whole. It also denies a full re-read of a file this session already read in full, when the file is unchanged (same mtime and size), has at least 150 lines, and no compaction happened since (`session-init` zeroes `read-state.jsonl` on every SessionStart, compact included). Never denies a Read with `offset`, `limit` or `pages`, an image, PDF or notebook, a subagent Read, or a file whose earlier read was partial. The note names Grep and offset/limit, and `offset:1` with a `limit` forces the re-read. |
 | `AskUserQuestion` | `auto-guard` | Only when the resolved mode is `auto`: denies the question tool so the model takes the recommended option. See [Auto mode](../guides/05-auto-mode.md). |
-| any tool | `auto-cost` | Only in auto mode: warns at `auto.warnPct` of `auto.budgetUsd`, and at the cap denies every tool except reads, `git status`, `git diff`, `playbook mode status` and a park note. See [Auto mode](../guides/05-auto-mode.md). |
+| any tool | `auto-cost` | Only in auto mode: per agent, warns at `auto.warnPct` of that agent's cap and at the cap denies new work except reads, the closing steps (commit, push, pull request skills and commands, read-only `gh`, `playbook mode status`) and its own park note. The caller comes from `agent_id` in the hook input, and `auto.sessionCeilingUsd` stops new `Agent` spawns for the tree. See [Auto mode](../guides/05-auto-mode.md). |
 | `Read`, `Grep`, `Glob`, `Edit`, `Write`, `NotebookEdit` | `search-counter` | Tracks exploration breadth. Nudges Claude toward the Explore subagent once, at 8 unique file reads or searches. |
 | `Edit`, `Write` | `memory-anchors` | When the target path is anchored in the graph-first memory store (`~/.config/playbook/memory/memory.graph.json`), surfaces the facts that describe it, plus their `depends_on` and `contradicts` neighbours, as `additionalContext` before the edit lands. The message is capped at 600 characters (extra facts are summarized as a count) and is emitted once per file per session. Never blocks. Also fires on `UserPromptSubmit`; see below. |
 | `Edit`, `Write` | `no-slop-guard` | Denies an Edit or Write whose new content, in a Rust, shell, or Python file, carries a run of 3 or more consecutive comment lines, or a comment naming a plan, brief, dispatch id, or completion criterion. |

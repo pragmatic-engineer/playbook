@@ -191,6 +191,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         statusline: true,
         security: false,
         telemetry: false,
+        claude_override: false,
         path_setup: None,
         repo: None,
     }
@@ -232,7 +233,7 @@ fn fresh_config_gets_fully_wired() {
         }
         // `memory` has nothing to migrate on a fresh machine with no
         // legacy `~/.claude/memory`.
-        if ["memory", "trust", "path", "telemetry"].contains(&step.name) {
+        if ["memory", "trust", "path", "telemetry", "claude-override"].contains(&step.name) {
             assert_eq!(
                 step.status,
                 StepStatus::Skipped,
@@ -696,12 +697,20 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     for step in &second.steps {
         // `system-prompt` and `memory` stay `Skipped` on both runs: neither
         // has anything to act on in this fixture.
-        let expected =
-            if ["system-prompt", "memory", "trust", "path", "telemetry"].contains(&step.name) {
-                StepStatus::Skipped
-            } else {
-                StepStatus::AlreadyCorrect
-            };
+        let expected = if [
+            "system-prompt",
+            "memory",
+            "trust",
+            "path",
+            "telemetry",
+            "claude-override",
+        ]
+        .contains(&step.name)
+        {
+            StepStatus::Skipped
+        } else {
+            StepStatus::AlreadyCorrect
+        };
         assert_eq!(
             step.status, expected,
             "expected '{}' to report no change on a second run: {}",
@@ -814,6 +823,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         statusline: true,
         security: false,
         telemetry: false,
+        claude_override: false,
         path_setup: None,
         repo: None,
     };
@@ -870,6 +880,7 @@ fn aliases_false_skips_shim_entirely() {
         statusline: true,
         security: false,
         telemetry: false,
+        claude_override: false,
         path_setup: None,
         repo: None,
     };
@@ -1372,4 +1383,39 @@ fn init_without_the_statusline_says_an_existing_playbook_status_line_stays() {
     assert!(find_step(&outcome, "settings")
         .detail
         .contains("status line not changed"));
+}
+
+#[test]
+fn claude_override_is_written_only_with_consent_and_never_touches_claude_settings() {
+    // Arrange
+    let home = scratch_home("claude-override");
+    let claude_home = claude_home_of(&home);
+    let off = run(&base_paths(&home, Some(ShellKind::Bash)));
+    assert_eq!(
+        find_step(&off, "claude-override").status,
+        StepStatus::Skipped
+    );
+    assert!(!playbook::init::shell_init::claude_override_enabled(&home));
+    let settings_before = std::fs::read_to_string(claude_home.join("settings.json")).ok();
+    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    paths.claude_override = true;
+
+    // Act
+    let first = run(&paths);
+    let second = run(&paths);
+
+    // Assert
+    assert_eq!(
+        find_step(&first, "claude-override").status,
+        StepStatus::Wired
+    );
+    assert_eq!(
+        find_step(&second, "claude-override").status,
+        StepStatus::AlreadyCorrect
+    );
+    assert!(playbook::init::shell_init::claude_override_enabled(&home));
+    assert_eq!(
+        std::fs::read_to_string(claude_home.join("settings.json")).ok(),
+        settings_before
+    );
 }

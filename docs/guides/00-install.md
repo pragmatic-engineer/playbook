@@ -42,6 +42,7 @@ Pass `--yes` to accept every default. Flags go after `-s --` when piping:
 | `--yes`, `-y` | Accept every default. |
 | `--skip-plugin`, `--no-setup` | Skip the plugin. Guards, settings and shell wiring still run. |
 | `--aliases` | Install `ccc` and `ccd` without asking. |
+| `--claude-override` | Make a plain `claude` load the playbook system prompt (needs the launcher line from `--aliases`). |
 | `--system-prompt` | Install the system prompt without asking (implies `--aliases`). |
 | `--binary-only` | Binary, `PATH`, guards and settings only. No plugin, launcher, system prompt or prompts. |
 | `--ref <ref>` | Source ref, same as `PLAYBOOK_REF`. |
@@ -154,7 +155,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Plugin only and the binary
 
-`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases` and `--system-prompt`, each with a `--no-` form. Hooks, status line and `PATH` are on by default, the permissions rules (`--security`), launcher and system prompt are off.
+`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry` and `--claude-override`, each with a `--no-` form. Hooks, status line and `PATH` are on by default, the permissions rules (`--security`), launcher and system prompt are off.
 
 With the plugin alone, the guards and status line are not wired, and `/playbook:doctor` reports them as missing. Run `/playbook:setup` to finish. The first session after a plugin-only install also prints one line: "playbook is installed as a plugin only. Run /playbook:setup to install the binary and guards." It goes away once the hooks are wired, and Homebrew and install script users never see it after `playbook init`.
 
