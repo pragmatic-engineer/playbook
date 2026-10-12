@@ -11,6 +11,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// The shim finds a Homebrew binary in a fixed system path, so the no-binary
+/// tests cannot run on a machine that has one.
+fn has_system_binary() -> bool {
+    [
+        "/opt/homebrew/bin/playbook",
+        "/usr/local/bin/playbook",
+        "/home/linuxbrew/.linuxbrew/bin/playbook",
+    ]
+    .iter()
+    .any(|p| Path::new(p).exists())
+}
+
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn home_with(settings: Option<&str>) -> PathBuf {
@@ -62,12 +74,12 @@ fn wired_settings_stay_silent() {
 }
 
 #[test]
-fn unwired_settings_warn_to_rerun_the_installer() {
+fn unwired_settings_warn_to_run_setup() {
     let home = home_with(Some(r#"{"hooks":{"PreToolUse":[]}}"#));
     let o = binary(&home);
     assert!(o.status.success());
     assert!(out(&o).contains(r#""hookEventName":"SessionStart""#));
-    assert!(out(&o).contains("Re-run the installer"));
+    assert!(out(&o).contains("Run /playbook:setup"));
 }
 
 #[test]
@@ -85,16 +97,22 @@ fn missing_or_malformed_settings_exit_zero_without_stderr_noise() {
 
 #[test]
 fn the_shim_without_a_binary_warns_and_installs_nothing() {
+    if has_system_binary() {
+        return;
+    }
     let home = home_with(None);
     let o = shim(&home);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    assert!(out(&o).contains("Re-run the installer"));
+    assert!(out(&o).contains("Run /playbook:setup"));
     assert!(o.stderr.is_empty(), "no installer output expected");
     assert!(!home.join(".local").exists(), "the shim must not install");
 }
 
 #[test]
 fn the_shim_and_the_binary_print_the_same_warning() {
+    if has_system_binary() {
+        return;
+    }
     let home = home_with(None);
     let shim_json: serde_json::Value = serde_json::from_str(out(&shim(&home)).trim()).unwrap();
     let binary_json: serde_json::Value = serde_json::from_str(out(&binary(&home)).trim()).unwrap();

@@ -220,3 +220,52 @@ fn every_playbook_command_in_hooks_json_goes_through_the_shim() {
     }
     assert_eq!(seen, 3);
 }
+
+#[test]
+fn the_install_notice_says_what_it_installs_and_how_to_opt_out() {
+    if has_system_binary() {
+        return;
+    }
+    let p = Plugin::new("shim-notice");
+    let home = p.work.dir("h8");
+    let out = p.run(&home, None, &[("INSTALL_WRITES", "1")], &["init"]);
+    let err = stderr(&out);
+    assert!(err.contains("SHA256"), "{err}");
+    assert!(err.contains("PLAYBOOK_NO_AUTO_INSTALL=1"), "{err}");
+}
+
+#[test]
+fn the_env_opt_out_installs_nothing_and_exits_127() {
+    if has_system_binary() {
+        return;
+    }
+    let p = Plugin::new("shim-optout-env");
+    let home = p.work.dir("h9");
+    let out = p.run(&home, None, &[("PLAYBOOK_NO_AUTO_INSTALL", "1")], &["init"]);
+    assert_eq!(out.status.code(), Some(127));
+    assert_eq!(p.calls(), 0);
+    assert!(stderr(&out).contains("automatic install is off"));
+}
+
+#[test]
+fn the_marker_file_opt_out_installs_nothing_and_exits_127() {
+    if has_system_binary() {
+        return;
+    }
+    let p = Plugin::new("shim-optout-file");
+    let home = p.work.dir("h10");
+    let marker = home.join(".config/playbook");
+    fs::create_dir_all(&marker).unwrap();
+    fs::write(marker.join("no-auto-install"), "").unwrap();
+    let out = p.run(
+        &home,
+        None,
+        &[(
+            "XDG_CONFIG_HOME",
+            &home.join(".config").display().to_string(),
+        )],
+        &["init"],
+    );
+    assert_eq!(out.status.code(), Some(127));
+    assert_eq!(p.calls(), 0);
+}
