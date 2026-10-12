@@ -66,7 +66,7 @@ pub struct Flags {
     #[arg(long, overrides_with = "short_name")]
     pub no_short_name: bool,
     /// Never ask: use the default for every part you did not answer with a flag
-    #[arg(long, short = 'y')]
+    #[arg(long, short = 'y', visible_alias = "defaults")]
     pub yes: bool,
     /// Print what would change for each part and change nothing
     #[arg(long, conflicts_with = "explain")]

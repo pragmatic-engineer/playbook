@@ -164,7 +164,7 @@ fn aliases_wire_only_the_rc_file_of_the_current_shell() {
     ] {
         let sb = Sandbox::new("aliases");
         let out = sb.init(shell, &["--aliases"]);
-        assert!(!text(&out).contains("shim: skipped"), "{}", text(&out));
+        assert!(!text(&out).contains("[skip] shim"), "{}", text(&out));
         assert!(sb.read(wired).lines().any(|l| l == SHELL_INIT_LINE));
         assert!(!sb.path(other).exists());
         assert!(!sb.path(".config/playbook/shell").exists());
@@ -245,7 +245,7 @@ fn a_plain_run_twice_is_byte_identical_and_makes_no_new_backups() {
     let again = text(&sb.init("/bin/bash", &[]));
     for step in ["settings", "hooks"] {
         assert!(
-            again.contains(&format!("{step}: ok")),
+            again.contains(&format!("[=] {step}  ")),
             "{step} rewrote: {again}"
         );
     }
@@ -284,7 +284,7 @@ fn no_hooks_leaves_every_hook_entry_out_and_says_so() {
     let h = Sandbox::new("no-hooks");
     let out = h.init("/bin/zsh", &["--no-hooks"]);
     let t = text(&out);
-    assert!(t.contains("hooks") && t.contains("skipped"), "{t}");
+    assert!(t.contains("[skip] hooks  "), "{t}");
     let settings = h.read(".claude/settings.json");
     assert!(!settings.contains("playbook hook"), "{settings}");
     assert!(
