@@ -7,6 +7,7 @@
 
 pub mod adr;
 pub mod agents;
+pub mod atlassian;
 pub mod brief;
 pub mod cc;
 pub mod ci;
@@ -681,6 +682,11 @@ pub enum Command {
     Adr {
         #[command(subcommand)]
         sub: AdrCommand,
+    },
+    /// Checks for the `playbook:atlassian` skill
+    Atlassian {
+        #[command(subcommand)]
+        sub: AtlassianCommand,
     },
     /// Helpers for `/playbook:learn-project`
     Learn {
@@ -1358,6 +1364,19 @@ pub enum AdrCommand {
     /// Creates `docs/adr` in the repo if it is missing. Prints
     /// `Next number: NNNN   Date: YYYY-MM-DD`.
     Next,
+}
+
+/// `playbook atlassian` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum AtlassianCommand {
+    /// Check that `acli` meets the minimum version and whether `twg` is installed
+    ///
+    /// Prints one line for `acli` (`ok`, `too old` with the
+    /// `brew upgrade atlassian/acli/acli` hint, `version unreadable` or
+    /// `missing`) and one for `twg`. Exits 0 when `acli` is usable and 1
+    /// otherwise, so the skill can fall back to the next route. Whether the
+    /// Atlassian MCP tools are connected is left to the skill.
+    Check,
 }
 
 /// `playbook learn` subcommands.

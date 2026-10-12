@@ -6,14 +6,15 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    adr, agents, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor, effort, eval,
-    gate, handoff, hooks, init, json, learn, manifest, memory_import, mode, plan_cleanup, planning,
-    pr, review, sanitize, settings, statusline, trust, update, usage, worktree, AdrCommand,
-    AgentsCommand, CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DocCommand,
-    DoctorCommand, EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand,
-    LearnCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand,
-    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology,
-    SessionsCommand, SettingsCommand, SkillCommand, WorktreeCommand,
+    adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
+    effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
+    plan_cleanup, planning, pr, review, sanitize, settings, statusline, trust, update, usage,
+    worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli, Command, CommitCommand,
+    ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand, GateCommand,
+    GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand,
+    ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand, ReviewWorktreeCommand,
+    SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand, SettingsCommand,
+    SkillCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -1386,6 +1387,16 @@ fn main() {
                     eprintln!("error: {err}");
                     std::process::exit(1);
                 }
+            }
+        }
+        Command::Atlassian {
+            sub: AtlassianCommand::Check,
+        } => {
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            let (text, usable) = atlassian::check(&path);
+            println!("{text}");
+            if !usable {
+                std::process::exit(1);
             }
         }
         Command::Learn {
