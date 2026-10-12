@@ -32,7 +32,7 @@ Do this first, before Step 1. Read the mode from the CLI:
 playbook run-context --command quick-review --args "$ARGUMENTS"
 ```
 
-The JSON has `mode` (`ask` or `auto`), `source`, `hook_mode`, `warning` and `ceiling`. If `warning` is not empty, print it once. `ceiling` is the highest effort the user allows for this run (`null` means no limit): hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. Exit 2 means `--auto` and `--ask` were both passed: stop with the line it printed. For any other failure, do not stop and do not retry: run in ask mode with no ceiling and print one line. When the error is `unrecognized subcommand 'run-context'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
+The JSON has `mode`, `source`, `hook_mode`, `warning` and `ceiling`. Read `playbook skill ref delegating-subagents run-context` and follow it for the warning, the ceiling, exit 2, any other failure, and an outdated binary.
 
 **Routing.** Where you choose what to spawn, also run `playbook route review --json` and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on.
 
