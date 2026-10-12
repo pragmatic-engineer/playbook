@@ -654,3 +654,31 @@ fn remove_kept_message_names_the_manual_command() {
     assert!(path.exists());
     assert!(stderr(&out).contains(&format!("git worktree remove --force '{}'", path.display())));
 }
+||||||| parent of ce8a286b (fix(hooks): tighten rm, no-slop and policy guard messages)
+
+
+#[test]
+fn create_clears_an_empty_unregistered_leftover_directory() {
+    let f = fixture("leftover");
+    let first = created_path(&create(&f.repo, "crashed"));
+    git_ok(&f.repo, &["worktree", "remove", first.to_str().unwrap()]);
+    git_ok(&f.repo, &["branch", "-D", "worktree-crashed"]);
+    fs::create_dir_all(&first).unwrap();
+    let again = created_path(&create(&f.repo, "crashed"));
+    assert_eq!(first, again);
+    assert!(again.join("README.md").exists());
+}
+
+#[test]
+fn create_keeps_a_non_empty_unregistered_directory_and_names_it() {
+    let f = fixture("leftover-full");
+    let first = created_path(&create(&f.repo, "full"));
+    git_ok(&f.repo, &["worktree", "remove", first.to_str().unwrap()]);
+    git_ok(&f.repo, &["branch", "-D", "worktree-full"]);
+    fs::create_dir_all(&first).unwrap();
+    fs::write(first.join("mine.txt"), "keep\n").unwrap();
+    let out = create(&f.repo, "full");
+    assert!(first.join("mine.txt").exists());
+    assert!(out.status.success(), "fallback should still place it");
+    assert!(stderr(&out).contains("not a worktree of this repo"));
+}

@@ -129,6 +129,35 @@ mod rm_workspace_guard {
         assert!(out.contains("playbook plan cleanup"), "{out}");
     }
 
+    #[test]
+    fn a_commit_heredoc_in_another_command_does_not_trip_the_substitution_rule() {
+        let ws = format!("{}/Workspace", home());
+        let cmd = format!(
+            "{} {ws}/tmpfile && git commit -m \"$(cat <<'EOF'\nfix: a thing\nEOF\n)\"",
+            del()
+        );
+        assert!(!blocked(&cmd, &ws), "{cmd}");
+    }
+
+    #[test]
+    fn the_denial_for_a_substitution_explains_the_rules() {
+        let ws = format!("{}/Workspace", home());
+        let out = run_guard_in(&format!("{} -rf $(echo x)", del()), Some(&ws), None);
+        assert!(is_deny(&out), "{out}");
+        assert!(out.contains("literal absolute path"), "{out}");
+    }
+
+    #[test]
+    fn denial_for_a_worktree_leftover_names_the_git_commands() {
+        let out = run_guard_in(
+            "rm -rf /nonexistent-parent/.worktrees/app/old",
+            Some("/nonexistent-root"),
+            None,
+        );
+        assert!(is_deny(&out), "{out}");
+        assert!(out.contains("git worktree prune"), "{out}");
+    }
+
     fn is_deny(stdout: &str) -> bool {
         if stdout.trim().is_empty() {
             return false;
@@ -1080,6 +1109,19 @@ mod no_slop_guard {
     }
 
     #[test]
+    fn a_read_only_gh_api_call_is_not_a_posting() {
+        assert!(!blocks(
+            "gh api /repos/o/r/pulls/1/comments --jq '.[] | select(.body | contains(\"\u{2014}\"))'"
+        ));
+        assert!(blocks(
+            "gh api -X POST /repos/o/r/issues/1/comments -f body=\"a \u{2014} b\""
+        ));
+        assert!(blocks(
+            "gh api /repos/o/r/issues/1/comments -f body=\"a \u{2014} b\""
+        ));
+    }
+
+    #[test]
     fn a_missing_body_file_does_not_block() {
         // The guard catches prose it can read. A path it cannot open is the
         // shell's error to report, and blocking here would be a false deny.
@@ -1329,5 +1371,24 @@ mod no_slop_guard {
             .expect("playbook binary should exit");
         assert!(out.status.success());
         assert!(is_denied(&String::from_utf8_lossy(&out.stdout)));
+    }
+
+    #[test]
+    fn a_write_over_an_existing_file_only_checks_what_changed() {
+        let dir = scratch("legacy-write");
+        let file = dir.join("legacy.rs");
+        let old_line = format!("// {}", "legacy words ".repeat(12));
+        let old = format!("{old_line}\nfn a() {{}}\n");
+        fs::write(&file, &old).expect("write");
+        let new = format!("{old_line}\nfn a() {{}}\n\nfn b() {{}}\n");
+        assert!(!is_denied(&run_write(file.to_str().expect("utf8"), &new)));
+        let fresh = dir.join("fresh.rs");
+        assert!(is_denied(&run_write(fresh.to_str().expect("utf8"), &old)));
+    }
+
+    #[test]
+    fn a_comment_line_that_is_one_long_url_is_allowed() {
+        let url = format!("// https://example.com/{}\n", "a".repeat(120));
+        assert!(!is_denied(&run_edit("src/lib.rs", &url)));
     }
 }

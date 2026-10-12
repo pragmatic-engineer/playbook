@@ -188,3 +188,15 @@ fn only_a_write_of_a_fact_file_shows_the_format() {
     );
     assert_eq!(run(&write_to("/Users/tester/repo/notes.md"), &[]).0, "");
 }
+
+#[test]
+fn denials_tell_an_unattended_run_what_to_do_when_the_sanctioned_path_fails() {
+    let (out, _, _) = run(&bash("gh pr create --title t --body b"), &[]);
+    let reason = denial(&out).expect("gh pr create is denied");
+    assert!(reason.contains("playbook pr create --help"), "{reason}");
+    assert!(reason.contains("stop"), "{reason}");
+
+    let (out, _, _) = run(&bash("git commit --no-verify -m x"), &[]);
+    let reason = denial(&out).expect("--no-verify is denied");
+    assert!(reason.contains("stop"), "{reason}");
+}

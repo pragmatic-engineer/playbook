@@ -67,9 +67,32 @@ fn is_posting(cmd: &str) -> bool {
             (Some("gh"), Some("pr" | "issue" | "release"), Some(verb)) => {
                 matches!(verb, "create" | "edit" | "comment" | "review")
             }
-            (Some("gh"), Some("api"), _) => API_ENDPOINTS.iter().any(|e| rest.contains(e)),
+            (Some("gh"), Some("api"), _) => {
+                API_ENDPOINTS.iter().any(|e| rest.contains(e)) && gh_api_writes(rest)
+            }
             (Some("git"), Some("commit" | "tag"), _) => true,
             _ => false,
+        }
+    })
+}
+
+/// Whether a `gh api` command sends data: a non-GET method, or any field or
+/// input flag (which make `gh` switch to POST).
+fn gh_api_writes(rest: &str) -> bool {
+    let words: Vec<&str> = rest.split_whitespace().collect();
+    words.iter().enumerate().any(|(i, w)| {
+        let method = matches!(*w, "-X" | "--method")
+            .then(|| words.get(i + 1).copied())
+            .flatten()
+            .or_else(|| w.strip_prefix("--method="));
+        match method {
+            Some(m) => !m.trim_matches(['"', '\'']).eq_ignore_ascii_case("GET"),
+            None => {
+                matches!(*w, "-f" | "-F" | "--field" | "--raw-field" | "--input")
+                    || w.starts_with("--field=")
+                    || w.starts_with("--raw-field=")
+                    || w.starts_with("--input=")
+            }
         }
     })
 }
@@ -166,7 +189,14 @@ fn new_text(payload: &Payload) -> String {
         let old_string = payload.field(".tool_input.old_string");
         return changed_lines(&old_string, &new_string);
     }
-    payload.field(".tool_input.content")
+    // Write sends the whole file; scan only what differs from the file on disk
+    // so an old long line in an existing file is not blamed on this write.
+    let content = payload.field(".tool_input.content");
+    let path = payload.field(".tool_input.file_path");
+    match std::fs::read_to_string(&path) {
+        Ok(existing) if !existing.is_empty() => changed_lines(&existing, &content),
+        _ => content,
+    }
 }
 
 /// `new`'s lines outside the common prefix/suffix with `old`, plus one line of context each side so a boundary-straddling violation is still caught.
@@ -218,7 +248,12 @@ fn comment_violation(text: &str, marker: &str) -> Option<String> {
         if has_ticket_id(trimmed) {
             return Some("a comment names a dispatch id".to_string());
         }
-        if line.chars().count() > MAX_COMMENT_LINE_WIDTH {
+        let mut words = trimmed
+            .trim_start_matches(marker)
+            .trim_start_matches(['/', '!', ' '])
+            .split_whitespace();
+        let lone_url = words.next().is_some_and(|w| w.contains("://")) && words.next().is_none();
+        if line.chars().count() > MAX_COMMENT_LINE_WIDTH && !lone_url {
             return Some(format!(
                 "a comment line exceeds {MAX_COMMENT_LINE_WIDTH} columns, wrap it instead of writing one long line"
             ));
