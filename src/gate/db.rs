@@ -14,7 +14,7 @@
 //! is the de facto standard Rust SQLite binding, and this binary has no
 //! other reason to be async.
 
-use crate::common::atomic::with_dir_lock_aged;
+use crate::common::atomic::{with_dir_lock_aged, LONG_LOCK_STALE_AGE};
 use crate::common::sqlite::{retry_busy, OPEN_BUDGET};
 use rusqlite::OptionalExtension;
 use std::fs;
@@ -259,10 +259,6 @@ pub fn query_phase(
 const MIGRATION_SENTINEL: &str = ".migration-complete";
 
 /// The legacy items a pre-ADR-0012 checkout held under its own `.claude/`.
-/// A migration lock older than this belongs to a killed process; the copy takes
-/// far less.
-const MIGRATION_LOCK_STALE: Duration = Duration::from_secs(120);
-
 const LEGACY_ITEMS: &[&str] = &["state.db", "plans", "designs", "implement", "worktrees"];
 
 /// Moves legacy `.claude/{state.db,plans,designs,implement,worktrees}` items
@@ -288,7 +284,7 @@ pub fn migrate_legacy_repo_local(repo_root: &Path, dest_base: &Path) -> Result<(
         &lock_path,
         50,
         Duration::from_millis(100),
-        MIGRATION_LOCK_STALE,
+        LONG_LOCK_STALE_AGE,
         || migrate_legacy_repo_local_locked(&legacy_root, dest_base, &sentinel),
     );
     if acquired {
@@ -743,6 +739,29 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, content).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_migrate_lock_from_a_killed_process_is_cleared() {
+        let base = scratch_dir("legacy-migrate-stale-lock");
+        let repo_root = base.join("repo");
+        let legacy = repo_root.join(".claude");
+        write_file(&legacy.join("state.db"), "sqlite bytes");
+        let lock = legacy.join(".migrate.lock");
+        fs::create_dir_all(&lock).unwrap();
+        let past = std::time::SystemTime::now() - LONG_LOCK_STALE_AGE * 3;
+        fs::File::open(&lock)
+            .and_then(|h| h.set_modified(past))
+            .unwrap();
+        let dest_base = base.join("dest");
+
+        let result = migrate_legacy_repo_local(&repo_root, &dest_base);
+
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(dest_base.join(MIGRATION_SENTINEL).is_file());
+        assert!(!lock.exists());
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

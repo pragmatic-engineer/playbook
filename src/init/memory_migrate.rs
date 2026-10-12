@@ -18,7 +18,7 @@
 //! the full set of legacy-filename fixes, not just the ones a particular
 //! caller happened to add.
 
-use crate::common::atomic::with_dir_lock_aged;
+use crate::common::atomic::{with_dir_lock_aged, LONG_LOCK_STALE_AGE};
 use crate::common::paths::playbook_root_from;
 use crate::init::run::{StepReport, StepStatus};
 use std::fs;
@@ -30,8 +30,6 @@ const STEP_NAME: &str = "memory";
 const OLD_FILE_NAME: &str = "graph.json";
 const NEW_FILE_NAME: &str = "memory.graph.json";
 const OLD_LOCK_NAME: &str = "graph.json.lock";
-/// A migration lock older than this belongs to a killed process.
-const MIGRATION_LOCK_STALE: Duration = Duration::from_secs(120);
 const NEW_LOCK_NAME: &str = "memory.graph.json.lock";
 /// Its presence is the only "migration complete" signal: a destination
 /// left partially populated by an interrupted prior run has no sentinel.
@@ -219,7 +217,7 @@ fn move_memory_root(home: &Path, claude_home: &Path) -> StepReport {
         &lock_path,
         50,
         Duration::from_millis(10),
-        MIGRATION_LOCK_STALE,
+        LONG_LOCK_STALE_AGE,
         || copy_verify_and_finish(&old_root, &new_root, &sentinel),
     );
     if acquired {
@@ -538,7 +536,7 @@ mod tests {
         let new_root = new_root_of(&home);
         let lock = new_root.join(NEW_LOCK_NAME);
         fs::create_dir_all(&lock).unwrap();
-        set_mtime(&lock, SystemTime::now() - MIGRATION_LOCK_STALE * 3);
+        set_mtime(&lock, SystemTime::now() - LONG_LOCK_STALE_AGE * 3);
 
         let report = move_memory_root(&home, &claude_home);
 

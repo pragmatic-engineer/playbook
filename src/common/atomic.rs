@@ -18,6 +18,11 @@
 //! forever waiting on a lock; "rare torn write under sustained contention"
 //! was chosen deliberately over "hook that never returns".
 //!
+//! Known gap: the stale check and its `remove_dir` are two steps, so two
+//! callers that both see one dead lock as stale can both end up holding a
+//! lock. Treat these locks as fail-open guards against torn writes, never as
+//! strict mutual exclusion.
+//!
 //! `with_dir_lock` reports whether THIS call was the one that created the
 //! lock directory, and leaves removing it entirely up to the caller: a
 //! caller that never acquired the lock must not remove a directory another
@@ -67,6 +72,11 @@ pub(crate) fn with_dir_lock_aged<T>(
     let acquired = acquire_dir_lock(lock_path, retries, delay);
     (acquired, f())
 }
+
+/// Stale age for a lock held across a long copy (a store or a checkout). Every
+/// taker of such a lock must use the same age, or the shortest one steals a
+/// live holder's lock.
+pub(crate) const LONG_LOCK_STALE_AGE: Duration = Duration::from_secs(300);
 
 /// A lock directory older than this belongs to a holder that died inside its
 /// critical section, which takes well under a second.
