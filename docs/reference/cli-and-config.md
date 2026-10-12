@@ -218,7 +218,6 @@ Example: `playbook code search --text retry`
 - `<QUERY>`: Words to look for
 - `--text`: Search indexed text
 - `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
-- `--lang <LANG>`: Only files of this language
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document
 

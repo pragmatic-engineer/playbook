@@ -227,7 +227,7 @@ fn status_is_fresh_after_indexing_and_stale_after_an_added_file() {
 fn search_after_an_added_file_warns_on_stderr_in_text_mode() {
     // Arrange
     let fx = Fixture::new("search-text-warn", true);
-    fx.write("a.txt", "needleword here\n");
+    fx.write("a.txt", "alpha\nbeta\nneedleword here\n");
     assert!(fx.playbook(&["code", "index"]).status.success());
     fx.write("new.txt", "other\n");
 
@@ -241,7 +241,8 @@ fn search_after_an_added_file_warns_on_stderr_in_text_mode() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    assert!(stdout.starts_with("a.txt:1-1"), "{stdout}");
+    assert!(stdout.starts_with("a.txt:1-3"), "{stdout}");
+    assert!(stdout.contains("needleword here"), "{stdout}");
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(stderr.contains("stale"), "{stderr}");
 }

@@ -56,9 +56,6 @@ pub enum CodeCommand {
         /// Only files under this path prefix, for example `lib/payment/`
         #[arg(long)]
         path: Option<String>,
-        /// Only files of this language
-        #[arg(long)]
-        lang: Option<String>,
         /// Most results to show, from 1 to 200
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=200))]
         limit: u32,
@@ -89,25 +86,32 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
         CodeCommand::Search {
             query,
             path,
-            lang,
             limit,
             json,
             ..
-        } => render_search(env, &query, path, lang, limit as usize, json),
+        } => render_search(env, &query, path, limit as usize, json),
     }
+}
+
+/// A path prefix as the index stores paths: forward slashes, no leading `./`.
+fn normalize_prefix(prefix: &str) -> String {
+    let slashed = prefix.replace('\\', "/");
+    let mut rest = slashed.as_str();
+    while let Some(next) = rest.strip_prefix("./") {
+        rest = next;
+    }
+    rest.to_string()
 }
 
 fn render_search(
     env: &Env,
     query: &str,
     path: Option<String>,
-    lang: Option<String>,
     limit: usize,
     json: bool,
 ) -> Result<String, String> {
     let mut opts = SearchOptions::new(query);
-    opts.path = path;
-    opts.lang = lang;
+    opts.path = path.map(|p| normalize_prefix(&p));
     opts.limit = limit;
     let out = super::search_text(&env.cwd, &opts)?;
     let state = status::state_of(&out.drift);
@@ -117,6 +121,12 @@ fn render_search(
     }
     if out.result.hits.iter().any(|h| h.stale) {
         warnings.push("some results changed after they were indexed".to_string());
+    }
+    if out.result.scan_capped {
+        warnings.push(format!(
+            "searched only the first {} files, so results may be incomplete",
+            out.result.files_scanned.unwrap_or(0)
+        ));
     }
     if json {
         let results: Vec<serde_json::Value> = out
@@ -158,7 +168,7 @@ fn render_search(
         let first = h
             .excerpt
             .lines()
-            .find(|l| !l.trim().is_empty())
+            .nth(h.line.saturating_sub(super::search::excerpt_start(h.line)))
             .unwrap_or("");
         let stale = if h.stale { " (stale)" } else { "" };
         text.push_str(&format!(
@@ -169,10 +179,15 @@ fn render_search(
             first.trim()
         ));
     }
-    if out.result.truncated {
+    if out.result.omitted > 0 {
         text.push_str(&format!("{} more results not shown\n", out.result.omitted));
     }
-    if out.result.hits.is_empty() {
+    if out.result.scan_capped {
+        let n = out.result.files_scanned.unwrap_or(0);
+        text.push_str(&format!(
+            "searched only the first {n} files, so results may be incomplete\n"
+        ));
+    } else if out.result.hits.is_empty() {
         text.push_str("no matches\n");
     }
     Ok(text)
@@ -254,4 +269,18 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
         report.skipped,
         report.failed
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_prefix;
+
+    #[test]
+    fn a_prefix_loses_leading_dot_slashes_and_backslashes() {
+        // Arrange, Act, Assert
+        assert_eq!(normalize_prefix("./lib/"), "lib/");
+        assert_eq!(normalize_prefix("././lib"), "lib");
+        assert_eq!(normalize_prefix("lib\\pay"), "lib/pay");
+        assert_eq!(normalize_prefix("lib/"), "lib/");
+    }
 }

@@ -967,6 +967,23 @@ mod tests {
     }
 
     #[test]
+    fn the_lock_is_released_while_a_copy_of_the_descriptor_is_still_open() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-lock-dup");
+        write(&f.root, "a.rs", b"x\n");
+        let held = acquire_lock(&f.index).expect("first lock");
+        let copy = held.0.try_clone().expect("clone");
+
+        // Act
+        drop(held);
+
+        // Assert
+        assert!(acquire_lock(&f.index).is_ok());
+        drop(copy);
+    }
+
+    #[test]
     fn a_run_stopped_after_it_started_reads_as_interrupted() {
         let _g = pinned();
         // Arrange
