@@ -133,12 +133,19 @@ pub const MAX_SIGNATURE_CHARS: usize = 200;
 
 /// Collapses whitespace and caps the length. The flag says it was cut.
 pub fn clean_signature(raw: &str) -> (String, bool) {
-    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.chars().count() > MAX_SIGNATURE_CHARS {
-        (collapsed.chars().take(MAX_SIGNATURE_CHARS).collect(), true)
-    } else {
-        (collapsed, false)
+    let mut out = String::new();
+    let mut count = 0usize;
+    for word in raw.split_whitespace() {
+        let sep = usize::from(!out.is_empty());
+        for ch in std::iter::repeat_n(' ', sep).chain(word.chars()) {
+            if count == MAX_SIGNATURE_CHARS {
+                return (out, true);
+            }
+            out.push(ch);
+            count += 1;
+        }
     }
+    (out, false)
 }
 
 /// Extracts symbols and imports from a parsed file.

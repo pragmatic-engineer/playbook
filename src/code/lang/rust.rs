@@ -4,6 +4,7 @@
 //! Rust symbol and import extraction.
 
 use super::{clean_signature, Extracted, Import, Symbol};
+use std::borrow::Cow;
 use tree_sitter::Node;
 
 /// Nesting deeper than this (modules inside modules) is not followed.
@@ -14,8 +15,9 @@ struct Walker<'a> {
     out: Extracted,
 }
 
-fn text<'a>(node: Node, source: &'a [u8]) -> &'a str {
-    std::str::from_utf8(&source[node.start_byte()..node.end_byte()]).unwrap_or("")
+/// The node's source text, with any invalid UTF-8 replaced.
+fn text<'a>(node: Node, source: &'a [u8]) -> Cow<'a, str> {
+    String::from_utf8_lossy(&source[node.start_byte()..node.end_byte()])
 }
 
 pub fn extract(root: Node, source: &[u8]) -> Extracted {
@@ -29,12 +31,20 @@ pub fn extract(root: Node, source: &[u8]) -> Extracted {
 
 /// The name of an impl target: `Wrapper<T>` is `Wrapper`, `&Foo` is `Foo`.
 fn type_name(node: Node, source: &[u8]) -> String {
-    match node.kind() {
-        "generic_type" | "reference_type" => node
-            .child_by_field_name("type")
-            .map_or_else(|| text(node, source).to_string(), |t| type_name(t, source)),
-        _ => text(node, source).to_string(),
+    let mut current = node;
+    // Followed in a loop and capped, so a hostile chain of `&` cannot overflow the stack.
+    for _ in 0..MAX_DEPTH {
+        let field = match current.kind() {
+            "generic_type" | "reference_type" | "pointer_type" => "type",
+            "dynamic_type" => "trait",
+            _ => break,
+        };
+        match current.child_by_field_name(field) {
+            Some(next) => current = next,
+            None => break,
+        }
     }
+    text(current, source).to_string()
 }
 
 fn join(prefix: &str, name: &str) -> String {
@@ -62,6 +72,7 @@ impl Walker<'_> {
             "function_item" | "function_signature_item" => Some("function"),
             "struct_item" => Some("struct"),
             "enum_item" => Some("enum"),
+            "union_item" => Some("union"),
             "type_item" => Some("type_alias"),
             "const_item" => Some("const"),
             "static_item" => Some("static"),
@@ -93,6 +104,11 @@ impl Walker<'_> {
                     self.members(node, &qualified, parent);
                 }
             }
+            "foreign_mod_item" => {
+                if let Some(body) = node.child_by_field_name("body") {
+                    self.items(body, prefix, parent, depth + 1);
+                }
+            }
             "use_declaration" => self.use_declaration(node),
             _ => {}
         }
@@ -109,7 +125,7 @@ impl Walker<'_> {
             let kind = match node.kind() {
                 "function_item" | "function_signature_item" => "method",
                 "const_item" => "const",
-                "type_item" => "type_alias",
+                "type_item" | "associated_type" => "type_alias",
                 _ => continue,
             };
             self.symbol(node, kind, owner, parent);
@@ -128,10 +144,14 @@ impl Walker<'_> {
         if name.is_empty() {
             return None;
         }
-        let head_end = node
-            .child_by_field_name("body")
-            .map_or(node.end_byte(), |b| b.start_byte());
-        let raw = std::str::from_utf8(&self.source[node.start_byte()..head_end]).unwrap_or("");
+        // A macro has no body field, so its head ends with its name.
+        let head_end = if node.kind() == "macro_definition" {
+            name_node.end_byte()
+        } else {
+            node.child_by_field_name("body")
+                .map_or(node.end_byte(), |b| b.start_byte())
+        };
+        let raw = String::from_utf8_lossy(&self.source[node.start_byte()..head_end]);
         let (signature, signature_cut) =
             clean_signature(raw.trim_end_matches(|c: char| c == ';' || c.is_whitespace()));
         self.out.symbols.push(Symbol {
@@ -145,7 +165,9 @@ impl Walker<'_> {
             start_line: node.start_position().row + 1,
             end_line: node.end_position().row + 1,
             parent,
-            exported: text(node, self.source).starts_with("pub"),
+            exported: node
+                .children(&mut node.walk())
+                .any(|c| c.kind() == "visibility_modifier"),
         });
         Some(self.out.symbols.len() - 1)
     }
@@ -189,12 +211,15 @@ impl Walker<'_> {
                 let (module, name) = match arg.child_by_field_name("path") {
                     Some(p) if p.kind() == "scoped_identifier" => (
                         self.field_text(p, "path").unwrap_or_default(),
-                        self.field_text(p, "name").unwrap_or_default(),
+                        self.field_text(p, "name"),
                     ),
-                    Some(p) => (String::new(), text(p, self.source).to_string()),
-                    None => (String::new(), String::new()),
+                    Some(p) => (text(p, self.source).to_string(), None),
+                    None => (String::new(), None),
                 };
-                (module, Some(format!("{name} as {alias}")))
+                match name {
+                    Some(name) => (module, Some(format!("{name} as {alias}"))),
+                    None => (module, Some(format!("as {alias}"))),
+                }
             }
             _ => (text(arg, self.source).to_string(), None),
         }
@@ -203,6 +228,7 @@ impl Walker<'_> {
     fn list_names(&self, list: Node) -> String {
         let mut cursor = list.walk();
         list.named_children(&mut cursor)
+            .filter(|n| !n.is_extra())
             .map(|n| text(n, self.source).to_string())
             .collect::<Vec<_>>()
             .join(", ")
@@ -328,6 +354,62 @@ mod a {
             assert_eq!(find(&symbols, want).kind, "method", "{want}");
         }
         assert_eq!(find(&symbols, "a::Type::method").name, "method");
+    }
+
+    #[test]
+    fn visibility_unions_extern_blocks_trait_types_and_macro_heads_are_extracted() {
+        // Arrange: the `pub fn` body holds an invalid byte, so the item text is not valid UTF-8.
+        let mut src = b"pub fn shown() { /* \xff */ }\nfn hidden() {}\n".to_vec();
+        src.extend_from_slice(
+            b"union U { a: u32 }\n\
+extern \"C\" { fn from_c(); }\n\
+trait T { type Item; }\n\
+macro_rules! twice { ($e:expr) => { $e * 2 }; }\n\
+impl dyn T { fn d(&self) {} }\n\
+impl T for &&Foo { fn f(&self) {} }\n\
+impl fmt::Display for x::Y { fn g(&self) {} }\n",
+        );
+        let parsed = parse(Lang::Rust, &src).expect("parse");
+
+        // Act
+        let symbols = extract_any(Lang::Rust, &parsed, &src).symbols;
+
+        // Assert
+        assert!(find(&symbols, "shown").exported);
+        assert!(!find(&symbols, "hidden").exported);
+        assert_eq!(find(&symbols, "U").kind, "union");
+        assert_eq!(find(&symbols, "from_c").kind, "function");
+        assert_eq!(find(&symbols, "T::Item").kind, "type_alias");
+        assert_eq!(
+            find(&symbols, "twice").signature.as_deref(),
+            Some("macro_rules! twice")
+        );
+        assert_eq!(find(&symbols, "T::d").kind, "method");
+        assert_eq!(find(&symbols, "Foo::f").kind, "method");
+        assert_eq!(find(&symbols, "x::Y::g").kind, "method");
+    }
+
+    #[test]
+    fn a_long_chain_of_references_in_an_impl_target_does_not_overflow() {
+        // Arrange
+        let src = format!("impl {}Foo {{ fn f() {{}} }}\n", "&".repeat(100_000));
+
+        // Act, Assert: it returns instead of overflowing the stack.
+        let _ = run(&src);
+    }
+
+    #[test]
+    fn use_with_an_alias_and_a_comment_inside_a_list() {
+        // Arrange
+        let src = "use serde as s;\nuse std::{io, // note\n fmt};\n";
+
+        // Act
+        let (_, imports) = run(src);
+
+        // Assert
+        assert_eq!(imports[0].module, "serde");
+        assert_eq!(imports[0].names.as_deref(), Some("as s"));
+        assert_eq!(imports[1].names.as_deref(), Some("io, fmt"));
     }
 
     #[test]
