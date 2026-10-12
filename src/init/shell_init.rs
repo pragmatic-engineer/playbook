@@ -9,6 +9,9 @@
 //! function that calls the launcher only for a plain interactive session
 //! (see `claude_override.sh`); every other call runs the real binary untouched.
 //!
+//! With `launcher.shortName` on, the output also defines `pb` as a short name
+//! for `playbook`, but only when nothing else uses that name (see `short_name.sh`).
+//!
 //! The launcher itself is `playbook cc launch`. A child process cannot change
 //! its parent's directory, so the function hands the binary a temp file in
 //! `$PLAYBOOK_CC_CD_FILE`; when the launcher enters a worktree it writes the
@@ -25,7 +28,38 @@ pub fn script(shell: ShellKind) -> String {
 
 /// The text `shell-init` prints for the current config.
 pub fn script_for_config(shell: ShellKind, home: &std::path::Path) -> String {
-    script_with(shell, claude_override_enabled(home))
+    script_with_options(
+        shell,
+        claude_override_enabled(home),
+        short_name_enabled(home),
+    )
+}
+
+/// Whether `launcher.shortName` is on. Off unless the user chose it.
+pub fn short_name_enabled(home: &std::path::Path) -> bool {
+    matches!(
+        crate::config::resolve("launcher.shortName", home, None),
+        Ok((serde_json::Value::Bool(true), _))
+    )
+}
+
+/// The first executable file called `name` in the directories of `path`, the
+/// way a shell would find a command. Used by `init` to see whether `pb` is taken.
+pub fn command_on_path(name: &str, path: &std::ffi::OsStr) -> Option<std::path::PathBuf> {
+    std::env::split_paths(path)
+        .map(|dir| dir.join(name))
+        .find(|p| p.metadata().is_ok_and(|m| m.is_file() && is_executable(&m)))
+}
+
+#[cfg(unix)]
+fn is_executable(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_meta: &std::fs::Metadata) -> bool {
+    true
 }
 
 /// Whether `launcher.claudeOverride` is on. Off unless the user chose it.
@@ -38,12 +72,23 @@ pub fn claude_override_enabled(home: &std::path::Path) -> bool {
 
 /// The same text with the optional `claude` function appended when `claude_override` is set.
 pub fn script_with(shell: ShellKind, claude_override: bool) -> String {
+    script_with_options(shell, claude_override, false)
+}
+
+/// The same text with each optional part appended when its flag is set.
+pub fn script_with_options(shell: ShellKind, claude_override: bool, short_name: bool) -> String {
     let mut text = base(shell);
     if claude_override {
         text.push_str(CLAUDE_OVERRIDE);
     }
+    if short_name {
+        text.push_str(SHORT_NAME);
+    }
     text
 }
+
+/// The optional `pb` function, defined only when the name is free.
+pub const SHORT_NAME: &str = include_str!("short_name.sh");
 
 /// The optional `claude` function and its bypass rules.
 pub const CLAUDE_OVERRIDE: &str = include_str!("claude_override.sh");
@@ -85,7 +130,7 @@ mod tests {
             assert!(text.contains("\nccc() {"));
             assert!(text.contains("\nccd() {"));
             assert!(!text.contains("\ncc() {"));
-            assert!(!text.contains("\npb() {") && !text.contains("\npbd() {"));
+            assert!(!text.contains("pb()") && !text.contains("\npbd() {"));
         }
     }
 }

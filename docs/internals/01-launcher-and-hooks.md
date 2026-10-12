@@ -24,6 +24,10 @@ A session started without the launcher gets none of this except the hooks.
 
 `playbook init --claude-override` (or `playbook config set launcher.claudeOverride true`) makes `playbook shell-init` also define a `claude` function. A plain interactive `claude` then goes through the launcher, so the playbook system prompt loads every time. Calls that use their own flags, subcommands, `-p`, piped or scripted use, and `PLAYBOOK_BYPASS=1` run the real binary untouched, and an existing `claude` alias or function is never replaced. Init writes only this playbook key, with your consent. It never changes Claude Code settings or memory and never passes `--settings`.
 
+### The `pb` short name
+
+`playbook init --short-name` (or `playbook config set launcher.shortName true`) makes `playbook shell-init` also define `pb`, which runs `playbook`. Init writes the key only when no command named `pb` is on your PATH. Each time your shell reads the rc file, `shell-init` checks again and defines `pb` only when no command, alias, function or builtin has the name, so it never overwrites yours. Playbook writes only its own config key, never a Claude Code setting or memory.
+
 ### Subcommands
 
 | Command | Behavior |

@@ -115,6 +115,16 @@ pub const PARTS: &[Part] = &[
         undo: "Run `playbook config set launcher.claudeOverride false`, or `command claude` to skip it once.",
     },
     Part {
+        id: "short-name",
+        asked: true,
+        default_on: false,
+        flags: "--short-name, --no-short-name",
+        question: "Add `pb` as a short name for `playbook`? It is added only when `pb` is not already a command, alias or function on your machine. This sets `launcher.shortName` in ~/.config/playbook.",
+        does: "Turns on `launcher.shortName`, so `playbook shell-init` also defines `pb` as `playbook`. Init checks your PATH and writes nothing when `pb` is already a command. `shell-init` checks again each time your shell starts, and skips `pb` when a command, alias, function or builtin of that name exists. It never overwrites one. It takes effect once the launcher line from the aliases part is in your rc file.",
+        changes: "~/.config/playbook (the playbook config store, key `launcher.shortName`)",
+        undo: "Run `playbook config set launcher.shortName false`.",
+    },
+    Part {
         id: "memory-migration",
         asked: false,
         default_on: true,

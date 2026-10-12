@@ -58,6 +58,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "docs.maxMemoryMb",
     "docs.anydocPath",
     "launcher.claudeOverride",
+    "launcher.shortName",
     "launcher.systemPromptMode",
 ];
 
@@ -133,7 +134,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "docs.maxOutputChars" => Some(Value::Number(200_000.into())),
         "docs.maxMemoryMb" => Some(Value::Number(1024.into())),
         "docs.anydocPath" => Some(Value::String(String::new())),
-        "launcher.claudeOverride" => Some(Value::Bool(false)),
+        "launcher.claudeOverride" | "launcher.shortName" => Some(Value::Bool(false)),
         "launcher.systemPromptMode" => Some(Value::String("append".to_string())),
         _ => None,
     }

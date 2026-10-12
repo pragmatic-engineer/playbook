@@ -186,6 +186,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         security: paths.security,
         telemetry: paths.telemetry,
         claude_override: paths.claude_override,
+        short_name: paths.short_name,
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
             bin_dir: s.bin_dir.clone(),
             shell: s.shell,
@@ -196,6 +197,11 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     let (settings_step, hooks_step) = run::settings_and_hooks_steps(&scratch_paths, epoch);
     let telemetry_step = run::telemetry_step(&scratch_paths, epoch);
     let override_step = run::claude_override_step(&sh, scratch_paths.claude_override);
+    let short_step = run::short_name_step(
+        &sh,
+        scratch_paths.short_name,
+        &std::env::var_os("PATH").unwrap_or_default(),
+    );
     let path_step = run::path_step(&sh, scratch_paths.path_setup.as_ref());
     let after_path = rc_snapshot(&sh);
     let shim_step = run::rewire_rc_file_step(&sh, scratch_paths.shell_kind, scratch_paths.aliases);
@@ -224,6 +230,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("system-prompt", choices.system_prompt),
         ("telemetry", choices.telemetry),
         ("claude-override", choices.claude_override),
+        ("short-name", choices.short_name),
     ];
     for (id, enabled) in flags {
         let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{id} ({})\n", on(enabled)));
@@ -269,6 +276,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                 "~/.config/playbook config: {}",
                 override_step.detail
             )],
+            "short-name" => vec![format!("~/.config/playbook config: {}", short_step.detail)],
             "path" => file_lines(&before_rc, &after_path, &path_step),
             "aliases" => file_lines(&after_path, &after_shim, &shim_step),
             _ => vec![system_prompt_line(paths)],

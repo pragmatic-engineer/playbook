@@ -430,6 +430,7 @@ fn main() {
                 security: choices.security,
                 telemetry: choices.telemetry,
                 claude_override: choices.claude_override,
+                short_name: choices.short_name,
             };
             if flags.dry_run {
                 print!("{}", init::preview::dry_run(&paths, &choices));
