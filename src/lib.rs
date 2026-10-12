@@ -978,7 +978,8 @@ pub enum UsageCommand {
     /// Warm the usage store in the background (run by the `usage-warm` hook)
     #[command(hide = true)]
     Warm,
-    /// Read new session history into the usage store (deprecated: use `playbook usage --summary`)
+    /// Removed in 0.24: use `playbook usage --summary`, the terminal view warms itself
+    #[command(hide = true)]
     Ingest,
     /// Run the local OpenTelemetry receiver in the foreground
     ///
