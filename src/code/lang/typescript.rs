@@ -332,16 +332,20 @@ impl Walker<'_> {
         let start = decl.range.start_byte();
         // Only the first characters are kept, so a huge declaration is not decoded whole.
         let reach = MAX_SIGNATURE_CHARS * 4 + 4;
-        let slice = |from: usize, to: usize| {
-            let to = to.min(self.source.len()).min(from.saturating_add(reach));
+        let mut clipped = false;
+        let mut slice = |from: usize, to: usize| {
+            let wanted = to.min(self.source.len());
+            let to = wanted.min(from.saturating_add(reach));
+            clipped |= to < wanted;
             &self.source[from.min(to)..to]
         };
         let mut bytes = slice(decl.lead.0, decl.lead.1).to_vec();
         bytes.extend_from_slice(slice(decl.head_start, decl.head_end.max(decl.head_start)));
         let raw = String::from_utf8_lossy(&bytes);
-        let (signature, signature_cut) = clean_signature(
+        let (signature, cut) = clean_signature(
             raw.trim_end_matches(|c: char| c == ';' || c == ',' || c.is_whitespace()),
         );
+        let signature_cut = cut || clipped;
         self.out.symbols.push(Symbol {
             qualified_name: join(scope.prefix, &name),
             name,
@@ -669,6 +673,21 @@ export default other;
             find(&symbols, "b").signature.as_deref(),
             Some("export const b = () =>")
         );
+    }
+
+    #[test]
+    fn a_long_aligned_signature_is_flagged_cut_even_when_it_collapses_short() {
+        // Arrange: each parameter sits behind 100 spaces, so the head passes 804 bytes.
+        let params: Vec<String> = (0..12)
+            .map(|i| format!("{}p{i}", " ".repeat(100)))
+            .collect();
+        let src = format!("function f(\n{}) {{}}\n", params.join(",\n"));
+
+        // Act
+        let (symbols, _) = run(Lang::TypeScript, &src);
+
+        // Assert
+        assert!(symbols[0].signature_cut);
     }
 
     #[test]
