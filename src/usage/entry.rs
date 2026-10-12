@@ -7,12 +7,13 @@
 use super::host::UsageCommand;
 use super::period::Period;
 use super::query::{self, Range, WeekStart};
-use super::run::{ingest_new, run_ingest, run_summary, Paths};
+use super::run::{ingest_new, run_summary, Paths};
 use super::{api, db, tui};
 use rusqlite::Connection;
 
-/// The release that removes the old `usage ingest` subcommand.
-const REMOVED_IN: &str = "v0.22.0";
+/// What the removed `usage ingest` says to anyone who still calls it.
+const INGEST_REMOVED: &str =
+    "`usage ingest` was removed: use `playbook usage --summary`, the terminal view warms itself";
 
 /// The flags of `playbook usage` itself.
 pub struct Opts {
@@ -26,10 +27,6 @@ pub struct Opts {
 pub fn interactive() -> bool {
     use std::io::IsTerminal;
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
-}
-
-fn deprecated(what: &str, instead: &str) {
-    eprintln!("usage: {what} is deprecated and will be removed in {REMOVED_IN}. {instead}");
 }
 
 /// The `--json` document: the totals and groups, the limits and burn rate
@@ -72,16 +69,7 @@ pub fn run(
     interactive: bool,
 ) -> Result<String, String> {
     match sub {
-        Some(UsageCommand::Ingest) => {
-            deprecated(
-                "`usage ingest`",
-                &format!(
-                    "Use `{}`, which also reads new session history.",
-                    super::host::command("usage --summary")
-                ),
-            );
-            run_ingest(paths)
-        }
+        Some(UsageCommand::Ingest) => Err(INGEST_REMOVED.to_string()),
         Some(UsageCommand::Warm) => super::warm::run_warm(paths).map(|()| String::new()),
         Some(UsageCommand::Collect { port, idle_seconds }) => {
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));

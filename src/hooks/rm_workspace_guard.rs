@@ -91,8 +91,15 @@ pub fn run(payload: &Payload) {
     // Comma with no space: the shell built this with `IFS=', '` and `${arr[*]}`,
     // which joins on the FIRST character of IFS only. Matching bash's quirk
     // rather than the prettier form keeps the message byte-identical.
+    let state_root = crate::common::paths::playbook_root();
+    let state_root = state_root.to_string_lossy();
+    let hint = if outside.iter().any(|t| t.starts_with(state_root.as_ref())) {
+        " This path is playbook's own state: to clear plan scratch files use `playbook plan cleanup <slug>` (or `playbook plan cleanup --stale` for old leftovers), do not rm them."
+    } else {
+        ""
+    };
     emit_pre_deny(&format!(
-        "rm blocked: {} is outside {roots} and ~/.claude/**. Allowed: rm inside the repo or those roots. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path.",
+        "rm blocked: {} is outside {roots} and ~/.claude/**. Allowed: rm inside the repo or those roots. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path.{hint}",
         outside.join(",")
     ));
 }

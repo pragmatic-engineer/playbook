@@ -10,7 +10,6 @@
 | `playbook usage --summary` | Reads anything new, then prints the text summary and exits. With `--range` it covers only that range and says which dates. For `today`, `week` and `month` it ends with the [period comparison](#period-comparison). |
 | `playbook usage --json` | Prints the totals, the groups and the live view as JSON, for scripts. For `today`, `week` and `month` it adds a `comparison` object. |
 | `playbook usage --range <name>` | Sets the range for the terminal view, `--json` and `--summary`. See [Ranges](#ranges). The default is `week` for the terminal view, `30d` for `--json` and all time for `--summary`. |
-| `playbook usage ingest` | Reads anything new into the store. Deprecated, use `--summary` or `--json`. |
 | `playbook usage collect` | Runs the local OpenTelemetry receiver in the foreground. `cc` starts it for you when needed. See [The telemetry receiver](#the-telemetry-receiver). |
 | `playbook usage status [--json]` | Shows whether the receiver runs, the telemetry row counts and the retention limits. Starts nothing. |
 | `playbook usage prune [--dry-run]` | Deletes telemetry rows past the retention limits. See [Checking and running the collector](#checking-and-running-the-collector). |

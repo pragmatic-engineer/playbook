@@ -7,13 +7,13 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
     adr, agents, brief, cc, ci, commit, common, config, deps, doc, doctor, effort, eval, gate,
-    handoff, hooks, init, json, learn, manifest, memory_import, mode, planning, pr, review,
-    sanitize, settings, statusline, trust, update, usage, worktree, AdrCommand, AgentsCommand,
-    CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand,
-    EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand,
-    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand,
-    ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand,
-    SettingsCommand, SkillCommand, WorktreeCommand,
+    handoff, hooks, init, json, learn, manifest, memory_import, mode, plan_cleanup, planning, pr,
+    review, sanitize, settings, statusline, trust, update, usage, worktree, AdrCommand,
+    AgentsCommand, CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DocCommand,
+    DoctorCommand, EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand,
+    LearnCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand,
+    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology,
+    SessionsCommand, SettingsCommand, SkillCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -1187,6 +1187,61 @@ fn main() {
                 Err(err) => {
                     eprintln!("error: {err}");
                     std::process::exit(1);
+                }
+            }
+        }
+        Command::Plan {
+            sub:
+                PlanCommand::Cleanup {
+                    slug,
+                    dry_run,
+                    json,
+                    stale,
+                    older_than,
+                    yes,
+                },
+        } => {
+            let dir = match gate_plans_dir() {
+                Ok(dir) => dir,
+                Err(err) => {
+                    eprintln!("error: playbook path plans failed: {err}");
+                    std::process::exit(1);
+                }
+            };
+            let (result, dry) = if stale {
+                (
+                    plan_cleanup::cleanup_stale(
+                        &dir,
+                        older_than,
+                        yes,
+                        std::time::SystemTime::now(),
+                    ),
+                    !yes,
+                )
+            } else {
+                let slug = slug.unwrap_or_default();
+                if !plan_cleanup::valid_slug(&slug) {
+                    eprintln!("error: invalid slug '{slug}': use letters, digits, '-', '_' and '.', not starting with '.'");
+                    std::process::exit(1);
+                }
+                (plan_cleanup::cleanup_slug(&dir, &slug, dry_run), dry_run)
+            };
+            match result {
+                Ok(names) => {
+                    if json {
+                        println!("{}", serde_json::json!({ "dry_run": dry, "files": names }));
+                    } else {
+                        for n in &names {
+                            println!("{n}");
+                        }
+                        if dry && !names.is_empty() {
+                            eprintln!("dry run: nothing removed");
+                        }
+                    }
+                }
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    std::process::exit(2);
                 }
             }
         }

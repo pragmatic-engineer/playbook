@@ -20,7 +20,7 @@ A hook that fails or cannot read its input allows the call. Only the hooks marke
 
 | Event | Matcher | Command | What it does | Can block or change | Reads and writes | Turn off |
 | :- | :- | :- | :- | :- | :- | :- |
-| `PreToolUse` | `Bash` | `playbook hook rm-workspace-guard` | Stops an `rm` whose target is outside your safe roots. Runs only for `rm` commands. | Can deny the call. | Reads the command and `PLAYBOOK_SAFE_ROOTS`. Writes nothing. | Entry only. `PLAYBOOK_SAFE_ROOTS` adds safe roots. |
+| `PreToolUse` | `Bash` | `playbook hook rm-workspace-guard` | Stops an `rm` whose target is outside your safe roots. Runs only for `rm` commands. | Can deny the call. For playbook's own plans folder the denial points to `playbook plan cleanup <slug>`. | Reads the command and `PLAYBOOK_SAFE_ROOTS`. Writes nothing. | Entry only. `PLAYBOOK_SAFE_ROOTS` adds safe roots. |
 | `PreToolUse` | `Bash` | `playbook hook bg-await-guard` | Warns when a command backgrounds an install, build or typecheck that a later step needs. | Warns only. Never blocks. | Reads the command. Writes nothing. | `BG_AWAIT_GUARD=0` |
 | `PreToolUse` | `Bash` | `playbook hook no-slop-guard` | Denies a posting command (commit, PR text) that contains an em or en dash. | Can deny the call. | Reads the command and any message file it names. Writes nothing. | `NO_SLOP_GUARD=0` |
 | `PreToolUse` | `Edit\|Write` | `playbook hook no-slop-guard` | Denies new code that carries a slop comment. | Can deny the call. | Reads the content being written. Writes nothing. | `NO_SLOP_GUARD=0` |

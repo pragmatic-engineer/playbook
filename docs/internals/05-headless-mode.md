@@ -21,7 +21,7 @@ All run with `CI=true`, stdin from `/dev/null`, and an empty `HOME`.
 | `settings check <template> <perms> <root>` | yes | three required arguments |
 | `ci [--json] [--dir <path>]` | yes | runs the three checks above in one step: one line each, exit 1 if any fails; outside a playbook checkout every check is skipped and it exits 0 |
 | `gate record` and `gate check` | yes | need `--source <plan file>` and a git `origin` remote; no remote exits 1 with a clear message; an edited plan reads `STALE`; a missing phase reads `MISSING`, exit 1 |
-| `usage`, `usage ingest` | yes | no transcripts: exit 0, "No usage recorded yet" |
+| `usage` | yes | no transcripts: exit 0, "No usage recorded yet" |
 | `handoff save`, `handoff show`, `handoff status` | yes | `save` reads stdin and refuses empty input |
 | `trust <path>` | yes | always exit 0 |
 | `pr prepare --help` | yes | exit 0, so a caller can detect support |
