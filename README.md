@@ -25,7 +25,12 @@ To see what `playbook init` changes before you agree, read [What init installs](
 
 Pin a version with `PLAYBOOK_REF=v0.23.0`. Update later with `playbook update`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
 
-**Plugin only.** `claude plugin install playbook@pragmatic-engineer` (after `claude plugin marketplace add pragmatic-engineer/marketplace`) gives you the skills, commands and subagents. Hooks need the binary, so the first `playbook` call installs it, and `/playbook:setup` finishes the wiring. The plugin needs Claude Code 2.1.224 or later.
+| Mode | What you get | Commands |
+|---|---|---|
+| Skills only (plugin) | Skill text. No guards, hooks, status line or working commands. | `claude plugin marketplace add pragmatic-engineer/marketplace` then `claude plugin install playbook@pragmatic-engineer` |
+| Skills plus binary (recommended) | Everything | The install script above, or Homebrew then `playbook init`, or the plugin then `/playbook:setup` |
+
+The `playbook` binary is a hard dependency of every command, hook, guard, the status line and usage. Only the skill text works without it. The plugin needs Claude Code 2.1.224 or later. See [Pick an install mode](docs/guides/00-install.md#pick-an-install-mode).
 
 ## A first session
 
