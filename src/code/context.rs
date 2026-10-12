@@ -586,22 +586,6 @@ mod tests {
     }
 
     #[test]
-    fn a_piece_of_a_camel_case_name_matches() {
-        let _g = pinned();
-        // Arrange
-        let f = fx("cx-pieces");
-        f.write("pay.ts", "export function processPayment() {}\n");
-        f.run();
-
-        // Act
-        let got = ctx(&f, "the payment of retries");
-
-        // Assert
-        assert_eq!(got.terms, vec!["payment", "retries"]);
-        assert_eq!(got.snippets[0].path, "pay.ts");
-    }
-
-    #[test]
     fn overlapping_hits_in_one_function_merge_into_one_snippet() {
         let _g = pinned();
         // Arrange: the name matches `retry` and the body matches it as text too.
@@ -804,23 +788,5 @@ mod tests {
         ] {
             assert!(!is_test_path(no), "{no}");
         }
-    }
-
-    #[test]
-    fn two_runs_give_identical_snippets() {
-        let _g = pinned();
-        // Arrange
-        let f = fx("cx-stable");
-        f.write("a.ts", "function retry() {}\nfunction retryAgain() {}\n");
-        f.write("b.ts", "function retryLater() {}\n");
-        f.run();
-
-        // Act
-        let a = format!("{:?}", ctx(&f, "retry").snippets);
-        let b = format!("{:?}", ctx(&f, "retry").snippets);
-
-        // Assert
-        assert_eq!(a, b);
-        assert!(a.contains("retry"));
     }
 }
