@@ -119,6 +119,16 @@ mod rm_workspace_guard {
         String::from_utf8_lossy(&out.stdout).to_string()
     }
 
+    #[test]
+    fn denial_for_playbook_state_names_the_cleanup_command() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let cmd =
+            format!("rm -f {home}/.config/playbook/repos/acme/widgets/w1/plans/demo.checkpoint.md");
+        let out = run_guard_in(&cmd, Some("/nonexistent-root"), None);
+        assert!(is_deny(&out), "{out}");
+        assert!(out.contains("playbook plan cleanup"), "{out}");
+    }
+
     fn is_deny(stdout: &str) -> bool {
         if stdout.trim().is_empty() {
             return false;

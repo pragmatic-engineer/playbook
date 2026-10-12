@@ -167,3 +167,77 @@ fn skill_ref_prints_the_reference_or_falls_back_to_the_skill() {
     let c = out(&s.run(&["skill", "ref", "grounding-review", "--plugin-root", root]));
     assert_eq!(b, c);
 }
+
+fn plans_dir(s: &Sandbox) -> PathBuf {
+    let o = s.run(&["path", "plans"]);
+    PathBuf::from(out(&o).trim())
+}
+
+fn seed_plans(s: &Sandbox) -> PathBuf {
+    let d = plans_dir(s);
+    fs::create_dir_all(&d).unwrap();
+    for n in [
+        "demo.md",
+        "demo-quality.md",
+        "demo.checkpoint.md",
+        "demo.gate-source.md",
+        "demo.gate-source.test-review.md",
+    ] {
+        fs::write(d.join(n), "x").unwrap();
+    }
+    fs::create_dir(d.join("demo.checkpoint.md.lock")).unwrap();
+    d
+}
+
+#[test]
+fn plan_cleanup_removes_scratch_only_and_is_idempotent() {
+    let s = Sandbox::new("clean");
+    let d = seed_plans(&s);
+    let dry = s.run(&["plan", "cleanup", "demo", "--dry-run"]);
+    assert!(dry.status.success());
+    assert!(d.join("demo.checkpoint.md").is_file());
+    let o = s.run(&["plan", "cleanup", "demo"]);
+    assert!(o.status.success());
+    assert_eq!(out(&o).lines().count(), 4, "{}", out(&o));
+    assert!(d.join("demo.md").is_file() && d.join("demo-quality.md").is_file());
+    assert!(!d.join("demo.checkpoint.md.lock").exists());
+    let again = s.run(&["plan", "cleanup", "demo", "--json"]);
+    assert!(again.status.success());
+    assert!(out(&again).contains("\"files\":[]"), "{}", out(&again));
+}
+
+#[test]
+fn plan_cleanup_rejects_bad_slugs() {
+    let s = Sandbox::new("cleanbad");
+    seed_plans(&s);
+    for slug in ["../demo", "a/b", ".hidden", ".."] {
+        let o = s.run(&["plan", "cleanup", slug]);
+        assert_eq!(o.status.code(), Some(1), "{slug}");
+    }
+}
+
+#[test]
+fn plan_cleanup_stale_needs_yes() {
+    let s = Sandbox::new("cleanstale");
+    let d = seed_plans(&s);
+    fs::write(d.join("orphan.checkpoint.md"), "x").unwrap();
+    let o = s.run(&["plan", "cleanup", "--stale"]);
+    assert!(o.status.success());
+    assert!(d.join("demo.checkpoint.md").is_file());
+    let o = s.run(&["plan", "cleanup", "--stale", "--yes", "--older-than", "0"]);
+    assert!(o.status.success());
+    assert!(!d.join("demo.checkpoint.md").exists());
+    assert!(d.join("orphan.checkpoint.md").is_file());
+}
+
+#[test]
+fn plans_picker_ignores_scratch_files() {
+    let s = Sandbox::new("picker");
+    seed_plans(&s);
+    let o = out(&s.run(&["plans"]));
+    assert!(o.contains("demo.md"), "{o}");
+    assert!(
+        !o.contains("checkpoint") && !o.contains("gate-source") && !o.contains("quality"),
+        "{o}"
+    );
+}
