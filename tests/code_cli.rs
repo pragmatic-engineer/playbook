@@ -182,3 +182,43 @@ fn the_index_lands_under_the_home_state_dir_and_not_in_the_repo() {
         .collect::<Vec<_>>();
     assert!(!listing.iter().any(|n| n == ".playbook"), "{listing:?}");
 }
+
+#[test]
+fn status_without_an_index_reports_missing_and_exits_zero() {
+    // Arrange
+    let fx = Fixture::new("status-missing", true);
+    fx.write("a.rs", "fn a() {}\n");
+
+    // Act
+    let out = fx.playbook(&["code", "status", "--json"]);
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let doc = json_of(&out);
+    assert_eq!(doc["command"], "status");
+    assert_eq!(doc["index"]["state"], "missing");
+}
+
+#[test]
+fn status_is_fresh_after_indexing_and_stale_after_an_added_file() {
+    // Arrange
+    let fx = Fixture::new("status-stale", true);
+    fx.write("a.rs", "fn a() {}\n");
+    assert!(fx.playbook(&["code", "index"]).status.success());
+
+    // Act
+    let fresh = json_of(&fx.playbook(&["code", "status", "--json"]));
+    fx.write("new.rs", "fn n() {}\n");
+    let stale = json_of(&fx.playbook(&["code", "status", "--json"]));
+
+    // Assert
+    assert_eq!(fresh["index"]["state"], "fresh");
+    assert_eq!(fresh["results"]["interrupted"], false);
+    assert_eq!(stale["index"]["state"], "stale");
+    assert_eq!(stale["results"]["added"]["paths"][0], "new.rs");
+    assert!(!stale["warnings"].as_array().expect("warnings").is_empty());
+}
