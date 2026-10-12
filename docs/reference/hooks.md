@@ -6,9 +6,10 @@ Paths below use `~/.config/playbook/` as the playbook home. The session director
 
 ## How to turn a hook off
 
-Four ways, from narrowest to widest.
+Five ways, from narrowest to widest.
 
 - A per-hook switch, where the last column names one. Environment switches (`POLICY_GUARD=0`) go in the `env` block of `settings.json` or your shell.
+- Disable the plugin in Claude Code. That sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false`. Every hook then exits with no output and no side effects, and the status line prints nothing, while the entries stay in `settings.json`. Enable the plugin again to resume.
 - Delete the hook's entry from `~/.claude/settings.json`. Init puts it back on the next run unless you pass `--no-hooks`.
 - `playbook init --no-hooks` never adds playbook hook entries. It does not remove ones that are already there.
 - `playbook uninstall` removes every entry init wired. Add `--dry-run` to see the list first.

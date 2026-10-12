@@ -41,6 +41,8 @@ Init adds 26 hook entries to `~/.claude/settings.json`. They run 20 different `p
 
 The entries fall into five groups: safety guards, session lifecycle, usage tracking and auto mode, memory, and hygiene. Only a few hooks can stop a tool call: `rm-workspace-guard`, `no-slop-guard`, `policy-guard`, `preread-size-check`, and (in `auto` mode) `auto-guard` and `auto-cost`. `memory-capture` can pause a stop. The rest add context or warn.
 
+While the plugin is disabled in Claude Code, every hook and the status line pause. See the [hook reference](../reference/hooks.md#how-to-turn-a-hook-off).
+
 Init adds or updates its own entries only. A hook you added by hand, or an event group init does not manage, stays as it is. Running init twice changes nothing the second time.
 
 ### Shared settings and status line
