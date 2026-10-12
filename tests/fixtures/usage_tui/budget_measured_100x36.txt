@@ -9,7 +9,7 @@
 │weekly window [measured]  ■■■······· 30%/100%  under  left 70%  allow 0.7%/h 17.5%/d              │
 │this week spend [local history]  $3.05 so far  avg $0.04/h $0.99/day  last week $0.08/h $2.02/day │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─┤¹Spend per day, USD├──────────────────────────╮╭─┤²Tokens per day├──────────────────────────────╮
+╭─┤¹Spend per day, USD├─┤v view: total├──────────╮╭─┤²Tokens per day├──────────────────────────────╮
 │total $3.05  peak $1.80 on 09-01  avg $0.76/day ││total 95.2K  peak 47.6K on 09-01  avg 23.8K/day │
 │Thu 2026-09-03 today  $1.25  2 msgs  47.6K tok  ││Thu 2026-09-03 today  47.6K tok  $1.25  2 msgs  │
 │ $2┤┄┄┄┄┄┄▄▄▄▄▄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄││ 50K┤┄┄┄┄┄┄▆▆▆▆▆┄┄┄┄┄┄┄▆▆▆▆▆┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│
@@ -19,7 +19,7 @@
 │ $0┤      █████       ██████                    ││   0┤      █████       █████                    │
 │    2026-08-31        2026-09-03     2026-09-06 ││     2026-08-31        2026-09-03    2026-09-06 │
 ╰──────────────────────────┤cost low ■■■■■ high├─╯╰────────────────────────┤tokens low ■■■■■ high├─╯
-╭─┤³Models├───────────────────────┤vs last week├─╮╭─┤⁴Projects├────────────────────────────────────╮
+╭─┤³Models├───────────────────────┤vs last week├─╮╭─┤⁴Projects├─┤v view: projects├─────────────────╮
 │name             cost▼     prev   change       %││name             msgs  tokens     cost▼ share   │
 │■sonnet-5        $1.80    $0.20   +$1.60   +800%││beta                2   47.6K     $1.80 ■■■■■···│
 │■opus-5          $1.25    $6.00   -$4.75  -79.2%││alpha               2   47.6K     $1.25 ■■■·····│
@@ -33,4 +33,4 @@
 │                                                ││                                                │
 │                                                ││                                                │
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
- 1-6 panel r range d/w/W/m/M/a jump ←/→ day v view / filter q quit   updated 01:46:40 UTC, every 5s
+ d day w week m month ←/→ day r range v view / filter h help q quit  updated 01:46:40 UTC, every 5s

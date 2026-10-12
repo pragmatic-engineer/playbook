@@ -57,7 +57,7 @@ The two charts are bar charts drawn with eighth blocks, one bar per UTC day, wit
 
 - **Total.** One color per bar along the gradient, as above.
 - **By model.** Each bar is stacked by model, the biggest model at the bottom, and the legend in the bottom border names them (`■ opus-5 ■ sonnet-5 +1` when they do not all fit). The edge between two models is exact to an eighth of a cell: a cell that holds an edge is drawn as a block in the lower model's color on the upper model's. Without color (the mono theme) the models are told apart by pattern (`█ ▓ ▒ ░ ▚ ▞ ▛ ▟`).
-- **Daily.** A table with a row for each day up to today, newest first: date with weekday, messages, tokens, cost and the model that cost the most that day. `s` and `S` sort it by any column, the selection and the wheel work as in the other tables, and a click selects a row. Today is bold and underlined, the peak day is bold and yellow, and the legend in the bottom border says so. Idle days stay as zero rows, so it reads as a calendar.
+- **Daily.** A table with a row for each day up to today, newest first: date with weekday, messages, tokens, cost and the model that cost the most that day. `s` and `S` sort it by any column, the selection works as in the other tables. Today is bold and underlined, the peak day is bold and yellow, and the legend in the bottom border says so. Idle days stay as zero rows, so it reads as a calendar.
 
 A model keeps one color everywhere: its swatch in the Models panel, its band in the stacked bars, its legend entry and its name in the daily table. The color comes from a hash of the model name, so it stays the same when the range changes. Two models that want the same color in one range get the next free one, and with more than eight models the colors are shared.
 
@@ -68,7 +68,9 @@ Keys:
 | `1` to `6`, `Tab`, `Shift-Tab` | Focus a panel. The focused panel's hint is a badge. |
 | `Left`, `Right` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
 | `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
-| `v` | Step the spend panel (total, by model, daily table), or with the projects panel focused, step projects, agents, skills, tools and health. |
+| `v` | Change the view of the focused panel, and only that panel. With Spend focused it steps total, by model and daily table. With Projects focused it steps projects, agents, skills, tools and health. On the other four panels it does nothing. The title of Spend and Projects always shows `v view: <name>`, and the other panels show no such tag. |
+| `h`, `?` | Open the help window: every key, grouped, with the panels each one acts on. |
+| `R` | Read new usage now. The view also refreshes by itself. |
 | `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
 | `S` | Reverse the sort. |
 | `Enter` | Filter the whole view to the selected row: a model, a project or a session id. `Enter` on that row again lifts the filter. |
@@ -82,6 +84,8 @@ Keys:
 | `q`, `Esc`, `Ctrl-C` | Quit. |
 
 The view is keyboard only, so the terminal's own text selection and scrolling keep working.
+
+**Help window.** `h` or `?` opens a centered window over the panels. It groups the keys (navigation, periods, views, sorting, filtering, refresh, quit) and says which panels each key acts on. It is sized for 80 by 24, and when the screen is shorter than the text the arrows, `PageUp`, `PageDown`, `Home` and `End` scroll it. Any other key closes it, and `Ctrl-C` still quits. Data keeps refreshing underneath and nothing the user set (focus, selection, sorts, views, cursor) changes. The key handler, the footer hints and the help window all read one table, `BINDINGS` in `src/usage/tui/keys.rs`, so the help cannot list a key that does not work or miss one that does. A test presses every key on every panel and fails if one changes anything without a row in the table. The footer shows each hint with its verb (`m month`, `/ filter`, `h help`), and on a narrow screen drops hints in the table's `drop` order, always keeping `v view`, `/ filter`, `h help` and `q quit`.
 
 ### Ranges
 

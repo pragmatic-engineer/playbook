@@ -9,6 +9,7 @@ use super::app::App;
 use super::budget;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
+use super::keys::{self, HelpLine};
 use super::notice::{self, Notice};
 use super::panels;
 use super::theme::Palette;
@@ -151,6 +152,66 @@ pub fn render(frame: &mut Frame, app: &App) {
         );
     }
     frame.render_widget(Paragraph::new(footer(app, &pal, area.width)), p.footer);
+    if let Some(scroll) = app.help {
+        render_help(frame, area, scroll, &pal);
+    }
+}
+
+/// Height of the help window on a screen `rows` tall: all its lines, or what
+/// the screen leaves.
+pub fn help_height(rows: u16) -> u16 {
+    (keys::help_lines().len() as u16 + 2).min(rows.saturating_sub(2))
+}
+
+/// The help window, centered, over the panels. It scrolls when the screen is
+/// shorter than the text.
+fn render_help(frame: &mut Frame, area: Rect, scroll: usize, pal: &Palette) {
+    let width = area.width.saturating_sub(2).min(78);
+    let height = help_height(area.height);
+    let rect = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    );
+    let accent = Style::default()
+        .fg(pal.color(pal.hi))
+        .add_modifier(Modifier::BOLD);
+    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let lines: Vec<Line> = keys::help_lines()
+        .into_iter()
+        .map(|l| match l {
+            HelpLine::Blank => Line::raw(""),
+            HelpLine::Heading(h) => Line::styled(h, accent),
+            HelpLine::Key {
+                shown,
+                text,
+                panels,
+            } => Line::from(vec![
+                Span::styled(format!("{shown:<10} "), accent),
+                Span::raw(format!("{text:<41}")),
+                Span::styled(panels, dim),
+            ]),
+        })
+        .collect();
+    let page = usize::from(height.saturating_sub(2));
+    let top = scroll.min(lines.len().saturating_sub(page));
+    let edge = Style::default().fg(pal.color(pal.hi));
+    let more = if lines.len() > page {
+        "\u{2191}/\u{2193} scroll, any other key closes"
+    } else {
+        "any key closes"
+    };
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(edge)
+        .title(Line::styled("\u{2524} Help: keys by group \u{251c}", edge))
+        .title_bottom(Line::styled(format!("\u{2524} {more} \u{251c}"), edge));
+    frame.render_widget(ratatui::widgets::Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines).scroll((top as u16, 0)).block(block),
+        rect,
+    );
 }
 
 /// Draws a message in a bordered box that clears what is under it.
@@ -188,36 +249,34 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
     // The status keeps its place at the right, so the hints get what is left.
     let room = usize::from(area_width).saturating_sub(status.chars().count());
     let theme = format!("theme ({})", app.theme.name());
-    // Listed in the order shown. When the line is too wide, hints drop in
-    // `DROP` order, so the ones that matter most stay.
-    let mut hints = vec![
-        ("1-6", "panel".to_string()),
-        ("r", "range".to_string()),
-        ("d/w/W/m/M/a", "jump".to_string()),
-        ("\u{2190}/\u{2192}", "day".to_string()),
-        ("v", "view".to_string()),
-        ("/", "filter".to_string()),
-        ("s/S", "sort".to_string()),
-        ("enter", "pick".to_string()),
-        ("p", "sessions".to_string()),
-        ("t", theme),
-        ("q", "quit".to_string()),
-    ];
-    let width = |hints: &[(&str, String)]| {
+    // Shown in the order of the key table. When the line is too wide, hints
+    // drop in the table's `drop` order, so the ones that matter most stay.
+    let mut hints: Vec<(&str, String, u8)> = keys::footer_hints()
+        .into_iter()
+        .map(|h| {
+            let verb = if h.verb == "theme" {
+                theme.clone()
+            } else {
+                h.verb.to_string()
+            };
+            (h.key, verb, h.drop)
+        })
+        .collect();
+    let width = |hints: &[(&str, String, u8)]| {
         1 + hints
             .iter()
-            .map(|(k, l)| k.chars().count() + l.chars().count() + 2)
+            .map(|(k, l, _)| k.chars().count() + l.chars().count() + 2)
             .sum::<usize>()
     };
-    for drop in FOOTER_DROP {
+    for rank in 1..=u8::MAX {
         if width(&hints) <= room {
             break;
         }
-        hints.retain(|(k, _)| *k != drop);
+        hints.retain(|(_, _, d)| *d != rank);
     }
     let used = width(&hints);
     let mut spans = vec![Span::raw(" ")];
-    for (key, label) in hints {
+    for (key, label, _) in hints {
         spans.push(Span::styled(key.to_string(), keys));
         spans.push(Span::styled(format!(" {label} "), dim));
     }
@@ -226,9 +285,6 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
     spans.push(Span::styled(status, status_style));
     Line::from(spans)
 }
-
-/// The order footer hints are dropped in on a narrow screen.
-const FOOTER_DROP: [&str; 5] = ["p", "t", "enter", "s/S", "1-6"];
 
 /// What the right end of the footer says: when the data was last read, or why
 /// the last read failed. The time is the snapshot's own clock, so it moves only
@@ -791,9 +847,84 @@ mod tests {
     }
 
     #[test]
+    fn the_spend_and_projects_titles_name_their_view_and_the_others_do_not() {
+        let mut app = app_with(&[event("claude-opus-5", "alpha", 12.5)]);
+        let text = screen(&app, 120, 30);
+        assert!(text.contains("v view: total"), "{text}");
+        assert!(text.contains("v view: projects"), "{text}");
+        assert_eq!(text.matches("v view:").count(), 2, "{text}");
+        app.key(ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Char('4'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        app.key(ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Char('v'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        assert!(screen(&app, 120, 30).contains("v view: agents"));
+    }
+
+    #[test]
+    fn the_help_window_fits_every_supported_size_and_names_the_panels() {
+        for (w, h) in [(80, 24), (100, 30), (160, 50)] {
+            let mut app = app_with(&[event("claude-opus-5", "alpha", 1.0)]);
+            app.help = Some(0);
+            let text = screen(&app, w, h);
+            assert!(text.contains("Navigation"), "{w}x{h}: {text}");
+            if h >= 50 {
+                // The whole table fits on a tall screen.
+                for group in [
+                    "Periods",
+                    "Views",
+                    "Sorting",
+                    "Filtering",
+                    "Refresh",
+                    "Quit",
+                ] {
+                    assert!(text.contains(group), "{w}x{h}: {text}");
+                }
+                assert!(text.contains("Spend, Projects"), "{w}x{h}");
+            }
+            assert!(text.contains("closes"), "{w}x{h}");
+            // Every line of the window is inside the screen.
+            assert_eq!(text.lines().count(), usize::from(h));
+        }
+    }
+
+    #[test]
+    fn every_help_line_fits_the_narrowest_window() {
+        for line in super::keys::help_lines() {
+            if let super::keys::HelpLine::Key {
+                shown,
+                text,
+                panels,
+            } = line
+            {
+                let width = 11 + 41 + panels.chars().count();
+                assert!(shown.chars().count() <= 10, "{shown}");
+                assert!(text.chars().count() <= 40, "{text}");
+                assert!(width <= 76, "{shown}: {width}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_footer_names_what_each_key_does_and_always_keeps_help_and_quit() {
+        let app = App::new(Range::All);
+        let wide = screen(&app, 140, 30);
+        for hint in ["m month", "w week", "d day", "a all", "h help", "q quit"] {
+            assert!(wide.contains(hint), "{hint}");
+        }
+        for width in [80, 90, 100] {
+            let text = screen(&app, width, 24);
+            assert!(text.contains("h help") && text.contains("q quit"), "{text}");
+        }
+    }
+
+    #[test]
     fn the_footer_lists_the_keys_and_the_active_theme() {
         let app = App::new(Range::All);
-        let text = screen(&app, 120, 30);
+        let text = screen(&app, 160, 30);
         for hint in [
             "/ filter",
             "s/S sort",
@@ -954,11 +1085,11 @@ mod tests {
     #[test]
     fn the_footer_drops_the_least_important_hints_first_on_a_narrow_screen() {
         let app = App::new(Range::All);
-        let wide = screen(&app, 120, 30);
+        let wide = screen(&app, 160, 30);
         let narrow = screen(&app, 80, 24);
         assert!(wide.contains("t theme"), "{wide}");
         assert!(!narrow.contains("t theme"), "{narrow}");
-        for kept in ["r range", "d/w/W/m/M/a jump", "/ filter", "q quit"] {
+        for kept in ["m month", "v view", "/ filter", "h help", "q quit"] {
             assert!(narrow.contains(kept), "{kept}:\n{narrow}");
         }
     }

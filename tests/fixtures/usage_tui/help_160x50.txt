@@ -1,0 +1,50 @@
+╭─┤playbook usage├──┤UTC├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│last 30 days 2026-08-05 to 2026-09-03  (no previous period to compare)                                                                                        │
+│cost          $20.27                    ╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮                                        │
+│tokens        618.8K                    │Navigation                                                                  │                                        │
+│messages          26                    │1 to 6     Focus a panel by its number              all panels              │                                        │
+╰────────────────────────────────────────│Tab        Focus the next panel                     all panels              │────────────────────────────────────────╯
+╭─┤Budget├───────────────────────────────│Shift-Tab  Focus the previous panel                 all panels              │────────────────────┤UTC  all projects├─╮
+│Limit unknown: playbook config set --glo│Down, j    Select the next row                      tables                  │                                        │
+│or use Claude Code on Pro or Max with th│Up, k      Select the previous row                  tables                  │                                        │
+│this week spend [local history]  $0.00 s│PgDn       Move five rows down                      tables                  │                                        │
+╰────────────────────────────────────────│PgUp       Move five rows up                        tables                  │────────────────────────────────────────╯
+╭─┤¹Spend per day, USD├─┤v view: total├──│Home, g    First row, or first day of a chart       tables, charts          │────────────────────────────────────────╮
+│total $20.27  peak $6.01 on 08-25  avg $│End, G     Last row, or last day of a chart         tables, charts          │ 20.6K/day                              │
+│Thu 2026-09-03 today  $1.25  2 msgs  47.│Left       Move the chart cursor one bar back       charts                  │  2 msgs                                │
+│ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│Right      Move the chart cursor one bar forward    charts                  │┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▅▅┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▅▅┄┄┄▅▅┄│
+│   │                                    │                                                                            │               ██               ██   ██ │
+│   │                                    │Periods                                                                     │               ██               ██   ██ │
+│   │                                    │d          Show today                               all panels              │               ██               ██   ██ │
+│ $4┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│w          Show this week                           all panels              │┄▂┄▂┄▂▂┄▂┄┄┄┄┄┄██┄▂┄▂┄┄┄┄▂┄▂▂┄┄┄██┄┄┄██┄│
+│   │                                    │W          Show last week                           all panels              │ █ █ ██ █      ██ █ █    █ ██   ██   ██ │
+│   │                        ▁▁          │m          Show this month                          all panels              │ █ █ ██ █      ██ █ █    █ ██   ██   ██ │
+│   │  ▅                     ██   ▄▄     │M          Show last month                          all panels              │ █ █ ██ █      ██ █ █    █ ██   ██   ██ │
+│ $0┤▂ █ ▁▁   ▇▇ ▁ ▅▅ ▄    ▂ ██ ▁ ██   ▁▁│a          Show all time                            all panels              │ █ █ ██ █      ██ █ █    █ ██   ██   ██ │
+│    W T F  S S  M T  W T  F S  S M  T W │r          Switch between today and this week       all panels              │ W T F  S S  M T  W T F  S S  M T  W T  │
+│    2026-08-05                          │                                                                            │   2026-08-20                2026-09-03 │
+╰────────────────────────────────────────│Views                                                                       │────────────────┤tokens low ■■■■■ high├─╯
+╭─┤³Models├──────────────────────────────│v          Next view of the focused panel           Spend, Projects         │────────────────────────────────────────╮
+│name                                    │t          Next color theme (off with NO_COLOR)     all panels              │         msgs  tokens     cost▼ share   │
+│■ opus-5                                │p          Open the full screen Sessions list       all panels              │           10  238.0K    $11.85 ■■■■■···│
+│■ sonnet-5                              │h, ?       Show this help                           all panels              │            9  214.2K     $8.25 ■■■·····│
+│■ haiku-5                               │                                                                            │            7  166.6K     $0.17 ········│
+│                                        │Sorting                                                                     │                                        │
+│                                        │s          Sort by the next column                  tables                  │                                        │
+│                                        │S          Reverse the sort order                   tables                  │                                        │
+│                                        │                                                                            │                                        │
+╰────────────────────────────────────────│Filtering                                                                   │────────────────────────────────────────╯
+╭─┤⁵Live sessions├───────────────────────│/          Type a filter on any field               all panels              │──────────────────────────────────┤UTC├─╮
+│state project                    model  │Enter      Filter to selected row; again to undo    tables 3-6              │model              msgs  tokens    cost▼│
+│live  alpha                      opus-5 │c          Clear the filter                         all panels              │opus-5                2   47.6K    $1.25│
+│                                        │                                                                            │sonnet-5              1   23.8K    $1.25│
+│                                        │Refresh                                                                     │sonnet-5              1   23.8K    $0.55│
+│                                        │R          Read new usage now (also automatic)      all panels              │opus-5                1   23.8K    $0.80│
+│                                        │                                                                            │sonnet-5              1   23.8K    $0.95│
+│                                        │Quit                                                                        │opus-5                1   23.8K    $1.40│
+│                                        │q, Esc     Quit                                     all panels              │sonnet-5              1   23.8K    $0.20│
+│                                        │Ctrl-C     Quit, also while typing a filter         all panels              │opus-5                1   23.8K    $6.00│
+│                                        ╰┤ any key closes ├──────────────────────────────────────────────────────────╯haiku-5               1   23.8K    $0.01│
+│                                                                              ││Sat 08-22 s-11     gamma              haiku-5               1   23.8K    $0.02│
+╰──────────────────────────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────╯
+ 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (btop) h help enter select q quit         updated 01:46:40 UTC, every 5s
