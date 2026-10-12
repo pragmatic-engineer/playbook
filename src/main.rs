@@ -6,12 +6,12 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    adr, agents, brief, cc, ci, commit, common, config, deps, doctor, effort, eval, gate, handoff,
-    hooks, init, json, learn, manifest, memory_import, mode, planning, pr, review, sanitize,
-    settings, statusline, trust, update, usage, worktree, AdrCommand, AgentsCommand, CcCommand,
-    Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DoctorCommand, EvalCommand,
-    GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand,
-    MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand,
+    adr, agents, brief, cc, ci, commit, common, config, deps, doc, doctor, effort, eval, gate,
+    handoff, hooks, init, json, learn, manifest, memory_import, mode, planning, pr, review,
+    sanitize, settings, statusline, trust, update, usage, worktree, AdrCommand, AgentsCommand,
+    CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand,
+    EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand,
+    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand,
     ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand,
     SettingsCommand, SkillCommand, WorktreeCommand,
 };
@@ -1512,6 +1512,14 @@ fn main() {
                 }
             }
         },
+        Command::Doc { sub } => {
+            let home = common::home_dir();
+            let code = match sub {
+                DocCommand::Read { file, json } => doc::read(&home, &file, json),
+                DocCommand::Status => doc::status(&home),
+            };
+            std::process::exit(code);
+        }
         Command::Doctor { sub } => match sub {
             DoctorCommand::Check { json } => {
                 let home = common::home_dir();
