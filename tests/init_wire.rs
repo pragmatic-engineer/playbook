@@ -251,6 +251,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "memory-capture",
         "context-hygiene",
         "doc-read-hint",
+        "usage-warm",
         "rm-workspace-guard",
         "bg-await-guard",
         "no-slop-guard",

@@ -963,6 +963,9 @@ pub enum AgentsCommand {
 /// `playbook usage` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum UsageCommand {
+    /// Warm the usage store in the background (run by the `usage-warm` hook)
+    #[command(hide = true)]
+    Warm,
     /// Read new session history into the usage store (deprecated: use `playbook usage --summary`)
     Ingest,
     /// Run the local OpenTelemetry receiver in the foreground
@@ -1840,6 +1843,7 @@ pub enum HookName {
     MigrationCheck,
     ContextHygiene,
     DocReadHint,
+    UsageWarm,
 }
 
 /// `playbook hooks` subcommands.
@@ -1946,6 +1950,7 @@ mod tests {
             "memory-capture",
             "context-hygiene",
             "doc-read-hint",
+            "usage-warm",
             "rm-workspace-guard",
             "bg-await-guard",
             "no-slop-guard",
