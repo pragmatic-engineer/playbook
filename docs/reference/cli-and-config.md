@@ -1117,7 +1117,7 @@ Example: `playbook update --check`
 
 Show token and cost usage across your sessions
 
-With no subcommand, opens the terminal view, which opens on this week compared with last week. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Days are UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise. For today, week and month, `--json` adds a comparison with the previous period over the same elapsed span, and `--summary` prints it.
+With no subcommand, opens the terminal view, which opens on this week compared with last week. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Days are UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise. For today, week and month, `--json` adds a comparison with the previous period over the same elapsed span, and `--summary` prints it. The cost per agent and skill, tool latency and health views come from Claude Code's OpenTelemetry export when it is available, see `playbook usage collect`.
 
 Example: `playbook usage --range today`
 
