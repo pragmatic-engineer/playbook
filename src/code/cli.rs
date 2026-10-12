@@ -141,6 +141,24 @@ pub enum CodeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Gather the code a task needs
+    ///
+    /// Describe the task in words. Finds matching declarations and text,
+    /// widens text hits to the declaration around them, adds imports of the
+    /// top files and tests that name a top declaration, merges overlaps and
+    /// fills a size budget. Prints what did not fit.
+    ///
+    /// Example: `playbook code context "add retry support to payment processing"`
+    Context {
+        /// The task, in words
+        query: String,
+        /// Budget in tokens, counted as four bytes each
+        #[arg(long, default_value_t = 4000, value_parser = clap::value_parser!(u32).range(200..=65536))]
+        max_tokens: u32,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn parse_range_arg(spec: &str) -> Result<(usize, usize), String> {
@@ -182,6 +200,11 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
         }
         CodeCommand::Outline { path, json } => render_outline(env, &path, json),
         CodeCommand::Read { path, lines, json } => render_read(env, &path, lines, json),
+        CodeCommand::Context {
+            query,
+            max_tokens,
+            json,
+        } => render_context(env, &query, max_tokens as usize, json),
         CodeCommand::Refs {
             target,
             limit,
@@ -347,6 +370,102 @@ fn visible(line: &str) -> String {
             }
         })
         .collect()
+}
+
+fn render_context(env: &Env, query: &str, max_tokens: usize, json: bool) -> Result<String, String> {
+    let mut opts = super::context::ContextOptions::new(query);
+    opts.max_tokens = max_tokens;
+    let out = super::build_context(&env.cwd, &opts)?;
+    let state = status::state_of(&out.drift);
+    let mut warnings = Vec::new();
+    if state == IndexState::Stale {
+        warnings.push(status::stale_warning(&out.drift));
+    }
+    if out.result.snippets.iter().any(|s| s.stale) {
+        warnings.push("some snippets changed after they were indexed".to_string());
+    }
+    if json {
+        let snippets: Vec<serde_json::Value> = out
+            .result
+            .snippets
+            .iter()
+            .map(|s| {
+                json!({
+                    "path": s.path,
+                    "start_line": s.start_line,
+                    "end_line": s.end_line,
+                    "reason": s.reason,
+                    "tier": s.tier,
+                    "stale": s.stale,
+                    "text": s.text,
+                })
+            })
+            .collect();
+        let omitted: Vec<serde_json::Value> = out
+            .result
+            .omitted
+            .iter()
+            .map(|o| {
+                json!({
+                    "path": o.path,
+                    "start_line": o.start_line,
+                    "end_line": o.end_line,
+                    "reason": o.reason,
+                })
+            })
+            .collect();
+        let mut envelope = Envelope::new(
+            "context",
+            state,
+            out.index_path.display().to_string(),
+            json!({
+                "terms": out.result.terms,
+                "snippets": snippets,
+                "omitted": omitted,
+                "bytes": out.result.bytes,
+            }),
+        );
+        envelope.truncated = out.result.truncated;
+        envelope.omitted = out.result.omitted_count;
+        envelope.warnings = warnings;
+        return Ok(envelope.to_json());
+    }
+    for warning in &warnings {
+        eprintln!("code: {warning}");
+    }
+    let mut text = String::new();
+    for s in &out.result.snippets {
+        let stale = if s.stale { " (stale)" } else { "" };
+        text.push_str(&format!(
+            "== {}:{}-{}{stale}  {}\n{}\n",
+            s.path,
+            s.start_line,
+            s.end_line,
+            s.reason,
+            visible_block(&s.text)
+        ));
+    }
+    if out.result.omitted_count > 0 {
+        text.push_str(&format!(
+            "{} more candidates did not fit:\n",
+            out.result.omitted_count
+        ));
+        for o in &out.result.omitted {
+            text.push_str(&format!(
+                "  {}:{}-{}  {}\n",
+                o.path, o.start_line, o.end_line, o.reason
+            ));
+        }
+    }
+    if out.result.snippets.is_empty() {
+        text.push_str("no matching code\n");
+    }
+    Ok(text)
+}
+
+/// Like `visible`, for several lines.
+fn visible_block(text: &str) -> String {
+    text.split('\n').map(visible).collect::<Vec<_>>().join("\n")
 }
 
 fn render_refs(env: &Env, target: &str, limit: usize, json: bool) -> Result<String, String> {
