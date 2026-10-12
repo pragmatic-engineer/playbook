@@ -58,7 +58,7 @@ Do this first, after the `--help` check above. Read the mode from the CLI:
 playbook run-context --command adr --args "$ARGUMENTS"
 ```
 
-The JSON has `mode` (`ask` or `auto`), `source`, `hook_mode`, `warning` and `ceiling`. If `warning` is not empty, print it once. `ceiling` is the highest effort the user allows for this run (`null` means no limit): hold your own work to it, and before you spawn an agent follow the `delegating-subagents` skill, which runs `playbook effort resolve agents <agent>` and uses the `subagentType` it returns. Exit 2 means `--auto` and `--ask` were both passed: stop with the line it printed. For any other failure, do not stop and do not retry: run in ask mode with no ceiling and print one line. When the error is `unrecognized subcommand 'run-context'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
+The JSON has `mode`, `source`, `hook_mode`, `warning` and `ceiling`. Read `playbook skill ref delegating-subagents run-context` and follow it for the warning, the ceiling, exit 2, any other failure, and an outdated binary.
 
 If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:adr needs a person to run it, because an ADR records a decision that a person has to make and own." Do not run any later step.
 

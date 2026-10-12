@@ -18,7 +18,7 @@ Do this first. Read the mode from the CLI:
 playbook run-context --args "$ARGUMENTS"
 ```
 
-The JSON has `mode` (`ask` or `auto`), `source`, `hook_mode` and `warning`. If `warning` is not empty, print it once. Exit 2 means `--auto` and `--ask` were both passed: stop with the line it printed. For any other failure, do not stop and do not retry: run in ask mode and print one line. When the error is `unrecognized subcommand 'run-context'`, the installed binary is older than this plugin: print "playbook binary is older than the plugin, run `playbook update`."
+The JSON has `mode`, `source`, `hook_mode` and `warning`. Read `playbook skill ref delegating-subagents run-context` and follow it for the warning, exit 2, any other failure, and an outdated binary.
 
 If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:address-pr-comments needs a person to run it, because it replies on GitHub in your name and each reply needs your approval." Do not run any later step.
 

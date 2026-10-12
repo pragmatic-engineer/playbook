@@ -193,3 +193,40 @@ fn playbook_usage_names_every_command() {
         "do not hard-code a command count"
     );
 }
+
+/// `playbook skill ref <skill> <name>` silently falls back to the skill's
+/// `SKILL.md` when the reference file is missing, so a renamed or deleted
+/// reference would go unnoticed. Every literal pointer must resolve.
+#[test]
+fn every_skill_ref_pointer_resolves_to_a_reference_file() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let pointer =
+        regex::Regex::new(r"playbook skill ref ([a-z][a-z-]*) ([a-z][a-z0-9-]*)").unwrap();
+    let mut checked = 0;
+    for dir in ["commands", "agents", "skills", "prompts"] {
+        let mut stack = vec![root.join(dir)];
+        while let Some(path) = stack.pop() {
+            if path.is_dir() {
+                stack.extend(
+                    fs::read_dir(&path)
+                        .unwrap()
+                        .filter_map(Result::ok)
+                        .map(|e| e.path()),
+                );
+            } else if path.extension().is_some_and(|e| e == "md") {
+                let text = fs::read_to_string(&path).unwrap();
+                for cap in pointer.captures_iter(&text) {
+                    let file = root.join(format!("skills/{}/references/{}.md", &cap[1], &cap[2]));
+                    assert!(
+                        file.is_file(),
+                        "{}: no reference file {}",
+                        path.display(),
+                        file.display()
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked >= 9, "found only {checked} skill ref pointers");
+}
