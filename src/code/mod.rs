@@ -5,5 +5,6 @@
 //! answers with exact paths, line ranges and short excerpts.
 
 pub mod db;
+pub mod index;
 pub mod location;
 pub mod walker;
