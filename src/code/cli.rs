@@ -409,9 +409,7 @@ fn render_refs(env: &Env, target: &str, limit: usize, json: bool) -> Result<Stri
     if out.result.omitted > 0 {
         text.push_str(&format!("{} more results not shown\n", out.result.omitted));
     }
-    if out.result.files_capped {
-        text.push_str("stopped at the file cap, so results may be incomplete\n");
-    } else if out.result.refs.is_empty() {
+    if out.result.refs.is_empty() && !out.result.files_capped {
         text.push_str("no references\n");
     }
     Ok(text)

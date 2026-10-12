@@ -61,8 +61,24 @@ pub fn target_name(target: &str) -> &str {
     after_colons.rsplit('.').next().unwrap_or(after_colons)
 }
 
+/// Most index rows read when looking for candidate files.
+const CANDIDATE_LIMIT: usize = 5000;
+
+/// Whether `haystack` holds `needle` with no identifier character on either side.
+fn has_word(haystack: &[u8], needle: &[u8]) -> bool {
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return false;
+    }
+    (0..=haystack.len() - needle.len()).any(|i| {
+        &haystack[i..i + needle.len()] == needle
+            && (i == 0 || !is_word(haystack[i - 1]))
+            && haystack.get(i + needle.len()).is_none_or(|b| !is_word(*b))
+    })
+}
+
 /// Candidate files: supported files whose text holds the target as a word.
-fn candidate_files(conn: &Connection, name: &str, cap: usize) -> Result<Vec<String>, String> {
+fn candidate_files(conn: &Connection, name: &str, limit: usize) -> Result<Vec<String>, String> {
     let Some(query) = super::search::fts_query(name) else {
         return Ok(Vec::new());
     };
@@ -75,7 +91,7 @@ fn candidate_files(conn: &Connection, name: &str, cap: usize) -> Result<Vec<Stri
              ORDER BY f.path LIMIT ?2",
         )
         .map_err(|e| format!("refs failed: {e}"))?;
-    let limit = i64::try_from(cap + 1).unwrap_or(i64::MAX);
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let rows = stmt
         .query_map(rusqlite::params![query, limit], |r| r.get::<_, String>(0))
         .map_err(|e| format!("refs failed: {e}"))?;
@@ -87,20 +103,25 @@ fn candidate_files(conn: &Connection, name: &str, cap: usize) -> Result<Vec<Stri
 pub fn find_refs(conn: &Connection, root: &Path, opts: &RefsOptions) -> Result<RefsResult, String> {
     let name = target_name(&opts.target);
     let mut result = RefsResult::default();
-    let mut files = candidate_files(conn, name, opts.file_cap)?;
-    if files.len() > opts.file_cap {
-        files.truncate(opts.file_cap);
-        result.files_capped = true;
-    }
+    let files = candidate_files(conn, name, CANDIDATE_LIMIT)?;
     let mut total = 0usize;
     for path in files {
-        result.files_scanned += 1;
         let Some(language) = Lang::for_path(&path) else {
             continue;
         };
         let Some(loaded) = load(root, &path) else {
             continue;
         };
+        // The text index folds case and splits identifiers, so check that the
+        // file really spells the name before it counts against the cap.
+        if !has_word(loaded.bytes(), name.as_bytes()) {
+            continue;
+        }
+        if result.files_scanned >= opts.file_cap {
+            result.files_capped = true;
+            break;
+        }
+        result.files_scanned += 1;
         for found in scan_file(language, &loaded, &path, name) {
             total += 1;
             if result.refs.len() < opts.limit {
@@ -120,6 +141,7 @@ fn scan_file(language: Lang, loaded: &Loaded, path: &str, name: &str) -> Vec<Ref
     };
     let kinds = lang::identifier_kinds(language);
     let imports = lang::import_kinds(language);
+    let decls = lang::declaration_kinds(language);
     let mut out = Vec::new();
     let mut cursor = parsed.tree.walk();
     let bytes = loaded.bytes();
@@ -128,16 +150,22 @@ fn scan_file(language: Lang, loaded: &Loaded, path: &str, name: &str) -> Vec<Ref
         let node = cursor.node();
         if kinds.contains(&node.kind()) && bytes.get(node.byte_range()) == Some(name.as_bytes()) {
             let start = node.start_position();
-            let role = role_of(node, imports);
-            let text = loaded
+            let role = role_of(node, imports, decls);
+            let line_text = loaded
                 .lines
                 .get(start.row)
+                .map(|l| l.trim_start_matches('\u{feff}'));
+            let text = line_text
                 .map(|l| l.trim().chars().take(200).collect::<String>())
                 .unwrap_or_default();
-            let column = loaded
-                .lines
-                .get(start.row)
-                .map_or(start.column + 1, |l| char_column(l, start.column));
+            let column = line_text.map_or(start.column + 1, |l| {
+                let skipped = if start.row == 0 && loaded.lines[0].starts_with('\u{feff}') {
+                    3
+                } else {
+                    0
+                };
+                char_column(l, start.column.saturating_sub(skipped))
+            });
             out.push(Ref {
                 path: path.to_string(),
                 line: start.row + 1,
@@ -170,7 +198,7 @@ fn char_column(line: &str, byte_col: usize) -> usize {
     line[..end].chars().count() + 1
 }
 
-fn role_of(node: tree_sitter::Node, imports: &[&str]) -> &'static str {
+fn role_of(node: tree_sitter::Node, imports: &[&str], decls: &[&str]) -> &'static str {
     let mut up = node.parent();
     let mut hops = 0;
     while let Some(parent) = up {
@@ -184,7 +212,9 @@ fn role_of(node: tree_sitter::Node, imports: &[&str]) -> &'static str {
         up = parent.parent();
     }
     match node.parent() {
-        Some(p) if p.child_by_field_name("name") == Some(node) => "declaration",
+        Some(p) if decls.contains(&p.kind()) && p.child_by_field_name("name") == Some(node) => {
+            "declaration"
+        }
         _ => "use",
     }
 }
@@ -263,6 +293,52 @@ mod tests {
                 ("b.ts", 2, "use"),
             ]
         );
+    }
+
+    #[test]
+    fn roles_cover_rust_imports_paths_jsx_keyword_arguments_and_destructuring() {
+        let _g = pinned();
+        // Arrange
+        let cases: [(&str, &str, &str); 5] = [
+            ("a.rs", "use a::target;\n", "import"),
+            ("b.rs", "fn f() { a::target(); }\n", "use"),
+            ("c.tsx", "const x = <target />;\n", "use"),
+            ("d.py", "f(target=1)\n", "use"),
+            ("e.rs", "fn f(x: Foo) { let Foo { target } = x; }\n", "use"),
+        ];
+        for (name, src, role) in cases {
+            let f = fx(&format!("rf-role-{name}"));
+            f.write(name, src);
+            f.run();
+
+            // Act
+            let got = refs(&f, "target");
+
+            // Assert
+            assert_eq!(got.refs.len(), 1, "{name}");
+            assert_eq!(got.refs[0].role, role, "{name}");
+        }
+    }
+
+    #[test]
+    fn files_that_only_share_a_word_piece_do_not_use_the_file_cap() {
+        let _g = pinned();
+        // Arrange: `getUser` and `user_id` match the text index for `User` but do not spell it.
+        let f = fx("rf-pieces");
+        f.write("a.ts", "getUser();\n");
+        f.write("b.py", "user_id = 1\n");
+        f.write("c.ts", "User();\n");
+        f.run();
+        let mut opts = RefsOptions::new("User");
+        opts.file_cap = 1;
+
+        // Act
+        let got = find_refs(&f.conn(), &f.root, &opts).expect("refs");
+
+        // Assert
+        assert_eq!(got.files_scanned, 1);
+        assert!(!got.files_capped);
+        assert_eq!(got.refs[0].path, "c.ts");
     }
 
     #[test]

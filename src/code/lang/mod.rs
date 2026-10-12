@@ -153,7 +153,12 @@ pub fn clean_signature(raw: &str) -> (String, bool) {
 /// Node kinds that hold an identifier a reference search can match.
 pub fn identifier_kinds(lang: Lang) -> &'static [&'static str] {
     match lang {
-        Lang::Rust => &["identifier", "type_identifier", "field_identifier"],
+        Lang::Rust => &[
+            "identifier",
+            "type_identifier",
+            "field_identifier",
+            "shorthand_field_identifier",
+        ],
         Lang::TypeScript | Lang::Tsx | Lang::JavaScript => &[
             "identifier",
             "property_identifier",
@@ -162,6 +167,44 @@ pub fn identifier_kinds(lang: Lang) -> &'static [&'static str] {
             "shorthand_property_identifier_pattern",
         ],
         Lang::Python => &["identifier"],
+    }
+}
+
+/// Parent node kinds whose `name` field declares something.
+pub fn declaration_kinds(lang: Lang) -> &'static [&'static str] {
+    match lang {
+        Lang::Rust => &[
+            "function_item",
+            "function_signature_item",
+            "struct_item",
+            "enum_item",
+            "union_item",
+            "trait_item",
+            "type_item",
+            "const_item",
+            "static_item",
+            "mod_item",
+            "macro_definition",
+            "associated_type",
+        ],
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => &[
+            "function_declaration",
+            "generator_function_declaration",
+            "function_signature",
+            "class_declaration",
+            "abstract_class_declaration",
+            "interface_declaration",
+            "type_alias_declaration",
+            "enum_declaration",
+            "internal_module",
+            "module",
+            "variable_declarator",
+            "method_definition",
+            "method_signature",
+            "abstract_method_signature",
+            "public_field_definition",
+        ],
+        Lang::Python => &["function_definition", "class_definition"],
     }
 }
 
