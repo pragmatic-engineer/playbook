@@ -44,6 +44,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.telemetry` | `auto` | `auto`, `off` |
 | `usage.telemetryRetentionDays` | `90` | a number, see the config keys guide for the range |
 | `usage.telemetryMaxRows` | `500000` | a number, see the config keys guide for the range |
+| `usage.autoIngest` | `true` | `true`, `false` |
+| `usage.autoIngestMinutes` | `10` | a number, see the config keys guide for the range |
 | `usage.budget.monthlyUsd` | `0` | a number, see the config keys guide for the range |
 | `usage.budget.weeklyUsd` | `0` | a number, see the config keys guide for the range |
 | `sessions.staleAfterDays` | `3` | a number, see the config keys guide for the range |
