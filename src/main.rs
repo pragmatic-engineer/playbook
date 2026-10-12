@@ -371,6 +371,13 @@ fn main() {
                 .map(|(value, _)| value.as_bool().unwrap_or(false))
                 .unwrap_or(false);
             let asking = init::choices::stdio_is_interactive() && !flags.yes && !flags.dry_run;
+            if let Some(notice) = init::choices::defaults_notice(
+                std::io::stdin().is_terminal(),
+                std::io::stdout().is_terminal(),
+                &flags,
+            ) {
+                eprintln!("{notice}");
+            }
             let caps = playbook::ui::Caps::detect();
             let mut guided: Vec<(&'static str, bool)> = Vec::new();
             if asking {
