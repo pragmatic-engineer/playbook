@@ -58,7 +58,7 @@ impl Sys {
         match run_with_timeout(&mut command, limit) {
             Some(o) => Out {
                 ok: o.status.success(),
-                stdout: String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                stdout: scrub(String::from_utf8_lossy(&o.stdout).trim()),
                 stderr: scrub(String::from_utf8_lossy(&o.stderr).trim()),
             },
             None => Out {

@@ -28,7 +28,7 @@ pub struct Check {
     pub bucket: String,
 }
 
-const FIELDS: &str = "number,url,isDraft,state,title,baseRefName";
+const FIELDS: &str = "number,url,isDraft,state,title,baseRefName,isCrossRepository";
 
 fn parse_pr(v: &Value) -> Option<Pr> {
     Some(Pr {
@@ -60,14 +60,20 @@ fn json(text: &str) -> Result<Value, String> {
 /// The open PR whose head is `branch`, if any.
 pub fn find(sys: &Sys, branch: &str) -> Result<Option<Pr>, String> {
     let out = sys.gh(&[
-        "pr", "list", "--head", branch, "--state", "open", "--json", FIELDS, "--limit", "1",
+        "pr", "list", "--head", branch, "--state", "open", "--json", FIELDS, "--limit", "20",
     ]);
     if !out.ok {
         return Err(format!("gh pr list failed: {}", out.stderr));
     }
     Ok(json(&out.stdout)?
         .as_array()
-        .and_then(|a| a.first())
+        .and_then(|a| {
+            a.iter().find(|v| {
+                !v.get("isCrossRepository")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
+        })
         .and_then(parse_pr))
 }
 
