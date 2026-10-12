@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 11] = [
+const PROBES: [Probe; 12] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -107,6 +107,7 @@ const PROBES: [Probe; 11] = [
     worktree_rows,
     migration_rows,
     plugin_only_rows,
+    atlassian_rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -410,6 +411,22 @@ fn layer6(env: &Env) -> Vec<Row> {
         });
     }
     rows
+}
+
+/// The Atlassian command line tools the `playbook:atlassian` skill can use.
+/// Absent tools are informational: the skill falls back to the next route.
+fn atlassian_rows(env: &Env) -> Vec<Row> {
+    use crate::atlassian::{acli_line, acli_status, twg_line, twg_status, Status, UPGRADE_HINT};
+    let acli = acli_status(&env.path_var);
+    let acli_row = match &acli {
+        Status::Ok(_) => Row::new("-", Level::Pass, acli_line(&acli)),
+        Status::Missing => Row::new("-", Level::Info, acli_line(&acli)),
+        Status::TooOld(_) | Status::Unreadable => {
+            Row::new("-", Level::Warn, acli_line(&acli)).hint(format!("run: {UPGRADE_HINT}"))
+        }
+    };
+    let twg = twg_status(&env.path_var);
+    vec![acli_row, Row::new("-", Level::Info, twg_line(&twg))]
 }
 
 fn layer7(env: &Env) -> Vec<Row> {

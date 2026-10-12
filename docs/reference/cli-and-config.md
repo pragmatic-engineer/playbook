@@ -74,7 +74,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -114,6 +114,18 @@ Example: `playbook agents variants --ceiling medium`
 - `--ceiling <CEILING>`: Lowest effort ceiling to apply to every agent (default: none)
 - `--mode <MODE>`: auto, all or off (default: auto)
 - `--json`: Print the `--agents` JSON
+
+### `playbook atlassian`
+
+Checks for the `playbook:atlassian` skill
+
+Subcommands: `check`
+
+### `playbook atlassian check`
+
+Check that `acli` meets the minimum version and whether `twg` is installed
+
+Prints one line for `acli` (`ok`, `too old` with the `brew upgrade atlassian/acli/acli` hint, `version unreadable` or `missing`) and one for `twg`. Exits 0 when `acli` is usable and 1 otherwise, so the skill can fall back to the next route. Whether the Atlassian MCP tools are connected is left to the skill.
 
 ### `playbook cc`
 
