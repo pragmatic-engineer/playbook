@@ -76,7 +76,7 @@ pub mod trust;
 pub mod ui;
 pub mod uninstall;
 pub mod update;
-pub mod usage;
+pub use playbook_telemetry as usage;
 pub mod usage_host;
 pub mod worktree;
 

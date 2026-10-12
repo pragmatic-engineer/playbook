@@ -198,6 +198,7 @@ mod tests {
     use serde_json::json;
 
     fn setup(name: &str, settings: &str) -> (PathBuf, PathBuf, PathBuf) {
+        crate::usage_host::install();
         let home = scratch_dir(name);
         let claude = home.join(".claude");
         fs::create_dir_all(&claude).unwrap();
