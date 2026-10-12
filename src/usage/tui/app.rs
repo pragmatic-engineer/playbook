@@ -126,6 +126,8 @@ pub struct App {
     pub mouse: bool,
     /// The screen size, for turning a click into a panel and a row.
     pub area: Rect,
+    /// Where transcripts are read from, named in the empty states.
+    pub sources: String,
     /// How often the snapshot is refreshed, shown in the footer.
     pub refresh_every: Duration,
 }
@@ -162,6 +164,7 @@ impl App {
             sorts: PANELS.map(Panel::default_sort),
             mouse: true,
             area: Rect::new(0, 0, 100, 30),
+            sources: String::new(),
             refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
         }
     }

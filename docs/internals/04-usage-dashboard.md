@@ -122,6 +122,8 @@ While you type a filter every key is text, so `q` and `r` do not quit or change 
 | `light` | The same with darker colors for a white ground. |
 | `mono` | No color. The selected row is shown in reverse video. |
 
+When there is nothing to chart, the body says why instead of showing empty panels. If the range has no messages but the store has some, it names the dates the store covers and the keys that widen the range (`a` all time, `m` month, `w` week), and when a filter is set it says how to clear it (`c`). If the store is empty, it names the folder transcripts are read from, how to check it, and `CLAUDE_CONFIG_DIR`, which moves that folder when Claude Code uses it. A failed read fills the body with the error before the first data and shows a banner over the last good numbers after it.
+
 The theme comes from the `usage.theme` config key (`btop`, `dark`, `light`, `mono`; see [config keys](../guides/04-config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
 Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the btop values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither it goes to the nearest of the 16 basic colors. The values come from btop's `Default_theme` and the code in `src/usage/tui/theme.rs` says so. btop is Apache 2.0 like playbook, and the attribution is in `NOTICE`.

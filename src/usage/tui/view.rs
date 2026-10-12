@@ -9,6 +9,7 @@ use super::app::App;
 use super::budget;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
+use super::notice::{self, Notice};
 use super::panels;
 use super::theme::Palette;
 use crate::usage::aggregate::date_key;
@@ -116,8 +117,14 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     let p = layout(area);
     render_header(frame, p.header, app, &pal);
-    match &app.data {
-        Some(data) => {
+    let body = Rect::new(
+        p.spend.x,
+        p.spend.y,
+        area.width,
+        p.sessions.bottom().saturating_sub(p.spend.y),
+    );
+    match (&app.data, notice::body(app)) {
+        (Some(data), None) => {
             budget::render(frame, p.budget, data, &pal);
             panels::spend(frame, p.spend, app, data, &pal);
             panels::tokens(frame, p.tokens, app, data, &pal);
@@ -126,12 +133,42 @@ pub fn render(frame: &mut Frame, app: &App) {
             panels::live(frame, p.live, app, data, &pal);
             panels::sessions(frame, p.sessions, app, data, &pal);
         }
-        None => {
-            let body = Rect::new(p.spend.x, p.spend.y, area.width, 1);
-            frame.render_widget(Paragraph::new("Reading usage..."), body);
+        (data, Some(n)) => {
+            if let Some(data) = data {
+                budget::render(frame, p.budget, data, &pal);
+            }
+            render_notice(frame, body, &n, &pal);
         }
+        (None, None) => {}
+    }
+    if let (Some(_), Some(n)) = (&app.data, notice::banner(app)) {
+        let height = (n.lines.len() as u16 + 2).min(body.height);
+        render_notice(
+            frame,
+            Rect::new(body.x, body.y, body.width, height),
+            &n,
+            &pal,
+        );
     }
     frame.render_widget(Paragraph::new(footer(app, &pal, area.width)), p.footer);
+}
+
+/// Draws a message in a bordered box that clears what is under it.
+fn render_notice(frame: &mut Frame, area: Rect, n: &Notice, pal: &Palette) {
+    let ink = if n.error { pal.error } else { pal.hi };
+    let edge = Style::default().fg(pal.color(ink));
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(edge)
+        .title(Line::styled(format!("\u{2524} {} \u{251c}", n.title), edge));
+    let lines: Vec<Line> = n.lines.iter().map(|l| Line::raw(l.clone())).collect();
+    frame.render_widget(ratatui::widgets::Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .block(block),
+        area,
+    );
 }
 
 /// The key hints: each key in the accent color, its meaning in the text color,
@@ -709,6 +746,46 @@ mod tests {
     fn before_the_first_read_the_view_says_it_is_reading() {
         let app = App::new(Range::All);
         assert!(screen(&app, 80, 24).contains("Reading usage"));
+    }
+
+    #[test]
+    fn an_empty_range_fills_the_body_with_the_dates_that_have_data() {
+        let mut app = app_with(&[]);
+        let d = app.data.as_mut().unwrap();
+        d.store = crate::usage::tui::data::StoreSpan {
+            events: 3,
+            first: Some(NOW - 90_000),
+            last: Some(NOW - 80_000),
+        };
+        for (w, h) in [(80, 24), (100, 30), (160, 50)] {
+            let text = screen(&app, w, h);
+            assert!(text.contains("The store has 3 messages from"), "{text}");
+            assert!(text.contains("Press a to show all time"), "{text}");
+            assert!(!text.contains("No usage in this range.\n"), "{text}");
+        }
+    }
+
+    #[test]
+    fn an_empty_store_names_the_transcript_folder() {
+        let mut app = app_with(&[]);
+        app.sources = "/fake/home/.claude/projects".into();
+        let text = screen(&app, 80, 24);
+        assert!(text.contains("No usage recorded yet"), "{text}");
+        assert!(text.contains("/fake/home/.claude/projects"), "{text}");
+    }
+
+    #[test]
+    fn a_read_failure_shows_in_the_body_with_and_without_old_data() {
+        let mut app = App::new(Range::Today);
+        app.error = Some("database is locked".into());
+        let text = screen(&app, 80, 24);
+        assert!(text.contains("Could not read usage"), "{text}");
+        assert!(text.matches("database is locked").count() >= 2, "{text}");
+        let mut app = app_with(&[event("claude-opus-5", "alpha", 1.0)]);
+        app.error = Some("disk I/O error".into());
+        let text = screen(&app, 100, 30);
+        assert!(text.contains("Refresh failed"), "{text}");
+        assert!(text.contains("alpha"), "{text}");
     }
 
     #[test]

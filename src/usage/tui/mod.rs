@@ -10,6 +10,7 @@ pub mod budget;
 pub mod chart;
 pub mod data;
 pub mod fmt;
+pub mod notice;
 pub mod panels;
 #[cfg(test)]
 mod parity;
@@ -67,6 +68,7 @@ fn event_loop(
     range: Range,
 ) -> std::io::Result<()> {
     let mut app = App::new(range);
+    app.sources = paths.claude_projects.display().to_string();
     app.week_start = super::entry::configured_week_start();
     // NO_COLOR counts when it is set to anything but empty.
     app.no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
