@@ -6,12 +6,13 @@
 
 use super::chart::Plot;
 use super::data::Data;
+use super::keys::{self, Cmd};
 use super::panels;
 use super::sort::{
     day_rows, group_rows, pair_rows, session_day_rows, session_rows, Panel, Sort, PANELS,
 };
 use super::theme::{ColorDepth, Theme};
-use super::view;
+use super::view::{self, help_height};
 use super::worker::DEFAULT_REFRESH_SECONDS;
 use crate::usage::aggregate::SECONDS_PER_DAY;
 use crate::usage::period::pair_groups;
@@ -55,6 +56,14 @@ pub enum SpendView {
 }
 
 impl SpendView {
+    pub fn name(self) -> &'static str {
+        match self {
+            SpendView::Total => "total",
+            SpendView::ByModel => "by model",
+            SpendView::Daily => "daily table",
+        }
+    }
+
     pub fn next(self) -> SpendView {
         match self {
             SpendView::Total => SpendView::ByModel,
@@ -80,6 +89,16 @@ pub enum ProjectsView {
 }
 
 impl ProjectsView {
+    pub fn name(self) -> &'static str {
+        match self {
+            ProjectsView::Projects => "projects",
+            ProjectsView::Agents => "agents",
+            ProjectsView::Skills => "skills",
+            ProjectsView::Tools => "tools",
+            ProjectsView::Health => "health",
+        }
+    }
+
     pub fn next(self) -> ProjectsView {
         match self {
             ProjectsView::Projects => ProjectsView::Agents,
@@ -122,6 +141,8 @@ pub struct App {
     pub sorts: [Sort; 6],
     /// The screen size, for laying out the charts the cursor keys move over.
     pub area: Rect,
+    /// The help window, with the line it is scrolled to, when it is open.
+    pub help: Option<usize>,
     /// Files read and files to read while a first read runs.
     pub indexing: Option<(usize, usize)>,
     /// Where transcripts are read from, named in the empty states.
@@ -136,6 +157,8 @@ pub enum Effect {
     None,
     /// The range or filter changed: re-query now.
     Requery,
+    /// Open the Sessions view.
+    Sessions,
 }
 
 impl App {
@@ -159,6 +182,7 @@ impl App {
             selected: [0; 6],
             sorts: PANELS.map(Panel::default_sort),
             area: Rect::new(0, 0, 100, 30),
+            help: None,
             indexing: None,
             sources: String::new(),
             refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
@@ -366,30 +390,60 @@ impl App {
         if self.editing {
             return self.edit(key.code, ctrl);
         }
+        if self.help.is_some() {
+            return self.help_key(key.code, ctrl);
+        }
+        match keys::lookup(key.code, ctrl) {
+            Some(binding) => self.run(binding.cmd, key.code),
+            None => Effect::None,
+        }
+    }
+
+    /// Keys while the help window is open: the arrows scroll it, Ctrl-C quits
+    /// and any other key closes it. The data keeps refreshing underneath.
+    fn help_key(&mut self, code: KeyCode, ctrl: bool) -> Effect {
+        let at = self.help.unwrap_or(0);
+        let page = self.help_page();
+        let to = match code {
+            KeyCode::Down => Some(at + 1),
+            KeyCode::Up => Some(at.saturating_sub(1)),
+            KeyCode::PageDown => Some(at + page),
+            KeyCode::PageUp => Some(at.saturating_sub(page)),
+            KeyCode::Home => Some(0),
+            KeyCode::End => Some(usize::MAX),
+            _ => None,
+        };
+        match to {
+            Some(to) => self.help = Some(to.min(self.help_scroll_max())),
+            None if ctrl && code == KeyCode::Char('c') => self.quit = true,
+            None => self.help = None,
+        }
+        Effect::None
+    }
+
+    /// Help lines that fit in the window.
+    pub fn help_page(&self) -> usize {
+        usize::from(help_height(self.area.height).saturating_sub(2)).max(1)
+    }
+
+    fn help_scroll_max(&self) -> usize {
+        keys::help_lines().len().saturating_sub(self.help_page())
+    }
+
+    /// Runs one command.
+    fn run(&mut self, cmd: Cmd, code: KeyCode) -> Effect {
         let focus = self.focus;
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
-            KeyCode::Char('c') if ctrl => self.quit = true,
-            KeyCode::Char('t') if !self.no_color => self.theme = self.theme.next(),
-            KeyCode::Char(c @ ('d' | 'w' | 'W' | 'm' | 'M' | 'a')) => {
-                return self.set_range(match c {
-                    'd' => Range::Today,
-                    'w' => Range::ThisWeek(self.week_start),
-                    'W' => Range::LastWeek(self.week_start),
-                    'm' => Range::CurrentMonth,
-                    'M' => Range::LastMonth,
-                    _ => Range::All,
-                });
-            }
-            KeyCode::Char('/') => {
-                self.editing = true;
-                self.draft = self.filter.clone();
-            }
-            KeyCode::Char('c') if !self.filter.is_empty() => {
-                self.filter.clear();
-                return Effect::Requery;
-            }
-            KeyCode::Char('r') => {
+        match cmd {
+            Cmd::Quit => self.quit = true,
+            Cmd::Theme if !self.no_color => self.theme = self.theme.next(),
+            Cmd::Theme => {}
+            Cmd::Today => return self.set_range(Range::Today),
+            Cmd::Week => return self.set_range(Range::ThisWeek(self.week_start)),
+            Cmd::LastWeek => return self.set_range(Range::LastWeek(self.week_start)),
+            Cmd::Month => return self.set_range(Range::CurrentMonth),
+            Cmd::LastMonth => return self.set_range(Range::LastMonth),
+            Cmd::All => return self.set_range(Range::All),
+            Cmd::CycleRange => {
                 let all = default_ranges(self.week_start);
                 // From any other range, `r` goes to the first of the two.
                 let next = match all.iter().position(|r| *r == self.range) {
@@ -398,34 +452,49 @@ impl App {
                 };
                 return self.set_range(next);
             }
-            KeyCode::Char(c @ '1'..='6') => self.focus = PANELS[usize::from(c as u8 - b'1')],
-            KeyCode::Tab => self.focus_next(1),
-            KeyCode::BackTab => self.focus_next(-1),
-            KeyCode::Left => self.move_cursor(-1),
-            KeyCode::Right => self.move_cursor(1),
-            KeyCode::Home | KeyCode::Char('g') if focus.is_chart() && !self.is_table(focus) => {
+            Cmd::Filter => {
+                self.editing = true;
+                self.draft = self.filter.clone();
+            }
+            Cmd::ClearFilter if !self.filter.is_empty() => {
+                self.filter.clear();
+                return Effect::Requery;
+            }
+            Cmd::ClearFilter => {}
+            Cmd::FocusPanel => {
+                if let KeyCode::Char(c @ '1'..='6') = code {
+                    self.focus = PANELS[usize::from(c as u8 - b'1')];
+                }
+            }
+            Cmd::NextPanel => self.focus_next(1),
+            Cmd::PrevPanel => self.focus_next(-1),
+            Cmd::CursorLeft => self.move_cursor(-1),
+            Cmd::CursorRight => self.move_cursor(1),
+            Cmd::First if focus.is_chart() && !self.is_table(focus) => {
                 self.move_cursor(isize::MIN);
             }
-            KeyCode::End | KeyCode::Char('G') if focus.is_chart() && !self.is_table(focus) => {
+            Cmd::Last if focus.is_chart() && !self.is_table(focus) => {
                 self.move_cursor(isize::MAX);
             }
-            KeyCode::Down | KeyCode::Char('j') => self.step(focus, 1),
-            KeyCode::Up | KeyCode::Char('k') => self.step(focus, -1),
-            KeyCode::PageDown => self.step(focus, 5),
-            KeyCode::PageUp => self.step(focus, -5),
-            KeyCode::Home | KeyCode::Char('g') => self.select(focus, 0),
-            KeyCode::End | KeyCode::Char('G') => self.select(focus, usize::MAX),
-            KeyCode::Char('v') if focus == Panel::Projects => {
-                self.projects_view = self.projects_view.next();
-            }
-            KeyCode::Char('v') => self.spend_view = self.spend_view.next(),
-            KeyCode::Char('s') if self.is_table(focus) => {
+            Cmd::First => self.select(focus, 0),
+            Cmd::Last => self.select(focus, usize::MAX),
+            Cmd::Down => self.step(focus, 1),
+            Cmd::Up => self.step(focus, -1),
+            Cmd::PageDown => self.step(focus, 5),
+            Cmd::PageUp => self.step(focus, -5),
+            Cmd::NextView => match focus {
+                Panel::Projects => self.projects_view = self.projects_view.next(),
+                Panel::Spend => self.spend_view = self.spend_view.next(),
+                _ => {}
+            },
+            Cmd::Sort if self.is_table(focus) => {
                 self.sorts[focus.index()] = self.sort(focus).next(focus, self.compared());
             }
-            KeyCode::Char('S') if self.is_table(focus) => {
+            Cmd::SortFlip if self.is_table(focus) => {
                 self.sorts[focus.index()] = self.sort(focus).flip();
             }
-            KeyCode::Enter => {
+            Cmd::Sort | Cmd::SortFlip => {}
+            Cmd::Pick => {
                 // Enter on the row already used as the filter lifts it.
                 if let Some(key) = self.selected_key() {
                     self.filter = if self.filter == key {
@@ -436,7 +505,9 @@ impl App {
                     return Effect::Requery;
                 }
             }
-            _ => {}
+            Cmd::Sessions => return Effect::Sessions,
+            Cmd::Help => self.help = Some(0),
+            Cmd::Refresh => return Effect::Requery,
         }
         Effect::None
     }
@@ -919,6 +990,7 @@ mod tests {
     #[test]
     fn v_steps_the_spend_panel_through_total_by_model_and_daily() {
         let mut app = App::new(Range::All);
+        app.key(press(KeyCode::Char('1')));
         assert_eq!(app.spend_view, SpendView::Total);
         let mut seen = Vec::new();
         for _ in 0..3 {
@@ -990,5 +1062,187 @@ mod tests {
         let mut app = App::new(Range::All);
         assert_eq!(app.key(press(KeyCode::Char('z'))), Effect::None);
         assert!(!app.quit);
+    }
+
+    #[test]
+    fn v_changes_only_the_view_of_the_focused_panel() {
+        let mut app = loaded();
+        // Models, Tokens, Live and Sessions have no view: v does nothing.
+        for key in ['2', '3', '5', '6'] {
+            app.key(press(KeyCode::Char(key)));
+            app.key(press(KeyCode::Char('v')));
+            assert_eq!(app.spend_view, SpendView::Total, "{key}");
+            assert_eq!(app.projects_view, ProjectsView::Projects, "{key}");
+        }
+        app.key(press(KeyCode::Char('4')));
+        app.key(press(KeyCode::Char('v')));
+        assert_eq!(app.projects_view, ProjectsView::Agents);
+        assert_eq!(app.spend_view, SpendView::Total);
+        app.key(press(KeyCode::Char('1')));
+        app.key(press(KeyCode::Char('v')));
+        assert_eq!(app.spend_view, SpendView::ByModel);
+        assert_eq!(app.projects_view, ProjectsView::Agents);
+    }
+
+    #[test]
+    fn h_and_question_mark_open_the_help_and_any_other_key_closes_it() {
+        for open in ['h', '?'] {
+            let mut app = loaded();
+            app.key(press(KeyCode::Char(open)));
+            assert_eq!(app.help, Some(0));
+            // A key that would change the range only closes the window.
+            assert_eq!(app.key(press(KeyCode::Char('a'))), Effect::None);
+            assert_eq!((app.help, app.range), (None, Range::All));
+        }
+        for close in [KeyCode::Esc, KeyCode::Char('h'), KeyCode::Char('x')] {
+            let mut app = loaded();
+            app.key(press(KeyCode::Char('h')));
+            app.key(press(close));
+            assert_eq!(app.help, None, "{close:?}");
+            assert!(!app.quit, "{close:?}");
+        }
+    }
+
+    #[test]
+    fn the_help_scrolls_with_the_arrows_and_stops_at_its_ends() {
+        let mut app = loaded();
+        app.area = Rect::new(0, 0, 80, 24);
+        app.key(press(KeyCode::Char('h')));
+        app.key(press(KeyCode::Up));
+        assert_eq!(app.help, Some(0));
+        app.key(press(KeyCode::Down));
+        assert_eq!(app.help, Some(1));
+        app.key(press(KeyCode::End));
+        let last = keys::help_lines().len() - app.help_page();
+        assert_eq!(app.help, Some(last));
+        app.key(press(KeyCode::Down));
+        assert_eq!(app.help, Some(last));
+        app.key(press(KeyCode::Home));
+        assert_eq!(app.help, Some(0));
+    }
+
+    #[test]
+    fn a_refresh_while_the_help_is_open_keeps_it_and_the_selection() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('3')));
+        app.key(press(KeyCode::Down));
+        app.key(press(KeyCode::Char('h')));
+        app.key(press(KeyCode::Down));
+        app.refresh(data_with([5.0, 1.0, 3.0]));
+        assert_eq!(app.help, Some(1));
+        assert_eq!(app.selection(Panel::Models), 1);
+        assert_eq!(app.focus, Panel::Models);
+    }
+
+    #[test]
+    fn ctrl_c_quits_while_the_help_is_open() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('h')));
+        app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(app.quit);
+    }
+
+    #[test]
+    fn r_capital_asks_for_a_fresh_read_and_p_opens_sessions() {
+        let mut app = loaded();
+        assert_eq!(app.key(press(KeyCode::Char('R'))), Effect::Requery);
+        assert_eq!(app.key(press(KeyCode::Char('p'))), Effect::Sessions);
+    }
+
+    /// Every key the handler reacts to is in the key table, so the help and
+    /// the footer list it. The probe presses every key a keyboard offers on an
+    /// app with data, a filter and each focus, and a key that changes anything
+    /// must have a binding.
+    #[test]
+    fn every_key_that_does_something_is_in_the_help_table() {
+        let mut keys_to_try: Vec<KeyCode> =
+            (0x20u8..0x7f).map(|b| KeyCode::Char(b as char)).collect();
+        keys_to_try.extend([
+            KeyCode::Tab,
+            KeyCode::BackTab,
+            KeyCode::Enter,
+            KeyCode::Esc,
+            KeyCode::Backspace,
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::Home,
+            KeyCode::End,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::Delete,
+            KeyCode::Insert,
+        ]);
+        for code in keys_to_try {
+            for focus in PANELS {
+                let mut app = charted(Range::LastDays(30), 30);
+                app.filter = "opus".into();
+                app.focus = focus;
+                let before = format!("{app:?}");
+                let effect = app.key(press(code));
+                let changed = effect != Effect::None || format!("{app:?}") != before;
+                if changed {
+                    assert!(
+                        keys::lookup(code, false).is_some(),
+                        "{code:?} does something on {focus:?} but is not in the key table"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_command_has_a_binding_and_every_binding_is_in_the_help() {
+        use keys::Cmd::*;
+        for cmd in [
+            Quit,
+            Theme,
+            Today,
+            Week,
+            LastWeek,
+            Month,
+            LastMonth,
+            All,
+            CycleRange,
+            Filter,
+            ClearFilter,
+            FocusPanel,
+            NextPanel,
+            PrevPanel,
+            CursorLeft,
+            CursorRight,
+            First,
+            Last,
+            Down,
+            Up,
+            PageDown,
+            PageUp,
+            NextView,
+            Sort,
+            SortFlip,
+            Pick,
+            Sessions,
+            Help,
+            Refresh,
+        ] {
+            assert!(keys::BINDINGS.iter().any(|b| b.cmd == cmd), "{cmd:?}");
+        }
+        let lines = keys::help_lines();
+        for b in keys::BINDINGS {
+            assert!(
+                lines.iter().any(|l| matches!(l,
+                    keys::HelpLine::Key { shown, .. } if *shown == b.shown)),
+                "{} missing from the help",
+                b.shown
+            );
+            for code in b.keys {
+                assert_eq!(
+                    keys::lookup(*code, b.ctrl).map(|x| x.cmd),
+                    Some(b.cmd),
+                    "{code:?}"
+                );
+            }
+        }
     }
 }

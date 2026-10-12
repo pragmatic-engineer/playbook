@@ -9,7 +9,7 @@
 │or use Claude Code on Pro or Max with the playbook statusline for the 5 hour and weekly limits.                                                               │
 │this week spend [local history]  $0.00 so far  avg n/a  last week n/a                                                                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─┤¹Spend per day, USD├────────────────────────────────────────────────────────╮╭─┤²Tokens per day├────────────────────────────────────────────────────────────╮
+╭─┤¹Spend per day, USD├─┤v view: total├────────────────────────────────────────╮╭─┤²Tokens per day├────────────────────────────────────────────────────────────╮
 │total $20.27  peak $6.01 on 08-25  avg $0.68/day                              ││total 618.8K  peak 47.6K on 08-14  avg 20.6K/day                              │
 │Thu 2026-09-03 today  $1.25  2 msgs  47.6K tok  opus-5 100%                   ││Thu 2026-09-03 today  47.6K tok  $1.25  2 msgs                                │
 │ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄││ 50K┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▅▅┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▅▅┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▅▅┄┄┄▅▅┄│
@@ -24,7 +24,7 @@
 │    W T F  S S  M T  W T  F S  S M  T W  T F S  S M  T W  T F  S S  M T  W T  ││     W T F  S S  M T  W T F  S S  M T  W T F  S S  M T  W T F  S S  M T  W T  │
 │    2026-08-05                           2026-08-20                2026-09-03 ││     2026-08-05                          2026-08-20                2026-09-03 │
 ╰────────────────────────────────────────────────────────┤cost low ■■■■■ high├─╯╰──────────────────────────────────────────────────────┤tokens low ■■■■■ high├─╯
-╭─┤³Models├────────────────────────────────────────────────────────────────────╮╭─┤⁴Projects├──────────────────────────────────────────────────────────────────╮
+╭─┤³Models├────────────────────────────────────────────────────────────────────╮╭─┤⁴Projects├─┤v view: projects├───────────────────────────────────────────────╮
 │name                                           msgs  tokens     cost▼ share   ││name                                           msgs  tokens     cost▼ share   │
 │■ opus-5                                         10  238.0K    $14.25 ■■■■■■··││beta                                             10  238.0K    $11.85 ■■■■■···│
 │■ sonnet-5                                        9  214.2K     $5.85 ■■······││alpha                                             9  214.2K     $8.25 ■■■·····│
@@ -47,4 +47,4 @@
 │                                                                              ││          s-8      gamma              haiku-5               1   23.8K    $0.01│
 │                                                                              ││Sat 08-22 s-11     gamma              haiku-5               1   23.8K    $0.02│
 ╰──────────────────────────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────╯
- 1-6 panel r range d/w/W/m/M/a jump ←/→ day v view / filter s/S sort enter pick p sessions t theme (btop) q quit                 updated 01:46:40 UTC, every 5s
+ 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (btop) h help enter select q quit         updated 01:46:40 UTC, every 5s

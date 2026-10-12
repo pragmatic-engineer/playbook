@@ -10,6 +10,7 @@ pub mod budget;
 pub mod chart;
 pub mod data;
 pub mod fmt;
+pub mod keys;
 pub mod notice;
 pub mod panels;
 #[cfg(test)]
@@ -96,15 +97,9 @@ fn event_loop(
                         app.quit = true;
                     }
                 }
-                Event::Key(key)
-                    if key.kind == KeyEventKind::Press
-                        && key.code == ratatui::crossterm::event::KeyCode::Char('p')
-                        && !app.editing =>
-                {
-                    sessions.open();
-                }
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
                     Effect::Requery => worker.ask(app.range, &app.filter),
+                    Effect::Sessions => sessions.open(),
                     Effect::None => {}
                 },
                 _ => {}

@@ -127,6 +127,24 @@ fn wide_screen_160x50() {
 }
 
 #[test]
+fn the_help_window_at_three_sizes() {
+    for (w, h) in [(80, 24), (100, 30), (160, 50)] {
+        let mut a = app(Theme::Btop);
+        a.area = ratatui::layout::Rect::new(0, 0, w, h);
+        a.help = Some(0);
+        check(&format!("help_{w}x{h}"), &draw(&a, w, h));
+    }
+}
+
+#[test]
+fn the_help_window_scrolled_to_the_end_at_80x24() {
+    let mut a = app(Theme::Btop);
+    a.area = ratatui::layout::Rect::new(0, 0, 80, 24);
+    a.help = Some(usize::MAX);
+    check("help_end_80x24", &draw(&a, 80, 24));
+}
+
+#[test]
 fn the_week_range_has_wide_bars_and_weekday_names() {
     let mut a = app(Theme::Btop);
     let events = fixture();

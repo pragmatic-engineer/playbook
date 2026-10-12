@@ -107,6 +107,25 @@ fn panel_block(
         .title(title_line(pal, panel, title, box_ink, focused))
 }
 
+/// A panel box. The Spend and Projects panels also name the view `v` has
+/// them showing; no other panel has a view, so the others show nothing.
+fn view_block(pal: &Palette, app: &App, panel: Panel, title: &str, box_ink: Ink) -> Block<'static> {
+    let focused = app.focus == panel;
+    let block = panel_block(pal, panel, title, box_ink, focused);
+    let name = match panel {
+        Panel::Spend => app.spend_view.name(),
+        Panel::Projects => app.projects_view.name(),
+        _ => return block,
+    };
+    let edge = fg(pal, box_ink);
+    block.title(Line::from(vec![
+        Span::styled("\u{2524}", edge),
+        Span::styled("v", fg(pal, pal.hi).add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" view: {name}"), fg(pal, pal.graph_text)),
+        Span::styled("\u{251c}", edge),
+    ]))
+}
+
 fn num(text: impl Into<String>) -> Cell<'static> {
     Cell::from(Text::from(text.into()).alignment(Alignment::Right))
 }
@@ -331,13 +350,12 @@ pub fn swatch(pal: &Palette, slot: usize) -> Span<'static> {
 
 /// Cost per day or tokens per day: a bar chart with axes, a cursor and a legend.
 fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, panel: Panel) {
-    let focused = app.focus == panel;
     let (name, fill, box_ink, what) = match panel {
         Panel::Tokens => ("Tokens", pal.down, pal.box_net, "tokens"),
         _ => ("Spend", pal.cpu, pal.box_cpu, "cost"),
     };
     if data.series.is_empty() {
-        let block = panel_block(pal, panel, name, box_ink, focused);
+        let block = view_block(pal, app, panel, name, box_ink);
         return empty(frame, area, pal, block, "No usage in this range.");
     }
     let plot = chart_plot(area, data, panel);
@@ -357,7 +375,7 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
         _ if stacked => format!("Spend per {per} by model, USD{span}"),
         _ => format!("Spend per {per}, USD{span}"),
     };
-    let mut block = panel_block(pal, panel, &title, box_ink, focused);
+    let mut block = view_block(pal, app, panel, &title, box_ink);
     if plot.geo.stats_y.is_none() {
         // No room for the totals line, so the peak goes in the border.
         let peak = plot
@@ -405,9 +423,8 @@ pub fn peak_style(pal: &Palette) -> Style {
 /// One row for each day up to today: date, messages, tokens, cost and the model
 /// that cost the most. Today and the peak day are marked.
 fn daily_table(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let focused = app.focus == Panel::Spend;
     let today = data.now.div_euclid(SECONDS_PER_DAY);
-    let mut block = panel_block(pal, Panel::Spend, "Daily cost", pal.box_cpu, focused);
+    let mut block = view_block(pal, app, Panel::Spend, "Daily cost", pal.box_cpu);
     let edge = fg(pal, pal.box_cpu);
     block = block.title_bottom(
         Line::from(vec![
@@ -611,8 +628,7 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
         ProjectsView::Health => return health(frame, area, app, data, pal),
         ProjectsView::Projects => {}
     }
-    let focused = app.focus == Panel::Projects;
-    let block = panel_block(pal, Panel::Projects, "Projects", pal.box_mem, focused);
+    let block = view_block(pal, app, Panel::Projects, "Projects", pal.box_mem);
     if data.repos.is_empty() {
         return empty(frame, area, pal, block, "No usage in this range.");
     }
@@ -697,8 +713,7 @@ fn telemetry_split(
     (title, label): (&str, &'static str),
     view: &crate::usage::query::AgentView,
 ) {
-    let focused = app.focus == Panel::Projects;
-    let mut block = panel_block(pal, Panel::Projects, title, pal.box_mem, focused);
+    let mut block = view_block(pal, app, Panel::Projects, title, pal.box_mem);
     if !data.telemetry_rows {
         return empty(frame, area, pal, block, TELEMETRY_OFF);
     }
@@ -771,8 +786,7 @@ fn telemetry_note(pal: &Palette, data: &Data) -> Line<'static> {
 /// Latency and error rate per tool, from telemetry. For a period each tool
 /// also shows its average latency in the previous span and the change.
 fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let focused = app.focus == Panel::Projects;
-    let mut block = panel_block(pal, Panel::Projects, "Tools", pal.box_mem, focused);
+    let mut block = view_block(pal, app, Panel::Projects, "Tools", pal.box_mem);
     if !data.telemetry_rows {
         return empty(frame, area, pal, block, TELEMETRY_OFF);
     }
@@ -940,8 +954,7 @@ fn figures(data: &Data) -> Vec<Figure> {
 /// range against the previous span, from telemetry. The cache hit rate comes
 /// from transcripts, so it stays available without telemetry.
 fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let focused = app.focus == Panel::Projects;
-    let mut block = panel_block(pal, Panel::Projects, "Health", pal.box_mem, focused);
+    let mut block = view_block(pal, app, Panel::Projects, "Health", pal.box_mem);
     if !data.telemetry_rows {
         return empty(frame, area, pal, block, TELEMETRY_OFF);
     }
