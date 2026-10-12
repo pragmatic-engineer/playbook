@@ -314,27 +314,44 @@ fn refresh_status(app: &App, pal: &Palette, area_width: u16) -> (String, Style) 
     }
 }
 
+/// `Aug 31`, the UTC date of a day number without its year.
+fn month_name_day(day: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let key = date_key(day);
+    let month: usize = key[5..7].parse().unwrap_or(1);
+    let dom: u32 = key[8..].parse().unwrap_or(1);
+    format!("{} {dom}", MONTHS[month.clamp(1, 12) - 1])
+}
+
 fn range_label(data: &Data) -> String {
     match data.range.days(data.now) {
         Some((first, past)) if past - first == 1 => {
-            format!("{} {}", data.range.label(), date_key(first))
+            format!(
+                "{} {}, {}",
+                data.range.label(),
+                month_name_day(first),
+                &date_key(first)[..4]
+            )
         }
         Some((first, past)) => format!(
-            "{} {} to {}",
+            "{} {} to {}, {}",
             data.range.label(),
-            date_key(first),
-            date_key(past - 1)
+            month_name_day(first),
+            month_name_day(past - 1),
+            &date_key(past - 1)[..4]
         ),
         None => "all time".to_string(),
     }
 }
 
-/// `08-31`, the UTC date without its year.
+/// `Aug 31`, the UTC date without its year.
 fn month_day(timestamp: i64) -> String {
-    date_key(day_of(timestamp))[5..].to_string()
+    month_name_day(day_of(timestamp))
 }
 
-/// `08-31 to 09-03`, or just the date when the span is one day.
+/// `Aug 31 to Sep 3`, or just the date when the span is one day.
 fn date_span(span: TimeSpan) -> String {
     let (first, last) = (month_day(span.start), month_day(span.end - 1));
     if first == last {
@@ -1036,20 +1053,20 @@ mod tests {
         for (range, want) in [
             (
                 Range::Today,
-                "today 09-03 until 01:46  vs  yesterday 09-02 until 01:46  (same span 1h 46m)",
+                "today Sep 3 until 01:46  vs  yesterday Sep 2 until 01:46  (same span 1h 46m)",
             ),
             (
                 Range::ThisWeek(WeekStart::Monday),
-                "this week 08-31 to 09-03 until 01:46  vs  last week 08-24 to 08-27 until 01:46  (same span 3d 1h)",
+                "this week Aug 31 to Sep 3 until 01:46  vs  last week Aug 24 to Aug 27 until 01:46  (same span 3d 1h)",
             ),
             (
                 Range::CurrentMonth,
-                "this month 09-01 to 09-03 until 01:46  vs  last month 08-01 to 08-03 until 01:46  (same span 2d 1h)",
+                "this month Sep 1 to Sep 3 until 01:46  vs  last month Aug 1 to Aug 3 until 01:46  (same span 2d 1h)",
             ),
             // The other ranges have no previous period.
-            (Range::LastWeek(WeekStart::Monday), "last week 2026-08-24 to 2026-08-30"),
-            (Range::LastMonth, "last month 2026-08-01 to 2026-08-31"),
-            (Range::LastDays(30), "last 30 days 2026-08-05 to 2026-09-03"),
+            (Range::LastWeek(WeekStart::Monday), "last week Aug 24 to Aug 30, 2026"),
+            (Range::LastMonth, "last month Aug 1 to Aug 31, 2026"),
+            (Range::LastDays(30), "last 30 days Aug 5 to Sep 3, 2026"),
             (Range::All, "all time"),
         ] {
             let text = screen(&app_for(range, &[]), 120, 30);
@@ -1061,7 +1078,8 @@ mod tests {
         let text = screen(&app_for(sunday, &[]), 120, 30);
         assert!(text.contains("UTC, weeks start Sun"), "{text}");
         assert!(
-            text.contains("this week 08-30 to 09-03") && text.contains("last week 08-23 to 08-27"),
+            text.contains("this week Aug 30 to Sep 3")
+                && text.contains("last week Aug 23 to Aug 27"),
             "{text}"
         );
     }

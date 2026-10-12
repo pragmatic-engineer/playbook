@@ -559,6 +559,47 @@ fn date_labels(plot: &Plot, width: usize) -> Vec<(usize, String)> {
     vec![(0, short(first.first))]
 }
 
+/// The day of the month, `1` to `31`.
+fn day_number(day: i64) -> String {
+    date_key(day)[8..].trim_start_matches('0').to_string()
+}
+
+/// Whether bar `i` carries a day number when every `step` bars do. The first
+/// and the last bar always do.
+fn shows_number(i: usize, last: usize, step: usize) -> bool {
+    i.is_multiple_of(step) || i == last
+}
+
+/// Whether the number of bar `i` leaves a column free before the next number
+/// that is shown, so two numbers never touch.
+fn number_fits(plot: &Plot, i: usize, last: usize, step: usize) -> bool {
+    let end = usize::from(plot.geo.cells[i].0) + day_number(plot.bars[i].first).len();
+    match (i + 1..=last).find(|j| shows_number(*j, last, step)) {
+        Some(j) => end < usize::from(plot.geo.cells[j].0) || i == last,
+        None => true,
+    }
+}
+
+/// How many bars apart the day numbers are: every day when each cell holds a
+/// number and a gap, else every second, third or seventh day, the smallest
+/// step that keeps the regular numbers clear of each other. The first and the
+/// last bar always show one, and when the last is too close to the one before
+/// it the one before is left out.
+fn number_step(plot: &Plot) -> usize {
+    let last = plot.bars.len().saturating_sub(1);
+    for step in [1, 2, 3, 7] {
+        let shown: Vec<usize> = (0..=last).filter(|i| i.is_multiple_of(step)).collect();
+        let clear = shown.windows(2).all(|w| {
+            let end = usize::from(plot.geo.cells[w[0]].0) + day_number(plot.bars[w[0]].first).len();
+            end < usize::from(plot.geo.cells[w[1]].0)
+        });
+        if clear {
+            return step;
+        }
+    }
+    usize::MAX
+}
+
 /// The weekday label: three letters, two or one, so the labels of one chart
 /// all look alike.
 fn weekday_label(letters: usize, day: i64) -> String {
@@ -621,7 +662,24 @@ pub fn render(buf: &mut Buffer, plot: &Plot, series: &[DayPoint], view: &View, p
             buf.set_stringn(x, y, label, usize::from(geo.cells[i].1), style);
         }
     }
-    if let Some(y) = geo.dates_y {
+    if let (Some(y), 1) = (geo.dates_y, geo.per) {
+        let step = number_step(plot);
+        let last = plot.bars.len().saturating_sub(1);
+        for (i, bar) in plot.bars.iter().enumerate() {
+            if !shows_number(i, last, step) || !number_fits(plot, i, last, step) {
+                continue;
+            }
+            let style = mark_style(
+                pal,
+                view.cursor == Some(i),
+                bar.contains(view.today),
+                peak == Some(i),
+            );
+            let x = geo.x_of(i);
+            let room = usize::from(geo.plot.right().saturating_sub(x));
+            buf.set_stringn(x, y, day_number(bar.first), room, style);
+        }
+    } else if let Some(y) = geo.dates_y {
         for (at, label) in date_labels(plot, usize::from(geo.plot.width)) {
             buf.set_stringn(
                 geo.plot.x + at as u16,
@@ -1040,22 +1098,76 @@ mod tests {
         assert_eq!(buf[(p.x, p.y + p.height - 1)].symbol(), "\u{2581}");
     }
 
+    /// The numbers on the row under the weekdays, as (column, text) pairs.
+    fn numbers(buf: &Buffer, plot: &Plot) -> Vec<(usize, String)> {
+        let line = row(buf, plot.geo.dates_y.unwrap());
+        let mut out: Vec<(usize, String)> = Vec::new();
+        for (at, ch) in line.chars().enumerate() {
+            if ch.is_ascii_digit() {
+                match out.last_mut() {
+                    Some((from, text)) if *from + text.len() == at => text.push(ch),
+                    _ => out.push((at, ch.to_string())),
+                }
+            }
+        }
+        out
+    }
+
     #[test]
-    fn the_x_axis_shows_the_first_middle_and_last_date() {
-        let s = series(&vec![1.0; 30]);
+    fn a_week_shows_the_weekday_and_the_day_number_under_it_for_every_bar() {
+        // 2026-08-05 is a Wednesday, so the week runs Wed 5 to Tue 11.
+        let s = series(&[1.0; 7]);
+        let (plot, buf) = draw(Rect::new(0, 0, 60, 14), &s, None);
+        let (w, d) = (plot.geo.weekdays_y.unwrap(), plot.geo.dates_y.unwrap());
+        assert_eq!(d, w + 1, "the number is directly under the weekday");
+        let days = row(&buf, w);
+        let nums = row(&buf, d);
+        for (name, n) in ["Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"]
+            .into_iter()
+            .zip(5..)
+        {
+            let at = days.find(name).unwrap();
+            assert_eq!(nums[at..].split_whitespace().next(), Some(&*n.to_string()));
+        }
+        assert!(!nums.contains("2026") && !nums.contains("08-"), "{nums}");
+    }
+
+    #[test]
+    fn a_month_in_a_narrow_panel_shows_fewer_numbers_and_never_a_date() {
+        for width in [40, 50, 60, 100] {
+            let s = series(&vec![1.0; 31]);
+            let (plot, buf) = draw(Rect::new(0, 0, width, 12), &s, None);
+            assert_eq!(plot.geo.per, 1, "{width}");
+            let nums = numbers(&buf, &plot);
+            let text: Vec<&str> = nums.iter().map(|(_, t)| t.as_str()).collect();
+            // 31 days from Aug 5: the first is 5 and the last is Sep 4.
+            assert_eq!(text.first(), Some(&"5"), "{width}: {text:?}");
+            assert_eq!(text.last(), Some(&"4"), "{width}: {text:?}");
+            assert!(text.iter().all(|t| t.len() <= 2), "{width}: {text:?}");
+            // A column stays free between two numbers.
+            assert!(
+                nums.windows(2).all(|w| w[0].0 + w[0].1.len() < w[1].0),
+                "{width}: {nums:?}"
+            );
+            let line = row(&buf, plot.geo.dates_y.unwrap());
+            assert!(!line.contains("2026") && !line.contains("08-"), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_wide_panel_shows_every_day_number_of_a_month() {
+        let s = series(&vec![1.0; 31]);
+        let (plot, buf) = draw(Rect::new(0, 0, 120, 12), &s, None);
+        assert_eq!(numbers(&buf, &plot).len(), 31);
+    }
+
+    #[test]
+    fn bars_that_hold_several_days_keep_short_date_labels() {
+        let s = series(&vec![1.0; 90]);
         let (plot, buf) = draw(Rect::new(0, 0, 60, 12), &s, None);
+        assert!(plot.geo.per > 1);
         let dates = row(&buf, plot.geo.dates_y.unwrap());
-        assert!(dates.contains("2026-08-05"), "{dates}");
-        assert!(dates.contains("2026-08-20"), "{dates}");
-        assert!(dates.contains("2026-09-03"), "{dates}");
-        // On a narrow panel the dates lose their year, then the middle one.
-        let (plot, buf) = draw(Rect::new(0, 0, 30, 12), &s, None);
-        let dates = row(&buf, plot.geo.dates_y.unwrap());
-        assert!(
-            dates.contains("08-05") && dates.contains("09-03"),
-            "{dates}"
-        );
-        assert!(!dates.contains("2026"), "{dates}");
+        assert!(dates.contains("08-05"), "{dates}");
     }
 
     #[test]
