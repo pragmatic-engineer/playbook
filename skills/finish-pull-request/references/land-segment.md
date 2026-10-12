@@ -26,10 +26,10 @@ gh pr ready "$BRANCH"
 **2. Gate on required checks.** Poll with a deadline; never `--watch` unbounded.
 
 ```bash
-playbook pr ci-wait "$PR" --required --settle 120 --timeout 300 --interval 30
+playbook pr ci-wait "$PR" --settle 120 --timeout 300 --interval 30
 ```
 
-Run it with the Bash `timeout` set to 600000. On `CI_VERDICT=TIMEOUT` repeat it up to 5 times, then park the Segment. `--required` is deliberate: the merge gate is what the repo enforces, not every check that exists. A failing NON-required check does not block the merge, but MUST be reported as a follow-up rather than silently dropped. `CI_VERDICT=NONE` (the repo requires no checks) is a legitimate pass; record it as `NONE`, never as `PASS`, so the ledger does not claim a gate that never ran. `CI_VERDICT=TIMEOUT` parks the Segment; do not merge a PR whose checks never finished.
+Run it with the Bash `timeout` set to 600000. On `CI_VERDICT=TIMEOUT` repeat it up to 5 times, then park the Segment. Waiting on required checks only (the default, no `--all`) is deliberate: the merge gate is what the repo enforces, not every check that exists. A failing NON-required check does not block the merge, but MUST be reported as a follow-up rather than silently dropped. `CI_VERDICT=NONE` (the repo requires no checks) is a legitimate pass; record it as `NONE`, never as `PASS`, so the ledger does not claim a gate that never ran. `CI_VERDICT=TIMEOUT` parks the Segment; do not merge a PR whose checks never finished.
 
 **3. CI-fix loop (two budgets, counted separately).** **3 fix attempts** per Segment, matching the existing `--auto: WU fails after 3 retries -> stop` rule, plus **2 reruns** per Segment. A rerun is not a fix and MUST NOT consume the fix budget.
 

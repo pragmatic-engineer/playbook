@@ -25,7 +25,7 @@ Run `playbook mode status --json` (add `--flag auto` or `--flag ask` if the sess
    - `deep`: run `/playbook:deep-review <n> --self` against the PR just created (a draft is a real PR, so this works).
    - `quick`: run `/playbook:quick-review <n> --self`.
    - Config read error on either call: do not block and do not skip. Run `/playbook:deep-review <n> --self`.
-   - Never issue `/clear` here: a model cannot, and the reviewers are fresh subagents that never saw the code. A person may clear first, but nothing depends on it. If this session has no `Agent` tool, the review command runs its lenses inline and says so in its report; treat that report as the review.
+   - Never issue `/clear` here: a model cannot, and the reviewers are fresh subagents that never saw the code. A person may clear first; nothing depends on it. If this session has no `Agent` tool, the review command runs its lenses inline and says so in its report; treat that report as the review.
 2. After the review, read `playbook config get autoReview.fix` and `playbook config get autoMerge.enabled`. Both default to `false`, apply in ask and auto mode alike, and need no question.
 3. Fix the findings. A push updates the draft, no new PR needed.
    - `autoReview.fix` is `false`: fix any findings the review surfaced, as you judge best.
