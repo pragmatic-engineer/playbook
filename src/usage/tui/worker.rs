@@ -8,9 +8,9 @@
 //! in small batches and the screen shows the partial store as it grows.
 
 use super::data::{self, Data};
-use crate::common::time::now_secs;
 use crate::usage::query::Range;
 use crate::usage::run::{ingest_into, Paths};
+use crate::usage::util::time::now_secs;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;

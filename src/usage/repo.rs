@@ -73,7 +73,7 @@ fn named(name: String) -> Option<String> {
 /// directory itself is gone. The common dir is shared by every worktree.
 fn repo_from_git(cwd: &Path) -> Option<String> {
     let dir = nearest_existing(cwd)?;
-    let printed = crate::common::git::output(&dir, &["rev-parse", "--git-common-dir"])?;
+    let printed = crate::usage::util::git::output(&dir, &["rev-parse", "--git-common-dir"])?;
     if printed.is_empty() {
         return None;
     }
@@ -100,7 +100,7 @@ fn name_from_common_dir(common: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use crate::usage::util::scratch_dir;
     use std::fs;
     use std::process::Command;
 

@@ -95,7 +95,7 @@ pub fn ingest_into(
         stats.duplicates_skipped += more.duplicates_skipped;
     }
     // Telemetry never changes the totals; a failure here leaves transcripts as the source.
-    let _ = super::reconcile::reconcile(conn, crate::common::time::now_secs());
+    let _ = super::reconcile::reconcile(conn, crate::usage::util::time::now_secs());
     Ok(stats)
 }
 

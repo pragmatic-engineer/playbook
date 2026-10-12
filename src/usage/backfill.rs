@@ -51,7 +51,7 @@ pub fn run_once(source: &dyn UsageSource, conn: &Connection) -> Result<usize, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use crate::usage::util::scratch_dir;
     use crate::usage::{Events, UsageEvent};
     use std::cell::Cell;
     use std::fs;

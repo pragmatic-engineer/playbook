@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn a_transcript_older_than_the_watermark_is_not_read_at_all() {
-        let dir = crate::common::test_support::scratch_dir("old-transcript");
+        let dir = crate::usage::util::scratch_dir("old-transcript");
         let project = dir.join("p");
         fs::create_dir_all(&project).unwrap();
         let file = project.join("s.jsonl");
@@ -631,7 +631,7 @@ mod tests {
     }
 
     fn events_from(name: &str, bytes: &[u8]) -> Events {
-        let dir = crate::common::test_support::scratch_dir(name);
+        let dir = crate::usage::util::scratch_dir(name);
         fs::create_dir_all(dir.join("p")).unwrap();
         fs::write(dir.join("p/s.jsonl"), bytes).unwrap();
         let events = ClaudeCodeSource::new(dir.clone()).events_since(0).unwrap();
@@ -688,7 +688,7 @@ mod tests {
     /// files, with growing and shrinking output counts and out of order
     /// timestamps, so the dedup rules decide the result.
     fn many_files(name: &str, files: usize) -> PathBuf {
-        let dir = crate::common::test_support::scratch_dir(name);
+        let dir = crate::usage::util::scratch_dir(name);
         for f in 0..files {
             let sub = dir.join(format!("proj-{}", f % 5));
             fs::create_dir_all(&sub).unwrap();

@@ -4,7 +4,7 @@
 //! `playbook usage` and its subcommands: picks the terminal view or the text or
 //! JSON output.
 
-use super::host::UsageCommand;
+use super::command::UsageCommand;
 use super::period::Period;
 use super::query::{self, Range, WeekStart};
 use super::run::{ingest_new, run_summary, Paths};
@@ -82,17 +82,17 @@ pub fn run(
                 serde_json::to_string_pretty(&status)
                     .map_err(|e| format!("failed to encode the collector status: {e}"))
             } else {
-                Ok(status.text(crate::common::time::now_secs()))
+                Ok(status.text(crate::usage::util::time::now_secs()))
             }
         }
         None if opts.summary => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;
-            run_summary(paths, range, crate::common::time::now_secs())
+            run_summary(paths, range, crate::usage::util::time::now_secs())
         }
         None if opts.json => {
             let range = parse_range(opts.range.as_deref().unwrap_or(DEFAULT_RANGE))?;
             let (conn, _) = ingest_new(paths)?;
-            json_report(&conn, paths, range, crate::common::time::now_secs())
+            json_report(&conn, paths, range, crate::usage::util::time::now_secs())
         }
         None if interactive => {
             tui::run(
@@ -103,7 +103,7 @@ pub fn run(
         }
         None => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;
-            run_summary(paths, range, crate::common::time::now_secs())
+            run_summary(paths, range, crate::usage::util::time::now_secs())
         }
     }
 }
