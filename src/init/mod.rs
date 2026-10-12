@@ -43,3 +43,4 @@ pub mod statusline;
 pub mod system_prompt;
 pub mod telemetry;
 pub mod wire;
+pub mod wizard;

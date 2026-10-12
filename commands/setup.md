@@ -96,7 +96,7 @@ If `playbook init` exits non-zero, still run the second command, then report whi
 ## Step 4: Report
 
 Report the output of both commands verbatim. Then say in one line what this run installed or changed: the binary (if the shim installed it just now), the hooks and status line in `settings.json`, `PATH`, and the launcher or system prompt only if you added them. `playbook init` prints one line per
-step with its status (for example, "ok - already up to date" when nothing changed).
+step with its status (for example, `[=] statusline  already up to date` when nothing changed), then the totals and next steps.
 
 End your report with:
 

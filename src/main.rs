@@ -379,14 +379,45 @@ fn main() {
             ) {
                 eprintln!("{notice}");
             }
+            let caps = playbook::ui::Caps::detect();
+            let mut guided: Vec<(&'static str, bool)> = Vec::new();
             if asking {
-                print!("{}", init::catalog::plan());
+                let security_on = flags.security || (!flags.no_security && security_config);
+                let items = init::wizard::items(&flags, security_on);
+                print!("{}", init::wizard::welcome(&caps));
+                let stdin = std::io::stdin();
+                let mut input = stdin.lock();
+                let mut out = std::io::stdout();
+                let finish = playbook::ui::wizard::run(
+                    &caps,
+                    &items,
+                    &init::wizard::summary_detail,
+                    &mut input,
+                    &mut out,
+                );
+                match finish {
+                    Ok(playbook::ui::wizard::Finish::Confirmed(answers)) => {
+                        for (item, on) in items.iter().zip(answers) {
+                            if let Some(p) = init::catalog::part(&item.choice.id) {
+                                guided.push((p.id, on));
+                            }
+                        }
+                    }
+                    Ok(_) => {
+                        println!("Cancelled. Nothing was changed.");
+                        std::process::exit(1);
+                    }
+                    Err(err) => {
+                        eprintln!("init: {err}");
+                        std::process::exit(1);
+                    }
+                }
             }
             let choices = init::choices::resolve(
                 &flags,
                 asking,
                 security_config,
-                &mut init::choices::ask_on_terminal,
+                &mut |question, default| init::wizard::guided_answer(&guided, question, default),
             );
             let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
             let home = common::home_dir();
@@ -438,9 +469,7 @@ fn main() {
                 return;
             }
             let outcome = init::run::run(&paths);
-            for step in &outcome.steps {
-                println!("{}", step.render());
-            }
+            print!("{}", init::wizard::progress(&caps, &outcome.steps));
             for warning in &outcome.warnings {
                 eprintln!("init: warning: {warning}");
             }
