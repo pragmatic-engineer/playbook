@@ -62,6 +62,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `docs.maxMemoryMb` | `1024` | a number, see the config keys guide for the range |
 | `docs.anydocPath` | empty | see the config keys guide |
 | `launcher.claudeOverride` | `false` | `true`, `false` |
+| `launcher.shortName` | `false` | `true`, `false` |
 | `launcher.systemPromptMode` | `append` | `append`, `replace` |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
@@ -686,6 +687,8 @@ Example: `playbook init --no-hooks --aliases`
 - `--no-telemetry`: Do not write telemetry variables into settings.json
 - `--claude-override`: Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
 - `--no-claude-override`: Do not turn on the `claude` shell function
+- `--short-name`: Add `pb` as a short name for `playbook`, only when `pb` is free (recorded in playbook own config)
+- `--no-short-name`: Do not add the `pb` short name
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing

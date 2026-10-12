@@ -33,6 +33,7 @@ Each part has a flag pair. With no flag, `init` asks in a terminal and uses the 
 | Launcher shortcuts `ccc` and `ccd` | off | `--aliases`, `--no-aliases` | your shell rc file |
 | System prompt | off | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md` |
 | Usage telemetry | off, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
+| `pb` short name | off, asked | `--short-name`, `--no-short-name` | `~/.config/playbook` (the `launcher.shortName` key) |
 | `claude` function | off, asked | `--claude-override`, `--no-claude-override` | `~/.config/playbook` (the `launcher.claudeOverride` key) |
 
 `--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
@@ -84,6 +85,10 @@ Init adds a block that starts with `# playbook binary` to your shell startup fil
 ### The `claude` function
 
 `--claude-override` asks whether a plain `claude` should load the playbook system prompt every time. A yes sets `launcher.claudeOverride` to `true` in playbook's own config. It changes no Claude Code setting and no memory. With the key on, `playbook shell-init` also defines a `claude` function that starts the launcher for a plain interactive session. Calls that use their own flags (`-p`, subcommands, `--settings`, your own prompt flags, piped or scripted use) and `PLAYBOOK_BYPASS=1` go straight to the real `claude`, and a `claude` you already defined as an alias or function is left alone. The function needs the `eval` line from `--aliases` in your rc file. Undo it with `playbook config set launcher.claudeOverride false`. See [the launcher](../internals/01-launcher-and-hooks.md#the-claude-function).
+
+### The `pb` short name
+
+`--short-name` asks whether `pb` should be a short name for `playbook`. A yes sets `launcher.shortName` to `true` in playbook's own config, and nothing else changes. Init looks for a command named `pb` on your PATH first and writes nothing when it finds one. With the key on, `playbook shell-init` defines `pb` only when no command, alias, function or builtin of that name exists in your shell at that moment, so a `pb` you install or define later always wins and playbook never overwrites it. The function needs the `eval` line from `--aliases` in your rc file. Undo it with `playbook config set launcher.shortName false`. See [the launcher](../internals/01-launcher-and-hooks.md#the-pb-short-name).
 
 ### Memory migration
 

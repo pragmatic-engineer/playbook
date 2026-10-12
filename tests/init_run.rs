@@ -192,6 +192,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         security: false,
         telemetry: false,
         claude_override: false,
+        short_name: false,
         path_setup: None,
         repo: None,
     }
@@ -233,7 +234,16 @@ fn fresh_config_gets_fully_wired() {
         }
         // `memory` has nothing to migrate on a fresh machine with no
         // legacy `~/.claude/memory`.
-        if ["memory", "trust", "path", "telemetry", "claude-override"].contains(&step.name) {
+        if [
+            "memory",
+            "trust",
+            "path",
+            "telemetry",
+            "claude-override",
+            "short-name",
+        ]
+        .contains(&step.name)
+        {
             assert_eq!(
                 step.status,
                 StepStatus::Skipped,
@@ -704,6 +714,7 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
             "path",
             "telemetry",
             "claude-override",
+            "short-name",
         ]
         .contains(&step.name)
         {
@@ -824,6 +835,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         security: false,
         telemetry: false,
         claude_override: false,
+        short_name: false,
         path_setup: None,
         repo: None,
     };
@@ -881,6 +893,7 @@ fn aliases_false_skips_shim_entirely() {
         security: false,
         telemetry: false,
         claude_override: false,
+        short_name: false,
         path_setup: None,
         repo: None,
     };
