@@ -371,21 +371,46 @@ fn main() {
                 .map(|(value, _)| value.as_bool().unwrap_or(false))
                 .unwrap_or(false);
             let asking = init::choices::stdio_is_interactive() && !flags.yes && !flags.dry_run;
-            if let Some(notice) = init::choices::defaults_notice(
-                std::io::stdin().is_terminal(),
-                std::io::stdout().is_terminal(),
-                &flags,
-            ) {
-                eprintln!("{notice}");
-            }
+            let caps = playbook::ui::Caps::detect();
+            let mut guided: Vec<(&'static str, bool)> = Vec::new();
             if asking {
-                print!("{}", init::catalog::plan());
+                let items = init::wizard::items(&flags);
+                print!("{}", init::wizard::welcome(&caps));
+                let stdin = std::io::stdin();
+                let mut input = stdin.lock();
+                let mut out = std::io::stdout();
+                let finish = playbook::ui::wizard::run(
+                    &caps,
+                    &items,
+                    &init::wizard::summary_detail,
+                    &mut input,
+                    &mut out,
+                );
+                match finish {
+                    Ok(playbook::ui::wizard::Finish::Confirmed(answers)) => {
+                        for (item, on) in items.iter().zip(answers) {
+                            if let Some(p) = init::catalog::part(&item.choice.id) {
+                                guided.push((p.id, on));
+                            }
+                        }
+                    }
+                    _ => {
+                        println!("Cancelled. Nothing was changed.");
+                        return;
+                    }
+                }
             }
             let choices = init::choices::resolve(
                 &flags,
                 asking,
                 security_config,
-                &mut init::choices::ask_on_terminal,
+                &mut |question, default| {
+                    init::catalog::PARTS
+                        .iter()
+                        .find(|p| p.question == question)
+                        .and_then(|p| guided.iter().find(|(id, _)| *id == p.id))
+                        .map_or(default, |(_, on)| *on)
+                },
             );
             let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
             let home = common::home_dir();
@@ -437,9 +462,7 @@ fn main() {
                 return;
             }
             let outcome = init::run::run(&paths);
-            for step in &outcome.steps {
-                println!("{}", step.render());
-            }
+            print!("{}", init::wizard::progress(&caps, &outcome.steps));
             for warning in &outcome.warnings {
                 eprintln!("init: warning: {warning}");
             }

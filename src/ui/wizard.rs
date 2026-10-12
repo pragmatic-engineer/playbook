@@ -9,6 +9,9 @@ use super::render::{self, Choice, Step, SummaryRow};
 use super::Caps;
 use std::io::{self, BufRead, Write};
 
+/// The most screens one wizard run shows.
+pub const MAX_ITEMS: usize = 32;
+
 /// What a typed line means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Answer {
