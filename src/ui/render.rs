@@ -39,6 +39,12 @@ pub enum Status {
     Unchanged,
     Skipped,
     Failed,
+    /// Would happen on a real run (a dry run).
+    Planned,
+    /// Worth a look, not an error.
+    Warn,
+    /// Context, not an action.
+    Info,
 }
 
 /// One row of the final summary.
@@ -92,10 +98,16 @@ pub fn symbol(caps: &Caps, status: Status) -> &'static str {
         (true, Status::Unchanged) => "=",
         (true, Status::Skipped) => "\u{25CB}",
         (true, Status::Failed) => "\u{2718}",
+        (true, Status::Planned) => "\u{2192}",
+        (true, Status::Warn) => "!",
+        (true, Status::Info) => "i",
         (false, Status::Done) => "[ok]",
         (false, Status::Unchanged) => "[=]",
         (false, Status::Skipped) => "[skip]",
         (false, Status::Failed) => "[fail]",
+        (false, Status::Planned) => "[plan]",
+        (false, Status::Warn) => "[warn]",
+        (false, Status::Info) => "[info]",
     }
 }
 
@@ -240,13 +252,15 @@ pub fn progress_line(caps: &Caps, status: Status, name: &str, detail: &str) -> S
         Status::Unchanged => Tone::Dim,
         Status::Skipped => Tone::Yellow,
         Status::Failed => Tone::Red,
+        Status::Planned => Tone::Cyan,
+        Status::Warn => Tone::Yellow,
+        Status::Info => Tone::Dim,
     };
-    format!(
-        "{} {}  {}",
-        paint(caps, tone, symbol(caps, status)),
-        sanitize(name),
-        sanitize(detail)
-    )
+    let mark = paint(caps, tone, symbol(caps, status));
+    if name.is_empty() {
+        return format!("{mark} {}", sanitize(detail));
+    }
+    format!("{mark} {}  {}", sanitize(name), sanitize(detail))
 }
 
 /// How many actions landed each way.
@@ -256,6 +270,8 @@ pub struct Counts {
     pub unchanged: usize,
     pub skipped: usize,
     pub failed: usize,
+    pub planned: usize,
+    pub warned: usize,
 }
 
 impl Counts {
@@ -265,6 +281,9 @@ impl Counts {
             match s {
                 Status::Done => c.done += 1,
                 Status::Unchanged => c.unchanged += 1,
+                Status::Info => {}
+                Status::Planned => c.planned += 1,
+                Status::Warn => c.warned += 1,
                 Status::Skipped => c.skipped += 1,
                 Status::Failed => c.failed += 1,
             }
@@ -280,9 +299,18 @@ pub fn next_steps(caps: &Caps, counts: Counts, steps: &[&str]) -> String {
         unchanged,
         skipped,
         failed,
+        planned,
+        warned,
     } = counts;
     let mut out =
-        format!("\n{done} done, {unchanged} unchanged, {skipped} skipped, {failed} failed\n");
+        format!("\n{done} done, {unchanged} unchanged, {skipped} skipped, {failed} failed");
+    if planned > 0 {
+        let _ = write!(out, ", {planned} planned");
+    }
+    if warned > 0 {
+        let _ = write!(out, ", {warned} warnings");
+    }
+    out.push('\n');
     if !steps.is_empty() {
         out.push('\n');
         out.push_str(&heading(caps, "Next steps"));
