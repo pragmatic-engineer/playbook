@@ -33,11 +33,11 @@ pub fn runtime_root() -> PathBuf {
     playbook_root().join("runtime")
 }
 
-/// `$HOME/.config/playbook`: the folder holding `usage.db`, the durable,
-/// cross-project usage store shared with playbook-telemetry, and the lock and
-/// receiver files next to it.
+/// The data folder that holds `usage.db`, the durable, cross-project usage
+/// store shared with playbook-telemetry, and the lock and receiver files next
+/// to it. The crate owns the folder logic.
 pub fn usage_db_dir() -> PathBuf {
-    playbook_root()
+    crate::usage::data::data_dir(&crate::common::session::home_dir())
 }
 
 /// `$HOME/.config/playbook/cc-state`: per-project config-drift baselines.
