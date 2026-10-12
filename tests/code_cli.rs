@@ -369,3 +369,46 @@ fn symbol_without_an_index_exits_one_and_says_to_index_first() {
     let err = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(err.contains("no index yet"), "{err}");
 }
+
+#[test]
+fn outline_works_without_an_index_and_a_text_file_exits_one() {
+    // Arrange
+    let fx = Fixture::new("outline", true);
+    fx.write("a.py", "class A:\n    def run(self):\n        pass\n");
+    fx.write("b.txt", "hello\n");
+
+    // Act
+    let ok = fx.playbook(&["code", "outline", "a.py"]);
+    let bad = fx.playbook(&["code", "outline", "b.txt"]);
+
+    // Assert
+    let stdout = String::from_utf8_lossy(&ok.stdout).to_string();
+    assert!(ok.status.success());
+    assert!(stdout.contains("class:1-3"), "{stdout}");
+    assert!(stdout.contains("  method:2-3"), "{stdout}");
+    assert_eq!(bad.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("supported:"));
+}
+
+#[test]
+fn read_prints_numbered_lines_and_rejects_bad_ranges_and_outside_paths() {
+    // Arrange
+    let fx = Fixture::new("read", true);
+    fx.write("a.txt", "one\ntwo\nthree\n");
+
+    // Act
+    let ok = fx.playbook(&["code", "read", "a.txt", "2:3"]);
+    let json = fx.playbook(&["code", "read", "a.txt", "1:1", "--json"]);
+    let reversed = fx.playbook(&["code", "read", "a.txt", "3:2"]);
+    let outside = fx.playbook(&["code", "read", "../outside", "1:1"]);
+
+    // Assert
+    let stdout = String::from_utf8_lossy(&ok.stdout).to_string();
+    assert!(stdout.contains("     2  two"), "{stdout}");
+    assert!(stdout.contains("     3  three"), "{stdout}");
+    let doc = json_of(&json);
+    assert_eq!(doc["results"]["text"], "one");
+    assert_eq!(doc["index"]["state"], "not_used");
+    assert!(!reversed.status.success());
+    assert_eq!(outside.status.code(), Some(1));
+}

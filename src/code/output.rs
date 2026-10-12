@@ -15,6 +15,8 @@ pub enum IndexState {
     Fresh,
     Stale,
     Missing,
+    /// The command reads files on disk and never opens the index.
+    NotUsed,
 }
 
 impl IndexState {
@@ -23,6 +25,7 @@ impl IndexState {
             IndexState::Fresh => "fresh",
             IndexState::Stale => "stale",
             IndexState::Missing => "missing",
+            IndexState::NotUsed => "not_used",
         }
     }
 }

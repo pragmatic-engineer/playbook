@@ -209,7 +209,7 @@ Index and search the repository's source code
 
 The index is a cache kept under the playbook state folder for this worktree. Nothing is written inside the repository.
 
-Subcommands: `index`, `search`, `status`, `symbol`
+Subcommands: `index`, `outline`, `read`, `search`, `status`, `symbol`
 
 ### `playbook code index`
 
@@ -221,6 +221,29 @@ Example: `playbook code index --json`
 
 - `--json`: Print one JSON document
 - `--rebuild`: Delete the cache first and index everything again
+
+### `playbook code outline`
+
+List the declarations in one file
+
+Parses the file as it is on disk, so it works without an index and never shows old text. Prints at most 500 declarations, indented by nesting.
+
+Example: `playbook code outline lib/payment/service.ts`
+
+- `<PATH>`: The file to outline
+- `--json`: Print one JSON document
+
+### `playbook code read`
+
+Print numbered lines of one file
+
+Reads the file as it is on disk. Prints at most 400 lines or 32 KiB. A range that ends past the file is cut at the end with a warning.
+
+Example: `playbook code read lib/payment/service.ts 10:40`
+
+- `<PATH>`: The file to read
+- `<LINES>`: First and last line, 1 based and inclusive, as START:END
+- `--json`: Print one JSON document
 
 ### `playbook code search`
 
