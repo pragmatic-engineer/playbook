@@ -59,8 +59,27 @@ fn is_transparent(kind: &str) -> bool {
             | "with_statement"
             | "for_statement"
             | "while_statement"
+            | "match_statement"
+            | "case_clause"
             | "block"
     )
+}
+
+/// Identifier targets of an assignment's left side.
+fn collect_identifiers<'t>(node: Node<'t>, out: &mut Vec<Node<'t>>, depth: usize) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    match node.kind() {
+        "identifier" => out.push(node),
+        "pattern_list" | "tuple_pattern" | "list_pattern" => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                collect_identifiers(child, out, depth + 1);
+            }
+        }
+        _ => {}
+    }
 }
 
 impl Walker<'_> {
@@ -100,6 +119,8 @@ impl Walker<'_> {
             }
             "import_statement" => self.import_statement(node),
             "import_from_statement" => self.import_from(node),
+            "future_import_statement" => self.future_import(node),
+            "type_alias_statement" => self.type_alias(node, prefix, parent),
             "expression_statement" => {
                 if owner != Owner::Function {
                     self.assignment(node, prefix, parent);
@@ -127,10 +148,15 @@ impl Walker<'_> {
             (false, Owner::Class) => "method",
             (false, _) => "function",
         };
-        let head_end = def
-            .child_by_field_name("body")
-            .map_or(def.end_byte(), |b| b.start_byte());
-        let Some(index) = self.symbol(def, outer, kind, head_end, prefix, parent) else {
+        // The head ends at the colon, so a comment after it stays out.
+        let head_end = def.child_by_field_name("body").map_or(def.end_byte(), |b| {
+            def.children(&mut def.walk())
+                .filter(|c| c.kind() == ":" && c.end_byte() <= b.start_byte())
+                .last()
+                .map_or(b.start_byte(), |c| c.end_byte())
+        });
+        let Some(index) = self.symbol(def, outer, def.start_byte(), kind, head_end, prefix, parent)
+        else {
             return;
         };
         if let Some(body) = def.child_by_field_name("body") {
@@ -144,45 +170,85 @@ impl Walker<'_> {
         }
     }
 
-    /// `NAME = value` at module or class level.
+    /// `NAME = value` at module or class level, including tuple targets and
+    /// chained assignments.
     fn assignment(&mut self, stmt: Node, prefix: &str, parent: Option<usize>) {
         let mut cursor = stmt.walk();
         let found = stmt
             .named_children(&mut cursor)
             .find(|n| n.kind() == "assignment");
-        let Some(assign) = found else {
-            return;
-        };
-        let Some(left) = assign.child_by_field_name("left") else {
-            return;
-        };
-        if left.kind() != "identifier" {
-            return;
+        let mut next = found;
+        let mut hops = 0;
+        while let Some(assign) = next {
+            hops += 1;
+            if hops > MAX_DEPTH {
+                return;
+            }
+            let right = assign.child_by_field_name("right");
+            let is_lambda = right.is_some_and(|r| r.kind() == "lambda");
+            let kind = if is_lambda { "function" } else { "variable" };
+            if let Some(left) = assign.child_by_field_name("left") {
+                let mut targets = Vec::new();
+                collect_identifiers(left, &mut targets, 0);
+                for target in targets {
+                    self.symbol_at(
+                        target,
+                        stmt,
+                        stmt.start_byte(),
+                        kind,
+                        stmt.end_byte(),
+                        prefix,
+                        parent,
+                    );
+                }
+            }
+            next = right.filter(|r| r.kind() == "assignment");
         }
-        let is_lambda = assign
-            .child_by_field_name("right")
-            .is_some_and(|r| r.kind() == "lambda");
-        let kind = if is_lambda { "function" } else { "variable" };
-        self.symbol_at(left, stmt, kind, stmt.end_byte(), prefix, parent);
     }
 
+    /// `type Name = value`
+    fn type_alias(&mut self, node: Node, prefix: &str, parent: Option<usize>) {
+        let Some(left) = node.child_by_field_name("left") else {
+            return;
+        };
+        let named = left.named_child(0).unwrap_or(left);
+        let name = if named.kind() == "generic_type" {
+            named.named_child(0).unwrap_or(named)
+        } else {
+            named
+        };
+        self.symbol_at(
+            name,
+            node,
+            node.start_byte(),
+            "type_alias",
+            node.end_byte(),
+            prefix,
+            parent,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn symbol(
         &mut self,
         def: Node,
         outer: Node,
+        sig_start: usize,
         kind: &'static str,
         head_end: usize,
         prefix: &str,
         parent: Option<usize>,
     ) -> Option<usize> {
         let name = def.child_by_field_name("name")?;
-        self.symbol_at(name, outer, kind, head_end, prefix, parent)
+        self.symbol_at(name, outer, sig_start, kind, head_end, prefix, parent)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn symbol_at(
         &mut self,
         name_node: Node,
         outer: Node,
+        sig_start: usize,
         kind: &'static str,
         head_end: usize,
         prefix: &str,
@@ -194,12 +260,12 @@ impl Walker<'_> {
         }
         let start = outer.start_byte();
         // Only the first characters are kept, so a huge statement is not decoded whole.
-        let end = head_end
-            .min(self.source.len())
-            .min(start.saturating_add(MAX_SIGNATURE_CHARS * 4 + 4));
-        let raw = String::from_utf8_lossy(&self.source[start..end.max(start)]);
-        let (signature, signature_cut) =
+        let wanted = head_end.min(self.source.len());
+        let end = wanted.min(sig_start.saturating_add(MAX_SIGNATURE_CHARS * 4 + 4));
+        let raw = String::from_utf8_lossy(&self.source[sig_start.min(end)..end]);
+        let (signature, mut signature_cut) =
             clean_signature(raw.trim_end_matches(|c: char| c == ':' || c.is_whitespace()));
+        signature_cut |= end < wanted;
         let exported = !name.starts_with('_');
         self.out.symbols.push(Symbol {
             qualified_name: join(prefix, &name),
@@ -238,6 +304,25 @@ impl Walker<'_> {
                 line,
             });
         }
+    }
+
+    /// `from __future__ import annotations`
+    fn future_import(&mut self, node: Node) {
+        let mut cursor = node.walk();
+        let names: Vec<String> = node
+            .children_by_field_name("name", &mut cursor)
+            .map(|n| {
+                text(n, self.source)
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        self.out.imports.push(Import {
+            module: "__future__".to_string(),
+            names: Some(names.join(", ")),
+            line: node.start_position().row + 1,
+        });
     }
 
     fn import_from(&mut self, node: Node) {
@@ -369,10 +454,7 @@ def wrapped():
         // Assert
         let w = find(&symbols, "wrapped");
         assert_eq!((w.start_line, w.end_line), (3, 6));
-        assert_eq!(
-            w.signature.as_deref(),
-            Some("@decorate @other(1) def wrapped()")
-        );
+        assert_eq!(w.signature.as_deref(), Some("def wrapped()"));
         assert!(src[w.start_byte..w.end_byte].starts_with("@decorate"));
     }
 
@@ -401,6 +483,54 @@ except ImportError:
             assert_eq!(find(&symbols, want).kind, "function", "{want}");
         }
         assert_eq!(imports.len(), 1);
+    }
+
+    #[test]
+    fn newer_syntax_and_assignment_targets_are_extracted() {
+        // Arrange
+        let src = "\
+from __future__ import annotations
+type Vector = list[float]
+a, b = 1, 2
+X = Y = 0
+class Foo(Base):  # noqa: E501
+    pass
+match command:
+    case 1:
+        def in_case():
+            pass
+";
+
+        // Act
+        let (symbols, imports) = run(src);
+
+        // Assert
+        assert_eq!(find(&symbols, "Vector").kind, "type_alias");
+        for want in ["a", "b", "X", "Y"] {
+            assert_eq!(find(&symbols, want).kind, "variable", "{want}");
+        }
+        assert_eq!(
+            find(&symbols, "Foo").signature.as_deref(),
+            Some("class Foo(Base)")
+        );
+        assert_eq!(find(&symbols, "in_case").kind, "function");
+        assert_eq!(imports[0].module, "__future__");
+        assert_eq!(imports[0].names.as_deref(), Some("annotations"));
+    }
+
+    #[test]
+    fn a_long_aligned_signature_is_flagged_cut_even_when_it_collapses_short() {
+        // Arrange: each parameter sits behind 100 spaces, so the head passes 804 bytes.
+        let params: Vec<String> = (0..12)
+            .map(|i| format!("{}p{i}", " ".repeat(100)))
+            .collect();
+        let src = format!("def f(\n{}):\n    pass\n", params.join(",\n"));
+
+        // Act
+        let (symbols, _) = run(&src);
+
+        // Assert
+        assert!(symbols[0].signature_cut);
     }
 
     #[test]
