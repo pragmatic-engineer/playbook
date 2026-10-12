@@ -163,8 +163,11 @@ fn check_git(args: &[String]) -> Option<&'static str> {
     while let Some(word) = args.get(i) {
         if word == "-c" {
             let value = args.get(i + 1)?.to_lowercase();
-            if value == "commit.gpgsign=false" || value == "tag.gpgsign=false" {
-                return Some(NO_SIGN_REASON);
+            if let Some((key, setting)) = value.split_once('=') {
+                let off = matches!(setting.trim(), "false" | "no" | "off" | "0" | "");
+                if off && (key == "commit.gpgsign" || key == "tag.gpgsign") {
+                    return Some(NO_SIGN_REASON);
+                }
             }
             i += 2;
         } else if GIT_VALUE_OPTIONS.contains(&word.as_str()) {

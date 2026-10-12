@@ -80,20 +80,26 @@ fn is_posting(cmd: &str) -> bool {
 /// input flag (which make `gh` switch to POST).
 fn gh_api_writes(rest: &str) -> bool {
     let words: Vec<&str> = rest.split_whitespace().collect();
-    words.iter().enumerate().any(|(i, w)| {
-        let method = matches!(*w, "-X" | "--method")
-            .then(|| words.get(i + 1).copied())
-            .flatten()
-            .or_else(|| w.strip_prefix("--method="));
-        match method {
-            Some(m) => !m.trim_matches(['"', '\'']).eq_ignore_ascii_case("GET"),
-            None => {
-                matches!(*w, "-f" | "-F" | "--field" | "--raw-field" | "--input")
-                    || w.starts_with("--field=")
-                    || w.starts_with("--raw-field=")
-                    || w.starts_with("--input=")
-            }
-        }
+    // An explicit method decides: a field on a GET is a query parameter.
+    let method = words.iter().enumerate().find_map(|(i, w)| {
+        let value = match *w {
+            "-X" | "--method" => words.get(i + 1).copied(),
+            _ => w
+                .strip_prefix("--method=")
+                .or_else(|| w.strip_prefix("-X").filter(|v| !v.is_empty())),
+        };
+        value.map(|v| v.trim_matches(['"', '\'']).to_string())
+    });
+    if let Some(method) = method {
+        return !method.eq_ignore_ascii_case("GET");
+    }
+    words.iter().any(|w| {
+        matches!(*w, "--field" | "--raw-field" | "--input")
+            || ["--field=", "--raw-field=", "--input="]
+                .iter()
+                .any(|p| w.starts_with(p))
+            || w.starts_with("-f")
+            || w.starts_with("-F")
     })
 }
 

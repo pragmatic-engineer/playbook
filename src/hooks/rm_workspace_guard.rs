@@ -354,11 +354,29 @@ fn offending_targets(
     let mut segment_has_rm = false;
     let mut segment_has_substitution = false;
     let mut substitution_in_rm_command = false;
+    // Open `$(` groups and an open backtick span. A command inside one is part
+    // of a substitution whose separators must not hide it.
+    let mut paren_depth = 0usize;
+    let mut in_backtick = false;
     // The very start of a command is a command position, same as after a `;`.
     let mut prev_was_separator = true;
 
     for (token, is_data) in tokenize(cmd) {
-        let token = token.as_str();
+        let whole = token.as_str();
+        let mut token = whole;
+        // A substitution opens a command position: `$(cd` is `cd` and
+        // `x=$(rm` is `rm`.
+        if let Some(at) = token.rfind("$(") {
+            token = &token[at + 2..];
+            prev_was_separator = true;
+        } else if let Some(at) = token.rfind('`') {
+            token = &token[at + 1..];
+            prev_was_separator = true;
+        }
+        paren_depth += whole.matches("$(").count();
+        in_backtick ^= whole.matches('`').count() % 2 == 1;
+        let inside_substitution = paren_depth > 0 || in_backtick;
+        paren_depth = paren_depth.saturating_sub(whole.matches(')').count());
 
         // A word that is DATA, meaning inside quotes or inside a heredoc body,
         // is prose unless a separator put it in command position. `-m "fix: stop
@@ -377,7 +395,7 @@ fn offending_targets(
             in_rm = true;
             saw_rm = true;
             segment_has_rm = true;
-            substitution_in_rm_command |= segment_has_substitution;
+            substitution_in_rm_command |= segment_has_substitution || inside_substitution;
             prev_was_separator = false;
             continue;
         }
@@ -389,7 +407,7 @@ fn offending_targets(
             continue;
         }
         prev_was_separator = false;
-        if token.contains("$(") || token.contains('`') {
+        if whole.contains("$(") || whole.contains('`') {
             segment_has_substitution = true;
             substitution_in_rm_command |= segment_has_rm;
         }
@@ -411,8 +429,8 @@ fn offending_targets(
         // The cost is that `rm -rf "$REPO/target"` now blocks too, even though
         // it would have expanded to somewhere allowed. That is the correct
         // direction to be wrong in: the caller can retry with a literal path.
-        let unresolvable = token.contains('$')
-            || token.contains('`')
+        let unresolvable = whole.contains('$')
+            || whole.contains('`')
             || (saw_cd && !token.starts_with('/') && !token.starts_with('~'));
         if unresolvable || !is_allowed(token, home, claude_dir, safe_roots) {
             outside.push(token.to_string());

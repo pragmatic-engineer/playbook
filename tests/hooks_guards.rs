@@ -140,6 +140,27 @@ mod rm_workspace_guard {
     }
 
     #[test]
+    fn an_rm_hidden_in_a_substitution_still_blocks() {
+        let ws = format!("{}/Workspace", home());
+        let d = del();
+        for cmd in [
+            format!("echo $(cd / && {d} -rf etc)"),
+            format!("out=$(cd ~ && {d} -rf .ssh)"),
+            format!("echo $(date; {d} -rf {ws}/x)"),
+            format!("X=$(pwd) {d} -rf {ws}/x"),
+            format!("echo `cd / && {d} -rf etc`"),
+        ] {
+            assert!(blocked(&cmd, &ws), "should block: {cmd}");
+        }
+        for cmd in [
+            format!("echo $(date) && {d} -rf {ws}/x"),
+            format!("{d} -rf {ws}/x && echo $(date)"),
+        ] {
+            assert!(!blocked(&cmd, &ws), "should allow: {cmd}");
+        }
+    }
+
+    #[test]
     fn the_denial_for_a_substitution_explains_the_rules() {
         let ws = format!("{}/Workspace", home());
         let out = run_guard_in(&format!("{} -rf $(echo x)", del()), Some(&ws), None);
@@ -1122,6 +1143,20 @@ mod no_slop_guard {
     }
 
     #[test]
+    fn gh_api_flag_forms_decide_whether_it_posts() {
+        let dash = "\u{2014}";
+        assert!(!blocks(&format!(
+            "gh api -X GET /repos/o/r/pulls/1/comments -f per_page=100 --jq '{dash}'"
+        )));
+        assert!(blocks(&format!(
+            "gh api /repos/o/r/issues/1/comments -fbody='a {dash} b'"
+        )));
+        assert!(blocks(&format!(
+            "gh api /repos/o/r/issues/1/comments -XPOST -f body='a {dash} b'"
+        )));
+    }
+
+    #[test]
     fn a_missing_body_file_does_not_block() {
         // The guard catches prose it can read. A path it cannot open is the
         // shell's error to report, and blocking here would be a false deny.
@@ -1382,6 +1417,8 @@ mod no_slop_guard {
         fs::write(&file, &old).expect("write");
         let new = format!("{old_line}\nfn a() {{}}\n\nfn b() {{}}\n");
         assert!(!is_denied(&run_write(file.to_str().expect("utf8"), &new)));
+        let wide = format!("{old}// {}\n", "new words ".repeat(15));
+        assert!(is_denied(&run_write(file.to_str().expect("utf8"), &wide)));
         let fresh = dir.join("fresh.rs");
         assert!(is_denied(&run_write(fresh.to_str().expect("utf8"), &old)));
     }
@@ -1390,5 +1427,10 @@ mod no_slop_guard {
     fn a_comment_line_that_is_one_long_url_is_allowed() {
         let url = format!("// https://example.com/{}\n", "a".repeat(120));
         assert!(!is_denied(&run_edit("src/lib.rs", &url)));
+        let prose = format!(
+            "// see https://example.com/{} for details\n",
+            "a".repeat(120)
+        );
+        assert!(is_denied(&run_edit("src/lib.rs", &prose)));
     }
 }

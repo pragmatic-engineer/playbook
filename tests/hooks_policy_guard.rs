@@ -194,9 +194,30 @@ fn denials_tell_an_unattended_run_what_to_do_when_the_sanctioned_path_fails() {
     let (out, _, _) = run(&bash("gh pr create --title t --body b"), &[]);
     let reason = denial(&out).expect("gh pr create is denied");
     assert!(reason.contains("playbook pr create --help"), "{reason}");
-    assert!(reason.contains("stop"), "{reason}");
+    assert!(
+        reason.contains("report the error text to the user, and stop"),
+        "{reason}"
+    );
 
     let (out, _, _) = run(&bash("git commit --no-verify -m x"), &[]);
     let reason = denial(&out).expect("--no-verify is denied");
-    assert!(reason.contains("stop"), "{reason}");
+    assert!(
+        reason.contains("report the hook's error text and stop"),
+        "{reason}"
+    );
+
+    let (out, _, _) = run(&bash("git commit --no-gpg-sign -m x"), &[]);
+    let reason = denial(&out).expect("--no-gpg-sign is denied");
+    assert!(
+        reason.contains("report the error text and stop"),
+        "{reason}"
+    );
+
+    for value in ["no", "0", "off", "False"] {
+        let (out, _, _) = run(
+            &bash(&format!("git -c commit.gpgsign={value} commit -m x")),
+            &[],
+        );
+        assert!(denial(&out).is_some(), "gpgsign={value} must be denied");
+    }
 }
