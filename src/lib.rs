@@ -14,6 +14,7 @@ pub mod code;
 pub mod commit;
 pub mod common;
 pub mod config;
+pub mod deliver;
 pub mod deps;
 #[cfg(unix)]
 pub mod doc;
