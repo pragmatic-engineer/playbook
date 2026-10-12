@@ -121,7 +121,7 @@ fn event_loop(
     Ok(())
 }
 
-type Loaded = Result<(Vec<crate::usage::host::Record>, i64), String>;
+type Loaded = Result<(Vec<crate::usage::session_view::Record>, i64), String>;
 
 /// The Sessions management view and the thread that reads it. A read asks
 /// `gh` for each branch, so it runs off the draw loop and the screen never

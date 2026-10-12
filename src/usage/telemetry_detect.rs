@@ -8,12 +8,12 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 /// A variable that means the user configured telemetry themselves.
-pub fn is_telemetry_var(name: &str) -> bool {
+fn is_telemetry_var(name: &str) -> bool {
     name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_")
 }
 
 /// Whether the `env` block of a settings document names a telemetry variable.
-pub fn settings_configure_telemetry(settings: &Value) -> bool {
+fn settings_configure_telemetry(settings: &Value) -> bool {
     settings
         .get("env")
         .and_then(Value::as_object)

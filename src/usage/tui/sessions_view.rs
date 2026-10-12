@@ -12,8 +12,8 @@
 
 use super::fmt::fit;
 use super::theme::Palette;
-use crate::usage::host::{age, link_label, tokens, worktree_label, Record, State};
 use crate::usage::query::{clock, short_id};
+use crate::usage::session_view::{age, link_label, tokens, worktree_label, Record, State};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Modifier, Style};
@@ -344,7 +344,7 @@ fn footer_line(view: &SessionsView, pal: &Palette, now: i64) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::usage::host::{Place, Pr, PrKind};
+    use crate::usage::session_view::{Place, Pr, PrKind};
     use crate::usage::tui::theme::{ColorDepth, Theme};
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::KeyEventKind;

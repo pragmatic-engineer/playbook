@@ -8,8 +8,8 @@
 //! changes what the cost-per-agent and latency views can show, never a total.
 
 use super::collector::{read_state, running, state_path, State};
-use super::host::{telemetry_configured as configured, Configured};
 use super::run::Paths;
+use super::telemetry_detect::{configured, Configured};
 use serde_json::Value;
 use std::path::Path;
 

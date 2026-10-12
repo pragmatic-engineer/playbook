@@ -3,7 +3,7 @@
 
 //! The data the terminal view's sessions panel shows: a record per agent
 //! session and the small formatters for it. The host program builds the
-//! records (see `host::Host::sessions`); this module only defines and prints
+//! records (see `host::load_sessions`); this module only defines and prints
 //! them.
 
 const DAY: i64 = 86_400;
@@ -134,5 +134,70 @@ pub fn worktree_label(r: &Record) -> String {
         }
         None if r.place.cwd.is_some() => "main checkout".into(),
         None => "-".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOW: i64 = 1_000_000;
+
+    #[test]
+    fn ages_and_token_counts_read_short() {
+        assert_eq!(age(NOW - 5, NOW), "now");
+        assert_eq!(age(NOW - 90, NOW), "1m");
+        assert_eq!(age(NOW - 7300, NOW), "2h");
+        assert_eq!(age(NOW - 3 * DAY, NOW), "3d");
+        assert_eq!(tokens(0), "-");
+        assert_eq!(tokens(182_000), "182k");
+        assert_eq!(tokens(1_250_000), "1.2M");
+    }
+
+    fn record() -> Record {
+        Record {
+            id: "s".into(),
+            agent: "claude".into(),
+            repo: "r".into(),
+            branch: "b".into(),
+            place: Place::default(),
+            issue: None,
+            pr: None,
+            state: State::Idle,
+            last_activity: 0,
+            context_tokens: 0,
+            cost_usd: 0.0,
+            unpriced: 0,
+            messages: 0,
+            needs_attention: false,
+            hint: String::new(),
+        }
+    }
+
+    #[test]
+    fn the_link_label_prefers_a_pr_then_an_inferred_issue() {
+        let mut r = record();
+        assert_eq!(link_label(&r), "-");
+        r.issue = Some(7);
+        assert_eq!(link_label(&r), "issue #7?");
+        r.pr = Some(Pr {
+            number: 9,
+            kind: PrKind::Merged,
+        });
+        assert_eq!(link_label(&r), "PR #9 merged");
+    }
+
+    #[test]
+    fn the_worktree_label_names_gone_linked_and_main_checkouts() {
+        let mut r = record();
+        assert_eq!(worktree_label(&r), "-");
+        r.place.cwd = Some("/a/b".into());
+        assert_eq!(worktree_label(&r), "main checkout");
+        r.place.worktree = Some("/a/wt/feat".into());
+        assert_eq!(worktree_label(&r), "feat");
+        r.place.convention = "playbook";
+        assert_eq!(worktree_label(&r), "feat (playbook)");
+        r.place.gone = true;
+        assert_eq!(worktree_label(&r), "gone");
     }
 }

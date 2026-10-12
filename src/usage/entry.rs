@@ -4,7 +4,7 @@
 //! `playbook usage` and its subcommands: picks the terminal view or the text or
 //! JSON output.
 
-use super::host::UsageCommand;
+use super::command::UsageCommand;
 use super::period::Period;
 use super::query::{self, Range, WeekStart};
 use super::run::{ingest_new, run_summary, Paths};

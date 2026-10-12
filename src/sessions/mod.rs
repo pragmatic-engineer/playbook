@@ -481,15 +481,4 @@ mod tests {
         assert!(row["pr"].is_null());
         assert_eq!(doc["generated_at"], NOW);
     }
-
-    #[test]
-    fn ages_and_token_counts_read_short() {
-        assert_eq!(age(NOW - 5, NOW), "now");
-        assert_eq!(age(NOW - 90, NOW), "1m");
-        assert_eq!(age(NOW - 7300, NOW), "2h");
-        assert_eq!(age(NOW - 3 * DAY, NOW), "3d");
-        assert_eq!(tokens(0), "-");
-        assert_eq!(tokens(182_000), "182k");
-        assert_eq!(tokens(1_250_000), "1.2M");
-    }
 }

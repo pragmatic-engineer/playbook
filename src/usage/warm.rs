@@ -135,9 +135,7 @@ pub fn maybe_spawn(home: &Path, paths: &Paths, exe: &Path) {
 }
 
 fn value(home: &Path, key: &str) -> Option<serde_json::Value> {
-    crate::config::resolve_valid(key, home, None)
-        .ok()
-        .map(|(v, _, _)| v)
+    super::host::config_value(key, home)
 }
 
 /// `usage.autoIngest`, on unless the config says false.

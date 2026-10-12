@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The one place `src/usage` touches the host program. Config values, the
-//! state directory, the program name in user facing text, the host's repo
-//! path layout and the host-only types the terminal view needs all come from
-//! here. Moving usage to its own crate means replacing this one file.
+//! One of the two places `src/usage` touches the host program (the other is
+//! `util`). Config values, the state directory, the program name in user
+//! facing text, the host's repo path layout and the sessions panel data all
+//! come from here. Moving usage to its own crate means replacing these two
+//! files.
 //!
 //! Parts of playbook that depend on usage (the statusline limits capture, the
 //! `cc` launcher starting the collector, the hook pause check) stay on the
@@ -55,14 +56,5 @@ pub fn state_dir() -> PathBuf {
     crate::common::paths::usage_db_dir()
 }
 
-/// The clap enum of `usage` subcommands, owned by the host's CLI.
-pub use super::command::UsageCommand;
-
-/// How the host launches Claude Code with telemetry, for the status view.
-pub use super::telemetry_detect::{configured as telemetry_configured, Configured};
-
-/// The sessions view's record types, owned by the host's `sessions` feature.
-pub use crate::sessions::{
-    age, link_label, load as load_sessions, tokens, worktree_label, Place, Pr, PrKind, Record,
-    State,
-};
+/// The sessions panel data, built by the host's `sessions` feature.
+pub use crate::sessions::load as load_sessions;
