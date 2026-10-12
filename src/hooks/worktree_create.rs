@@ -138,6 +138,10 @@ fn add_worktree(
         // Registered but its folder is gone: drop the stale entry, then re-add.
         git(main_root, &["worktree", "prune"])?;
     }
+    // An empty folder git does not know is what a crashed run leaves behind.
+    if target.is_dir() && std::fs::read_dir(target).is_ok_and(|mut d| d.next().is_none()) {
+        let _ = std::fs::remove_dir(target);
+    }
     if target.exists() {
         return Err(format!(
             "{} exists but is not a worktree of this repo",

@@ -69,11 +69,11 @@ const WRITER_PROGRAMS: [&str; 10] = [
 /// treats as the option itself.
 const MIN_ABBREVIATION: usize = 8;
 
-const NO_VERIFY_REASON: &str = "Skipping git hooks (--no-verify, commit -n) is not allowed. Fix what the hook reports instead. If a hook is wrong, say so and ask the user.";
+const NO_VERIFY_REASON: &str = "Skipping git hooks (--no-verify, commit -n) is not allowed. Fix what the hook reports instead. If a hook is wrong, say so and ask the user. In an unattended run, report the hook's error text and stop.";
 
-const NO_SIGN_REASON: &str = "Turning off commit or tag signing (--no-gpg-sign, commit.gpgsign=false) is not allowed. Sign every commit and tag. If signing fails, report the error to the user.";
+const NO_SIGN_REASON: &str = "Turning off commit or tag signing (--no-gpg-sign, commit.gpgsign=false) is not allowed. Sign every commit and tag. If signing fails, report the error text and stop.";
 
-const PR_CREATE_REASON: &str = "Do not hand-run `gh pr create`. Use the /playbook:create-pull-request skill: it runs the pre-flight checks, writes a conventional-commit title and the team PR template, then calls `playbook pr create`.";
+const PR_CREATE_REASON: &str = "Do not hand-run `gh pr create`. Use the /playbook:create-pull-request skill: it runs the pre-flight checks, writes a conventional-commit title and the team PR template, then calls `playbook pr create`. If `playbook pr create` itself fails, run `playbook pr create --help`, report the error text to the user, and stop; do not fall back to `gh pr create`.";
 
 /// Shown when a fact file is written in playbook's store: the format the
 /// system prompt no longer carries.
@@ -163,8 +163,11 @@ fn check_git(args: &[String]) -> Option<&'static str> {
     while let Some(word) = args.get(i) {
         if word == "-c" {
             let value = args.get(i + 1)?.to_lowercase();
-            if value == "commit.gpgsign=false" || value == "tag.gpgsign=false" {
-                return Some(NO_SIGN_REASON);
+            if let Some((key, setting)) = value.split_once('=') {
+                let off = matches!(setting.trim(), "false" | "no" | "off" | "0" | "");
+                if off && (key == "commit.gpgsign" || key == "tag.gpgsign") {
+                    return Some(NO_SIGN_REASON);
+                }
             }
             i += 2;
         } else if GIT_VALUE_OPTIONS.contains(&word.as_str()) {

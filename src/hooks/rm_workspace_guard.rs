@@ -95,11 +95,13 @@ pub fn run(payload: &Payload) {
     let state_root = state_root.to_string_lossy();
     let hint = if outside.iter().any(|t| t.starts_with(state_root.as_ref())) {
         " This path is playbook's own state: to clear plan scratch files use `playbook plan cleanup <slug>` (or `playbook plan cleanup --stale` for old leftovers), do not rm them."
+    } else if outside.iter().any(|t| t.contains("/.worktrees/")) {
+        " This path looks like a worktree leftover: use `git worktree remove --force <path>` for a registered one, `git worktree prune` for a deleted one, and an empty leftover folder is cleared by the next worktree create."
     } else {
         ""
     };
     emit_pre_deny(&format!(
-        "rm blocked: {} is outside {roots} and ~/.claude/**. Allowed: rm inside the repo or those roots. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path.{hint}",
+        "rm blocked: {} is outside {roots} and ~/.claude/**. Allowed: rm inside the repo or those roots. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path. If the label is `<command substitution>`, a `$VAR` or a relative path after `cd`, the guard cannot resolve it: run the rm as its own call with a literal absolute path.{hint}",
         outside.join(",")
     ));
 }
@@ -348,11 +350,33 @@ fn offending_targets(
     let mut in_rm = false;
     let mut saw_cd = false;
     let mut saw_rm = false;
+    // A substitution only matters when it shares a simple command with an `rm`.
+    let mut segment_has_rm = false;
+    let mut segment_has_substitution = false;
+    let mut substitution_in_rm_command = false;
+    // Open `$(` groups and an open backtick span. A command inside one is part
+    // of a substitution whose separators must not hide it.
+    let mut paren_depth = 0usize;
+    let mut in_backtick = false;
     // The very start of a command is a command position, same as after a `;`.
     let mut prev_was_separator = true;
 
     for (token, is_data) in tokenize(cmd) {
-        let token = token.as_str();
+        let whole = token.as_str();
+        let mut token = whole;
+        // A substitution opens a command position: `$(cd` is `cd` and
+        // `x=$(rm` is `rm`.
+        if let Some(at) = token.rfind("$(") {
+            token = &token[at + 2..];
+            prev_was_separator = true;
+        } else if let Some(at) = token.rfind('`') {
+            token = &token[at + 1..];
+            prev_was_separator = true;
+        }
+        paren_depth += whole.matches("$(").count();
+        in_backtick ^= whole.matches('`').count() % 2 == 1;
+        let inside_substitution = paren_depth > 0 || in_backtick;
+        paren_depth = paren_depth.saturating_sub(whole.matches(')').count());
 
         // A word that is DATA, meaning inside quotes or inside a heredoc body,
         // is prose unless a separator put it in command position. `-m "fix: stop
@@ -370,15 +394,23 @@ fn offending_targets(
         if is_command && (token == "rm" || token.ends_with("/rm")) {
             in_rm = true;
             saw_rm = true;
+            segment_has_rm = true;
+            substitution_in_rm_command |= segment_has_substitution || inside_substitution;
             prev_was_separator = false;
             continue;
         }
         if SEPARATORS.contains(&token) {
             in_rm = false;
+            segment_has_rm = false;
+            segment_has_substitution = false;
             prev_was_separator = true;
             continue;
         }
         prev_was_separator = false;
+        if whole.contains("$(") || whole.contains('`') {
+            segment_has_substitution = true;
+            substitution_in_rm_command |= segment_has_rm;
+        }
         if !in_rm || token.starts_with('-') {
             continue;
         }
@@ -397,15 +429,15 @@ fn offending_targets(
         // The cost is that `rm -rf "$REPO/target"` now blocks too, even though
         // it would have expanded to somewhere allowed. That is the correct
         // direction to be wrong in: the caller can retry with a literal path.
-        let unresolvable = token.contains('$')
-            || token.contains('`')
+        let unresolvable = whole.contains('$')
+            || whole.contains('`')
             || (saw_cd && !token.starts_with('/') && !token.starts_with('~'));
         if unresolvable || !is_allowed(token, home, claude_dir, safe_roots) {
             outside.push(token.to_string());
         }
     }
 
-    if saw_rm && (cmd.contains("$(") || cmd.contains('`')) {
+    if saw_rm && substitution_in_rm_command {
         outside.push(SUBSTITUTION_LABEL.to_string());
     }
     outside
