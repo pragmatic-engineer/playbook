@@ -4,7 +4,7 @@
 //! TypeScript, TSX and JavaScript symbol and import extraction. One walker
 //! serves all three grammars, because their node kinds overlap.
 
-use super::{clean_signature, Extracted, Import, Symbol};
+use super::{clean_signature, Extracted, Import, Symbol, MAX_SIGNATURE_CHARS};
 use std::borrow::Cow;
 use tree_sitter::Node;
 
@@ -14,6 +14,8 @@ const MAX_DEPTH: usize = 64;
 struct Walker<'a> {
     source: &'a [u8],
     out: Extracted,
+    /// Names listed by `export { a }` or `export default a`, flagged at the end.
+    listed: Vec<String>,
 }
 
 /// The node's source text, with any invalid UTF-8 replaced.
@@ -25,8 +27,14 @@ pub fn extract(root: Node, source: &[u8]) -> Extracted {
     let mut walker = Walker {
         source,
         out: Extracted::default(),
+        listed: Vec::new(),
     };
     walker.items(root, "", None, 0);
+    for symbol in &mut walker.out.symbols {
+        if symbol.parent.is_none() && walker.listed.contains(&symbol.name) {
+            symbol.exported = true;
+        }
+    }
     walker.out
 }
 
@@ -41,11 +49,7 @@ fn join(prefix: &str, name: &str) -> String {
 fn is_function_value(node: Node) -> bool {
     matches!(
         node.kind(),
-        "arrow_function"
-            | "function_expression"
-            | "function"
-            | "generator_function"
-            | "generator_function_expression"
+        "arrow_function" | "function_expression" | "generator_function"
     )
 }
 
@@ -55,7 +59,9 @@ struct Decl<'t> {
     name: Node<'t>,
     /// Supplies the line and byte range. The `export` keyword is included.
     range: Node<'t>,
-    /// The signature runs from the start of `range` to here.
+    /// The signature is the bytes of `lead`, then `head_start..head_end`.
+    lead: (usize, usize),
+    head_start: usize,
     head_end: usize,
 }
 
@@ -90,6 +96,13 @@ impl Walker<'_> {
         match node.kind() {
             "export_statement" => self.export_statement(node, scope),
             "import_statement" => self.import_statement(node),
+            "ambient_declaration" => {
+                let mut cursor = node.walk();
+                let inner: Vec<Node> = node.named_children(&mut cursor).collect();
+                for child in inner {
+                    self.statement(child, outer, exported, scope);
+                }
+            }
             "function_declaration" | "generator_function_declaration" | "function_signature" => {
                 self.declared(node, outer, "function", exported, scope);
             }
@@ -159,10 +172,24 @@ impl Walker<'_> {
             });
             return;
         }
+        let mut cursor = node.walk();
+        let clause = node
+            .named_children(&mut cursor)
+            .find(|n| n.kind() == "export_clause");
+        if let Some(clause) = clause {
+            let mut inner = clause.walk();
+            for spec in clause.named_children(&mut inner) {
+                if let Some(name) = spec.child_by_field_name("name") {
+                    self.listed.push(text(name, self.source).to_string());
+                }
+            }
+            return;
+        }
         if let Some(value) = node.child_by_field_name("value") {
             // `export default function f() {}` and `export default class C {}`.
             match value.kind() {
-                "function_expression" | "function" | "generator_function" => {
+                "identifier" => self.listed.push(text(value, self.source).to_string()),
+                "function_expression" | "generator_function" => {
                     self.declared(value, node, "function", true, scope);
                 }
                 "class" => self.container(value, node, "class", true, scope),
@@ -188,6 +215,8 @@ impl Walker<'_> {
             Decl {
                 name,
                 range: outer,
+                lead: (0, 0),
+                head_start: outer.start_byte(),
                 head_end,
             },
             kind,
@@ -206,6 +235,7 @@ impl Walker<'_> {
             .named_children(&mut cursor)
             .filter(|n| n.kind() == "variable_declarator")
             .collect();
+        let first_start = declarators.first().map_or(0, Node::start_byte);
         for declarator in declarators {
             let Some(name) = declarator.child_by_field_name("name") else {
                 continue;
@@ -226,6 +256,8 @@ impl Walker<'_> {
             let decl = Decl {
                 name,
                 range: outer,
+                lead: (outer.start_byte(), first_start),
+                head_start: declarator.start_byte(),
                 head_end,
             };
             self.symbol(decl, kind, exported, scope);
@@ -251,7 +283,10 @@ impl Walker<'_> {
         let mut cursor = body.walk();
         let children: Vec<Node> = body.named_children(&mut cursor).collect();
         for node in children {
-            let Some(name) = node.child_by_field_name("name") else {
+            let name = node
+                .child_by_field_name("name")
+                .or_else(|| node.child_by_field_name("property"));
+            let Some(name) = name else {
                 continue;
             };
             let head_end = match node.kind() {
@@ -275,6 +310,8 @@ impl Walker<'_> {
             let decl = Decl {
                 name,
                 range: node,
+                lead: (0, 0),
+                head_start: node.start_byte(),
                 head_end,
             };
             self.symbol(decl, "method", owner_exported && !hidden, scope);
@@ -293,8 +330,15 @@ impl Walker<'_> {
             return None;
         }
         let start = decl.range.start_byte();
-        let head_end = decl.head_end.max(start).min(self.source.len());
-        let raw = String::from_utf8_lossy(&self.source[start..head_end]);
+        // Only the first characters are kept, so a huge declaration is not decoded whole.
+        let reach = MAX_SIGNATURE_CHARS * 4 + 4;
+        let slice = |from: usize, to: usize| {
+            let to = to.min(self.source.len()).min(from.saturating_add(reach));
+            &self.source[from.min(to)..to]
+        };
+        let mut bytes = slice(decl.lead.0, decl.lead.1).to_vec();
+        bytes.extend_from_slice(slice(decl.head_start, decl.head_end.max(decl.head_start)));
+        let raw = String::from_utf8_lossy(&bytes);
         let (signature, signature_cut) = clean_signature(
             raw.trim_end_matches(|c: char| c == ';' || c == ',' || c.is_whitespace()),
         );
@@ -315,6 +359,24 @@ impl Walker<'_> {
     }
 
     fn import_statement(&mut self, node: Node) {
+        let mut cursor = node.walk();
+        let require = node
+            .named_children(&mut cursor)
+            .find(|n| n.kind() == "import_require_clause");
+        if let Some(clause) = require {
+            // `import fs = require("fs")`
+            if let Some(source) = clause.child_by_field_name("source") {
+                let alias = clause
+                    .named_child(0)
+                    .map(|n| text(n, self.source).to_string());
+                self.out.imports.push(Import {
+                    module: unquote(&text(source, self.source)),
+                    names: alias,
+                    line: node.start_position().row + 1,
+                });
+            }
+            return;
+        }
         let Some(source) = node.child_by_field_name("source") else {
             return;
         };
@@ -526,6 +588,7 @@ import fs from \"fs\";
 import { a, b as c } from './mod';
 import * as path from 'path';
 import \"./side-effect\";
+import cp = require(\"child_process\");
 export { x } from \"./x\";
 export * from \"./all\";
 ";
@@ -545,9 +608,66 @@ export * from \"./all\";
                 ("./mod", Some("a, b as c"), 2),
                 ("path", Some("* as path"), 3),
                 ("./side-effect", None, 4),
-                ("./x", Some("x"), 5),
-                ("./all", Some("*"), 6),
+                ("child_process", Some("cp"), 5),
+                ("./x", Some("x"), 6),
+                ("./all", Some("*"), 7),
             ]
+        );
+    }
+
+    #[test]
+    fn declare_forms_and_local_export_lists_are_handled() {
+        // Arrange
+        let src = "\
+declare function ext(): void;
+export declare class Api { go(): void; }
+function local() {}
+const other = () => 1;
+export { local as renamed };
+export default other;
+";
+
+        // Act
+        let (symbols, _) = run(Lang::TypeScript, src);
+
+        // Assert
+        assert_eq!(find(&symbols, "ext").kind, "function");
+        assert_eq!(find(&symbols, "Api").kind, "class");
+        assert!(find(&symbols, "Api").exported);
+        assert_eq!(find(&symbols, "Api.go").kind, "method");
+        assert!(find(&symbols, "local").exported);
+        assert!(find(&symbols, "other").exported);
+    }
+
+    #[test]
+    fn a_javascript_class_field_arrow_is_a_method() {
+        // Arrange
+        let src = "class A {\n  handler = () => {};\n  count = 1;\n}\n";
+
+        // Act
+        let (symbols, _) = run(Lang::JavaScript, src);
+
+        // Assert
+        assert_eq!(find(&symbols, "A.handler").kind, "method");
+        assert!(symbols.iter().all(|s| s.name != "count"));
+    }
+
+    #[test]
+    fn each_declarator_keeps_its_own_signature() {
+        // Arrange
+        let src = "export const a = 1, b = () => 2;\n";
+
+        // Act
+        let (symbols, _) = run(Lang::TypeScript, src);
+
+        // Assert
+        assert_eq!(
+            find(&symbols, "a").signature.as_deref(),
+            Some("export const a = 1")
+        );
+        assert_eq!(
+            find(&symbols, "b").signature.as_deref(),
+            Some("export const b = () =>")
         );
     }
 
