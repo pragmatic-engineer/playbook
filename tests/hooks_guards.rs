@@ -179,6 +179,15 @@ mod rm_workspace_guard {
         assert!(out.contains("git worktree prune"), "{out}");
     }
 
+    #[test]
+    fn denial_for_a_stale_lock_says_it_clears_itself() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let cmd = format!("rm -rf {home}/.config/playbook/runtime/s1/edits.jsonl.lock");
+        let out = run_guard_in(&cmd, Some("/nonexistent-root"), None);
+        assert!(is_deny(&out), "{out}");
+        assert!(out.contains("clears itself"), "{out}");
+    }
+
     fn is_deny(stdout: &str) -> bool {
         if stdout.trim().is_empty() {
             return false;
