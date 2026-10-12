@@ -2,6 +2,8 @@
 
 Run `playbook config list` to see every key with its value and source tier in the current repo, and `playbook config get <key>` for one.
 
+The `usage.*` keys are also read by the standalone `playbook-telemetry` tool (alias `pbtop`) from the same `~/.config/playbook/config.json`. It has no config file of its own.
+
 ## Where a key is read from
 
 The first tier that sets a key wins:

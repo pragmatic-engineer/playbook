@@ -65,6 +65,19 @@ playbook init
 
 `playbook init` wires the hooks and the `PATH` block, so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `init` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Upgrade with `brew upgrade playbook`.
 
+### Optional: the standalone telemetry tool
+
+You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. Install the standalone tool only on a machine that has no `playbook`, or when you want the short `pbtop` command.
+
+```bash
+brew install pragmatic-engineer/tap/playbook-telemetry
+pbtop
+```
+
+The formula installs two commands, `playbook-telemetry` and `pbtop`, which are the same program. Release archives for macOS, Linux and Windows are on the [playbook-telemetry releases page](https://github.com/pragmatic-engineer/playbook-telemetry/releases/latest), and the repository README covers `cargo` builds. Everything stays on your machine.
+
+The tool shares its data with playbook: the database is `~/.config/playbook/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/config.json`. See [Config keys](04-config-keys.md).
+
 ### Without `curl | bash`
 
 **Plugin, then `/playbook:setup`.**
