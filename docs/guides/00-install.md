@@ -1,5 +1,7 @@
 # Install
 
+To see every change `playbook init` makes before you agree to it, read [What init installs](06-what-init-installs.md) and the [hook reference](../reference/hooks.md).
+
 The quickest route is one command. This page covers every route, requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
 
 ## Requirements
