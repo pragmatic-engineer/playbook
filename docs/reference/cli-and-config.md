@@ -44,6 +44,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.telemetry` | `auto` | `auto`, `off` |
 | `usage.telemetryRetentionDays` | `90` | a number, see the config keys guide for the range |
 | `usage.telemetryMaxRows` | `500000` | a number, see the config keys guide for the range |
+| `usage.autoIngest` | `true` | `true`, `false` |
+| `usage.autoIngestMinutes` | `10` | a number, see the config keys guide for the range |
 | `usage.budget.monthlyUsd` | `0` | a number, see the config keys guide for the range |
 | `usage.budget.weeklyUsd` | `0` | a number, see the config keys guide for the range |
 | `sessions.staleAfterDays` | `3` | a number, see the config keys guide for the range |
@@ -192,7 +194,7 @@ Index and search the repository's source code
 
 The index is a cache kept under the playbook state folder for this worktree. Nothing is written inside the repository.
 
-Subcommands: `index`
+Subcommands: `index`, `status`
 
 ### `playbook code index`
 
@@ -204,6 +206,16 @@ Example: `playbook code index --json`
 
 - `--json`: Print one JSON document
 - `--rebuild`: Delete the cache first and index everything again
+
+### `playbook code status`
+
+Report whether the index matches the files on disk
+
+Hashes every file git lists, so it is slower than the quick check that search commands run first.
+
+Example: `playbook code status --json`
+
+- `--json`: Print one JSON document
 
 ### `playbook commit`
 

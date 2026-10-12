@@ -129,15 +129,15 @@ enum Outcome {
     },
 }
 
-struct Existing {
-    sha: String,
-    status: String,
-    error: Option<String>,
-    size: i64,
-    mtime_ns: i64,
+pub(crate) struct Existing {
+    pub(crate) sha: String,
+    pub(crate) status: String,
+    pub(crate) error: Option<String>,
+    pub(crate) size: i64,
+    pub(crate) mtime_ns: i64,
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -429,7 +429,7 @@ fn write_batch(
     tx.commit().map_err(|e| e.to_string())
 }
 
-fn load_existing(conn: &Connection) -> Result<HashMap<String, Existing>, String> {
+pub(crate) fn load_existing(conn: &Connection) -> Result<HashMap<String, Existing>, String> {
     let mut stmt = conn
         .prepare("SELECT path, sha256, status, error, size, mtime_ns FROM files")
         .map_err(|e| e.to_string())?;

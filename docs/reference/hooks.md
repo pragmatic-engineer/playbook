@@ -42,7 +42,7 @@ A hook that fails or cannot read its input allows the call. Only the hooks marke
 
 ## Usage tracking and auto mode
 
-The usage store itself is filled by `playbook usage collect`, not by a hook. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy). These hooks keep per-session counters and enforce the spend cap in `auto` mode.
+The usage store is filled by `playbook usage` itself, by the `usage-warm` hook in the background, and from telemetry by `playbook usage collect`. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy). These hooks keep per-session counters and enforce the spend cap in `auto` mode.
 
 | Event | Matcher | Command | What it does | Can block or change | Reads and writes | Turn off |
 | :- | :- | :- | :- | :- | :- | :- |
@@ -51,6 +51,8 @@ The usage store itself is filled by `playbook usage collect`, not by a hook. See
 | `PreToolUse` | `AskUserQuestion` | `playbook hook auto-guard` | In `auto` mode, denies questions to you so an unattended run does not stall. | Can deny the call, in `auto` mode only. | Reads the `mode` setting. Writes a once-only marker in the session directory. | `playbook mode ask` (the default). |
 | `UserPromptSubmit` | none | `playbook hook auto-guard` | In `auto` mode, advises a trusted permission mode once per session. | Adds context. Never blocks. | Reads the `mode` setting. | `playbook mode ask` (the default). |
 | `PreToolUse` | none | `playbook hook auto-cost` | In `auto` mode, tracks session spend against `auto.budgetUsd` and denies tools at the cap. | Can deny the call, in `auto` mode only. | Reads the session transcripts and status line telemetry. Writes `auto-cost.json` in the session directory. | `playbook mode ask` (the default). |
+| `SessionStart` | none | `playbook hook usage-warm` | Starts a short background read of new session history, so `playbook usage` opens with data. Prints nothing and waits for nothing. | Never blocks. Prints nothing. | Starts a detached, low priority `playbook usage warm`, which reads session transcripts the way `playbook usage` does and writes only the usage store plus `auto-ingest.lock` and `auto-ingest.stamp` in `~/.config/playbook/usage`. It stores no transcript text beyond what the usage store already keeps. Skipped when the last run finished less than `usage.autoIngestMinutes` ago. | `playbook config set usage.autoIngest false`. |
+| `SessionEnd` | none | `playbook hook usage-warm` | Starts the same background read when a session ends, so the finished session is already stored. | Never blocks. Prints nothing. | Same as above. | `playbook config set usage.autoIngest false`. |
 
 ## Memory
 

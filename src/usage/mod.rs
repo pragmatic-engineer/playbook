@@ -29,6 +29,7 @@ pub mod summary;
 pub mod telemetry_db;
 pub mod telemetry_status;
 pub mod tui;
+pub mod warm;
 
 /// One assistant message's token usage and derived cost. `event_id` is the
 /// source's own unique message id, the dedup key (a message can span several

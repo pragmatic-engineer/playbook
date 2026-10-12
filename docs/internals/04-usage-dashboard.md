@@ -240,6 +240,10 @@ Totals never read them, so every total is unchanged, and a session with no row i
 
 Plain `claude` sessions (not started through `cc`) send nothing to the receiver unless the OpenTelemetry variables are set for them. `playbook init --telemetry` writes those variables into your Claude Code settings, with your consent, see [Telemetry by default](#telemetry-by-default). Without them, such sessions are read from transcripts.
 
+## Background warm-up
+
+The `usage-warm` hook (SessionStart and SessionEnd, wired by `playbook init`) keeps the store current without you opening the view. It checks `usage.autoIngest` and a stamp file, then starts `playbook usage warm` detached and returns in a few milliseconds with no output. The child takes `auto-ingest.lock` in the usage directory so one read runs at a time (a lock older than 20 minutes counts as dead), lowers its priority, runs the same resume-safe batched ingest as the usage view, and stops after two minutes. A read that finished writes `auto-ingest.stamp`, and hooks skip while the stamp is younger than `usage.autoIngestMinutes` (default 10). A read that hit the time limit leaves no stamp, keeps its committed batches, and the next hook resumes it. It stores only what ingest already stores and logs nothing. The plugin-disabled pause applies, since no hook runs then.
+
 ## The telemetry receiver
 
 `playbook usage collect` runs a local receiver for Claude Code's OpenTelemetry export. It is optional: without it every number comes from transcripts, as before. `cc` starts it for you when needed, see below.

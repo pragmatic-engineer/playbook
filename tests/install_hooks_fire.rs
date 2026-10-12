@@ -309,6 +309,28 @@ fn fires(f: &Fire, name: &str) -> bool {
             .1
             .contains("playbook doc read /tmp/report.docx")
         }
+        "usage-warm" => {
+            let home = scratch(f, "h-usage-warm");
+            let (_, out) = run_hook(
+                &f.playbook,
+                name,
+                r#"{"session_id":"fire-usage-warm"}"#,
+                &home,
+                &home,
+                &[],
+                &[],
+            );
+            let stamp = home.join(".config/playbook/usage/auto-ingest.stamp");
+            let mut seen = false;
+            for _ in 0..100 {
+                if stamp.is_file() {
+                    seen = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            out.is_empty() && seen
+        }
         "precompact-warn" => {
             let home = scratch(f, "h-precompact");
             run_hook(
