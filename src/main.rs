@@ -415,7 +415,6 @@ fn main() {
                 aliases,
                 path_setup,
                 hooks: choices.hooks,
-                settings: choices.settings,
                 statusline: choices.statusline,
                 security: choices.security,
             };
@@ -436,7 +435,16 @@ fn main() {
                 .filter(|s| s.status == StepStatus::Wired)
                 .map(|s| s.name)
                 .collect();
-            print!("{}", init::catalog::summary(&changed));
+            let on_parts: Vec<&str> = [
+                ("hooks", choices.hooks),
+                ("statusline", choices.statusline),
+                ("security", choices.security),
+            ]
+            .iter()
+            .filter(|(_, on)| *on)
+            .map(|(id, _)| *id)
+            .collect();
+            print!("{}", init::catalog::summary(&changed, &on_parts));
             if !outcome.ok() {
                 let failed = outcome
                     .steps

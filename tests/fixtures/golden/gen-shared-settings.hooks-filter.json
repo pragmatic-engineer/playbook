@@ -1,5 +1,4 @@
 {
-  "env": {},
   "hooks": {
     "PreToolUse": [
       {
@@ -32,6 +31,5 @@
       "Bash(curl:*)"
     ],
     "defaultMode": "auto"
-  },
-  "skipAutoPermissionPrompt": false
+  }
 }

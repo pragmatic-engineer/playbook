@@ -574,9 +574,9 @@ Lists the hooks init adds to settings.json, grouped by purpose, and the ones the
 
 Install or repair your local Claude Code setup
 
-Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, settings, status line, PATH, the `ccc` launcher, the system prompt) unless you answer with a flag. Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`, unanswered parts use their defaults: hooks, settings and PATH on, the launcher and system prompt off.
+Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, status line, PATH, the `ccc` launcher, the system prompt) unless you answer with a flag. Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`, unanswered parts use their defaults: hooks, the status line and PATH on, the launcher and system prompt off.
 
-The security defaults (permissions rules and the autoupdater switch) are never asked about and stay off unless you pass `--security` or set `security.defaults` to true. Without them, `init` leaves any permissions you already have untouched.
+The security defaults (permissions rules) are never asked about and stay off unless you pass `--security` or set `security.defaults` to true. Without them, `init` leaves any permissions you already have untouched.
 
 Before it asks anything, init prints a plan of each part and the files it edits. `--dry-run` shows what would change on your machine and changes nothing. `--explain` describes a part, or every part, and changes nothing.
 
@@ -584,11 +584,9 @@ Example: `playbook init --no-hooks --aliases`
 
 - `--hooks`: Wire every playbook hook into settings.json (guards, session and worktree hooks)
 - `--no-hooks`: Add no playbook hook entries, including the guards in the shared settings
-- `--settings`: Merge playbook's shared settings (options, without the status line) into settings.json
-- `--no-settings`: Do not touch the shared settings
 - `--statusline`: Use the playbook status line (sets statusLine.command to `playbook statusline`)
 - `--no-statusline`: Do not set or change statusLine in settings.json
-- `--security`: Also apply the security defaults (permissions rules, autoupdater off); off unless asked or `security.defaults` is true
+- `--security`: Also apply the security defaults (permissions rules); off unless asked or `security.defaults` is true
 - `--no-security`: Do not apply the security defaults, even when `security.defaults` is true
 - `--path`: Put the playbook binary on PATH for every shell start
 - `--no-path`: Do not edit shell files for PATH

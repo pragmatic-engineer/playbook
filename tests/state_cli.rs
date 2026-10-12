@@ -72,7 +72,13 @@ fn init_imports_the_old_files_once_and_keeps_them_renamed() {
 
     let out = run(
         &h,
-        &["init", "--yes", "--no-hooks", "--no-settings", "--no-path"],
+        &[
+            "init",
+            "--yes",
+            "--no-hooks",
+            "--no-statusline",
+            "--no-path",
+        ],
     );
     assert!(out.status.success(), "{}", text(&out));
     assert!(
@@ -94,7 +100,13 @@ fn init_imports_the_old_files_once_and_keeps_them_renamed() {
 
     let again = run(
         &h,
-        &["init", "--yes", "--no-hooks", "--no-settings", "--no-path"],
+        &[
+            "init",
+            "--yes",
+            "--no-hooks",
+            "--no-statusline",
+            "--no-path",
+        ],
     );
     assert!(!text(&again).contains("imported"), "{}", text(&again));
 }

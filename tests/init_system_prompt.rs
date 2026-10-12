@@ -70,7 +70,6 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         system_prompt,
         aliases: true,
         hooks: true,
-        settings: true,
         statusline: true,
         security: false,
         path_setup: None,
