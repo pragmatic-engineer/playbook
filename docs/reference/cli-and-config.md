@@ -209,7 +209,19 @@ Index and search the repository's source code
 
 The index is a cache kept under the playbook state folder for this worktree. Nothing is written inside the repository.
 
-Subcommands: `index`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
+Subcommands: `context`, `index`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
+
+### `playbook code context`
+
+Gather the code a task needs
+
+Describe the task in words. Finds matching declarations and text, widens text hits to the declaration around them, adds imports of the top files and tests that name a top declaration, merges overlaps and fills a size budget. Prints what did not fit.
+
+Example: `playbook code context "add retry support to payment processing"`
+
+- `<QUERY>`: The task, in words
+- `--max-tokens <MAX_TOKENS>`: Budget in tokens of snippet text, counted as four bytes each
+- `--json`: Print one JSON document
 
 ### `playbook code index`
 
