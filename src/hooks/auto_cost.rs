@@ -1,19 +1,25 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! In `auto`, tracks the session's spend against the budget on every tool call.
+//! In `auto`, tracks spend against a budget per agent on every tool call.
 //!
-//! Spend is the larger of two per-source deltas from a baseline taken the
-//! first time the hook runs: the priced transcripts (main plus subagents,
-//! each read from its own byte offset) and the statusline telemetry. Values
-//! are rounded to integer cents before they are subtracted. The result is
-//! persisted as `<session dir>/auto-cost.json`.
+//! Each transcript (the main one and every `subagents/agent-*.jsonl`) is
+//! read from its own byte offset and priced, from a baseline taken the first
+//! time the hook runs. Values are rounded to integer cents before they are
+//! subtracted. The result is persisted as `<session dir>/auto-cost.json`.
 //!
-//! At the warn tier the hook adds one note, and at the cap it denies every
-//! tool outside a short safe list. When the spend cannot be read, including a
-//! transcript with unpriced models and no telemetry, it fails closed the same
-//! way. Under the cap it also denies the model changing its
-//! own guard: the `mode`, `auto.*` and `fix.*` settings and the config files.
+//! The caller is the main session, or a subagent named by the `agent_id` in
+//! the hook input. The main session is held to `auto.budgetUsd` against its
+//! own transcript, and each subagent to `auto.agentBudgetUsd` against its own.
+//! A caller that cannot be named counts as the main session. At the warn tier
+//! the caller hears one note about its own budget. At its cap only that caller
+//! is parked: new work is denied, while reading, the closing steps in the
+//! `closing` module and a park note stay allowed. The whole tree's spend has a
+//! ceiling, `auto.sessionCeilingUsd`, past which every caller is parked.
+//! When the caller's spend cannot be read, including a transcript with
+//! unpriced models and no telemetry, it fails closed the same way. Under the
+//! cap it also denies the model changing its own guard: the `mode`, `auto.*`
+//! and `fix.*` settings and the config files.
 
 use crate::common::atomic::{remove_stale_lock_dir, with_dir_lock, STALE_LOCK_AGE};
 use crate::common::mode::{hook_slug, resolve, resolve_for_hook_at, Mode, Source};
@@ -32,6 +38,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
+mod closing;
+
 const INTERVAL_VAR: &str = "PLAYBOOK_AUTO_COST_INTERVAL_MS";
 const DEFAULT_INTERVAL_MS: u64 = 2000;
 const STATE_FILE: &str = "auto-cost.json";
@@ -44,17 +52,6 @@ struct State {
     transcript: Transcript,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     telemetry: Option<Telemetry>,
-}
-
-impl State {
-    /// Whether the spend can be trusted: a transcript with every message
-    /// priced, or the statusline telemetry. A model missing from the price
-    /// table counts as free, so without telemetry that cost is a guess.
-    fn is_readable(&self) -> bool {
-        let files = &self.transcript.files;
-        let priced = !files.is_empty() && files.values().all(|file| !file.unpriced);
-        priced || self.telemetry.is_some()
-    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -97,14 +94,12 @@ struct Telemetry {
 }
 
 const DEFAULT_BUDGET_CENTS: i64 = 500;
+const DEFAULT_AGENT_BUDGET_CENTS: i64 = 500;
+/// With `auto.sessionCeilingUsd` unset, the tree's ceiling is this many
+/// times the main cap.
+const CEILING_FACTOR: i64 = 10;
 const DEFAULT_WARN_PCT: u64 = 70;
 const SAFE_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
-const SAFE_COMMANDS: [&str; 4] = [
-    "git status",
-    "git diff",
-    "playbook mode status",
-    "playbook mode status --json",
-];
 const MODE_ESCAPE: &str = "playbook mode ask";
 
 pub fn run(payload: &Payload) {
@@ -137,12 +132,17 @@ fn config_broke_mid_session(
         && root.join("runtime").join(sid).join(STATE_FILE).is_file()
 }
 
-/// The cap and the warn tier in integer cents.
+/// The caps and the warn tier in integer cents.
 struct Limits {
+    /// The main session's cap.
     cap: i64,
-    warn: i64,
+    /// The cap of each subagent.
+    agent_cap: i64,
+    /// The whole tree's ceiling, past which every caller is parked.
+    ceiling: i64,
     pct: u64,
     budget_is_valid: bool,
+    agent_budget_is_valid: bool,
 }
 
 impl Limits {
@@ -152,10 +152,14 @@ impl Limits {
                 .ok()
                 .map(|(value, _)| value)
         };
-        let budget = value("auto.budgetUsd")
-            .and_then(|value| value.as_f64())
-            .map(to_cents)
-            .filter(|cents| *cents > 0);
+        let cents = |key: &str| {
+            value(key)
+                .and_then(|value| value.as_f64())
+                .map(to_cents)
+                .filter(|cents| *cents > 0)
+        };
+        let budget = cents("auto.budgetUsd");
+        let agent_budget = cents("auto.agentBudgetUsd");
         let pct = value("auto.warnPct")
             .and_then(|value| value.as_u64())
             .filter(|pct| (1..=100).contains(pct))
@@ -163,63 +167,236 @@ impl Limits {
         let cap = budget.unwrap_or(DEFAULT_BUDGET_CENTS);
         Limits {
             cap,
-            warn: (cap as f64 * pct as f64 / 100.0).round() as i64,
+            agent_cap: agent_budget.unwrap_or(DEFAULT_AGENT_BUDGET_CENTS),
+            ceiling: cents("auto.sessionCeilingUsd").unwrap_or(cap.saturating_mul(CEILING_FACTOR)),
             pct,
             budget_is_valid: budget.is_some(),
+            agent_budget_is_valid: agent_budget.is_some(),
         }
+    }
+
+    fn cap_of(&self, caller: &Caller) -> i64 {
+        match caller {
+            Caller::Main => self.cap,
+            Caller::Agent(_) => self.agent_cap,
+        }
+    }
+
+    fn warn_of(&self, caller: &Caller) -> i64 {
+        (self.cap_of(caller) as f64 * self.pct as f64 / 100.0).round() as i64
+    }
+}
+
+/// Who made the tool call. Claude Code puts `agent_id` in the hook input of a
+/// call made inside a subagent and leaves it out for the main session. The
+/// transcript path is the main one for both, and a subagent's own transcript
+/// sits at `<main minus .jsonl>/subagents/agent-<id>.jsonl`.
+#[derive(Clone, PartialEq, Debug)]
+enum Caller {
+    Main,
+    Agent(String),
+}
+
+/// The transcripts the hook reads for one call.
+struct Transcripts {
+    main: PathBuf,
+    caller: Caller,
+}
+
+impl Transcripts {
+    fn of(payload: &Payload) -> Self {
+        let given = PathBuf::from(payload.field(".transcript_path"));
+        let id = agent_id(&payload.field(".agent_id"));
+        // A transcript path that already is a subagent's own names the caller
+        // and leads back to the main one.
+        let (main, from_path) = match own_agent_id(&given) {
+            Some((main, id)) => (main, Some(id)),
+            None => (given, None),
+        };
+        let caller = id.or(from_path).map_or(Caller::Main, Caller::Agent);
+        Transcripts { main, caller }
+    }
+
+    /// The state key of the caller's own transcript.
+    fn own_key(&self) -> Option<String> {
+        let path = match &self.caller {
+            Caller::Main => (!self.main.as_os_str().is_empty()).then(|| self.main.clone()),
+            Caller::Agent(id) => {
+                let stem = self.main.to_str()?.strip_suffix(".jsonl")?;
+                Some(
+                    Path::new(stem)
+                        .join("subagents")
+                        .join(format!("agent-{id}.jsonl")),
+                )
+            }
+        };
+        path.map(|path| path.to_string_lossy().into_owned())
+    }
+}
+
+/// The id without the `agent-` prefix, kept to characters that are safe in a
+/// file name. `None` means no usable id.
+fn agent_id(raw: &str) -> Option<String> {
+    let id: String = raw
+        .strip_prefix("agent-")
+        .unwrap_or(raw)
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .collect();
+    (!id.is_empty()).then_some(id)
+}
+
+/// For `<stem>/subagents/agent-<id>.jsonl`, the main transcript and the id.
+fn own_agent_id(path: &Path) -> Option<(PathBuf, String)> {
+    if !is_agent_transcript(path) {
+        return None;
+    }
+    let dir = path.parent()?;
+    if dir.file_name()? != "subagents" {
+        return None;
+    }
+    let stem = dir.parent()?;
+    let name = path.file_name()?.to_str()?;
+    let id = agent_id(name.strip_suffix(".jsonl")?)?;
+    Some((stem.with_extension("jsonl"), id))
+}
+
+/// The caller's spend in cents, or `None` when it cannot be trusted: a
+/// transcript with every message priced, or else the statusline telemetry,
+/// which covers the whole tree and so is an upper bound. A model missing from
+/// the price table counts as free, so without telemetry that cost is a guess.
+/// A subagent whose transcript does not exist yet has spent nothing.
+fn spend_cents(state: &State, transcripts: &Transcripts) -> Option<i64> {
+    let telemetry = state
+        .telemetry
+        .as_ref()
+        .map(|t| t.cents.saturating_sub(t.baseline_cents));
+    let entry = transcripts
+        .own_key()
+        .and_then(|key| state.transcript.files.get(&key));
+    // The agent's file is missing: it has not started writing yet, which is
+    // only believed while the main transcript is readable. Otherwise the
+    // path may simply be wrong, and the spend is unknown.
+    let main_is_read = state
+        .transcript
+        .files
+        .contains_key(&transcripts.main.to_string_lossy().into_owned());
+    match (entry, &transcripts.caller) {
+        (Some(file), _) if !file.unpriced => {
+            Some(to_cents(file.usd).saturating_sub(file.baseline_cents))
+        }
+        (None, Caller::Agent(_)) if transcripts.own_key().is_some() && main_is_read => Some(0),
+        _ => telemetry,
     }
 }
 
 fn enforce(payload: &Payload, limits: &Limits, root: &Path) {
-    let state = refresh(payload).filter(State::is_readable);
+    let transcripts = Transcripts::of(payload);
+    let caller = &transcripts.caller;
     let dir = PathBuf::from(session_dir(payload));
-    let park_note = dir.join("park-note.md");
+    let park_note = (!dir.as_os_str().is_empty()).then(|| dir.join(park_note_name(caller)));
     let call = ToolCall::of(payload);
-    let Some(state) = state else {
-        if !call.is_safe(None) && !call.is_mode_escape() {
-            emit_pre_deny(UNREADABLE_REASON);
+    let state = refresh(payload);
+    let spend = state
+        .as_ref()
+        .and_then(|state| spend_cents(state, &transcripts));
+    let guard = call.changes_the_guard(root);
+    let (Some(state), Some(spend)) = (state, spend) else {
+        let allowed = call.is_allowed_when_parked(park_note.as_deref());
+        if allowed && !guard || call.is_mode_escape() {
+            return;
         }
+        emit_pre_deny(if allowed {
+            SELF_PROTECTION_REASON
+        } else {
+            UNREADABLE_REASON
+        });
         return;
     };
-    if state.effective_cents >= limits.cap {
-        if !call.is_safe(Some(&park_note)) {
-            emit_pre_deny(&budget_reached_reason(&park_note));
+    let cap = limits.cap_of(caller);
+    if spend >= cap || state.effective_cents >= limits.ceiling {
+        if !call.is_allowed_when_parked(park_note.as_deref()) {
+            let note = park_note.unwrap_or_default();
+            let reason = if spend >= cap {
+                budget_reached_reason(caller, cap, &note)
+            } else {
+                ceiling_reason(limits.ceiling, &note)
+            };
+            emit_pre_deny(&reason);
+        } else if guard {
+            emit_pre_deny(SELF_PROTECTION_REASON);
         }
         return;
     }
-    if call.changes_the_guard(root) {
+    if guard {
         emit_pre_deny(SELF_PROTECTION_REASON);
         return;
     }
+    let suffix = match caller {
+        Caller::Main => String::new(),
+        Caller::Agent(id) => format!("-{id}"),
+    };
     let mut notes = Vec::new();
     if !limits.budget_is_valid && claim(&dir.join("budget-note")) {
         notes.push(INVALID_BUDGET_NOTE.to_string());
     }
-    if state.effective_cents >= limits.warn && claim(&dir.join("warned")) {
-        notes.push(warn_note(limits));
+    if !limits.agent_budget_is_valid && claim(&dir.join("agent-budget-note")) {
+        notes.push(INVALID_AGENT_BUDGET_NOTE.to_string());
+    }
+    if spend >= limits.warn_of(caller) && claim(&dir.join(format!("warned{suffix}"))) {
+        notes.push(warn_note(limits, caller));
     }
     if !notes.is_empty() {
         emit_pre_context("PreToolUse", &notes.join(" "));
     }
 }
 
-const UNREADABLE_REASON: &str = "cost unreadable: the session spend can't be checked. Stop here and report to the user. Reading files still works, and `playbook mode ask` is allowed.";
+fn park_note_name(caller: &Caller) -> String {
+    match caller {
+        Caller::Main => "park-note.md".to_string(),
+        Caller::Agent(id) => format!("park-note-{id}.md"),
+    }
+}
+
+const UNREADABLE_REASON: &str = "cost unreadable: the spend can't be checked. Stop here and report to the user. Reading files, the closing steps (commit, push, pull request) and a park note still work, and `playbook mode ask` is allowed.";
 const SELF_PROTECTION_REASON: &str =
     "Auto mode settings are locked while auto is on. Ask the user to run this command themselves.";
 const INVALID_BUDGET_NOTE: &str = "auto.budgetUsd must be a number of at least 0.01, so the default cap of $5 applies. Fix it with `playbook config set auto.budgetUsd <usd>`.";
+const INVALID_AGENT_BUDGET_NOTE: &str = "auto.agentBudgetUsd must be a number of at least 0.01, so the default agent cap of $5 applies. Fix it with `playbook config set auto.agentBudgetUsd <usd>`.";
 
-fn budget_reached_reason(park_note: &Path) -> String {
+fn dollars(cents: i64) -> String {
+    format!("${:.2}", cents as f64 / 100.0)
+}
+
+fn budget_reached_reason(caller: &Caller, cap: i64, park_note: &Path) -> String {
+    let (who, key) = match caller {
+        Caller::Main => ("the main session", "auto.budgetUsd"),
+        Caller::Agent(_) => ("this agent", "auto.agentBudgetUsd"),
+    };
     format!(
-        "budget reached: write a park note to {} describing where you stopped, then report to the user. Only the user can raise the cap or start a new session.",
+        "budget reached: {who} has spent its {} cap. New work is denied. If there is finished work to deliver, the closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. To go on, the user can run `playbook config set {key} <usd>` or `playbook mode ask`.",
+        dollars(cap),
         park_note.display()
     )
 }
 
-fn warn_note(limits: &Limits) -> String {
+fn ceiling_reason(ceiling: i64, park_note: &Path) -> String {
     format!(
-        "AUTO MODE budget: {}% of the ${:.2} cap is spent. Finish the current step, then report to the user before the cap parks the session.",
+        "session ceiling reached: the agents together have spent the {} ceiling, so every agent is parked and new work is denied. The closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. To go on, the user can run `playbook config set auto.sessionCeilingUsd <usd>` or `playbook mode ask`.",
+        dollars(ceiling),
+        park_note.display()
+    )
+}
+
+fn warn_note(limits: &Limits, caller: &Caller) -> String {
+    let who = match caller {
+        Caller::Main => "the main session",
+        Caller::Agent(_) => "this agent",
+    };
+    format!(
+        "AUTO MODE budget: {}% of {who}'s {} cap is spent. Finish the current step, then report to the user before the cap parks {who}.",
         limits.pct,
-        limits.cap as f64 / 100.0
+        dollars(limits.cap_of(caller))
     )
 }
 
@@ -236,6 +413,7 @@ struct ToolCall {
     tool: String,
     command: String,
     file_path: String,
+    skill: String,
 }
 
 impl ToolCall {
@@ -244,15 +422,18 @@ impl ToolCall {
             tool: payload.field(".tool_name"),
             command: payload.field(".tool_input.command"),
             file_path: payload.field(".tool_input.file_path"),
+            skill: payload.field(".tool_input.skill"),
         }
     }
 
-    /// Reading, the exact read-only commands, and the model's own park note
-    /// when the caller has one to allow.
-    fn is_safe(&self, park_note: Option<&Path>) -> bool {
+    /// What stays allowed once a caller is parked or its cost is unreadable:
+    /// reading, the closing steps that deliver finished work, and the
+    /// caller's own park note.
+    fn is_allowed_when_parked(&self, park_note: Option<&Path>) -> bool {
         match self.tool.as_str() {
             tool if SAFE_TOOLS.contains(&tool) => true,
-            "Bash" => SAFE_COMMANDS.contains(&self.command.as_str()),
+            "Bash" => closing::is_closing_command(&self.command),
+            "Skill" => closing::is_closing_skill(&self.skill),
             "Write" => park_note.is_some_and(|note| is_same_path(Path::new(&self.file_path), note)),
             _ => false,
         }
@@ -419,10 +600,13 @@ fn effective_cents(state: &State) -> i64 {
     let transcript = (!files.is_empty()).then(|| {
         files
             .values()
-            .map(|f| to_cents(f.usd) - f.baseline_cents)
-            .sum::<i64>()
+            .map(|f| to_cents(f.usd).saturating_sub(f.baseline_cents))
+            .fold(0_i64, i64::saturating_add)
     });
-    let telemetry = state.telemetry.as_ref().map(|t| t.cents - t.baseline_cents);
+    let telemetry = state
+        .telemetry
+        .as_ref()
+        .map(|t| t.cents.saturating_sub(t.baseline_cents));
     transcript.into_iter().chain(telemetry).max().unwrap_or(0)
 }
 
@@ -430,21 +614,24 @@ fn to_cents(usd: f64) -> i64 {
     (usd * 100.0).round() as i64
 }
 
+/// Every transcript of the tree: the main one and each subagent's own.
 fn transcript_files(payload: &Payload) -> Vec<PathBuf> {
-    let main = payload.field(".transcript_path");
-    if main.is_empty() {
-        return Vec::new();
-    }
-    let mut files = vec![PathBuf::from(&main)];
-    if let Some(stem) = main.strip_suffix(".jsonl") {
-        let subagents = fs::read_dir(Path::new(stem).join("subagents"))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| is_agent_transcript(path));
-        files.extend(subagents);
-    }
+    let main = Transcripts::of(payload).main;
+    let Some(stem) = main.to_str().and_then(|main| main.strip_suffix(".jsonl")) else {
+        return if main.as_os_str().is_empty() {
+            Vec::new()
+        } else {
+            vec![main]
+        };
+    };
+    let subagents = fs::read_dir(Path::new(stem).join("subagents"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| is_agent_transcript(path));
+    let mut files = vec![main.clone()];
+    files.extend(subagents);
     files
 }
 
@@ -487,7 +674,7 @@ fn advance_file(files: &mut BTreeMap<String, FileCost>, path: &Path, first_call:
         entry.last_id = id;
         entry.last_usd = usd;
     }
-    entry.offset += complete.len() as u64;
+    entry.offset = entry.offset.saturating_add(complete.len() as u64);
     if is_new && first_call {
         entry.baseline_cents = to_cents(entry.usd);
     }

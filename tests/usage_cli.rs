@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Binary-level tests for `playbook usage` and `playbook usage ingest`, run
+//! Binary-level tests for `playbook usage`, run
 //! against a scratch `$HOME` seeded from the committed fixtures. The real
 //! `~/.claude` is never read.
 
@@ -84,22 +84,14 @@ fn bare_usage_ingests_and_prints_a_summary_with_fixture_values() {
 }
 
 #[test]
-fn usage_ingest_reports_counts_and_a_second_run_adds_nothing() {
-    let home = Home::new("ingest");
+fn a_second_summary_run_reports_the_same_totals_and_adds_nothing() {
+    let home = Home::new("summary-twice");
 
-    let first = home.run(&["usage", "ingest"]);
-    let second = home.run(&["usage", "ingest"]);
+    let first = home.run(&["usage", "--summary"]);
+    let second = home.run(&["usage", "--summary"]);
 
     assert!(first.status.success() && second.status.success());
-    assert_eq!(
-        stdout(&first).trim(),
-        "usage ingest: added 3 usage events and 0 tool events (0 already stored)"
-    );
-    // The watermark is inclusive, so the newest event is re-read and skipped.
-    assert_eq!(
-        stdout(&second).trim(),
-        "usage ingest: added 0 usage events and 0 tool events (1 already stored)"
-    );
+    assert_eq!(stdout(&first), stdout(&second));
 }
 
 #[test]
@@ -136,23 +128,20 @@ fn copy_dir(from: &Path, to: &Path) {
 }
 
 #[test]
-fn usage_ingest_reads_codex_rollouts_when_the_sessions_dir_exists() {
+fn the_summary_reads_codex_rollouts_when_the_sessions_dir_exists() {
     let home = Home::new("codex");
     copy_dir(&fixtures().join("codex"), &home.0.join(".codex/sessions"));
 
-    let first = home.run(&["usage", "ingest"]);
-    let second = home.run(&["usage", "ingest"]);
+    let first = home.run(&["usage", "--summary"]);
+    let second = home.run(&["usage", "--summary"]);
 
     assert!(first.status.success() && second.status.success());
-    assert_eq!(
-        stdout(&first).trim(),
-        "usage ingest: added 7 usage events and 0 tool events (0 already stored)"
-    );
     assert!(
-        stdout(&second).starts_with("usage ingest: added 0 usage events and 0 tool events"),
+        !stdout(&first).contains("No usage recorded yet"),
         "{}",
-        stdout(&second)
+        stdout(&first)
     );
+    assert_eq!(stdout(&first), stdout(&second));
 }
 
 fn stderr(out: &Output) -> String {
@@ -230,19 +219,16 @@ fn the_web_dashboard_flag_and_subcommand_are_gone() {
 }
 
 #[test]
-fn usage_ingest_still_works_and_warns_that_it_is_deprecated() {
-    let home = Home::new("ingest-deprecated");
+fn usage_ingest_is_removed_and_says_what_to_run_instead() {
+    let home = Home::new("ingest-removed");
 
     let out = home.run(&["usage", "ingest"]);
 
-    assert!(out.status.success());
-    assert!(stdout(&out).contains("usage ingest: added 3 usage events"));
+    assert!(!out.status.success());
     let err = stderr(&out);
-    assert!(
-        err.contains("deprecated") && err.contains("v0.22.0"),
-        "{err}"
-    );
+    assert!(err.contains("was removed"), "{err}");
     assert!(err.contains("playbook usage --summary"), "{err}");
+    assert!(stdout(&out).is_empty(), "{}", stdout(&out));
 }
 
 fn json_range(home: &Home, range: &str) -> serde_json::Value {

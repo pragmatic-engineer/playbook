@@ -418,6 +418,10 @@ fn set_rejects_an_out_of_range_auto_or_fix_value_with_a_clear_message_and_writes
         ("auto.budgetUsd", "-5", "at least 0.01"),
         ("auto.budgetUsd", "0.004", "at least 0.01"),
         ("auto.budgetUsd", "abc", "auto.budgetUsd"),
+        ("auto.agentBudgetUsd", "0", "at least 0.01"),
+        ("auto.agentBudgetUsd", "0.004", "at least 0.01"),
+        ("auto.sessionCeilingUsd", "-1", "at least 0.01"),
+        ("auto.sessionCeilingUsd", "0.004", "at least 0.01"),
         ("auto.warnPct", "0", "between 1 and 100"),
         ("auto.warnPct", "101", "between 1 and 100"),
         ("fix.maxFiles", "0", "positive integer"),
@@ -447,6 +451,9 @@ fn set_writes_valid_auto_and_fix_values_including_a_fractional_budget() {
     // Arrange
     let rows = [
         ("auto.budgetUsd", "2.5"),
+        ("auto.agentBudgetUsd", "0.5"),
+        ("auto.sessionCeilingUsd", "0"),
+        ("auto.sessionCeilingUsd", "40"),
         ("auto.warnPct", "100"),
         ("fix.maxFiles", "99"),
         ("fix.maxLines", "1"),

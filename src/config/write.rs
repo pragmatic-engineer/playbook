@@ -82,7 +82,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
     Ok(())
 }
 
-/// `auto.budgetUsd` takes any number of at least one cent, since the spend cap
+/// `auto.budgetUsd` and `auto.agentBudgetUsd` take any number of at least one cent, since the spend cap
 /// is held in whole cents, so a fractional budget works.
 /// `usage.budget.*Usd` takes any number from 0 (no budget).
 /// `auto.warnPct` takes a whole number within 1 to 100, `usage.refreshSeconds` one within 1 to
@@ -91,9 +91,15 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
 fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
     let whole = value.as_i64();
     let (valid, constraint) = match key {
-        "auto.budgetUsd" => (
+        "auto.budgetUsd" | "auto.agentBudgetUsd" => (
             value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.01),
             "a number of at least 0.01",
+        ),
+        "auto.sessionCeilingUsd" => (
+            value
+                .as_f64()
+                .is_some_and(|n| n.is_finite() && (n == 0.0 || n >= 0.01)),
+            "0 (ten times auto.budgetUsd) or a number of at least 0.01",
         ),
         "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => (
             value

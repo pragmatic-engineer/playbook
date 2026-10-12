@@ -99,15 +99,6 @@ pub fn ingest_into(
     Ok(stats)
 }
 
-/// `playbook usage ingest`.
-pub fn run_ingest(paths: &Paths) -> Result<String, String> {
-    let (_, stats) = ingest_new(paths)?;
-    Ok(format!(
-        "usage ingest: added {} usage events and {} tool events ({} already stored)",
-        stats.usage_inserted, stats.tools_inserted, stats.duplicates_skipped
-    ))
-}
-
 /// Bare `playbook usage`: ingest, then render.
 /// The text report. `range` is `None` for every recorded session.
 pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<String, String> {

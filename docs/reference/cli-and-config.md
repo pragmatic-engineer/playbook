@@ -32,6 +32,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `models.opus` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
 | `routing.escalate` | `ask` | `ask`, `auto`, `deny` |
 | `auto.budgetUsd` | `5` | a number, see the config keys guide for the range |
+| `auto.agentBudgetUsd` | `5` | a number, see the config keys guide for the range |
+| `auto.sessionCeilingUsd` | `0` | a number, see the config keys guide for the range |
 | `auto.warnPct` | `70` | a number, see the config keys guide for the range |
 | `fix.maxFiles` | `3` | a number, see the config keys guide for the range |
 | `fix.maxLines` | `500` | a number, see the config keys guide for the range |
@@ -668,6 +670,8 @@ Example: `playbook init --no-hooks --aliases`
 - `--no-system-prompt`: Do not install the system prompt
 - `--telemetry`: Write the OpenTelemetry variables for the local usage collector into settings.json (only when you have no telemetry set up)
 - `--no-telemetry`: Do not write telemetry variables into settings.json
+- `--claude-override`: Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
+- `--no-claude-override`: Do not turn on the `claude` shell function
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing
@@ -1231,7 +1235,7 @@ Example: `playbook usage --range today`
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
 - `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
 
-Subcommands: `collect`, `ingest`, `prune`, `status`
+Subcommands: `collect`, `prune`, `status`
 
 ### `playbook usage collect`
 
@@ -1243,10 +1247,6 @@ Example: `playbook usage collect --idle-seconds 1800`
 
 - `--port <PORT>`: Port to listen on (an error when busy). Default: the last port, 4318, then any free port
 - `--idle-seconds <IDLE_SECONDS>`: Stop after this many seconds with no request; 0 means never
-
-### `playbook usage ingest`
-
-Read new session history into the usage store (deprecated: use `playbook usage --summary`)
 
 ### `playbook usage prune`
 
