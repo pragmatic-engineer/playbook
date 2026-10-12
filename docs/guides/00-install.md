@@ -102,7 +102,7 @@ The plugin alone gives you skills, commands and subagents, and nothing else. Wit
      playbook init
    ```
 
-   In a terminal, `init` asks about hooks, settings, `PATH`, the launcher and the system prompt. Each has `--x` and `--no-x` flags. With `--yes`, or without a terminal, hooks, settings and `PATH` are on and the launcher and system prompt are off. Every step is safe to repeat.
+   In a terminal, `init` asks about hooks, settings, the status line, `PATH`, the launcher and the system prompt. The status line question reads "Use the playbook status line?" and has `--statusline` and `--no-statusline`. Answering no leaves `statusLine` in `settings.json` as it is, and an existing playbook status line stays until `playbook uninstall`. Each part has `--x` and `--no-x` flags. With `--yes`, or without a terminal, hooks, settings, the status line and `PATH` are on and the launcher and system prompt are off. Every step is safe to repeat.
 
 6. Run `/playbook:doctor`.
 

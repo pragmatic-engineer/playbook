@@ -396,6 +396,7 @@ fn main() {
                 path_setup,
                 hooks: choices.hooks,
                 settings: choices.settings,
+                statusline: choices.statusline,
                 security: choices.security,
             };
             let outcome = init::run::run(&paths);
