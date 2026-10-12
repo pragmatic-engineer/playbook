@@ -564,7 +564,7 @@ mod tests {
         assert!(run_prune(&p, false).unwrap().contains("no usage database"));
         assert!(!p.db.exists(), "prune must not create the database");
         std::fs::create_dir_all(p.db.parent().unwrap()).unwrap();
-        let conn = super::super::db::open_db(&p.db).unwrap();
+        let conn = crate::usage::db::open_db(&p.db).unwrap();
         migrate_up(&conn).unwrap();
         let old = crate::usage::telemetry_db::TelemetryTool {
             session_id: "s".into(),

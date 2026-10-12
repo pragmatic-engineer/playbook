@@ -28,6 +28,7 @@ pub mod reconcile;
 pub mod repo;
 pub mod run;
 pub mod session_view;
+pub mod standalone;
 pub mod summary;
 pub mod telemetry_db;
 pub mod telemetry_detect;
