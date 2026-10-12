@@ -24,12 +24,12 @@ fn ok(program: &str, args: &[&str], dir: &Path) -> bool {
 }
 
 /// `owner/name` from an origin URL such as `git@host:owner/name.git`.
-fn repo_from_url(url: &str) -> String {
+fn repo_from_url(url: &str) -> Option<String> {
     let url = url.trim().trim_end_matches(".git");
     let mut parts = url.rsplit(['/', ':']);
-    let name = parts.next().unwrap_or("");
-    let owner = parts.next().unwrap_or("");
-    format!("{owner}/{name}")
+    let name = parts.next().filter(|n| !n.is_empty())?;
+    let owner = parts.next().filter(|o| !o.is_empty())?;
+    Some(format!("{owner}/{name}"))
 }
 
 /// `uniq -c | sort -rn | head` over the project keys in `log`: the part of
@@ -65,9 +65,12 @@ pub fn preflight(dir: &Path, home: &Path) -> Result<String, String> {
         root_path,
     )
     .filter(|r| !r.is_empty())
-    .unwrap_or_else(|| {
+    .or_else(|| {
         repo_from_url(&run("git", &["remote", "get-url", "origin"], root_path).unwrap_or_default())
-    });
+    })
+    .ok_or(
+        "no origin remote and gh cannot name the repo; add one with `git remote add origin <url>`",
+    )?;
     let store = crate::common::paths::playbook_root_from(home)
         .join("memory")
         .join(&repo);
@@ -118,9 +121,21 @@ mod tests {
 
     #[test]
     fn a_repo_name_comes_from_https_and_ssh_urls() {
-        assert_eq!(repo_from_url("https://github.com/o/r.git\n"), "o/r");
-        assert_eq!(repo_from_url("git@github.com:o/r.git"), "o/r");
-        assert_eq!(repo_from_url("https://github.com/o/r"), "o/r");
+        assert_eq!(
+            repo_from_url("https://github.com/o/r.git\n").as_deref(),
+            Some("o/r")
+        );
+        assert_eq!(
+            repo_from_url("git@github.com:o/r.git").as_deref(),
+            Some("o/r")
+        );
+        assert_eq!(
+            repo_from_url("https://github.com/o/r").as_deref(),
+            Some("o/r")
+        );
+        assert_eq!(repo_from_url(""), None);
+        assert_eq!(repo_from_url("   \n"), None);
+        assert_eq!(repo_from_url("r"), None);
     }
 
     #[test]
