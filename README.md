@@ -100,7 +100,7 @@ Every key is in [Config keys](docs/guides/04-config-keys.md), and every command 
 
 ## Auto mode
 
-`playbook mode auto` lets commands take the recommended answer instead of asking, list each choice under Assumptions, and keep going. A spend cap (`auto.budgetUsd`) stops a runaway session. `playbook mode ask` turns it off, and `playbook mode status` shows where the mode came from. The default is `ask`.
+`playbook mode auto` lets commands take the recommended answer instead of asking, list each choice under Assumptions, and keep going. A spend cap per agent (`auto.budgetUsd` for the main session, `auto.agentBudgetUsd` for each subagent) parks a runaway agent while it can still deliver finished work. `playbook mode ask` turns it off, and `playbook mode status` shows where the mode came from. The default is `ask`.
 
 Auto never force-pushes and never approves a plan design unless you pass `--auto-design`. Auto does not skip the review post question: pass `--self` or `--no-post` for that. Details and limits are in the [auto mode guide](docs/guides/05-auto-mode.md).
 

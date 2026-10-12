@@ -33,6 +33,7 @@ Each part has a flag pair. With no flag, `init` asks in a terminal and uses the 
 | Launcher shortcuts `ccc` and `ccd` | off | `--aliases`, `--no-aliases` | your shell rc file |
 | System prompt | off | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md` |
 | Usage telemetry | off, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
+| `claude` function | off, asked | `--claude-override`, `--no-claude-override` | `~/.config/playbook` (the `launcher.claudeOverride` key) |
 
 `--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
 
@@ -79,6 +80,10 @@ Init adds a block that starts with `# playbook binary` to your shell startup fil
 `--system-prompt` copies `SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/`. Claude Code uses it only when you start it through `ccc` or `ccd`. If you already have a copy, init refreshes it on every run, unless you edited it, in which case your copy stays. Without the flag and without an existing copy, nothing is placed.
 
 `--telemetry` writes the OpenTelemetry variables that point Claude Code at a collector on 127.0.0.1 into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage` too. It asks a question of its own, and nothing is written without a yes. It writes nothing when your environment or any Claude Code settings file (user, project, local, managed) already names a telemetry variable, so a setting you made, including one that turns telemetry off, is never overridden. Prompt text, tool content, emails and tokens are not sent, and the account id stays out of the metrics. `playbook uninstall` removes exactly the keys init wrote, unless you changed them. See [telemetry by default](../internals/04-usage-dashboard.md#telemetry-by-default).
+
+### The `claude` function
+
+`--claude-override` asks whether a plain `claude` should load the playbook system prompt every time. A yes sets `launcher.claudeOverride` to `true` in playbook's own config. It changes no Claude Code setting and no memory. With the key on, `playbook shell-init` also defines a `claude` function that starts the launcher for a plain interactive session. Calls that use their own flags (`-p`, subcommands, `--settings`, your own prompt flags, piped or scripted use) and `PLAYBOOK_BYPASS=1` go straight to the real `claude`, and a `claude` you already defined as an alias or function is left alone. The function needs the `eval` line from `--aliases` in your rc file. Undo it with `playbook config set launcher.claudeOverride false`. See [the launcher](../internals/01-launcher-and-hooks.md#the-claude-function).
 
 ### Memory migration
 

@@ -53,6 +53,12 @@ pub struct Flags {
     /// Do not write telemetry variables into settings.json
     #[arg(long, overrides_with = "telemetry")]
     pub no_telemetry: bool,
+    /// Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
+    #[arg(long, overrides_with = "no_claude_override")]
+    pub claude_override: bool,
+    /// Do not turn on the `claude` shell function
+    #[arg(long, overrides_with = "claude_override")]
+    pub no_claude_override: bool,
     /// Never ask: use the default for every part you did not answer with a flag
     #[arg(long, short = 'y')]
     pub yes: bool,
@@ -74,6 +80,7 @@ pub struct Choices {
     pub aliases: bool,
     pub system_prompt: bool,
     pub telemetry: bool,
+    pub claude_override: bool,
 }
 
 fn pick(on: bool, off: bool) -> Option<bool> {
@@ -138,6 +145,12 @@ pub fn resolve(
             catalog::question("telemetry"),
             false,
         ),
+        claude_override: decide(
+            flags.claude_override,
+            flags.no_claude_override,
+            catalog::question("claude-override"),
+            false,
+        ),
     }
 }
 
@@ -187,7 +200,8 @@ mod tests {
                 path: true,
                 aliases: false,
                 system_prompt: false,
-                telemetry: false
+                telemetry: false,
+                claude_override: false
             }
         );
     }
@@ -207,7 +221,7 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.aliases);
-        assert_eq!(asked.len(), 4, "{asked:?}");
+        assert_eq!(asked.len(), 5, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && !q.contains("ccc")));

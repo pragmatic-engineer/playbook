@@ -105,6 +105,16 @@ pub const PARTS: &[Part] = &[
         undo: "`playbook uninstall` removes exactly the keys init wrote, unless you changed them.",
     },
     Part {
+        id: "claude-override",
+        asked: true,
+        default_on: false,
+        flags: "--claude-override, --no-claude-override",
+        question: "Make a plain `claude` load the playbook system prompt every time, and pass calls that use their own flags straight to Claude Code? This sets `launcher.claudeOverride` in ~/.config/playbook. No Claude Code setting or memory is changed.",
+        does: "Turns on `launcher.claudeOverride`, so `playbook shell-init` also defines a `claude` function. A plain interactive `claude` then starts through the launcher, so the playbook system prompt loads every time. Calls that need Claude Code untouched (piped or scripted use, `-p`, subcommands, your own prompt or settings flags, `PLAYBOOK_BYPASS=1`) go straight to the real binary. It takes effect once the launcher line from the aliases part is in your rc file.",
+        changes: "~/.config/playbook (the playbook config store, key `launcher.claudeOverride`)",
+        undo: "Run `playbook config set launcher.claudeOverride false`, or `command claude` to skip it once.",
+    },
+    Part {
         id: "memory-migration",
         asked: false,
         default_on: true,
