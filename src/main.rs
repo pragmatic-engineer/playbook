@@ -629,6 +629,13 @@ fn main() {
                 }
             }
         }
+        Command::Code { sub } => match playbook::code::run(sub, &playbook::code::Env::real()) {
+            Ok(output) => print!("{output}"),
+            Err(err) => {
+                eprintln!("code: {err}");
+                std::process::exit(1);
+            }
+        },
         Command::Sessions { sub, json } => {
             let json = json || matches!(sub, Some(SessionsCommand::List { json: true }));
             let paths = usage::run::Paths::real();

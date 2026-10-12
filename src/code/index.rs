@@ -8,10 +8,10 @@
 //! one file rolls back only that file.
 
 use super::db::{self, OpenMode};
+use super::host;
 use super::walker::{self, Skipped};
-use crate::common::atomic::ensure_private_dir;
-use crate::update::verify::sha256_hex;
 use rusqlite::{params, Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
@@ -135,6 +135,13 @@ struct Existing {
     error: Option<String>,
     size: i64,
     mtime_ns: i64,
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn now_ms() -> i64 {
@@ -463,7 +470,7 @@ pub fn lock_path(index: &Path) -> PathBuf {
 /// Takes the exclusive run lock, or says another run holds it.
 pub fn acquire_lock(index: &Path) -> Result<File, String> {
     if let Some(parent) = index.parent() {
-        ensure_private_dir(parent)
+        host::ensure_private_dir(parent)
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
     }
     let file = OpenOptions::new()
@@ -489,8 +496,8 @@ pub fn run(root: &Path, index: &Path, rebuild: bool, opts: &Options) -> Result<R
     let started = now_ms();
     set_meta(&conn, "last_run_started", &started.to_string())?;
     set_meta(&conn, "repo_root", &root.display().to_string())?;
-    set_meta(&conn, "worktree_id", &crate::common::paths::worktree_id())?;
-    set_meta(&conn, "tool_version", env!("CARGO_PKG_VERSION"))?;
+    set_meta(&conn, "worktree_id", &host::worktree_id())?;
+    set_meta(&conn, "tool_version", host::tool_version())?;
 
     let found = walker::discover(root, &opts.limits)?;
     let existing = load_existing(&conn)?;
@@ -810,6 +817,58 @@ mod tests {
         assert_eq!(orphans, stay_chunks);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_file_keeps_its_old_rows_and_counts_as_failed() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-unreadable");
+        write(&f.root, "a.rs", b"fn keepme() {}\n");
+        f.run();
+        write(&f.root, "a.rs", b"fn keepme2() {}\n");
+        std::fs::set_permissions(f.root.join("a.rs"), std::fs::Permissions::from_mode(0o000))
+            .expect("chmod");
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let is_root = unsafe { libc::geteuid() } == 0;
+
+        // Act
+        let report = f.run();
+
+        // Assert
+        std::fs::set_permissions(f.root.join("a.rs"), std::fs::Permissions::from_mode(0o644))
+            .expect("chmod back");
+        if !is_root {
+            assert_eq!(report.failed, 1);
+            let conn = f.conn();
+            assert_eq!(fts_paths(&conn, "keepme"), vec!["a.rs"]);
+            let status: String = conn
+                .query_row("SELECT status FROM files WHERE path = 'a.rs'", [], |r| {
+                    r.get(0)
+                })
+                .expect("status");
+            assert_eq!(status, "failed");
+        }
+    }
+
+    #[test]
+    fn swapping_the_file_set_leaves_no_row_outside_the_new_set() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-branch");
+        write(&f.root, "one.rs", b"fn one() {}\n");
+        write(&f.root, "two.rs", b"fn two() {}\n");
+        f.run();
+        std::fs::remove_file(f.root.join("one.rs")).expect("rm");
+        write(&f.root, "three.rs", b"fn three() {}\n");
+
+        // Act
+        f.run();
+
+        // Assert
+        assert_eq!(paths(&f.conn()), vec!["three.rs", "two.rs"]);
+    }
+
     #[test]
     fn readers_see_exactly_the_committed_batch_while_the_writer_is_paused() {
         let _g = pinned();
@@ -898,6 +957,59 @@ mod tests {
     }
 
     #[test]
+    fn a_run_stopped_after_it_started_reads_as_interrupted() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-interrupted");
+        write(&f.root, "a.rs", b"x\n");
+        let opts = Options {
+            hooks: Hooks {
+                after_batch_commit: Some(Box::new(|_| Err("stop".to_string()))),
+                before_file_insert: None,
+            },
+            ..Options::default()
+        };
+
+        // Act
+        let stopped = run(&f.root, &f.index, false, &opts);
+
+        // Assert
+        assert_eq!(stopped.expect_err("stopped"), "stop");
+        let conn = f.conn();
+        let meta = |k: &str| -> Option<i64> {
+            conn.query_row("SELECT value FROM meta WHERE key = ?1", [k], |r| {
+                r.get::<_, String>(0)
+            })
+            .ok()
+            .and_then(|v| v.parse().ok())
+        };
+        assert!(meta("last_run_started").is_some());
+        assert!(meta("last_run_completed").is_none());
+        drop(conn);
+        f.run();
+        let conn = f.conn();
+        let done: i64 = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'last_run_completed'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .expect("completed")
+            .parse()
+            .expect("number");
+        let started: i64 = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'last_run_started'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .expect("started")
+            .parse()
+            .expect("number");
+        assert!(done >= started);
+    }
+
+    #[test]
     fn an_error_inside_one_file_rolls_back_only_that_file() {
         let _g = pinned();
         // Arrange: 7 files, batches of 3, the fifth written file fails.
@@ -939,5 +1051,128 @@ mod tests {
             })
             .expect("error");
         assert_eq!(err, "injected");
+    }
+
+    #[test]
+    fn chunk_windows_follow_the_line_counts() {
+        // Arrange
+        let cases = [
+            (0usize, vec![]),
+            (1, vec![(1, 1)]),
+            (59, vec![(1, 59)]),
+            (60, vec![(1, 60)]),
+            (61, vec![(1, 60), (61, 61)]),
+            (120, vec![(1, 60), (61, 120)]),
+        ];
+        for (lines, want) in cases {
+            let text = (0..lines).map(|_| "x").collect::<Vec<_>>().join("\n");
+
+            // Act
+            let got: Vec<(usize, usize)> = make_chunks(&text, 60)
+                .iter()
+                .map(|c| (c.start_line, c.end_line))
+                .collect();
+
+            // Assert
+            assert_eq!(got, want, "{lines} lines");
+        }
+    }
+
+    #[test]
+    fn identifier_pieces_split_snake_camel_acronym_and_digit_forms() {
+        // Arrange, Act, Assert
+        let cases: [(&str, &[&str]); 5] = [
+            ("processPayment", &["process", "payment"]),
+            ("create_payment", &["create", "payment"]),
+            ("HTTPServer", &["http", "server"]),
+            ("v2Api", &["v2", "api"]),
+            ("_private", &["private"]),
+        ];
+        for (word, want) in cases {
+            assert_eq!(identifier_pieces(word), want, "{word}");
+        }
+    }
+
+    #[test]
+    fn a_pieces_search_finds_camel_and_snake_identifiers() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-pieces");
+        write(&f.root, "a.ts", b"function processPayment() {}\n");
+        write(&f.root, "b.py", b"def create_payment():\n    pass\n");
+        write(&f.root, "c.rs", b"fn unrelated() {}\n");
+
+        // Act
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        assert_eq!(fts_paths(&conn, "payment"), vec!["a.ts", "b.py"]);
+        assert!(fts_paths(&conn, "create").contains(&"b.py".to_string()));
+    }
+
+    #[test]
+    fn skipped_files_get_rows_with_size_and_mtime_and_stay_unchanged() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-skipped");
+        write(&f.root, "bin.dat", b"a\0b");
+        write(&f.root, "ok.rs", b"fn ok() {}\n");
+
+        // Act
+        let first = f.run();
+        let second = f.run();
+
+        // Assert
+        assert_eq!((first.skipped, first.indexed), (1, 1));
+        assert_eq!(second.skipped, 1);
+        let conn = f.conn();
+        let (status, error, size): (String, String, i64) = conn
+            .query_row(
+                "SELECT status, error, size FROM files WHERE path = 'bin.dat'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("row");
+        assert_eq!(
+            (status.as_str(), error.as_str(), size),
+            ("skipped", "binary", 3)
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_is_indexed_lossily_and_marked_partial() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-utf8");
+        write(&f.root, "a.txt", b"hello \xff\xfe world\n");
+
+        // Act
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        let status: String = conn
+            .query_row("SELECT status FROM files WHERE path = 'a.txt'", [], |r| {
+                r.get(0)
+            })
+            .expect("status");
+        assert_eq!(status, "partial");
+        assert_eq!(fts_paths(&conn, "world"), vec!["a.txt"]);
+    }
+
+    #[test]
+    fn rebuild_deletes_the_cache_and_indexes_everything_again() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-rebuild");
+        write(&f.root, "a.rs", b"fn a() {}\n");
+        f.run();
+
+        // Act
+        let report = run(&f.root, &f.index, true, &Options::default()).expect("rebuild");
+
+        // Assert
+        assert_eq!((report.changed, report.unchanged), (1, 0));
     }
 }

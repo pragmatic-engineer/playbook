@@ -4,7 +4,7 @@
 //! Where the repo root and the index live, and how user supplied paths become
 //! repo relative paths with `/` separators.
 
-use crate::common::paths::{repo_scoped_dir, RepoScope};
+use super::host;
 use std::path::{Component, Path, PathBuf};
 
 /// Why a user supplied path was refused.
@@ -37,13 +37,7 @@ pub fn repo_root(cwd: &Path) -> Result<PathBuf, String> {
 
 /// `<worktree state dir>/code/index.sqlite3` for the current repo.
 pub fn index_path() -> Result<PathBuf, String> {
-    repo_scoped_dir(RepoScope::Worktree)
-        .map(|dir| dir.join("code").join("index.sqlite3"))
-        .ok_or_else(|| {
-            "could not resolve where to keep the code index; this repo needs a git 'origin' \
-             remote and a resolvable worktree root"
-                .to_string()
-        })
+    host::state_dir().map(|dir| dir.join("code").join("index.sqlite3"))
 }
 
 /// Replaces `\` with `/`. Pure, so it is tested on strings on every platform.
