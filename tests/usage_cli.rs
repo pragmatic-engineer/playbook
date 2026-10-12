@@ -226,7 +226,7 @@ fn usage_ingest_is_removed_and_says_what_to_run_instead() {
 
     assert!(!out.status.success());
     let err = stderr(&out);
-    assert!(err.contains("removed in 0.24"), "{err}");
+    assert!(err.contains("was removed"), "{err}");
     assert!(err.contains("playbook usage --summary"), "{err}");
     assert!(stdout(&out).is_empty(), "{}", stdout(&out));
 }

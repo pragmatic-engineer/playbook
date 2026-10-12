@@ -13,7 +13,7 @@ use rusqlite::Connection;
 
 /// What the removed `usage ingest` says to anyone who still calls it.
 const INGEST_REMOVED: &str =
-    "`usage ingest` was removed in 0.24: use `playbook usage --summary`, the terminal view warms itself";
+    "`usage ingest` was removed: use `playbook usage --summary`, the terminal view warms itself";
 
 /// The flags of `playbook usage` itself.
 pub struct Opts {
