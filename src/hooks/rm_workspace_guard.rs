@@ -93,7 +93,9 @@ pub fn run(payload: &Payload) {
     // rather than the prettier form keeps the message byte-identical.
     let state_root = crate::common::paths::playbook_root();
     let state_root = state_root.to_string_lossy();
-    let hint = if outside.iter().any(|t| t.starts_with(state_root.as_ref())) {
+    let hint = if outside.iter().any(|t| t.ends_with(".lock")) {
+        " A leftover `.lock` directory clears itself on the next write once it is 10 seconds old, so do not rm it."
+    } else if outside.iter().any(|t| t.starts_with(state_root.as_ref())) {
         " This path is playbook's own state: to clear plan scratch files use `playbook plan cleanup <slug>` (or `playbook plan cleanup --stale` for old leftovers), do not rm them."
     } else if outside.iter().any(|t| t.contains("/.worktrees/")) {
         " This path looks like a worktree leftover: use `git worktree remove --force <path>` for a registered one, `git worktree prune` for a deleted one, and an empty leftover folder is cleared by the next worktree create."

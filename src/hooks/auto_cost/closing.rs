@@ -13,6 +13,7 @@
 //! unknown here. This is a guardrail against drift, not a security boundary.
 
 use crate::common::shell::{commands, program_name, Command};
+use std::path::Path;
 
 /// The skills a closing step loads: the two delivery skills and the ones they
 /// depend on.
@@ -28,11 +29,24 @@ pub fn is_closing_skill(skill: &str) -> bool {
     CLOSING_SKILLS.contains(&skill.trim())
 }
 
-/// Whether every simple command of `command` is a closing step.
+/// Whether every simple command of `command` is a closing step. A `git push`
+/// with no branch is denied; see [`is_closing_command_in`].
+#[cfg(test)]
 pub fn is_closing_command(command: &str) -> bool {
+    is_closing_command_in(command, None)
+}
+
+/// Whether every simple command of `command` is a closing step. `cwd` is where
+/// the command runs: a `git push` that names no branch is allowed when the
+/// branch checked out there is not protected.
+pub fn is_closing_command_in(command: &str, cwd: Option<&Path>) -> bool {
     let plain = without_stream_merges(command);
+    let source: Vec<char> = plain.chars().collect();
     let parsed = commands(&plain);
-    !parsed.is_empty() && parsed.iter().all(is_closing_step)
+    !parsed.is_empty()
+        && parsed
+            .iter()
+            .all(|step| is_closing_step(step, &source, cwd))
 }
 
 /// The text without the stream merges (`2>&1`, `1>&2`, `>&2`, `&>/dev/null`)
@@ -70,7 +84,7 @@ fn without_stream_merges(command: &str) -> String {
     out
 }
 
-fn is_closing_step(command: &Command) -> bool {
+fn is_closing_step(command: &Command, source: &[char], cwd: Option<&Path>) -> bool {
     if command.spans.iter().any(|span| span.dynamic) {
         return false;
     }
@@ -85,7 +99,7 @@ fn is_closing_step(command: &Command) -> bool {
     if is_pr_body_write(command) {
         return true;
     }
-    let Some(words) = without_redirects(&command.words) else {
+    let Some(words) = without_redirects(command, source) else {
         return false;
     };
     let words = unwrap_group(&words);
@@ -97,7 +111,7 @@ fn is_closing_step(command: &Command) -> bool {
         return false;
     };
     match program_name(program).as_str() {
-        "git" => is_git_step(args),
+        "git" => is_git_step(args, cwd),
         "gh" => is_gh_read(args),
         "playbook" => is_playbook_step(args),
         // The skills' version probe ends in `|| { echo "..." >&2; exit 1; }`.
@@ -137,23 +151,24 @@ fn is_pr_body_write(command: &Command) -> bool {
 
 /// The words with the redirections removed, or `None` when one writes or reads
 /// a file. Sending output to `/dev/null` or to the other stream, and a
-/// heredoc, are fine.
-fn without_redirects(words: &[String]) -> Option<Vec<&str>> {
+/// heredoc, are fine. A `<` or `>` inside quotes is text, not a redirection.
+fn without_redirects<'a>(command: &'a Command, source: &[char]) -> Option<Vec<&'a str>> {
     let mut kept = Vec::new();
-    let mut rest = words.iter().map(String::as_str);
-    while let Some(word) = rest.next() {
+    let mut rest = command.words.iter().zip(&command.spans);
+    while let Some((word, span)) = rest.next() {
+        if !has_unquoted_angle(source, span.start, span.end) {
+            kept.push(word.as_str());
+            continue;
+        }
+        let word = word.as_str();
         let operator = word.trim_start_matches(|c: char| c.is_ascii_digit());
         if !operator.starts_with(['<', '>']) {
             // A redirect glued to a word, as in `status>out.txt`.
-            if word.contains(['<', '>']) {
-                return None;
-            }
-            kept.push(word);
-            continue;
+            return None;
         }
         let symbols = operator.trim_start_matches(['<', '>']);
         let target = if symbols.is_empty() {
-            rest.next()?
+            rest.next()?.0.as_str()
         } else {
             symbols
         };
@@ -165,18 +180,47 @@ fn without_redirects(words: &[String]) -> Option<Vec<&str>> {
     Some(kept)
 }
 
+/// Whether `source[start..end]` holds a `<` or `>` outside quotes.
+fn has_unquoted_angle(source: &[char], start: usize, end: usize) -> bool {
+    let mut quote: Option<char> = None;
+    let mut chars = source
+        .get(start..end.min(source.len()))
+        .unwrap_or(&[])
+        .iter();
+    while let Some(&c) = chars.next() {
+        match (quote, c) {
+            (None, '\\') => {
+                chars.next();
+            }
+            (Some('"'), '\\') => {
+                chars.next();
+            }
+            (None, '\'' | '"') => quote = Some(c),
+            (Some(open), _) if open == c => quote = None,
+            (None, '<' | '>') => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// `git` with at most `-C <dir>` before the subcommand.
-fn is_git_step(args: &[&str]) -> bool {
-    let args = match args {
-        ["-C", _, rest @ ..] => rest,
-        rest => rest,
+fn is_git_step(args: &[&str], cwd: Option<&Path>) -> bool {
+    let (dir, args) = match args {
+        ["-C", dir, rest @ ..] => (cwd.map(|cwd| cwd.join(dir)), rest),
+        rest => (cwd.map(Path::to_path_buf), rest),
     };
     match args {
         [] => false,
         ["add" | "commit" | "status", ..] => true,
         ["diff" | "log", rest @ ..] => !rest.iter().any(|arg| arg.starts_with("--output")),
         ["worktree", "list", ..] => true,
-        ["push", rest @ ..] => is_safe_push(rest),
+        ["push", rest @ ..] => is_safe_push(
+            rest,
+            dir.as_deref()
+                .and_then(unprotected_current_branch)
+                .as_deref(),
+        ),
         _ => false,
     }
 }
@@ -184,11 +228,17 @@ fn is_git_step(args: &[&str]) -> bool {
 /// Branches a closing step never pushes to.
 const PROTECTED_BRANCHES: [&str; 4] = ["main", "master", "trunk", "develop"];
 
-/// A push of a named branch to a remote. It must not force, delete, mirror,
-/// push every branch, run a program of its choosing, or target a protected
-/// branch. A push with no explicit branch is denied too, since it may push
-/// the protected branch the work tree is on.
-fn is_safe_push(args: &[&str]) -> bool {
+/// The branch checked out in `dir`, unless it is protected or HEAD is detached.
+fn unprotected_current_branch(dir: &Path) -> Option<String> {
+    let branch = crate::common::gitfacts::current_branch(dir)??;
+    (!PROTECTED_BRANCHES.contains(&branch.as_str())).then_some(branch)
+}
+
+/// A push to a remote. It must not force, delete, mirror, push every branch,
+/// run a program of its choosing, or target a protected branch. A push with no
+/// explicit branch, or with `HEAD`, goes to the checked-out branch, so it is
+/// allowed only when `current` names that branch and it is not protected.
+fn is_safe_push(args: &[&str], current: Option<&str>) -> bool {
     let unsafe_flag = args.iter().any(|arg| {
         let short = arg.starts_with('-') && !arg.starts_with("--");
         arg.starts_with("--force")
@@ -204,18 +254,26 @@ fn is_safe_push(args: &[&str]) -> bool {
         .copied()
         .filter(|arg| !arg.starts_with('-'))
         .collect();
-    let [_remote, refspecs @ ..] = positional.as_slice() else {
-        return false;
+    let refspecs = match positional.as_slice() {
+        [] => &[][..],
+        [_remote, refspecs @ ..] => refspecs,
     };
-    !unsafe_flag
-        && !refspecs.is_empty()
-        && refspecs.iter().all(|spec| {
-            let destination = spec.rsplit(':').next().unwrap_or(spec);
-            let branch = destination
-                .strip_prefix("refs/heads/")
-                .unwrap_or(destination);
-            !branch.is_empty() && branch != "HEAD" && !PROTECTED_BRANCHES.contains(&branch)
-        })
+    if unsafe_flag {
+        return false;
+    }
+    if refspecs.is_empty() {
+        return current.is_some();
+    }
+    refspecs.iter().all(|spec| {
+        let destination = spec.rsplit(':').next().unwrap_or(spec);
+        let branch = destination
+            .strip_prefix("refs/heads/")
+            .unwrap_or(destination);
+        if branch == "HEAD" && !spec.contains(':') {
+            return current.is_some();
+        }
+        !branch.is_empty() && branch != "HEAD" && !PROTECTED_BRANCHES.contains(&branch)
+    })
 }
 
 /// Read-only `gh`: viewing and listing pull requests and runs, and `api`
@@ -287,11 +345,25 @@ fn is_playbook_step(args: &[&str]) -> bool {
         ["commit", "run", rest @ ..] => rest.contains(&"--auto"),
         ["pr", "create" | "prepare" | "rules", ..]
         | ["commit", "prepare", ..]
-        | ["mode", "status"]
-        | ["mode", "status", "--json"]
+        | ["worktree", "review", "teardown", ..]
         | ["config", "get", ..] => true,
+        ["mode", "status", rest @ ..] => is_status_probe(rest),
         _ => false,
     }
+}
+
+/// The arguments after `mode status`: `--json` and `--flag auto|ask`, in any
+/// order, which is how the delivery skills read the run mode.
+fn is_status_probe(args: &[&str]) -> bool {
+    let mut args = args.iter();
+    while let Some(&arg) = args.next() {
+        match arg {
+            "--json" => {}
+            "--flag" if matches!(args.next(), Some(&("auto" | "ask"))) => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -324,6 +396,12 @@ mod tests {
             "playbook pr prepare --help >/dev/null 2>&1 || { echo \"ERROR: upgrade\" >&2; exit 1; }",
             "cat > \"/tmp/state/pr-body.md\" <<'PRBODY_EOF'\nbody $x `y`\nPRBODY_EOF\nplaybook pr create --title \"fix: x\" --body-file /tmp/state/pr-body.md",
             "git commit -m \"feat: a b\" 2>&1",
+            "git commit -m \"a 2>&1 b\"",
+            "git commit -m \"feat: a -> b\"",
+            "git commit -m 'fix: x < y and y > z'",
+            "playbook mode status --flag auto --json",
+            "playbook mode status --json --flag ask",
+            "playbook worktree review teardown /tmp/wt",
             "playbook pr prepare --base main",
             "playbook mode status",
             "playbook mode status --json",
@@ -372,6 +450,13 @@ mod tests {
             "git push origin feat/x:refs/heads/master",
             "git push",
             "git push origin",
+            "playbook mode status --flag bogus --json",
+            "playbook mode status --flag",
+            "playbook mode status --json extra",
+            "git status \"x\" > out.txt",
+            "git status >out.txt",
+            "git log 2>err.txt",
+            "git log < in.txt",
             "git push --all origin",
             "git push origin HEAD",
             "playbook commit run",
@@ -383,8 +468,6 @@ mod tests {
             "cat > ../pr-body.md <<'EOF'\nx\nEOF",
             "cat > /tmp/pr-body.md <<EOF\n$(id)\nEOF",
             "echo hi > out.txt",
-            // A word that holds a redirect symbol is denied, quoted or not.
-            "git commit -m \"a 2>&1 b\"",
             "head -5 file",
             "",
         ];

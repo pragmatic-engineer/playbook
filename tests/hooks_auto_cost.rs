@@ -2199,3 +2199,199 @@ fn a_repo_tier_auto_mode_still_looks_up_the_slug_and_tracks_the_session() {
         "auto mode from the repo tier must start tracking cost"
     );
 }
+
+#[test]
+fn env_sourced_auto_never_names_a_remedy_that_cannot_work() {
+    // Arrange: PLAYBOOK_MODE=auto in the environment beats `playbook mode ask`
+    let unreadable = Session::auto_from("env-unreadable", AutoFrom::Env);
+    unreadable.seed_budget(&json!(5), 70);
+    let capped = Session::at_budget("env-capped", AutoFrom::Env);
+
+    // Act
+    let unreadable_reason = unreadable.bash("npm test");
+    let capped_reason = capped.bash("npm test");
+
+    // Assert
+    for (label, outcome) in [
+        ("unreadable", &unreadable_reason),
+        ("capped", &capped_reason),
+    ] {
+        let reason = outcome.reason(label);
+        assert!(reason.contains("PLAYBOOK_MODE"), "{label}: {reason}");
+        assert!(reason.contains("unset"), "{label}: {reason}");
+        assert!(
+            !reason.contains("`playbook mode ask` is allowed"),
+            "{label}: {reason}"
+        );
+        assert!(
+            !reason.contains("or `playbook mode ask`"),
+            "{label}: {reason}"
+        );
+    }
+}
+
+#[test]
+fn config_sourced_auto_still_names_mode_ask() {
+    let session = Session::at_budget("cfg-capped", AutoFrom::Config);
+    let reason = session.bash("npm test");
+    assert!(
+        reason.reason("capped").contains("`playbook mode ask`"),
+        "{reason:?}"
+    );
+}
+
+#[test]
+fn the_invalid_budget_note_asks_the_user_instead_of_telling_the_model_to_run_a_guarded_command() {
+    let session = Session::auto("bad-budget-wording");
+    session.seed_budget(&json!(0), 70);
+    session.append_telemetry("0.00");
+    let Outcome::Note(note) = session.bash("npm test") else {
+        panic!("expected a note");
+    };
+    assert!(note.contains("Ask the user to run"), "{note}");
+    assert!(!note.contains("Fix it with"), "{note}");
+}
+
+#[test]
+fn at_the_cap_the_skills_status_probe_with_a_flag_stays_allowed() {
+    let session = Session::at_budget("status-flag", AutoFrom::Config);
+    for command in [
+        "playbook mode status --flag auto --json",
+        "playbook mode status --flag ask --json",
+        "playbook mode status --json --flag auto",
+    ] {
+        assert!(!session.bash(command).is_denied(), "{command:?}");
+    }
+    for command in [
+        "playbook mode status --flag bogus --json",
+        "playbook mode status --flag auto --json extra",
+        "playbook mode status --flag",
+    ] {
+        session.bash(command).reason(command);
+    }
+}
+
+#[test]
+fn at_the_cap_an_angle_bracket_inside_quotes_is_not_a_redirection() {
+    let session = Session::at_budget("quoted-angle", AutoFrom::Config);
+    for command in [
+        "git commit -m \"feat: a -> b\"",
+        "git commit -m 'fix: x < y and y > z'",
+        "playbook pr create --title \"fix: a > b\" --body-file /tmp/pr-body.md",
+    ] {
+        assert!(!session.bash(command).is_denied(), "{command:?} must pass");
+    }
+    for command in [
+        "git status > out.txt",
+        "git status >out.txt",
+        "git log 2>err.txt",
+        "git log < in.txt",
+        "git status \"x\" > out.txt",
+    ] {
+        session.bash(command).reason(command);
+    }
+}
+
+fn repo_on_branch(tag: &str, branch: &str) -> PathBuf {
+    let dir = scratch(tag).cwd.join("repo");
+    fs::create_dir_all(&dir).expect("repo dir");
+    let status = std::process::Command::new("git")
+        .args(["init", "-q", "-b", branch])
+        .current_dir(&dir)
+        .status()
+        .expect("git");
+    assert!(status.success());
+    dir
+}
+
+#[test]
+fn at_the_cap_a_bare_push_is_allowed_only_on_a_non_protected_current_branch() {
+    let feature = Session::at_budget("push-feature", AutoFrom::Config);
+    let main = Session::at_budget("push-main", AutoFrom::Config);
+    let feature_repo = repo_on_branch("push-feature-repo", "feat/x");
+    let main_repo = repo_on_branch("push-main-repo", "main");
+    let at = |session: &Session, repo: &Path, command: &str| {
+        let mut value: Value =
+            serde_json::from_str(&session.tool_payload("Bash", json!({"command": command})))
+                .expect("json");
+        value["cwd"] = json!(repo.to_string_lossy());
+        session.call_payload(&value.to_string())
+    };
+    for command in ["git push", "git push origin", "git push -u origin HEAD"] {
+        assert!(
+            !at(&feature, &feature_repo, command).is_denied(),
+            "{command:?} on feat/x must be allowed"
+        );
+        at(&main, &main_repo, command).reason(command);
+    }
+    for command in [
+        "git push --force",
+        "git push origin main",
+        "git push --force origin HEAD",
+    ] {
+        at(&feature, &feature_repo, command).reason(command);
+    }
+}
+
+#[test]
+fn a_subagent_at_the_session_ceiling_can_still_close_its_work_and_is_told_what_to_do() {
+    // Arrange: the whole tree has spent the ceiling, so every caller is parked
+    let session = Session::auto("ceiling-agent");
+    let config = json!({"mode": "auto", "auto": {"budgetUsd": 50, "sessionCeilingUsd": 5}});
+    auto_env::seed_raw_global_config(&session.s.home, &config.to_string());
+    session.baseline_then_report("5.00");
+    let as_agent = |tool: &str, input: Value| {
+        let mut value: Value =
+            serde_json::from_str(&session.tool_payload(tool, input)).expect("json");
+        value["agent_id"] = json!("abc123");
+        session.call_payload(&value.to_string())
+    };
+
+    // Act
+    let push = as_agent("Bash", json!({"command": "git push origin feat/x"}));
+    let pr = as_agent(
+        "Bash",
+        json!({"command": "playbook pr create --title t --body-file b.md"}),
+    );
+    let skill = as_agent("Skill", json!({"skill": "playbook:commit-and-push"}));
+    let build = as_agent("Bash", json!({"command": "cargo build"}));
+
+    // Assert
+    assert!(!push.is_denied() && !pr.is_denied() && !skill.is_denied());
+    let reason = build.reason("build");
+    assert!(reason.contains("park-note-abc123.md"), "{reason}");
+    assert!(reason.contains("report to the user"), "{reason}");
+}
+
+#[test]
+fn a_parked_main_session_leaves_a_marker_that_clears_once_it_is_under_the_cap() {
+    // Arrange
+    let session = Session::at_budget("parked-marker", AutoFrom::Config);
+    let marker = session.dir().join("parked");
+
+    // Act and Assert: the deny leaves the marker the Stop hook reads
+    session.bash("npm test").reason("capped");
+    assert!(marker.exists());
+
+    // A raised cap lets the next call through and drops the marker
+    session.seed_budget(&json!(50), 70);
+    assert!(!session.bash("git status").is_denied());
+    assert!(!marker.exists());
+}
+
+#[test]
+fn a_parked_subagent_does_not_set_the_main_session_marker() {
+    let session = Session::auto("parked-agent");
+    let config = json!({"mode": "auto", "auto": {"budgetUsd": 50, "agentBudgetUsd": 1}});
+    auto_env::seed_raw_global_config(&session.s.home, &config.to_string());
+    session.baseline_then_report("0.00");
+    let mut value: Value =
+        serde_json::from_str(&session.tool_payload("Bash", json!({"command": "npm test"})))
+            .expect("json");
+    value["agent_id"] = json!("zz");
+    append(&session.subagent("agent-zz.jsonl"), &assistant_line(2.0));
+    session
+        .call_payload(&value.to_string())
+        .reason("agent capped");
+    assert!(!session.dir().join("parked").exists());
+}
