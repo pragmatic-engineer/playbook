@@ -72,6 +72,7 @@ pub mod statusline;
 #[doc(hidden)]
 pub mod testing;
 pub mod trust;
+pub mod ui;
 pub mod uninstall;
 pub mod update;
 pub mod usage;
