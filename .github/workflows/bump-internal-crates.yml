@@ -1,0 +1,262 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# Keeps the pinned internal git dependencies in Cargo.toml current. When a tool
+# repo publishes a release it sends `internal-crate-release` here (fast path);
+# a daily run checks every internal crate's latest release (fallback); a
+# maintainer can run it by hand. Each crate gets one PR on the branch
+# `chore/bump-<crate>`. The PR goes through the normal protected flow: checks
+# run, then auto-merge lands it.
+#
+# Cargo.toml keeps an exact `tag = "vX.Y.Z"` for each crate and Cargo.lock
+# records the commit. Nothing here ever points at a branch or "latest".
+#
+# Commits are made through the GitHub GraphQL API with the bot App token, so
+# GitHub signs them and they show as Verified, and the PR checks run (a push
+# with GITHUB_TOKEN would not start them). The App is the one auto-update-pr.yml
+# uses (BOT_APP_CLIENT_ID and BOT_APP_PRIVATE_KEY); without it the workflow
+# skips with a notice.
+#
+# dispatch payload: {"event_type":"internal-crate-release",
+#   "client_payload":{"crate":"playbook-telemetry",
+#                     "repo":"pragmatic-engineer/playbook-telemetry",
+#                     "tag":"v0.1.4"}}
+# The crate and repo must match the registry in the `plan` job. The payload is
+# a hint, never trusted: .github/scripts/bump-internal-crate.sh re-checks the release.
+
+name: bump-internal-crates
+
+on:
+  repository_dispatch:
+    types: [internal-crate-release]
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: Crate to bump (for example playbook-telemetry)
+        required: true
+        type: string
+      repo:
+        description: Source repo (for example pragmatic-engineer/playbook-telemetry)
+        required: true
+        type: string
+      tag:
+        description: Release tag (for example v0.1.4)
+        required: true
+        type: string
+  schedule:
+    - cron: "17 5 * * *"
+
+permissions: {}
+
+jobs:
+  # Decides which crates need a bump and emits them as a matrix.
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Build the bump list
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          IN_CRATE: ${{ github.event.client_payload.crate || inputs.crate }}
+          IN_REPO: ${{ github.event.client_payload.repo || inputs.repo }}
+          IN_TAG: ${{ github.event.client_payload.tag || inputs.tag }}
+        run: |
+          set -euo pipefail
+          # Registry of internal crates. Add playbook-code here once it has a
+          # release and a dependency line in Cargo.toml.
+          declare -A REG=(
+            [playbook-telemetry]=pragmatic-engineer/playbook-telemetry
+            [playbook-code]=pragmatic-engineer/playbook-code
+          )
+          items='[]'
+          add() { # crate repo tag
+            items=$(jq -c --arg c "$1" --arg r "$2" --arg t "$3" '. + [{crate:$c,repo:$r,tag:$t}]' <<<"$items")
+          }
+          pinned() { # prints the pinned tag, empty when there is no such dependency
+            grep -E "^$1[[:space:]]*=.*git[[:space:]]*=" Cargo.toml \
+              | sed -nE 's/.*tag[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' || true
+          }
+          if [ "$EVENT" = schedule ]; then
+            for crate in "${!REG[@]}"; do
+              [ -n "$(pinned "$crate")" ] || { echo "::notice::$crate is not a dependency yet; skipping."; continue; }
+              latest=$(gh release view --repo "${REG[$crate]}" --json tagName --jq .tagName 2>/dev/null || true)
+              [ -n "$latest" ] || { echo "::notice::${REG[$crate]} has no release; skipping."; continue; }
+              [ "$latest" != "$(pinned "$crate")" ] && add "$crate" "${REG[$crate]}" "$latest"
+            done
+          else
+            [[ ${REG[$IN_CRATE]+x} ]] || { echo "::error::$IN_CRATE is not a known internal crate"; exit 1; }
+            [ "${REG[$IN_CRATE]}" = "$IN_REPO" ] || { echo "::error::$IN_CRATE must come from ${REG[$IN_CRATE]}"; exit 1; }
+            [[ $IN_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag must look like v1.2.3"; exit 1; }
+            [ -n "$(pinned "$IN_CRATE")" ] && add "$IN_CRATE" "$IN_REPO" "$IN_TAG" \
+              || echo "::notice::$IN_CRATE is not a dependency yet; skipping."
+          fi
+          echo "matrix=$(jq -c . <<<"$items")" >> "$GITHUB_OUTPUT"
+          echo "Bump list: $items"
+
+  bump:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    # One run per crate at a time; a newer release waits for the older run
+    # instead of cancelling a half-finished push.
+    concurrency:
+      group: bump-${{ matrix.crate }}
+      cancel-in-progress: false
+    env:
+      CRATE: ${{ matrix.crate }}
+      SRC_REPO: ${{ matrix.repo }}
+      TAG: ${{ matrix.tag }}
+      BRANCH: chore/bump-${{ matrix.crate }}
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - name: Check for bot App credentials
+        id: bot
+        env:
+          BOT_APP_CLIENT_ID: ${{ secrets.BOT_APP_CLIENT_ID }}
+        run: |
+          if [ -n "$BOT_APP_CLIENT_ID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::BOT_APP_CLIENT_ID not set; cannot open the bump PR."
+          fi
+
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        if: steps.bot.outputs.configured == 'true'
+        id: app-token
+        with:
+          client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: steps.bot.outputs.configured == 'true'
+        with:
+          persist-credentials: false
+
+      - name: Bump the pin
+        if: steps.bot.outputs.configured == 'true'
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rustup component add clippy
+          .github/scripts/bump-internal-crate.sh "$CRATE" "$SRC_REPO" "$TAG"
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$CRATE is already at $TAG; no PR needed."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat
+          fi
+
+      - name: Build, lint and test
+        if: steps.bump.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          cargo build --locked
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo clippy --locked --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
+          cargo test --locked
+
+      - name: Commit, open the PR and enable auto-merge
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="chore(deps): bump $CRATE to $TAG"
+          bot_id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          signoff="Signed-off-by: ${APP_SLUG}[bot] <${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com>"
+          base=$(gh api "repos/$REPO/git/ref/heads/main" --jq .object.sha)
+
+          # Point the bump branch at current main, then add one commit on top.
+          # createCommitOnBranch is signed by GitHub. Re-running for a newer
+          # tag resets the branch, so there is always one commit and one PR.
+          if gh api "repos/$REPO/git/ref/heads/$BRANCH" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/heads/$BRANCH" -f sha="$base" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$REPO/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$base" >/dev/null
+          fi
+
+          body_text="Bump the pinned $CRATE dependency to $TAG from $SRC_REPO. Cargo.lock records the new commit."
+          jq -n \
+            --arg repo "$REPO" --arg branch "$BRANCH" --arg oid "$base" \
+            --arg head "$title" --arg body "$body_text"$'\n\n'"$signoff" \
+            --arg toml "$(base64 < Cargo.toml | tr -d '\n')" \
+            --arg lock "$(base64 < Cargo.lock | tr -d '\n')" \
+            '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+              variables: {input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                expectedHeadOid: $oid,
+                message: {headline: $head, body: $body},
+                fileChanges: {additions: [
+                  {path: "Cargo.toml", contents: $toml},
+                  {path: "Cargo.lock", contents: $lock}]}}}}' \
+            | gh api graphql --input - --jq .data.createCommitOnBranch.commit.oid > head_sha.txt
+          sha=$(cat head_sha.txt)
+          echo "Committed $sha on $BRANCH."
+
+          pr_body="## Summary
+
+          Bumps the pinned \`$CRATE\` dependency to \`$TAG\`.
+
+          ## What Changed
+
+          - Cargo.toml pins \`$CRATE\` to the exact tag \`$TAG\` from $SRC_REPO.
+          - Cargo.lock records the commit for that tag.
+
+          ## Notes for reviewers
+
+          Opened by the bump-internal-crates workflow. It checked that $TAG is the latest release and has a SHA256SUMS asset, then ran build, clippy and tests."
+          pr_body=$(printf '%s\n' "$pr_body" | sed 's/^          //')
+
+          existing=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --repo "$REPO" --title "$title" --body "$pr_body"
+            pr="$existing"
+          else
+            url=$(gh pr create --repo "$REPO" --base main --head "$BRANCH" --title "$title" --body "$pr_body")
+            pr=${url##*/}
+          fi
+          gh pr merge "$pr" --repo "$REPO" --auto --squash --match-head-commit "$sha"
+          echo "PR #$pr is set to auto-merge."
