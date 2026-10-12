@@ -101,6 +101,15 @@ fn a_renamed_end_marker_makes_the_command_fail_loudly() {
         let text = text.replace("### Review Comments\n", "### Comment Guidelines\n");
         fs::write(dir.join(format!("skills/{skill}/SKILL.md")), text).unwrap();
     }
+    let refs = dir.join("skills/writing-style/references");
+    fs::create_dir_all(&refs).unwrap();
+    for name in ["commits-and-prs.md", "github-prohibited.md"] {
+        fs::copy(
+            root().join("skills/writing-style/references").join(name),
+            refs.join(name),
+        )
+        .unwrap();
+    }
     let (ok, out) = run_step0_in(&dir);
     assert!(!ok, "{out}");
     assert!(
