@@ -37,7 +37,7 @@ use worker::{Update, Worker};
 const TICK: Duration = Duration::from_millis(200);
 
 /// The theme to start with: `NO_COLOR` forces `mono`, else the `usage.theme`
-/// config key, which is `btop` unless set.
+/// config key, which is `default` unless set.
 fn start_theme(no_color: bool) -> Theme {
     if no_color {
         return Theme::Mono;

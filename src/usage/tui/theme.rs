@@ -4,19 +4,18 @@
 //! Colors for the terminal view. `t` cycles the themes. `Mono` uses no color
 //! at all, for terminals and pipes that cannot show it.
 //!
-//! The `btop` theme is the default. Its values are btop's built-in default
-//! theme (`Default_theme` in `src/btop_theme.cpp` of
-//! https://github.com/aristocratos/btop, Apache-2.0, Copyright 2021 Aristocratos),
-//! mapped to the roles this view has: a two digit hex in btop is a gray (`#cc`
-//! is 204, 204, 204), and a graph or meter colors a value from a start, mid
-//! and end color the way btop does. See NOTICE.
+//! The `default` theme is the default. Its values follow the look of a classic
+//! dark system monitor, adapted from a third party theme that NOTICE credits,
+//! mapped to the roles this view has: a two digit hex is a gray (`#cc` is 204,
+//! 204, 204), and a graph or meter colors a value from a start, mid and end
+//! color. See NOTICE.
 
 use ratatui::style::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Theme {
     #[default]
-    Btop,
+    Standard,
     Dark,
     Light,
     Mono,
@@ -57,7 +56,7 @@ pub enum Ink {
     Rgb(Rgb),
 }
 
-/// What a graph or meter paints with: one color, or btop's three point
+/// What a graph or meter paints with: one color, or a three point
 /// gradient (start at 0%, mid at 50%, end at 100%).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fill {
@@ -137,16 +136,16 @@ const fn ink(rgb: Rgb) -> Ink {
 impl Theme {
     pub fn next(self) -> Theme {
         match self {
-            Theme::Btop => Theme::Dark,
+            Theme::Standard => Theme::Dark,
             Theme::Dark => Theme::Light,
             Theme::Light => Theme::Mono,
-            Theme::Mono => Theme::Btop,
+            Theme::Mono => Theme::Standard,
         }
     }
 
     pub fn name(self) -> &'static str {
         match self {
-            Theme::Btop => "btop",
+            Theme::Standard => "default",
             Theme::Dark => "dark",
             Theme::Light => "light",
             Theme::Mono => "mono",
@@ -154,14 +153,14 @@ impl Theme {
     }
 
     pub fn parse(name: &str) -> Option<Theme> {
-        [Theme::Btop, Theme::Dark, Theme::Light, Theme::Mono]
+        [Theme::Standard, Theme::Dark, Theme::Light, Theme::Mono]
             .into_iter()
             .find(|t| t.name() == name)
     }
 
     pub fn palette(self, depth: ColorDepth) -> Palette {
         match self {
-            Theme::Btop => Palette {
+            Theme::Standard => Palette {
                 depth,
                 mono: false,
                 bg: ink(gray(0x00)),
@@ -365,7 +364,7 @@ mod tests {
 
     #[test]
     fn next_visits_every_theme_and_wraps() {
-        let mut t = Theme::Btop;
+        let mut t = Theme::Standard;
         let mut seen = vec![t];
         for _ in 0..4 {
             t = t.next();
@@ -374,27 +373,27 @@ mod tests {
         assert_eq!(
             seen,
             [
-                Theme::Btop,
+                Theme::Standard,
                 Theme::Dark,
                 Theme::Light,
                 Theme::Mono,
-                Theme::Btop
+                Theme::Standard
             ]
         );
     }
 
     #[test]
-    fn btop_is_the_default_and_names_round_trip() {
-        assert_eq!(Theme::default(), Theme::Btop);
-        for t in [Theme::Btop, Theme::Dark, Theme::Light, Theme::Mono] {
+    fn the_default_theme_is_the_default_and_names_round_trip() {
+        assert_eq!(Theme::default(), Theme::Standard);
+        for t in [Theme::Standard, Theme::Dark, Theme::Light, Theme::Mono] {
             assert_eq!(Theme::parse(t.name()), Some(t));
         }
         assert_eq!(Theme::parse("solarized"), None);
     }
 
     #[test]
-    fn btop_uses_the_values_of_btops_default_theme() {
-        let p = Theme::Btop.palette(ColorDepth::True);
+    fn the_default_theme_uses_its_documented_values() {
+        let p = Theme::Standard.palette(ColorDepth::True);
         assert_eq!(p.color(p.bg), Color::Rgb(0, 0, 0));
         assert_eq!(p.color(p.fg), Color::Rgb(0xcc, 0xcc, 0xcc));
         assert_eq!(p.color(p.title), Color::Rgb(0xee, 0xee, 0xee));

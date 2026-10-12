@@ -113,23 +113,23 @@ fn check(name: &str, actual: &str) {
 
 #[test]
 fn full_screen_100x30() {
-    check("full_100x30", &draw(&app(Theme::Btop), 100, 30));
+    check("full_100x30", &draw(&app(Theme::Standard), 100, 30));
 }
 
 #[test]
 fn minimum_screen_80x24() {
-    check("min_80x24", &draw(&app(Theme::Btop), 80, 24));
+    check("min_80x24", &draw(&app(Theme::Standard), 80, 24));
 }
 
 #[test]
 fn wide_screen_160x50() {
-    check("wide_160x50", &draw(&app(Theme::Btop), 160, 50));
+    check("wide_160x50", &draw(&app(Theme::Standard), 160, 50));
 }
 
 #[test]
 fn the_help_window_at_three_sizes() {
     for (w, h) in [(80, 24), (100, 30), (160, 50)] {
-        let mut a = app(Theme::Btop);
+        let mut a = app(Theme::Standard);
         a.area = ratatui::layout::Rect::new(0, 0, w, h);
         a.help = Some(0);
         check(&format!("help_{w}x{h}"), &draw(&a, w, h));
@@ -138,7 +138,7 @@ fn the_help_window_at_three_sizes() {
 
 #[test]
 fn the_help_window_scrolled_to_the_end_at_80x24() {
-    let mut a = app(Theme::Btop);
+    let mut a = app(Theme::Standard);
     a.area = ratatui::layout::Rect::new(0, 0, 80, 24);
     a.help = Some(usize::MAX);
     check("help_end_80x24", &draw(&a, 80, 24));
@@ -146,7 +146,7 @@ fn the_help_window_scrolled_to_the_end_at_80x24() {
 
 #[test]
 fn the_week_range_has_wide_bars_and_weekday_names() {
-    let mut a = app(Theme::Btop);
+    let mut a = app(Theme::Standard);
     let events = fixture();
     let live = live_view(&events, &events, &events, NOW);
     let range = Range::ThisWeek(crate::usage::query::WeekStart::Monday);
@@ -157,7 +157,7 @@ fn the_week_range_has_wide_bars_and_weekday_names() {
 
 #[test]
 fn today_compares_with_yesterday_and_charts_the_last_seven_days() {
-    let mut a = app(Theme::Btop);
+    let mut a = app(Theme::Standard);
     let events = fixture();
     let live = live_view(&events, &events, &events, NOW);
     a.range = Range::Today;
@@ -167,7 +167,7 @@ fn today_compares_with_yesterday_and_charts_the_last_seven_days() {
 
 #[test]
 fn a_moved_cursor_reads_out_its_day() {
-    let mut a = app(Theme::Btop);
+    let mut a = app(Theme::Standard);
     a.cursor = Some(NOW.div_euclid(DAY) - 9);
     let text = draw(&a, 100, 30);
     assert!(text.contains("Tue 2026-08-25"), "{text}");
@@ -184,7 +184,11 @@ fn spend_stacked_by_model_100x30() {
     use crate::usage::tui::app::SpendView;
     check(
         "stacked_100x30",
-        &draw(&with_spend_view(Theme::Btop, SpendView::ByModel), 100, 30),
+        &draw(
+            &with_spend_view(Theme::Standard, SpendView::ByModel),
+            100,
+            30,
+        ),
     );
 }
 
@@ -204,18 +208,18 @@ fn the_daily_table_at_100x30() {
     use crate::usage::tui::app::SpendView;
     check(
         "daily_100x30",
-        &draw(&with_spend_view(Theme::Btop, SpendView::Daily), 100, 30),
+        &draw(&with_spend_view(Theme::Standard, SpendView::Daily), 100, 30),
     );
 }
 
 #[test]
 fn a_model_wears_the_same_color_in_the_table_and_the_stacked_bars() {
     use crate::usage::tui::app::SpendView;
-    let a = with_spend_view(Theme::Btop, SpendView::ByModel);
+    let a = with_spend_view(Theme::Standard, SpendView::ByModel);
     let buf = buffer(&a, 100, 30);
     let p = panels();
     let data = a.data.as_ref().unwrap();
-    let pal = Theme::Btop.palette(ColorDepth::True);
+    let pal = Theme::Standard.palette(ColorDepth::True);
     // The Models panel is sorted by cost: opus, sonnet, haiku.
     let rows: Vec<Color> = (0..3)
         .map(|i| buf[(p.models.x + 1, p.models.y + 2 + i)].fg)
@@ -268,7 +272,7 @@ fn a_model_wears_the_same_color_in_the_table_and_the_stacked_bars() {
 #[test]
 fn the_daily_table_marks_today_and_the_peak_day() {
     use crate::usage::tui::app::SpendView;
-    let mut a = with_spend_view(Theme::Btop, SpendView::Daily);
+    let mut a = with_spend_view(Theme::Standard, SpendView::Daily);
     let buf = buffer(&a, 100, 30);
     let p = panels();
     // Newest first, so today is the first row.
@@ -325,7 +329,7 @@ fn plan_snapshot() -> Snapshot {
 #[test]
 fn the_budget_panel_shows_the_plan_windows_as_measured() {
     let a = with_limits(
-        app(Theme::Btop),
+        app(Theme::Standard),
         Some(&plan_snapshot()),
         &[],
         Range::ThisWeek(WeekStart::Monday),
@@ -340,7 +344,7 @@ fn the_budget_panel_shows_the_plan_windows_as_measured() {
 #[test]
 fn the_budget_panel_shows_a_manual_limit_and_says_so() {
     let a = with_limits(
-        app(Theme::Btop),
+        app(Theme::Standard),
         None,
         &[(LimitPeriod::Monthly, 40.0), (LimitPeriod::Weekly, 5.0)],
         Range::CurrentMonth,
@@ -353,7 +357,7 @@ fn the_budget_panel_shows_a_manual_limit_and_says_so() {
 
 #[test]
 fn the_budget_panel_says_how_to_set_a_limit_when_none_is_known() {
-    let text = draw(&app(Theme::Btop), 100, 36);
+    let text = draw(&app(Theme::Standard), 100, 36);
     check("budget_unknown_100x36", &text);
     assert!(text.contains("Limit unknown: playbook config set --global usage.budget.monthlyUsd"));
 }
@@ -361,9 +365,12 @@ fn the_budget_panel_says_how_to_set_a_limit_when_none_is_known() {
 #[test]
 fn the_budget_panel_is_left_out_of_a_short_screen() {
     for (w, h) in [(80, 24), (100, 30), (100, 35)] {
-        assert!(!draw(&app(Theme::Btop), w, h).contains("Budget"), "{w}x{h}");
+        assert!(
+            !draw(&app(Theme::Standard), w, h).contains("Budget"),
+            "{w}x{h}"
+        );
     }
-    assert!(draw(&app(Theme::Btop), 100, 36).contains("Budget"));
+    assert!(draw(&app(Theme::Standard), 100, 36).contains("Budget"));
 }
 
 #[test]
@@ -374,14 +381,14 @@ fn a_stale_plan_reading_is_marked() {
         used_percentage: 5.0,
         resets_at: NOW + 3600,
     });
-    let a = with_limits(app(Theme::Btop), Some(&snap), &[], Range::Today);
+    let a = with_limits(app(Theme::Standard), Some(&snap), &[], Range::Today);
     assert!(draw(&a, 160, 50).contains("[measured, stale]"));
 }
 
 #[test]
 fn the_state_wears_the_error_color_when_the_limit_will_be_exceeded() {
     let a = with_limits(
-        app(Theme::Btop),
+        app(Theme::Standard),
         Some(&plan_snapshot()),
         &[],
         Range::ThisWeek(WeekStart::Monday),
@@ -396,13 +403,13 @@ fn the_state_wears_the_error_color_when_the_limit_will_be_exceeded() {
         .windows(4)
         .position(|w| w.concat() == "will")
         .expect("the state is on the first limit row");
-    let pal = Theme::Btop.palette(ColorDepth::True);
+    let pal = Theme::Standard.palette(ColorDepth::True);
     assert_eq!(buf[(at as u16, row)].fg, pal.color(pal.error));
 }
 
 #[test]
 fn too_small_screen() {
-    check("too_small_60x20", &draw(&app(Theme::Btop), 60, 20));
+    check("too_small_60x20", &draw(&app(Theme::Standard), 60, 20));
 }
 
 #[test]
@@ -412,7 +419,7 @@ fn before_the_first_read() {
 
 #[test]
 fn the_theme_changes_color_not_text() {
-    let btop = draw(&app(Theme::Btop), 100, 30);
+    let standard = draw(&app(Theme::Standard), 100, 30);
     let dark = draw(&app(Theme::Dark), 100, 30);
     let light = draw(&app(Theme::Light), 100, 30);
     let mono = draw(&app(Theme::Mono), 100, 30);
@@ -430,7 +437,7 @@ fn the_theme_changes_color_not_text() {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    assert_eq!(body(&btop), body(&dark));
+    assert_eq!(body(&standard), body(&dark));
     assert_eq!(body(&dark), body(&light));
     assert_eq!(body(&dark), body(&mono));
 }
@@ -454,8 +461,8 @@ fn find(buf: &Buffer, symbol: &str, row: u16) -> (u16, u16) {
 }
 
 #[test]
-fn btop_paints_a_black_ground_and_gray_text() {
-    let buf = buffer(&app(Theme::Btop), 100, 30);
+fn the_default_theme_paints_a_black_ground_and_gray_text() {
+    let buf = buffer(&app(Theme::Standard), 100, 30);
     // Every cell has the black ground.
     assert!(buf.content().iter().all(|c| c.bg == rgb(0, 0, 0)
         || c.bg == rgb(0x6a, 0x2f, 0x2f)
@@ -471,7 +478,7 @@ fn panels() -> crate::usage::tui::view::Panels {
 
 #[test]
 fn each_box_has_its_own_outline_color() {
-    let buf = buffer(&app(Theme::Btop), 100, 30);
+    let buf = buffer(&app(Theme::Standard), 100, 30);
     let p = panels();
     let corner = |r: ratatui::layout::Rect| {
         assert_eq!(
@@ -492,7 +499,7 @@ fn each_box_has_its_own_outline_color() {
 
 #[test]
 fn titles_carry_a_hint_in_the_accent_color() {
-    let buf = buffer(&app(Theme::Btop), 100, 30);
+    let buf = buffer(&app(Theme::Standard), 100, 30);
     let p = panels();
     // The hint follows the corner, a dash and the `┤`.
     let (x, y) = find(&buf, "\u{b9}", p.spend.y);
@@ -506,7 +513,7 @@ fn titles_carry_a_hint_in_the_accent_color() {
 
 #[test]
 fn the_bars_run_the_gradient_with_their_height_on_the_scale() {
-    let buf = buffer(&app(Theme::Btop), 100, 30);
+    let buf = buffer(&app(Theme::Standard), 100, 30);
     let p = panels();
     // Collect the colors of bar cells inside the spend panel.
     let mut colors: Vec<Color> = Vec::new();
@@ -532,7 +539,7 @@ fn the_bars_run_the_gradient_with_their_height_on_the_scale() {
 
 #[test]
 fn the_selected_row_of_the_focused_panel_is_highlighted() {
-    let a = app(Theme::Btop);
+    let a = app(Theme::Standard);
     let buf = buffer(&a, 100, 30);
     let p = panels();
     let first = p.models.y + 2;
@@ -546,7 +553,7 @@ fn the_selected_row_of_the_focused_panel_is_highlighted() {
 
 #[test]
 fn meters_use_the_gradient_and_the_dim_color_for_the_rest() {
-    let buf = buffer(&app(Theme::Btop), 100, 30);
+    let buf = buffer(&app(Theme::Standard), 100, 30);
     let p = panels();
     let first = p.models.y + 2;
     // The haiku share is tiny: a dim dot at the end of its row.
@@ -563,7 +570,7 @@ fn meters_use_the_gradient_and_the_dim_color_for_the_rest() {
 
 #[test]
 fn a_256_color_terminal_gets_indexed_colors_only() {
-    let mut a = app(Theme::Btop);
+    let mut a = app(Theme::Standard);
     a.depth = ColorDepth::Ansi256;
     let buf = buffer(&a, 100, 30);
     for c in buf.content() {
@@ -579,7 +586,7 @@ fn a_256_color_terminal_gets_indexed_colors_only() {
 
 #[test]
 fn a_16_color_terminal_gets_named_colors_only() {
-    let mut a = app(Theme::Btop);
+    let mut a = app(Theme::Standard);
     a.depth = ColorDepth::Ansi16;
     let buf = buffer(&a, 100, 30);
     for c in buf.content() {
@@ -617,7 +624,7 @@ fn the_dark_theme_keeps_the_terminal_ground() {
 fn agents_app(with_telemetry: bool) -> App {
     use crate::usage::aggregate::Group;
     use crate::usage::tui::app::ProjectsView;
-    let mut a = app(Theme::Btop);
+    let mut a = app(Theme::Standard);
     a.projects_view = ProjectsView::Agents;
     if with_telemetry {
         let group = |key: &str, messages: u64, cost: f64| Group {
@@ -694,7 +701,7 @@ fn v_cycles_projects_agents_skills_and_back() {
 
 fn health_app(with_telemetry: bool, view: crate::usage::tui::app::ProjectsView) -> App {
     use crate::usage::telemetry_db::{Health, ToolStat};
-    let mut a = app(Theme::Btop);
+    let mut a = app(Theme::Standard);
     let events = fixture();
     let live = live_view(&events, &events, &events, NOW);
     a.range = Range::Today;
@@ -794,7 +801,7 @@ fn the_tools_view_is_readable_at_the_minimum_size_and_without_a_comparison() {
     use crate::usage::tui::app::ProjectsView;
     let a = health_app(true, ProjectsView::Tools);
     assert!(draw(&a, 80, 24).contains("Bash"));
-    let mut b = app(Theme::Btop);
+    let mut b = app(Theme::Standard);
     b.projects_view = ProjectsView::Health;
     let data = b.data.as_mut().unwrap();
     data.telemetry_rows = true;

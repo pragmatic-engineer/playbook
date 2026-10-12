@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn t_cycles_the_theme() {
         let mut app = App::new(Range::All);
-        assert_eq!(app.theme, Theme::Btop);
+        assert_eq!(app.theme, Theme::Standard);
         app.key(press(KeyCode::Char('t')));
         assert_eq!(app.theme, Theme::Dark);
     }

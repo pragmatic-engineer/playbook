@@ -869,7 +869,7 @@ mod tests {
     use crate::usage::tui::theme::{ColorDepth, Theme};
 
     fn pal() -> Palette {
-        Theme::Btop.palette(ColorDepth::True)
+        Theme::Standard.palette(ColorDepth::True)
     }
 
     /// 2026-08-05, a Wednesday.

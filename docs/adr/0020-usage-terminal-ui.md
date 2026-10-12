@@ -6,7 +6,7 @@
 
 ## Context
 
-Issue #577 asks for a btop style terminal view of usage. The maintainer decision on the issue is binding:
+Issue #577 asks for a terminal view of usage in the style of a classic system monitor. The maintainer decision on the issue is binding:
 
 - `playbook usage` with no subcommand opens the terminal UI.
 - The other `usage` subcommands are deprecated for one release with a warning that names the replacement, then removed.

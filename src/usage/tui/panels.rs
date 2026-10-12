@@ -3,7 +3,7 @@
 
 //! The six panels: spend and token graphs, the model and project breakdowns,
 //! the live sessions and the sessions of the range by day. Each is a rounded
-//! box with its key hint and title in the top border, like btop.
+//! box with its key hint and title in the top border.
 
 use super::app::{App, ProjectsView, SpendView};
 use super::chart::{self, Metric, Plot};
@@ -50,7 +50,7 @@ fn selected_style(pal: &Palette) -> Style {
     }
 }
 
-/// `┤¹Title├` the way btop writes a box title, with the panel's key hint in the
+/// `┤¹Title├` the way a classic system monitor writes a box title, with the panel's key hint in the
 /// accent color. The focused panel's hint is a badge.
 fn title_line(
     pal: &Palette,
@@ -266,7 +266,7 @@ fn empty(frame: &mut Frame, area: Rect, pal: &Palette, block: Block<'static>, me
     );
 }
 
-/// A meter like btop's: `■` cells colored along the gradient up to `fraction`,
+/// A meter of `■` cells colored along the gradient up to `fraction`,
 /// the rest dim dots.
 fn meter(pal: &Palette, fill: Fill, fraction: f64, width: usize) -> Cell<'static> {
     let filled = ((fraction.clamp(0.0, 1.0) * width as f64).round() as usize).min(width);
