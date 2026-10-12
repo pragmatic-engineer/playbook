@@ -348,11 +348,22 @@ fn main() {
                 dry_run: dry_run || !yes,
             };
             let report = playbook::uninstall::run(&opts);
-            for line in &report.lines {
-                println!("{line}");
-            }
-            for error in &report.errors {
-                eprintln!("uninstall: {error}");
+            if std::io::stdout().is_terminal() {
+                print!(
+                    "{}",
+                    playbook::uninstall::style::render(
+                        &playbook::ui::Caps::detect(),
+                        &report,
+                        opts.dry_run
+                    )
+                );
+            } else {
+                for line in &report.lines {
+                    println!("{line}");
+                }
+                for error in &report.errors {
+                    eprintln!("uninstall: {error}");
+                }
             }
             if !yes && !dry_run {
                 eprintln!("uninstall: nothing was changed; re-run with --yes to remove these");
@@ -1761,6 +1772,11 @@ fn main() {
                 let rows = doctor::check::run(&env);
                 if json {
                     println!("{}", doctor::check::to_json(&rows));
+                } else if std::io::stdout().is_terminal() {
+                    print!(
+                        "{}",
+                        doctor::style::render(&playbook::ui::Caps::detect(), &rows)
+                    );
                 } else {
                     print!("{}", doctor::check::render(&rows));
                 }
@@ -1972,6 +1988,12 @@ fn main() {
                 )
             });
             match result {
+                Ok(outcome) if std::io::stdout().is_terminal() => {
+                    print!(
+                        "{}",
+                        update::style::render(&playbook::ui::Caps::detect(), &outcome)
+                    );
+                }
                 Ok(outcome) => {
                     for line in &outcome.out {
                         println!("{line}");

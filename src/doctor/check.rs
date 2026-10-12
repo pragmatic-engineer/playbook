@@ -545,6 +545,32 @@ fn plugin_only_rows(env: &Env) -> Vec<Row> {
     .hint("run /playbook:setup")]
 }
 
+/// The lines under the table: what to run for each failed layer, or that all
+/// required layers pass.
+pub fn closing(rows: &[Row]) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    let failed: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.level == Level::Fail)
+        .map(|r| r.layer)
+        .collect();
+    if failed.iter().any(|l| ["1", "2", "3", "4", "5"].contains(l)) {
+        out.push("Run /playbook:setup to fix layers 1 to 5.");
+    }
+    if failed.contains(&"6") {
+        out.push("/playbook:setup cannot fix layer 6, it does not install the binary. Install it with install.sh or Homebrew and put its directory on PATH.");
+    }
+    if failed.contains(&"7") {
+        out.push(
+            "Layer 7 needs a hand edit: remove or fix the named entry in ~/.claude/settings.json.",
+        );
+    }
+    if failed.is_empty() {
+        out.push("All required layers pass.");
+    }
+    out
+}
+
 /// The table as text: `LEVEL  message -- hint`, one row per line, then the
 /// closing remediation line when a required layer failed.
 pub fn render(rows: &[Row]) -> String {
@@ -556,22 +582,9 @@ pub fn render(rows: &[Row]) -> String {
         }
         out.push('\n');
     }
-    let failed: Vec<&str> = rows
-        .iter()
-        .filter(|r| r.level == Level::Fail)
-        .map(|r| r.layer)
-        .collect();
-    if failed.iter().any(|l| ["1", "2", "3", "4", "5"].contains(l)) {
-        out.push_str("Run /playbook:setup to fix layers 1 to 5.\n");
-    }
-    if failed.contains(&"6") {
-        out.push_str("/playbook:setup cannot fix layer 6, it does not install the binary. Install it with install.sh or Homebrew and put its directory on PATH.\n");
-    }
-    if failed.contains(&"7") {
-        out.push_str("Layer 7 needs a hand edit: remove or fix the named entry in ~/.claude/settings.json.\n");
-    }
-    if failed.is_empty() {
-        out.push_str("All required layers pass.\n");
+    for line in closing(rows) {
+        out.push_str(line);
+        out.push('\n');
     }
     out
 }
