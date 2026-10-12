@@ -107,7 +107,7 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
 /// The data names the account, repos, and branches, so the file is owner-only
 /// on unix. Created first so SQLite never makes it with the default umask, and
 /// the WAL and shm files copy this mode. An older, wider file is tightened.
-fn make_db_file_private(path: &Path) -> Result<(), String> {
+pub(crate) fn make_db_file_private(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
