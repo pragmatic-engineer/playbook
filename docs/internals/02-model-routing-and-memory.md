@@ -7,7 +7,7 @@ The session model defaults to Sonnet. Four things shape which model and effort a
 The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) and in `playbook route`. The system prompt points there and does not restate models, so the two cannot disagree.
 
 - **Sonnet** is the session default and covers most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`.
-- **Haiku** takes mechanical, formatting and search work: `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, and the `doctor`, `session-start` and `setup` commands.
+- **Haiku** takes mechanical, formatting and search work: `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands.
 - **Opus** takes design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`.
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
@@ -105,6 +105,7 @@ This table lists every agent, command and skill with the model and effort in its
 | command | `plan` | `opus` | `medium` | Design work. A weak plan is expensive. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `quick-review` | `sonnet` | `medium` | One pass over a diff. Its reviewer runs on Opus at medium, the reviewer's own effort. |
 | command | `repo-audit` | - | - | Forks into the auditor agent, which sets the model and effort. |
+| command | `session-handoff` | `haiku` | `low` | Writes and saves a handoff using binary-supplied rules and facts. |
 | command | `session-start` | `haiku` | `low` | Loads a saved handoff. Mechanical. |
 | command | `setup` | `haiku` | `low` | Runs compiled helpers and asks questions. Mechanical. |
 | skill | `atlassian-cli` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
@@ -115,7 +116,6 @@ This table lists every agent, command and skill with the model and effort in its
 | skill | `grounding-research` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `grounding-review` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `playbook-usage` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `session-handoff` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `systematic-debugging` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `writing-style` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 <!-- policy-table:end -->

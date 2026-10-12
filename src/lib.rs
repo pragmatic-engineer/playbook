@@ -915,6 +915,16 @@ pub enum HandoffCommand {
     },
     /// Show recent session starts and this directory's handoff counts
     Status,
+    /// Print the rules and template for writing a handoff
+    Template,
+    /// Print the git facts for the "Where we are now" section
+    Facts {
+        /// Directory to read (default: the current one)
+        #[arg(long)]
+        dir: Option<String>,
+    },
+    /// Check a handoff read from stdin for section shape and dashes
+    Check,
 }
 
 /// Which worktree-scoped storage directory `playbook path` prints.

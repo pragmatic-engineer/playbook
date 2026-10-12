@@ -654,7 +654,17 @@ Save and show notes that carry a session over to the next one
 
 A handoff is a markdown note for one directory. The next session started there loads it.
 
-Subcommands: `save`, `show`, `status`
+Subcommands: `check`, `facts`, `save`, `show`, `status`, `template`
+
+### `playbook handoff check`
+
+Check a handoff read from stdin for section shape and dashes
+
+### `playbook handoff facts`
+
+Print the git facts for the "Where we are now" section
+
+- `--dir <DIR>`: Directory to read (default: the current one)
 
 ### `playbook handoff save`
 
@@ -673,6 +683,10 @@ Print this directory's handoff without using it up
 ### `playbook handoff status`
 
 Show recent session starts and this directory's handoff counts
+
+### `playbook handoff template`
+
+Print the rules and template for writing a handoff
 
 ### `playbook hooks`
 
