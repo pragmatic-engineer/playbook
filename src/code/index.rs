@@ -467,8 +467,18 @@ pub fn lock_path(index: &Path) -> PathBuf {
     index.with_file_name("index.lock")
 }
 
+/// The held run lock. Dropping it unlocks explicitly, so a copy of the file
+/// descriptor that a concurrent fork briefly holds cannot keep the lock alive.
+pub struct RunLock(File);
+
+impl Drop for RunLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 /// Takes the exclusive run lock, or says another run holds it.
-pub fn acquire_lock(index: &Path) -> Result<File, String> {
+pub fn acquire_lock(index: &Path) -> Result<RunLock, String> {
     if let Some(parent) = index.parent() {
         host::ensure_private_dir(parent)
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
@@ -480,7 +490,7 @@ pub fn acquire_lock(index: &Path) -> Result<File, String> {
         .open(lock_path(index))
         .map_err(|e| format!("failed to open the index lock: {e}"))?;
     match file.try_lock() {
-        Ok(()) => Ok(file),
+        Ok(()) => Ok(RunLock(file)),
         Err(TryLockError::WouldBlock) => Err("another index run is in progress".to_string()),
         Err(TryLockError::Error(e)) => Err(format!("failed to lock the index: {e}")),
     }
