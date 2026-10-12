@@ -10,6 +10,8 @@
 //! only on request. Memory, settings the user owns, sessions, history and
 //! earlier backups are never touched.
 
+pub mod style;
+
 use crate::init::{migrate, shim, wire};
 use std::fs;
 use std::io;
