@@ -14,6 +14,7 @@ pub mod code;
 pub mod commit;
 pub mod common;
 pub mod config;
+pub mod deliver;
 pub mod deps;
 #[cfg(unix)]
 pub mod doc;
@@ -480,6 +481,18 @@ pub enum Command {
     Cc {
         #[command(subcommand)]
         sub: Option<CcCommand>,
+    },
+    /// Start a session with permission prompts skipped
+    ///
+    /// The same launcher as `playbook cc launch`, with
+    /// `--dangerously-skip-permissions` added. The `ccd` shortcut calls it.
+    /// Run it directly to skip the shell shortcuts.
+    ///
+    /// Example: `playbook ccd fresh`
+    Ccd {
+        /// Subcommand and arguments, passed through to claude
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Show token and cost usage across your sessions
     ///

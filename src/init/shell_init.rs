@@ -5,6 +5,10 @@
 //! rc file to `eval`. The launcher is `ccc`, not `cc`, because `cc` is the C
 //! compiler on most systems.
 //!
+//! With `launcher.claudeOverride` on, the output also defines a `claude`
+//! function that calls the launcher only for a plain interactive session
+//! (see `claude_override.sh`); every other call runs the real binary untouched.
+//!
 //! The launcher itself is `playbook cc launch`. A child process cannot change
 //! its parent's directory, so the function hands the binary a temp file in
 //! `$PLAYBOOK_CC_CD_FILE`; when the launcher enters a worktree it writes the
@@ -16,6 +20,35 @@ use super::shim::ShellKind;
 /// The function bodies are valid in bash and zsh alike, so the one text is
 /// shared; only the header names the shell it was generated for.
 pub fn script(shell: ShellKind) -> String {
+    script_with(shell, false)
+}
+
+/// The text `shell-init` prints for the current config.
+pub fn script_for_config(shell: ShellKind, home: &std::path::Path) -> String {
+    script_with(shell, claude_override_enabled(home))
+}
+
+/// Whether `launcher.claudeOverride` is on. Off unless the user chose it.
+pub fn claude_override_enabled(home: &std::path::Path) -> bool {
+    matches!(
+        crate::config::resolve("launcher.claudeOverride", home, None),
+        Ok((serde_json::Value::Bool(true), _))
+    )
+}
+
+/// The same text with the optional `claude` function appended when `claude_override` is set.
+pub fn script_with(shell: ShellKind, claude_override: bool) -> String {
+    let mut text = base(shell);
+    if claude_override {
+        text.push_str(CLAUDE_OVERRIDE);
+    }
+    text
+}
+
+/// The optional `claude` function and its bypass rules.
+pub const CLAUDE_OVERRIDE: &str = include_str!("claude_override.sh");
+
+fn base(shell: ShellKind) -> String {
     let name = match shell {
         ShellKind::Bash => "bash",
         ShellKind::Zsh => "zsh",

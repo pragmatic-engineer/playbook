@@ -222,10 +222,10 @@ impl Status {
             }
             _ => {
                 lines.push("collector: not running".to_string());
-                lines.push(
-                    "start it with `playbook usage collect`, or see the usage dashboard guide for a background setup"
-                        .to_string(),
-                );
+                lines.push(format!(
+                    "start it with `{}`, or see the usage dashboard guide for a background setup",
+                    super::host::command("usage collect")
+                ));
                 if let Some(port) = self.port {
                     lines.push(format!("last port: {port}"));
                 }
@@ -272,11 +272,9 @@ fn age(seconds: i64) -> String {
 /// The telemetry limits from the `usage.telemetryRetentionDays` and
 /// `usage.telemetryMaxRows` config keys, the defaults when unset or invalid.
 pub fn configured_retention() -> Retention {
-    let home = crate::common::session::home_dir();
     let read = |key: &str, default: u64| {
-        crate::config::resolve_valid(key, &home, None)
-            .ok()
-            .and_then(|(value, _, _)| value.as_u64())
+        super::host::config_value_now(key)
+            .and_then(|value| value.as_u64())
             .unwrap_or(default)
     };
     Retention {
