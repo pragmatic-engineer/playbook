@@ -123,6 +123,24 @@ pub enum CodeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// List syntax references to a name
+    ///
+    /// Finds identifiers in code that spell the name, including declarations
+    /// and imports, and skips comments and strings. Every result is a
+    /// candidate: nothing checks scope or types, so unrelated names that share
+    /// a spelling also appear.
+    ///
+    /// Example: `playbook code refs processPayment`
+    Refs {
+        /// The name to look for; a dotted or scoped name uses its last part
+        target: String,
+        /// Most results to show, from 1 to 200
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn parse_range_arg(spec: &str) -> Result<(usize, usize), String> {
@@ -164,6 +182,11 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
         }
         CodeCommand::Outline { path, json } => render_outline(env, &path, json),
         CodeCommand::Read { path, lines, json } => render_read(env, &path, lines, json),
+        CodeCommand::Refs {
+            target,
+            limit,
+            json,
+        } => render_refs(env, &target, limit as usize, json),
         CodeCommand::Symbol {
             name,
             kind,
@@ -324,6 +347,74 @@ fn visible(line: &str) -> String {
             }
         })
         .collect()
+}
+
+fn render_refs(env: &Env, target: &str, limit: usize, json: bool) -> Result<String, String> {
+    let mut opts = super::refs::RefsOptions::new(target);
+    opts.limit = limit;
+    let out = super::find_refs(&env.cwd, &opts)?;
+    let state = status::state_of(&out.drift);
+    let mut warnings = Vec::new();
+    if state == IndexState::Stale {
+        warnings.push(status::stale_warning(&out.drift));
+    }
+    if out.result.files_capped {
+        warnings.push(format!(
+            "read only the first {} matching files, so results may be incomplete",
+            out.result.files_scanned
+        ));
+    }
+    if json {
+        let rows: Vec<serde_json::Value> = out
+            .result
+            .refs
+            .iter()
+            .map(|r| {
+                json!({
+                    "path": r.path,
+                    "line": r.line,
+                    "column": r.column,
+                    "role": r.role,
+                    "text": r.text,
+                    "confidence": "candidate",
+                })
+            })
+            .collect();
+        let mut envelope = Envelope::new(
+            "refs",
+            state,
+            out.index_path.display().to_string(),
+            serde_json::Value::Array(rows),
+        );
+        envelope.truncated = out.result.truncated;
+        envelope.omitted = out.result.omitted;
+        envelope.warnings = warnings;
+        envelope.stats = Some(json!({"files_scanned": out.result.files_scanned}));
+        return Ok(envelope.to_json());
+    }
+    for warning in &warnings {
+        eprintln!("code: {warning}");
+    }
+    let mut text = String::new();
+    for r in &out.result.refs {
+        text.push_str(&format!(
+            "{}:{}:{}  {} (candidate)  {}\n",
+            r.path,
+            r.line,
+            r.column,
+            r.role,
+            visible(&r.text)
+        ));
+    }
+    if out.result.omitted > 0 {
+        text.push_str(&format!("{} more results not shown\n", out.result.omitted));
+    }
+    if out.result.files_capped {
+        text.push_str("stopped at the file cap, so results may be incomplete\n");
+    } else if out.result.refs.is_empty() {
+        text.push_str("no references\n");
+    }
+    Ok(text)
 }
 
 fn render_outline(env: &Env, input: &str, json: bool) -> Result<String, String> {

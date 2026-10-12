@@ -209,7 +209,7 @@ Index and search the repository's source code
 
 The index is a cache kept under the playbook state folder for this worktree. Nothing is written inside the repository.
 
-Subcommands: `index`, `outline`, `read`, `search`, `status`, `symbol`
+Subcommands: `index`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
 
 ### `playbook code index`
 
@@ -243,6 +243,18 @@ Example: `playbook code read lib/payment/service.ts 10:40`
 
 - `<PATH>`: The file to read
 - `<LINES>`: First and last line, 1 based and inclusive, as START:END
+- `--json`: Print one JSON document
+
+### `playbook code refs`
+
+List syntax references to a name
+
+Finds identifiers in code that spell the name, including declarations and imports, and skips comments and strings. Every result is a candidate: nothing checks scope or types, so unrelated names that share a spelling also appear.
+
+Example: `playbook code refs processPayment`
+
+- `<TARGET>`: The name to look for; a dotted or scoped name uses its last part
+- `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document
 
 ### `playbook code search`

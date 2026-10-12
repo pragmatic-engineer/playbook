@@ -116,6 +116,11 @@ pub(super) struct Loaded {
 }
 
 impl Loaded {
+    /// The file's raw bytes.
+    pub(super) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
     /// Whether the file still hashes to `sha`.
     pub(super) fn same(&self, sha: &str) -> bool {
         sha256_hex(&self.bytes) == sha

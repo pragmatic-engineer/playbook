@@ -150,6 +150,34 @@ pub fn clean_signature(raw: &str) -> (String, bool) {
     (out, false)
 }
 
+/// Node kinds that hold an identifier a reference search can match.
+pub fn identifier_kinds(lang: Lang) -> &'static [&'static str] {
+    match lang {
+        Lang::Rust => &["identifier", "type_identifier", "field_identifier"],
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => &[
+            "identifier",
+            "property_identifier",
+            "type_identifier",
+            "shorthand_property_identifier",
+            "shorthand_property_identifier_pattern",
+        ],
+        Lang::Python => &["identifier"],
+    }
+}
+
+/// Node kinds whose subtree is an import, so names inside are import uses.
+pub fn import_kinds(lang: Lang) -> &'static [&'static str] {
+    match lang {
+        Lang::Rust => &["use_declaration"],
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => &["import_statement"],
+        Lang::Python => &[
+            "import_statement",
+            "import_from_statement",
+            "future_import_statement",
+        ],
+    }
+}
+
 /// Extracts symbols and imports from a parsed file.
 pub fn extract(lang: Lang, parsed: &Parsed, source: &[u8]) -> Extracted {
     match lang {
