@@ -5,6 +5,7 @@
 //! one extractor module. Extractors walk the tree with plain node access and
 //! use no Tree-sitter queries.
 
+pub mod python;
 pub mod rust;
 pub mod typescript;
 
@@ -156,7 +157,7 @@ pub fn extract(lang: Lang, parsed: &Parsed, source: &[u8]) -> Extracted {
         Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
             typescript::extract(parsed.tree.root_node(), source)
         }
-        Lang::Python => Extracted::default(),
+        Lang::Python => python::extract(parsed.tree.root_node(), source),
     }
 }
 
