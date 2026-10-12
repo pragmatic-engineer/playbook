@@ -105,6 +105,7 @@ fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
     for item in items {
         let text = item.as_str().ok_or_else(bad)?;
         let rest = match text.strip_prefix("~/") {
+            Some(rest) if rest.starts_with('/') => return Err(bad()),
             Some(rest) => rest,
             None if text.starts_with('/') => text,
             None => return Err(bad()),
@@ -191,4 +192,41 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         value: value.to_string(),
         constraint,
     })
+}
+
+#[cfg(test)]
+mod root_list_tests {
+    use super::validate_root_list;
+    use serde_json::json;
+
+    #[test]
+    fn the_root_list_accepts_only_deep_clean_absolute_or_home_paths() {
+        for good in [
+            json!([]),
+            json!(["~/a"]),
+            json!(["~/a/b/"]),
+            json!(["/opt/data"]),
+            json!(["/private/tmp"]),
+        ] {
+            assert!(validate_root_list("k", &good).is_ok(), "{good}");
+        }
+        for bad in [
+            json!("~/a"),
+            json!([1]),
+            json!(["/"]),
+            json!(["/tmp"]),
+            json!(["~"]),
+            json!(["~/"]),
+            json!(["~/."]),
+            json!(["~//etc"]),
+            json!(["rel/dir"]),
+            json!(["/a/b/../c"]),
+            json!(["/a/b/*"]),
+            json!(["/a/it's"]),
+            json!(["/a/b\\c"]),
+            json!(["/a/$X"]),
+        ] {
+            assert!(validate_root_list("k", &bad).is_err(), "{bad}");
+        }
+    }
 }

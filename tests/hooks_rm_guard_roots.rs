@@ -36,20 +36,11 @@ impl Fx {
     fn new() -> Fx {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let run = playbook::testing::run_id();
-        // Outside the real ~/.cache and /tmp: the guard under test never sees
-        // the real home, and this path is allowed by no derived root.
-        let base = fs::canonicalize(
-            PathBuf::from(std::env::var("HOME").expect("HOME"))
-                .join(".cache/playbook-tests")
-                .join(format!("rmroots-{run}-{n}")),
-        )
-        .unwrap_or_else(|_| {
-            let dir = PathBuf::from(std::env::var("HOME").expect("HOME"))
-                .join(".cache/playbook-tests")
-                .join(format!("rmroots-{run}-{n}"));
-            fs::create_dir_all(&dir).expect("base");
-            fs::canonicalize(dir).expect("canonical base")
-        });
+        // Cargo's per-target scratch folder: outside every root the guard
+        // derives, and independent of the developer's real HOME and /tmp.
+        let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("rmroots-{run}-{n}"));
+        fs::create_dir_all(&base).expect("base");
+        let base = fs::canonicalize(base).expect("canonical base");
         let home = base.join("home");
         let repo = base.join("org/repo");
         let wt_root = base.join("org/.worktrees");
@@ -60,6 +51,10 @@ impl Fx {
             let out = Command::new("git")
                 .arg("-C")
                 .arg(dir)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
                 .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
                 .args(["-c", "commit.gpgsign=false"])
                 .args(args)
@@ -101,6 +96,8 @@ impl Fx {
             .env("HOME", &self.home)
             .env_remove("PLAYBOOK_SAFE_ROOTS")
             .env_remove("WORKTREE_BASE_DIR")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
             .current_dir(cwd);
         for (k, v) in extra_env {
             spawn.env(k, v);
@@ -304,7 +301,8 @@ fn symlinks_and_dot_dot_are_judged_where_they_really_point() {
         (format!("{d} -rf {}/out-link", s(&fx.repo)), true),
         (format!("{d} -rf {}/out-link/.ssh", s(&fx.repo)), true),
         (format!("{d} -rf {h}/into-tmp/sub"), false),
-        (format!("{d} -rf {h}/into-tmp"), false),
+        (format!("{d} -rf {h}/into-tmp/"), false),
+        (format!("{d} -rf {h}/into-tmp"), true),
         (format!("{d} -rf {h}/to-tmp-root"), true),
         (format!("{d} -rf {t}/to-home/* "), true),
     ];
@@ -413,7 +411,14 @@ fn the_config_key_rejects_dangerous_or_malformed_values() {
         r#"["/a/b/../c"]"#,
         r#"["~/a/../.."]"#,
         r#"["/a/b/*"]"#,
+        r#"["~//etc"]"#,
         r#"["$HOME/x"]"#,
+        r#"["/opt/$USER/x"]"#,
+        r#"["/opt/a`b`/x"]"#,
+        r#"["/opt/it's/x"]"#,
+        r#"["/opt/a\\b/x"]"#,
+        r#"["/opt/a\"b/x"]"#,
+        r#"["/opt/a{b,c}/x"]"#,
         r#"[1]"#,
     ] {
         let out = fx.config_set(bad);
@@ -445,7 +450,14 @@ fn a_worktree_base_dir_from_the_environment_is_allowed_contents_only() {
         assert_eq!(fx.denied(&cmd, &fx.repo, &env), want, "{cmd}");
     }
     // A hostile value must not widen anything.
-    for bad in ["/", &s(&fx.home), "relative"] {
+    // A relative value must be ignored, not resolved against the cwd.
+    let relative = [("WORKTREE_BASE_DIR", "../sibling")];
+    let cmd = format!("{d} -rf {}/x", s(&fx.base.join("org/sibling")));
+    assert!(
+        fx.denied(&cmd, &fx.repo, &relative),
+        "relative base is ignored"
+    );
+    for bad in ["/", &s(&fx.home)] {
         let env = [("WORKTREE_BASE_DIR", bad)];
         let cmd = format!("{d} -rf {}/.ssh", s(&fx.home));
         assert!(fx.denied(&cmd, &fx.repo, &env), "base {bad:?}");
@@ -478,4 +490,58 @@ fn the_denial_message_names_the_scratch_roots_and_the_config_key() {
             "message should mention {needle}: {text}"
         );
     }
+}
+
+#[test]
+fn a_colon_separated_value_is_split_into_roots() {
+    let fx = Fx::new();
+    let d = rm();
+    assert!(fx.config_set("~/a:/opt/data/scratch").status.success());
+    for (cmd, want) in [
+        (format!("{d} -rf ~/a/x"), false),
+        (format!("{d} -rf /opt/data/scratch/x"), false),
+        (format!("{d} -rf /opt/data/scratch"), true),
+        (format!("{d} -rf /opt/data"), true),
+        (format!("{d} -rf ~/a"), true),
+    ] {
+        assert_eq!(fx.denied(&cmd, &fx.repo, &[]), want, "{cmd}");
+    }
+}
+
+#[test]
+fn a_configured_root_that_links_to_home_or_the_filesystem_root_is_dropped() {
+    let fx = Fx::new();
+    let d = rm();
+    for target in [s(&fx.home), "/".to_string()] {
+        let link = fx.home.join("scratch-link");
+        let _ = fs::remove_file(&link);
+        symlink(&target, &link).expect("link");
+        assert!(fx.config_set(r#"["~/scratch-link"]"#).status.success());
+        for cmd in [
+            format!("{d} -rf {}/.ssh", s(&fx.home)),
+            format!("{d} -rf ~/scratch-link/.ssh"),
+            format!("{d} -rf /etc/x"),
+        ] {
+            assert!(fx.denied(&cmd, &fx.repo, &[]), "{target}: {cmd}");
+        }
+    }
+}
+
+#[test]
+fn quoting_braces_and_shell_syntax_cannot_smuggle_a_path_out() {
+    let fx = Fx::new();
+    let (d, t, r) = (rm(), s(&fx.tmp), s(&fx.repo));
+    let cases: Vec<(String, bool)> = vec![
+        (format!("{d} -rf {r}/{{a,/etc/x}}"), true),
+        (format!("{d} -rf {r}/{{a,b}}"), false),
+        (format!("{d} -rf {r}/{{a,../../x}}"), true),
+        (format!("{d} -rf {t}/pbx-{{a,/etc/x}}"), true),
+        (format!("{d} -rf \"~/.cache/x\""), true),
+        (format!("{d} -rf '~'"), true),
+        (format!("{d} -rf {t}/sub(:h)"), true),
+        (format!("{d} -rf {t}/sub<x"), true),
+        (format!("cd {t} && {d} -rf \"{t}/sub\""), false),
+        (format!("cd {t} && {d} -rf sub"), true),
+    ];
+    check(&fx, &fx.repo, &cases);
 }
