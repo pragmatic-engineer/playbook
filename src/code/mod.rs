@@ -9,6 +9,7 @@
 //! only through `host`.
 
 pub mod cli;
+pub mod context;
 pub mod db;
 pub mod host;
 pub mod index;
@@ -134,6 +135,27 @@ pub fn find_refs(cwd: &Path, opts: &refs::RefsOptions) -> Result<RefsOutcome, St
     let drift = status::quick_check(&conn, &root)?;
     let result = refs::find_refs(&conn, &root, opts)?;
     Ok(RefsOutcome {
+        index_path,
+        drift,
+        result,
+    })
+}
+
+/// A context answer plus the freshness of the index it came from.
+pub struct ContextOutcome {
+    pub index_path: PathBuf,
+    pub drift: status::Drift,
+    pub result: context::ContextResult,
+}
+
+/// Gathers code for a task described in words, for the repository containing `cwd`.
+pub fn build_context(cwd: &Path, opts: &context::ContextOptions) -> Result<ContextOutcome, String> {
+    let root = location::repo_root(cwd)?;
+    let index_path = location::index_path()?;
+    let conn = db::open_index(&index_path, db::OpenMode::Query).map_err(|e| e.to_string())?;
+    let drift = status::quick_check(&conn, &root)?;
+    let result = context::build(&conn, &root, opts)?;
+    Ok(ContextOutcome {
         index_path,
         drift,
         result,
