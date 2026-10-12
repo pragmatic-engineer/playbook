@@ -37,6 +37,8 @@ pub struct Envelope {
     pub truncated: bool,
     pub omitted: usize,
     pub warnings: Vec<String>,
+    /// Extra counters, printed as `stats` only when present.
+    pub stats: Option<Value>,
 }
 
 impl Envelope {
@@ -54,6 +56,7 @@ impl Envelope {
             truncated: false,
             omitted: 0,
             warnings: Vec::new(),
+            stats: None,
         }
     }
 
@@ -70,6 +73,9 @@ impl Envelope {
         doc.insert("truncated".into(), json!(self.truncated));
         doc.insert("omitted".into(), json!(self.omitted));
         doc.insert("warnings".into(), json!(self.warnings));
+        if let Some(stats) = &self.stats {
+            doc.insert("stats".into(), stats.clone());
+        }
         let mut text = Value::Object(doc).to_string();
         text.push('\n');
         text
