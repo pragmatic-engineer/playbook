@@ -46,6 +46,7 @@ fn run_hook(name: playbook::HookName) {
 
 fn main() {
     restore_sigpipe();
+    playbook::usage_host::install();
     // Hot paths skip building the clap tree. See `fastpath`.
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     match playbook::fastpath::classify(&args) {

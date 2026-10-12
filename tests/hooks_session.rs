@@ -2300,3 +2300,47 @@ fn a_huge_handoff_is_cut_so_the_whole_context_stays_under_the_harness_cap() {
         "memory still fits: {context}"
     );
 }
+
+#[test]
+fn a_resume_clears_the_auto_cost_state_but_a_compaction_keeps_it() {
+    // Arrange
+    let repo_dir = scratch_dir("resume-repo");
+    let home = scratch_dir("resume-home");
+    init_repo_with_origin(&repo_dir, "https://github.com/acme/widgets.git");
+    let session = home.join(".config/playbook/runtime/sid-resume");
+    let markers = [
+        "auto-cost.json",
+        "warned",
+        "warned-abc",
+        "budget-note",
+        "agent-budget-note",
+        "park-note.md",
+        "park-note-abc.md",
+        "auto-advice-given",
+        "parked",
+    ];
+    let seed = || {
+        fs::create_dir_all(&session).expect("session dir");
+        for name in markers {
+            fs::write(session.join(name), "x").expect("marker");
+        }
+    };
+
+    // Act and Assert: compaction is the same session again
+    seed();
+    let compact = r#"{"session_id":"sid-resume","source":"compact"}"#;
+    run_hook("session-init", &repo_dir, &home, compact, &[]);
+    for name in markers {
+        assert!(
+            session.join(name).exists(),
+            "{name} must survive a compaction"
+        );
+    }
+
+    // Act and Assert: a resume starts a new count
+    let resume = r#"{"session_id":"sid-resume","source":"resume"}"#;
+    run_hook("session-init", &repo_dir, &home, resume, &[]);
+    for name in markers {
+        assert!(!session.join(name).exists(), "{name} must go on a resume");
+    }
+}

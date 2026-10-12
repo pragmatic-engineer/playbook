@@ -52,6 +52,19 @@ const SESSION_COUNTER_FILES: [&str; 8] = [
     "hygiene-level",
 ];
 
+/// Per-session auto mode state: the spend baseline, the warn and budget notes,
+/// the park notes and the advice marker. Cleared on every start except a
+/// compaction, so a resumed session starts a new count.
+const AUTO_STATE_FILES: [&str; 6] = [
+    "parked",
+    "auto-cost.json",
+    "budget-note",
+    "agent-budget-note",
+    "auto-advice-given",
+    "park-note.md",
+];
+const AUTO_STATE_PREFIXES: [&str; 2] = ["warned", "park-note-"];
+
 const DEFAULT_AUTO_LEARN_MAX_AGE_DAYS: i64 = 14;
 
 const DRIFT_SYSTEM_MESSAGE: &str = "\u{26a0} Claude config (settings.json + hooks) has drifted \
@@ -75,6 +88,9 @@ pub fn run(payload: &Payload) {
 
     prepare_memory_store();
     zero_session_state(&dir);
+    if payload.field(".source") != "compact" {
+        clear_auto_state(&dir);
+    }
     clear_statusline_cache();
     // Headless runs (CI, `claude -p`) have no stale worktrees, no person to nudge,
     // and no handoff to consume: they inject nothing unless memory is opted in.
@@ -165,6 +181,25 @@ fn zero_session_state(dir: &str) {
     }
     let now = crate::common::time::now_epoch_secs();
     let _ = fs::write(base.join("start-ts"), now.to_string());
+}
+
+fn clear_auto_state(dir: &str) {
+    if dir.is_empty() {
+        return;
+    }
+    for name in AUTO_STATE_FILES {
+        let _ = fs::remove_file(Path::new(dir).join(name));
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if AUTO_STATE_PREFIXES.iter().any(|p| name.starts_with(p)) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Clear the statusline PR/CI cache entries for the current repo+branch, so

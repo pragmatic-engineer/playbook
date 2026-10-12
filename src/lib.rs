@@ -76,6 +76,7 @@ pub mod ui;
 pub mod uninstall;
 pub mod update;
 pub mod usage;
+pub mod usage_host;
 pub mod worktree;
 
 use clap::{Parser, Subcommand, ValueEnum};

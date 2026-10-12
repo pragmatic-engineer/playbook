@@ -17,7 +17,7 @@ use std::time::Duration;
 pub fn incr_counter(file: &str) -> i64 {
     let path = Path::new(file);
     let lock_path = Path::new(&format!("{file}.lock")).to_path_buf();
-    let (_, next) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
+    let (acquired, next) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
         let current = fs::read_to_string(path)
             .ok()
             .and_then(|contents| contents.trim().parse::<i64>().ok())
@@ -29,12 +29,11 @@ pub fn incr_counter(file: &str) -> i64 {
         write_atomically(path, &next.to_string());
         next
     });
-    // Deliberately unconditional, even though the lock may not have been
-    // acquired: matches the retired shell originals'
-    // `incr_counter`, which both remove the lock directory even after
-    // exhausting every retry. See atomic.rs's module comment for the full
-    // rationale; do not change this to a conditional removal.
-    let _ = fs::remove_dir(&lock_path);
+    // Only release a lock this call took: removing a live holder's lock would
+    // let two writers in at once. A stale lock is cleared on acquire.
+    if acquired {
+        let _ = fs::remove_dir(&lock_path);
+    }
     next
 }
 
@@ -82,6 +81,30 @@ mod tests {
         assert_eq!(got, 2);
         assert_eq!(fs::read_to_string(&file).unwrap(), "2");
 
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fresh_foreign_lock_survives_and_a_stale_one_is_cleared() {
+        // Arrange
+        let root = scratch_dir("counter-foreign-lock");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("cnt");
+        let lock = root.join("cnt.lock");
+        fs::create_dir_all(&lock).unwrap();
+
+        // Act
+        let first = incr_counter(file.to_str().unwrap());
+        let live = lock.exists();
+        let past = std::time::SystemTime::now() - Duration::from_secs(60);
+        fs::File::open(&lock).unwrap().set_modified(past).unwrap();
+        let second = incr_counter(file.to_str().unwrap());
+
+        // Assert
+        assert_eq!((first, second), (1, 2));
+        assert!(live, "a live holder's lock must not be removed");
+        assert!(!lock.exists(), "a stale lock is cleared and released");
         let _ = fs::remove_dir_all(&root);
     }
 
