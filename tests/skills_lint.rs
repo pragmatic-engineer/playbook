@@ -153,14 +153,23 @@ fn lens_reviewers_do_not_load_the_orchestrator_sections() {
 }
 
 #[test]
-fn writing_style_keeps_the_examples_heading_stub() {
+fn writing_style_keeps_the_loading_heading_and_every_reference() {
     let skill = read_skill("writing-style/SKILL.md");
     assert!(
-        skill.lines().any(|l| l.starts_with("## Examples")),
-        "src/pr/rules.rs ends the GitHub slice at this heading"
+        skill
+            .lines()
+            .any(|l| l.starts_with("## Loading the references")),
+        "src/pr/rules.rs ends the core slice at this heading"
     );
-    for name in ["examples", "imperfections", "shell-quoting"] {
-        assert!(skill.contains(&format!("playbook skill ref writing-style {name}")));
+    for name in [
+        "examples",
+        "imperfections",
+        "shell-quoting",
+        "commits-and-prs",
+        "github-review-comments",
+        "github-prohibited",
+    ] {
+        assert!(skill.contains(&format!("`{name}`")), "{name}");
         read_skill(&format!("writing-style/references/{name}.md"));
     }
 }

@@ -1,6 +1,6 @@
 ---
 name: writing-style
-description: Voice, banned-word, and no-dash rules for prose a human reads, such as PRs, review comments, Jira, Confluence, Slack, ADRs, commit messages. Use before writing or posting any.
+description: "Voice, banned-word, and no-dash rules for prose a human reads, such as PRs, review comments, Jira, Confluence, Slack, ADRs, commit messages. Use before writing or posting any."
 ---
 
 # Writing Style
@@ -19,9 +19,7 @@ These rules are MUST-level unless marked SHOULD.
 
 MUST apply these principles to anything written for review: the reviewer is the user, the text is the interface, a question in their head is the cost. Reviewers scan, they don't read.
 
-- Commit messages MUST use a conventional imperative subject under ~50 chars, one change per commit. Add a body only when the why isn't obvious; a sentence or two, or tight bullets.
-- PR descriptions MUST lead with one line of what and why; treat that as the target, not the floor. Add a short bulleted "what changed" only when the diff needs it to be reviewable; link to detail instead of inlining it. Aim for the gist in under 30 seconds, most PRs need fewer words than feel natural to write.
-- Review findings MUST default to one sentence, two at most (the problem, then what breaks). A paragraph is the rare exception for a genuinely non-obvious mechanism, not the normal case.
+- Commit messages, PR descriptions and review findings: length and shape rules are in the references listed under Loading the references.
 - Block and doc comments: see the IRON RULE above.
 - When clarity and consistency conflict, MUST choose clarity.
 
@@ -34,7 +32,7 @@ MUST apply these principles to anything written for review: the reviewer is the 
 - Use short sentences. Default to one line for a reply, a reaction, or a status update; a paragraph is the exception, earned by genuine complexity, not the default.
 - Use active voice. "This breaks the import" not "the import is broken by this."
 - Use data and examples to support claims.
-- Use "you" and "your" to address the reader directly. Exception: in code review comments, use "we" and "this" to stay non-confrontational.
+- Use "you" and "your" to address the reader directly. Code review comments are the exception: see `github-review-comments`.
 - Use first person ("I noticed", "I think", "Done", "Good point").
 - Be conversational, not formulaic.
 - Be kind and respectful.
@@ -44,7 +42,7 @@ MUST apply these principles to anything written for review: the reviewer is the 
 - **Natural pauses.** An ellipsis works... like this. Or a parenthetical aside mid-sentence. Use sparingly.
 - **Imperfect structure.** Don't write perfectly parallel bullet points or flawless topic sentences. Combine two ideas in one bullet. Add something that doesn't fit the pattern. Humans are structured, but not that structured.
 - **Human transitions.** "Plus,", "On top of that,", "The weird thing is", or no transition at all.
-- Short replies and simple inline comments run one to two sentences. A review finding that needs context may use up to three short paragraphs (see When reviewing).
+- Short replies and simple inline comments run one to two sentences. A review finding that needs context may use up to three short paragraphs (see `github-review-comments`).
 - MUST use contractions. "wouldn't" not "would not", "it's" not "it is", "don't" not "do not". Formal uncontracted forms are an immediate AI tell.
 - Casual Australian slang is fine (sparingly, 1 in 5-6 comments): "no worries", "too easy", "reckon we should", "keen to hear your thoughts", "should be sweet". Keep it light, never rude.
 
@@ -81,76 +79,14 @@ very, really, literally, actually, certainly, probably, basically, delve, embark
 
 A second, distinct category: phrases that perform depth or authority instead of stating a fact ("smart-ass" tone, not flowery vocabulary). Never appear in generated content: "load-bearing", "worth stating plainly", "here's the honest truth", "the real tension", "carry the argument", "at its core", "what really matters", "the deeper issue". State the fact; don't announce that you're about to state it.
 
+
 ---
 
-# GitHub-Specific Rules
+## Loading the references
 
-The rules below apply to content posted to GitHub (review comments, PR replies, issue comments). They extend the universal rules above. Before posting a review comment or a reply, read `playbook skill ref writing-style imperfections` and `playbook skill ref writing-style examples`. Before a `gh api -f body=` call, read `playbook skill ref writing-style shell-quoting`.
+This file holds the universal rules. Load the reference that matches the prose you write, with `playbook skill ref writing-style <name>`, which prints the file path to read:
 
-## Context-Specific Rules
-
-### When reviewing (posting as a reviewer)
-
-- **Trust the author.** Assume they know the language and the codebase. Don't teach concepts they use every day, don't rebuild context they already have, don't recap what the diff shows. Say the problem, not the background to it.
-- **One sentence when possible, two at most: the problem, then why.** Use a direct causal template: "this won't work because X, do Y instead" or "this will cause X because Y." State the defect and its cause, then stop. A second sentence only when the mechanism is genuinely non-obvious (a subtle race, a data-loss path you can't see from the diff). A dev skims a review comment for the gist, not an essay: plainest words available, short sentences, active voice, no filler.
-- **The `blocking:` label already argues priority. Don't argue it again.** State the defect and stop; never add a clause about why it is worth fixing, what it would cost to ignore, or why now is the right time. "blocking: this leaks the session token to the client" is enough. Not "blocking: this leaks the session token, which matters because an attacker could hijack the session, and it costs nothing to fix now." The label carries the urgency; the sentence only needs the defect.
-- **Avoid jargon.** Say things in plain words a teammate would use out loud. If a technical term is unavoidable, add what it means in a few words. Prefer "anyone can read another user's record" over "IDOR".
-- **No word that could mean more than one thing.** If a term is ambiguous in context, use the plainer, unambiguous one instead.
-- Assume the reader is a senior dev.
-- Do NOT pad with blank lines or formatting. The label + the comment is enough.
-- Lead with what you found, not with compliments. Skip "looks good" and "solid approach" openers.
-- Don't write comparison reports. "X uses A while Y uses B. Works because C. Worth aligning to D." is a static-analyser pattern. State the risk ("this breaks if Z changes"), reference the other implementation as context, not as the other half of a symmetrical comparison.
-- When suggesting a fix, use natural language ("consider changing X to Y", "this should probably be", "you might want to").
-- **No fix in mind, say so.** State the problem and stop. A guessed-at fix you don't actually believe in is worse than naming a real gap and leaving the fix to the author.
-- **A code snippet is a last resort**, only when the problem or the fix is too complex to explain in a sentence or two. Prefer pseudocode over real, runnable code: sketch the idea in a few lines, not a full implementation. A developer is attached to their own code, and a ready-made solution reads as presumptuous; pseudocode hands over the idea and leaves the implementation to them. Reserve real code for GitHub's own ```suggestion``` block, a literal, applicable diff for a mechanical fix, never for illustrating an approach.
-- For nitpicks and minor suggestions, soften the tone.
-- Start each review comment with a conventional comment label, no bold formatting: `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. A human typing fast doesn't wrap labels in `**`. Use `blocking:` for a finding that must be fixed before merge; reserve `issue:` for a real problem that is not merge-blocking. `suggestion:`, `nitpick:`, and `question:` are non-blocking by definition, so they never take the `blocking:` label.
-- **Nitpicks must be lightweight.** If the reason is obvious from the code, state the finding and stop. Don't trace the history of why the code exists.
-- **Don't state implications the reader can draw themselves.** "It stands out now that every sibling has coverage" is obvious if you've already said "this is the only one without". Stop after the fact.
-- **Don't explain what code does when the reader can see it.** State what's wrong, suggest the action (update or remove, pick one), stop.
-
-### When replying to feedback (posting as PR author)
-
-Reply drafts must read like a human typed them quickly in a code review thread.
-
-- **One sentence is ideal. Two max.** Three is too many. A paragraph is never acceptable in a code review reply. If you need two sentences, the second adds a fact, not a justification.
-- **Skip the opener.** Go straight to substance. "Behind a feature flag for now." not "Good point. I'll put it behind a feature flag for now." Most replies need no acknowledgement at all. Praise-style openers in particular are immediate AI tells: NEVER lead with "Good catch.", "Nice catch.", "Great catch.", "You're right.", "Great point.", "Good point.", "Valid point."
-- **Never paraphrase the reviewer's point back.** They just said it. Repeating it wastes space and sounds like a chatbot confirming receipt.
-- **Code-change replies are especially terse.** When the reply is paired with a fix in the same push, the diff is the explanation. Default to one short sentence: "Fixed.", "Done.", "Ok, done.", "Sorted." A brief locator tag is fine when it adds value ("Done, added (v || null) normalisation for notes."). NEVER rationalise the fix. NEVER restate the reviewer's finding before saying "fixed".
-- **Only explain when you deviated.** If you applied the reviewer's suggestion verbatim, no rationale is needed. Spell out reasoning ONLY when (a) you took a different approach, (b) you applied part of a multi-option suggestion and deferred the rest, or (c) you intentionally disagreed. Even then, one clause, never a paragraph.
-- **Acknowledgements must be terse when used.** One or two neutral words: "Ok.", "Fair point.", "Yeah.", "My bad.", "Sure.", "Will do.", "Noted." Vary across a batch.
-- **No trailing hedges.** Don't end with "but good to be aware of", "worth keeping in mind", "something to watch for", "we can revisit if needed." Say the thing and stop.
-- **Match the reviewer's register.** Casual reviewer gets a casual reply. Formal gets formal.
-- When explaining a design decision, state the reason in one clause. "They're distinct in Postgres so this is intentional." not a paragraph about trade-offs.
-- When disagreeing, explain the reasoning respectfully. Still one sentence.
-- **Australian slang is fine sparingly.** "Should be sweet.", "Too easy.", "Reckon that's fine."
-
-**Quote standalone comments:** When replying to non-threaded comments (review body comments, issue-level comments), prefix the reply with a blockquote of the original comment for context. Inline review thread replies don't need this since the platform threads them automatically.
-
-### When creating PRs
-
-- Be concise: 1-3 sentences per reply.
-- For code changes done in response to feedback: "Done, <what was changed>."
-- For questions: answer directly and briefly.
-- For ticket creation: "Tracked in <TICKET-ID>."
-- **Test Plan sections:** only include manual verification steps a reviewer cannot get from CI. Do NOT list CI results, test counts, or generic statements. If there are no manual steps, omit the Test Plan section entirely or write "N/A". Never write filler like "Covered by unit tests".
-
-## Prohibited GitHub Content
-
-Patterns that flag content as non-human. NEVER appear in GitHub-posted content:
-
-1. **Git commit hashes/SHAs:** never reference commits by hash (e.g., "In f661154", "fixed in abc123"). Humans don't cite commit hashes in conversation.
-2. **Escaped apostrophes in double-quoted strings:** `"don\'t"` posts as `don'''t`. Just write `"don't"`.
-3. **Paraphrasing openers:** never echo the reviewer's point in a noun phrase ("Valid concern on the behavioural inconsistency", "Great observation about the null handling"). Humans say "Ok.", "Fair point.", "Yeah.", "My bad." then move to substance.
-4. **Finding numbers (1, 2, 3) or coloured circle emojis** in posted content.
-5. **Formatted section headers** like "File-Level Findings" or "Summary" grouping multiple findings under one banner, in posted content (these are local report artifacts). This does not apply to the bare per-comment label (`blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`) that starts each individual finding.
-6. **"Fix:" prefix on suggestions** when posted to GitHub (sounds robotic).
-7. **Bullet-point summaries of findings** (that's what inline comments are for).
-8. **Emojis** unless the project convention includes them.
-9. **LLM hedging phrases:** "if you feel strongly", "I can see the trade-off", "that's a fair point". Too deferential. State your position.
-10. **Praise openers + restate-the-finding pattern:** "Good catch.", "Nice catch.", "Great catch.", "You're right.", "Great point." Fix the thing and move on.
-11. **Restating the reviewer's finding in your reply when a code fix landed.** Diff is the explanation. Prose summary of the fix is an AI tell.
-
-## Examples
-
-Before posting a review comment or a reply, read `playbook skill ref writing-style examples`.
+- Commit message, PR title or PR body: `commits-and-prs`.
+- Review comment, reply to feedback, or issue or PR comment on GitHub: `github-review-comments`, plus `examples` and `imperfections`.
+- Anything posted to GitHub, including a PR body: `github-prohibited`.
+- A `gh api -f body=` call: `shell-quoting`.

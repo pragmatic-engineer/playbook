@@ -9,10 +9,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// The heading that ends the universal rules in writing-style's SKILL.md.
+const CORE_END: &str = "## Loading the references";
+
 /// Where a cut ends.
 enum End<'a> {
     /// The line before the first later line starting with this text.
     Before(&'a str),
+    /// The last line of the text.
+    Eof,
 }
 
 /// Lines from the first one starting with `start` up to, and not including,
@@ -20,14 +25,17 @@ enum End<'a> {
 /// opens another range, as `sed -n '/a/,/b/p'` does. A range that never finds
 /// its end runs to the last line, which is dropped, as `sed '$d'` drops it.
 fn cut(text: &str, start: Option<&str>, end: End<'_>) -> Vec<String> {
-    let End::Before(end) = end;
+    let (end, to_eof) = match end {
+        End::Before(e) => (e, false),
+        End::Eof => ("", true),
+    };
     let lines: Vec<&str> = text.lines().collect();
     let mut out: Vec<&str> = Vec::new();
     let mut inside = start.is_none();
     let mut first = true;
     for line in &lines {
         if inside {
-            if !(first && start.is_none()) && line.starts_with(end) {
+            if !to_eof && !(first && start.is_none()) && line.starts_with(end) {
                 // The end line is part of sed's range but `sed '$d'` removes it.
                 inside = false;
                 continue;
@@ -40,7 +48,7 @@ fn cut(text: &str, start: Option<&str>, end: End<'_>) -> Vec<String> {
             first = false;
         }
     }
-    if inside {
+    if inside && !to_eof {
         // Ran to the end of the file: `sed '$d'` removes the last line.
         out.pop();
     }
@@ -75,23 +83,33 @@ pub fn extract_commit(plugin_root: &Path, out_dir: &Path) -> Result<PathBuf, Str
     })?;
     fs::create_dir_all(out_dir)
         .map_err(|e| format!("could not create {}: {e}", out_dir.display()))?;
+    let cp = plugin_root.join("skills/writing-style/references/commits-and-prs.md");
+    let cp_text = fs::read_to_string(&cp).map_err(|_| {
+        format!(
+            "{} not found under $CLAUDE_PLUGIN_ROOT/skills/. Read the full skill via the Skill tool instead.",
+            cp.display()
+        )
+    })?;
     let mut lines = cut(
         &text,
         Some("> **IRON RULE:** MUST NEVER use em dashes"),
         End::Before("> **IRON RULE:**"),
     );
     lines.extend(cut(
-        &text,
+        &cp_text,
         Some("- Commit messages MUST"),
-        End::Before("- PR descriptions"),
+        End::Before("## Pull requests"),
     ));
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
     lines.push(String::new());
     lines.extend(cut(&text, Some("## Banned Words"), End::Before("---")));
     let has = |s: &str| lines.iter().any(|l| l.contains(s));
     if !(has("IRON RULE") && has("Commit messages MUST") && has("delve")) {
         return Err("writing-style commit extraction is missing an expected rule; read the full skill via the Skill tool instead.".into());
     }
-    if has("PR descriptions MUST") || has("# GitHub-Specific Rules") {
+    if has("PR descriptions MUST") || has("## Pull requests") {
         return Err("writing-style commit extraction ran past its end marker; read the full skill via the Skill tool instead.".into());
     }
     let path = out_dir.join("writing-style-commit.md");
@@ -112,6 +130,9 @@ pub fn extract(plugin_root: &Path, out_dir: &Path) -> Result<Extracted, String> 
         })
     };
     let ws_text = read(&ws)?;
+    let refs = plugin_root.join("skills/writing-style/references");
+    let prs_text = read(&refs.join("commits-and-prs.md"))?;
+    let github_text = read(&refs.join("github-prohibited.md"))?;
     let es_text = read(&es)?;
     fs::create_dir_all(out_dir)
         .map_err(|e| format!("could not create {}: {e}", out_dir.display()))?;
@@ -121,13 +142,9 @@ pub fn extract(plugin_root: &Path, out_dir: &Path) -> Result<Extracted, String> 
         github: out_dir.join("writing-style-github.md"),
         eng: out_dir.join("eng-standards.md"),
     };
-    let core = cut(&ws_text, None, End::Before("# GitHub-Specific Rules"));
-    let prs = cut(&ws_text, Some("### When creating PRs"), End::Before("## "));
-    let github = cut(
-        &ws_text,
-        Some("## Prohibited GitHub Content"),
-        End::Before("## Examples"),
-    );
+    let core = cut(&ws_text, None, End::Before(CORE_END));
+    let prs = cut(&prs_text, Some("## Pull requests"), End::Eof);
+    let github = cut(&github_text, Some("# Prohibited GitHub"), End::Eof);
     let eng = cut(
         &es_text,
         Some("### Readiness"),
@@ -195,13 +212,12 @@ mod tests {
         let ws = fs::read_to_string(repo_root().join("skills/writing-style/SKILL.md")).unwrap();
         let es =
             fs::read_to_string(repo_root().join("skills/engineering-standards/SKILL.md")).unwrap();
-        let core = cut(&ws, None, End::Before("# GitHub-Specific Rules"));
-        let prs = cut(&ws, Some("### When creating PRs"), End::Before("## "));
-        let github = cut(
-            &ws,
-            Some("## Prohibited GitHub Content"),
-            End::Before("## Examples"),
-        );
+        let refs = repo_root().join("skills/writing-style/references");
+        let cp = fs::read_to_string(refs.join("commits-and-prs.md")).unwrap();
+        let gh = fs::read_to_string(refs.join("github-prohibited.md")).unwrap();
+        let core = cut(&ws, None, End::Before(CORE_END));
+        let prs = cut(&cp, Some("## Pull requests"), End::Eof);
+        let github = cut(&gh, Some("# Prohibited GitHub"), End::Eof);
         let eng = cut(
             &es,
             Some("### Readiness"),
@@ -220,12 +236,12 @@ mod tests {
             ]
         );
         assert!(core.iter().any(|l| l.contains("IRON RULE")));
-        assert!(bytes(&core) < 14_000, "core is {} bytes", bytes(&core));
+        assert!(bytes(&core) < 12_000, "core is {} bytes", bytes(&core));
 
-        assert_eq!(headings(&prs), ["### When creating PRs"]);
-        assert!(bytes(&prs) < 800);
+        assert_eq!(headings(&prs), ["## Pull requests", "## When creating PRs"]);
+        assert!(bytes(&prs) < 1_000);
 
-        assert_eq!(headings(&github), ["## Prohibited GitHub Content"]);
+        assert_eq!(headings(&github), ["# Prohibited GitHub Content"]);
         assert!(github.iter().any(|l| l.starts_with("11. ")));
         assert!(bytes(&github) < 2_500);
 
@@ -249,9 +265,9 @@ mod tests {
     }
 
     #[test]
-    fn the_examples_heading_stub_stays_so_the_github_slice_has_an_end() {
+    fn the_loading_heading_stays_so_the_core_slice_has_an_end() {
         let ws = fs::read_to_string(repo_root().join("skills/writing-style/SKILL.md")).unwrap();
-        assert!(ws.lines().any(|l| l.starts_with("## Examples")));
+        assert!(ws.lines().any(|l| l.starts_with(CORE_END)));
     }
 
     #[test]
