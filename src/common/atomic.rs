@@ -18,6 +18,11 @@
 //! forever waiting on a lock; "rare torn write under sustained contention"
 //! was chosen deliberately over "hook that never returns".
 //!
+//! Known gap: the stale check and its `remove_dir` are two steps, so two
+//! callers that both see one dead lock as stale can both end up holding a
+//! lock. Treat these locks as fail-open guards against torn writes, never as
+//! strict mutual exclusion.
+//!
 //! `with_dir_lock` reports whether THIS call was the one that created the
 //! lock directory, and leaves removing it entirely up to the caller: a
 //! caller that never acquired the lock must not remove a directory another
@@ -40,15 +45,37 @@ use std::time::Duration;
 /// returns `(acquired, result)`, where `acquired` says whether this call
 /// actually created `lock_path`, so the caller can decide for itself whether
 /// removing it afterward is safe.
+///
+/// A lock directory left by a killed holder is removed first when it is older
+/// than [`STALE_LOCK_AGE`], so no caller waits out its retry budget and then
+/// runs unguarded forever. Use [`with_dir_lock_aged`] when the critical
+/// section can legitimately run longer than that.
 pub(crate) fn with_dir_lock<T>(
     lock_path: &Path,
     retries: u32,
     delay: Duration,
     f: impl FnOnce() -> T,
 ) -> (bool, T) {
-    let acquired = acquire_dir_lock(lock_path, retries, delay);
+    with_dir_lock_aged(lock_path, retries, delay, STALE_LOCK_AGE, f)
+}
+
+/// [`with_dir_lock`] with a caller-chosen `stale_age`, for a critical section
+/// (copying a store) that outlives [`STALE_LOCK_AGE`].
+pub(crate) fn with_dir_lock_aged<T>(
+    lock_path: &Path,
+    retries: u32,
+    delay: Duration,
+    stale_age: Duration,
+    f: impl FnOnce() -> T,
+) -> (bool, T) {
+    let acquired = acquire_dir_lock_aged(lock_path, retries, delay, stale_age);
     (acquired, f())
 }
+
+/// Stale age for a lock held across a long copy (a store or a checkout). Every
+/// taker of such a lock must use the same age, or the shortest one steals a
+/// live holder's lock.
+pub(crate) const LONG_LOCK_STALE_AGE: Duration = Duration::from_secs(300);
 
 /// A lock directory older than this belongs to a holder that died inside its
 /// critical section, which takes well under a second.
@@ -102,6 +129,17 @@ pub(crate) fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
 /// Try to `mkdir` `lock_path`, retrying up to `retries` times with `delay`
 /// between attempts. Returns whether this call created the directory.
 pub(crate) fn acquire_dir_lock(lock_path: &Path, retries: u32, delay: Duration) -> bool {
+    acquire_dir_lock_aged(lock_path, retries, delay, STALE_LOCK_AGE)
+}
+
+/// [`acquire_dir_lock`] that treats a lock older than `stale_age` as left by a
+/// dead holder, for a critical section longer than [`STALE_LOCK_AGE`].
+pub(crate) fn acquire_dir_lock_aged(
+    lock_path: &Path,
+    retries: u32,
+    delay: Duration,
+    stale_age: Duration,
+) -> bool {
     let mut attempts = 0;
     loop {
         if fs::create_dir(lock_path).is_ok() {
@@ -110,7 +148,7 @@ pub(crate) fn acquire_dir_lock(lock_path: &Path, retries: u32, delay: Duration) 
         if attempts == 0 {
             // A holder killed mid-section leaves its directory behind; clear
             // it once and try again instead of waiting out the whole budget.
-            remove_stale_lock_dir(lock_path, STALE_LOCK_AGE);
+            remove_stale_lock_dir(lock_path, stale_age);
             if fs::create_dir(lock_path).is_ok() {
                 return true;
             }
@@ -231,6 +269,69 @@ pub fn make_db_file_private(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_lock_is_healed_by_with_dir_lock_itself() {
+        let root = scratch_dir("atomic-stale-heal");
+        let lock = root.join("x.lock");
+        fs::create_dir_all(&lock).unwrap();
+        age_dir(&lock, STALE_LOCK_AGE * 3);
+        let started = std::time::Instant::now();
+
+        let (acquired, ()) = with_dir_lock(&lock, 50, Duration::from_millis(100), || {});
+
+        assert!(acquired, "a dead holder's lock must not block forever");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fresh_lock_is_respected() {
+        let root = scratch_dir("atomic-fresh-keep");
+        let lock = root.join("x.lock");
+        fs::create_dir_all(&lock).unwrap();
+
+        let (acquired, ()) = with_dir_lock(&lock, 3, Duration::from_millis(5), || {});
+
+        assert!(!acquired);
+        assert!(lock.exists(), "a live holder's lock is never removed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_older_than_default_but_younger_than_the_custom_age_is_kept() {
+        let root = scratch_dir("atomic-custom-age");
+        let lock = root.join("x.lock");
+        fs::create_dir_all(&lock).unwrap();
+        age_dir(&lock, STALE_LOCK_AGE * 3);
+
+        let (acquired, ()) = with_dir_lock_aged(
+            &lock,
+            3,
+            Duration::from_millis(5),
+            STALE_LOCK_AGE * 10,
+            || {},
+        );
+
+        assert!(!acquired);
+        assert!(lock.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_append_recovers_from_a_stale_lock() {
+        let root = scratch_dir("atomic-append-stale-with-lock");
+        let file = root.join("a.log");
+        let lock = root.join("a.log.lock");
+        fs::create_dir_all(&lock).unwrap();
+        age_dir(&lock, STALE_LOCK_AGE * 3);
+
+        atomic_append(file.to_str().unwrap(), "hello");
+
+        assert_eq!(fs::read_to_string(&file).unwrap(), "hello\n");
+        assert!(!lock.exists(), "the healed lock is released afterward");
+    }
 
     #[test]
     fn appends_two_lines_in_order() {

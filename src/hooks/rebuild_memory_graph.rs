@@ -10,7 +10,7 @@
 //! `memory-anchors.rs` (the sole reader of the file this hook writes) must
 //! change in lockstep with this one; they ship in the same commit on purpose.
 
-use crate::common::atomic::with_dir_lock;
+use crate::common::atomic::{with_dir_lock_aged, LONG_LOCK_STALE_AGE};
 use crate::common::home_dir;
 use crate::common::paths::memory_dir;
 use crate::common::payload::Payload;
@@ -787,9 +787,15 @@ pub fn rebuild_now() -> Result<(), RebuildError> {
 fn rebuild() -> Result<(), RebuildError> {
     let mem_dir = memory_dir();
     let lock_path = mem_dir.join("memory.graph.json.lock");
-    let (acquired, result) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
-        rebuild_locked(&mem_dir)
-    });
+    // The memory migration holds this same lock across a copy, so a rebuild
+    // must use its stale age or it would steal a live migration's lock.
+    let (acquired, result) = with_dir_lock_aged(
+        &lock_path,
+        50,
+        Duration::from_millis(10),
+        LONG_LOCK_STALE_AGE,
+        || rebuild_locked(&mem_dir),
+    );
     if acquired {
         let _ = fs::remove_dir(&lock_path);
     }

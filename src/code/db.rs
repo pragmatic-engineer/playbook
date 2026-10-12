@@ -6,6 +6,7 @@
 //! delete anything. Connection setup follows the usage store's ordering.
 
 use super::host;
+use crate::common::sqlite::{retry_busy, OPEN_BUDGET};
 use rusqlite::{Connection, ErrorCode};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -214,8 +215,11 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
     let conn = Connection::open(path).map_err(|e| step(path, "open the database", e))?;
     conn.busy_timeout(BUSY_TIMEOUT)
         .map_err(|e| step(path, "set busy_timeout", e))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| step(path, "set journal_mode=WAL", e))?;
+    retry_busy(
+        || conn.pragma_update(None, "journal_mode", "WAL"),
+        OPEN_BUDGET,
+    )
+    .map_err(|e| step(path, "set journal_mode=WAL", e))?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(|e| step(path, "set foreign_keys", e))?;
     conn.pragma_update(None, "synchronous", "NORMAL")
@@ -240,7 +244,7 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
     if mode == OpenMode::Query {
         return Err(DbError::NeedsRebuild(rebuild_hint(path, "is empty")));
     }
-    conn.execute_batch(SCHEMA_SQL)
+    retry_busy(|| conn.execute_batch(SCHEMA_SQL), OPEN_BUDGET)
         .map_err(|e| step(path, "create the schema", e))?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|e| step(path, "set user_version", e))?;
