@@ -221,7 +221,7 @@ Example: `playbook code search retry --lang python`
 - `<QUERY>`: Words to look for
 - `--text`: Search indexed text only
 - `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
-- `--lang <LANG>`: Only files of this language: rust, typescript, javascript or python
+- `--lang <LANG>`: Only files of this language: rust, typescript, javascript or python (one of `rust`, `typescript`, `javascript`, `python`)
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document
 
@@ -239,13 +239,13 @@ Example: `playbook code status --json`
 
 Find where a name is declared
 
-Matches the name, then the name ignoring case, then the name as a prefix. A dotted or scoped name matches the qualified name first.
+Matches the exact qualified name first (a top level symbol's qualified name is its plain name), then the name, then the name ignoring case, then the name as a prefix.
 
 Example: `playbook code symbol PaymentService --kind class`
 
 - `<NAME>`: The name to look up
 - `--kind <KIND>`: Only this kind, for example `function`, `class` or `method`
-- `--lang <LANG>`: Only files of this language: rust, typescript, javascript or python
+- `--lang <LANG>`: Only files of this language: rust, typescript, javascript or python (one of `rust`, `typescript`, `javascript`, `python`)
 - `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document

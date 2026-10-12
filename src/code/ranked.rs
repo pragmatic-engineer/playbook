@@ -130,7 +130,8 @@ fn import_hits(
         "FROM imports i JOIN files f ON f.id = i.file_id
          WHERE (i.module = ?1
                 OR instr(', ' || COALESCE(i.names, '') || ', ', ', ' || ?1 || ', ') > 0
-                OR instr(', ' || COALESCE(i.names, '') || ', ', ' as ' || ?1 || ', ') > 0){extra}"
+                OR instr(', ' || COALESCE(i.names, '') || ', ', ' as ' || ?1 || ', ') > 0
+                OR instr(', ' || COALESCE(i.names, '') || ', ', ', ' || ?1 || ' as ') > 0){extra}"
     );
     let mut params: Vec<String> = vec![query.to_string()];
     params.extend(extra_params);
@@ -189,32 +190,58 @@ pub fn ranked_search(
 ) -> Result<SearchResult, String> {
     let limit = opts.limit;
     let mut result = SearchResult::default();
-    let mut known_total = 0usize;
+    // A tier that finds nothing to show because the limit is full may still
+    // hold matches, so the result is flagged truncated.
+    let mut skipped_tier = false;
 
     let (hits, total) = symbol_hits(conn, root, opts, limit)?;
-    known_total += total;
+    result.omitted += total.saturating_sub(hits.len());
     result.hits.extend(hits);
 
-    let (hits, total) = import_hits(conn, root, opts, limit - result.hits.len())?;
-    known_total += total;
-    result.hits.extend(hits);
+    let remaining = limit - result.hits.len();
+    if remaining > 0 {
+        let (hits, total) = import_hits(conn, root, opts, remaining)?;
+        result.omitted += total.saturating_sub(hits.len());
+        result.hits.extend(hits);
+    } else {
+        skipped_tier = true;
+    }
 
-    let (hits, total) = fts_hits(conn, root, opts, limit - result.hits.len())?;
-    known_total += total;
-    let text_hits = hits.clone();
-    result.hits.extend(hits);
+    let remaining = limit - result.hits.len();
+    if remaining > 0 {
+        let (hits, total) = fts_hits(conn, root, opts, remaining)?;
+        result.omitted += total.saturating_sub(hits.len());
+        let shown: Vec<Hit> = hits
+            .into_iter()
+            .filter(|h| !result.hits.iter().any(|seen| covers(seen, h)))
+            .collect();
+        result.hits.extend(shown);
+    } else {
+        skipped_tier = true;
+    }
 
-    if result.hits.len() < limit {
-        let remaining = limit - result.hits.len();
-        let literal = literal_scan(conn, root, opts, remaining, &text_hits)?;
-        known_total += literal.hits.len() + literal.omitted;
+    let remaining = limit - result.hits.len();
+    if remaining > 0 {
+        let literal = literal_scan(conn, root, opts, remaining, &result.hits)?;
+        result.omitted += literal.omitted;
         result.hits.extend(literal.hits);
         result.files_scanned = literal.files_scanned;
         result.scan_capped = literal.scan_capped;
+    } else {
+        skipped_tier = true;
     }
-    result.omitted = known_total.saturating_sub(result.hits.len());
-    result.truncated = result.omitted > 0 || result.scan_capped;
+    result.truncated = result.omitted > 0 || result.scan_capped || skipped_tier;
     Ok(result)
+}
+
+/// Whether `seen` already shows the place `hit` points at.
+fn covers(seen: &Hit, hit: &Hit) -> bool {
+    seen.path == hit.path
+        && if seen.match_type == "text" {
+            (seen.start_line..=seen.end_line).contains(&hit.line)
+        } else {
+            hit.start_line <= seen.line && seen.line <= hit.end_line
+        }
 }
 
 #[cfg(test)]
@@ -382,7 +409,89 @@ mod tests {
         // Assert
         assert_eq!(got.hits.len(), 2);
         assert!(got.truncated);
-        assert!(got.omitted >= 1);
+        assert_eq!(got.omitted, 1);
+    }
+
+    #[test]
+    fn a_full_limit_still_flags_the_skipped_tiers() {
+        let _g = pinned();
+        // Arrange: one symbol fills the limit, and b.py matches only as a substring.
+        let f = fx("rk-skipped");
+        f.write("a.py", "def retry():\n    pass\n");
+        f.write("b.py", "x = retry()\n");
+        f.run();
+        let mut opts = SearchOptions::new("retr");
+        opts.limit = 1;
+
+        // Act
+        let got = rank(&f, &opts);
+
+        // Assert
+        assert_eq!(got.hits.len(), 1);
+        assert!(got.truncated);
+    }
+
+    #[test]
+    fn a_symbol_line_is_not_repeated_as_a_text_or_literal_hit() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("rk-dedup");
+        f.write("a.rs", "fn same() {}\n");
+        f.run();
+
+        // Act
+        let got = rank(&f, &SearchOptions::new("same"));
+
+        // Assert
+        assert_eq!(tiers(&got), vec![(1, "a.rs")]);
+    }
+
+    #[test]
+    fn import_hits_match_modules_and_aliased_names_and_report_staleness() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("rk-imports");
+        f.write("a.py", "import numpy as np\nfrom net import retry as r\n");
+        f.run();
+        f.write(
+            "a.py",
+            "import numpy as np\nfrom net import retry as r\n# edited\n",
+        );
+
+        // Act
+        let found = |q: &str| {
+            import_hits(&f.conn(), &f.root, &SearchOptions::new(q), 10)
+                .expect("hits")
+                .0
+                .len()
+        };
+
+        // Assert
+        for q in ["numpy", "np", "net", "retry", "r"] {
+            assert_eq!(found(q), 1, "{q}");
+        }
+        let hit = import_hits(&f.conn(), &f.root, &SearchOptions::new("net"), 10)
+            .expect("hits")
+            .0;
+        assert!(hit[0].stale);
+    }
+
+    #[test]
+    fn a_symbol_hit_is_stale_after_the_file_changes() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("rk-stale");
+        f.write("a.rs", "fn a() {}\n");
+        f.run();
+        f.write("a.rs", "fn a() {}\n// edited\n");
+
+        // Act
+        let got = symbol_hits(&f.conn(), &f.root, &SearchOptions::new("a"), 10)
+            .expect("hits")
+            .0;
+
+        // Assert
+        assert!(got[0].stale);
     }
 
     #[test]

@@ -378,10 +378,14 @@ pub(super) fn literal_scan(
                 continue;
             }
             let line = i + 1;
-            if covered
-                .iter()
-                .any(|h| h.path == path && (h.start_line..=h.end_line).contains(&line))
-            {
+            if covered.iter().any(|h| {
+                h.path == path
+                    && if h.match_type == "text" {
+                        (h.start_line..=h.end_line).contains(&line)
+                    } else {
+                        h.line == line
+                    }
+            }) {
                 continue;
             }
             if result.hits.len() >= limit {

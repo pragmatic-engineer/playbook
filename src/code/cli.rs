@@ -59,7 +59,7 @@ pub enum CodeCommand {
         #[arg(long)]
         path: Option<String>,
         /// Only files of this language: rust, typescript, javascript or python
-        #[arg(long)]
+        #[arg(long, value_parser = ["rust", "typescript", "javascript", "python"])]
         lang: Option<String>,
         /// Most results to show, from 1 to 200
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=200))]
@@ -70,8 +70,9 @@ pub enum CodeCommand {
     },
     /// Find where a name is declared
     ///
-    /// Matches the name, then the name ignoring case, then the name as a
-    /// prefix. A dotted or scoped name matches the qualified name first.
+    /// Matches the exact qualified name first (a top level symbol's qualified
+    /// name is its plain name), then the name, then the name ignoring case,
+    /// then the name as a prefix.
     ///
     /// Example: `playbook code symbol PaymentService --kind class`
     Symbol {
@@ -81,7 +82,7 @@ pub enum CodeCommand {
         #[arg(long)]
         kind: Option<String>,
         /// Only files of this language: rust, typescript, javascript or python
-        #[arg(long)]
+        #[arg(long, value_parser = ["rust", "typescript", "javascript", "python"])]
         lang: Option<String>,
         /// Only files under this path prefix, for example `lib/payment/`
         #[arg(long)]
