@@ -145,7 +145,7 @@ Run this only when Argument Resolution found a ticket. Skip it entirely for a pl
 
 **Connect (layered).** Find a way to reach the tracker, in order:
 
-1. **MCP:** search for a connected ticket tool (`ToolSearch` for Jira, Linear, Atlassian, or issue tools). If one is connected, use it.
+1. **MCP:** search for a connected ticket tool (`ToolSearch` for Jira, Linear, Atlassian, or issue tools). If one is connected, use it. For a Jira or other Atlassian ticket, load `playbook:atlassian` first and follow its selection order (MCP, acli, twg) instead of the steps below.
 2. **Provider command:** else look for a configured fetch command. Read `.claude/plan.config` (or the repo's existing tracker config) for a per-tracker command with an `{id}` placeholder, for example `jira issue view {id} --raw` or `linear issue {id} --json`, and run it with Bash. A public tracker URL with no auth can be read with `WebFetch`. A page that needs auth or JavaScript rendering that `WebFetch` can't handle can be opened with the `agent-browser` MCP, if it's connected: `open` the url, then `snapshot` for the accessibility tree and `screenshot` for visual content.
 3. **Neither:** stop and tell the user how to connect one (an MCP server or a provider command), then offer to continue with the ticket id as a plain-text seed. Do NOT fabricate ticket contents.
 

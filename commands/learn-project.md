@@ -62,7 +62,7 @@ It prints `Repo:`, `Root:`, `Store:` and `Commits:` lines, then `gh:` and `acli:
 
 Then, before collecting:
 
-- **Atlassian access:** the `jira` and `confluence` collectors have no MCP tools, so brief them to use `acli` (they load `playbook:atlassian-cli`) whenever `acli` is present and authenticated, even if `mcp__atlassian__*` tools exist here. When only MCP is available, run the Atlassian reads yourself and pass the results in the collectors' briefs. The `playbook:atlassian-cli` skill carries the real command surface and the Confluence page-discovery workaround; load it before any `acli` call. Jira and Confluence authenticate separately, so treat the two probes above independently: Jira reachable and Confluence not is a normal state, not an error. With neither, mark JIRA/Confluence **unavailable** and record it for the report.
+- **Atlassian access:** the `jira` and `confluence` collectors have no MCP tools, so brief them to use `acli` (they load `playbook:atlassian`) whenever `acli` is present and authenticated, even if `mcp__atlassian__*` tools exist here. When only MCP is available, run the Atlassian reads yourself and pass the results in the collectors' briefs. The `playbook:atlassian` skill carries the real command surface and the Confluence page-discovery workaround; load it before any Atlassian call. Jira and Confluence authenticate separately, so treat the two probes above independently: Jira reachable and Confluence not is a normal state, not an error. With neither, mark JIRA/Confluence **unavailable** and record it for the report.
 - **Targets:** resolve the JIRA project key(s) from the histogram and the Confluence space from README/links. If ambiguous, ask the user once.
 - **Capture:** `REPO`, `ROOT`, scope caps, and which sources are reachable. You need these in every later phase.
 
@@ -153,7 +153,7 @@ These split collection from the write decision, so a run can happen unattended (
 One tight summary:
 
 - Facts written / updated / superseded, per cluster and per store.
-- Sources used, and **sources skipped with the reason** (e.g. "Confluence: no MCP and acli absent").
+- Sources used, and **sources skipped with the reason** (e.g. "Confluence: no MCP, acli or twg").
 - The `memory.graph.json` path, node and edge counts, and any dangling anchors or edges flagged during the build.
 
 ## Teardown (MUST run, even on failure or abort)

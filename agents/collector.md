@@ -20,7 +20,7 @@ You have no interactive user. Never wait for confirmation or a Y/n answer: run t
 - **jira**: epics, active sprints and boards, components, common labels for the project key given in the prompt.
 - **confluence**: pages on setup, onboarding, architecture, runbooks, and decisions in the given space. Capture titles, URLs, and key points.
 
-**For the jira and confluence roles, load the `playbook:atlassian-cli` skill first** when the orchestrator says to use `acli`. It carries the verified command surface and, for Confluence, the page-discovery workaround. Two things that will otherwise waste your run:
+**Before using any Atlassian tool (jira and confluence roles), load the `playbook:atlassian` skill first**. It owns the selection order and carries the verified acli command surface and, for Confluence, the page-discovery workaround. Two things that will otherwise waste your run:
 
 - `acli` has **no Confluence page search and no page list**. `page view` needs an `--id`. Discover by walking `space list --expand homepage`, then `page view --include-direct-children` down the tree, using `--include-labels` to spot the pages worth opening.
 - Jira and Confluence authenticate separately. One working does not mean the other does.
