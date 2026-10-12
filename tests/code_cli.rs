@@ -412,3 +412,28 @@ fn read_prints_numbered_lines_and_rejects_bad_ranges_and_outside_paths() {
     assert!(!reversed.status.success());
     assert_eq!(outside.status.code(), Some(1));
 }
+
+#[test]
+fn refs_lists_labelled_candidates_in_json_and_text() {
+    // Arrange
+    let fx = Fixture::new("refs", true);
+    fx.write("a.py", "def target():\n    pass\ntarget()\n# target\n");
+    assert!(fx.playbook(&["code", "index"]).status.success());
+
+    // Act
+    let json = fx.playbook(&["code", "refs", "target", "--json"]);
+    let text = fx.playbook(&["code", "refs", "target"]);
+
+    // Assert
+    let doc = json_of(&json);
+    assert_eq!(doc["command"], "refs");
+    assert_eq!(doc["results"][0]["role"], "declaration");
+    assert_eq!(doc["results"][1]["line"], 3);
+    assert_eq!(doc["results"][1]["confidence"], "candidate");
+    assert_eq!(doc["stats"]["files_scanned"], 1);
+    let stdout = String::from_utf8_lossy(&text.stdout).to_string();
+    assert!(
+        stdout.starts_with("a.py:1:5  declaration (candidate)"),
+        "{stdout}"
+    );
+}

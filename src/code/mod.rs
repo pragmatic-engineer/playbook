@@ -16,6 +16,7 @@ pub mod lang;
 pub mod location;
 pub mod output;
 pub mod ranked;
+pub mod refs;
 pub mod search;
 pub mod source;
 pub mod status;
@@ -115,5 +116,26 @@ pub fn symbol_lookup(cwd: &Path, opts: &search::SearchOptions) -> Result<SearchO
             omitted,
             ..search::SearchResult::default()
         })
+    })
+}
+
+/// Reference candidates plus the freshness of the index they came from.
+pub struct RefsOutcome {
+    pub index_path: PathBuf,
+    pub drift: status::Drift,
+    pub result: refs::RefsResult,
+}
+
+/// Identifier uses of a name for the repository containing `cwd`.
+pub fn find_refs(cwd: &Path, opts: &refs::RefsOptions) -> Result<RefsOutcome, String> {
+    let root = location::repo_root(cwd)?;
+    let index_path = location::index_path()?;
+    let conn = db::open_index(&index_path, db::OpenMode::Query).map_err(|e| e.to_string())?;
+    let drift = status::quick_check(&conn, &root)?;
+    let result = refs::find_refs(&conn, &root, opts)?;
+    Ok(RefsOutcome {
+        index_path,
+        drift,
+        result,
     })
 }
