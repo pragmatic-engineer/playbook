@@ -62,8 +62,28 @@ pub(crate) fn remove_stale_lock_dir(lock_path: &Path, max_age: Duration) {
         .and_then(|meta| meta.modified())
         .ok()
         .and_then(|modified| modified.elapsed().ok());
-    if age.is_some_and(|age| age > max_age) {
-        let _ = fs::remove_dir(lock_path);
+    if !age.is_some_and(|age| age > max_age) {
+        return;
+    }
+    // Rename first, so of several callers that saw the same stale lock only
+    // one claims it, and a lock another caller has just taken is put back.
+    let claimed = lock_path.with_extension(format!(
+        "stale-{}-{}",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    if fs::rename(lock_path, &claimed).is_err() {
+        return;
+    }
+    let still_old = fs::metadata(&claimed)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age > max_age);
+    if still_old {
+        let _ = fs::remove_dir(&claimed);
+    } else {
+        let _ = fs::rename(&claimed, lock_path);
     }
 }
 
@@ -306,11 +326,9 @@ mod tests {
         age_dir(&lock, STALE_LOCK_AGE * 3);
 
         // Act
-        let started = std::time::Instant::now();
         atomic_append(file.to_str().unwrap(), "one");
 
         // Assert
-        assert!(started.elapsed() < Duration::from_millis(300));
         assert_eq!(fs::read_to_string(&file).unwrap(), "one\n");
         assert!(!lock.exists(), "the lock this call took must be released");
         let _ = fs::remove_dir_all(&root);

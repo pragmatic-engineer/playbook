@@ -29,13 +29,6 @@ pub fn is_closing_skill(skill: &str) -> bool {
     CLOSING_SKILLS.contains(&skill.trim())
 }
 
-/// Whether every simple command of `command` is a closing step. A `git push`
-/// with no branch is denied; see [`is_closing_command_in`].
-#[cfg(test)]
-pub fn is_closing_command(command: &str) -> bool {
-    is_closing_command_in(command, None)
-}
-
 /// Whether every simple command of `command` is a closing step. `cwd` is where
 /// the command runs: a `git push` that names no branch is allowed when the
 /// branch checked out there is not protected.
@@ -59,7 +52,7 @@ fn without_stream_merges(command: &str) -> String {
     let mut rest = command;
     while let Some(c) = rest.chars().next() {
         if quote.is_none() && c != '\\' {
-            if let Some(merge) = MERGES.iter().find(|m| rest.starts_with(**m)) {
+            if let Some(merge) = MERGES.iter().find(|m| ends_at_boundary(rest, m)) {
                 rest = &rest[merge.len()..];
                 continue;
             }
@@ -82,6 +75,17 @@ fn without_stream_merges(command: &str) -> String {
         rest = &rest[width..];
     }
     out
+}
+
+/// Whether `rest` starts with `merge` and the word ends right after it. A
+/// merge followed by more word characters, as in `>&2x`, is a redirect to a file.
+fn ends_at_boundary(rest: &str, merge: &str) -> bool {
+    rest.strip_prefix(merge).is_some_and(|after| {
+        after
+            .chars()
+            .next()
+            .is_none_or(|c| c.is_whitespace() || matches!(c, ';' | '|' | '&' | ')' | '}'))
+    })
 }
 
 fn is_closing_step(command: &Command, source: &[char], cwd: Option<&Path>) -> bool {
@@ -183,11 +187,28 @@ fn without_redirects<'a>(command: &'a Command, source: &[char]) -> Option<Vec<&'
 /// Whether `source[start..end]` holds a `<` or `>` outside quotes.
 fn has_unquoted_angle(source: &[char], start: usize, end: usize) -> bool {
     let mut quote: Option<char> = None;
+    let mut ansi = false;
     let mut chars = source
         .get(start..end.min(source.len()))
         .unwrap_or(&[])
         .iter();
     while let Some(&c) = chars.next() {
+        // `$'...'` lets a backslash escape the closing quote.
+        if ansi {
+            match c {
+                '\\' => {
+                    chars.next();
+                }
+                '\'' => ansi = false,
+                _ => {}
+            }
+            continue;
+        }
+        if quote.is_none() && c == '$' && chars.clone().next() == Some(&'\'') {
+            chars.next();
+            ansi = true;
+            continue;
+        }
         match (quote, c) {
             (None, '\\') => {
                 chars.next();
@@ -215,12 +236,7 @@ fn is_git_step(args: &[&str], cwd: Option<&Path>) -> bool {
         ["add" | "commit" | "status", ..] => true,
         ["diff" | "log", rest @ ..] => !rest.iter().any(|arg| arg.starts_with("--output")),
         ["worktree", "list", ..] => true,
-        ["push", rest @ ..] => is_safe_push(
-            rest,
-            dir.as_deref()
-                .and_then(unprotected_current_branch)
-                .as_deref(),
-        ),
+        ["push", rest @ ..] => is_safe_push(rest, dir.as_deref()),
         _ => false,
     }
 }
@@ -234,46 +250,107 @@ fn unprotected_current_branch(dir: &Path) -> Option<String> {
     (!PROTECTED_BRANCHES.contains(&branch.as_str())).then_some(branch)
 }
 
-/// A push to a remote. It must not force, delete, mirror, push every branch,
-/// run a program of its choosing, or target a protected branch. A push with no
-/// explicit branch, or with `HEAD`, goes to the checked-out branch, so it is
-/// allowed only when `current` names that branch and it is not protected.
-fn is_safe_push(args: &[&str], current: Option<&str>) -> bool {
+/// Where a push with no refspec goes, which depends on `push.default` and
+/// the branch's upstream: the branch name on the remote, from
+/// `git rev-parse --abbrev-ref @{push}`.
+fn push_destination(dir: &Path) -> Option<String> {
+    let mut git = std::process::Command::new("git");
+    git.arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--abbrev-ref", "@{push}"]);
+    let out = crate::common::run_with_timeout(&mut git, std::time::Duration::from_secs(10))?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let name = text.trim();
+    (out.status.success() && !name.is_empty()).then(|| {
+        name.split_once('/')
+            .map_or(name, |(_, branch)| branch)
+            .to_string()
+    })
+}
+
+/// Whether `refs/heads/<name>` exists in the repo at `dir`.
+fn is_local_branch(dir: &Path, name: &str) -> bool {
+    let mut git = std::process::Command::new("git");
+    git.arg("-C").arg(dir).args([
+        "show-ref",
+        "--verify",
+        "--quiet",
+        &format!("refs/heads/{name}"),
+    ]);
+    crate::common::run_with_timeout(&mut git, std::time::Duration::from_secs(10))
+        .is_some_and(|out| out.status.success())
+}
+
+/// A push to a remote. It must not force, delete, mirror, push every branch or
+/// tag, run a program of its choosing, or target a protected branch. Every
+/// refspec must name a local branch (or `HEAD`). A push with no refspec goes
+/// where git's `push.default` sends it, so that destination must not be
+/// protected either. Both need `dir`, the repo the push runs in.
+fn is_safe_push(args: &[&str], dir: Option<&Path>) -> bool {
     let unsafe_flag = args.iter().any(|arg| {
         let short = arg.starts_with('-') && !arg.starts_with("--");
         arg.starts_with("--force")
-            || ["--delete", "--mirror", "--prune", "--all", "--tags"].contains(arg)
+            || [
+                "--delete",
+                "--mirror",
+                "--prune",
+                "--all",
+                "--tags",
+                "--follow-tags",
+            ]
+            .contains(arg)
             || ["--receive-pack", "--exec", "--repo"]
                 .iter()
                 .any(|flag| arg.starts_with(flag))
             || (short && arg.contains(['f', 'd']))
             || arg.starts_with(['+', ':'])
     });
-    let positional: Vec<&str> = args
-        .iter()
-        .copied()
-        .filter(|arg| !arg.starts_with('-'))
-        .collect();
+    // A push option takes the next word as its value, which is not a remote.
+    let mut positional: Vec<&str> = Vec::new();
+    let mut words = args.iter().copied();
+    while let Some(arg) = words.next() {
+        match arg {
+            "-o" | "--push-option" => {
+                words.next();
+            }
+            _ if arg.starts_with('-') => {}
+            _ => positional.push(arg),
+        }
+    }
     let refspecs = match positional.as_slice() {
         [] => &[][..],
         [_remote, refspecs @ ..] => refspecs,
     };
-    if unsafe_flag {
+    let (false, Some(dir)) = (unsafe_flag, dir) else {
         return false;
-    }
+    };
+    let current = unprotected_current_branch(dir);
     if refspecs.is_empty() {
-        return current.is_some();
+        return current.is_some()
+            && push_destination(dir).is_some_and(|branch| !is_protected(&branch));
     }
     refspecs.iter().all(|spec| {
-        let destination = spec.rsplit(':').next().unwrap_or(spec);
+        let (source, destination) = spec.split_once(':').unwrap_or((spec, spec));
         let branch = destination
             .strip_prefix("refs/heads/")
+            .or_else(|| destination.strip_prefix("heads/"))
             .unwrap_or(destination);
-        if branch == "HEAD" && !spec.contains(':') {
-            return current.is_some();
+        if destination.starts_with("refs/") && !destination.starts_with("refs/heads/") {
+            return false;
         }
-        !branch.is_empty() && branch != "HEAD" && !PROTECTED_BRANCHES.contains(&branch)
+        if branch.is_empty() || is_protected(branch) {
+            return false;
+        }
+        if source == "HEAD" {
+            return spec.contains(':') || current.is_some();
+        }
+        let source = source.strip_prefix("refs/heads/").unwrap_or(source);
+        is_local_branch(dir, source)
     })
+}
+
+fn is_protected(branch: &str) -> bool {
+    PROTECTED_BRANCHES.contains(&branch)
 }
 
 /// Read-only `gh`: viewing and listing pull requests and runs, and `api`
@@ -369,15 +446,58 @@ fn is_status_probe(args: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+
+    /// A scratch repo on `feat/x` with a second local branch `feat/y`.
+    fn repo() -> &'static PathBuf {
+        static REPO: OnceLock<PathBuf> = OnceLock::new();
+        REPO.get_or_init(|| {
+            let dir = std::env::temp_dir().join(format!(
+                "playbook-closing-{}-{}",
+                crate::testing::run_id(),
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).expect("repo dir");
+            let git = |args: &[&str]| {
+                let status = std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&dir)
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .env("GIT_AUTHOR_NAME", "t")
+                    .env("GIT_AUTHOR_EMAIL", "t@t")
+                    .env("GIT_COMMITTER_NAME", "t")
+                    .env("GIT_COMMITTER_EMAIL", "t@t")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .expect("git");
+                assert!(status.success(), "git {args:?}");
+            };
+            git(&["init", "-q", "-b", "feat/x"]);
+            git(&["commit", "-q", "--allow-empty", "-m", "seed"]);
+            git(&["branch", "feat/y"]);
+            dir
+        })
+    }
+
+    fn closing(command: &str) -> bool {
+        is_closing_command_in(command, Some(repo()))
+    }
 
     #[test]
     fn every_listed_command_is_a_closing_step_and_new_work_is_not() {
-        let closing = [
+        let closing_steps = [
             "git add -A",
             "git add src/a.rs docs/x.md",
             "git commit -S -s -m \"feat: x\"",
             "git push origin feat/x",
+            "git push origin feat/y",
             "git push -u origin feat/x",
+            "git push origin HEAD",
+            "git push -u origin HEAD",
+            "git push -o ci.skip origin feat/x",
             "git -C ../wt status --short",
             "git status",
             "git diff HEAD~1 --stat",
@@ -458,7 +578,18 @@ mod tests {
             "git log 2>err.txt",
             "git log < in.txt",
             "git push --all origin",
-            "git push origin HEAD",
+            "git push origin heads/main",
+            "git push origin feat/x:heads/main",
+            "git push -o ci.skip origin",
+            "git push --push-option ci.skip origin",
+            "git push origin v1.4.0",
+            "git push origin refs/tags/v1.4.0",
+            "git push --follow-tags origin feat/x",
+            "git push origin feat/x:refs/tags/v1",
+            "echo x >&2x",
+            "git status >&2out.txt",
+            "echo x $'\\'' >out.txt",
+            "echo \"a\" $'\\''>out.txt",
             "playbook commit run",
             "playbook commit run -a",
             "git commit -m \"x\" \"$(echo 2>&1)\"",
@@ -471,11 +602,11 @@ mod tests {
             "head -5 file",
             "",
         ];
-        for command in closing {
-            assert!(is_closing_command(command), "{command:?} must be allowed");
+        for command in closing_steps {
+            assert!(closing(command), "{command:?} must be allowed");
         }
         for command in new_work {
-            assert!(!is_closing_command(command), "{command:?} must be denied");
+            assert!(!closing(command), "{command:?} must be denied");
         }
     }
 

@@ -90,7 +90,9 @@ pub fn run(payload: &Payload) {
     let dir_path = Path::new(&dir);
     // A parked auto session cannot write the memory store, so asking for it
     // only wastes turns.
-    if dir_path.join("parked").exists() {
+    if dir_path.join("parked").exists()
+        && crate::common::mode::resolve_for_hook().mode == crate::common::mode::Mode::Auto
+    {
         return;
     }
     let marker = dir_path.join("capture-due");

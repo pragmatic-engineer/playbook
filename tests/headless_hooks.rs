@@ -318,10 +318,31 @@ fn a_parked_auto_session_is_not_asked_to_write_memory_it_cannot_write() {
     let dir = arm_capture_due(&w);
     fs::write(dir.join("parked"), "").unwrap();
 
-    let (out, code) = run_hook(&w, "memory-capture", &stop_payload(""), &[]);
+    let (out, code) = run_hook(
+        &w,
+        "memory-capture",
+        &stop_payload(""),
+        &[("PLAYBOOK_MODE", "auto")],
+    );
 
     assert_eq!((out.trim(), code), ("", 0));
     assert!(!dir.join("capture-attempts").exists(), "no attempt counted");
+}
+
+#[test]
+fn a_stale_parked_marker_is_ignored_once_the_session_left_auto() {
+    let w = world("stop-parked-ask");
+    let dir = arm_capture_due(&w);
+    fs::write(dir.join("parked"), "").unwrap();
+
+    let (out, _) = run_hook(
+        &w,
+        "memory-capture",
+        &stop_payload(""),
+        &[("PLAYBOOK_MODE", "ask")],
+    );
+
+    assert!(out.contains(r#""decision":"block""#), "output: {out}");
 }
 
 #[test]

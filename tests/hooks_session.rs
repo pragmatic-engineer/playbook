@@ -2317,6 +2317,7 @@ fn a_resume_clears_the_auto_cost_state_but_a_compaction_keeps_it() {
         "park-note.md",
         "park-note-abc.md",
         "auto-advice-given",
+        "parked",
     ];
     let seed = || {
         fs::create_dir_all(&session).expect("session dir");

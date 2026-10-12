@@ -21,7 +21,7 @@
 //! cap it also denies the model changing its own guard: the `mode`, `auto.*`
 //! and `fix.*` settings and the config files.
 
-use crate::common::atomic::{remove_stale_lock_dir, with_dir_lock, STALE_LOCK_AGE};
+use crate::common::atomic::with_dir_lock;
 use crate::common::mode::{hook_slug, resolve, resolve_for_hook_at, Mode, Source};
 use crate::common::paths::playbook_root_from;
 use crate::common::payload::Payload;
@@ -619,7 +619,6 @@ fn refresh(payload: &Payload) -> Option<State> {
     }
 
     let lock = dir.join("auto-cost.lock");
-    remove_stale_lock_dir(&lock, STALE_LOCK_AGE);
     let (acquired, state) = with_dir_lock(&lock, 50, Duration::from_millis(10), || {
         let loaded = load::<State>(&state_path);
         let has_baseline = loaded.is_some();

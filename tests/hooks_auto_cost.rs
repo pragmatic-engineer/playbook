@@ -104,6 +104,7 @@ impl Session {
         let mut value: Value = serde_json::from_str(&self.payload()).expect("payload is JSON");
         value["tool_name"] = json!(tool);
         value["tool_input"] = input;
+        value["cwd"] = json!(auto_env::feature_repo(&self.s).to_string_lossy());
         value.to_string()
     }
 
@@ -2292,16 +2293,46 @@ fn at_the_cap_an_angle_bracket_inside_quotes_is_not_a_redirection() {
     }
 }
 
+/// A repo on `branch` with a commit, a bare `origin`, and the branch pushed
+/// with its upstream set, so a bare `git push` resolves its destination.
 fn repo_on_branch(tag: &str, branch: &str) -> PathBuf {
-    let dir = scratch(tag).cwd.join("repo");
+    let root = scratch(tag).cwd;
+    let dir = root.join("repo");
+    let origin = root.join("origin.git");
     fs::create_dir_all(&dir).expect("repo dir");
-    let status = std::process::Command::new("git")
-        .args(["init", "-q", "-b", branch])
-        .current_dir(&dir)
-        .status()
-        .expect("git");
-    assert!(status.success());
+    let git = |at: &Path, args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(at)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git");
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&root, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
+    git(&dir, &["init", "-q", "-b", branch]);
+    git(&dir, &["commit", "-q", "--allow-empty", "-m", "seed"]);
+    git(
+        &dir,
+        &["remote", "add", "origin", origin.to_str().expect("utf8")],
+    );
+    git(&dir, &["push", "-q", "-u", "origin", branch]);
     dir
+}
+
+fn call_in(session: &Session, repo: &Path, command: &str) -> Outcome {
+    let mut value: Value =
+        serde_json::from_str(&session.tool_payload("Bash", json!({"command": command})))
+            .expect("json");
+    value["cwd"] = json!(repo.to_string_lossy());
+    session.call_payload(&value.to_string())
 }
 
 #[test]
@@ -2310,27 +2341,51 @@ fn at_the_cap_a_bare_push_is_allowed_only_on_a_non_protected_current_branch() {
     let main = Session::at_budget("push-main", AutoFrom::Config);
     let feature_repo = repo_on_branch("push-feature-repo", "feat/x");
     let main_repo = repo_on_branch("push-main-repo", "main");
-    let at = |session: &Session, repo: &Path, command: &str| {
-        let mut value: Value =
-            serde_json::from_str(&session.tool_payload("Bash", json!({"command": command})))
-                .expect("json");
-        value["cwd"] = json!(repo.to_string_lossy());
-        session.call_payload(&value.to_string())
-    };
     for command in ["git push", "git push origin", "git push -u origin HEAD"] {
         assert!(
-            !at(&feature, &feature_repo, command).is_denied(),
+            !call_in(&feature, &feature_repo, command).is_denied(),
             "{command:?} on feat/x must be allowed"
         );
-        at(&main, &main_repo, command).reason(command);
+        call_in(&main, &main_repo, command).reason(command);
     }
     for command in [
         "git push --force",
         "git push origin main",
         "git push --force origin HEAD",
+        "git push origin v1.0.0",
+        "git push --follow-tags origin feat/x",
     ] {
-        at(&feature, &feature_repo, command).reason(command);
+        call_in(&feature, &feature_repo, command).reason(command);
     }
+    // A push option's value is not a remote, so `-o x origin` is a bare push
+    call_in(&main, &main_repo, "git push -o ci.skip origin").reason("-o on main");
+    assert!(!call_in(&feature, &feature_repo, "git push -o ci.skip origin").is_denied());
+    // The branch a push resolves is the one in the repo it runs in.
+    let sibling = main_repo.to_string_lossy().into_owned();
+    call_in(&feature, &feature_repo, &format!("git -C {sibling} push")).reason("git -C main push");
+}
+
+#[test]
+fn a_bare_push_that_git_would_send_to_a_protected_branch_is_denied() {
+    // feat/x tracks origin/main and push.default=upstream sends it there
+    let session = Session::at_budget("push-upstream-main", AutoFrom::Config);
+    let repo = repo_on_branch("push-upstream-main-repo", "feat/x");
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git");
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["push", "-q", "origin", "feat/x:main"]);
+    git(&["branch", "-u", "origin/main"]);
+    git(&["config", "push.default", "upstream"]);
+    call_in(&session, &repo, "git push").reason("bare push to main");
 }
 
 #[test]
@@ -2394,4 +2449,18 @@ fn a_parked_subagent_does_not_set_the_main_session_marker() {
         .call_payload(&value.to_string())
         .reason("agent capped");
     assert!(!session.dir().join("parked").exists());
+}
+
+#[test]
+fn an_unreadable_main_session_leaves_the_parked_marker_but_a_subagent_does_not() {
+    let session = Session::auto("parked-unreadable");
+    session.seed_budget(&json!(5), 70);
+    let mut agent: Value =
+        serde_json::from_str(&session.tool_payload("Bash", json!({"command": "npm test"})))
+            .expect("json");
+    agent["agent_id"] = json!("zz");
+    session.call_payload(&agent.to_string()).reason("agent");
+    assert!(!session.dir().join("parked").exists());
+    session.bash("npm test").reason("main");
+    assert!(session.dir().join("parked").exists());
 }
