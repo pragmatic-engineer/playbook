@@ -73,6 +73,7 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         statusline: true,
         security: false,
         telemetry: false,
+        claude_override: false,
         path_setup: None,
         repo: None,
     }

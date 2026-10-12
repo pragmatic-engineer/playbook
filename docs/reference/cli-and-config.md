@@ -670,6 +670,8 @@ Example: `playbook init --no-hooks --aliases`
 - `--no-system-prompt`: Do not install the system prompt
 - `--telemetry`: Write the OpenTelemetry variables for the local usage collector into settings.json (only when you have no telemetry set up)
 - `--no-telemetry`: Do not write telemetry variables into settings.json
+- `--claude-override`: Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
+- `--no-claude-override`: Do not turn on the `claude` shell function
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing
