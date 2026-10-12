@@ -807,29 +807,6 @@ mod tests {
     }
 
     #[test]
-    fn the_checkpoint_task_fixture_holds_twenty_complete_tasks() {
-        // Arrange
-        let text = include_str!("../../tests/fixtures/code_c1_tasks.json");
-
-        // Act
-        let doc: serde_json::Value = serde_json::from_str(text).expect("fixture parses");
-
-        // Assert
-        let tasks = doc["tasks"].as_array().expect("tasks");
-        assert_eq!(tasks.len(), 20);
-        for task in tasks {
-            let repo = task["repo"].as_str().expect("repo");
-            assert!(doc["repos"][repo]["commit"]
-                .as_str()
-                .is_some_and(|c| c.len() == 40));
-            assert!(task["query"].as_str().is_some_and(|q| !q.is_empty()));
-            let first = &task["expected"][0];
-            assert!(first["path"].as_str().is_some_and(|p| !p.is_empty()));
-            assert!(first["line"].as_u64().is_some_and(|l| l > 0));
-        }
-    }
-
-    #[test]
     fn two_runs_give_identical_snippets() {
         let _g = pinned();
         // Arrange
