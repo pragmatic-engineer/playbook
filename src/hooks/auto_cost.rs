@@ -558,7 +558,7 @@ fn is_guarded_invocation(words: &[String]) -> bool {
 
 /// What follows `--` in `cargo run ... -- <args>`, which a workspace binary
 /// receives as its own arguments.
-fn cargo_run_args(args: &[String]) -> Option<&[String]> {
+pub(super) fn cargo_run_args(args: &[String]) -> Option<&[String]> {
     let subcommand = args.iter().find(|word| !word.starts_with(['-', '+']))?;
     if subcommand != "run" && subcommand != "r" {
         return None;

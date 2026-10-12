@@ -114,7 +114,12 @@ pub fn run(payload: &Payload) {
     let reason = if !command.is_empty() {
         check_command(&command, &home)
     } else {
-        check_path(&path, &home)
+        let content = format!(
+            "{}{}",
+            payload.field(".tool_input.content"),
+            payload.field(".tool_input.new_string")
+        );
+        check_path(&path, &home, &content)
     };
     if let Some(reason) = reason {
         emit_pre_deny(reason);
@@ -134,42 +139,130 @@ fn is_fact_file(path: &str, memory_dir: &Path) -> bool {
         && !path.components().any(|c| c == Component::ParentDir)
 }
 
+/// Programs that run another command given as plain words, so `playbook` can
+/// sit after them.
+const RUNNER_PROGRAMS: [&str; 9] = [
+    "nohup",
+    "xargs",
+    "setsid",
+    "stdbuf",
+    "watch",
+    "parallel",
+    "ionice",
+    "caffeinate",
+    "unbuffer",
+];
+
+/// Shells that run the string after `-c`.
+const SHELL_PROGRAMS: [&str; 4] = ["sh", "bash", "zsh", "dash"];
+
+/// Programs that can write a file or database they are handed, on top of
+/// `WRITER_PROGRAMS`.
+const DB_WRITER_PROGRAMS: [&str; 8] = [
+    "sqlite3", "python", "python3", "node", "ruby", "perl", "sed", "jq",
+];
+
 /// Whether this simple command can widen the `rm` guard's allowance.
-fn changes_rm_guard_config(words: &[String], program_at: usize) -> bool {
+fn changes_rm_guard_config(words: &[String], program_at: usize, home: &str) -> bool {
+    changes_rm_guard_config_at(words, program_at, home, 0)
+}
+
+fn changes_rm_guard_config_at(
+    words: &[String],
+    program_at: usize,
+    home: &str,
+    depth: usize,
+) -> bool {
     let assigns = words[..program_at].iter().any(|w| {
         w.split_once('=')
             .is_some_and(|(name, _)| matches!(name, "WORKTREE_BASE_DIR" | "PLAYBOOK_SAFE_ROOTS"))
     });
-    // Any program pointed at the config database can change any setting.
-    if assigns
-        || words
-            .iter()
-            .any(|w| w.to_lowercase().contains("playbook.db"))
-    {
+    if assigns {
         return true;
     }
-    let mut args = &words[program_at + 1..];
-    match program_name(&words[program_at]).as_str() {
-        "playbook" => {}
-        "cargo" => {
-            let Some(dashes) = args.iter().position(|w| w == "--") else {
-                return false;
-            };
-            args = &args[dashes + 1..];
+    let program = program_name(&words[program_at]);
+    let rest = &words[program_at + 1..];
+    // A config file or the database named as the target of something that can
+    // write. Read-only programs, `git commit -m "mention playbook.db"` and
+    // searches are left alone.
+    let writes = WRITER_PROGRAMS.contains(&program.as_str())
+        || DB_WRITER_PROGRAMS.contains(&program.as_str())
+        || SHELL_PROGRAMS.contains(&program.as_str())
+        || words.iter().any(|w| redirects(w));
+    if writes && words.iter().any(|w| names_config_store(w, home)) {
+        return true;
+    }
+    if depth < 3 {
+        if SHELL_PROGRAMS.contains(&program.as_str()) {
+            if let Some(at) = rest
+                .iter()
+                .position(|w| w == "-c" || w.ends_with("c") && w.starts_with('-'))
+            {
+                if let Some(script) = rest.get(at + 1) {
+                    return simple_commands(script).iter().any(|inner| {
+                        program_index(inner)
+                            .is_some_and(|i| changes_rm_guard_config_at(inner, i, home, depth + 1))
+                    });
+                }
+            }
         }
+        if RUNNER_PROGRAMS.contains(&program.as_str()) {
+            return rest
+                .iter()
+                .position(|w| program_name(w) == "playbook")
+                .is_some_and(|i| {
+                    let inner = &rest[i..];
+                    changes_rm_guard_config_at(inner, 0, home, depth + 1)
+                });
+        }
+    }
+    let mut args = rest;
+    match program.as_str() {
+        "playbook" => {}
+        "cargo" => match super::auto_cost::cargo_run_args(args) {
+            Some(after) => args = after,
+            None => return false,
+        },
         _ => return false,
     }
-    let Some(at) = args.iter().position(|w| w == "config") else {
+    if args
+        .iter()
+        .find(|w| !w.starts_with('-'))
+        .map(String::as_str)
+        != Some("config")
+    {
         return false;
-    };
+    }
+    let at = args.iter().position(|w| w == "config").unwrap_or(0);
     match args[at + 1..].first().map(String::as_str) {
+        // `unset` and `edit` do not exist yet. They are denied ahead of time so
+        // adding them later cannot open a gap.
         Some("import" | "unset" | "edit") => true,
+        // Any positional can be the key (`--org acme` takes a value in some
+        // spellings), so all of them are checked.
         Some("set") => args[at + 2..]
             .iter()
-            .find(|w| !w.starts_with('-'))
-            .is_some_and(|key| key.to_lowercase().starts_with("hooks.rmguard")),
+            .filter(|w| !w.starts_with('-'))
+            .any(|w| w.to_lowercase().starts_with("hooks.rmguard")),
         _ => false,
     }
+}
+
+/// Whether `word` names playbook's config database or one of its config
+/// files, or a glob inside the playbook folder.
+fn names_config_store(word: &str, home: &str) -> bool {
+    if word.to_lowercase().contains("playbook.db") {
+        return true;
+    }
+    if home.is_empty() {
+        return false;
+    }
+    let root = crate::common::paths::playbook_root_from(Path::new(home));
+    let expanded = expand_home(word, home);
+    super::auto_cost::is_config_file(Path::new(&expanded), &root)
+        || (expanded.contains(['*', '?'])
+            && Path::new(&expanded).starts_with(&root)
+            && Path::new(&expanded).components().count() == root.components().count() + 1)
 }
 
 /// The reason to deny `command`, or `None` to allow it.
@@ -182,7 +275,7 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
             continue;
         };
         let args = &words[at + 1..];
-        if changes_rm_guard_config(&words, at) {
+        if changes_rm_guard_config(&words, at, home) {
             return Some(RM_GUARD_CONFIG_REASON);
         }
         let found = match program_name(&words[at]).as_str() {
@@ -330,7 +423,10 @@ fn redirects(word: &str) -> bool {
 }
 
 /// The reason to deny a write to `path`, or `None` to allow it.
-fn check_path(path: &str, home: &str) -> Option<&'static str> {
+fn check_path(path: &str, home: &str, content: &str) -> Option<&'static str> {
+    if writes_guard_env_to_settings(path, content) {
+        return Some(RM_GUARD_CONFIG_REASON);
+    }
     if !home.is_empty()
         && super::auto_cost::is_config_file(
             Path::new(path),
@@ -340,6 +436,23 @@ fn check_path(path: &str, home: &str) -> Option<&'static str> {
         return Some(RM_GUARD_CONFIG_REASON);
     }
     is_claude_memory_path(path, home).then_some(MEMORY_REASON)
+}
+
+/// A Claude Code settings file that is given an `env` entry able to move the
+/// `rm` guard's roots or switch the guards off. Other edits to settings pass.
+fn writes_guard_env_to_settings(path: &str, content: &str) -> bool {
+    let p = Path::new(path);
+    let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase());
+    let in_claude_dir = p
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|d| d == ".claude");
+    let is_settings =
+        in_claude_dir && name.is_some_and(|n| n.starts_with("settings") && n.ends_with(".json"));
+    is_settings
+        && ["PLAYBOOK_SAFE_ROOTS", "WORKTREE_BASE_DIR", "POLICY_GUARD"]
+            .iter()
+            .any(|key| content.contains(key))
 }
 
 /// Whether `path` is inside Claude Code's auto memory
@@ -407,6 +520,16 @@ mod tests {
             "WORKTREE_BASE_DIR=/tmp/x rm -rf /tmp/x/y",
             "PLAYBOOK_SAFE_ROOTS=/ rm -rf /etc/x",
             "env WORKTREE_BASE_DIR=/Users/me playbook worktree sweep",
+            "nohup playbook config set --global hooks.rmGuard.allowedRoots /a/b",
+            "xargs playbook config set hooks.rmGuard.allowedRoots /a/b",
+            "bash -c 'playbook config set hooks.rmGuard.allowedRoots /a/b'",
+            "sh -c \"cd x && playbook config import f.json\"",
+            "playbook config set --org acme hooks.rmGuard.allowedRoots /a/b",
+            "printf x > ~/.config/playbook/config.json",
+            "echo '{}' | tee $HOME/.config/playbook/orgs/acme/config.json",
+            "python3 -c 'x' ~/.config/playbook/playbook.db",
+            "cp evil.db ~/.config/playbook/playbook.db",
+            "sed -i s/a/b/ ~/.config/playbook/*.db",
         ] {
             assert_eq!(deny(command), Some(RM_GUARD_CONFIG_REASON), "{command}");
         }
@@ -422,9 +545,36 @@ mod tests {
             "echo \"playbook config set hooks.rmGuard.allowedRoots x\"",
             "git commit -m 'document hooks.rmGuard.allowedRoots'",
             "cargo test --test hooks_guards",
+            "cargo test -- config import",
+            "git commit -m 'handle playbook.db lock'",
+            "rg -n playbook.db src/",
+            "cat ~/.config/playbook/config.json",
+            "playbook config set --global commit.signOff true",
+            "xargs echo playbook",
         ] {
             assert_eq!(deny(command), None, "{command}");
         }
+    }
+
+    #[test]
+    fn settings_files_may_not_gain_a_guard_env_entry() {
+        let settings = format!("{HOME}/.claude/settings.json");
+        let local = "/work/repo/.claude/settings.local.json";
+        for path in [settings.as_str(), local] {
+            assert_eq!(
+                check_path(path, HOME, r#"{"env":{"WORKTREE_BASE_DIR":"/"}}"#),
+                Some(RM_GUARD_CONFIG_REASON)
+            );
+            assert_eq!(
+                check_path(path, HOME, r#"{"env":{"POLICY_GUARD":"0"}}"#),
+                Some(RM_GUARD_CONFIG_REASON)
+            );
+            assert_eq!(check_path(path, HOME, r#"{"model":"opus"}"#), None);
+        }
+        assert_eq!(
+            check_path("/work/notes/settings.json", HOME, "WORKTREE_BASE_DIR"),
+            None
+        );
     }
 
     #[test]
@@ -437,12 +587,12 @@ mod tests {
             format!("{root}/x/../playbook.db"),
         ] {
             assert_eq!(
-                check_path(&path, HOME),
+                check_path(&path, HOME, "x"),
                 Some(RM_GUARD_CONFIG_REASON),
                 "{path}"
             );
         }
-        assert_eq!(check_path(&format!("{root}/memory/a.md"), HOME), None);
+        assert_eq!(check_path(&format!("{root}/memory/a.md"), HOME, "x"), None);
     }
 
     fn deny(command: &str) -> Option<&'static str> {
@@ -568,7 +718,7 @@ mod tests {
             "/Users/me/.claude/projects/p/x/../memory/a.md",
         ];
         for path in inside {
-            assert_eq!(check_path(path, HOME), Some(MEMORY_REASON), "{path}");
+            assert_eq!(check_path(path, HOME, "x"), Some(MEMORY_REASON), "{path}");
         }
         let outside = [
             "/Users/me/.config/playbook/memory/a.md",
@@ -581,7 +731,7 @@ mod tests {
             "",
         ];
         for path in outside {
-            assert_eq!(check_path(path, HOME), None, "{path}");
+            assert_eq!(check_path(path, HOME, "x"), None, "{path}");
         }
     }
 
@@ -631,7 +781,7 @@ mod tests {
     #[test]
     fn an_empty_home_never_denies_a_path() {
         // Arrange / Act / Assert
-        assert_eq!(check_path("/.claude/memory/a.md", ""), None);
+        assert_eq!(check_path("/.claude/memory/a.md", "", "x"), None);
     }
 
     #[test]
