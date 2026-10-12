@@ -18,6 +18,7 @@ pub mod mode;
 pub mod par;
 pub mod paths;
 pub mod payload;
+pub mod plugin_state;
 pub mod proc;
 pub mod prose;
 pub mod re;
