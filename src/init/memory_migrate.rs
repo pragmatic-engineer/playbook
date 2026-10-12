@@ -18,7 +18,7 @@
 //! the full set of legacy-filename fixes, not just the ones a particular
 //! caller happened to add.
 
-use crate::common::atomic::with_dir_lock;
+use crate::common::atomic::with_dir_lock_aged;
 use crate::common::paths::playbook_root_from;
 use crate::init::run::{StepReport, StepStatus};
 use std::fs;
@@ -30,6 +30,8 @@ const STEP_NAME: &str = "memory";
 const OLD_FILE_NAME: &str = "graph.json";
 const NEW_FILE_NAME: &str = "memory.graph.json";
 const OLD_LOCK_NAME: &str = "graph.json.lock";
+/// A migration lock older than this belongs to a killed process.
+const MIGRATION_LOCK_STALE: Duration = Duration::from_secs(120);
 const NEW_LOCK_NAME: &str = "memory.graph.json.lock";
 /// Its presence is the only "migration complete" signal: a destination
 /// left partially populated by an interrupted prior run has no sentinel.
@@ -210,9 +212,16 @@ fn move_memory_root(home: &Path, claude_home: &Path) -> StepReport {
     }
 
     let lock_path = new_root.join(NEW_LOCK_NAME);
-    let (acquired, report) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
-        copy_verify_and_finish(&old_root, &new_root, &sentinel)
-    });
+    // Fail-open by design: a migration that cannot take the lock still runs,
+    // because refusing would leave a user stuck on a dead holder's lock. A
+    // lock left by a killed process is cleared first.
+    let (acquired, report) = with_dir_lock_aged(
+        &lock_path,
+        50,
+        Duration::from_millis(10),
+        MIGRATION_LOCK_STALE,
+        || copy_verify_and_finish(&old_root, &new_root, &sentinel),
+    );
     if acquired {
         let _ = fs::remove_dir(&lock_path);
     }
@@ -519,6 +528,22 @@ mod tests {
     fn set_mtime(path: &Path, time: SystemTime) {
         let file = fs::File::open(path).unwrap();
         file.set_modified(time).unwrap();
+    }
+
+    #[test]
+    fn a_stale_migration_lock_is_cleared_and_the_copy_runs() {
+        let home = scratch_dir("mm-stale-lock");
+        let claude_home = home.join(".claude");
+        write_file(&claude_home.join("memory/fact.md"), "old");
+        let new_root = new_root_of(&home);
+        let lock = new_root.join(NEW_LOCK_NAME);
+        fs::create_dir_all(&lock).unwrap();
+        set_mtime(&lock, SystemTime::now() - MIGRATION_LOCK_STALE * 3);
+
+        let report = move_memory_root(&home, &claude_home);
+
+        assert_ne!(report.status, StepStatus::Failed, "{}", report.detail);
+        assert!(!lock.exists());
     }
 
     fn new_root_of(home: &Path) -> PathBuf {

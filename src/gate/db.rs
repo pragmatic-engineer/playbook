@@ -14,7 +14,8 @@
 //! is the de facto standard Rust SQLite binding, and this binary has no
 //! other reason to be async.
 
-use crate::common::atomic::with_dir_lock;
+use crate::common::atomic::with_dir_lock_aged;
+use crate::common::sqlite::{retry_busy, OPEN_BUDGET};
 use rusqlite::OptionalExtension;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -138,13 +139,18 @@ pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
     // ordering is load-bearing, not cosmetic.
     conn.busy_timeout(Duration::from_millis(5000))
         .map_err(|e| format!("failed to set busy_timeout: {e}"))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| format!("failed to set journal_mode=WAL: {e}"))?;
-    conn.execute_batch(SCHEMA_SQL)
+    // The WAL switch skips the busy handler, so a parallel opener gets BUSY
+    // at once; retry it for a bounded time.
+    retry_busy(
+        || conn.pragma_update(None, "journal_mode", "WAL"),
+        OPEN_BUDGET,
+    )
+    .map_err(|e| format!("failed to set journal_mode=WAL: {e}"))?;
+    retry_busy(|| conn.execute_batch(SCHEMA_SQL), OPEN_BUDGET)
         .map_err(|e| format!("failed to create gate_phases schema: {e}"))?;
     ensure_source_hash_column(&conn)?;
     ensure_stuck_verdict(&conn)?;
-    conn.execute_batch(ROUNDS_SQL)
+    retry_busy(|| conn.execute_batch(ROUNDS_SQL), OPEN_BUDGET)
         .map_err(|e| format!("failed to create gate_rounds schema: {e}"))?;
 
     Ok(conn)
@@ -253,6 +259,10 @@ pub fn query_phase(
 const MIGRATION_SENTINEL: &str = ".migration-complete";
 
 /// The legacy items a pre-ADR-0012 checkout held under its own `.claude/`.
+/// A migration lock older than this belongs to a killed process; the copy takes
+/// far less.
+const MIGRATION_LOCK_STALE: Duration = Duration::from_secs(120);
+
 const LEGACY_ITEMS: &[&str] = &["state.db", "plans", "designs", "implement", "worktrees"];
 
 /// Moves legacy `.claude/{state.db,plans,designs,implement,worktrees}` items
@@ -274,9 +284,13 @@ pub fn migrate_legacy_repo_local(repo_root: &Path, dest_base: &Path) -> Result<(
     }
 
     let lock_path = legacy_root.join(".migrate.lock");
-    let (acquired, result) = with_dir_lock(&lock_path, 50, Duration::from_millis(100), || {
-        migrate_legacy_repo_local_locked(&legacy_root, dest_base, &sentinel)
-    });
+    let (acquired, result) = with_dir_lock_aged(
+        &lock_path,
+        50,
+        Duration::from_millis(100),
+        MIGRATION_LOCK_STALE,
+        || migrate_legacy_repo_local_locked(&legacy_root, dest_base, &sentinel),
+    );
     if acquired {
         let _ = fs::remove_dir(&lock_path);
         // Harmless no-op if anything else still lives under `.claude`.
