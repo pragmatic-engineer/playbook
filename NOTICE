@@ -2,3 +2,10 @@ Playbook
 Copyright 2026 Igor Santos
 
 This product is licensed under the Apache License, Version 2.0.
+
+This product includes Tree-sitter (https://github.com/tree-sitter/tree-sitter)
+and the Tree-sitter grammars for Rust, TypeScript and TSX, JavaScript and
+Python (https://github.com/tree-sitter, tree-sitter-rust, tree-sitter-typescript,
+tree-sitter-javascript, tree-sitter-python), Copyright their respective
+authors, licensed under the MIT License. They are linked into the binary and
+used by `playbook code`.
