@@ -250,7 +250,7 @@ fn signing_flag(sys: &Sys) -> bool {
         sys.git_out(&["config", "--get", key])
             .is_some_and(|v| !v.is_empty())
     };
-    set("gpg.format") && set("user.signingkey")
+    set("user.signingkey")
 }
 
 fn text_problems(opts: &Options) -> Vec<String> {
@@ -331,6 +331,16 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         ..Report::default()
     };
 
+    if let Some(message) = &opts.message {
+        let problems = check::commit_message(message);
+        if !problems.is_empty() {
+            return Err(refuse_all(
+                problems,
+                "the commit message breaks a text rule",
+            ));
+        }
+    }
+
     // 2. Staging.
     if !opts.dry_run {
         let flag = match opts.stage {
@@ -390,6 +400,13 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
             "the base branch name looks like an option",
         ));
     }
+    let was_draft = existing.as_ref().map_or(opts.default_draft, |p| p.draft);
+    if opts.auto_merge && opts.ready.map_or(was_draft, |r| !r) {
+        return Err(fail(
+            exit::REFUSED,
+            "auto-merge needs a ready PR; pass --ready",
+        ));
+    }
     let base_ref = format!("refs/remotes/origin/{base}");
     if !sys.git(&["rev-parse", "--verify", "-q", &base_ref]).ok {
         return Err(fail(exit::FAILED, format!("origin/{base} does not exist")));
@@ -424,13 +441,6 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
                 "something is staged but no commit message was given",
             )
         })?;
-        let problems = check::commit_message(message);
-        if !problems.is_empty() {
-            return Err(refuse_all(
-                problems,
-                "the commit message breaks a text rule",
-            ));
-        }
         if !opts.dry_run {
             if let Some(before) = opts.before_commit {
                 before(&sys.dir).map_err(|e| fail(exit::REFUSED, e))?;
@@ -463,20 +473,26 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         .git(&["merge-base", "--is-ancestor", &base_ref, "HEAD"])
         .ok;
     let mut rebased = false;
+    let mut before = String::new();
     if !contains_base {
         report.actions.push(format!("rebase onto origin/{base}"));
         if !opts.dry_run {
-            let before = sys.git_out(&["rev-parse", "HEAD"]).unwrap_or_default();
+            before = sys.git_out(&["rev-parse", "HEAD"]).unwrap_or_default();
             let onto = format!("origin/{base}");
             let out = sys.git_wait(&["rebase", "--autostash", &onto], Wait::Hooks);
             if !out.ok {
                 let files = sys
                     .git_out(&["diff", "--name-only", "--diff-filter=U"])
                     .unwrap_or_default();
-                sys.git(&["rebase", "--abort"]);
+                let aborted = sys.git(&["rebase", "--abort"]).ok;
+                let note = if aborted {
+                    "it was aborted and nothing was pushed"
+                } else {
+                    "the abort failed and the tree is still mid-rebase; run git rebase --abort"
+                };
                 let mut f = fail(
                     exit::CONFLICT,
-                    format!("rebase onto origin/{base} conflicts; it was aborted and nothing was pushed. Resolve these files and run again"),
+                    format!("rebase onto origin/{base} conflicts; {note}. Resolve these files and run again"),
                 );
                 f.details = files.lines().map(String::from).collect();
                 return Err(f);
@@ -512,23 +528,34 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         .next()
         .map(String::from);
     let refspec = format!("HEAD:{remote_ref}");
+    // Force only over commits we already had before our own rebase.
+    let lease_base = if rebased {
+        before.clone()
+    } else {
+        "HEAD".to_string()
+    };
     let push_args: Option<Vec<String>> = match &remote {
         None => Some(vec!["push".into(), "-u".into(), "origin".into(), refspec]),
         Some(r) if *r == head => None,
         Some(r) if sys.git(&["merge-base", "--is-ancestor", r, "HEAD"]).ok => {
             Some(vec!["push".into(), "origin".into(), refspec])
         }
-        Some(r) if rebased => Some(vec![
-            "push".into(),
-            format!("--force-with-lease={remote_ref}:{r}"),
-            "origin".into(),
-            refspec,
-        ]),
+        Some(r)
+            if (rebased || (opts.dry_run && !contains_base))
+                && sys.git(&["merge-base", "--is-ancestor", r, &lease_base]).ok =>
+        {
+            Some(vec![
+                "push".into(),
+                format!("--force-with-lease={remote_ref}:{r}"),
+                "origin".into(),
+                refspec,
+            ])
+        }
         Some(_) if opts.dry_run => Some(vec!["push".into(), "(refused: remote diverged)".into()]),
         Some(_) => {
             return Err(fail(
                 exit::REFUSED,
-                "the remote branch has commits this branch lacks, and no rebase of ours explains it; this command only force-pushes after its own rebase",
+                "the remote branch has commits this branch lacks; this command only force-pushes after its own rebase of commits it already had",
             ))
         }
     };
@@ -642,6 +669,10 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
                 if !opts.dry_run {
                     let body = opts.body.as_deref().map(|b| pr::with_kept(b, &kept));
                     if let Some(body) = &body {
+                        let problems = check::pr_body(body);
+                        if !problems.is_empty() {
+                            return Err(refuse_all(problems, "the PR body breaks a text rule"));
+                        }
                         std::fs::write(&body_file, body)
                             .map_err(|e| fail(exit::FAILED, e.to_string()))?;
                     }
@@ -695,7 +726,9 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         return Ok(report);
     }
 
-    let number = pr_now.as_ref().map(|p| p.number).unwrap_or(0);
+    let Some(number) = pr_now.as_ref().map(|p| p.number) else {
+        return Err(fail(exit::FAILED, "no pull request to act on"));
+    };
 
     // 8. Auto-merge.
     if opts.auto_merge {
@@ -708,7 +741,12 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
             return Ok(report);
         }
         pr::enable_auto_merge(&sys, number).map_err(|e| fail(exit::FAILED, e))?;
-        let (_, queued) = pr::status(&sys, number).map_err(|e| fail(exit::FAILED, e))?;
+        let (state, queued) = pr::status(&sys, number).map_err(|e| fail(exit::FAILED, e))?;
+        if state == "MERGED" {
+            report.state = Some(state);
+            report.outcome = "merged".into();
+            return Ok(report);
+        }
         report.auto_merge_queued = queued;
         report.actions.push(if queued {
             "auto-merge queued".into()
@@ -753,7 +791,10 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
                 report.code = exit::TIMEOUT;
                 return Ok(report);
             }
-            std::thread::sleep(opts.poll);
+            std::thread::sleep(
+                opts.poll
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
         }
     }
     Ok(report)
