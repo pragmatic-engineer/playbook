@@ -264,7 +264,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: None,
         name: "auto-cost",
         group: Group::Usage,
-        purpose: "In `auto` mode, tracks spend per agent against `auto.budgetUsd` (main session) and `auto.agentBudgetUsd` (each subagent), and denies new work for an agent at its cap while the closing steps stay allowed. Denies new agents at `auto.sessionCeilingUsd`.",
+        purpose: "In `auto` mode, tracks spend per agent against `auto.budgetUsd` (main session) and `auto.agentBudgetUsd` (each subagent), and denies new work for an agent at its cap while the closing steps stay allowed. Parks every agent at `auto.sessionCeilingUsd`.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,

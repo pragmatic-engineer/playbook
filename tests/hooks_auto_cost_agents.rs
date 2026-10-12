@@ -398,7 +398,7 @@ fn new_work_is_denied_at_a_cap_and_the_reason_names_the_unblocking_commands() {
 }
 
 #[test]
-fn at_the_ceiling_new_agents_are_denied_and_other_work_and_closing_steps_continue() {
+fn at_the_ceiling_every_caller_is_parked_and_the_closing_steps_continue() {
     // Arrange: 3.00 + 4.00 + 4.00 is 11.00 against a ceiling of 10.00, and
     // every caller is under its own cap of 5.00.
     let tree = Tree::new("ceiling", 5.0, 5.0, 10.0);
@@ -406,24 +406,110 @@ fn at_the_ceiling_new_agents_are_denied_and_other_work_and_closing_steps_continu
     tree.spend_agent("a1", 4.0);
     tree.spend_agent("b2", 4.0);
 
-    for agent in [None, Some("a1")] {
+    for agent in [None, Some("a1"), Some("c3")] {
         // Act
         let spawn = new_work_call(&tree, agent, "Agent", "");
+        let edit = new_work_call(&tree, agent, "Edit", "");
         let build = tree.bash(agent, "cargo build");
         let push = tree.bash(agent, "git push origin feat/x");
 
         // Assert
-        let reason = spawn.reason();
-        assert!(
-            reason.contains("`playbook config set auto.sessionCeilingUsd <usd>`"),
-            "{reason}"
-        );
-        assert!(reason.contains("`playbook mode ask`"), "{reason}");
-        assert!(
-            !build.is_denied(),
-            "work under the own cap goes on: {build:?}"
-        );
+        for denied in [&spawn, &edit, &build] {
+            let reason = denied.reason();
+            assert!(
+                reason.contains("`playbook config set auto.sessionCeilingUsd <usd>`"),
+                "{reason}"
+            );
+            assert!(reason.contains("`playbook mode ask`"), "{reason}");
+        }
         assert!(!push.is_denied(), "{push:?}");
+    }
+}
+
+#[test]
+fn a_main_cap_and_an_agent_cap_that_differ_each_apply_to_their_own_caller() {
+    // Arrange: main may spend 8.00 and an agent 2.00.
+    let tree = Tree::new("caps-differ", 8.0, 2.0, 100.0);
+    tree.spend_main(3.0);
+    tree.spend_agent("a1", 2.5);
+
+    // Act
+    let main = tree.bash(None, "npm test");
+    let agent = tree.bash(Some("a1"), "npm test");
+
+    // Assert
+    assert!(!main.is_denied(), "3.00 is under 8.00: {main:?}");
+    let reason = agent.reason();
+    assert!(reason.contains("$2.00"), "{reason}");
+    assert!(reason.contains("auto.agentBudgetUsd"), "{reason}");
+}
+
+#[test]
+fn the_guard_still_denies_settings_for_a_parked_caller_and_an_unreadable_one() {
+    // Arrange: an agent at its cap, and another whose transcript is unpriced.
+    let tree = Tree::new("guard-first", 5.0, 1.0, 100.0);
+    tree.spend_agent("a1", 2.0);
+    let line = json!({"type": "assistant", "message": {"id": "m1", "model": "unknown-model-x",
+        "usage": {"input_tokens": 10, "output_tokens": 1}}});
+    let path = tree.agent_file("u1");
+    fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    fs::write(&path, format!("{line}\n")).expect("agent transcript");
+
+    for agent in ["a1", "u1"] {
+        // Act
+        let set = tree.bash(Some(agent), "playbook config set auto.agentBudgetUsd 99");
+        let ask = tree.bash(Some(agent), "playbook mode ask");
+
+        // Assert
+        assert!(set.is_denied(), "{agent}: {set:?}");
+        if agent == "u1" {
+            assert_eq!(ask, Outcome::Silent, "the mode escape stays open");
+        }
+    }
+}
+
+#[test]
+fn an_agent_whose_main_transcript_cannot_be_read_fails_closed() {
+    // Arrange: the payload names a main transcript that does not exist.
+    let tree = Tree::new("no-main", 5.0, 5.0, 100.0);
+    let mut value: Value =
+        serde_json::from_str(&tree.payload(Some("a1"), "Bash", json!({"command": "npm test"})))
+            .expect("payload is JSON");
+    value["transcript_path"] = json!(tree.s.cwd.join("gone.jsonl").to_string_lossy());
+
+    // Act
+    let outcome = tree.run(&value.to_string());
+
+    // Assert
+    assert!(outcome.reason().contains("cost unreadable"), "{outcome:?}");
+}
+
+#[test]
+fn a_parked_caller_cannot_force_push_push_to_main_or_commit_without_auto() {
+    // Arrange
+    let tree = Tree::new("parked-git", 5.0, 1.0, 100.0);
+    tree.spend_agent("a1", 2.0);
+
+    // Act and assert
+    for command in [
+        "playbook commit run",
+        "git push origin main",
+        "git push origin HEAD:master",
+        "git push --receive-pack=x origin feat/x",
+        "git log --output=x",
+        "gh api repos/o/r/issues -fkey=v",
+        "gh api repos/o/r/issues -XPOST",
+        "git status>out.txt",
+    ] {
+        assert!(tree.bash(Some("a1"), command).is_denied(), "{command}");
+    }
+    for command in [
+        "playbook commit run --auto <<'MSG'\nfeat: x\nMSG",
+        "playbook pr prepare --help >/dev/null 2>&1 || { echo \"upgrade\" >&2; exit 1; }",
+        "cat > \"/tmp/s/pr-body.md\" <<'PRBODY_EOF'\nbody\nPRBODY_EOF\nplaybook pr create --title \"fix: x\" --body-file /tmp/s/pr-body.md",
+    ] {
+        let outcome = tree.bash(Some("a1"), command);
+        assert!(!outcome.is_denied(), "{command}: {outcome:?}");
     }
 }
 

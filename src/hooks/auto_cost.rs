@@ -15,8 +15,8 @@
 //! the caller hears one note about its own budget. At its cap only that caller
 //! is parked: new work is denied, while reading, the closing steps in the
 //! `closing` module and a park note stay allowed. The whole tree's spend has a
-//! ceiling, `auto.sessionCeilingUsd`, past which only new `Agent` spawns are
-//! denied. When the caller's spend cannot be read, including a transcript with
+//! ceiling, `auto.sessionCeilingUsd`, past which every caller is parked.
+//! When the caller's spend cannot be read, including a transcript with
 //! unpriced models and no telemetry, it fails closed the same way. Under the
 //! cap it also denies the model changing its own guard: the `mode`, `auto.*`
 //! and `fix.*` settings and the config files.
@@ -100,7 +100,6 @@ const DEFAULT_AGENT_BUDGET_CENTS: i64 = 500;
 const CEILING_FACTOR: i64 = 10;
 const DEFAULT_WARN_PCT: u64 = 70;
 const SAFE_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
-const SPAWN_TOOLS: [&str; 2] = ["Agent", "Task"];
 const MODE_ESCAPE: &str = "playbook mode ask";
 
 pub fn run(payload: &Payload) {
@@ -139,7 +138,7 @@ struct Limits {
     cap: i64,
     /// The cap of each subagent.
     agent_cap: i64,
-    /// The whole tree's ceiling, past which no agent is spawned.
+    /// The whole tree's ceiling, past which every caller is parked.
     ceiling: i64,
     pct: u64,
     budget_is_valid: bool,
@@ -169,7 +168,7 @@ impl Limits {
         Limits {
             cap,
             agent_cap: agent_budget.unwrap_or(DEFAULT_AGENT_BUDGET_CENTS),
-            ceiling: cents("auto.sessionCeilingUsd").unwrap_or(cap * CEILING_FACTOR),
+            ceiling: cents("auto.sessionCeilingUsd").unwrap_or(cap.saturating_mul(CEILING_FACTOR)),
             pct,
             budget_is_valid: budget.is_some(),
             agent_budget_is_valid: agent_budget.is_some(),
@@ -268,13 +267,25 @@ fn own_agent_id(path: &Path) -> Option<(PathBuf, String)> {
 /// the price table counts as free, so without telemetry that cost is a guess.
 /// A subagent whose transcript does not exist yet has spent nothing.
 fn spend_cents(state: &State, transcripts: &Transcripts) -> Option<i64> {
-    let telemetry = state.telemetry.as_ref().map(|t| t.cents - t.baseline_cents);
+    let telemetry = state
+        .telemetry
+        .as_ref()
+        .map(|t| t.cents.saturating_sub(t.baseline_cents));
     let entry = transcripts
         .own_key()
         .and_then(|key| state.transcript.files.get(&key));
+    // The agent's file is missing: it has not started writing yet, which is
+    // only believed while the main transcript is readable. Otherwise the
+    // path may simply be wrong, and the spend is unknown.
+    let main_is_read = state
+        .transcript
+        .files
+        .contains_key(&transcripts.main.to_string_lossy().into_owned());
     match (entry, &transcripts.caller) {
-        (Some(file), _) if !file.unpriced => Some(to_cents(file.usd) - file.baseline_cents),
-        (None, Caller::Agent(_)) => Some(0),
+        (Some(file), _) if !file.unpriced => {
+            Some(to_cents(file.usd).saturating_sub(file.baseline_cents))
+        }
+        (None, Caller::Agent(_)) if transcripts.own_key().is_some() && main_is_read => Some(0),
         _ => telemetry,
     }
 }
@@ -289,26 +300,36 @@ fn enforce(payload: &Payload, limits: &Limits, root: &Path) {
     let spend = state
         .as_ref()
         .and_then(|state| spend_cents(state, &transcripts));
+    let guard = call.changes_the_guard(root);
     let (Some(state), Some(spend)) = (state, spend) else {
-        if !call.is_allowed_when_parked(park_note.as_deref()) && !call.is_mode_escape() {
-            emit_pre_deny(UNREADABLE_REASON);
+        let allowed = call.is_allowed_when_parked(park_note.as_deref());
+        if allowed && !guard || call.is_mode_escape() {
+            return;
         }
+        emit_pre_deny(if allowed {
+            SELF_PROTECTION_REASON
+        } else {
+            UNREADABLE_REASON
+        });
         return;
     };
     let cap = limits.cap_of(caller);
-    if spend >= cap {
+    if spend >= cap || state.effective_cents >= limits.ceiling {
         if !call.is_allowed_when_parked(park_note.as_deref()) {
             let note = park_note.unwrap_or_default();
-            emit_pre_deny(&budget_reached_reason(caller, cap, &note));
+            let reason = if spend >= cap {
+                budget_reached_reason(caller, cap, &note)
+            } else {
+                ceiling_reason(limits.ceiling, &note)
+            };
+            emit_pre_deny(&reason);
+        } else if guard {
+            emit_pre_deny(SELF_PROTECTION_REASON);
         }
         return;
     }
-    if call.changes_the_guard(root) {
+    if guard {
         emit_pre_deny(SELF_PROTECTION_REASON);
-        return;
-    }
-    if call.spawns_an_agent() && state.effective_cents >= limits.ceiling {
-        emit_pre_deny(&ceiling_reason(limits.ceiling));
         return;
     }
     let suffix = match caller {
@@ -359,10 +380,11 @@ fn budget_reached_reason(caller: &Caller, cap: i64, park_note: &Path) -> String 
     )
 }
 
-fn ceiling_reason(ceiling: i64) -> String {
+fn ceiling_reason(ceiling: i64, park_note: &Path) -> String {
     format!(
-        "session ceiling reached: the agents together have spent the {} ceiling, so no new agent starts. Finish and deliver the work in hand, then report to the user. To go on, the user can run `playbook config set auto.sessionCeilingUsd <usd>` or `playbook mode ask`.",
-        dollars(ceiling)
+        "session ceiling reached: the agents together have spent the {} ceiling, so every agent is parked and new work is denied. The closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. To go on, the user can run `playbook config set auto.sessionCeilingUsd <usd>` or `playbook mode ask`.",
+        dollars(ceiling),
+        park_note.display()
     )
 }
 
@@ -419,10 +441,6 @@ impl ToolCall {
 
     fn is_mode_escape(&self) -> bool {
         self.tool == "Bash" && self.command == MODE_ESCAPE
-    }
-
-    fn spawns_an_agent(&self) -> bool {
-        SPAWN_TOOLS.contains(&self.tool.as_str())
     }
 
     fn changes_the_guard(&self, root: &Path) -> bool {
@@ -582,10 +600,13 @@ fn effective_cents(state: &State) -> i64 {
     let transcript = (!files.is_empty()).then(|| {
         files
             .values()
-            .map(|f| to_cents(f.usd) - f.baseline_cents)
-            .sum::<i64>()
+            .map(|f| to_cents(f.usd).saturating_sub(f.baseline_cents))
+            .fold(0_i64, i64::saturating_add)
     });
-    let telemetry = state.telemetry.as_ref().map(|t| t.cents - t.baseline_cents);
+    let telemetry = state
+        .telemetry
+        .as_ref()
+        .map(|t| t.cents.saturating_sub(t.baseline_cents));
     transcript.into_iter().chain(telemetry).max().unwrap_or(0)
 }
 
@@ -653,7 +674,7 @@ fn advance_file(files: &mut BTreeMap<String, FileCost>, path: &Path, first_call:
         entry.last_id = id;
         entry.last_usd = usd;
     }
-    entry.offset += complete.len() as u64;
+    entry.offset = entry.offset.saturating_add(complete.len() as u64);
     if is_new && first_call {
         entry.baseline_cents = to_cents(entry.usd);
     }

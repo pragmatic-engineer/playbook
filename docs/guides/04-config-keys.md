@@ -42,7 +42,7 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `routing.escalate` | `ask` | `ask`, `auto`, `deny` | What `playbook route` does when a task needs approval (the top model, the high implement tier, or a task that failed twice). `ask` tells the orchestrator to ask you first. `auto` proceeds, and auto mode with `auto.budgetUsd` still caps the spend. `deny` returns the cheaper route instead. Your effort ceiling always wins. |
 | `auto.budgetUsd` | `5` | number, 0.01 or more | The spend cap of the main session in US dollars while the mode is `auto`, counted on its own transcript. |
 | `auto.agentBudgetUsd` | `5` | number, 0.01 or more | The spend cap of each subagent in US dollars while the mode is `auto`, counted on its own transcript. At its cap only that agent is parked, and it can still commit, push and open a pull request. |
-| `auto.sessionCeilingUsd` | `0` | number, 0 or 0.01 and more | A ceiling on what the whole tree of agents has spent. At the ceiling no new agent starts. `0` means ten times `auto.budgetUsd`. |
+| `auto.sessionCeilingUsd` | `0` | number, 0 or 0.01 and more | A ceiling on what the whole tree of agents has spent. At the ceiling every agent is parked. `0` means ten times `auto.budgetUsd`. |
 | `auto.warnPct` | `70` | whole number, 1 to 100 | The percent of a cap (`auto.budgetUsd` for the main session, `auto.agentBudgetUsd` for a subagent) at which the spend hook warns that agent once. |
 | `fix.maxFiles` | `3` | whole number, 1 or more | `/playbook:fix` stops and hands off to `/playbook:plan` when more files than this change. |
 | `fix.maxLines` | `500` | whole number, 1 or more | `/playbook:fix` stops the same way when more lines than this change, not counting the new test. |

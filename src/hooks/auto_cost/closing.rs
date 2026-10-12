@@ -30,22 +30,69 @@ pub fn is_closing_skill(skill: &str) -> bool {
 
 /// Whether every simple command of `command` is a closing step.
 pub fn is_closing_command(command: &str) -> bool {
-    // The shell reader treats `&` as a separator, so the stream merges are
-    // taken out first. Quoted text that holds one loses it, which is harmless.
-    let plain = ["2>&1", "1>&2", ">&2", "&>/dev/null"]
-        .iter()
-        .fold(command.to_string(), |text, merge| text.replace(merge, ""));
+    let plain = without_stream_merges(command);
     let parsed = commands(&plain);
     !parsed.is_empty() && parsed.iter().all(is_closing_step)
+}
+
+/// The text without the stream merges (`2>&1`, `1>&2`, `>&2`, `&>/dev/null`)
+/// that sit outside quotes. The shell reader treats `&` as a separator, so
+/// they are taken out first. Quoted text is left as it is.
+fn without_stream_merges(command: &str) -> String {
+    const MERGES: [&str; 4] = ["2>&1", "1>&2", ">&2", "&>/dev/null"];
+    let mut out = String::with_capacity(command.len());
+    let mut quote: Option<char> = None;
+    let mut rest = command;
+    while let Some(c) = rest.chars().next() {
+        if quote.is_none() && c != '\\' {
+            if let Some(merge) = MERGES.iter().find(|m| rest.starts_with(**m)) {
+                rest = &rest[merge.len()..];
+                continue;
+            }
+        }
+        match (quote, c) {
+            (None, '\'' | '"') => quote = Some(c),
+            (Some(open), _) if open == c => quote = None,
+            _ => {}
+        }
+        let width = if c == '\\' && quote != Some('\'') {
+            c.len_utf8()
+                + rest[c.len_utf8()..]
+                    .chars()
+                    .next()
+                    .map_or(0, char::len_utf8)
+        } else {
+            c.len_utf8()
+        };
+        out.push_str(&rest[..width]);
+        rest = &rest[width..];
+    }
+    out
 }
 
 fn is_closing_step(command: &Command) -> bool {
     if command.spans.iter().any(|span| span.dynamic) {
         return false;
     }
+    // An unquoted heredoc expands `$` and backticks in its body.
+    if command
+        .heredocs
+        .iter()
+        .any(|doc| !doc.quoted && doc.text.contains(['$', '`']))
+    {
+        return false;
+    }
+    if is_pr_body_write(command) {
+        return true;
+    }
     let Some(words) = without_redirects(&command.words) else {
         return false;
     };
+    let words = unwrap_group(&words);
+    // A lone `}` closes a group the skill's version probe opened.
+    if words.is_empty() && command.words.first().is_some_and(|word| word == "}") {
+        return true;
+    }
     let Some((program, args)) = words.split_first() else {
         return false;
     };
@@ -53,10 +100,39 @@ fn is_closing_step(command: &Command) -> bool {
         "git" => is_git_step(args),
         "gh" => is_gh_read(args),
         "playbook" => is_playbook_step(args),
+        // The skills' version probe ends in `|| { echo "..." >&2; exit 1; }`.
+        "echo" | "exit" | "true" => true,
         // Output of a closing step may be trimmed.
         "head" | "tail" | "wc" => command.piped,
         _ => false,
     }
+}
+
+/// The words without a leading `{` or a trailing `}` of a command group.
+fn unwrap_group<'a>(words: &[&'a str]) -> Vec<&'a str> {
+    let mut words = words;
+    while let Some((&"{", rest)) = words.split_first() {
+        words = rest;
+    }
+    while let Some((&"}", rest)) = words.split_last() {
+        words = rest;
+    }
+    words.to_vec()
+}
+
+/// `cat > <dir>/pr-body.md <<'EOF'`: the one file write the pull request
+/// skill makes before `playbook pr create`. The body must be a quoted heredoc.
+fn is_pr_body_write(command: &Command) -> bool {
+    let words: Vec<&str> = command.words.iter().map(String::as_str).collect();
+    let [cat, ">", target, ..] = words.as_slice() else {
+        return false;
+    };
+    let rest = &words[3..];
+    program_name(cat) == "cat"
+        && target.ends_with("/pr-body.md")
+        && !target.contains("..")
+        && command.heredocs.iter().all(|doc| doc.quoted)
+        && rest.iter().all(|word| word.starts_with("<<"))
 }
 
 /// The words with the redirections removed, or `None` when one writes or reads
@@ -68,6 +144,10 @@ fn without_redirects(words: &[String]) -> Option<Vec<&str>> {
     while let Some(word) = rest.next() {
         let operator = word.trim_start_matches(|c: char| c.is_ascii_digit());
         if !operator.starts_with(['<', '>']) {
+            // A redirect glued to a word, as in `status>out.txt`.
+            if word.contains(['<', '>']) {
+                return None;
+            }
             kept.push(word);
             continue;
         }
@@ -93,24 +173,49 @@ fn is_git_step(args: &[&str]) -> bool {
     };
     match args {
         [] => false,
-        ["add" | "commit" | "status" | "log", ..] => true,
-        ["diff", rest @ ..] => !rest.iter().any(|arg| arg.starts_with("--output")),
+        ["add" | "commit" | "status", ..] => true,
+        ["diff" | "log", rest @ ..] => !rest.iter().any(|arg| arg.starts_with("--output")),
         ["worktree", "list", ..] => true,
-        ["push", rest @ ..] => !is_destructive_push(rest),
+        ["push", rest @ ..] => is_safe_push(rest),
         _ => false,
     }
 }
 
-/// A push that forces, deletes or mirrors. Closing a task never needs one,
-/// and the other hooks keep guarding protected branches.
-fn is_destructive_push(args: &[&str]) -> bool {
-    args.iter().any(|arg| {
-        let flag = arg.starts_with('-') && !arg.starts_with("--");
+/// Branches a closing step never pushes to.
+const PROTECTED_BRANCHES: [&str; 4] = ["main", "master", "trunk", "develop"];
+
+/// A push of a named branch to a remote. It must not force, delete, mirror,
+/// push every branch, run a program of its choosing, or target a protected
+/// branch. A push with no explicit branch is denied too, since it may push
+/// the protected branch the work tree is on.
+fn is_safe_push(args: &[&str]) -> bool {
+    let unsafe_flag = args.iter().any(|arg| {
+        let short = arg.starts_with('-') && !arg.starts_with("--");
         arg.starts_with("--force")
-            || matches!(*arg, "--delete" | "--mirror" | "--prune")
-            || (flag && arg.contains(['f', 'd']))
+            || ["--delete", "--mirror", "--prune", "--all", "--tags"].contains(arg)
+            || ["--receive-pack", "--exec", "--repo"]
+                .iter()
+                .any(|flag| arg.starts_with(flag))
+            || (short && arg.contains(['f', 'd']))
             || arg.starts_with(['+', ':'])
-    })
+    });
+    let positional: Vec<&str> = args
+        .iter()
+        .copied()
+        .filter(|arg| !arg.starts_with('-'))
+        .collect();
+    let [_remote, refspecs @ ..] = positional.as_slice() else {
+        return false;
+    };
+    !unsafe_flag
+        && !refspecs.is_empty()
+        && refspecs.iter().all(|spec| {
+            let destination = spec.rsplit(':').next().unwrap_or(spec);
+            let branch = destination
+                .strip_prefix("refs/heads/")
+                .unwrap_or(destination);
+            !branch.is_empty() && branch != "HEAD" && !PROTECTED_BRANCHES.contains(&branch)
+        })
 }
 
 /// Read-only `gh`: viewing and listing pull requests and runs, and `api`
@@ -124,37 +229,50 @@ fn is_gh_read(args: &[&str]) -> bool {
     }
 }
 
+/// `gh api` that only reads. A short flag with its value attached (`-fkey=v`,
+/// `-Fkey=v`, `-XPOST`) or in a cluster (`-if`) is judged like the spaced
+/// form, and `graphql` is a POST by default.
 fn is_get_api(args: &[&str]) -> bool {
     let mut at = 0;
-    while let Some(arg) = args.get(at) {
-        let lower = arg.to_lowercase();
-        let method = |value: &str| value.eq_ignore_ascii_case("GET");
-        match lower.as_str() {
-            "-x" | "--method" => {
-                if !args.get(at + 1).is_some_and(|value| method(value)) {
-                    return false;
+    while let Some(&arg) = args.get(at) {
+        let is_get = |value: &str| value == "GET";
+        if arg == "graphql" {
+            return false;
+        }
+        if let Some(long) = arg.strip_prefix("--") {
+            let (name, value) = long.split_once('=').unwrap_or((long, ""));
+            match name {
+                "input" | "field" | "raw-field" => return false,
+                "method" => {
+                    let value = if long.contains('=') {
+                        Some(value)
+                    } else {
+                        at += 1;
+                        args.get(at).copied()
+                    };
+                    if !value.is_some_and(is_get) {
+                        return false;
+                    }
                 }
-                at += 1;
+                _ => {}
             }
-            "--input" | "--field" | "--raw-field" => return false,
-            _ if arg.starts_with("-X") => {
-                if !method(&arg[2..]) {
-                    return false;
-                }
-            }
-            _ if arg.starts_with("--method=") => {
-                if !method(&arg["--method=".len()..]) {
-                    return false;
-                }
-            }
-            _ if arg.starts_with("--input=")
-                || arg.starts_with("--field=")
-                || arg.starts_with("--raw-field=") =>
-            {
+        } else if let Some(short) = arg.strip_prefix('-').filter(|short| !short.is_empty()) {
+            if short.contains(['f', 'F']) {
                 return false;
             }
-            _ if *arg == "-f" || *arg == "-F" => return false,
-            _ => {}
+            if let Some(method) = short.strip_prefix('X') {
+                let method = if method.is_empty() {
+                    at += 1;
+                    args.get(at).copied().unwrap_or_default()
+                } else {
+                    method
+                };
+                if !is_get(method) {
+                    return false;
+                }
+            } else if short.contains('X') {
+                return false;
+            }
         }
         at += 1;
     }
@@ -162,16 +280,18 @@ fn is_get_api(args: &[&str]) -> bool {
 }
 
 /// The `playbook` commands the commit and pull request skills run, and the
-/// read-only status and config reads.
+/// read-only status and config reads. `commit run` must carry `--auto`:
+/// without it the command may force push after an amend or a rebase.
 fn is_playbook_step(args: &[&str]) -> bool {
-    matches!(
-        args,
+    match args {
+        ["commit", "run", rest @ ..] => rest.contains(&"--auto"),
         ["pr", "create" | "prepare" | "rules", ..]
-            | ["commit", "run" | "prepare", ..]
-            | ["mode", "status"]
-            | ["mode", "status", "--json"]
-            | ["config", "get", ..]
-    )
+        | ["commit", "prepare", ..]
+        | ["mode", "status"]
+        | ["mode", "status", "--json"]
+        | ["config", "get", ..] => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -199,12 +319,17 @@ mod tests {
             "gh api -X GET repos/o/r/pulls",
             "playbook pr create --title \"fix: x\" --body-file b.md",
             "playbook commit run --auto",
+            "git push origin HEAD:refs/heads/feat/x",
+            "git log --oneline 2>&1 | head -5",
+            "playbook pr prepare --help >/dev/null 2>&1 || { echo \"ERROR: upgrade\" >&2; exit 1; }",
+            "cat > \"/tmp/state/pr-body.md\" <<'PRBODY_EOF'\nbody $x `y`\nPRBODY_EOF\nplaybook pr create --title \"fix: x\" --body-file /tmp/state/pr-body.md",
+            "git commit -m \"feat: a b\" 2>&1",
             "playbook pr prepare --base main",
             "playbook mode status",
             "playbook mode status --json",
             "git status && git diff",
             "git log --oneline 2>&1 | head -5",
-            "playbook commit run <<'MSG'\nfeat: x\nMSG",
+            "playbook commit run --auto <<'MSG'\nfeat: x\nMSG",
         ];
         let new_work = [
             "cargo build",
@@ -228,7 +353,38 @@ mod tests {
             "git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\"",
             "git status > out.txt",
             "git diff --output=x",
-            "echo hi | head",
+            "gh api repos/o/r/issues -fkey=v",
+            "gh api repos/o/r/issues -Fkey=v",
+            "gh api repos/o/r/issues -XPOST",
+            "gh api repos/o/r/issues -if",
+            "gh api graphql",
+            "gh api repos/o/r --method=POST",
+            "cat <<EOF | playbook commit run --auto\n$HOME\nEOF",
+            "playbook commit run --auto <<EOF\n$(id)\nEOF",
+            "git status>out.txt",
+            "git log>>out.txt",
+            "git log --output=x",
+            "git log --output x",
+            "git push --receive-pack=evil origin feat/x",
+            "git push --exec=evil origin feat/x",
+            "git push origin main",
+            "git push origin HEAD:main",
+            "git push origin feat/x:refs/heads/master",
+            "git push",
+            "git push origin",
+            "git push --all origin",
+            "git push origin HEAD",
+            "playbook commit run",
+            "playbook commit run -a",
+            "git commit -m \"x\" \"$(echo 2>&1)\"",
+            "git status '2>&1' > out.txt",
+            "git status \"2>&1\" > out.txt",
+            "cat > /tmp/other.txt <<'EOF'\nx\nEOF",
+            "cat > ../pr-body.md <<'EOF'\nx\nEOF",
+            "cat > /tmp/pr-body.md <<EOF\n$(id)\nEOF",
+            "echo hi > out.txt",
+            // A word that holds a redirect symbol is denied, quoted or not.
+            "git commit -m \"a 2>&1 b\"",
             "head -5 file",
             "",
         ];
