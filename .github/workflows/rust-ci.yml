@@ -27,7 +27,9 @@ permissions: {}
 
 concurrency:
   group: rust-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a push to main: it is the run that saves the cargo cache, and
+  # back-to-back merges were cancelling it before the save step.
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   # Classifies the change so docs-only PRs skip the heavy lanes. Required
@@ -132,9 +134,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-build-test-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-build-test-v2-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            cargo-build-test-${{ runner.os }}-
+            cargo-build-test-v2-${{ runner.os }}-
 
       # Prints the version rust-toolchain.toml actually resolved to, so a
       # reviewer can confirm the pin took effect from the job log instead of
@@ -255,7 +257,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-build-test-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-build-test-v2-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
 
   # Cheap lane for docs-only changes: the only cargo tests that read docs
   # (generated reference page drift, config-key coverage, README and index
