@@ -14,6 +14,7 @@ pub mod commit;
 pub mod common;
 pub mod config;
 pub mod deps;
+pub mod doc;
 pub mod doctor;
 pub mod effort;
 pub mod eval;
@@ -315,6 +316,17 @@ pub enum Command {
     Deps {
         #[command(subcommand)]
         sub: DepsCommand,
+    },
+    /// Read a PDF or Office file as text with the optional anydoc converter
+    ///
+    /// Conversion is local, bounded in size, time, memory and output, and
+    /// never uses OCR or a hosted service. The text is printed as untrusted
+    /// document content and nothing is kept on disk afterwards.
+    ///
+    /// Example: `playbook doc read report.docx`
+    Doc {
+        #[command(subcommand)]
+        sub: DocCommand,
     },
     /// Read single facts that the health check uses
     ///
@@ -1574,6 +1586,24 @@ pub enum DoctorCommand {
         /// Only count this event (default: every event)
         event: Option<String>,
     },
+}
+
+/// `playbook doc` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum DocCommand {
+    /// Print a document as Markdown, framed as untrusted content
+    ///
+    /// Supports pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods
+    /// and csv. A scanned PDF with no text layer reports that it needs OCR.
+    Read {
+        /// The document to read
+        file: PathBuf,
+        /// Print one JSON object instead of the framed text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Say whether the anydoc converter is installed and how to get it
+    Status,
 }
 
 /// `playbook deps` subcommands.
