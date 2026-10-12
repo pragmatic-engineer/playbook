@@ -143,6 +143,7 @@ mod tests {
             "a-quality.md",
             "a.checkpoint.md",
             "a.gate-source-1.md",
+            "a.checkpoint.md.lock",
             "keep.md",
         ] {
             fs::write(plans.join(n), "# T\n").unwrap();
