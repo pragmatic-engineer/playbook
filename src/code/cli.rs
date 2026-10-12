@@ -40,19 +40,50 @@ pub enum CodeCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Search the indexed text of this repository
+    /// Search symbols, imports and text of this repository
     ///
-    /// Shows repo relative paths, line ranges and short excerpts. Words in the
-    /// query are matched as plain text, so operators have no special meaning.
-    /// Results are marked stale when a file changed after it was indexed.
+    /// Without the text flag, results are ranked in tiers: exact qualified
+    /// name, exact name, name ignoring case, name prefix, import, text, then a
+    /// plain substring scan. With it, only indexed text is searched. Words in
+    /// the query are matched as plain text, so operators have no special
+    /// meaning. Results are marked stale when a file changed after indexing.
     ///
-    /// Example: `playbook code search --text retry`
+    /// Example: `playbook code search retry --lang python`
     Search {
         /// Words to look for
         query: String,
-        /// Search indexed text
-        #[arg(long, required = true)]
+        /// Search indexed text only
+        #[arg(long)]
         text: bool,
+        /// Only files under this path prefix, for example `lib/payment/`
+        #[arg(long)]
+        path: Option<String>,
+        /// Only files of this language: rust, typescript, javascript or python
+        #[arg(long, value_parser = ["rust", "typescript", "javascript", "python"])]
+        lang: Option<String>,
+        /// Most results to show, from 1 to 200
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+    /// Find where a name is declared
+    ///
+    /// Matches the exact qualified name first (a top level symbol's qualified
+    /// name is its plain name), then the name, then the name ignoring case,
+    /// then the name as a prefix.
+    ///
+    /// Example: `playbook code symbol PaymentService --kind class`
+    Symbol {
+        /// The name to look up
+        name: String,
+        /// Only this kind, for example `function`, `class` or `method`
+        #[arg(long)]
+        kind: Option<String>,
+        /// Only files of this language: rust, typescript, javascript or python
+        #[arg(long, value_parser = ["rust", "typescript", "javascript", "python"])]
+        lang: Option<String>,
         /// Only files under this path prefix, for example `lib/payment/`
         #[arg(long)]
         path: Option<String>,
@@ -85,11 +116,34 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
         CodeCommand::Status { json } => render_status(env, json),
         CodeCommand::Search {
             query,
+            text,
+            path,
+            lang,
+            limit,
+            json,
+        } => {
+            let mut opts = SearchOptions::new(&query);
+            opts.path = path.map(|p| normalize_prefix(&p));
+            opts.lang = lang;
+            opts.limit = limit as usize;
+            let mode = if text { Mode::Text } else { Mode::Ranked };
+            render_search(env, &opts, mode, json)
+        }
+        CodeCommand::Symbol {
+            name,
+            kind,
+            lang,
             path,
             limit,
             json,
-            ..
-        } => render_search(env, &query, path, limit as usize, json),
+        } => {
+            let mut opts = SearchOptions::new(&name);
+            opts.kind = kind;
+            opts.path = path.map(|p| normalize_prefix(&p));
+            opts.lang = lang;
+            opts.limit = limit as usize;
+            render_search(env, &opts, Mode::Symbol, json)
+        }
     }
 }
 
@@ -103,17 +157,29 @@ fn normalize_prefix(prefix: &str) -> String {
     rest.to_string()
 }
 
+/// Which lookup a search-shaped command runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Text,
+    Ranked,
+    Symbol,
+}
+
 fn render_search(
     env: &Env,
-    query: &str,
-    path: Option<String>,
-    limit: usize,
+    opts: &SearchOptions,
+    mode: Mode,
     json: bool,
 ) -> Result<String, String> {
-    let mut opts = SearchOptions::new(query);
-    opts.path = path.map(|p| normalize_prefix(&p));
-    opts.limit = limit;
-    let out = super::search_text(&env.cwd, &opts)?;
+    let command = match mode {
+        Mode::Symbol => "symbol",
+        Mode::Text | Mode::Ranked => "search",
+    };
+    let out = match mode {
+        Mode::Text => super::search_text(&env.cwd, opts)?,
+        Mode::Ranked => super::search_ranked(&env.cwd, opts)?,
+        Mode::Symbol => super::symbol_lookup(&env.cwd, opts)?,
+    };
     let state = status::state_of(&out.drift);
     let mut warnings = Vec::new();
     if state == IndexState::Stale {
@@ -134,7 +200,7 @@ fn render_search(
             .hits
             .iter()
             .map(|h| {
-                json!({
+                let mut row = json!({
                     "path": h.path,
                     "start_line": h.start_line,
                     "end_line": h.end_line,
@@ -143,11 +209,20 @@ fn render_search(
                     "tier": h.tier,
                     "excerpt": h.excerpt,
                     "stale": h.stale,
-                })
+                });
+                if let (Some(sym), Some(map)) = (&h.symbol, row.as_object_mut()) {
+                    map.insert("name".into(), json!(sym.name));
+                    map.insert("qualified_name".into(), json!(sym.qualified_name));
+                    map.insert("kind".into(), json!(sym.kind));
+                    map.insert("lang".into(), json!(sym.lang));
+                    map.insert("signature".into(), json!(sym.signature));
+                    map.insert("exported".into(), json!(sym.exported));
+                }
+                row
             })
             .collect();
         let mut envelope = Envelope::new(
-            "search",
+            command,
             state,
             out.index_path.display().to_string(),
             serde_json::Value::Array(results),
@@ -165,18 +240,27 @@ fn render_search(
     }
     let mut text = String::new();
     for h in &out.result.hits {
-        let first = h
-            .excerpt
-            .lines()
-            .nth(h.line.saturating_sub(super::search::excerpt_start(h.line)))
-            .unwrap_or("");
         let stale = if h.stale { " (stale)" } else { "" };
+        let shown = match &h.symbol {
+            Some(sym) => format!(
+                "{} {}  {}",
+                sym.kind,
+                sym.qualified_name,
+                sym.signature.as_deref().unwrap_or("")
+            ),
+            None => h
+                .excerpt
+                .lines()
+                .nth(h.line.saturating_sub(h.excerpt_start))
+                .unwrap_or("")
+                .to_string(),
+        };
         text.push_str(&format!(
             "{}:{}-{}{stale}  {}\n",
             h.path,
             h.start_line,
             h.end_line,
-            first.trim()
+            shown.trim()
         ));
     }
     if out.result.omitted > 0 {

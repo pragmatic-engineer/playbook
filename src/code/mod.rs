@@ -15,6 +15,7 @@ pub mod index;
 pub mod lang;
 pub mod location;
 pub mod output;
+pub mod ranked;
 pub mod search;
 pub mod status;
 #[cfg(test)]
@@ -73,14 +74,45 @@ pub struct SearchOutcome {
 /// Searches indexed text for the repository containing `cwd`. Runs the quick
 /// freshness check first and reports its drift, so a caller can warn.
 pub fn search_text(cwd: &Path, opts: &search::SearchOptions) -> Result<SearchOutcome, String> {
+    lookup(cwd, opts, search::text_search)
+}
+
+fn lookup(
+    cwd: &Path,
+    opts: &search::SearchOptions,
+    run: fn(
+        &rusqlite::Connection,
+        &Path,
+        &search::SearchOptions,
+    ) -> Result<search::SearchResult, String>,
+) -> Result<SearchOutcome, String> {
     let root = location::repo_root(cwd)?;
     let index_path = location::index_path()?;
     let conn = db::open_index(&index_path, db::OpenMode::Query).map_err(|e| e.to_string())?;
     let drift = status::quick_check(&conn, &root)?;
-    let result = search::text_search(&conn, &root, opts)?;
+    let result = run(&conn, &root, opts)?;
     Ok(SearchOutcome {
         index_path,
         drift,
         result,
+    })
+}
+
+/// Ranked search over symbols, imports and text.
+pub fn search_ranked(cwd: &Path, opts: &search::SearchOptions) -> Result<SearchOutcome, String> {
+    lookup(cwd, opts, ranked::ranked_search)
+}
+
+/// Symbols whose name matches, by the name tiers only.
+pub fn symbol_lookup(cwd: &Path, opts: &search::SearchOptions) -> Result<SearchOutcome, String> {
+    lookup(cwd, opts, |conn, root, opts| {
+        let (hits, total) = ranked::symbol_hits(conn, root, opts, opts.limit)?;
+        let omitted = total.saturating_sub(hits.len());
+        Ok(search::SearchResult {
+            hits,
+            truncated: omitted > 0,
+            omitted,
+            ..search::SearchResult::default()
+        })
     })
 }

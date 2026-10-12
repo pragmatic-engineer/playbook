@@ -2162,7 +2162,7 @@ mod tests {
     }
 
     #[test]
-    fn code_search_needs_text_and_limits_run_from_one_to_two_hundred() {
+    fn code_search_and_symbol_limits_run_from_one_to_two_hundred() {
         // Arrange
         let parse = |limit: &str| {
             Cli::try_parse_from([
@@ -2171,8 +2171,11 @@ mod tests {
         };
 
         // Act, Assert
-        assert!(Cli::try_parse_from(["playbook", "code", "search", "x"]).is_err());
+        assert!(Cli::try_parse_from(["playbook", "code", "search"]).is_err());
+        assert!(Cli::try_parse_from(["playbook", "code", "search", "x"]).is_ok());
         assert!(Cli::try_parse_from(["playbook", "code", "search", "--text", "x"]).is_ok());
+        assert!(Cli::try_parse_from(["playbook", "code", "symbol", "x"]).is_ok());
+        assert!(Cli::try_parse_from(["playbook", "code", "symbol", "x", "--limit", "0"]).is_err());
         assert!(parse("0").is_err());
         assert!(parse("1").is_ok());
         assert!(parse("200").is_ok());

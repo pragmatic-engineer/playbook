@@ -21,6 +21,8 @@ pub const DEFAULT_SCAN_CAP: usize = 2000;
 pub struct SearchOptions {
     pub query: String,
     pub path: Option<String>,
+    pub lang: Option<String>,
+    pub kind: Option<String>,
     pub limit: usize,
     pub scan_cap: usize,
 }
@@ -30,6 +32,8 @@ impl SearchOptions {
         Self {
             query: query.to_string(),
             path: None,
+            lang: None,
+            kind: None,
             limit: DEFAULT_LIMIT,
             scan_cap: DEFAULT_SCAN_CAP,
         }
@@ -46,7 +50,22 @@ pub struct Hit {
     pub match_type: &'static str,
     pub tier: u8,
     pub excerpt: String,
+    /// The 1 based line where `excerpt` starts.
+    pub excerpt_start: usize,
     pub stale: bool,
+    /// Set for symbol hits.
+    pub symbol: Option<SymbolInfo>,
+}
+
+/// What a symbol hit adds to a hit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolInfo {
+    pub name: String,
+    pub qualified_name: String,
+    pub kind: String,
+    pub lang: Option<String>,
+    pub signature: Option<String>,
+    pub exported: bool,
 }
 
 #[derive(Debug, Default)]
@@ -91,14 +110,14 @@ fn clip(line: &str) -> String {
 }
 
 /// A file read for excerpts.
-struct Loaded {
-    lines: Vec<String>,
+pub(super) struct Loaded {
+    pub(super) lines: Vec<String>,
     bytes: Vec<u8>,
 }
 
 impl Loaded {
     /// Whether the file still hashes to `sha`.
-    fn same(&self, sha: &str) -> bool {
+    pub(super) fn same(&self, sha: &str) -> bool {
         sha256_hex(&self.bytes) == sha
     }
 }
@@ -106,7 +125,7 @@ impl Loaded {
 /// Reads `path` only when it is still a regular file within the indexer's size
 /// cap, so a file swapped for a link or a device after indexing is never
 /// followed. `None` when the file cannot be read.
-fn load(root: &Path, path: &str) -> Option<Loaded> {
+pub(super) fn load(root: &Path, path: &str) -> Option<Loaded> {
     let full = root.join(path);
     let meta = std::fs::symlink_metadata(&full).ok()?;
     if !meta.file_type().is_file() || meta.len() > Limits::default().max_file_bytes {
@@ -165,7 +184,7 @@ pub fn excerpt_start(line: usize) -> usize {
 }
 
 /// The matching line with one line of context on each side.
-fn excerpt(lines: &[String], line: usize) -> String {
+pub(super) fn excerpt(lines: &[String], line: usize) -> String {
     let from = excerpt_start(line);
     let to = (line + 1).min(lines.len());
     (from..=to)
@@ -181,13 +200,17 @@ struct Row {
     end_line: usize,
 }
 
-fn filters(opts: &SearchOptions) -> (String, Vec<String>) {
+pub(super) fn filters(opts: &SearchOptions) -> (String, Vec<String>) {
     let mut sql = String::new();
     let mut params = Vec::new();
     if let Some(prefix) = &opts.path {
         sql.push_str(" AND substr(f.path, 1, length(?)) = ?");
         params.push(prefix.clone());
         params.push(prefix.clone());
+    }
+    if let Some(lang) = &opts.lang {
+        sql.push_str(" AND f.lang = ?");
+        params.push(lang.clone());
     }
     (sql, params)
 }
@@ -236,6 +259,54 @@ fn fts_rows(
     Ok((rows, usize::try_from(total).unwrap_or(0)))
 }
 
+/// FTS hits for the query tokens, best first, at most `fetch`, plus how many
+/// chunks matched in all. Empty when the query has no tokens.
+pub(super) fn fts_hits(
+    conn: &Connection,
+    root: &Path,
+    opts: &SearchOptions,
+    fetch: usize,
+) -> Result<(Vec<Hit>, usize), String> {
+    let toks = tokens(&opts.query);
+    let Some(query) = fts_query(&opts.query) else {
+        return Ok((Vec::new(), 0));
+    };
+    let (rows, total) = fts_rows(conn, &query, opts, fetch)?;
+    let mut cache: HashMap<String, Option<Loaded>> = HashMap::new();
+    let hits = rows
+        .into_iter()
+        .map(|row| {
+            let loaded = cache
+                .entry(row.path.clone())
+                .or_insert_with(|| load(root, &row.path));
+            let same = loaded.as_ref().is_some_and(|l| l.same(&row.sha));
+            let lines: &[String] = loaded.as_ref().map_or(&[], |l| &l.lines);
+            let line = if lines.is_empty() {
+                row.start_line
+            } else {
+                match_line(lines, row.start_line, row.end_line, &toks)
+            };
+            Hit {
+                excerpt: if lines.is_empty() {
+                    String::new()
+                } else {
+                    excerpt(lines, line)
+                },
+                path: row.path,
+                start_line: row.start_line,
+                end_line: row.end_line,
+                line,
+                match_type: "text",
+                tier: 6,
+                excerpt_start: excerpt_start(line),
+                stale: !same,
+                symbol: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    Ok((hits, total))
+}
+
 /// Searches indexed text. FTS hits come first, ordered by relevance then path
 /// and line. With no tokens or no FTS hits, a literal substring scan over
 /// indexed files answers instead, bounded by `scan_cap` files.
@@ -244,57 +315,27 @@ pub fn text_search(
     root: &Path,
     opts: &SearchOptions,
 ) -> Result<SearchResult, String> {
-    let toks = tokens(&opts.query);
-    if let Some(query) = fts_query(&opts.query) {
-        let (rows, total) = fts_rows(conn, &query, opts, opts.limit)?;
-        if !rows.is_empty() {
-            let mut cache: HashMap<String, Option<Loaded>> = HashMap::new();
-            let hits = rows
-                .into_iter()
-                .map(|row| {
-                    let loaded = cache
-                        .entry(row.path.clone())
-                        .or_insert_with(|| load(root, &row.path));
-                    let same = loaded.as_ref().is_some_and(|l| l.same(&row.sha));
-                    let lines: &[String] = loaded.as_ref().map_or(&[], |l| &l.lines);
-                    let line = if lines.is_empty() {
-                        row.start_line
-                    } else {
-                        match_line(lines, row.start_line, row.end_line, &toks)
-                    };
-                    Hit {
-                        excerpt: if lines.is_empty() {
-                            String::new()
-                        } else {
-                            excerpt(lines, line)
-                        },
-                        path: row.path,
-                        start_line: row.start_line,
-                        end_line: row.end_line,
-                        line,
-                        match_type: "text",
-                        tier: 6,
-                        stale: !same,
-                    }
-                })
-                .collect::<Vec<_>>();
-            let omitted = total.saturating_sub(hits.len());
-            return Ok(SearchResult {
-                hits,
-                truncated: omitted > 0,
-                omitted,
-                files_scanned: None,
-                scan_capped: false,
-            });
-        }
+    let (hits, total) = fts_hits(conn, root, opts, opts.limit)?;
+    if !hits.is_empty() {
+        let omitted = total.saturating_sub(hits.len());
+        return Ok(SearchResult {
+            hits,
+            truncated: omitted > 0,
+            omitted,
+            files_scanned: None,
+            scan_capped: false,
+        });
     }
-    literal_scan(conn, root, opts)
+    literal_scan(conn, root, opts, opts.limit, &[])
 }
 
-fn literal_scan(
+/// Substring scan over indexed files, skipping lines the `covered` hits already show.
+pub(super) fn literal_scan(
     conn: &Connection,
     root: &Path,
     opts: &SearchOptions,
+    limit: usize,
+    covered: &[Hit],
 ) -> Result<SearchResult, String> {
     let needle = opts.query.trim();
     let mut result = SearchResult {
@@ -336,7 +377,18 @@ fn literal_scan(
             if !text.contains(needle) {
                 continue;
             }
-            if result.hits.len() >= opts.limit {
+            let line = i + 1;
+            if covered.iter().any(|h| {
+                h.path == path
+                    && if h.match_type == "text" {
+                        (h.start_line..=h.end_line).contains(&line)
+                    } else {
+                        h.line == line
+                    }
+            }) {
+                continue;
+            }
+            if result.hits.len() >= limit {
                 result.truncated = true;
                 result.omitted += 1;
                 continue;
@@ -348,8 +400,10 @@ fn literal_scan(
                 line: i + 1,
                 match_type: "literal",
                 tier: 7,
+                excerpt_start: excerpt_start(i + 1),
                 excerpt: excerpt(lines, i + 1),
                 stale: !*same.get_or_insert_with(|| loaded.same(&sha)),
+                symbol: None,
             });
         }
     }
