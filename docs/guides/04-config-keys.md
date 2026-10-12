@@ -50,7 +50,7 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `hygiene.enabled` | `true` | `true`, `false` | The context hygiene nudge: once the main session passes `hygiene.thresholdTokens`, it asks the model to save a handoff and tells you to run `/clear`. It never clears or compacts for you. See [hooks](../internals/01-launcher-and-hooks.md#userpromptsubmit). |
 | `hygiene.thresholdTokens` | `250000` | whole number, 10000 or more | The main-session context size in tokens at which the nudge fires, once per crossing of each multiple. |
 | `hints.pluginRemoved` | `true` | `true`, `false` | When `playbook init` saw the plugin installed and it is no longer in Claude Code's plugin list, the status line shows one line and the SessionStart hook adds one line of context, both telling you to run `playbook uninstall --yes`. Set it to `false` to hide both. Nothing is removed for you. |
-| `docs.convert` | `off` | `auto`, `off` | Whether playbook suggests `playbook doc read` for PDF and Office files. The command itself works whenever the optional `anydoc` converter is installed. |
+| `docs.convert` | `auto` | `auto`, `off` | Whether playbook suggests (only when the anydoc converter is installed) `playbook doc read` for PDF and Office files. The command itself works whenever the optional `anydoc` converter is installed. |
 | `docs.maxBytes` | `26214400` | whole number, 1 or more | The largest file `playbook doc read` opens, in bytes (25 MB). |
 | `docs.timeoutSeconds` | `30` | whole number, 1 or more | The converter is stopped after this many seconds. |
 | `docs.maxOutputChars` | `200000` | whole number, 1 or more | The text printed is cut after this many characters, with a marker that says how many were shown. |

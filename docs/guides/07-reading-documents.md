@@ -6,7 +6,7 @@
 
 1. Install the converter yourself: `npm install --global @firecrawl/anydoc` (needs Node 20 or later).
 2. Check it: `playbook doc status`.
-3. Optional: `playbook config set docs.convert auto`. With `auto`, a Read of a whole PDF, or of a Word, PowerPoint, Excel, EPUB, RTF or OpenDocument file, gets one line that suggests `playbook doc read <file>`. The hook only suggests. It never changes the call and never blocks.
+3. Nothing more to do: `docs.convert` defaults to `auto`. A Read of a whole PDF, or of a Word, PowerPoint, Excel, EPUB, RTF or OpenDocument file, gets one line that suggests `playbook doc read <file>`. The hook only suggests. It never changes the call and never blocks. Set `docs.convert` to `off` to stop the hint. See the [benchmark](../internals/10-document-conversion-benchmark.md).
 
 Without the converter the feature is off and nothing changes. `playbook doc read` then says how to install it.
 
