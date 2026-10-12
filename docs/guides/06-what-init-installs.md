@@ -4,13 +4,54 @@
 
 ## See it before you say yes
 
-- `playbook init` prints a short plan first: each part, what it does and the files it edits. Then it asks about each part, and each question names the files it will edit.
+- In a terminal, `playbook init` is a guided wizard. It shows one screen per part ("Step 3 of 8"), with what happens if you accept and what happens if you decline, a mark for the recommended answer, and the keys y, n, b (back), s (use the default) and q (quit). A summary and a confirm come last. Nothing is written before you confirm.
+- `--yes` (or `--defaults`) skips the wizard and takes the defaults. Each part also has a `--x` and `--no-x` flag, and a flag wins over the wizard and shows in the summary as set by a flag.
+- Without a terminal there are no questions: flags and defaults apply.
 - `playbook init --dry-run` prints exactly what would change for each part and changes nothing.
 - `playbook init --explain` describes every part. `playbook init --explain <part>` describes one, for example `--explain hooks`.
 - `playbook hooks list` prints every hook with its event, matcher and one line of purpose.
 - After a real run, `init` prints a summary of what changed and how to undo each part.
 
 All of these read from the same tables in the code, and a test keeps the [hook reference](../reference/hooks.md) in line with them.
+
+## What the wizard looks like
+
+```text
+Step 3 of 8  Path  (recommended: yes)
+------------------------------------------------------------
+Add the playbook binary's directory to PATH in your shell startup files?
+
+If you accept:
+  + Puts the playbook binary on PATH so hooks find it.
+  + Adds a block that starts with `# playbook binary` and one `export PATH=...` line.
+  + Undo: `playbook uninstall --remove-binary` removes the block.
+
+If you decline:
+  - Your shell files are not touched. Hooks may not find playbook unless it is already on PATH.
+
+Do this? [Y/n, b back, s skip, q quit]
+```
+
+After the summary, each action prints one line, then the totals and the next steps:
+
+```text
+Applying
+------------------------------------------------------------
+[ok] hooks  wired the ported hooks into settings.json
+[=] statusline  already up to date
+[skip] aliases  not installed; pass --aliases to opt in
+[fail] trust  could not write ~/.claude.json
+
+1 done, 1 unchanged, 1 skipped, 1 failed
+```
+
+Before this wizard, `init` printed a flat plan and one yes or no question per part, then lines like `hooks: wired - ...`.
+
+## Output in a terminal and in a pipe
+
+- `uninstall`, `update` and `doctor` print marked lines (`[ok]`, `[=]`, `[skip]`, `[fail]`, `[plan]`, `[warn]`, `[info]`) with a heading, totals and next steps when output goes to a terminal. A UTF-8 terminal gets symbols instead of the bracket marks.
+- Color is off when `NO_COLOR` is set, `TERM=dumb`, or output is not a terminal. Text wraps to the terminal width, between 40 and 100 columns.
+- A pipe, `doctor check --json` and the `/playbook:doctor` skill keep the plain text they read before.
 
 ## Privacy
 
