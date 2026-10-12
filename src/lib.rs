@@ -56,6 +56,7 @@ pub mod manifest;
 pub mod memory_import;
 pub mod mode;
 pub mod models;
+pub mod plan_cleanup;
 pub mod planning;
 pub mod plans;
 pub mod pr;
@@ -1222,6 +1223,37 @@ pub enum PlanCommand {
         /// Replace the checkpoint with stdin
         #[arg(long)]
         write: bool,
+    },
+    /// Remove the scratch files a finished plan leaves in the plans folder
+    ///
+    /// Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and
+    /// `<slug>.gate-source*.md` from `playbook path plans`, never the final plan
+    /// or its quality report. Prints the removed file names, one per line. Safe
+    /// to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2
+    /// when a symlink leaves the folder or a removal fails (nothing removed
+    /// after a refusal). `--stale` lists leftovers of every slug that already
+    /// has a final plan and deletes them only with `--yes`.
+    ///
+    /// Example: `playbook plan cleanup my-topic --dry-run`
+    Cleanup {
+        /// Kebab-case topic slug
+        #[arg(required_unless_present = "stale", conflicts_with = "stale")]
+        slug: Option<String>,
+        /// Only list what would be removed
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the result as JSON
+        #[arg(long)]
+        json: bool,
+        /// Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
+        #[arg(long)]
+        stale: bool,
+        /// With `--stale`, only files at least this many days old
+        #[arg(long, default_value_t = 0, requires = "stale")]
+        older_than: u64,
+        /// With `--stale`, actually delete
+        #[arg(long, requires = "stale")]
+        yes: bool,
     },
     /// Write the per-Work-Unit brief files `/playbook:implement` gives its subagents
     ///

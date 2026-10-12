@@ -762,7 +762,7 @@ First moves any legacy folders from the old repo-local location.
 
 Helpers for `/playbook:plan`
 
-Subcommands: `brief`, `checkpoint`
+Subcommands: `brief`, `checkpoint`, `cleanup`
 
 ### `playbook plan brief`
 
@@ -789,6 +789,21 @@ Without `--write` it creates the plans folder and prints the path, then `found` 
 
 - `<SLUG>`: Kebab-case topic slug, or the ticket id in lower case
 - `--write`: Replace the checkpoint with stdin
+
+### `playbook plan cleanup`
+
+Remove the scratch files a finished plan leaves in the plans folder
+
+Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and `<slug>.gate-source*.md` from `playbook path plans`, never the final plan or its quality report. Prints the removed file names, one per line. Safe to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2 when a symlink leaves the folder or a removal fails (nothing removed after a refusal). `--stale` lists leftovers of every slug that already has a final plan and deletes them only with `--yes`.
+
+Example: `playbook plan cleanup my-topic --dry-run`
+
+- `<SLUG>`: Kebab-case topic slug
+- `--dry-run`: Only list what would be removed
+- `--json`: Print the result as JSON
+- `--stale`: Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
+- `--older-than <OLDER_THAN>`: With `--stale`, only files at least this many days old
+- `--yes`: With `--stale`, actually delete
 
 ### `playbook plans`
 
