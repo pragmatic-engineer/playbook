@@ -381,7 +381,8 @@ fn main() {
             let caps = playbook::ui::Caps::detect();
             let mut guided: Vec<(&'static str, bool)> = Vec::new();
             if asking {
-                let items = init::wizard::items(&flags);
+                let security_on = flags.security || (!flags.no_security && security_config);
+                let items = init::wizard::items(&flags, security_on);
                 print!("{}", init::wizard::welcome(&caps));
                 let stdin = std::io::stdin();
                 let mut input = stdin.lock();
@@ -401,9 +402,13 @@ fn main() {
                             }
                         }
                     }
-                    _ => {
+                    Ok(_) => {
                         println!("Cancelled. Nothing was changed.");
-                        return;
+                        std::process::exit(1);
+                    }
+                    Err(err) => {
+                        eprintln!("init: {err}");
+                        std::process::exit(1);
                     }
                 }
             }
@@ -411,13 +416,7 @@ fn main() {
                 &flags,
                 asking,
                 security_config,
-                &mut |question, default| {
-                    init::catalog::PARTS
-                        .iter()
-                        .find(|p| p.question == question)
-                        .and_then(|p| guided.iter().find(|(id, _)| *id == p.id))
-                        .map_or(default, |(_, on)| *on)
-                },
+                &mut |question, default| init::wizard::guided_answer(&guided, question, default),
             );
             let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
             let home = common::home_dir();

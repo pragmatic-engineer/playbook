@@ -284,7 +284,7 @@ fn no_hooks_leaves_every_hook_entry_out_and_says_so() {
     let h = Sandbox::new("no-hooks");
     let out = h.init("/bin/zsh", &["--no-hooks"]);
     let t = text(&out);
-    assert!(t.contains("hooks") && t.contains("skipped"), "{t}");
+    assert!(t.contains("[skip] hooks  "), "{t}");
     let settings = h.read(".claude/settings.json");
     assert!(!settings.contains("playbook hook"), "{settings}");
     assert!(

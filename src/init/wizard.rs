@@ -110,9 +110,11 @@ pub fn choice_for(p: &Part) -> Choice {
     }
 }
 
-/// One item per asked part, in catalog order.
-pub fn items(flags: &Flags) -> Vec<Item> {
-    catalog::PARTS
+/// One item per asked part, in catalog order. `security_on` is whether the
+/// security part will run anyway, from its flag or `security.defaults`. It is
+/// never asked about, so it appears as a fixed row in the summary.
+pub fn items(flags: &Flags, security_on: bool) -> Vec<Item> {
+    let mut list: Vec<Item> = catalog::PARTS
         .iter()
         .filter(|p| p.asked)
         .take(MAX_ITEMS)
@@ -121,7 +123,24 @@ pub fn items(flags: &Flags) -> Vec<Item> {
             default: p.default_on,
             fixed: flag_for(flags, p.id),
         })
-        .collect()
+        .collect();
+    if let (true, Some(p)) = (security_on, catalog::part("security")) {
+        list.push(Item {
+            choice: choice_for(p),
+            default: true,
+            fixed: Some(true),
+        });
+    }
+    list
+}
+
+/// The wizard's answer for the part a question belongs to, else `default`.
+pub fn guided_answer(guided: &[(&str, bool)], question: &str, default: bool) -> bool {
+    catalog::PARTS
+        .iter()
+        .find(|p| p.question == question)
+        .and_then(|p| guided.iter().find(|(id, _)| *id == p.id))
+        .map_or(default, |(_, on)| *on)
 }
 
 /// The words after the on/off mark in the summary.
@@ -221,7 +240,7 @@ mod tests {
             no_aliases: true,
             ..Flags::default()
         };
-        let list = items(&flags);
+        let list = items(&flags, false);
         let a = list.iter().find(|i| i.choice.id == "aliases");
         assert_eq!(a.map(|i| i.fixed), Some(Some(false)));
         assert_eq!(
@@ -232,7 +251,7 @@ mod tests {
 
     #[test]
     fn the_aliases_screen_shows_the_exact_rc_line() {
-        let list = items(&Flags::default());
+        let list = items(&Flags::default(), false);
         let a = list.iter().find(|i| i.choice.id == "aliases");
         let shown = a.map(|i| i.choice.accept.join("\n")).unwrap_or_default();
         assert!(shown.contains("eval \"$(playbook shell-init)\""), "{shown}");
@@ -240,7 +259,7 @@ mod tests {
 
     #[test]
     fn the_hooks_screen_counts_hooks_by_group() {
-        let list = items(&Flags::default());
+        let list = items(&Flags::default(), false);
         let h = list.iter().find(|i| i.choice.id == "hooks");
         let shown = h.map(|i| i.choice.accept.join("\n")).unwrap_or_default();
         assert!(shown.contains("safety guards"), "{shown}");
@@ -261,6 +280,32 @@ mod tests {
         assert!(got.contains("[fail] trust  cannot write\n"));
         assert!(got.contains("1 done, 1 unchanged, 1 skipped, 1 failed"));
         assert!(got.contains("Fix the failed lines"));
+    }
+
+    #[test]
+    fn security_shows_as_a_fixed_row_only_when_it_will_run() {
+        let flags = Flags::default();
+        assert!(!items(&flags, false)
+            .iter()
+            .any(|i| i.choice.id == "security"));
+        let on = items(&flags, true);
+        let sec = on.iter().find(|i| i.choice.id == "security");
+        assert_eq!(sec.map(|i| i.fixed), Some(Some(true)));
+    }
+
+    #[test]
+    fn every_asked_part_flips_when_answered_against_its_default() {
+        use crate::init::choices::resolve;
+        let guided: Vec<(&str, bool)> = catalog::PARTS
+            .iter()
+            .filter(|p| p.asked)
+            .map(|p| (p.id, !p.default_on))
+            .collect();
+        let c = resolve(&Flags::default(), true, false, &mut |q, d| {
+            guided_answer(&guided, q, d)
+        });
+        assert!(!c.hooks && !c.statusline && !c.path);
+        assert!(c.aliases && c.system_prompt && c.telemetry && c.claude_override);
     }
 
     #[test]
