@@ -303,7 +303,7 @@ fn reason(status: u16) -> &'static str {
 
 fn respond(stream: &mut TcpStream, status: u16, body: &str) {
     let text = format!(
-        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nX-Playbook-Collector: 1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         reason(status),
         body.len()
     );

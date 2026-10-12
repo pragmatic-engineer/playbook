@@ -25,6 +25,16 @@ pub fn home_dir() -> PathBuf {
     std::env::home_dir().unwrap_or_default()
 }
 
+/// The message for a command that cannot run because no home directory could
+/// be resolved (`$HOME` unset and no passwd entry). An empty home would turn
+/// every state path into one relative to the current directory, so commands
+/// stop instead of writing there.
+pub fn home_error(home: &Path) -> Option<&'static str> {
+    home.as_os_str()
+        .is_empty()
+        .then_some("cannot resolve the home directory; set HOME and run again")
+}
+
 /// Return the per-session state directory under the playbook runtime root,
 /// creating it on demand with mode 0700. Empty when no session id is present.
 pub fn session_dir(payload: &Payload) -> String {
@@ -94,6 +104,12 @@ fn split_dir_base(p: &str) -> (&str, &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_empty_home_is_an_error_and_a_real_one_is_not() {
+        assert!(super::home_error(std::path::Path::new("")).is_some());
+        assert!(super::home_error(std::path::Path::new("/home/a")).is_none());
+    }
+
     use super::*;
     use crate::common::test_support::scratch_dir;
     #[cfg(unix)]

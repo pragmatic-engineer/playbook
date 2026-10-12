@@ -93,6 +93,52 @@ pub fn running(state: &State) -> bool {
     state.pid != 0 && pid_alive(state.pid) && port_answers(state.port)
 }
 
+/// What answers on a port that `running` found open.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Probe {
+    /// A playbook collector replied.
+    Collector,
+    /// Something replied that is not a collector: the pid was reused.
+    Foreign,
+    /// Nothing replied in time: a collector stuck in a slow write, or a
+    /// program that accepts and never answers.
+    Silent,
+}
+
+const PROBE_DEADLINE: Duration = Duration::from_millis(1000);
+
+/// Sends a harmless request to `port` and classifies the reply. A collector
+/// answers every request, including this unauthenticated `GET`, with the
+/// `X-Playbook-Collector` header.
+pub fn probe(port: u16) -> Probe {
+    use std::io::{Read, Write};
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, PROBE_DEADLINE) else {
+        return Probe::Silent;
+    };
+    let _ = stream.set_read_timeout(Some(PROBE_DEADLINE));
+    let _ = stream.set_write_timeout(Some(PROBE_DEADLINE));
+    let request = "GET /v1/logs HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    if stream.write_all(request.as_bytes()).is_err() {
+        return Probe::Silent;
+    }
+    let mut buf = [0u8; 1024];
+    let n = match stream.read(&mut buf) {
+        Ok(n) if n > 0 => n,
+        _ => return Probe::Silent,
+    };
+    classify_reply(&buf[..n])
+}
+
+fn classify_reply(reply: &[u8]) -> Probe {
+    let text = String::from_utf8_lossy(reply).to_ascii_lowercase();
+    if text.contains("x-playbook-collector:") {
+        Probe::Collector
+    } else {
+        Probe::Foreign
+    }
+}
+
 /// 32 hex characters from the OS random source.
 fn new_token() -> Result<String, String> {
     use std::io::Read;
@@ -322,11 +368,24 @@ pub fn run_collect(
 ) -> Result<String, String> {
     let path = state_path(paths);
     let previous = read_state(&path);
+    let mut foreign = false;
     if let Some(prev) = previous.as_ref().filter(|p| running(p)) {
-        return Ok(format!(
-            "collector already running on port {} (pid {})",
-            prev.port, prev.pid
-        ));
+        match probe(prev.port) {
+            Probe::Collector => {
+                return Ok(format!(
+                    "collector already running on port {} (pid {})",
+                    prev.port, prev.pid
+                ));
+            }
+            Probe::Silent => {
+                return Err(format!(
+                    "something on port {} does not answer (recorded collector pid {}); check what holds the port before stopping anything, then run again",
+                    prev.port, prev.pid
+                ));
+            }
+            // The pid now belongs to another program: the state is stale.
+            Probe::Foreign => foreign = true,
+        }
     }
     let conn = super::db::open_db(&paths.db)?;
     migrate_up(&conn)?;
@@ -341,8 +400,10 @@ pub fn run_collect(
         }
     };
     let actual = listener.local_addr().map_err(|e| e.to_string())?.port();
+    // A foreign program held the recorded port, so sessions may have sent it
+    // the old bearer token; a fresh collector gets a fresh one.
     let token = match previous {
-        Some(p) if !p.token.is_empty() => p.token,
+        Some(p) if !p.token.is_empty() && !foreign => p.token,
         _ => new_token()?,
     };
     let mut state = State {
@@ -437,9 +498,89 @@ mod tests {
         };
         std::fs::create_dir_all(state_path(&p).parent().unwrap()).unwrap();
         write_state(&state_path(&p), &state).unwrap();
+        // A real receiver answers the probe.
+        let db = crate::usage::db::open_db(&p.db).unwrap();
+        migrate_up(&db).unwrap();
+        let serve_stop = Arc::new(AtomicBool::new(false));
+        let server_stop = Arc::clone(&serve_stop);
+        let server = std::thread::spawn(move || {
+            let cfg = Config {
+                token: None,
+                idle: None,
+                prune: None,
+            };
+            let _ = serve(&listener, &db, &cfg, &server_stop, || 0);
+        });
         let stop = Arc::new(AtomicBool::new(false));
+
         let msg = run_collect(&p, None, 1, &stop).unwrap();
+
+        serve_stop.store(true, Ordering::SeqCst);
+        let _ = server.join();
         assert!(msg.contains("already running"), "{msg}");
+    }
+
+    fn state_on(p: &Paths, port: u16) {
+        let state = State {
+            pid: std::process::id(),
+            port,
+            token: "t".into(),
+            ..State::default()
+        };
+        std::fs::create_dir_all(state_path(p).parent().unwrap()).unwrap();
+        write_state(&state_path(p), &state).unwrap();
+    }
+
+    #[test]
+    fn a_listener_that_never_answers_is_reported_not_called_running() {
+        let p = paths("collector-silent");
+        let listener = bind(0).unwrap();
+        state_on(&p, listener.local_addr().unwrap().port());
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let err = run_collect(&p, None, 1, &stop).unwrap_err();
+
+        assert!(err.contains("does not answer"), "{err}");
+        drop(listener);
+    }
+
+    #[test]
+    fn a_foreign_program_on_the_port_means_a_stale_state_and_a_fresh_start() {
+        use std::io::{Read, Write};
+        let p = paths("collector-foreign");
+        let foreign = bind(0).unwrap();
+        let port = foreign.local_addr().unwrap().port();
+        state_on(&p, port);
+        let server = std::thread::spawn(move || {
+            // The bare liveness connect comes first, then the probe.
+            for _ in 0..2 {
+                if let Ok((mut s, _)) = foreign.accept() {
+                    let mut buf = [0u8; 512];
+                    let _ = s.read(&mut buf);
+                    let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+                }
+            }
+        });
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let msg = run_collect(&p, None, 1, &stop).unwrap();
+
+        let _ = server.join();
+        assert!(!msg.contains("already running"), "{msg}");
+        assert_ne!(
+            read_state(&state_path(&p)).unwrap().token,
+            "t",
+            "the old token may have reached the foreign program"
+        );
+    }
+
+    #[test]
+    fn replies_are_classified_by_the_collector_header() {
+        assert_eq!(
+            classify_reply(b"HTTP/1.1 405 Method Not Allowed\r\nX-Playbook-Collector: 1\r\n\r\n"),
+            Probe::Collector
+        );
+        assert_eq!(classify_reply(b"HTTP/1.1 200 OK\r\n\r\n"), Probe::Foreign);
     }
 
     #[test]

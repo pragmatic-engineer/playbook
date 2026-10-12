@@ -28,7 +28,7 @@
 //! Prompt, tool detail, tool content and raw body logging are never turned on
 //! and the account uuid is left out of the metrics.
 
-use crate::usage::collector::{read_state, running, state_path, State};
+use crate::usage::collector::{probe, read_state, running, state_path, Probe, State};
 use crate::usage::run::Paths;
 pub use crate::usage::telemetry_detect::{
     configured, files_configured, process_configured, Configured,
@@ -75,12 +75,34 @@ pub fn decide(
 }
 
 const LOCK_STALE_SECONDS: u64 = 10;
-const START_WAIT_MS: u64 = 1500;
+const START_WAIT: Duration = Duration::from_millis(1500);
+
+/// Spawns `cmd`, retrying a few times while the program file is busy. A binary
+/// that was just written or replaced (an update, or a script in a test) can
+/// report ETXTBSY for a moment while a concurrent fork still holds its write
+/// handle, and one failed spawn would leave the session without telemetry.
+fn spawn_retrying_busy(cmd: &mut std::process::Command) -> bool {
+    for attempt in 0..10 {
+        match cmd.spawn() {
+            Ok(_) => return true,
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 9 => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => return false,
+        }
+    }
+    false
+}
 
 /// Starts `exe usage collect` detached and waits for it to record itself in
 /// `state_file`. Returns the state when it is live. `started` is set only
 /// when this call started the process, so the note is printed once.
-fn start_collector(state_file: &Path, exe: &Path, started: &mut bool) -> Option<State> {
+fn start_collector(
+    state_file: &Path,
+    exe: &Path,
+    started: &mut bool,
+    wait: Duration,
+) -> Option<State> {
     let dir = state_file.parent()?;
     let lock = dir.join("collector.spawn");
     let lock_is_fresh = |p: &Path| {
@@ -115,12 +137,16 @@ fn start_collector(state_file: &Path, exe: &Path, started: &mut bool) -> Option<
             .stderr(std::process::Stdio::null());
         #[cfg(unix)]
         std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-        *started = cmd.spawn().is_ok();
+        *started = spawn_retrying_busy(&mut cmd);
     }
     let mut found = None;
-    for _ in 0..(START_WAIT_MS / 50) {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
         if let Some(state) = read_state(state_file).filter(running) {
             found = Some(state);
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -148,11 +174,14 @@ pub fn session_env(home: &Path, cwd: &Path) -> Vec<(String, String)> {
     // Settings that init wrote already point the session at the collector,
     // so only the collector needs to be up; nothing more is set here.
     let wanted = matches!(kind, Configured::Nothing | Configured::Playbook);
-    let down = !collector.as_ref().is_some_and(running);
+    // A listener that is not a playbook collector (a reused port) is down.
+    let down = !collector
+        .as_ref()
+        .is_some_and(|s| running(s) && probe(s.port) == Probe::Collector);
     if wanted && down && state_file.with_file_name("usage.db").exists() {
         if let Ok(exe) = std::env::current_exe() {
             let mut started = false;
-            collector = start_collector(&state_file, &exe, &mut started).or(collector);
+            collector = start_collector(&state_file, &exe, &mut started, START_WAIT).or(collector);
             if started && collector.is_some() {
                 eprintln!(
                     "playbook: started the usage collector for telemetry (it stops after 10 idle minutes, see playbook usage status)"
@@ -173,6 +202,10 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
     use std::path::PathBuf;
+
+    /// Generous: the wait ends as soon as the collector is found, so it only
+    /// costs time when the host is too loaded to start a shell in 1.5 seconds.
+    const TEST_WAIT: Duration = Duration::from_secs(20);
 
     fn live() -> State {
         // Our own pid is alive; a bound listener makes the port answer.
@@ -271,7 +304,8 @@ mod tests {
         let (_l, port) = listening();
         let exe = fake_exe(&dir, port);
         let mut started = false;
-        let state = start_collector(&dir.join("collector.json"), &exe, &mut started).unwrap();
+        let state =
+            start_collector(&dir.join("collector.json"), &exe, &mut started, TEST_WAIT).unwrap();
         assert!(started);
         assert_eq!((state.port, state.token.as_str()), (port, "t"));
         assert_eq!(
@@ -290,7 +324,13 @@ mod tests {
         let exe = fake_exe(&dir, port);
         std::fs::write(dir.join("collector.spawn"), "").unwrap();
         let mut started = false;
-        assert!(start_collector(&dir.join("collector.json"), &exe, &mut started).is_none());
+        assert!(start_collector(
+            &dir.join("collector.json"),
+            &exe,
+            &mut started,
+            Duration::from_millis(300)
+        )
+        .is_none());
         assert!(!started);
         assert!(!dir.join("runs").exists());
         assert!(dir.join("collector.spawn").exists(), "not ours to remove");
@@ -307,7 +347,9 @@ mod tests {
         lock.set_modified(std::time::SystemTime::now() - Duration::from_secs(60))
             .unwrap();
         let mut started = false;
-        assert!(start_collector(&dir.join("collector.json"), &exe, &mut started).is_some());
+        assert!(
+            start_collector(&dir.join("collector.json"), &exe, &mut started, TEST_WAIT).is_some()
+        );
         assert!(started);
     }
 
@@ -320,6 +362,7 @@ mod tests {
             &dir.join("collector.json"),
             &dir.join("no-such-program"),
             &mut started,
+            Duration::from_millis(100),
         );
         assert!(state.is_none() && !started);
         assert!(!dir.join("collector.spawn").exists());

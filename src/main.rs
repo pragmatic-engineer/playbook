@@ -62,6 +62,17 @@ fn main() {
         None => {}
     }
     let cli = Cli::parse();
+    // Hooks fail soft, and version and json write nothing under home; every other command refuses to write state relative to
+    // the current directory when there is no home.
+    if !matches!(
+        cli.command,
+        Command::Hook { .. } | Command::Version | Command::Json { .. }
+    ) {
+        if let Some(message) = common::home_error(&common::home_dir()) {
+            eprintln!("playbook: {message}");
+            std::process::exit(1);
+        }
+    }
 
     match cli.command {
         Command::Hook { name } => run_hook(name),
@@ -1350,10 +1361,15 @@ fn main() {
             let root = plugin_root
                 .or_else(|| std::env::var_os("CLAUDE_PLUGIN_ROOT").map(std::path::PathBuf::from))
                 .unwrap_or_default();
-            println!(
-                "{}",
-                planning::skill_ref(&root, &skill, name.as_deref()).display()
-            );
+            let path = planning::skill_ref(&root, &skill, name.as_deref());
+            if !path.is_file() {
+                eprintln!(
+                    "playbook: skill reference not found at {}; set CLAUDE_PLUGIN_ROOT or pass --plugin-root",
+                    path.display()
+                );
+                std::process::exit(1);
+            }
+            println!("{}", path.display());
         }
         Command::Adr {
             sub: AdrCommand::Next,

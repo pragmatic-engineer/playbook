@@ -168,6 +168,25 @@ fn skill_ref_prints_the_reference_or_falls_back_to_the_skill() {
     assert_eq!(b, c);
 }
 
+#[test]
+fn skill_ref_fails_with_a_clear_message_when_the_plugin_root_has_no_such_skill() {
+    let s = Sandbox::new("ref-missing");
+    let missing = s.repo.join("no-such-plugin-root");
+
+    let o = s.run(&[
+        "skill",
+        "ref",
+        "grounding-review",
+        "--plugin-root",
+        missing.to_str().unwrap(),
+    ]);
+
+    assert!(!o.status.success());
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("skill reference not found"), "{err}");
+    assert!(out(&o).trim().is_empty(), "no path is printed");
+}
+
 fn plans_dir(s: &Sandbox) -> PathBuf {
     let o = s.run(&["path", "plans"]);
     PathBuf::from(out(&o).trim())
