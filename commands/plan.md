@@ -426,6 +426,8 @@ After producing the plan, run the three-phase gate. Do NOT skip it. Do NOT ask t
 
 **Gate source has two tiers.** Keep the current draft in the shared file `$PLANS_DIR/<topic-slug>.gate-source.md`, written with `Write` every time the draft changes. Right before each phase's dispatch (its first and any retry), freeze a copy for that phase with `playbook gate snapshot <topic-slug> <phase>...` (`<phase>` is `fact-check`, `adversarial` or `test-review`; name Phase 2 and Phase 3 in one call, since they dispatch together). `gate record` reads that phase's own snapshot by default, so a verdict is recorded against what the phase actually reviewed even if the draft is revised before a sibling phase returns. Only Step 11's final `gate check` reads the shared file, which is also its default.
 
+Before running the gate, read `playbook skill ref delegating-subagents quality-gate`; it holds the recording, Verification Summary, Test Review criteria, INCONCLUSIVE and gate check rules used below.
+
 #### Phase 1: Fact-Check
 
 **Before Phase 1's first dispatch, and before each retry of Phase 1**, write the current draft to the shared file and run `playbook gate snapshot <topic-slug> fact-check`. Refresh the shared file every time the draft changes, including after every revision in the FAIL-then-revise-and-re-run cycles below: a stale snapshot would let an outdated draft pass off as the one actually reviewed.
@@ -440,19 +442,9 @@ Spawn a `fact-checker` agent (`subagent_type: playbook:fact-checker`) with the f
 - The Work Unit dependency graph is acyclic, and each Parallel group's WUs have disjoint files with no dependency on each other (the parallel-safe flags are accurate).
 - **Segments are well-formed:** every WU maps to exactly one Segment (full coverage, no WU in two); Segment order respects WU `Requires` (no forward cross-Segment dependency); each Segment's estimate is within budget (FAIL if a planned Segment exceeds the 1500 hard limit, WARN if it exceeds 1000 without justification or exceeds the 500 soft limit); any parallel-marked Segments have disjoint files and no mutual `Requires`.
 
-Returns a structured PASS / FAIL / WARN report. Phase 1 folds a Verification Summary into the report, reusing the `playbook:grounding-review` table shape:
+Returns a structured PASS / FAIL / WARN report. Phase 1 folds a Verification Summary into it (table shape in the quality-gate reference).
 
-```markdown
-## Verification Summary
-
-| Referenced path | Confirmed? | Where used |
-|---|---|---|
-| <path> | Yes (Read) / No (not found) | WU-N |
-
-Confidence: HIGH | MEDIUM | LOW
-```
-
-Spawn it with a stable `name`. **Record the gate:** pipe its full raw return text to `playbook gate record <topic-slug> plan fact-check -` (a quoted heredoc on stdin, no scratch file). Do this every time Phase 1 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so a stale FAIL from an earlier iteration is overwritten once a later iteration passes, and only the last recording before Step 11's `gate check` matters. **After it returns**, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha it found as a memory fact; otherwise skip. **If any FAILs:** revise the plan (refreshing both the shared file and this phase's own snapshot per the two-tier scheme above) and re-run Phase 1 under the gate loop (`playbook:delegating-subagents`, `references/gate-loop.md`: hard cap 5 rounds, stop at PASS, STUCK on no progress). Don't proceed until it passes.
+Spawn it with a stable `name`. **Record the gate:** pipe its full raw return text to `playbook gate record <topic-slug> plan fact-check -` (a quoted heredoc on stdin, no scratch file). Do this every time Phase 1 returns, including every retry (the recording rule is in the quality-gate reference). **After it returns**, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha it found as a memory fact; otherwise skip. **If any FAILs:** revise the plan (refreshing both the shared file and this phase's own snapshot per the two-tier scheme above) and re-run Phase 1 under the gate loop (`playbook:delegating-subagents`, `references/gate-loop.md`: hard cap 5 rounds, stop at PASS, STUCK on no progress). Don't proceed until it passes.
 
 #### Phase 2: Adversarial Review
 
@@ -466,15 +458,15 @@ Spawn a `critic` agent (`subagent_type: playbook:critic`, focus `plan`) with the
 - Blast radius: what could this break?
 - Contradictions with the fact-check report.
 
-Returns a structured report. Spawn it with a stable `name`. **Record the gate:** pipe its full raw return text to `playbook gate record <topic-slug> plan adversarial -` (a quoted heredoc on stdin, no scratch file). Do this every time Phase 2 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before Step 11's `gate check` matters. **After it returns**, record any rejected simpler alternative (with reasoning) in the plan's Risks section. **If any FAILs:** revise and re-run Phase 2 under the same gate loop, refreshing this phase's snapshot and the shared file before the re-run.
+Returns a structured report. Spawn it with a stable `name`. **Record the gate:** pipe its full raw return text to `playbook gate record <topic-slug> plan adversarial -` (a quoted heredoc on stdin, no scratch file). Do this every time Phase 2 returns, including every retry. **After it returns**, record any rejected simpler alternative (with reasoning) in the plan's Risks section. **If any FAILs:** revise and re-run Phase 2 under the same gate loop, refreshing this phase's snapshot and the shared file before the re-run.
 
 #### Phase 3: Test Review
 
 **Before Phase 3's own dispatch, and before each retry of Phase 3**, refresh the shared file if the draft changed and run `playbook gate snapshot <topic-slug> test-review`.
 
-Spawn a `test-reviewer` agent (`subagent_type: playbook:test-reviewer`) with the plan's Testing Strategy and the Phase 1 report (it runs in parallel with Phase 2, so it doesn't wait on the adversarial findings). It evaluates the proposed tests against `playbook:engineering-standards`: regression-pinning, flakiness, boundary coverage, test independence, mock quality, assertion strength.
+Spawn a `test-reviewer` agent (`subagent_type: playbook:test-reviewer`) with the plan's Testing Strategy and the Phase 1 report (it runs in parallel with Phase 2, so it doesn't wait on the adversarial findings). It evaluates the proposed tests against the Test Review criteria in the quality-gate reference.
 
-Returns a structured report. Spawn it with a stable `name`. **Record the gate:** pipe its full raw return text to `playbook gate record <topic-slug> plan test-review -` (a quoted heredoc on stdin, no scratch file). Do this every time Phase 3 returns, including every retry iteration below, not just the final one: `gate record` upserts on `(plan_slug, phase)`, so only the last recording before Step 11's `gate check` matters. **After it returns**, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable test-quality pattern as a memory fact; otherwise skip. **If any FAILs:** revise the test plan and re-run Phase 3 under the same gate loop, refreshing this phase's snapshot and the shared file before the re-run.
+Returns a structured report. Spawn it with a stable `name`. **Record the gate:** pipe its full raw return text to `playbook gate record <topic-slug> plan test-review -` (a quoted heredoc on stdin, no scratch file). Do this every time Phase 3 returns, including every retry. **After it returns**, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable test-quality pattern as a memory fact; otherwise skip. **If any FAILs:** revise the test plan and re-run Phase 3 under the same gate loop, refreshing this phase's snapshot and the shared file before the re-run.
 
 #### Quality Gate Result
 
@@ -491,9 +483,9 @@ Present all three reports:
 
 WARNs are shown for awareness but do not block.
 
-- **INCONCLUSIVE**: a phase returns INCONCLUSIVE, not PASS, when it couldn't actually perform its check: the agent failed to run or returned nothing, the target files were unreadable, or its confidence is LOW and blind spots dominate so a PASS would be unsupported. INCONCLUSIVE blocks the save exactly like FAIL and re-runs on the same max-3 loop; it's labeled distinctly so the cause reads as "couldn't verify," not "found a problem." A gate that checked nothing MUST NOT read PASS.
+- **INCONCLUSIVE** blocks the save exactly like FAIL (definition in the quality-gate reference).
 
-**Gate check (MUST, before Step 11):** run `playbook gate check <topic-slug> plan fact-check adversarial test-review`, which reads the shared file in its current, fully refreshed state (never a phase's snapshot). Everything above (the phase reports, the Quality Gate Result presentation, the INCONCLUSIVE rule) is for the human reading it; this command's exit code is what actually decides whether Step 11 may run. Exit 0: proceed to Step 11. Non-zero exit: do NOT proceed to Step 11, and do NOT write any "gate passed" language; instead report the command's own output verbatim, since it already names exactly which phase is MISSING, FAIL, STALE, or INCONCLUSIVE, never re-narrate it in your own words. For a FAIL, revise and re-run the failing phase(s) on that phase's own retry loop above. For STALE, re-run that same phase against the current source without revising anything: STALE only means its recorded verdict's hash no longer matches the current draft, not that the phase's own review was wrong, and revising content in response would itself cascade staleness onto sibling phases.
+**Gate check (MUST, before Step 11):** run `playbook gate check <topic-slug> plan fact-check adversarial test-review`, which reads the shared file in its current, fully refreshed state (never a phase's snapshot). Everything above (the phase reports, the Quality Gate Result presentation, the INCONCLUSIVE rule) is for the human reading it; this command's exit code is what actually decides whether Step 11 may run. Exit 0: proceed to Step 11. Non-zero exit: do NOT proceed to Step 11, and do NOT write any "gate passed" language; handle it as the quality-gate reference says (verbatim output, FAIL and INCONCLUSIVE retry, STALE re-run).
 
 ### Step 11: User Approval
 
