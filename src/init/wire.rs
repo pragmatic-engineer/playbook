@@ -365,7 +365,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Bash"),
         name: "rm-workspace-guard",
         group: Group::Safety,
-        purpose: "Stops an `rm` whose target is outside your safe roots. Runs only for `rm` commands.",
+        purpose: "Stops an `rm` whose target is outside your safe roots, `~/.claude`, and the scratch roots (contents only): `/tmp`, the system temp folders, `~/.cache`, the `.worktrees` folder next to the repo and `hooks.rmGuard.allowedRoots`. Symlinks and `..` are resolved first, and a bare glob such as `/tmp/*` is denied while `/tmp/pb-*` is allowed. Runs only for `rm` commands.",
         if_cond: Some("Bash(rm:*)"),
         timeout: Some(10),
         also_replaces: None,

@@ -60,6 +60,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "launcher.claudeOverride",
     "launcher.shortName",
     "launcher.systemPromptMode",
+    "hooks.rmGuard.allowedRoots",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -136,6 +137,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "docs.anydocPath" => Some(Value::String(String::new())),
         "launcher.claudeOverride" | "launcher.shortName" => Some(Value::Bool(false)),
         "launcher.systemPromptMode" => Some(Value::String("append".to_string())),
+        "hooks.rmGuard.allowedRoots" => Some(Value::Array(Vec::new())),
         _ => None,
     }
 }

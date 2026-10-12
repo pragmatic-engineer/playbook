@@ -2126,8 +2126,24 @@ fn parse_config_value(key: &str, value: &str) -> Result<serde_json::Value, confi
                 value: value.to_string(),
             })
         }
+        serde_json::Value::Array(_) => Ok(parse_path_list(value)),
         _ => Ok(serde_json::Value::String(value.to_string())),
     }
+}
+
+/// A list value: a JSON array, or a colon-separated list like `$PATH`. Empty
+/// clears the list. Each item is validated by `write::set`.
+fn parse_path_list(value: &str) -> serde_json::Value {
+    if let Ok(parsed @ serde_json::Value::Array(_)) = serde_json::from_str(value) {
+        return parsed;
+    }
+    serde_json::Value::Array(
+        value
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(|s| serde_json::Value::String(s.to_string()))
+            .collect(),
+    )
 }
 
 /// A whole number stays an integer so the stored JSON has no `.0`; anything
