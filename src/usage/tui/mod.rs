@@ -42,10 +42,8 @@ fn start_theme(no_color: bool) -> Theme {
     if no_color {
         return Theme::Mono;
     }
-    let home = crate::common::session::home_dir();
-    crate::config::resolve_valid("usage.theme", &home, None)
-        .ok()
-        .and_then(|(value, _, _)| value.as_str().and_then(Theme::parse))
+    crate::usage::host::config_value_now("usage.theme")
+        .and_then(|value| value.as_str().and_then(Theme::parse))
         .unwrap_or_default()
 }
 
@@ -123,7 +121,7 @@ fn event_loop(
     Ok(())
 }
 
-type Loaded = Result<(Vec<crate::sessions::Record>, i64), String>;
+type Loaded = Result<(Vec<crate::usage::host::Record>, i64), String>;
 
 /// The Sessions management view and the thread that reads it. A read asks
 /// `gh` for each branch, so it runs off the draw loop and the screen never
@@ -157,8 +155,8 @@ impl SessionsLoop {
         let (tx, rx) = std::sync::mpsc::channel();
         let paths = self.paths.clone();
         std::thread::spawn(move || {
-            let home = crate::common::session::home_dir();
-            let _ = tx.send(crate::sessions::load(&paths, &home));
+            let home = crate::usage::host::home_dir();
+            let _ = tx.send(crate::usage::host::load_sessions(&paths, &home));
         });
         self.reply = Some(rx);
         self.last_read = Some(std::time::Instant::now());

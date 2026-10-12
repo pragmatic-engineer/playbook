@@ -14,6 +14,7 @@ pub mod codex;
 pub mod collector;
 pub mod db;
 pub mod entry;
+pub mod host;
 pub mod ingest;
 pub mod limits;
 pub mod limits_source;
