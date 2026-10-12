@@ -868,6 +868,7 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
 
+    #[cfg(unix)]
     #[test]
     fn short_name_is_written_only_when_pb_is_free_on_path() {
         use std::os::unix::fs::PermissionsExt;
@@ -902,6 +903,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_non_executable_file_named_pb_does_not_block_the_short_name() {
         let bin = scratch_dir("short-name-plain");
