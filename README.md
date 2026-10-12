@@ -23,7 +23,7 @@ The installer adds the plugin, installs the `playbook` binary (checksum verified
 
 To see what `playbook init` changes before you agree, read [What init installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
 
-Pin a version with `PLAYBOOK_REF=v0.23.0`. Update later with `playbook update`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
+Pin a version with `PLAYBOOK_REF=v0.24.0`. Update later with `playbook update`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
 
 **Plugin only.** `claude plugin install playbook@pragmatic-engineer` (after `claude plugin marketplace add pragmatic-engineer/marketplace`) gives you the skills, commands and subagents. Hooks need the binary, so the first `playbook` call installs it, and `/playbook:setup` finishes the wiring. The plugin needs Claude Code 2.1.224 or later.
 
