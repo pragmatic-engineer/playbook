@@ -133,3 +133,4 @@ It commits, adding `--signoff` unless `commit.signOff` is `false`, `--no-signoff
 - The `Signed-off-by` trailer follows `commit.signOff` (default `true`). Turn it off for yourself with `playbook config set --global commit.signOff false`, or for one commit with `--no-signoff`.
 - If a hook fails: investigate, fix, re-stage, and create a NEW commit. Never amend to dodge the hook unless the user explicitly asks.
 - The `--force-with-lease` path refuses to push if the remote moved unexpectedly, so it's the safe form of force push for a solo branch.
+- To push the branch and open its pull request in one pass, use `/playbook:create-pull-request`, which runs `playbook deliver` as the single path for the push and the PR.
