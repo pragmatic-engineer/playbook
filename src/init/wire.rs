@@ -122,7 +122,7 @@ pub const PLUGIN_HOOKS: &[HookSpec] = &[
         matcher: None,
         name: "worktree-remove",
         group: Group::Worktree,
-        purpose: "Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it.",
+        purpose: "Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it; squash-merged branches count as published.",
         if_cond: None,
         timeout: Some(120),
         also_replaces: None,

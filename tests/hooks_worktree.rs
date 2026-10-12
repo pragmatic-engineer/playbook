@@ -544,3 +544,50 @@ fn payload_base_commit_skips_the_origin_refresh() {
         .join("playbook-origin-fetch")
         .exists());
 }
+
+#[test]
+fn create_reuses_a_branch_checked_out_at_another_path() {
+    let f = fixture("elsewhere");
+    let old = f.root.join("old-place");
+    git_ok(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "worktree-moved",
+            old.to_str().unwrap(),
+        ],
+    );
+    let out = create(&f.repo, "moved");
+    assert_eq!(created_path(&out), old);
+}
+
+#[test]
+fn remove_treats_a_squash_merged_branch_as_published() {
+    let f = fixture("rm-squash");
+    let path = created_path(&create(&f.repo, "sq"));
+    for n in ["a", "b"] {
+        fs::write(path.join(format!("{n}.txt")), "work\n").unwrap();
+        git_ok(&path, &["add", "."]);
+        git_ok(&path, &["commit", "-q", "-m", n]);
+    }
+    git_ok(&f.repo, &["merge", "--squash", "worktree-sq"]);
+    git_ok(&f.repo, &["commit", "-q", "-m", "squashed"]);
+    git_ok(&f.repo, &["push", "-q", "origin", "main"]);
+    let out = remove(&f.repo, &path);
+    assert!(out.status.success());
+    assert!(!path.exists(), "stderr: {}", stderr(&out));
+}
+
+#[test]
+fn remove_kept_message_names_the_manual_command() {
+    let f = fixture("rm-hint");
+    let path = created_path(&create(&f.repo, "hint"));
+    fs::write(path.join("new.txt"), "work\n").unwrap();
+    git_ok(&path, &["add", "."]);
+    git_ok(&path, &["commit", "-q", "-m", "local only"]);
+    let out = remove(&f.repo, &path);
+    assert!(stderr(&out).contains("git worktree remove"));
+}
