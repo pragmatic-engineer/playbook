@@ -224,7 +224,7 @@ fn plan_cleanup_stale_needs_yes() {
     let o = s.run(&["plan", "cleanup", "--stale"]);
     assert!(o.status.success());
     assert!(d.join("demo.checkpoint.md").is_file());
-    let o = s.run(&["plan", "cleanup", "--stale", "--yes"]);
+    let o = s.run(&["plan", "cleanup", "--stale", "--yes", "--older-than", "0"]);
     assert!(o.status.success());
     assert!(!d.join("demo.checkpoint.md").exists());
     assert!(d.join("orphan.checkpoint.md").is_file());

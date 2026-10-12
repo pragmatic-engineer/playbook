@@ -802,7 +802,7 @@ Example: `playbook plan cleanup my-topic --dry-run`
 - `--dry-run`: Only list what would be removed
 - `--json`: Print the result as JSON
 - `--stale`: Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
-- `--older-than <OLDER_THAN>`: With `--stale`, only files at least this many days old
+- `--older-than <OLDER_THAN>`: With `--stale`, only files at least this many days old (default 1, so a plan being re-planned today is left alone)
 - `--yes`: With `--stale`, actually delete
 
 ### `playbook plans`

@@ -1248,8 +1248,8 @@ pub enum PlanCommand {
         /// Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
         #[arg(long)]
         stale: bool,
-        /// With `--stale`, only files at least this many days old
-        #[arg(long, default_value_t = 0, requires = "stale")]
+        /// With `--stale`, only files at least this many days old (default 1, so a plan being re-planned today is left alone)
+        #[arg(long, default_value_t = 1, requires = "stale")]
         older_than: u64,
         /// With `--stale`, actually delete
         #[arg(long, requires = "stale")]
