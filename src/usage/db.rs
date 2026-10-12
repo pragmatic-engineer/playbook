@@ -7,7 +7,7 @@
 //! other processes, which is what WAL mode and `busy_timeout` are for.
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
-use crate::common::atomic::ensure_private_dir;
+use crate::common::atomic::{ensure_private_dir, make_db_file_private};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
@@ -102,28 +102,6 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
     .map_err(|e| format!("failed to create telemetry schema: {e}"))?;
     super::telemetry_db::ensure_columns(&conn)?;
     Ok(conn)
-}
-
-/// The data names the account, repos, and branches, so the file is owner-only
-/// on unix. Created first so SQLite never makes it with the default umask, and
-/// the WAL and shm files copy this mode. An older, wider file is tightened.
-pub(crate) fn make_db_file_private(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let error = |e: std::io::Error| format!("failed to secure {}: {e}", path.display());
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(path)
-            .map_err(error)?;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(error)?;
-    }
-    #[cfg(not(unix))]
-    let _ = path;
-    Ok(())
 }
 
 /// Adds `cache_creation_1h_tokens` to a database created before it existed.
