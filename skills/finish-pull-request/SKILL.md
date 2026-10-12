@@ -9,6 +9,8 @@ Run this in the main session or in a delegated or forked agent that holds the `A
 
 Inputs from the create-pull-request report: the PR number or URL, its branch, and whether `--ready` was passed. If any is missing, read it with `gh pr view`.
 
+An optional worktree path may also be given, for a caller whose working directory is not the PR's checkout. When it is, run every git command as `git -C <worktree>`, run `gh` and `playbook` with the PR number so they do not depend on the current directory, pass the path on to `/playbook:commit-and-push` and the review commands, and never change directory or touch files outside the worktree.
+
 ## Run mode
 
 Run `playbook mode status --json` (add `--flag auto` or `--flag ask` if the session was started with `--auto` or `--ask`). The `mode` key is `ask` or `auto`. In auto mode, skip the self-review below when `/playbook:implement` opened this PR, because its review already covered the code. Any other caller gets no review here, and the final report says that no self-review ran. If `--ready` was passed, it still promotes the draft. The `autoReview.fix` and `autoMerge.enabled` settings still apply in auto mode, except that this skill never merges a PR whose code no review covered.
