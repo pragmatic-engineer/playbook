@@ -241,6 +241,9 @@ fn refresh_status(app: &App, pal: &Palette, area_width: u16) -> (String, Style) 
         return (text, Style::default().fg(pal.color(pal.error)));
     }
     let dim = Style::default().fg(pal.color(pal.graph_text));
+    if let Some((done, total)) = app.indexing {
+        return (format!("indexing {done}/{total} files "), dim);
+    }
     match &app.data {
         // The interval goes first when the line is short.
         Some(d) if area_width >= 100 => (

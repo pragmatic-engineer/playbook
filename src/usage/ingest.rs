@@ -5,9 +5,11 @@
 //! account, write them, and advance the watermark, all in one transaction. A
 //! failure anywhere leaves both the rows and the watermark untouched.
 
+use super::claude_code::ClaudeCodeSource;
 use super::db;
-use super::UsageSource;
+use super::{Events, UsageSource};
 use rusqlite::{Connection, Transaction, TransactionBehavior};
+use std::path::PathBuf;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct IngestStats {
@@ -50,34 +52,7 @@ fn ingest_at(
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
         .map_err(|e| format!("failed to begin ingest transaction: {e}"))?;
     let mut stats = IngestStats::default();
-    let mut newest = watermark;
-
-    for event in events.usage {
-        newest = newest.max(event.timestamp);
-        let existed = db::has_usage_event(&tx, &event.event_id)?;
-        let mut event = event;
-        event.account = account.to_string();
-        if event.agent.is_empty() {
-            event.agent = name.to_string();
-        }
-        let written = db::upsert_usage_event(&tx, &event)?;
-        match (existed, written) {
-            (false, _) => stats.usage_inserted += 1,
-            (true, 0) => stats.duplicates_skipped += 1,
-            (true, _) => stats.usage_updated += 1,
-        }
-    }
-    for event in events.tools {
-        newest = newest.max(event.timestamp);
-        if db::has_tool_event(&tx, &event.event_id)? {
-            stats.duplicates_skipped += 1;
-            continue;
-        }
-        let mut event = event;
-        event.account = account.to_string();
-        db::insert_tool_event(&tx, &event)?;
-        stats.tools_inserted += 1;
-    }
+    let newest = write_events(&tx, events, account, name, watermark, &mut stats)?;
 
     // raise_watermark never moves backwards, so a quiet scan keeps the old value.
     db::raise_watermark(&tx, name, newest.min(now - WATERMARK_SAFETY_SECS))?;
@@ -86,6 +61,130 @@ fn ingest_at(
     Ok(stats)
 }
 
+/// Writes `events` into `tx` and returns the newest timestamp seen, at least
+/// `newest`. Dedup by id and the raise-only token rule are in the db calls.
+fn write_events(
+    tx: &Transaction,
+    events: Events,
+    account: &str,
+    name: &str,
+    mut newest: i64,
+    stats: &mut IngestStats,
+) -> Result<i64, String> {
+    for event in events.usage {
+        newest = newest.max(event.timestamp);
+        let existed = db::has_usage_event(tx, &event.event_id)?;
+        let mut event = event;
+        event.account = account.to_string();
+        if event.agent.is_empty() {
+            event.agent = name.to_string();
+        }
+        let written = db::upsert_usage_event(tx, &event)?;
+        match (existed, written) {
+            (false, _) => stats.usage_inserted += 1,
+            (true, 0) => stats.duplicates_skipped += 1,
+            (true, _) => stats.usage_updated += 1,
+        }
+    }
+    for event in events.tools {
+        newest = newest.max(event.timestamp);
+        if db::has_tool_event(tx, &event.event_id)? {
+            stats.duplicates_skipped += 1;
+            continue;
+        }
+        let mut event = event;
+        event.account = account.to_string();
+        db::insert_tool_event(tx, &event)?;
+        stats.tools_inserted += 1;
+    }
+    Ok(newest)
+}
+
+/// Set once a first-run backfill has read every transcript.
+const BACKFILL_DONE: &str = "backfill-complete:claude-code";
+
+/// Transcripts read per batch, at most, and the bytes that end a batch early.
+const BATCH_FILES: usize = 250;
+const BATCH_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The first read of a large history, in small committed batches, newest
+/// transcript first, so the store fills while the caller watches. Each batch
+/// commits its rows and the files it finished together, so an interrupted run
+/// resumes where it stopped. The source watermark moves only after the last
+/// batch: until then an unread older file could hold events older than it.
+/// A store that already has a watermark, or the done marker, takes the plain
+/// incremental `ingest`. `on_batch(done, total)` runs after each commit, with
+/// file counts only. It returns false to stop: the batches so far stay
+/// committed and the watermark does not move, so the next run resumes.
+pub fn ingest_claude(
+    source: &ClaudeCodeSource,
+    account: &str,
+    conn: &Connection,
+    on_batch: &mut dyn FnMut(usize, usize) -> bool,
+) -> Result<IngestStats, String> {
+    let name = source.name();
+    if db::get_watermark(conn, name)? > 0 || db::get_watermark(conn, BACKFILL_DONE)? > 0 {
+        return ingest(source, account, conn);
+    }
+    let started = crate::common::time::now_secs();
+    let mut files: Vec<(PathBuf, i64, u64)> = source
+        .files()
+        .into_iter()
+        .map(|f| {
+            let meta = std::fs::metadata(&f).ok();
+            let mtime = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs() as i64);
+            (f, mtime, meta.map_or(1, |m| m.len().max(1)))
+        })
+        .collect();
+    files.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let total = files.len();
+    let finished = db::backfilled_files(conn)?;
+    files.retain(|(f, mtime, _)| finished.get(&f.to_string_lossy().to_string()) != Some(mtime));
+    let mut done = total - files.len();
+    if !on_batch(done, total) {
+        return Ok(IngestStats::default());
+    }
+    let mut stats = IngestStats::default();
+    let mut rest = files.as_slice();
+    while !rest.is_empty() {
+        let mut take = 0;
+        let mut bytes = 0;
+        while take < rest.len() && take < BATCH_FILES && (take == 0 || bytes < BATCH_BYTES) {
+            bytes += rest[take].2;
+            take += 1;
+        }
+        let (batch, later) = rest.split_at(take);
+        rest = later;
+        let mut paths: Vec<PathBuf> = batch.iter().map(|b| b.0.clone()).collect();
+        paths.sort();
+        let events = source.events_from_files(&paths, 0, super::claude_code::worker_count());
+        let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+            .map_err(|e| format!("failed to begin ingest transaction: {e}"))?;
+        write_events(&tx, events, account, name, 0, &mut stats)?;
+        for (f, mtime, _) in batch {
+            db::record_backfilled_file(&tx, &f.to_string_lossy(), *mtime)?;
+        }
+        tx.commit()
+            .map_err(|e| format!("failed to commit ingest transaction: {e}"))?;
+        done += batch.len();
+        if !on_batch(done, total) {
+            return Ok(stats);
+        }
+    }
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+        .map_err(|e| format!("failed to begin ingest transaction: {e}"))?;
+    let newest = db::newest_usage_of(&tx, name)?;
+    db::raise_watermark(&tx, name, newest.min(started - WATERMARK_SAFETY_SECS))?;
+    db::raise_watermark(&tx, BACKFILL_DONE, 1)?;
+    db::clear_backfilled_files(&tx)?;
+    tx.commit()
+        .map_err(|e| format!("failed to commit ingest transaction: {e}"))?;
+    Ok(stats)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +398,122 @@ mod tests {
             now - WATERMARK_SAFETY_SECS
         );
         let _ = fs::remove_dir_all(dir);
+    }
+
+    /// `n` transcripts of one message each, file `i` last modified `i` seconds
+    /// after the epoch plus a base, so a higher index is newer.
+    fn transcripts(name: &str, n: usize) -> (PathBuf, ClaudeCodeSource) {
+        let root = scratch_dir(name);
+        let now = crate::common::time::now_secs();
+        for i in 0..n {
+            let dir = root.join(format!("proj{}", i % 3));
+            fs::create_dir_all(&dir).unwrap();
+            let ts = crate::common::time::iso_utc(now - 3_600 * 24 + i as i64);
+            let line = format!(
+                r#"{{"type":"assistant","timestamp":"{ts}","sessionId":"s{i}","cwd":"/fake/p","message":{{"id":"msg_{i}","model":"claude-sonnet-5","usage":{{"input_tokens":10,"output_tokens":5}}}}}}"#
+            );
+            let path = dir.join(format!("f{i}.jsonl"));
+            fs::write(&path, line + "\n").unwrap();
+            let when =
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000 + i as u64);
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(when)
+                .unwrap();
+        }
+        (root.clone(), ClaudeCodeSource::new(root))
+    }
+
+    const TOTAL: usize = BATCH_FILES * 2 + 20;
+
+    #[test]
+    fn a_first_read_goes_in_batches_newest_files_first_and_resumes_after_an_interrupt() {
+        let (_root, source) = transcripts("usage-batched", TOTAL);
+        let dir = scratch_dir("usage-batched-db");
+        let conn = db::open_db(&dir.join("usage.db")).unwrap();
+
+        // Stop after the first batch commits.
+        let mut seen = Vec::new();
+        ingest_claude(&source, "a", &conn, &mut |done, total| {
+            seen.push((done, total));
+            done == 0
+        })
+        .unwrap();
+        assert_eq!(seen, vec![(0, TOTAL), (BATCH_FILES, TOTAL)]);
+        let stored: Vec<String> = db::load_usage_events(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.event_id)
+            .collect();
+        assert_eq!(stored.len(), BATCH_FILES);
+        // The newest files come first.
+        assert!(stored.contains(&format!("msg_{}", TOTAL - 1)));
+        assert!(!stored.contains(&"msg_0".to_string()));
+        // An interrupted run never moves the watermark past unread files.
+        assert_eq!(db::get_watermark(&conn, "claude-code").unwrap(), 0);
+        assert_eq!(db::backfilled_files(&conn).unwrap().len(), BATCH_FILES);
+
+        // The next run starts from the files left and finishes.
+        let mut seen = Vec::new();
+        ingest_claude(&source, "a", &conn, &mut |done, total| {
+            seen.push((done, total));
+            true
+        })
+        .unwrap();
+        assert_eq!(seen.first(), Some(&(BATCH_FILES, TOTAL)));
+        assert_eq!(seen.last(), Some(&(TOTAL, TOTAL)));
+        assert_eq!(count(&conn, "usage_events"), TOTAL as i64);
+        assert!(db::get_watermark(&conn, "claude-code").unwrap() > 0);
+        assert_eq!(count(&conn, "usage_backfill_files"), 0);
+
+        // A finished store takes the incremental path and reports no batches.
+        let mut calls = 0;
+        ingest_claude(&source, "a", &conn, &mut |_, _| {
+            calls += 1;
+            true
+        })
+        .unwrap();
+        assert_eq!(calls, 0);
+        assert_eq!(count(&conn, "usage_events"), TOTAL as i64);
+    }
+
+    #[test]
+    fn a_batched_first_read_stores_what_the_plain_ingest_stores() {
+        let (_root, source) = transcripts("usage-batched-same", 55);
+        let a = db::open_db(&scratch_dir("usage-same-a").join("usage.db")).unwrap();
+        let b = db::open_db(&scratch_dir("usage-same-b").join("usage.db")).unwrap();
+        ingest(&source, "x", &a).unwrap();
+        ingest_claude(&source, "x", &b, &mut |_, _| true).unwrap();
+        let ids = |c: &Connection| {
+            let mut v: Vec<(String, i64, u64)> = db::load_usage_events(c)
+                .unwrap()
+                .into_iter()
+                .map(|e| (e.event_id, e.timestamp, e.output_tokens))
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(ids(&a), ids(&b));
+        assert_eq!(
+            db::get_watermark(&a, "claude-code").unwrap(),
+            db::get_watermark(&b, "claude-code").unwrap()
+        );
+    }
+
+    #[test]
+    fn an_existing_watermark_skips_the_backfill() {
+        let (_root, source) = transcripts("usage-batched-old", 5);
+        let conn = db::open_db(&scratch_dir("usage-old-db").join("usage.db")).unwrap();
+        db::raise_watermark(&conn, "claude-code", 5).unwrap();
+        let mut calls = 0;
+        ingest_claude(&source, "a", &conn, &mut |_, _| {
+            calls += 1;
+            true
+        })
+        .unwrap();
+        assert_eq!(calls, 0);
+        assert_eq!(count(&conn, "usage_events"), 5);
     }
 }

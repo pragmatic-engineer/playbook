@@ -47,6 +47,16 @@ pub fn body(app: &App) -> Option<Notice> {
     if !is_empty(d) {
         return None;
     }
+    if let Some((done, total)) = app.indexing {
+        return Some(Notice {
+            title: "Indexing".into(),
+            lines: vec![
+                format!("Reading transcripts from {}", app.sources),
+                format!("{done} of {total} files read. Data will appear as it is read."),
+            ],
+            error: false,
+        });
+    }
     if d.store.events == 0 {
         return Some(empty_store(app));
     }
@@ -161,6 +171,16 @@ mod tests {
         assert!(t.contains("/fake/home/.claude/projects"), "{t}");
         assert!(t.contains("CLAUDE_CONFIG_DIR"), "{t}");
         assert!(t.contains("--summary"), "{t}");
+    }
+
+    #[test]
+    fn while_indexing_an_empty_view_says_data_will_appear() {
+        let mut a = app(&[], StoreSpan::default(), Range::Today);
+        a.indexing = Some((120, 800));
+        let t = text(&body(&a).unwrap());
+        assert!(t.contains("120 of 800 files"), "{t}");
+        assert!(t.contains("Data will appear"), "{t}");
+        assert!(!t.contains("No usage"), "{t}");
     }
 
     #[test]
