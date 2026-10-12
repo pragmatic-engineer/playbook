@@ -87,6 +87,7 @@ non-interactive run would contradict what `--yes` says it does.
 `playbook init` always runs. This command has no terminal, so init does not ask its own questions and uses its defaults (hooks, settings and PATH on), plus the launcher and system prompt flags you built above. It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder. Then check the tools the plugin needs and install only the missing ones:
 
 ```bash
+test -n "$CLAUDE_PLUGIN_ROOT" || { echo "CLAUDE_PLUGIN_ROOT is unset; run setup from the plugin"; exit 1; }
 CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" playbook init [flags]
 playbook deps ensure "${CLAUDE_PLUGIN_ROOT}/Brewfile"
 ```
