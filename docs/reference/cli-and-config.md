@@ -50,6 +50,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `sessions.recentDays` | `7` | a number, see the config keys guide for the range |
 | `hygiene.enabled` | `true` | `true`, `false` |
 | `hygiene.thresholdTokens` | `250000` | a number, see the config keys guide for the range |
+| `hints.pluginRemoved` | `true` | `true`, `false` |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands

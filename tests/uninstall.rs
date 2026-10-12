@@ -420,3 +420,63 @@ fn the_installer_scripts_in_the_claude_dir_are_removed_and_nothing_else() {
     assert!(sb.path(".claude/CLAUDE.md").is_file());
     assert!(sb.path(".claude/projects/p/s.jsonl").is_file());
 }
+
+const LISTED: &str =
+    r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}]}}"#;
+
+#[test]
+fn uninstall_lists_the_plugin_and_marketplace_steps_that_still_apply() {
+    // Arrange
+    let sb = Sandbox::new("manual-both");
+    sb.write(".claude/plugins/installed_plugins.json", LISTED);
+    sb.write(
+        ".claude/plugins/known_marketplaces.json",
+        r#"{"pragmatic-engineer":{"source":{}}}"#,
+    );
+
+    // Act
+    let out = sb.run(&["uninstall", "--yes"]);
+
+    // Assert
+    let shown = text(&out);
+    assert!(
+        shown.contains("claude plugin uninstall playbook@pragmatic-engineer"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("claude plugin marketplace remove pragmatic-engineer"),
+        "{shown}"
+    );
+}
+
+#[test]
+fn uninstall_lists_only_the_steps_that_apply() {
+    // Arrange: the plugin is gone but the marketplace entry remains.
+    let sb = Sandbox::new("manual-marketplace-only");
+    sb.write(
+        ".claude/plugins/installed_plugins.json",
+        r#"{"version":2,"plugins":{}}"#,
+    );
+    sb.write(
+        ".claude/plugins/known_marketplaces.json",
+        r#"{"pragmatic-engineer":{"source":{}}}"#,
+    );
+
+    // Act
+    let shown = text(&sb.run(&["uninstall", "--yes"]));
+
+    // Assert
+    assert!(!shown.contains("claude plugin uninstall"), "{shown}");
+    assert!(
+        shown.contains("claude plugin marketplace remove pragmatic-engineer"),
+        "{shown}"
+    );
+}
+
+#[test]
+fn uninstall_prints_no_manual_steps_when_nothing_remains() {
+    let sb = Sandbox::new("manual-none");
+    let shown = text(&sb.run(&["uninstall", "--yes"]));
+    assert!(!shown.contains("claude plugin"), "{shown}");
+    assert!(!shown.contains("remaining manual steps"), "{shown}");
+}

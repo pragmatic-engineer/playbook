@@ -46,6 +46,76 @@ pub fn is_disabled_in(home: &Path) -> bool {
         == Some(serde_json::Value::Bool(false))
 }
 
+/// The marketplace the plugin comes from.
+pub const MARKETPLACE: &str = "pragmatic-engineer";
+
+/// The hint shown when the plugin was removed. The status line and the
+/// SessionStart hook use this one text.
+pub const REMOVED_HINT: &str =
+    "playbook plugin was removed, run `playbook uninstall --yes` to clean up";
+
+/// Config key that turns the removed-plugin hint off.
+pub const HINT_KEY: &str = "hints.pluginRemoved";
+
+/// Where `playbook init` records that it saw the plugin installed.
+pub fn seen_marker(home: &Path) -> std::path::PathBuf {
+    crate::common::paths::playbook_root_from(home).join("plugin-seen")
+}
+
+/// Whether Claude Code lists the plugin as installed, or `None` when
+/// `installed_plugins.json` is missing or cannot be parsed.
+pub fn installed_in(home: &Path) -> Option<bool> {
+    let path = home.join(".claude/plugins/installed_plugins.json");
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    let listed = |v: &serde_json::Value| v.get(PLUGIN_KEY).is_some_and(|e| !e.is_null());
+    Some(value.get("plugins").is_some_and(listed) || listed(&value))
+}
+
+/// Whether the marketplace is listed in `known_marketplaces.json`.
+pub fn marketplace_known_in(home: &Path) -> bool {
+    std::fs::read_to_string(home.join(".claude/plugins/known_marketplaces.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .is_some_and(|v| v.get(MARKETPLACE).is_some())
+}
+
+/// Record, in playbook's own state, that the plugin is installed right now.
+/// Does nothing when it is not, and never touches Claude Code's files.
+pub fn record_seen(home: &Path) {
+    if installed_in(home) != Some(true) {
+        return;
+    }
+    let marker = seen_marker(home);
+    if marker.is_file() {
+        return;
+    }
+    if let Some(dir) = marker.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(marker, "1\n");
+}
+
+/// Whether the plugin was seen installed and has since been removed from
+/// `installed_plugins.json`. Disabled is not removed, and a user who never
+/// had the plugin never matches. An unreadable list counts as not removed.
+pub fn removed(home: &Path) -> bool {
+    installed_in(home) == Some(false) && seen_marker(home).is_file()
+}
+
+/// The hint to show, or `None` when the plugin was not removed or the user
+/// turned the hint off with `hints.pluginRemoved`.
+pub fn removed_hint(home: &Path) -> Option<&'static str> {
+    if !removed(home) {
+        return None;
+    }
+    let off = crate::config::resolve(HINT_KEY, home, None)
+        .ok()
+        .and_then(|(v, _)| v.as_bool())
+        == Some(false);
+    (!off).then_some(REMOVED_HINT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,5 +173,84 @@ mod tests {
             r#"{"enabledPlugins":{"playbook@pragmatic-engineer":"false"}}"#,
         ));
         assert!(!is_disabled_in(&home));
+    }
+
+    fn write_installed(home: &std::path::Path, body: &str) {
+        let dir = home.join(".claude/plugins");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("installed_plugins.json"), body).unwrap();
+    }
+
+    const LISTED: &str =
+        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}]}}"#;
+    const EMPTY: &str = r#"{"version":2,"plugins":{}}"#;
+
+    #[test]
+    fn init_records_the_plugin_only_when_it_is_installed() {
+        let absent = home_with(None);
+        write_installed(&absent, EMPTY);
+        record_seen(&absent);
+        assert!(!seen_marker(&absent).exists());
+        let present = home_with(None);
+        write_installed(&present, LISTED);
+        record_seen(&present);
+        assert!(seen_marker(&present).is_file());
+    }
+
+    #[test]
+    fn a_seen_plugin_that_left_the_list_counts_as_removed() {
+        let home = home_with(None);
+        write_installed(&home, LISTED);
+        record_seen(&home);
+        assert!(!removed(&home));
+        write_installed(&home, EMPTY);
+        assert!(removed(&home));
+        assert_eq!(removed_hint(&home), Some(REMOVED_HINT));
+    }
+
+    #[test]
+    fn a_user_who_never_had_the_plugin_is_never_told_it_was_removed() {
+        let home = home_with(None);
+        write_installed(&home, EMPTY);
+        assert!(!removed(&home));
+        assert_eq!(removed_hint(&home), None);
+    }
+
+    #[test]
+    fn a_disabled_plugin_that_is_still_listed_is_not_removed() {
+        let home = home_with(Some(
+            r#"{"enabledPlugins":{"playbook@pragmatic-engineer":false}}"#,
+        ));
+        write_installed(&home, LISTED);
+        record_seen(&home);
+        assert!(!removed(&home));
+    }
+
+    #[test]
+    fn a_missing_or_malformed_list_is_not_removed() {
+        let home = home_with(None);
+        write_installed(&home, LISTED);
+        record_seen(&home);
+        write_installed(&home, "{not json");
+        assert!(!removed(&home));
+        let _ = std::fs::remove_file(home.join(".claude/plugins/installed_plugins.json"));
+        assert!(!removed(&home));
+    }
+
+    #[test]
+    fn the_config_key_turns_the_hint_off() {
+        let home = home_with(None);
+        write_installed(&home, LISTED);
+        record_seen(&home);
+        write_installed(&home, EMPTY);
+        crate::config::write::set(
+            crate::config::write::Tier::Global,
+            HINT_KEY,
+            serde_json::Value::Bool(false),
+            &home,
+            None,
+        )
+        .unwrap();
+        assert_eq!(removed_hint(&home), None);
     }
 }

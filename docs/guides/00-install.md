@@ -155,6 +155,10 @@ If a run is interrupted between writing `settings.json` and the baseline, delete
 
 Disabling `playbook@pragmatic-engineer` in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook init` wrote stay in `settings.json`. Enable the plugin again to resume. Only an explicit `false` pauses: with no entry (Homebrew only), `true`, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
 
+## When the plugin was removed
+
+`playbook init` notes in `~/.config/playbook/plugin-seen` that it saw the plugin installed. If the plugin later leaves Claude Code's `installed_plugins.json` (removed, which differs from disabled), the status line shows `playbook plugin was removed, run \`playbook uninstall --yes\` to clean up` and the SessionStart hook adds the same line once per session start. Nothing is deleted for you. Homebrew-only users never had the plugin and never see the line. Set `hints.pluginRemoved` to `false` to hide it (see [config keys](04-config-keys.md)).
+
 ## Uninstall
 
 ```bash
@@ -165,6 +169,8 @@ playbook uninstall --yes       # remove it
 It removes only what playbook placed: the hook entries and status line in `settings.json`, the launcher block in your rc files, and the files under `~/.config/playbook` that playbook copied (such as the system prompt). Without `--yes` it lists the plan and exits with status 1.
 
 Everything else stays: the rest of `settings.json` and your rc files, `.settings.base.json`, `backups/`, memory and all runtime state. Each changed file is backed up first (`settings.json.bak.<epoch>`). A status line script or system prompt you edited by hand is kept. If `settings.json` cannot be edited, such as invalid JSON, the placed files and the binary stay too.
+
+At the end it lists the manual steps that still apply, because playbook never changes Claude Code's plugins: `claude plugin uninstall playbook@pragmatic-engineer` while the plugin is installed, and `claude plugin marketplace remove pragmatic-engineer` while the marketplace is listed.
 
 `--remove-binary` also removes the binary, its `.bak` backups and the `PATH` block the installer added.
 
