@@ -67,7 +67,9 @@ fn read_line(input: &mut dyn BufRead) -> Option<String> {
 }
 
 /// Run every screen, then the summary and confirm. `detail` words each row of
-/// the summary for an answer.
+/// the summary for an answer. Enter keeps the current answer, which starts as
+/// the item's default. `s` restores the default. Back at the summary returns
+/// to the last question.
 pub fn run(
     caps: &Caps,
     items: &[Item],
@@ -81,62 +83,75 @@ pub fn run(
     let total = asked.len() + 1; // the summary is the last step
     let mut answers: Vec<bool> = items.iter().map(|i| i.fixed.unwrap_or(i.default)).collect();
     let mut pos = 0;
-    while pos < asked.len() {
-        let item = &items[asked[pos]];
-        let step = Step {
-            index: pos + 1,
-            total,
-        };
-        write!(out, "{}", render::step_screen(caps, step, &item.choice))?;
-        loop {
-            let default = answers[asked[pos]];
-            write!(
-                out,
-                "{}",
-                render::prompt_line(caps, &item.choice.question, default, pos > 0)
-            )?;
-            out.flush()?;
-            let Some(line) = read_line(input) else {
-                writeln!(out)?;
-                return Ok(Finish::Cancelled);
-            };
-            match parse_answer(&line, default) {
-                Answer::Yes => answers[asked[pos]] = true,
-                Answer::No => answers[asked[pos]] = false,
-                Answer::Skip => answers[asked[pos]] = item.default,
-                Answer::Back if pos > 0 => {
-                    pos -= 1;
-                    break;
-                }
-                Answer::Back => {
-                    writeln!(out, "This is the first question.")?;
-                    continue;
-                }
-                Answer::Quit => return Ok(Finish::Cancelled),
-                Answer::Unknown => {
-                    writeln!(out, "Type y, n, s, b or q.")?;
-                    continue;
-                }
-            }
-            pos += 1;
-            break;
-        }
-    }
-    let rows: Vec<SummaryRow> = items
-        .iter()
-        .zip(&answers)
-        .map(|(i, &on)| SummaryRow {
-            name: i.choice.id.clone(),
-            on,
-            detail: detail(i, on),
-        })
-        .collect();
+    // pos in 0..asked.len() is a question, pos == asked.len() is the summary.
     loop {
-        write!(out, "\n{}", render::summary(caps, &rows))?;
+        if pos < asked.len() {
+            let idx = asked[pos];
+            let item = &items[idx];
+            let step = Step {
+                index: pos + 1,
+                total,
+            };
+            write!(out, "{}", render::step_screen(caps, step, &item.choice))?;
+            loop {
+                write!(
+                    out,
+                    "{}",
+                    render::prompt_line(caps, &item.choice.question, answers[idx], pos > 0, true)
+                )?;
+                out.flush()?;
+                let Some(line) = read_line(input) else {
+                    writeln!(out)?;
+                    return Ok(Finish::Cancelled);
+                };
+                match parse_answer(&line, answers[idx]) {
+                    Answer::Yes => answers[idx] = true,
+                    Answer::No => answers[idx] = false,
+                    Answer::Skip => answers[idx] = item.default,
+                    Answer::Back if pos > 0 => {
+                        pos -= 1;
+                        break;
+                    }
+                    Answer::Back => {
+                        writeln!(out, "This is the first question.")?;
+                        continue;
+                    }
+                    Answer::Quit => return Ok(Finish::Cancelled),
+                    Answer::Unknown => {
+                        writeln!(out, "Type y, n, s, b or q.")?;
+                        continue;
+                    }
+                }
+                pos += 1;
+                break;
+            }
+            continue;
+        }
+        let rows: Vec<SummaryRow> = items
+            .iter()
+            .zip(&answers)
+            .map(|(i, &on)| SummaryRow {
+                name: i.choice.id.clone(),
+                on,
+                detail: detail(i, on),
+            })
+            .collect();
+        write!(
+            out,
+            "\n{}",
+            render::summary(
+                caps,
+                &rows,
+                Step {
+                    index: total,
+                    total
+                }
+            )
+        )?;
         write!(
             out,
             "{}",
-            render::prompt_line(caps, "Apply these changes?", true, !asked.is_empty())
+            render::prompt_line(caps, "Apply these changes?", true, !asked.is_empty(), false)
         )?;
         out.flush()?;
         let Some(line) = read_line(input) else {
@@ -144,36 +159,12 @@ pub fn run(
             return Ok(Finish::Cancelled);
         };
         match parse_answer(&line, true) {
-            Answer::Yes | Answer::Skip => return Ok(Finish::Confirmed(answers)),
+            Answer::Yes => return Ok(Finish::Confirmed(answers)),
             Answer::No | Answer::Quit => return Ok(Finish::Cancelled),
-            Answer::Back if !asked.is_empty() => {
-                // Walk back to the last asked item and redo from there.
-                return run_from_last(caps, items, detail, input, out, answers);
-            }
-            _ => writeln!(out, "Type y to apply, n to cancel.")?,
+            Answer::Back if !asked.is_empty() => pos = asked.len() - 1,
+            _ => writeln!(out, "Type y to apply, n to cancel, b to go back.")?,
         }
     }
-}
-
-fn run_from_last(
-    caps: &Caps,
-    items: &[Item],
-    detail: &dyn Fn(&Item, bool) -> String,
-    input: &mut dyn BufRead,
-    out: &mut dyn Write,
-    answers: Vec<bool>,
-) -> io::Result<Finish> {
-    // Keep what was answered as the new defaults and ask again from the start.
-    let again: Vec<Item> = items
-        .iter()
-        .zip(&answers)
-        .map(|(i, &a)| Item {
-            choice: i.choice.clone(),
-            default: a,
-            fixed: i.fixed,
-        })
-        .collect();
-    run(caps, &again, detail, input, out)
 }
 
 #[cfg(test)]
@@ -260,6 +251,41 @@ mod tests {
         assert_eq!(drive(&items, "q\n").0, Finish::Cancelled);
         assert_eq!(drive(&items, "").0, Finish::Cancelled);
         assert_eq!(drive(&items, "y\n").0, Finish::Cancelled);
+    }
+
+    #[test]
+    fn back_at_the_summary_returns_to_the_last_question_only() {
+        let items = [item("a", true, None), item("b", true, None)];
+        // a=y, b=y, back from summary, b=n, confirm
+        let (f, out) = drive(&items, "y\ny\nb\nn\ny\n");
+        assert_eq!(f, Finish::Confirmed(vec![true, false]));
+        assert_eq!(out.matches("Step 1 of 3").count(), 1);
+        assert_eq!(out.matches("Step 2 of 3").count(), 2);
+    }
+
+    #[test]
+    fn skip_at_the_summary_does_not_apply() {
+        let items = [item("a", true, None)];
+        let (f, out) = drive(&items, "y\ns\ny\n");
+        assert_eq!(f, Finish::Confirmed(vec![true]));
+        assert!(out.contains("Type y to apply"));
+        assert!(!out.contains("Apply these changes? [Y/n, s skip"));
+    }
+
+    #[test]
+    fn back_with_every_item_fixed_reprompts() {
+        let items = [item("a", true, Some(true))];
+        let (f, out) = drive(&items, "b\ny\n");
+        assert_eq!(f, Finish::Confirmed(vec![true]));
+        assert!(out.contains("Type y to apply"));
+    }
+
+    #[test]
+    fn skip_restores_the_default_after_going_back() {
+        let items = [item("a", false, None), item("b", true, None)];
+        // a=y, b=y, back, back, skip a (default false), b=y, confirm
+        let (f, _) = drive(&items, "y\ny\nb\nb\ns\n\ny\n");
+        assert_eq!(f, Finish::Confirmed(vec![false, true]));
     }
 
     #[test]

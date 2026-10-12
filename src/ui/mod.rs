@@ -48,7 +48,9 @@ impl Caps {
     ) -> Self {
         let set = |k: &str| env(k).is_some_and(|v| !v.is_empty());
         let dumb = env("TERM").is_some_and(|t| t == "dumb");
-        let color = is_tty && !dumb && !set("NO_COLOR");
+        // Off Unix, only a terminal known to understand escapes gets color.
+        let vt = cfg!(unix) || set("WT_SESSION") || set("TERM");
+        let color = is_tty && !dumb && vt && !set("NO_COLOR");
         let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
             .iter()
             .find_map(|k| env(k).filter(|v| !v.is_empty()))
@@ -146,6 +148,19 @@ mod tests {
     fn a_pipe_gets_plain_ascii() {
         let c = Caps::from_parts(&env_of(&[("LANG", "en_US.UTF-8")]), false, None);
         assert!(!c.color && !c.unicode);
+    }
+
+    #[test]
+    fn lc_all_beats_lang_and_columns_beat_env() {
+        let c = Caps::from_parts(
+            &env_of(&[("LC_ALL", "C"), ("LANG", "en_US.UTF-8"), ("COLUMNS", "70")]),
+            true,
+            Some(90),
+        );
+        assert!(!c.unicode);
+        assert_eq!(c.width, 90);
+        let bad = Caps::from_parts(&env_of(&[("COLUMNS", "abc")]), true, None);
+        assert_eq!(bad.width, 80);
     }
 
     #[test]

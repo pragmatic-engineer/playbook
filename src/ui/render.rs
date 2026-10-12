@@ -61,9 +61,18 @@ enum Tone {
     Cyan,
 }
 
+/// Replace control characters other than newline with `?`, so text from files
+/// or commands cannot move the cursor, fake a status or send terminal commands.
+pub fn sanitize(text: &str) -> String {
+    text.chars()
+        .map(|c| if c != '\n' && c.is_control() { '?' } else { c })
+        .collect()
+}
+
 fn paint(caps: &Caps, tone: Tone, text: &str) -> String {
+    let text = sanitize(text);
     if !caps.color {
-        return text.to_string();
+        return text;
     }
     let code = match tone {
         Tone::Bold => "1",
@@ -97,6 +106,7 @@ fn rule(caps: &Caps) -> String {
 
 /// Wrap `text` to `width` columns, indenting every line by `indent` spaces.
 pub fn wrap(text: &str, width: usize, indent: usize) -> String {
+    let text = sanitize(text);
     let room = width.saturating_sub(indent).max(10);
     let pad = " ".repeat(indent);
     let mut lines: Vec<String> = Vec::new();
@@ -167,14 +177,24 @@ pub fn step_screen(caps: &Caps, step: Step, choice: &Choice) -> String {
     out
 }
 
-/// The prompt line under a screen. `back` shows the back key from step 2 on.
-pub fn prompt_line(caps: &Caps, question: &str, default_yes: bool, back: bool) -> String {
+/// The prompt line under a screen. `back` shows the back key from step 2 on,
+/// `skip` the skip key on question screens.
+pub fn prompt_line(
+    caps: &Caps,
+    question: &str,
+    default_yes: bool,
+    back: bool,
+    skip: bool,
+) -> String {
     let yn = if default_yes { "Y/n" } else { "y/N" };
-    let keys = if back {
-        format!("{yn}, b back, s skip, q quit")
-    } else {
-        format!("{yn}, s skip, q quit")
-    };
+    let mut keys = yn.to_string();
+    if back {
+        keys.push_str(", b back");
+    }
+    if skip {
+        keys.push_str(", s skip");
+    }
+    keys.push_str(", q quit");
     format!(
         "{} {} ",
         paint(caps, Tone::Bold, question),
@@ -183,8 +203,12 @@ pub fn prompt_line(caps: &Caps, question: &str, default_yes: bool, back: bool) -
 }
 
 /// The choices before anything changes.
-pub fn summary(caps: &Caps, rows: &[SummaryRow]) -> String {
-    let mut out = heading(caps, "Summary of your choices");
+pub fn summary(caps: &Caps, rows: &[SummaryRow], step: Step) -> String {
+    let title = format!(
+        "Step {} of {}  Summary of your choices",
+        step.index, step.total
+    );
+    let mut out = heading(caps, &title);
     let w = rows
         .iter()
         .map(|r| r.name.chars().count())
@@ -199,9 +223,9 @@ pub fn summary(caps: &Caps, rows: &[SummaryRow]) -> String {
         let _ = writeln!(
             out,
             "  {:<w$}  {}  {}",
-            r.name,
+            sanitize(&r.name),
             paint(caps, tone, word),
-            r.detail,
+            sanitize(&r.detail),
             w = w
         );
     }
@@ -220,14 +244,43 @@ pub fn progress_line(caps: &Caps, status: Status, name: &str, detail: &str) -> S
     format!(
         "{} {}  {}",
         paint(caps, tone, symbol(caps, status)),
-        name,
-        detail
+        sanitize(name),
+        sanitize(detail)
     )
 }
 
+/// How many actions landed each way.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counts {
+    pub done: usize,
+    pub unchanged: usize,
+    pub skipped: usize,
+    pub failed: usize,
+}
+
+impl Counts {
+    pub fn tally(statuses: &[Status]) -> Self {
+        let mut c = Self::default();
+        for s in statuses {
+            match s {
+                Status::Done => c.done += 1,
+                Status::Unchanged => c.unchanged += 1,
+                Status::Skipped => c.skipped += 1,
+                Status::Failed => c.failed += 1,
+            }
+        }
+        c
+    }
+}
+
 /// Counts and the suggested next commands.
-pub fn next_steps(caps: &Caps, counts: [usize; 4], steps: &[&str]) -> String {
-    let [done, unchanged, skipped, failed] = counts;
+pub fn next_steps(caps: &Caps, counts: Counts, steps: &[&str]) -> String {
+    let Counts {
+        done,
+        unchanged,
+        skipped,
+        failed,
+    } = counts;
     let mut out =
         format!("\n{done} done, {unchanged} unchanged, {skipped} skipped, {failed} failed\n");
     if !steps.is_empty() {
@@ -323,7 +376,7 @@ If you decline:\n  \
                 detail: "not installed".into(),
             },
         ];
-        let got = summary(&Caps::plain(80), &rows);
+        let got = summary(&Caps::plain(80), &rows, Step { index: 3, total: 3 });
         assert!(got.contains("  hooks          on   29 entries\n"), "{got}");
         assert!(
             got.contains("  system-prompt  off  not installed\n"),
@@ -333,7 +386,18 @@ If you decline:\n  \
 
     #[test]
     fn next_steps_counts_and_lists() {
-        let got = next_steps(&Caps::plain(80), [2, 1, 3, 0], &["Open a new terminal."]);
+        let got = next_steps(
+            &Caps::plain(80),
+            Counts::tally(&[
+                Status::Done,
+                Status::Done,
+                Status::Unchanged,
+                Status::Skipped,
+                Status::Skipped,
+                Status::Skipped,
+            ]),
+            &["Open a new terminal."],
+        );
         assert!(got.contains("2 done, 1 unchanged, 3 skipped, 0 failed"));
         assert!(got.contains("Next steps"));
         assert!(got.contains("  Open a new terminal."));
@@ -343,13 +407,32 @@ If you decline:\n  \
     fn prompt_shows_back_only_after_the_first_step() {
         let c = Caps::plain(80);
         assert_eq!(
-            prompt_line(&c, "Add it?", true, false),
+            prompt_line(&c, "Add it?", true, false, true),
             "Add it? [Y/n, s skip, q quit] "
         );
         assert_eq!(
-            prompt_line(&c, "Add it?", false, true),
+            prompt_line(&c, "Add it?", false, true, true),
             "Add it? [y/N, b back, s skip, q quit] "
         );
+    }
+
+    #[test]
+    fn control_characters_in_text_are_neutralised() {
+        let c = Caps::plain(80);
+        let line = progress_line(&c, Status::Done, "a\x1b[2Jb", "x\ry\x07");
+        assert_eq!(line, "[ok] a?[2Jb  x?y?");
+        assert_eq!(sanitize("a\nb"), "a\nb");
+    }
+
+    #[test]
+    fn wrapped_lines_fit_the_width() {
+        let mut ch = choice();
+        ch.explain = "word ".repeat(30);
+        ch.accept = vec!["long ".repeat(20)];
+        let out = step_screen(&Caps::plain(40), Step { index: 1, total: 2 }, &ch);
+        for l in out.lines().skip(3) {
+            assert!(l.chars().count() <= 40, "{l:?}");
+        }
     }
 
     #[test]
