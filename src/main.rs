@@ -6,9 +6,9 @@ use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::init::shim::ShellKind;
 use playbook::{
-    adr, agents, brief, cc, ci, commit, common, config, deps, doc, doctor, effort, eval, gate,
-    handoff, hooks, init, json, learn, manifest, memory_import, mode, plan_cleanup, planning, pr,
-    review, sanitize, settings, statusline, trust, update, usage, worktree, AdrCommand,
+    adr, agents, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor, effort, eval,
+    gate, handoff, hooks, init, json, learn, manifest, memory_import, mode, plan_cleanup, planning,
+    pr, review, sanitize, settings, statusline, trust, update, usage, worktree, AdrCommand,
     AgentsCommand, CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand, DocCommand,
     DoctorCommand, EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand,
     LearnCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand,
@@ -1359,6 +1359,106 @@ fn main() {
                 "{}",
                 serde_json::to_string_pretty(&serde_json::Value::Object(out)).unwrap_or_default()
             );
+        }
+        Command::Deliver {
+            dir,
+            all,
+            update,
+            staged: _,
+            message,
+            message_file,
+            title,
+            body,
+            body_file,
+            base,
+            ready,
+            draft,
+            auto_merge,
+            wait,
+            timeout,
+            dry_run,
+            allow_large,
+            json,
+        } => {
+            let die = |message: String| -> ! {
+                if json {
+                    let v = serde_json::json!({
+                        "error": message, "details": [], "exit_code": deliver::exit::REFUSED
+                    });
+                    println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                } else {
+                    eprintln!("deliver: {message}");
+                }
+                std::process::exit(deliver::exit::REFUSED)
+            };
+            let read = |file: Option<String>, text: Option<String>| -> Option<String> {
+                match file {
+                    Some(f) => match std::fs::read_to_string(&f) {
+                        Ok(t) => Some(t),
+                        Err(e) => die(format!("could not read {f}: {e}")),
+                    },
+                    None => text,
+                }
+            };
+            let message = read(message_file, message);
+            let body = read(body_file, body);
+            let dir = dir.map(|d| absolute_from_cwd(&d));
+            if let Some(d) = &dir {
+                if let Err(e) = std::env::set_current_dir(d) {
+                    die(format!("--dir {d}: {e}"));
+                }
+            }
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let slug = common::repo_slug();
+            let repo_slug = (!slug.is_empty()).then_some(slug.as_str());
+            let mut opts = deliver::Options::new(cwd);
+            opts.stage = if all {
+                deliver::Stage::All
+            } else if update {
+                deliver::Stage::Tracked
+            } else {
+                deliver::Stage::Staged
+            };
+            opts.message = message;
+            opts.title = title;
+            opts.body = body;
+            opts.base = base;
+            opts.ready = if ready {
+                Some(true)
+            } else if draft {
+                Some(false)
+            } else {
+                None
+            };
+            opts.default_draft = pr::create::draft_setting(&common::home_dir(), repo_slug);
+            opts.auto_merge = auto_merge;
+            opts.wait = wait.then(|| std::time::Duration::from_secs(timeout));
+            opts.dry_run = dry_run;
+            opts.allow_large = allow_large;
+            match deliver::run(&opts) {
+                Ok(report) => {
+                    if json {
+                        println!("{}", report.to_json());
+                    } else {
+                        print!("{}", report.to_text());
+                    }
+                    std::process::exit(report.code);
+                }
+                Err(f) => {
+                    if json {
+                        let v = serde_json::json!({
+                            "error": f.message, "details": f.details, "exit_code": f.code
+                        });
+                        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                    } else {
+                        eprintln!("deliver: {}", f.message);
+                        for d in &f.details {
+                            eprintln!("  - {d}");
+                        }
+                    }
+                    std::process::exit(f.code);
+                }
+            }
         }
         Command::Commit { sub } => {
             let dir = std::env::current_dir().unwrap_or_default();
