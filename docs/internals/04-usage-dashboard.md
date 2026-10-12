@@ -45,7 +45,7 @@ The two charts are bar charts drawn with eighth blocks, one bar per UTC day, wit
 - **y axis.** Labels at the bottom, middle and top, with a blank column between them and the box, in dollars or tokens with units (`$0`, `$2.5`, `$250`, `$2.5K`, `500K`, `2.5M`). The top is a round value above the peak (1, 1.2, 1.6, 2, 2.5, 3, 4, 5, 6 or 8 times a power of ten), so the labels are round and the middle is half the top. Faint dotted guides mark the top and the middle.
 - **x axis.** The first, middle and last date under the bars (with the year when it fits), and a row of weekday letters or names when the panel is tall enough and every bar is wide enough for a letter and a gap (a month in a narrow panel has none). Today's weekday is bold and underlined, the peak day's is yellow, and the cursor's is highlighted.
 - **Totals line.** The total, the peak (with its date) and the average per day that has happened, for the range.
-- **Cursor.** `Left` and `Right` move it one bar, `Home` and `End` jump to the first and last bar while a chart has the focus, and with the mouse on, hovering or clicking a bar puts it there. A readout line gives the day, its cost, messages, tokens and top model with its share (the token chart leads with tokens). It starts on today, and both charts share it. Changing the range resets it.
+- **Cursor.** `Left` and `Right` move it one bar, `Home` and `End` jump to the first and last bar while a chart has the focus. A readout line gives the day, its cost, messages, tokens and top model with its share (the token chart leads with tokens). It starts on today, and both charts share it. Changing the range resets it.
 - **Legend.** The bar color follows its height on the axis along the theme gradient (green to red for cost), and the legend in the bottom border says so. The mono theme has no colors and no legend.
 - **Fill.** A week or more of bars always fills the width of the plot, and fewer bars are never wider than 16 columns.
 - **Wide ranges.** When the range has more days than the chart has columns, days are added up into bars of equal length (the title says `Spend per 3 days`), so nothing is cut off. The axis, readout and cursor then speak of those bars.
@@ -79,10 +79,9 @@ Keys:
 | `c` | Clear the filter. |
 | `p` | Open the [Sessions management view](09-sessions.md#the-sessions-view), a full screen table of recent sessions with their PR, state and suggestions. |
 | `t` | Cycle the theme: btop, dark, light, mono. |
-| `x` | Turn mouse reporting on or off. Turn it off to select text with the mouse. |
 | `q`, `Esc`, `Ctrl-C` | Quit. |
 
-The mouse is optional and on by default: a click focuses a panel and selects the row under it, the wheel moves the selection of the panel under the pointer, and hovering or clicking a chart bar moves the cursor.
+The view is keyboard only, so the terminal's own text selection and scrolling keep working.
 
 ### Ranges
 

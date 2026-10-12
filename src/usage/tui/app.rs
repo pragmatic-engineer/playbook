@@ -16,10 +16,8 @@ use super::worker::DEFAULT_REFRESH_SECONDS;
 use crate::usage::aggregate::SECONDS_PER_DAY;
 use crate::usage::period::pair_groups;
 use crate::usage::query::{Range, WeekStart};
-use ratatui::crossterm::event::{
-    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
-use ratatui::layout::{Position, Rect};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
 use std::time::Duration;
 
 /// Every range the view can show: the calendar ranges from the shortest to
@@ -122,9 +120,7 @@ pub struct App {
     /// The selected row of each panel, by `Panel::index`.
     pub selected: [usize; 6],
     pub sorts: [Sort; 6],
-    /// Whether the terminal reports the mouse.
-    pub mouse: bool,
-    /// The screen size, for turning a click into a panel and a row.
+    /// The screen size, for laying out the charts the cursor keys move over.
     pub area: Rect,
     /// Files read and files to read while a first read runs.
     pub indexing: Option<(usize, usize)>,
@@ -140,8 +136,6 @@ pub enum Effect {
     None,
     /// The range or filter changed: re-query now.
     Requery,
-    /// `mouse` changed: tell the terminal.
-    Mouse,
 }
 
 impl App {
@@ -164,7 +158,6 @@ impl App {
             focus: Panel::Models,
             selected: [0; 6],
             sorts: PANELS.map(Panel::default_sort),
-            mouse: true,
             area: Rect::new(0, 0, 100, 30),
             indexing: None,
             sources: String::new(),
@@ -378,10 +371,6 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('c') if ctrl => self.quit = true,
             KeyCode::Char('t') if !self.no_color => self.theme = self.theme.next(),
-            KeyCode::Char('x') => {
-                self.mouse = !self.mouse;
-                return Effect::Mouse;
-            }
             KeyCode::Char(c @ ('d' | 'w' | 'W' | 'm' | 'M' | 'a')) => {
                 return self.set_range(match c {
                     'd' => Range::Today,
@@ -450,83 +439,6 @@ impl App {
             _ => {}
         }
         Effect::None
-    }
-
-    /// The panel under a screen cell and the table row there, if it is one.
-    fn hit(&self, x: u16, y: u16) -> Option<(Panel, Option<usize>)> {
-        if self.area.width < view::MIN_WIDTH || self.area.height < view::MIN_HEIGHT {
-            return None;
-        }
-        let p = view::layout(self.area);
-        let rects = [p.spend, p.tokens, p.models, p.projects, p.live, p.sessions];
-        let at = Position::new(x, y);
-        let (panel, rect) = PANELS.iter().zip(rects).find(|(_, r)| r.contains(at))?;
-        // Border, then the header row, then the rows.
-        let first = rect.y + 2;
-        let row = (self.is_table(*panel) && y >= first)
-            .then(|| {
-                view::window_start(self.selection(*panel), view::visible_rows(rect))
-                    + usize::from(y - first)
-            })
-            .filter(|r| *r < self.rows(*panel));
-        Some((*panel, row))
-    }
-
-    /// Puts the cursor on the bar under a screen cell of a chart, if there is
-    /// one. Returns whether the cell was on a chart.
-    fn point_at_bar(&mut self, panel: Panel, x: u16, y: u16) -> bool {
-        let Some(plot) = self.plot(panel) else {
-            return false;
-        };
-        match plot.geo.bar_at(x, y) {
-            Some(i) => {
-                self.cursor = Some(plot.bars[i].first);
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// A click focuses a panel and selects a row, the wheel moves the
-    /// selection of the panel under the pointer. Over a chart, hovering or
-    /// clicking a bar puts the cursor on it.
-    pub fn mouse(&mut self, ev: MouseEvent) {
-        if self.editing {
-            return;
-        }
-        if matches!(
-            ev.kind,
-            MouseEventKind::Moved | MouseEventKind::Drag(MouseButton::Left)
-        ) {
-            for panel in [Panel::Spend, Panel::Tokens] {
-                if self.point_at_bar(panel, ev.column, ev.row) {
-                    return;
-                }
-            }
-        }
-        let Some((panel, row)) = self.hit(ev.column, ev.row) else {
-            return;
-        };
-        match ev.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                self.focus = panel;
-                if panel.is_chart() {
-                    self.point_at_bar(panel, ev.column, ev.row);
-                }
-                if let Some(row) = row {
-                    self.select(panel, row);
-                }
-            }
-            MouseEventKind::ScrollDown => {
-                self.focus = panel;
-                self.step(panel, 1);
-            }
-            MouseEventKind::ScrollUp => {
-                self.focus = panel;
-                self.step(panel, -1);
-            }
-            _ => {}
-        }
     }
 
     /// Keys while the filter is being typed. Enter applies, Esc drops it.
@@ -896,69 +808,6 @@ mod tests {
         assert_eq!(app.key(press(KeyCode::Enter)), Effect::None);
     }
 
-    #[test]
-    fn x_toggles_the_mouse() {
-        let mut app = App::new(Range::All);
-        assert!(app.mouse);
-        assert_eq!(app.key(press(KeyCode::Char('x'))), Effect::Mouse);
-        assert!(!app.mouse);
-    }
-
-    fn click(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
-        MouseEvent {
-            kind,
-            column,
-            row,
-            modifiers: KeyModifiers::NONE,
-        }
-    }
-
-    #[test]
-    fn a_click_focuses_a_panel_and_selects_the_row_under_it() {
-        let mut app = loaded();
-        let p = view::layout(app.area);
-        let left = MouseEventKind::Down(MouseButton::Left);
-        // Third model row: border, header, then the rows.
-        app.mouse(click(left, p.models.x + 3, p.models.y + 4));
-        assert_eq!(app.focus, Panel::Models);
-        assert_eq!(app.selection(Panel::Models), 2);
-        // The header row selects nothing but still focuses.
-        app.mouse(click(left, p.projects.x + 3, p.projects.y + 1));
-        assert_eq!(app.focus, Panel::Projects);
-        assert_eq!(app.selection(Panel::Projects), 0);
-    }
-
-    #[test]
-    fn the_wheel_moves_the_selection_of_the_panel_under_the_pointer() {
-        let mut app = loaded();
-        let p = view::layout(app.area);
-        app.mouse(click(
-            MouseEventKind::ScrollDown,
-            p.projects.x + 3,
-            p.projects.y + 3,
-        ));
-        assert_eq!(
-            (app.focus, app.selection(Panel::Projects)),
-            (Panel::Projects, 1)
-        );
-        app.mouse(click(
-            MouseEventKind::ScrollUp,
-            p.projects.x + 3,
-            p.projects.y + 3,
-        ));
-        assert_eq!(app.selection(Panel::Projects), 0);
-    }
-
-    #[test]
-    fn a_click_outside_every_panel_or_on_a_tiny_screen_does_nothing() {
-        let mut app = loaded();
-        app.mouse(click(MouseEventKind::Down(MouseButton::Left), 3, 0));
-        assert_eq!(app.focus, Panel::Models);
-        app.area = Rect::new(0, 0, 40, 10);
-        app.mouse(click(MouseEventKind::Down(MouseButton::Left), 3, 5));
-        assert_eq!(app.focus, Panel::Models);
-    }
-
     const NOW: i64 = 1_788_400_000;
     const DAY: i64 = 86_400;
 
@@ -1068,35 +917,6 @@ mod tests {
     }
 
     #[test]
-    fn hovering_or_clicking_a_bar_puts_the_cursor_on_its_day() {
-        let mut app = charted(Range::LastDays(30), 30);
-        let p = view::layout(app.area);
-        let plot = app.plot(Panel::Spend).unwrap();
-        let (x, y) = (plot.geo.x_of(4), plot.geo.plot.y);
-        app.mouse(click(MouseEventKind::Moved, x, y));
-        assert_eq!(app.cursor, Some(plot.bars[4].first));
-        // Hovering does not take the focus, a click does.
-        assert_eq!(app.focus, Panel::Models);
-        let x = plot.geo.x_of(9);
-        app.mouse(click(MouseEventKind::Down(MouseButton::Left), x, y));
-        assert_eq!(
-            (app.focus, app.cursor),
-            (Panel::Spend, Some(plot.bars[9].first))
-        );
-        // The tokens chart is the same days, so a hover there lands on its day.
-        let tokens = app.plot(Panel::Tokens).unwrap();
-        let (x, y) = (tokens.geo.x_of(2), tokens.geo.plot.y);
-        assert!(p.tokens.contains(ratatui::layout::Position::new(x, y)));
-        app.mouse(click(MouseEventKind::Moved, x, y));
-        assert_eq!(app.cursor, Some(tokens.bars[2].first));
-        // Over a table or the axis the cursor stays where it was.
-        let before = app.cursor;
-        app.mouse(click(MouseEventKind::Moved, p.models.x + 3, p.models.y + 3));
-        app.mouse(click(MouseEventKind::Moved, plot.geo.plot.x - 1, y));
-        assert_eq!(app.cursor, before);
-    }
-
-    #[test]
     fn v_steps_the_spend_panel_through_total_by_model_and_daily() {
         let mut app = App::new(Range::All);
         assert_eq!(app.spend_view, SpendView::Total);
@@ -1148,24 +968,20 @@ mod tests {
     }
 
     #[test]
-    fn the_cursor_keys_and_hover_leave_the_daily_table_alone() {
+    fn the_cursor_keys_leave_the_daily_table_alone() {
         let mut app = daily();
         app.key(press(KeyCode::Left));
-        assert_eq!(app.cursor, None);
-        let p = view::layout(app.area);
-        app.mouse(click(MouseEventKind::Moved, p.spend.x + 6, p.spend.y + 3));
         assert_eq!(app.cursor, None);
     }
 
     #[test]
-    fn clicking_a_day_row_selects_it() {
+    fn enter_on_a_day_row_applies_no_filter() {
         let mut app = daily();
-        let p = view::layout(app.area);
-        let left = MouseEventKind::Down(MouseButton::Left);
-        // Border, header, then the rows: the fourth row.
-        app.mouse(click(left, p.spend.x + 3, p.spend.y + 5));
+        app.key(press(KeyCode::Char('1')));
+        for _ in 0..3 {
+            app.key(press(KeyCode::Down));
+        }
         assert_eq!((app.focus, app.selection(Panel::Spend)), (Panel::Spend, 3));
-        // Enter has no filter to apply for a day.
         assert_eq!(app.key(press(KeyCode::Enter)), Effect::None);
     }
 

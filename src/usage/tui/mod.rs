@@ -26,10 +26,7 @@ pub mod worker;
 use super::query::Range;
 use super::run::Paths;
 use app::{App, Effect};
-use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
-};
-use ratatui::crossterm::execute;
+use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use sessions_view::SessionsView;
 use std::time::Duration;
 use theme::{ColorDepth, Theme};
@@ -55,9 +52,7 @@ fn start_theme(no_color: bool) -> Theme {
 /// including a panic (ratatui installs the hook).
 pub fn run(paths: &Paths, range: Range) -> Result<(), String> {
     let mut terminal = ratatui::init();
-    let _ = execute!(std::io::stdout(), EnableMouseCapture);
     let result = event_loop(&mut terminal, paths, range);
-    let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result.map_err(|e| format!("terminal error: {e}"))
 }
@@ -108,14 +103,10 @@ fn event_loop(
                 {
                     sessions.open();
                 }
-                Event::Mouse(_) if sessions.view.is_some() => {}
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
                     Effect::Requery => worker.ask(app.range, &app.filter),
-                    Effect::Mouse if app.mouse => execute!(std::io::stdout(), EnableMouseCapture)?,
-                    Effect::Mouse => execute!(std::io::stdout(), DisableMouseCapture)?,
                     Effect::None => {}
                 },
-                Event::Mouse(ev) => app.mouse(ev),
                 _ => {}
             }
         }
