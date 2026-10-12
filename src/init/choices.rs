@@ -4,6 +4,7 @@
 //! The optional parts of `playbook init` and how each one gets decided: a flag
 //! wins, else a question in a terminal, else the default.
 
+use crate::init::catalog;
 use clap::Args;
 use std::io::{self, BufRead, IsTerminal, Write};
 
@@ -55,6 +56,12 @@ pub struct Flags {
     /// Never ask: use the default for every part you did not answer with a flag
     #[arg(long, short = 'y')]
     pub yes: bool,
+    /// Print what would change for each part and change nothing
+    #[arg(long, conflicts_with = "explain")]
+    pub dry_run: bool,
+    /// Describe a part, or every part when none is named, and change nothing
+    #[arg(long, value_name = "PART", num_args = 0..=1, conflicts_with = "dry_run")]
+    pub explain: Option<Option<String>>,
 }
 
 /// What `init` will do for each optional part.
@@ -102,38 +109,33 @@ pub fn resolve(
         hooks: decide(
             flags.hooks,
             flags.no_hooks,
-            "Wire every playbook hook into ~/.claude/settings.json? (safety guards, session and worktree hooks)",
+            catalog::question("hooks"),
             true,
         ),
         settings: decide(
             flags.settings,
             flags.no_settings,
-            "Merge playbook's shared settings (options) into settings.json? Hooks and the status line are separate questions.",
+            catalog::question("settings"),
             true,
         ),
         statusline: decide(
             flags.statusline,
             flags.no_statusline,
-            "Use the playbook status line?",
+            catalog::question("statusline"),
             true,
         ),
         security: pick(flags.security, flags.no_security).unwrap_or(security_config),
-        path: decide(
-            flags.path,
-            flags.no_path,
-            "Put the playbook binary on PATH in your shell startup files?",
-            true,
-        ),
+        path: decide(flags.path, flags.no_path, catalog::question("path"), true),
         aliases: decide(
             flags.aliases,
             flags.no_aliases,
-            "Install the ccc and ccd launcher shortcuts?",
+            catalog::question("aliases"),
             false,
         ),
         system_prompt: decide(
             flags.system_prompt,
             flags.no_system_prompt,
-            "Install the playbook system prompt?",
+            catalog::question("system-prompt"),
             false,
         ),
     }
@@ -237,10 +239,15 @@ mod tests {
             order.push(q.to_string());
             d
         });
-        let pos = |needle: &str| order.iter().position(|q| q.contains(needle)).unwrap();
-        assert!(pos("shared settings") < pos("Use the playbook status line"));
-        assert!(pos("Use the playbook status line") < pos("PATH"));
-        assert!(order.iter().any(|q| q == "Use the playbook status line?"));
+        let pos = |id: &str| {
+            order
+                .iter()
+                .position(|q| q == catalog::question(id))
+                .unwrap()
+        };
+        assert!(pos("settings") < pos("statusline"));
+        assert!(pos("statusline") < pos("path"));
+        assert!(order.iter().any(|q| q == catalog::question("statusline")));
     }
 
     #[test]
@@ -255,7 +262,7 @@ mod tests {
         };
         assert!(
             resolve(&on, true, false, &mut |q, d| {
-                assert!(q != "Use the playbook status line?");
+                assert!(q != catalog::question("statusline"));
                 d
             })
             .statusline

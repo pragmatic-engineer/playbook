@@ -28,11 +28,13 @@
 //! form. `wire` changes what a user's own `settings.json` looks like after
 //! they choose to run `playbook init`.
 
+pub mod catalog;
 pub mod choices;
 pub mod memory_migrate;
 pub mod merge;
 pub mod migrate;
 pub mod path;
+pub mod preview;
 pub mod run;
 pub mod self_root;
 pub mod shell_init;

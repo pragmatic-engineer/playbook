@@ -1,0 +1,365 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
+//! `playbook init --dry-run`: what a run would change, part by part, with
+//! nothing written to the real files. It copies the few small files the parts
+//! edit into a scratch home, runs the same step code against that copy and
+//! reports the difference. The scratch home is removed afterwards.
+
+use crate::init::catalog;
+use crate::init::choices::Choices;
+use crate::init::path;
+use crate::init::run::{self, InitPaths, StepReport, StepStatus};
+use serde_json::Value;
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+/// Home-relative files the parts can edit. Each is copied when it exists.
+const TRACKED: &[&str] = &[
+    ".claude/settings.json",
+    ".claude/.settings.base.json",
+    ".zshrc",
+    ".zshenv",
+    ".bashrc",
+    ".bash_profile",
+    ".bash_login",
+    ".profile",
+    ".config/fish/conf.d/playbook.fish",
+];
+
+/// The part a top-level settings key belongs to.
+fn part_of_key(key: &str) -> &'static str {
+    match key {
+        "hooks" => "hooks",
+        "statusLine" => "statusline",
+        "permissions" => "security",
+        _ => "settings",
+    }
+}
+
+fn read(path: &Path) -> Option<String> {
+    fs::read_to_string(path).ok()
+}
+
+/// A home-relative path as the user knows it.
+fn tilde(rel: &str) -> String {
+    format!("~/{rel}")
+}
+
+/// (event, matcher, command) of every hook entry in a settings value.
+fn hook_entries(settings: &Value) -> BTreeSet<(String, String, String)> {
+    let mut out = BTreeSet::new();
+    let Some(hooks) = settings.get("hooks").and_then(Value::as_object) else {
+        return out;
+    };
+    for (event, groups) in hooks {
+        for group in groups.as_array().into_iter().flatten() {
+            let matcher = group["matcher"].as_str().unwrap_or("").to_string();
+            for hook in group["hooks"].as_array().into_iter().flatten() {
+                let command = hook["command"].as_str().unwrap_or("").to_string();
+                out.insert((event.clone(), matcher.clone(), command));
+            }
+        }
+    }
+    out
+}
+
+/// What changed in settings.json, one `(part, text)` pair per change.
+pub fn settings_changes(before: &Value, after: &Value) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
+    let empty = serde_json::Map::new();
+    let (b, a) = (
+        before.as_object().unwrap_or(&empty),
+        after.as_object().unwrap_or(&empty),
+    );
+    for (key, new) in a {
+        let old = b.get(key);
+        if old == Some(new) {
+            continue;
+        }
+        match (key.as_str(), old) {
+            ("hooks", _) => {
+                let was = hook_entries(before);
+                let added = hook_entries(after).difference(&was).count();
+                out.push(("hooks", format!("add {added} hook entries")));
+            }
+            ("env", Some(Value::Object(old_env))) => {
+                for (k, v) in new.as_object().into_iter().flatten() {
+                    if old_env.get(k) != Some(v) {
+                        let part = if k == "DISABLE_AUTOUPDATER" {
+                            "security"
+                        } else {
+                            "settings"
+                        };
+                        out.push((part, format!("set env.{k}")));
+                    }
+                }
+            }
+            (_, None) => out.push((part_of_key(key), format!("add {key}"))),
+            (_, Some(_)) => out.push((part_of_key(key), format!("change {key}"))),
+        }
+    }
+    out
+}
+
+/// One line per kind of change for a part: `add keys: a, b`, `change keys: c`.
+fn grouped(changes: &[(&'static str, String)], id: &str, file: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    for verb in ["add", "set", "change"] {
+        let names: Vec<&str> = changes
+            .iter()
+            .filter(|(p, _)| *p == id)
+            .filter_map(|(_, t)| t.strip_prefix(&format!("{verb} ")))
+            .collect();
+        match names.as_slice() {
+            [] => {}
+            [one] if one.ends_with("hook entries") => lines.push(format!("{file}: {verb} {one}")),
+            many => lines.push(format!("{file}: {verb} {}", many.join(", "))),
+        }
+    }
+    lines
+}
+
+/// Lines present after and not before, in order.
+fn added_lines(before: &str, after: &str) -> Vec<String> {
+    let had: BTreeSet<&str> = before.lines().collect();
+    after
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !had.contains(l))
+        .map(str::to_string)
+        .collect()
+}
+
+fn verb(step: &StepReport) -> &'static str {
+    match step.status {
+        StepStatus::Wired => "would change",
+        StepStatus::AlreadyCorrect => "already up to date",
+        StepStatus::Skipped => "skipped",
+        StepStatus::Failed => "would fail",
+    }
+}
+
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn make_scratch(home: &Path) -> std::io::Result<Scratch> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let dir = std::env::temp_dir().join(format!("playbook-dry-run-{}-{nanos}", std::process::id()));
+    fs::create_dir_all(dir.join(".claude"))?;
+    for rel in TRACKED {
+        let from = home.join(rel);
+        if from.is_file() {
+            let to = dir.join(rel);
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&from, &to)?;
+        }
+    }
+    Ok(Scratch(dir))
+}
+
+/// The report for `--dry-run`. Writes nothing outside a scratch directory it
+/// removes before returning.
+pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
+    let mut out = String::from("playbook init --dry-run: nothing is changed on this run.\n\n");
+    let scratch = match make_scratch(&paths.home) {
+        Ok(s) => s,
+        Err(err) => return format!("{out}could not prepare a scratch copy: {err}\n"),
+    };
+    let sh = scratch.0.clone();
+    let scratch_paths = InitPaths {
+        self_root: paths.self_root.clone(),
+        claude_home: sh.join(".claude"),
+        home: sh.clone(),
+        shell_kind: paths.shell_kind,
+        system_prompt: false,
+        aliases: paths.aliases,
+        hooks: paths.hooks,
+        settings: paths.settings,
+        statusline: paths.statusline,
+        security: paths.security,
+        path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
+            bin_dir: s.bin_dir.clone(),
+            shell: s.shell,
+        }),
+        repo: None,
+    };
+    let epoch = crate::common::time::now_epoch_secs();
+    let (settings_step, hooks_step) = run::settings_and_hooks_steps(&scratch_paths, epoch);
+    let path_step = run::path_step(&sh, scratch_paths.path_setup.as_ref());
+    let after_path = rc_snapshot(&sh);
+    let shim_step = run::rewire_rc_file_step(&sh, scratch_paths.shell_kind, scratch_paths.aliases);
+    let after_shim = rc_snapshot(&sh);
+    let before_rc = rc_snapshot(&paths.home);
+
+    let settings_rel = ".claude/settings.json";
+    let parse = |p: &Path| -> Value {
+        read(p)
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or(Value::Null)
+    };
+    let changes = settings_changes(
+        &parse(&paths.home.join(settings_rel)),
+        &parse(&sh.join(settings_rel)),
+    );
+    let settings_file = tilde(settings_rel);
+
+    let on = |b: bool| if b { "on" } else { "off" };
+    let flags = [
+        ("hooks", choices.hooks),
+        ("settings", choices.settings),
+        ("statusline", choices.statusline),
+        ("security", choices.security),
+        ("path", choices.path),
+        ("aliases", choices.aliases),
+        ("system-prompt", choices.system_prompt),
+    ];
+    for (id, enabled) in flags {
+        let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{id} ({})\n", on(enabled)));
+        if !enabled {
+            out.push_str("  skipped, you chose off\n\n");
+            continue;
+        }
+        let lines: Vec<String> = match id {
+            "hooks" | "settings" | "statusline" | "security" => {
+                let mine = grouped(&changes, id, &settings_file);
+                if mine.is_empty() {
+                    let step = if id == "hooks" {
+                        &hooks_step
+                    } else {
+                        &settings_step
+                    };
+                    vec![format!(
+                        "{settings_file}: {}{}",
+                        if step.status == StepStatus::Skipped {
+                            "skipped, "
+                        } else {
+                            "no change, "
+                        },
+                        if id == "hooks" || id == "settings" {
+                            step.detail.as_str()
+                        } else {
+                            "already as configured"
+                        }
+                    )]
+                } else {
+                    mine
+                }
+            }
+            "path" => file_lines(&before_rc, &after_path, &path_step),
+            "aliases" => file_lines(&after_path, &after_shim, &shim_step),
+            _ => vec![system_prompt_line(paths)],
+        };
+        for line in lines {
+            let _ = std::fmt::Write::write_fmt(&mut out, format_args!("  {line}\n"));
+        }
+        out.push('\n');
+    }
+    out.push_str("Runs every time\n");
+    for line in always_lines(paths) {
+        let _ = std::fmt::Write::write_fmt(&mut out, format_args!("  {line}\n"));
+    }
+    out.push_str(
+        "\nA backup of settings.json is saved before any change. One-time migrations are not simulated.\n",
+    );
+    if paths.self_root.is_none() {
+        out.push_str(
+            "No plugin or settings template was found. A real run writes embedded copies under ~/.config/playbook/embedded first.\n",
+        );
+    }
+    out
+}
+
+/// The contents of every tracked shell file that exists, by relative path.
+fn rc_snapshot(home: &Path) -> Vec<(&'static str, String)> {
+    TRACKED
+        .iter()
+        .filter(|r| !r.starts_with(".claude/"))
+        .map(|r| (*r, read(&home.join(r)).unwrap_or_default()))
+        .collect()
+}
+
+/// Files a rc-style step would edit, with the lines it would add.
+fn file_lines(
+    before: &[(&'static str, String)],
+    after: &[(&'static str, String)],
+    step: &StepReport,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for ((rel, old), (_, new)) in before.iter().zip(after) {
+        for add in added_lines(old, new) {
+            lines.push(format!("{}: add `{add}`", tilde(rel)));
+        }
+    }
+    if lines.is_empty() {
+        lines.push(format!("{}: {}", verb(step), step.detail));
+    }
+    lines
+}
+
+fn system_prompt_line(paths: &InitPaths) -> String {
+    let rel = ".config/playbook/prompts/SYSTEM_PROMPT.md";
+    let dest = paths.home.join(rel);
+    let shown = tilde(rel);
+    let source = paths
+        .self_root
+        .as_ref()
+        .map(|r| r.join("prompts/SYSTEM_PROMPT.md"))
+        .and_then(|p| read(&p));
+    match (source, read(&dest)) {
+        (None, _) => format!("{shown}: skipped, no system prompt found to copy"),
+        (Some(_), None) => format!("{shown}: add the file"),
+        (Some(s), Some(d)) if s == d => format!("{shown}: already up to date"),
+        (Some(_), Some(_)) => {
+            format!("{shown}: refresh the file, or keep your copy when you edited it")
+        }
+    }
+}
+
+fn always_lines(paths: &InitPaths) -> Vec<String> {
+    let root = crate::common::paths::playbook_root_from(&paths.home);
+    let old = paths.home.join(".claude/memory");
+    let mut lines = Vec::new();
+    for part in catalog::PARTS.iter().filter(|p| !p.asked) {
+        let text = match part.id {
+            "memory-migration" => {
+                if old.is_dir() && !root.join("memory/.migration-complete").exists() {
+                    "~/.claude/memory moves to ~/.config/playbook/memory".to_string()
+                } else {
+                    "nothing to move".to_string()
+                }
+            }
+            "trust" => {
+                let json = paths.home.join(".claude.json");
+                let dir = root.to_string_lossy().to_string();
+                if !json.exists() {
+                    "~/.claude.json does not exist, skipped".to_string()
+                } else if crate::trust::is_trusted(&json, &dir) {
+                    "already trusted".to_string()
+                } else {
+                    "~/.claude.json: mark ~/.config/playbook as trusted".to_string()
+                }
+            }
+            "config-hash" => {
+                if root.join("hooks/lib/config-hash.sh").is_file() {
+                    "remove ~/.config/playbook/hooks/lib/config-hash.sh".to_string()
+                } else {
+                    "nothing to remove".to_string()
+                }
+            }
+            "security" => continue,
+            other => format!("{other}: runs"),
+        };
+        lines.push(format!("{}: {text}", part.id));
+    }
+    lines
+}

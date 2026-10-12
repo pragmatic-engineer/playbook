@@ -352,24 +352,40 @@ fn main() {
         // binary-invoked form are the other two thirds of WU-11's atomic
         // switchover and stay untouched here; see `src/init/mod.rs`'s doc
         // comment for why running this wiring alone is still safe.
+        Command::Init { flags } if flags.explain.is_some() => {
+            let which = flags.explain.as_ref().and_then(|w| w.as_deref());
+            match init::catalog::explain(which) {
+                Ok(text) => print!("{text}"),
+                Err(err) => {
+                    eprintln!("init: {err}");
+                    std::process::exit(2);
+                }
+            }
+        }
         Command::Init { flags } => {
             let security_config = config::resolve("security.defaults", &common::home_dir(), None)
                 .map(|(value, _)| value.as_bool().unwrap_or(false))
                 .unwrap_or(false);
+            let asking = init::choices::stdio_is_interactive() && !flags.yes && !flags.dry_run;
+            if asking {
+                print!("{}", init::catalog::plan());
+            }
             let choices = init::choices::resolve(
                 &flags,
-                init::choices::stdio_is_interactive(),
+                asking,
                 security_config,
                 &mut init::choices::ask_on_terminal,
             );
             let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
             let home = common::home_dir();
             let claude_home = home.join(".claude");
-            let self_root = init::self_root::resolve_or_embedded(
-                std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                &claude_home,
-                &home,
-            );
+            let plugin_root = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
+            let self_root = if flags.dry_run {
+                // A dry run must not write the embedded copies.
+                init::self_root::resolve(plugin_root.as_deref(), &claude_home)
+            } else {
+                init::self_root::resolve_or_embedded(plugin_root.as_deref(), &claude_home, &home)
+            };
             let shell_kind = std::env::var("SHELL")
                 .ok()
                 .and_then(|shell| ShellKind::detect(&shell));
@@ -403,6 +419,10 @@ fn main() {
                 statusline: choices.statusline,
                 security: choices.security,
             };
+            if flags.dry_run {
+                print!("{}", init::preview::dry_run(&paths, &choices));
+                return;
+            }
             let outcome = init::run::run(&paths);
             for step in &outcome.steps {
                 println!("{}", step.render());
@@ -410,6 +430,13 @@ fn main() {
             for warning in &outcome.warnings {
                 eprintln!("init: warning: {warning}");
             }
+            let changed: Vec<&str> = outcome
+                .steps
+                .iter()
+                .filter(|s| s.status == StepStatus::Wired)
+                .map(|s| s.name)
+                .collect();
+            print!("{}", init::catalog::summary(&changed));
             if !outcome.ok() {
                 let failed = outcome
                     .steps
@@ -420,6 +447,9 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Command::Hooks { sub } => match sub {
+            playbook::HooksCommand::List => print!("{}", init::catalog::hooks_list()),
+        },
         Command::Settings { sub } => match sub {
             SettingsCommand::Gen { src, perms } => match settings::gen::generate(&src, &perms) {
                 Ok(output) => print!("{output}"),

@@ -1,14 +1,15 @@
 # Hook reference
 
-Every hook that `playbook init` wires into `~/.claude/settings.json`, and the three the plugin registers itself. Each command is `playbook hook <name>`. A test fails when init wires a hook that is missing from the tables below, so this page cannot drift.
+Every hook that `playbook init` wires into `~/.claude/settings.json`, and the three the plugin registers itself (marked in the last column). Each command is `playbook hook <name>`. A test fails when init wires a hook that is missing from the tables below, so this page cannot drift.
 
 Paths below use `~/.config/playbook/` as the playbook home. The session directory is `~/.config/playbook/runtime/<session id>/`, owner-only (mode 0700). No hook reads a secret value, and no hook sends anything over the network.
 
 ## How to turn a hook off
 
-Four ways, from narrowest to widest.
+Five ways, from narrowest to widest.
 
 - A per-hook switch, where the last column names one. Environment switches (`POLICY_GUARD=0`) go in the `env` block of `settings.json` or your shell.
+- Disable the plugin in Claude Code. That sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false`. Every hook then exits with no output and no side effects, and the status line prints nothing, while the entries stay in `settings.json`. Enable the plugin again to resume.
 - Delete the hook's entry from `~/.claude/settings.json`. Init puts it back on the next run unless you pass `--no-hooks`.
 - `playbook init --no-hooks` never adds playbook hook entries. It does not remove ones that are already there.
 - `playbook uninstall` removes every entry init wired. Add `--dry-run` to see the list first.
@@ -37,6 +38,7 @@ A hook that fails or cannot read its input allows the call. Only the hooks marke
 | `Stop` | none | `playbook hook session-clean-exit` | Records that the session ended cleanly after each turn, so the next start can spot a crash. | Never blocks. | Writes `last-clean-ts` in the session directory and may queue an auto-learn entry under `runtime/to-learn/`. | `AUTO_LEARN_NUDGE=0` stops the queue entry. |
 | `SessionEnd` | none | `playbook hook session-clean-exit` | Writes the clean-exit marker when the session truly ends. | Never blocks. | Writes `clean-exit` in the session directory. Reads `edit-count`. | `AUTO_LEARN_NUDGE=0` stops the queue entry. |
 | `PreCompact` | none | `playbook hook precompact-warn` | Warns you that the context is about to be compacted and logs the event. | Warns only. Never blocks. | Appends a timestamp line to `~/.config/playbook/runtime/compactions.log`. | Entry only. |
+| `SessionStart` | none | `playbook hook migration-check` | Tells you to re-run `playbook init` when a plugin update arrived without it. Silent once settings are wired. | Shows a warning. Never blocks. | Reads `~/.claude/settings.json`. Writes nothing. | Disable or remove the plugin. |
 
 ## Usage tracking and auto mode
 
@@ -68,12 +70,11 @@ The usage store itself is filled by `playbook usage collect`, not by a hook. See
 | `UserPromptSubmit` | none | `playbook hook auto-model-detect` | Suggests `/playbook:plan`, `/playbook:adr` or `/playbook:implement` when your prompt looks like design or build work. | Adds context. Never blocks. | Reads your prompt text. Writes a once-only marker in the session directory. | Entry only. Silent in headless runs. |
 | `UserPromptSubmit` | none | `playbook hook context-hygiene` | Nudges the model to save a handoff when the context passes `hygiene.thresholdTokens`. | Adds context. Never blocks. | Reads the tail of the session transcript. Writes `hygiene-level` in the session directory. | `playbook config set hygiene.enabled false` |
 
-## Plugin hooks
+## Worktree
 
-These three come from the plugin's `hooks/hooks.json`, not from `settings.json`. They exist only while the plugin is installed. `playbook init` does not wire them.
+These two come from the plugin's `hooks/hooks.json`, not from `settings.json`. They exist only while the plugin is installed. `playbook init` does not wire them. The `migration-check` hook in Session lifecycle comes from the plugin too.
 
 | Event | Matcher | Command | What it does | Can block or change | Reads and writes | Turn off |
 | :- | :- | :- | :- | :- | :- | :- |
-| `SessionStart` | none | `playbook hook migration-check` | Tells you to re-run `playbook init` when a plugin update arrived without it. Silent once settings are wired. | Shows a warning. Never blocks. | Reads `~/.claude/settings.json`. Writes nothing. | Disable or remove the plugin. |
 | `WorktreeCreate` | none | `playbook hook worktree-create` | Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old. | Replaces Claude Code's default worktree creation. | Runs git in your repo. Writes the new worktree and a refresh stamp inside the git directory. | Disable or remove the plugin. |
 | `WorktreeRemove` | none | `playbook hook worktree-remove` | Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it. | Never forces a removal. | Runs git in your repo. | Disable or remove the plugin. |

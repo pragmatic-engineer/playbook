@@ -143,7 +143,6 @@ impl InitOutcome {
 /// Run every `init` step against `paths`. Copy steps run first; `settings`
 /// and `shim` only rewrite their file once their copy step is confirmed.
 pub fn run(paths: &InitPaths) -> InitOutcome {
-    let settings_path = paths.claude_home.join("settings.json");
     let self_root = paths.self_root.as_deref();
     // One stamp for every backup of this run, so a second boundary cannot split them.
     let epoch = crate::common::time::now_epoch_secs();
@@ -166,6 +165,33 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         migrate::record_skills(&paths.home, root);
     }
 
+    let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);
+
+    let path_step = path_step(&paths.home, paths.path_setup.as_ref());
+    let shim_step = rewire_rc_file_step(&paths.home, paths.shell_kind, paths.aliases);
+
+    let trust_step = trust_config_dir_step(&paths.home);
+
+    let mut steps = vec![
+        system_prompt_step,
+        settings_step,
+        hooks_step,
+        path_step,
+        shim_step,
+    ];
+    steps.extend(migrated.steps);
+    steps.push(trust_step);
+    InitOutcome {
+        steps,
+        warnings: migrated.warnings,
+    }
+}
+
+/// The settings merge and the hook wiring, in the order a real run does them.
+/// `init --dry-run` runs the same code against a scratch copy of the files.
+pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepReport, StepReport) {
+    let settings_path = paths.claude_home.join("settings.json");
+    let self_root = paths.self_root.as_deref();
     let settings_step = if paths.settings {
         seed_or_merge_settings(
             self_root,
@@ -195,30 +221,12 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     } else {
         StepReport::skipped("hooks", "not requested; pass --hooks to opt in")
     };
-
-    let path_step = path_step(&paths.home, paths.path_setup.as_ref());
-    let shim_step = rewire_rc_file_step(&paths.home, paths.shell_kind, paths.aliases);
-
-    let trust_step = trust_config_dir_step(&paths.home);
-
-    let mut steps = vec![
-        system_prompt_step,
-        settings_step,
-        hooks_step,
-        path_step,
-        shim_step,
-    ];
-    steps.extend(migrated.steps);
-    steps.push(trust_step);
-    InitOutcome {
-        steps,
-        warnings: migrated.warnings,
-    }
+    (settings_step, hooks_step)
 }
 
 /// Puts the binary's directory on PATH for every shell start. A failure is
 /// reported, never fatal: the binary still runs by absolute path.
-fn path_step(home: &Path, setup: Option<&path::Setup>) -> StepReport {
+pub(crate) fn path_step(home: &Path, setup: Option<&path::Setup>) -> StepReport {
     let Some(setup) = setup else {
         return StepReport::skipped("path", "not requested, or the binary location is unknown");
     };
@@ -281,7 +289,7 @@ fn trust_config_dir_step(home: &Path) -> StepReport {
 
 /// Whether a copy step actually landed: `Skipped` does not count, since it
 /// means the destination's state is unconfirmed, not verified complete.
-fn step_confirmed(step: &StepReport) -> bool {
+pub(crate) fn step_confirmed(step: &StepReport) -> bool {
     matches!(step.status, StepStatus::Wired | StepStatus::AlreadyCorrect)
 }
 
@@ -703,7 +711,11 @@ fn wire_hooks(settings_path: &Path, epoch: u64) -> StepReport {
 }
 
 /// Patch the rc file. Gated on `aliases`, then `$SHELL`.
-fn rewire_rc_file_step(home: &Path, shell_kind: Option<ShellKind>, aliases: bool) -> StepReport {
+pub(crate) fn rewire_rc_file_step(
+    home: &Path,
+    shell_kind: Option<ShellKind>,
+    aliases: bool,
+) -> StepReport {
     if !aliases {
         return StepReport::skipped("shim", "not installed; pass --aliases to opt in");
     }
