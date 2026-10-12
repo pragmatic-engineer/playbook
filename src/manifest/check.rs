@@ -15,7 +15,6 @@
 //! subcommand bare from anywhere inside the repo behaves as the script did.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Top-level files the manifest allows verbatim.
 const ALLOW_FILES: [&str; 15] = [
@@ -92,12 +91,12 @@ pub fn check(repo_root: &Path) -> Result<String, String> {
         ));
     }
 
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .arg("ls-files")
-        .output()
-        .map_err(|err| format!("failed to run git ls-files: {err}"))?;
+    let output = crate::common::git::run(
+        Some(repo_root),
+        &["ls-files"],
+        crate::common::git::SLOW_TIMEOUT,
+    )
+    .ok_or("failed to run git ls-files (git missing or timed out)")?;
     if !output.status.success() {
         return Err(format!("not a git repository: {}", repo_root.display()));
     }
@@ -126,14 +125,7 @@ pub fn check(repo_root: &Path) -> Result<String, String> {
 /// argument was given (check-manifest.sh:21-22). `None` when the cwd is not
 /// inside a git repository.
 pub fn toplevel() -> Option<PathBuf> {
-    let out = Command::new("git")
-        .args(["-C", ".", "rev-parse", "--show-toplevel"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let path = crate::common::git::output(Path::new("."), &["rev-parse", "--show-toplevel"])?;
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
 

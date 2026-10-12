@@ -11,7 +11,7 @@
 //! rebased, where the lease is checked against a ref this run fetched. In auto
 //! mode nothing is ever forced.
 
-use super::{current_branch, git_in, git_success, git_text};
+use super::{current_branch, git_in, git_in_long, git_success, git_text};
 use crate::common::re::static_regex;
 use std::path::Path;
 
@@ -145,7 +145,7 @@ pub fn run(
     args.push("--file".into());
     args.push(message_file.to_string_lossy().into_owned());
     let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    let out = git_in(dir, &argv).ok_or("could not run git")?;
+    let out = git_in_long(dir, &argv).ok_or("could not run git (or it timed out)")?;
     if !out.status.success() {
         return Err(format!(
             "git commit failed, nothing was pushed:\n{}",
@@ -158,7 +158,7 @@ pub fn run(
     if let Some(base) = base_ref(dir) {
         if branch != "main" && branch != "master" {
             let short = base.trim_start_matches("origin/");
-            let _ = git_in(dir, &["fetch", "origin", short, "--quiet"]);
+            let _ = git_in_long(dir, &["fetch", "origin", short, "--quiet"]);
             let behind: u32 = git_text(dir, &["rev-list", "--count", &format!("HEAD..{base}")])
                 .and_then(|n| n.parse().ok())
                 .unwrap_or(0);
@@ -166,7 +166,9 @@ pub fn run(
                 log.push(format!(
                     "Branch is {behind} commits behind {base}. Rebasing..."
                 ));
-                if git_success(dir, &["rebase", base, "--quiet"]) {
+                if git_in_long(dir, &["rebase", base, "--quiet"])
+                    .is_some_and(|o| o.status.success())
+                {
                     rebased = true;
                 } else {
                     log.push(format!(
@@ -192,10 +194,10 @@ pub fn run(
         a.extend_from_slice(extra);
         a.push("origin");
         a.push(&refspec);
-        git_in(dir, &a).ok_or_else(|| "could not run git push".to_string())
+        git_in_long(dir, &a).ok_or_else(|| "could not run git push (or it timed out)".to_string())
     };
     let remote_absent = opts.auto
-        && git_in(
+        && git_in_long(
             dir,
             &["ls-remote", "--exit-code", "--heads", "origin", &branch],
         )

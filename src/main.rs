@@ -371,6 +371,13 @@ fn main() {
                 .map(|(value, _)| value.as_bool().unwrap_or(false))
                 .unwrap_or(false);
             let asking = init::choices::stdio_is_interactive() && !flags.yes && !flags.dry_run;
+            if let Some(notice) = init::choices::defaults_notice(
+                std::io::stdin().is_terminal(),
+                std::io::stdout().is_terminal(),
+                &flags,
+            ) {
+                eprintln!("{notice}");
+            }
             if asking {
                 print!("{}", init::catalog::plan());
             }
@@ -1107,10 +1114,9 @@ fn main() {
                 }
                 ConfigCommand::Import { file } => {
                     let raw = if file == "-" {
-                        let mut buf = String::new();
-                        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf).map(|_| buf)
+                        common::stdin::read_piped()
                     } else {
-                        std::fs::read_to_string(&file)
+                        std::fs::read_to_string(&file).map_err(|err| err.to_string())
                     };
                     let doc = raw
                         .map_err(|err| format!("cannot read {file}: {err}"))
@@ -1263,8 +1269,7 @@ fn main() {
                 }
             };
             if write {
-                let mut content = String::new();
-                let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut content);
+                let content = read_stdin_to_string();
                 let saved = std::fs::create_dir_all(&dir)
                     .and_then(|()| planning::write_checkpoint(&path, &content));
                 match saved {
@@ -1473,11 +1478,7 @@ fn main() {
                 });
                 let raw = match tiers.as_deref() {
                     None => String::new(),
-                    Some("-") => {
-                        let mut s = String::new();
-                        let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s);
-                        s
-                    }
+                    Some("-") => read_stdin_to_string(),
                     Some(path) => std::fs::read_to_string(path).unwrap_or_default(),
                 };
                 let merged = review::lens::merge(&lenses, &raw, &forced);
@@ -1767,8 +1768,7 @@ fn main() {
         Command::Handoff { sub } => {
             let result = match sub {
                 HandoffCommand::Save { dir, session } => {
-                    let mut text = String::new();
-                    let _ = std::io::stdin().read_to_string(&mut text);
+                    let text = read_stdin_to_string();
                     handoff::run_save(dir.as_deref(), &text, session.as_deref())
                 }
                 HandoffCommand::Show { all, dir } => handoff::run_show(dir.as_deref(), all),
@@ -1948,16 +1948,17 @@ fn parse_number(value: &str) -> Option<serde_json::Value> {
 }
 
 /// Reads all of stdin into a `String`, for the `json` subcommands that
-/// take their JSON document piped in. Panics on a read failure: unlike
-/// [`read_hook_input`], these commands have no silent-empty fallback that
-/// would make sense, since an empty document is itself valid JSON input.
+/// take their document piped in. Exits 1 on a read failure or when stdin is a
+/// terminal: unlike [`read_hook_input`], these commands have no silent-empty
+/// fallback that would make sense.
 fn read_stdin_to_string() -> String {
-    let mut input = String::new();
-    if let Err(err) = std::io::stdin().read_to_string(&mut input) {
-        eprintln!("playbook: cannot read stdin: {err}");
-        std::process::exit(1);
+    match common::stdin::read_piped() {
+        Ok(input) => input,
+        Err(err) => {
+            eprintln!("playbook: {err}");
+            std::process::exit(1);
+        }
     }
-    input
 }
 
 /// Read the hook payload the same way common.py does: `HOOK_INPUT` env var
@@ -2046,10 +2047,10 @@ fn effort_report(
 
 /// The diff shape from `git diff --numstat <base>`, or why it cannot be read.
 fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
-    let out = std::process::Command::new("git")
-        .args(["diff", "--numstat", base, "--"])
-        .output()
-        .map_err(|e| format!("could not run git: {e}"))?;
+    let mut command = std::process::Command::new("git");
+    command.args(["diff", "--numstat", base, "--"]);
+    let out = common::proc::run_with_timeout(&mut command, common::git::SLOW_TIMEOUT)
+        .ok_or("could not run git (or it timed out)")?;
     if !out.status.success() {
         return Err(format!("git diff against {base} failed"));
     }

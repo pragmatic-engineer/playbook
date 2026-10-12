@@ -10,20 +10,20 @@
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 /// How many commits the churn count scans.
 const CHURN_COMMITS: usize = 2000;
 /// How many recent subjects the commit style is read from.
 const SUBJECTS: usize = 300;
 
+/// Longest one history scan may run. A huge repo that needs longer yields an
+/// empty scan instead of a command that never returns.
+const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 fn git(dir: &Path, args: &[&str]) -> String {
-    Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
+    let mut command = crate::common::git::command(dir);
+    command.args(args);
+    crate::common::proc::run_with_timeout(&mut command, SCAN_TIMEOUT)
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default()
 }

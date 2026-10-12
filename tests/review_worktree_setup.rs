@@ -379,3 +379,79 @@ fn setup_warns_when_origin_moved_but_still_checks_out_the_requested_sha() {
     let wt = stdout(&out);
     assert_eq!(git_ok(Path::new(&wt), &["rev-parse", "HEAD"]), f.sha);
 }
+
+/// A directory holding an executable named `name` that runs `script`.
+fn fake_bin(name: &str, script: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("fakebin");
+    let path = dir.join(name);
+    fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    dir
+}
+
+#[test]
+fn a_hung_gh_repo_view_times_out_instead_of_hanging() {
+    let f = Fixture::new();
+    let bin = fake_bin("gh", "sleep 60");
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let started = std::time::Instant::now();
+
+    let out = f.playbook(
+        &["setup", "7", &f.sha],
+        &[
+            ("GH_FETCH_URL", ""),
+            ("PATH", &path),
+            ("REVIEW_NET_TIMEOUT_SECONDS", "1"),
+        ],
+    );
+
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("timed out"),
+        "stderr: {}",
+        stderr(&out)
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+}
+
+#[test]
+fn a_hung_git_fetch_times_out_instead_of_hanging() {
+    let f = Fixture::new();
+    let real = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let real = String::from_utf8_lossy(&real.stdout).trim().to_string();
+    let bin = fake_bin(
+        "git",
+        &format!("case \"$*\" in *fetch*) sleep 60;; esac\nexec {real} \"$@\""),
+    );
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let started = std::time::Instant::now();
+
+    let out = f.playbook(
+        &["setup", "7", &f.sha],
+        &[("PATH", &path), ("REVIEW_NET_TIMEOUT_SECONDS", "1")],
+    );
+
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("failed to fetch"),
+        "stderr: {}",
+        stderr(&out)
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+}
+
+#[test]
+fn the_worktree_is_locked_with_the_pid_when_it_is_created() {
+    let f = Fixture::new();
+
+    let out = f.setup("7", &f.sha);
+
+    let wt = stdout(&out);
+    let admin = git_ok(Path::new(&wt), &["rev-parse", "--git-dir"]);
+    let reason = fs::read_to_string(Path::new(&admin).join("locked")).unwrap();
+    assert!(reason.contains("review pr=7 pid="), "{reason}");
+}
