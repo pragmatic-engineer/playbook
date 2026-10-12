@@ -117,7 +117,7 @@ playbook plans
 ```
 
 It prints one `path<TAB>[status]<TAB>title` row per plan file and ADR blueprint (quality, checkpoint and gate-source files are left out), or `NO_PLANS`, or `PLAN_PATH_ERROR: ...` with a non-zero exit. `playbook plans --json` prints the same rows as JSON.
-Present the rows as a numbered menu (index, status, title, path), listing unexecuted entries (`Proposed`/`Accepted`) first and `Implemented` last. Ask the user to pick a number, or to preview one first (Read it, show the summary, then re-ask). If the output is `NO_PLANS`, stop and tell the user to run `/playbook:plan` or `/playbook:adr` to create one. If the output starts with `PLAN_PATH_ERROR:`, stop and show the user that error verbatim (most likely no git `origin` remote); do NOT suggest running `/playbook:plan`, since the problem isn't an absence of plans. Use the chosen file as the task reference, then continue below. Any flags passed (e.g. `--auto`) still apply to the chosen plan.
+Present the rows as a numbered menu (index, status, title, path), listing unexecuted entries (`Proposed`/`Accepted`) first and `Implemented` last. Ask the user to pick a number, or to preview one first (Read it, show the summary, then re-ask). In auto mode never ask: when exactly one unexecuted entry exists, use it and log the assumption, otherwise stop and print the list. If the output is `NO_PLANS`, stop and tell the user to run `/playbook:plan` or `/playbook:adr` to create one. If the output starts with `PLAN_PATH_ERROR:`, stop and show the user that error verbatim (most likely no git `origin` remote); do NOT suggest running `/playbook:plan`, since the problem isn't an absence of plans. Use the chosen file as the task reference, then continue below. Any flags passed (e.g. `--auto`) still apply to the chosen plan.
 
 Otherwise, resolve `$ARGUMENTS` (minus flags) by format:
 
@@ -127,7 +127,7 @@ Otherwise, resolve `$ARGUMENTS` (minus flags) by format:
 - **Other file path:** Read it.
 - **Plain text:** the text is the task statement.
 
-If a fetch fails, ask the user to paste the task content.
+If a fetch fails, ask the user to paste the task content. In auto mode stop with the fetch error instead of asking.
 
 ## Step 2: Execute-Only Gate (MUST)
 
@@ -315,7 +315,7 @@ Each `wip` commit is a checkpoint, not the delivered shape: see Commit per Work 
 
 1. Once the WU's last dispatch (its last REFACTOR, or its last `--no-tdd` or `--no-tests` group) passes review, squash: `git reset --soft <wu-base-sha>` then one commit with the WU's real message, staging exactly its `Files`.
 2. **Parallel wave (worktree):** during integration the orchestrator cherry-picks that one commit onto the current Segment branch in dependency order (never the default branch). The Segment's branch stays local until its PR opens (Step 9, `/playbook:create-pull-request` handles the push); under the pause boundary that push happens per Segment mid-run, under savepoint at the end. Confirm the WU's files landed (`git log --stat`), then `playbook worktree remove <path>` it. That check compares the worktree's commit against `origin/<default-branch>`, which the cherry-picked copy on the local Segment branch has not reached yet, so it always refuses here: that refusal is expected, not a real block. Fall back to `git worktree remove --force <path>` on it, the same as a bare `git worktree remove` would have done, since the cherry-pick already confirms the work is safely integrated. A refusal for any OTHER reason (the worktree is locked, or has uncommitted changes `git log --stat` doesn't explain) is real and MUST be investigated before forcing.
-3. **Single-WU wave (main tree):** the squash commit already sits on the Segment branch; run `/playbook:commit-and-push` to push it. Confirm the files are committed (they no longer appear in `git status --porcelain`).
+3. **Single-WU wave (main tree):** the squash commit already sits on the Segment branch and stays local; it is the savepoint, and nothing is pushed until Step 9 opens the PR. Confirm the files are committed (they no longer appear in `git status --porcelain`).
 
 If a commit, squash, or cherry-pick fails, retry once, then stop and report.
 
@@ -360,7 +360,7 @@ Report the result: `Cycle check: PASS (N WUs resolve in topological order)` or h
 
 ## Step 7: Validate
 
-Run the project's checks (from Step 3 detection), e.g. type-check, lint, and tests. In `--auto`, run the full suite (not just affected) and, on failure, apply the `playbook:systematic-debugging` skill to find the root cause, then spawn an `implementer` subagent (`subagent_type: playbook:implementer`) to fix the responsible WU on its Segment branch, then amend via `/playbook:commit-and-push -a` (max 3 attempts; if still failing, stop and do NOT open any PRs).
+Run the project's checks (from Step 3 detection), e.g. type-check, lint, and tests. In `--auto`, run the full suite (not just affected) and, on failure, apply the `playbook:systematic-debugging` skill to find the root cause, then spawn an `implementer` subagent (`subagent_type: playbook:implementer`) to fix the responsible WU on its Segment branch, then commit the fix as a new commit with `/playbook:commit-and-push` (no `-a`, so a later push is never a force; max 3 attempts; if still failing, stop and do NOT open any PRs).
 
 - Fix and re-validate until green.
 - **Doc audit:** every new/modified function has a doc comment explaining WHY; add any that are missing.
@@ -453,6 +453,8 @@ Apply the fixes you hold with HIGH confidence plus every `blocking` correctness/
 - **Independent:** `/playbook:create-pull-request` per Segment branch with the default branch as base.
 - **Single:** in `--auto`, one `/playbook:create-pull-request` for the whole branch; interactively, leave PR creation to the user (the pre-existing behaviour). If a hard-limit re-split fired (Step 5), the plan now has a shared branch plus one `s<N>b` follow-up branch: open both (follow-up `--base` the shared branch), or in interactive mode point the user at both.
 
+Do not invoke `playbook:finish-pull-request` for these PRs: Steps 8 and 9 already reviewed the code. Promote a PR with `gh pr ready` when the user wants it.
+
 **Boundary behaviour.** With **savepoint** (the default, and `--auto`), open the whole PR set here at the end. With **pause after each PR**, Step 9 has already run per Segment (its scoped review before the PR), so this step opens that one Segment's PR and stops for the user before the next Segment. With **land**, this step opens that one Segment's PR as a draft and then continues straight into Step 10, which promotes, gates on CI, merges, and only then returns to Step 5 for the next Segment.
 
 **Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings (on the single path, one line: "single reviewer, 5 lenses (<count>)"), the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:deep-review`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Under **land**, this step hands off to Step 10 instead of finishing here; the true finish is Step 10's own report once the Segment reads `MERGED` (or `PARKED`). Starting the next feature: run `/clear` before the next `/playbook:plan`, so this run's plan, dispatch history, and fixes don't carry into it.
@@ -466,8 +468,8 @@ Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MU
 | Scenario | Action |
 | --- | --- |
 | Reference isn't a ready plan | STOP; tell the user to run `/playbook:plan` or `/playbook:adr` first (Step 2) |
-| Task is ambiguous | Ask the user before executing |
-| Plan needs new dependencies | List them and ask for approval (vet maintenance/license/CVEs) |
+| Task is ambiguous | Ask the user before executing; in auto, stop and report |
+| Plan needs new dependencies | List them and ask for approval (vet maintenance/license/CVEs); in auto, stop and report the list |
 | Touches auth/security code | Flag for extra review; be conservative |
 | Requires a DB migration | Execute the migration as its own unit with a rollback note |
 | Validation fails | Fix and re-validate before reporting done |
