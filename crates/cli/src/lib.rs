@@ -70,6 +70,7 @@ pub mod sessions;
 pub mod settings;
 pub mod state;
 pub mod statusline;
+pub mod storage;
 #[doc(hidden)]
 pub mod testing;
 pub mod tools_map;
@@ -947,23 +948,27 @@ pub enum HandoffCommand {
     Check,
 }
 
-/// Which worktree-scoped storage directory `playbook path` prints.
+/// Which storage directory `playbook path` prints. All but `data` sit under
+/// `~/.config/playbook/repos/<owner>/<repo>/`, the same from every worktree.
 #[derive(ValueEnum, Debug, Clone, Copy)]
 pub enum PathKind {
     Plans,
     Implement,
     Worktrees,
-    /// The shared data folder holding every database (not worktree scoped)
+    /// Where session handoffs for this repo are saved
+    Handoff,
+    /// The shared data folder holding every database (not tied to a repo)
     Data,
 }
 
 impl PathKind {
-    /// The exact subdirectory name under the worktree-scoped root.
+    /// The exact subdirectory name under the repo folder.
     pub fn dir_name(&self) -> &'static str {
         match self {
             PathKind::Plans => "plans",
             PathKind::Implement => "implement",
             PathKind::Worktrees => "worktrees",
+            PathKind::Handoff => "handoff",
             PathKind::Data => "data",
         }
     }

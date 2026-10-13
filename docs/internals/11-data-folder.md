@@ -53,3 +53,23 @@ A file that is not a database is left where it is, or renamed to `.migrated` for
 ## Uninstall
 
 `playbook uninstall` leaves the data folder alone, like memory and every other piece of state.
+
+## Repo folders
+
+Files that are not databases live under `~/.config/playbook/repos/<owner>/<repo>/`. `<owner>/<repo>` comes from the `origin` remote, and the folder is the same from every checkout and every worktree of the repo, so anyone can work the path out with `git remote get-url origin`.
+
+| Folder | Holds | Printed by |
+|---|---|---|
+| `plans/` | Plans, their quality reports and checkpoints | `playbook path plans` |
+| `implement/` | Per Work Unit briefs and progress notes | `playbook path implement` |
+| `worktrees/` | Worktrees `/playbook:implement` creates | `playbook path worktrees` |
+| `handoff/` | Handoffs saved with `playbook handoff save` | `playbook path handoff` |
+
+Earlier versions kept `plans/`, `implement/` and `worktrees/` one level deeper, in `<worktree-id>/`, and handoffs for every directory in `runtime/handoff/`. The first call that needs a folder copies the old files into the new one and never deletes or overwrites anything:
+
+- `plans/` and `implement/` are copied from every old `<worktree-id>/` folder. A name that already exists in the new folder is left alone, and the clash is counted in the note.
+- `worktrees/` is not copied. It holds live git checkouts, which a copy would break. Old ones stay where they are and keep working.
+- Handoffs for the current directory, and for the directories under it, are copied from `runtime/handoff/` the first time a session starts there. A marker in `handoff/.copied/` stops a handoff that a session already read from coming back.
+- A `MOVED.txt` beside the old files says where the copy went and marks the copy as done. One line goes to stderr when files were copied.
+
+Outside a repo with an `origin` remote, handoffs stay in `runtime/handoff/` and the other kinds report that no folder can be resolved.

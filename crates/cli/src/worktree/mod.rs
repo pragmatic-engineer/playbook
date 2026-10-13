@@ -40,7 +40,8 @@ pub fn classify(worktree_path: &Path, home: &Path) -> Convention {
     }
 }
 
-/// `playbook_root_from(home)/repos/<owner>/<repo>/*/worktrees/*/*`, where the
+/// `playbook_root_from(home)/repos/<owner>/<repo>/worktrees/*/*`, or the older
+/// `.../repos/<owner>/<repo>/*/worktrees/*/*` with a worktree-id segment. The
 /// owner/repo prefix comes from `repo_slug()`, never from `worktree_id()`:
 /// the worktree-id segment differs between two worktrees of the same repo, so
 /// a literal compare would miss every worktree but the one that created it.
@@ -57,7 +58,12 @@ fn is_wu_convention(path: &Path, home: &Path) -> bool {
         return false;
     };
     let segments: Vec<_> = rest.components().collect();
-    segments.len() == 4 && segments[1].as_os_str() == "worktrees"
+    let under = |i: usize| {
+        segments
+            .get(i)
+            .is_some_and(|s| s.as_os_str() == "worktrees")
+    };
+    (segments.len() == 3 && under(0)) || (segments.len() == 4 && under(1))
 }
 
 /// `.claude/worktrees/agent-*` anywhere in the path, matching the Agent

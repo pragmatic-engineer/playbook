@@ -621,7 +621,7 @@ fn table() -> Vec<Case> {
         case("trust", &["trust", "{ROOT}/repo"]).writes(),
     ];
     t.extend(json_cases());
-    for kind in ["plans", "implement", "worktrees", "data"] {
+    for kind in ["plans", "implement", "worktrees", "handoff", "data"] {
         t.push(case(&format!("path {kind}"), &["path", kind]).out("/.config/playbook/"));
     }
     t.extend(hook_cases());

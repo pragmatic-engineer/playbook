@@ -188,12 +188,26 @@ fn classify_returns_expected_convention_for_each_of_the_four_path_conventions() 
         .join("too-deep");
     fs::create_dir_all(&extra_nested_wu_path).expect("create extra nested dir");
 
+    // The current layout has no worktree-id segment.
+    let repo_folder = home
+        .join(".config")
+        .join("playbook")
+        .join("repos")
+        .join("acme")
+        .join("widgets");
+    let repo_wide_wu_path = repo_folder.join("worktrees").join("plan-slug").join("wu-1");
+    let repo_wide_too_deep = repo_wide_wu_path.join("too-deep");
+    fs::create_dir_all(&repo_wide_wu_path).expect("create repo wide wu dir");
+    fs::create_dir_all(&repo_wide_too_deep).expect("create too deep dir");
+
     let previous_cwd = std::env::current_dir().expect("read current dir");
     std::env::set_current_dir(&repo_root).expect("cd into repo root");
 
     // Act
     let cases = [
         (wu_path, Convention::Wu),
+        (repo_wide_wu_path, Convention::Wu),
+        (repo_wide_too_deep, Convention::Unmanaged),
         (agent_tool_path, Convention::AgentTool),
         (cc_launcher_path, Convention::CcLauncher),
         (review_path, Convention::Review),

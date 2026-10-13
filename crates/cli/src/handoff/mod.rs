@@ -5,7 +5,8 @@
 //! side (`playbook handoff save`) and the read side (the SessionStart hook)
 //! both key a handoff through `is_handoff_for`, so they can never disagree.
 //!
-//! Files live in `runtime_root()/handoff/<slug>-<epoch>-<pid>.md`. A handoff
+//! Files live in `repos/<owner>/<repo>/handoff/<slug>-<epoch>-<pid>.md`, or in
+//! `runtime_root()/handoff/` outside a repo with an `origin` remote. A handoff
 //! the hook has loaded moves to `handoff/used/` for 14 days, so `show` can
 //! still print it after the session start consumed it.
 
@@ -29,8 +30,10 @@ const USED_DIR: &str = "used";
 const SECS_PER_DAY: u64 = 86_400;
 const OTHER_DIRS_SHOWN: usize = 5;
 
+/// The handoff folder for the repo this process runs in, or the old global
+/// folder outside a repo with an `origin` remote. See [`crate::storage`].
 pub fn root() -> PathBuf {
-    crate::common::paths::runtime_root().join("handoff")
+    crate::storage::handoff_root(&current_slug())
 }
 
 /// Longest key kept. The file name adds an epoch, a pid, and `.md`, and a
