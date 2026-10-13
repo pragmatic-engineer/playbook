@@ -39,6 +39,10 @@ impl Run {
 
 /// `version_script` is the shell for `claude --version`.
 fn run(tag: &str, version_script: &str) -> Run {
+    run_with(tag, version_script, &[])
+}
+
+fn run_with(tag: &str, version_script: &str, extra: &[&str]) -> Run {
     let work = Work::new(tag);
     let src = work.dir("src");
     let home = work.dir("home");
@@ -61,6 +65,7 @@ fn run(tag: &str, version_script: &str) -> Run {
     let mut cmd = std::process::Command::new("bash");
     cmd.arg(repo_root().join("install.sh"))
         .arg("--yes")
+        .args(extra)
         .env_remove("SHELL")
         .env("PLAYBOOK_SRC", &src)
         .env("PLAYBOOK_BIN_DIR", &bin)
@@ -129,4 +134,95 @@ fn a_version_probe_that_exits_nonzero_does_not_abort_the_installer() {
         r.log()
     );
     assert!(r.calls.is_empty(), "plugin called: {}", r.calls);
+}
+
+#[test]
+fn a_default_install_adds_the_skills_plugin_and_the_hooks_plugin() {
+    let r = run("both-plugins", &version("2.1.269"));
+    assert!(r.out.status.success(), "{}", r.log());
+    assert!(
+        r.calls.contains("install playbook@pragmatic-engineer"),
+        "{}",
+        r.calls
+    );
+    assert!(
+        r.calls
+            .contains("install playbook-hooks@pragmatic-engineer"),
+        "{}",
+        r.calls
+    );
+    assert!(
+        r.calls.contains("enable playbook-hooks@pragmatic-engineer"),
+        "{}",
+        r.calls
+    );
+}
+
+#[test]
+fn skills_only_installs_just_the_skills_plugin_and_touches_nothing_else() {
+    let r = run_with("skills-only", &version("2.1.269"), &["--skills-only"]);
+    assert!(r.out.status.success(), "{}", r.log());
+    assert!(
+        r.calls.contains("install playbook@pragmatic-engineer"),
+        "{}",
+        r.calls
+    );
+    assert!(!r.calls.contains("playbook-hooks"), "{}", r.calls);
+    assert!(
+        !r.home.join(".claude/settings.json").exists(),
+        "{}",
+        r.log()
+    );
+    assert!(r.log().contains("no binary, no hooks"), "{}", r.log());
+}
+
+#[test]
+fn skills_only_still_honours_the_claude_version_gate() {
+    let r = run_with("skills-only-old", &version("2.0.0"), &["--skills-only"]);
+    assert!(r.out.status.success(), "{}", r.log());
+    assert!(r.calls.is_empty(), "plugin called: {}", r.calls);
+    assert!(!r.log().contains("no binary, no hooks"), "{}", r.log());
+}
+
+#[test]
+fn skills_only_and_binary_only_cannot_be_combined() {
+    let r = run_with(
+        "skills-binary",
+        &version("2.1.269"),
+        &["--skills-only", "--binary-only"],
+    );
+    assert!(!r.out.status.success());
+    assert!(r.log().contains("cannot be combined"), "{}", r.log());
+}
+
+#[test]
+fn a_declined_or_failed_skills_only_install_does_not_claim_success() {
+    let r = run_with("skills-only-fail", "exit 1", &["--skills-only"]);
+    assert!(r.out.status.success(), "{}", r.log());
+    assert!(!r.log().contains("no binary, no hooks"), "{}", r.log());
+}
+
+#[test]
+fn skills_only_refuses_to_combine_with_skip_plugin() {
+    let r = run_with(
+        "skills-skip",
+        &version("2.1.269"),
+        &["--skills-only", "--skip-plugin"],
+    );
+    assert!(!r.out.status.success());
+    assert!(r.log().contains("cannot be combined"), "{}", r.log());
+}
+
+#[test]
+fn the_marketplace_is_refreshed_before_the_plugins_are_installed() {
+    let r = run("market-update", &version("2.1.269"));
+    let update = r
+        .calls
+        .find("marketplace update pragmatic-engineer")
+        .expect("update call");
+    let install = r
+        .calls
+        .find("install playbook-hooks")
+        .expect("install call");
+    assert!(update < install, "{}", r.calls);
 }

@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 14] = [
+const PROBES: [Probe; 15] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -108,6 +108,7 @@ const PROBES: [Probe; 14] = [
     migration_rows,
     data_rows,
     plugin_only_rows,
+    plugin_split_rows,
     atlassian_rows,
     old_launcher_rows,
 ];
@@ -156,7 +157,9 @@ fn layer1(env: &Env) -> Row {
         return Row::new("1", Level::Info, "could not run `claude plugin list`");
     };
     let lower = text.to_lowercase();
-    let Some(at) = lower.find("playbook") else {
+    // Match the plugin's own id: the hooks plugin is `playbook-hooks@...` and
+    // sorts first in the list.
+    let Some(at) = lower.find("playbook@") else {
         return Row::new("1", Level::Fail, "plugin not installed").hint(miss);
     };
     let block_end = lower[at..].find("\n\n").map_or(lower.len(), |n| at + n);
@@ -636,6 +639,40 @@ fn plugin_only_rows(env: &Env) -> Vec<Row> {
         "plugin only: playbook hooks and guards are not wired in settings.json, so they do not run",
     )
     .hint("run /playbook:setup")]
+}
+
+/// The two plugins: `playbook` (skills, commands, agents) and `playbook-hooks`
+/// (hooks, shim, installer), which are versioned apart. Reads Claude Code's `installed_plugins.json` and
+/// stays silent when it is missing, as on a Homebrew-only machine. Neither
+/// plugin is required by the seven layers, so none of these rows fails.
+fn plugin_split_rows(env: &Env) -> Vec<Row> {
+    use crate::common::plugin_state::{
+        hooks_plugin_missing, installed_in, listed_in, HOOKS_PLUGIN_KEY,
+    };
+    let mut rows = Vec::new();
+    if hooks_plugin_missing(&env.home) {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                "playbook-hooks plugin not installed: the worktree hooks are off",
+            )
+            .hint("run: claude plugin marketplace update pragmatic-engineer && claude plugin install playbook-hooks@pragmatic-engineer"),
+        );
+    }
+    if listed_in(&env.home, HOOKS_PLUGIN_KEY) == Some(true)
+        && installed_in(&env.home) == Some(false)
+    {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Info,
+                "playbook plugin not installed: the skills and commands are absent",
+            )
+            .hint("run: claude plugin install playbook@pragmatic-engineer"),
+        );
+    }
+    rows
 }
 
 /// The lines under the table: what to run for each failed layer, or that all
