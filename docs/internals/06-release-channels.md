@@ -4,8 +4,9 @@ A tagged release reaches users through three channels: the GitHub release assets
 (built by the `build` and `checksums` jobs of `release.yml`), the Homebrew tap
 `pragmatic-engineer/homebrew-tap`, and the plugin marketplace, which lives in
 `pragmatic-engineer/skills`. This repo does not push to the last two. Each of
-those repos runs its own daily workflow that reads this repo's latest release and
-updates itself:
+those repos runs its own workflow that reads this repo's releases and updates
+itself. The tap checks every 30 minutes for the newest release under each
+formula's tag prefix. The marketplace reads the latest plain `vX.Y.Z` release:
 
 1. The tap rewrites the URLs and checksums in `Formula/playbook.rb` from the
    release's `SHA256SUMS`, then audits, installs and tests the formula.
@@ -15,8 +16,9 @@ updates itself:
    skills, commands and agents) is not pinned to a release: it is a path inside
    the skills repo and has its own version line there.
 
-Both create their commit through the GitHub API, so GitHub signs it. A release
-can take up to a day to reach the tap and the marketplace. To update sooner, run
+Both create their commit through the GitHub API, so GitHub signs it. The tap
+follows a release within about half an hour, and the marketplace can take up to
+a day. To update sooner, run
 the workflow by hand in each repo (`release` in the tap, `pin-hooks` in the
 skills repo).
 
@@ -25,7 +27,7 @@ skills repo).
 `.github/workflows/release.yml` releases every tool. It runs on a pushed tag
 matching `v*`, `telemetry-v*` or `code-v*`. Its first job, `resolve`, maps the
 prefix to the package, the binaries, the archive shape, the version file and the
-Homebrew tool name, and fails on any other tag. `code-v*` is reserved and fails
+tool name, and fails on any other tag. `code-v*` is reserved and fails
 until `crates/code` has a binary.
 
 The jobs after `resolve` are shared. `verify-version` checks the tag against the
@@ -34,15 +36,13 @@ creates the GitHub release when it is missing, with `--latest=false` for every
 prefix except `v`, so the repository's latest release stays on the playbook
 line. `build` compiles the five targets, ad hoc signs the macOS binaries and
 uploads one asset per target. `checksums` writes `SHA256SUMS` and attests the
-assets. `plugin-archive` runs for `v*` only. `notify-tap` sends the tap a
-`tool-released` event with the tool name and tag prefix. It never fails the
-release, and it prints the HTTP status when the tap refuses it, because the
-workflow token may not be allowed to dispatch to another repository. The tap also
-checks daily.
+assets. `plugin-archive` runs for `v*` only. The workflow only publishes. The tap's own
+`release` workflow checks every 30 minutes and picks the new release up, so a
+formula follows within about half an hour.
 
 To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
 is always a dry run: it resolves, verifies and builds, and skips release
-creation, uploads, attestation and the tap notice. The tag's version must match
+creation, uploads and attestation. The tag's version must match
 the files on the ref you run it from.
 
 ## The plugin archive
