@@ -556,3 +556,112 @@ fn template_check_and_facts_back_the_handoff_command() {
     assert_eq!(code, 0);
     assert!(out.starts_with("- "), "{out}");
 }
+
+/// A scratch repo with an `origin` remote, so handoffs resolve to the repo folder.
+fn repo_env(tag: &str) -> Env {
+    let env = Env::new(tag);
+    for args in [
+        vec!["init", "-q"],
+        vec![
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/acme/widgets.git",
+        ],
+    ] {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&env.cwd)
+            .args(&args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    }
+    env
+}
+
+impl Env {
+    fn repo_handoff_dir(&self) -> PathBuf {
+        self.home
+            .join(".config/playbook/repos/acme/widgets/handoff")
+    }
+}
+
+#[test]
+fn a_repo_saves_its_handoff_under_the_repo_folder() {
+    let env = repo_env("repo-folder");
+
+    let (code, out, _) = env.run(&["handoff", "save"], "# Topic\nIN-THE-REPO-FOLDER\n");
+    let (_, shown, _) = env.run(&["handoff", "show"], "");
+
+    assert_eq!(code, 0);
+    assert!(out.contains("repos/acme/widgets/handoff"), "{out}");
+    assert!(shown.contains("IN-THE-REPO-FOLDER"), "{shown}");
+    assert!(fs::read_dir(env.repo_handoff_dir()).unwrap().count() > 0);
+    assert!(
+        !env.handoff_dir().exists(),
+        "nothing should go to the old folder"
+    );
+}
+
+#[test]
+fn an_old_global_handoff_is_copied_in_loaded_once_and_the_original_stays() {
+    let env = repo_env("repo-migrate");
+    let key: String = env
+        .cwd
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    fs::create_dir_all(env.handoff_dir()).unwrap();
+    let old = env.handoff_dir().join(format!("{key}-1-1.md"));
+    fs::write(&old, "# Old\nOLD-GLOBAL-HANDOFF\n").unwrap();
+
+    let first = env.session_start(&env.cwd, "startup");
+    let second = env.session_start(&env.cwd, "startup");
+
+    assert!(first.contains("OLD-GLOBAL-HANDOFF"), "{first}");
+    assert!(
+        !second.contains("OLD-GLOBAL-HANDOFF"),
+        "it came back: {second}"
+    );
+    assert!(old.is_file(), "the original must stay");
+    assert!(env.handoff_dir().join("MOVED.txt").is_file());
+}
+
+#[test]
+fn dir_resolves_the_folder_from_the_target_repo_not_the_current_one() {
+    let env = repo_env("dir-other-repo");
+    let other = env.cwd.parent().unwrap().join("other");
+    fs::create_dir_all(&other).unwrap();
+    for args in [
+        vec!["init", "-q"],
+        vec![
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/acme/gadgets.git",
+        ],
+    ] {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&other)
+            .args(&args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    }
+
+    let (code, out, _) = env.run(
+        &["handoff", "save", "--dir", other.to_str().unwrap()],
+        "# Topic\nFOR-GADGETS\n",
+    );
+    let (_, shown, _) = env.run(&["handoff", "show", "--dir", other.to_str().unwrap()], "");
+
+    assert_eq!(code, 0);
+    assert!(out.contains("repos/acme/gadgets/handoff"), "{out}");
+    assert!(shown.contains("FOR-GADGETS"), "{shown}");
+    assert!(!env.repo_handoff_dir().exists());
+}

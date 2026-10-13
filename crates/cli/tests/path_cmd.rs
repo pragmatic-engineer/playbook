@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Binary-spawn tests for `playbook path <kind>`, resolving the absolute
-//! path to a worktree-scoped storage directory (`plans`/`implement`/`worktrees`).
+//! path to a repo storage directory (`plans`/`implement`/`worktrees`/`handoff`)
+//! under `~/.config/playbook/repos/<owner>/<repo>/`, the same from every
+//! worktree.
 
 use std::fs;
 use std::path::PathBuf;
@@ -74,20 +76,23 @@ impl Fixture {
             .expect("playbook binary should spawn")
     }
 
-    fn expected_dir(&self, dir_name: &str) -> PathBuf {
+    fn repo_base(&self) -> PathBuf {
         self.home
             .join(".config")
             .join("playbook")
             .join("repos")
             .join("test-owner")
             .join("test-repo")
-            .join(worktree_id(&self.repo))
-            .join(dir_name)
+    }
+
+    fn expected_dir(&self, dir_name: &str) -> PathBuf {
+        self.repo_base().join(dir_name)
     }
 }
 
 /// Mirrors `paths::worktree_id`'s slugify rule independently, not by
-/// calling the production function, so this stays a real check.
+/// calling the production function, so this stays a real check. The old
+/// worktree-scoped folders were named with it.
 fn worktree_id(repo: &std::path::Path) -> String {
     repo.to_string_lossy()
         .chars()
@@ -104,11 +109,12 @@ fn stderr_of(out: &std::process::Output) -> String {
 }
 
 #[test]
-fn every_kind_prints_its_worktree_scoped_subdirectory() {
+fn every_kind_prints_its_repo_subdirectory() {
     for (kind, dir_name) in [
         ("plans", "plans"),
         ("implement", "implement"),
         ("worktrees", "worktrees"),
+        ("handoff", "handoff"),
     ] {
         // Arrange
         let f = Fixture::new(&format!("kind-{kind}"));
@@ -199,5 +205,126 @@ fn data_kind_prints_the_data_folder_without_an_origin_remote() {
             .join("data")
             .display()
             .to_string()
+    );
+}
+
+fn write(path: &std::path::Path, text: &str) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+}
+
+#[test]
+fn a_linked_worktree_prints_the_same_folder_as_the_main_checkout() {
+    // Arrange
+    let f = Fixture::new("linked");
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&f.repo)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", stderr_of(&out));
+    };
+    git(&[
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=T",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "x",
+    ]);
+    let linked = f.repo.with_file_name(format!(
+        "{}-linked",
+        f.repo.file_name().unwrap().to_string_lossy()
+    ));
+    git(&[
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "side",
+        linked.to_str().unwrap(),
+    ]);
+
+    // Act
+    let main_out = f.run("plans");
+    let linked_out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["path", "plans"])
+        .current_dir(&linked)
+        .env("HOME", &f.home)
+        .output()
+        .unwrap();
+
+    // Assert
+    assert_eq!(stdout_of(&main_out), stdout_of(&linked_out));
+    assert_eq!(
+        PathBuf::from(stdout_of(&main_out).trim()),
+        f.expected_dir("plans")
+    );
+}
+
+#[test]
+fn plans_from_an_old_worktree_folder_are_copied_once_and_the_originals_stay() {
+    // Arrange
+    let f = Fixture::new("migrate-plans");
+    let old = f.repo_base().join(worktree_id(&f.repo)).join("plans");
+    write(&old.join("topic.md"), "the plan");
+    write(&old.join("topic.checkpoint.md"), "notes");
+
+    // Act
+    let first = f.run("plans");
+    fs::remove_file(f.expected_dir("plans").join("topic.checkpoint.md")).unwrap();
+    let second = f.run("plans");
+
+    // Assert
+    assert_eq!(first.status.code(), Some(0), "{}", stderr_of(&first));
+    assert_eq!(
+        fs::read_to_string(f.expected_dir("plans").join("topic.md")).unwrap(),
+        "the plan"
+    );
+    assert!(
+        stderr_of(&first).contains("copied 2 file(s)"),
+        "{}",
+        stderr_of(&first)
+    );
+    assert!(old.join("topic.md").is_file(), "the original must stay");
+    assert!(old.join("MOVED.txt").is_file());
+    assert!(
+        !f.expected_dir("plans").join("topic.checkpoint.md").exists(),
+        "a second run must not bring the file back"
+    );
+    assert!(stderr_of(&second).is_empty(), "{}", stderr_of(&second));
+}
+
+#[test]
+fn live_worktree_checkouts_are_not_copied() {
+    // Arrange
+    let f = Fixture::new("migrate-worktrees");
+    let old = f.repo_base().join(worktree_id(&f.repo)).join("worktrees");
+    write(&old.join("branch/file.rs"), "code");
+
+    // Act
+    let out = f.run("worktrees");
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    assert!(!f.expected_dir("worktrees").join("branch").exists());
+    assert!(old.join("branch/file.rs").is_file());
+}
+
+#[test]
+fn handoff_kind_prints_the_old_shared_folder_without_an_origin_remote() {
+    let f = Fixture::new_without_origin("handoff-no-origin");
+
+    let out = f.run("handoff");
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    assert_eq!(
+        PathBuf::from(stdout_of(&out).trim()),
+        f.home.join(".config/playbook/runtime/handoff")
     );
 }

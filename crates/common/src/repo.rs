@@ -33,6 +33,18 @@ pub fn repo_slug() -> String {
     slug
 }
 
+/// The slug for the repo that holds `dir`. Empty when `dir` is not in a repo
+/// with an `origin` remote. Not cached: callers use it once per command.
+pub fn repo_slug_in(dir: &std::path::Path) -> String {
+    if let Some(url) = crate::gitfacts::origin_url(dir) {
+        return normalize_remote_url(&url);
+    }
+    let args = ["--no-optional-locks", "remote", "get-url", "origin"];
+    git::trimmed(git::run(Some(dir), &args, git::TIMEOUT))
+        .map(|url| normalize_remote_url(&url))
+        .unwrap_or_default()
+}
+
 fn spawn_slug() -> String {
     // Read `.git/config` directly. A layout the reader does not model falls
     // through to `git`, which also applies URL rewrites.

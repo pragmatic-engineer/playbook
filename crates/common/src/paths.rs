@@ -125,6 +125,11 @@ pub enum RepoScope {
     /// `repos/<owner>/<repo>/<worktree-id>/`: scoped to one worktree, so
     /// two worktrees of the same repo never collide.
     Worktree,
+    /// `repos/<owner>/<repo>/`: one folder per repo, the same from every
+    /// worktree and every checkout. Plans, implementation notes, worktrees
+    /// and handoffs live under it, so a person or an agent with no binary can
+    /// derive the path from the `origin` remote alone.
+    Repo,
 }
 
 /// Resolve `kind`'s directory for the CURRENT repo, under
@@ -132,11 +137,28 @@ pub enum RepoScope {
 pub fn repo_scoped_dir(kind: RepoScope) -> Option<PathBuf> {
     let slug = repo_slug();
     let (owner, repo) = slug.split_once('/')?;
-    let id = worktree_id();
-    if id.is_empty() {
+    let id = if kind == RepoScope::Worktree {
+        worktree_id()
+    } else {
+        String::new()
+    };
+    if kind == RepoScope::Worktree && id.is_empty() {
         return None;
     }
     Some(repo_scope_path(&playbook_root(), owner, repo, kind, &id))
+}
+
+/// `repos/<owner>/<repo>/` for an `<owner>/<repo>` slug, or `None` when the
+/// slug is empty or has no owner.
+pub fn repo_dir_for_slug(slug: &str) -> Option<PathBuf> {
+    let (owner, repo) = slug.split_once('/')?;
+    Some(repo_scope_path(
+        &playbook_root(),
+        owner,
+        repo,
+        RepoScope::Repo,
+        "",
+    ))
 }
 
 /// Pure form of `repo_scoped_dir` for a known root, owner, repo and worktree id.
@@ -151,6 +173,7 @@ pub fn repo_scope_path(
     match kind {
         RepoScope::Config => base.join(".config"),
         RepoScope::Worktree => base.join(worktree_id),
+        RepoScope::Repo => base,
     }
 }
 

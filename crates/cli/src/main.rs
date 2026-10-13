@@ -8,8 +8,8 @@ use playbook::init::shim::ShellKind;
 use playbook::{
     adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
     effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
-    plan_cleanup, planning, pr, review, sanitize, settings, statusline, tools_map, trust, update,
-    usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli, Command,
+    plan_cleanup, planning, pr, review, sanitize, settings, statusline, storage, tools_map, trust,
+    update, usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli, Command,
     CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand, GateCommand,
     GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand,
     ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand, ReviewWorktreeCommand,
@@ -1367,13 +1367,12 @@ fn main() {
         Command::Plan {
             sub: PlanCommand::Checkpoint { slug, write },
         } => {
-            let Some(base) = common::repo_scoped_dir(common::RepoScope::Worktree) else {
+            let Some(dir) = storage::kind_dir(storage::Kind::Plans) else {
                 eprintln!(
                     "error: playbook path plans failed: this repo needs a git 'origin' remote"
                 );
                 std::process::exit(1);
             };
-            let dir = base.join("plans");
             let path = match planning::checkpoint_path(&dir, &slug) {
                 Ok(path) => path,
                 Err(err) => {
@@ -1733,13 +1732,13 @@ fn main() {
             }
         },
         Command::Plans { json } => {
-            let Some(base) = common::repo_scoped_dir(common::RepoScope::Worktree) else {
-                println!("PLAN_PATH_ERROR: could not resolve a worktree-scoped storage location; this repo needs a git 'origin' remote");
+            let Some(dir) = storage::kind_dir(storage::Kind::Plans) else {
+                println!("PLAN_PATH_ERROR: could not resolve the plans folder; this repo needs a git 'origin' remote");
                 std::process::exit(1);
             };
             let root = playbook::manifest::check::toplevel()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-            let plans = playbook::plans::list(&base.join("plans"), &root);
+            let plans = playbook::plans::list(&dir, &root);
             if json {
                 println!("{}", playbook::plans::to_json(&plans));
             } else {
@@ -1758,17 +1757,32 @@ fn main() {
                 println!("{}", dir.display());
                 return;
             }
-            match common::repo_scoped_dir(common::RepoScope::Worktree) {
-                Some(base) => {
-                    if let Some(repo_root) = playbook::manifest::check::toplevel() {
-                        if let Err(err) =
-                            playbook::gate::db::migrate_legacy_repo_local(&repo_root, &base)
-                        {
-                            eprintln!("playbook path: {err}");
-                            std::process::exit(1);
-                        }
-                    }
-                    let dir = base.join(kind.dir_name());
+            // The repo-local `.claude/` folders of very old versions move into the
+            // worktree folder first; `kind_dir` then copies from there.
+            if let (Some(repo_root), Some(base)) = (
+                playbook::manifest::check::toplevel(),
+                common::repo_scoped_dir(common::RepoScope::Worktree),
+            ) {
+                if let Err(err) = playbook::gate::db::migrate_legacy_repo_local(&repo_root, &base) {
+                    eprintln!("playbook path: {err}");
+                    std::process::exit(1);
+                }
+            }
+            let stored = match kind {
+                playbook::PathKind::Plans => Some(storage::Kind::Plans),
+                playbook::PathKind::Implement => Some(storage::Kind::Implement),
+                playbook::PathKind::Worktrees => Some(storage::Kind::Worktrees),
+                playbook::PathKind::Handoff | playbook::PathKind::Data => None,
+            };
+            let resolved = if matches!(kind, playbook::PathKind::Handoff) {
+                // Outside a repo this is the old shared folder, the same one
+                // `handoff save` writes to there.
+                Some(handoff::root())
+            } else {
+                stored.and_then(storage::kind_dir)
+            };
+            match resolved {
+                Some(dir) => {
                     if create {
                         if let Err(err) = std::fs::create_dir_all(&dir) {
                             eprintln!("playbook path: could not create {}: {err}", dir.display());
@@ -1779,9 +1793,8 @@ fn main() {
                 }
                 None => {
                     eprintln!(
-                        "playbook path: could not resolve a worktree-scoped storage location; \
-                     this repo needs a git 'origin' remote and a resolvable worktree \
-                     toplevel, refusing to fall back to a repo-local path"
+                        "playbook path: could not resolve the storage folder; this repo needs \
+                     a git 'origin' remote, refusing to fall back to a repo-local path"
                     );
                     std::process::exit(1);
                 }
@@ -2137,8 +2150,7 @@ fn main() {
 
 /// This worktree's plans folder, where the gate source files live.
 fn gate_plans_dir() -> Result<std::path::PathBuf, String> {
-    common::repo_scoped_dir(common::RepoScope::Worktree)
-        .map(|base| base.join("plans"))
+    storage::kind_dir(storage::Kind::Plans)
         .ok_or_else(|| "this repo needs a git 'origin' remote".to_string())
 }
 
