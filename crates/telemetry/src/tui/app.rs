@@ -1204,6 +1204,26 @@ mod tests {
     }
 
     #[test]
+    fn typing_the_hidden_sequence_shows_the_banner_and_a_bound_key_cancels_it() {
+        let mut shown = charted(Range::LastDays(30), 30);
+        let mut cancelled = charted(Range::LastDays(30), 30);
+
+        for ch in "xyzzy".chars() {
+            shown.key(press(KeyCode::Char(ch)));
+        }
+        for ch in "xy".chars() {
+            cancelled.key(press(KeyCode::Char(ch)));
+        }
+        cancelled.key(press(KeyCode::Char('j')));
+        for ch in "zzy".chars() {
+            cancelled.key(press(KeyCode::Char(ch)));
+        }
+
+        assert!(shown.egg.visible(std::time::Instant::now()));
+        assert!(!cancelled.egg.visible(std::time::Instant::now()));
+    }
+
+    #[test]
     fn every_command_has_a_binding_and_every_binding_is_in_the_help() {
         use keys::Cmd::*;
         for cmd in [
