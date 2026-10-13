@@ -543,7 +543,7 @@ fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usiz
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::testkit::{fx, pinned, Fx};
+    use crate::testkit::{fx, pinned, Fx};
 
     fn ctx(f: &Fx, q: &str) -> ContextResult {
         build(&f.conn(), &f.root, &ContextOptions::new(q)).expect("context")

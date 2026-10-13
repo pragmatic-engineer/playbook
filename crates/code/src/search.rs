@@ -428,7 +428,7 @@ pub(super) fn literal_scan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::testkit::{fx, pinned, Fx};
+    use crate::testkit::{fx, pinned, Fx};
 
     fn search(f: &Fx, opts: &SearchOptions) -> SearchResult {
         text_search(&f.conn(), &f.root, opts).expect("search")

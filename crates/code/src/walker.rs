@@ -6,7 +6,7 @@
 //! defaults then drop vendored and generated trees, links, submodules, large
 //! files and binary files, and every skip is reported with its reason.
 
-use crate::common::git;
+use playbook_common::git;
 use std::io::Read;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -227,7 +227,7 @@ pub(crate) mod test_repo {
 
     /// An initialised repo with an origin, under a unique scratch dir.
     pub fn init(tag: &str) -> PathBuf {
-        let dir = crate::common::test_support::scratch_dir(tag);
+        let dir = playbook_common::test_support::scratch_dir(tag);
         std::fs::create_dir_all(&dir).expect("repo dir");
         let dir = dir.canonicalize().expect("canonical");
         git_in(&dir, &["init", "--quiet"]);
@@ -463,7 +463,7 @@ mod tests {
         let _guard = pinned();
         // Arrange
         let root = init("walker-empty");
-        let plain = crate::common::test_support::scratch_dir("walker-plain");
+        let plain = playbook_common::test_support::scratch_dir("walker-plain");
         std::fs::create_dir_all(&plain).expect("plain dir");
 
         // Act

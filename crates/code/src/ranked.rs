@@ -247,7 +247,7 @@ fn covers(seen: &Hit, hit: &Hit) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::testkit::{fx, pinned, Fx};
+    use crate::testkit::{fx, pinned, Fx};
 
     fn rank(f: &Fx, opts: &SearchOptions) -> SearchResult {
         ranked_search(&f.conn(), &f.root, opts).expect("search")

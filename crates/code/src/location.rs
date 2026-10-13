@@ -32,7 +32,8 @@ impl std::error::Error for PathError {}
 
 /// The work tree root that contains `cwd`.
 pub fn repo_root(cwd: &Path) -> Result<PathBuf, String> {
-    crate::common::gitfacts::toplevel(cwd).ok_or_else(|| "not inside a git repository".to_string())
+    playbook_common::gitfacts::toplevel(cwd)
+        .ok_or_else(|| "not inside a git repository".to_string())
 }
 
 /// `<worktree state dir>/code/index.sqlite3` for the current repo.
@@ -105,7 +106,7 @@ fn lexically_outside(canonical_root: &Path, joined: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use playbook_common::test_support::scratch_dir;
     use std::fs;
 
     fn scratch(tag: &str) -> PathBuf {

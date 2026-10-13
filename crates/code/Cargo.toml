@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "playbook-code"
+version.workspace = true
+edition.workspace = true
+description = "Local source index for playbook: symbols, search, references and context"
+license.workspace = true
+publish = false
+
+[lib]
+name = "playbook_code"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "=4.6.6", features = ["derive"] }
+playbook-common = { path = "../common" }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+serde_json = { version = "=1.0.151", features = ["preserve_order"] }
+sha2 = "=0.10.9"
+tree-sitter = "=0.27.0"
+tree-sitter-javascript = "=0.25.0"
+tree-sitter-python = "=0.25.0"
+tree-sitter-rust = "=0.24.2"
+tree-sitter-typescript = "=0.23.2"
+
+[dev-dependencies]
+libc = "=0.2.189"
+
+[lints]
+workspace = true

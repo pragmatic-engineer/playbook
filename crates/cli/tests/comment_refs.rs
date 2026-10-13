@@ -58,7 +58,8 @@ fn comments_do_not_cite_paths_that_are_not_tracked() {
             f.ends_with(".rs")
                 && (f.starts_with("crates/cli/src/")
                     || f.starts_with("crates/cli/tests/")
-                    || f.starts_with("crates/common/"))
+                    || f.starts_with("crates/common/")
+                    || f.starts_with("crates/code/"))
         })
         .filter(|f| f.as_str() != "crates/cli/tests/comment_refs.rs")
     {

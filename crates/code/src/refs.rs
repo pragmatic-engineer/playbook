@@ -222,7 +222,7 @@ fn role_of(node: tree_sitter::Node, imports: &[&str], decls: &[&str]) -> &'stati
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::testkit::{fx, pinned, Fx};
+    use crate::testkit::{fx, pinned, Fx};
 
     fn refs(f: &Fx, target: &str) -> RefsResult {
         find_refs(&f.conn(), &f.root, &RefsOptions::new(target)).expect("refs")
