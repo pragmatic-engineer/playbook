@@ -837,6 +837,7 @@ dependencies = [
  "clap",
  "libc",
  "playbook-common",
+ "playbook-data",
  "rusqlite",
  "serde_json",
  "sha2",

@@ -37,6 +37,11 @@ pub enum Policy {
     /// The data is a rebuildable cache: keep the new file and set the old one
     /// aside.
     KeepNew,
+    /// A rebuildable cache that is moved by renaming the files (no copy, no
+    /// checks). When the new file exists the old one is set aside. A writer
+    /// holding the old file, or any failure, leaves it where it is and the
+    /// cache is rebuilt at the new path.
+    Cache,
 }
 
 /// How one merged table resolves a row that exists in both files.
@@ -464,11 +469,61 @@ pub fn migrate(step: &Move) -> Result<Outcome, String> {
     result
 }
 
+/// Move a rebuildable cache by renaming it. Never an error: a cache that
+/// cannot move is simply rebuilt.
+fn move_cache(step: &Move) -> Outcome {
+    // A cache that is not a database is junk: set it aside and rebuild.
+    if let Err(OldError::Corrupt(_)) = open_old(&step.old) {
+        return match set_aside(&step.old) {
+            Ok(()) => Outcome::SetAside,
+            Err(_) => Outcome::Nothing,
+        };
+    }
+    // Held until the files have moved, so no writer commits in between.
+    let Ok(writer_lock) = lock_old(&step.old) else {
+        return Outcome::Nothing;
+    };
+    // Windows cannot rename a file that is open, so it releases the lock
+    // first and accepts the small window.
+    #[cfg(windows)]
+    let writer_lock = {
+        drop(writer_lock);
+        None::<Connection>
+    };
+    let outcome = if step.new.exists() {
+        match set_aside(&step.old) {
+            Ok(()) => Outcome::SetAside,
+            Err(_) => Outcome::Nothing,
+        }
+    } else {
+        let mut moved = true;
+        // The sidecars first, so a failure never leaves the main file
+        // without the log it needs at the new path.
+        for side in ["-wal", "-shm", ""] {
+            let from = with_suffix(&step.old, side);
+            if from.exists() && fs::rename(&from, with_suffix(&step.new, side)).is_err() {
+                moved = false;
+                break;
+            }
+        }
+        if moved {
+            Outcome::Moved
+        } else {
+            Outcome::Nothing
+        }
+    };
+    drop(writer_lock);
+    outcome
+}
+
 fn run_locked(step: &Move) -> Result<Outcome, String> {
     if !step.old.is_file() {
         return Ok(Outcome::Nothing);
     }
     remove_stale_tmp(&step.new);
+    if step.policy == Policy::Cache {
+        return Ok(move_cache(step));
+    }
     let old_conn = match open_old(&step.old) {
         Ok(c) => c,
         Err(OldError::Corrupt(e)) => return Ok(Outcome::Corrupt(e)),
@@ -481,7 +536,7 @@ fn run_locked(step: &Move) -> Result<Outcome, String> {
         Outcome::Moved
     } else {
         match step.policy {
-            Policy::KeepNew => Outcome::SetAside,
+            Policy::KeepNew | Policy::Cache => Outcome::SetAside,
             Policy::MergeTables(_) | Policy::Merge(_) => {
                 let rules: Vec<(&str, Rule)> = match step.policy {
                     Policy::MergeTables(list) => list.iter().map(|t| (*t, Rule::Ignore)).collect(),
@@ -858,6 +913,73 @@ mod tests {
         make_log(&m.old, &[(1, 1, "t", "old-1"), (1, 2, "t", "old-2")]);
         migrate(&m).unwrap();
         assert_eq!(log(&m.new).len(), 2);
+    }
+
+    #[test]
+    fn a_cache_moves_by_rename_with_its_rows() {
+        let (m, _d) = step("dm-cache", Policy::Cache);
+        make(&m.old, &[(1, "a"), (2, "b")]);
+        // Committed frames stay in the WAL while a connection is open.
+        let keep = Connection::open(&m.old).unwrap();
+        keep.execute("INSERT INTO t VALUES (3, 'c')", []).unwrap();
+        assert_eq!(migrate(&m).unwrap(), Outcome::Moved);
+        for side in ["", "-wal", "-shm"] {
+            assert!(!with_suffix(&m.old, side).exists(), "{side}");
+        }
+        assert_eq!(rows(&m.new).len(), 3);
+        drop(keep);
+        assert_eq!(rows(&m.new).len(), 3);
+    }
+
+    #[test]
+    fn a_cache_with_a_new_file_sets_the_old_one_aside() {
+        let (m, _d) = step("dm-cache-both", Policy::Cache);
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        make(&m.new, &[(1, "new")]);
+        make(&m.old, &[(9, "old")]);
+        assert_eq!(migrate(&m).unwrap(), Outcome::SetAside);
+        assert_eq!(rows(&m.new), vec![(1, "new".into())]);
+        assert!(with_suffix(&m.old, ".migrated").exists());
+    }
+
+    #[test]
+    fn a_cache_held_by_a_writer_stays_put_then_is_set_aside() {
+        let (m, _d) = step("dm-cache-busy", Policy::Cache);
+        make(&m.old, &[(1, "a")]);
+        let w = Connection::open(&m.old).unwrap();
+        w.execute_batch("BEGIN IMMEDIATE; INSERT INTO t VALUES (2, 'b');")
+            .unwrap();
+        assert_eq!(migrate(&m).unwrap(), Outcome::Nothing);
+        assert!(m.old.exists());
+        assert!(!m.new.exists());
+        // The index is rebuilt at the new path; the stale old file is then
+        // set aside instead of replacing it.
+        w.execute_batch("ROLLBACK").unwrap();
+        drop(w);
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        make(&m.new, &[(7, "fresh")]);
+        assert_eq!(migrate(&m).unwrap(), Outcome::SetAside);
+        assert_eq!(rows(&m.new), vec![(7, "fresh".into())]);
+    }
+
+    #[test]
+    fn a_junk_cache_is_set_aside() {
+        let (m, _d) = step("dm-cache-junk", Policy::Cache);
+        fs::write(&m.old, vec![b'x'; 4096]).unwrap();
+        assert_eq!(migrate(&m).unwrap(), Outcome::SetAside);
+        assert!(with_suffix(&m.old, ".migrated").exists());
+    }
+
+    #[test]
+    fn two_cache_migrators_move_it_exactly_once() {
+        let (m, _d) = step("dm-cache-race", Policy::Cache);
+        make(&m.old, &[(1, "a")]);
+        let (m2, m3) = (m.clone(), m.clone());
+        let a = std::thread::spawn(move || migrate(&m2));
+        let b = std::thread::spawn(move || migrate(&m3));
+        let r = [a.join().unwrap().unwrap(), b.join().unwrap().unwrap()];
+        assert_eq!(r.iter().filter(|o| **o == Outcome::Moved).count(), 1);
+        assert_eq!(rows(&m.new), vec![(1, "a".into())]);
     }
 
     #[test]
