@@ -97,7 +97,14 @@ pub fn open(root: &Path) -> Result<Connection, ConfigError> {
     crate::common::atomic::ensure_private_dir(&data)
         .map_err(|_| ConfigError::DirectoryUnwritable(data.clone()))?;
     move_legacy_db(root);
-    let conn = init_connection(root).map_err(broken(root))?;
+    let conn = init_connection(root).map_err(|e| match e {
+        // Securing or opening the file failed (permissions, read-only
+        // volume): say so, rather than calling the store malformed.
+        rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::CannotOpen => {
+            ConfigError::DirectoryUnwritable(data.clone())
+        }
+        other => broken(root)(other),
+    })?;
     import_legacy_once(&conn, root)?;
     Ok(conn)
 }
@@ -114,6 +121,14 @@ fn init_connection(root: &Path) -> rusqlite::Result<Connection> {
         } else {
             db_path(root)
         };
+        // Owner-only before SQLite can create it with the default umask; the
+        // WAL and shm files copy this mode.
+        crate::common::atomic::make_db_file_private(&path).map_err(|msg| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+                Some(msg),
+            )
+        })?;
         let conn = Connection::open(path)?;
         // Before any statement that can contend for the write lock: the
         // default busy timeout is 0.

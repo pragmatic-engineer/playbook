@@ -1023,6 +1023,13 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
 /// contributing zero files.
 fn walk_markdown_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut out = Vec::new();
+    // A store that was never created holds no facts. Only the top level is
+    // forgiven: a missing nested directory still reports its path.
+    if let Err(e) = fs::symlink_metadata(dir) {
+        if e.kind() == io::ErrorKind::NotFound {
+            return Ok(out);
+        }
+    }
     walk_markdown_files_into(dir, &mut out)?;
     Ok(out)
 }

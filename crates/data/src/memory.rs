@@ -105,6 +105,8 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
         playbook_common::atomic::ensure_private_dir(dir)
             .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     }
+    // Owner-only before SQLite can create it with the default umask.
+    playbook_common::atomic::make_db_file_private(db)?;
     let mut conn = Connection::open(db).map_err(|e| e.to_string())?;
     conn.busy_timeout(BUSY).map_err(|e| e.to_string())?;
     playbook_common::sqlite::retry_busy(
@@ -274,6 +276,19 @@ pub fn read_graph(db: &Path) -> Result<Option<Graph>, String> {
 mod tests {
     use super::*;
     use playbook_common::test_support::scratch_dir;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_graph_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch_dir("memory-private-db");
+        let db = db_in(&dir.join("data"));
+
+        write_graph(&db, &[], &[]).unwrap();
+
+        let mode = std::fs::metadata(&db).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 
     fn node(id: &str) -> NodeRow {
         NodeRow {
