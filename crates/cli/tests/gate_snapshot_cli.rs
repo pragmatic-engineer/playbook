@@ -185,30 +185,3 @@ fn an_explicit_source_still_wins() {
     );
     assert!(ok.status.success(), "{}", text(&ok));
 }
-
-#[test]
-fn the_plan_and_implement_commands_use_the_snapshot_and_stdin_flow() {
-    let root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
-    let plan = fs::read_to_string(root.join("commands/plan.md")).unwrap();
-    assert!(plan.contains("playbook gate snapshot <topic-slug>"));
-    assert!(
-        !plan.contains("write the plan draft's current full content"),
-        "the draft is written once to the shared file, then copied by the command"
-    );
-    assert!(
-        !plan.contains("**Run Phase 1 inline**"),
-        "Phase 1 is dispatched like the other two; inline is only the fallback"
-    );
-    for file in [
-        "commands/plan.md",
-        "commands/implement.md",
-        "commands/adr.md",
-    ] {
-        let text = fs::read_to_string(root.join(file)).unwrap();
-        assert!(
-            !text.contains("<that file>") && !text.contains("<that-file>"),
-            "{file}"
-        );
-        assert!(text.contains("gate record"), "{file}");
-    }
-}

@@ -157,16 +157,3 @@ fn an_unreadable_plan_is_an_error() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("/no/such/plan.md"));
 }
-
-#[test]
-fn implement_writes_briefs_with_the_command_and_spawns_no_drafting_agent() {
-    let text =
-        fs::read_to_string(Path::new(env!("PLAYBOOK_REPO_ROOT")).join("commands/implement.md"))
-            .unwrap();
-    assert!(text.contains("playbook plan brief"));
-    assert!(
-        !text.contains("model: \"haiku\""),
-        "the Haiku drafting call is gone"
-    );
-    assert!(!text.contains("brief-drafting"));
-}

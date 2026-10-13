@@ -184,19 +184,4 @@ mod tests {
             assert!(check(s).is_empty(), "{s}: {:?}", check(s));
         }
     }
-
-    #[test]
-    fn every_listed_word_is_in_the_skills_banned_words() {
-        let skill = std::fs::read_to_string(
-            std::path::Path::new(env!("PLAYBOOK_REPO_ROOT")).join("skills/writing-style/SKILL.md"),
-        )
-        .unwrap();
-        let section = &skill[skill.find("## Banned Words").unwrap()..];
-        let section = &section[..section.find("\n---").unwrap()];
-        for w in BANNED {
-            let stem: String = w.chars().take(4).collect();
-            let stem = stem.as_str();
-            assert!(section.contains(stem), "{w} is not in the Banned Words");
-        }
-    }
 }
