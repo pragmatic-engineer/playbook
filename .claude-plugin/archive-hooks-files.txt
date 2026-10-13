@@ -3,9 +3,8 @@
 # An explicit allowlist: a file that is not listed here is NOT in the
 # marketplace install. tests/plugin_archive.rs keeps this list honest.
 #
-# The skills, commands and agents ship in the other plugin,
-# .claude-plugin/archive-files.txt. No path is listed in both, except the
-# licence and readme files.
+# The skills, commands and agents ship in the other plugin, which lives in
+# pragmatic-engineer/skills.
 
 # The manifest. build-plugin-archive.sh renames it to .claude-plugin/plugin.json
 # inside the zip, because a plugin root holds one manifest.
