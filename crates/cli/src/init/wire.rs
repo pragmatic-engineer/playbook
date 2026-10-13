@@ -152,7 +152,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: None,
         name: "session-init",
         group: Group::Session,
-        purpose: "Prepares the session directory, warns when a resumed session's config drifted, and adds a handoff, an auto-learn nudge and a small memory block to the context. Also sweeps stale worktrees.",
+        purpose: "Prepares the session directory, warns when a resumed session's config drifted, and adds the tool map, a handoff, an auto-learn nudge and a small memory block to the context. Also sweeps stale worktrees.",
         if_cond: None,
         timeout: None,
         also_replaces: None,

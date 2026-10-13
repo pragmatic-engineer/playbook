@@ -238,9 +238,10 @@ fn session_init_caps_the_ranked_memory_block() {
         !context.contains("fact-120"),
         "a fact placed past the cap should be left out: {context}"
     );
+    let map = playbook::tools_map::render().trim_end().chars().count();
     assert!(
-        context.chars().count() <= 2600,
-        "the whole context here is the memory block, held near 2,500 chars: {}",
+        context.chars().count() <= 2600 + map + 2,
+        "the context here is the tool map plus a memory block held near 2,500 chars: {}",
         context.chars().count()
     );
 }
@@ -1357,13 +1358,13 @@ fn session_init_degrades_quietly_when_both_shell_outs_are_unreachable() {
         ],
     );
 
-    // Assert: the hook still exits cleanly and prints nothing at all, since
-    // there was nothing left to say once both shell-outs failed.
+    // Assert: the hook still exits cleanly and says nothing but the tool map,
+    // since there was nothing else left to say once both shell-outs failed.
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert_eq!(
-        outcome.stdout.trim(),
-        "",
-        "with everything else disabled, a missing plugin root should yield no output: {}",
+        additional_context(&outcome.stdout),
+        playbook::tools_map::render().trim_end(),
+        "with everything else disabled, a missing plugin root should yield only the map: {}",
         outcome.stdout
     );
 }
@@ -2344,4 +2345,48 @@ fn a_resume_clears_the_auto_cost_state_but_a_compaction_keeps_it() {
     for name in markers {
         assert!(!session.join(name).exists(), "{name} must go on a resume");
     }
+}
+
+#[test]
+fn session_init_injects_the_tool_map_on_every_kind_of_start() {
+    // Arrange
+    let work = scratch_dir("tool-map");
+    let repo_dir = work.join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    let home = work.join("home");
+
+    for source in ["startup", "resume", "compact"] {
+        // Act
+        let outcome = run_session_init_with_source(&repo_dir, &home, source);
+        let context = additional_context(&outcome.stdout);
+
+        // Assert
+        assert_eq!(outcome.exit_code, 0, "{source}: hook should exit 0");
+        assert!(
+            context.contains("playbook tools: when an intent is covered here"),
+            "{source}: the tool map header is missing: {context}"
+        );
+        assert!(
+            context.contains("\npath plans|implement|worktrees --create"),
+            "{source}: the tool map lines are missing: {context}"
+        );
+    }
+}
+
+#[test]
+fn session_init_injects_the_tool_map_before_a_handoff() {
+    // Arrange
+    let work = scratch_dir("tool-map-order");
+    let repo_dir = work.join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    let home = work.join("home");
+    write_handoff(&home, &repo_dir, "HANDOFFMARKER decisions from last time");
+
+    // Act
+    let context = additional_context(&run_session_init_at(&repo_dir, &home).stdout);
+
+    // Assert
+    let map = context.find("playbook tools:").expect("tool map");
+    let handoff = context.find("HANDOFFMARKER").expect("handoff");
+    assert!(map < handoff, "the map should come first: {context}");
 }
