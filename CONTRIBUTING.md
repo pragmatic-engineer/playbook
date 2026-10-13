@@ -27,7 +27,7 @@ Run `just test` for everything, or `cargo nextest run -p playbook-code --config-
 
 ### Releases
 
-`vX.Y.Z` releases `playbook`. `telemetry-vX.Y.Z` releases `playbook-telemetry`. Create the telemetry release with `gh release create telemetry-vX.Y.Z --target main --latest=false` after pushing the signed tag, so GitHub's latest release stays on the `v` line. `TAP_DISPATCH_TOKEN` lets a release workflow tell the Homebrew tap right away; the tap also checks daily.
+`vX.Y.Z` releases `playbook`. `telemetry-vX.Y.Z` releases `playbook-telemetry`. Pushing the signed tag is enough: the telemetry workflow creates the release with `--latest=false`, so GitHub's latest release stays on the `v` line. The workflow then tells the Homebrew tap, and the tap also checks daily.
 
 ## Editing agents
 
