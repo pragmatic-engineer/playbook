@@ -21,14 +21,10 @@
 # Warning: `git clean -x` inside ~/.claude will delete the untracked settings.json.
 !/settings.shared.json
 !/permissions.shared.json
-!/commands/
-!/skills/
-!/agents/
 !/hooks/
 !/bin/
 !/shell/
 !/docs/
-!/output-styles/
 !/.github/
 !/.claude-plugin/
 # Rust binary scaffold (ADR 0007): Cargo.lock is committed per the repo's
