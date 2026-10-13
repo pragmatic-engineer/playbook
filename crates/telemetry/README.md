@@ -30,11 +30,11 @@ brew install pragmatic-engineer/tap/playbook-telemetry
 pbtop
 ```
 
-Or download the archive for your platform from the [latest release](https://github.com/pragmatic-engineer/playbook/releases?q=telemetry-v&expanded=true). Releases carry `playbook-telemetry-<version>-<target>.tar.gz` for macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) and Windows (x86_64), each holding both `playbook-telemetry` and `pbtop`, plus a `SHA256SUMS` file with build provenance attestations.
+Or download the archive for your platform from the [latest release](https://github.com/pragmatic-engineer/playbook-telemetry/releases/latest). Releases carry `playbook-telemetry-<version>-<target>.tar.gz` for macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) and Windows (x86_64), each holding both `playbook-telemetry` and `pbtop`, plus a `SHA256SUMS` file with build provenance attestations.
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
-gh attestation verify playbook-telemetry-<version>-<target>.tar.gz --repo pragmatic-engineer/playbook
+gh attestation verify playbook-telemetry-<version>-<target>.tar.gz --repo pragmatic-engineer/playbook-telemetry
 tar -xzf playbook-telemetry-<version>-<target>.tar.gz -C ~/.local/bin
 ```
 
@@ -99,29 +99,29 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 
 ## Use it as a library
 
-The crate `playbook-telemetry` (library `playbook_telemetry`, published from this repository) exposes the same code the binary runs. A program that embeds it implements the `host::Host` trait (config lookup, state folder, program name, repo layout, sessions panel data) and installs it once with `host::install` before calling `entry::run`. `entry::run` picks the time zone itself when `tz::init` has not run, so an embedder gets the same local-time default and the same `usage.timeZone` setting. Without an installed host the standalone one described above is used.
+The crate `playbook-telemetry` (library `playbook_telemetry`, built from the `crates/telemetry` folder of the playbook repository) exposes the same code the binary runs. A program that embeds it implements the `host::Host` trait (config lookup, state folder, program name, repo layout, sessions panel data) and installs it once with `host::install` before calling `entry::run`. `entry::run` picks the time zone itself when `tz::init` has not run, so an embedder gets the same local-time default and the same `usage.timeZone` setting. Without an installed host the standalone one described above is used.
 
 ```toml
-playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook-telemetry", tag = "v0.1.4", package = "playbook-telemetry" }
+playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook", tag = "telemetry-v<version>", package = "playbook-telemetry" }
 ```
 
 Pin an exact tag. The API is still settling, so expect changes between minor versions until 1.0.
 
 ## History
 
-This code was extracted from `src/usage` in [pragmatic-engineer/playbook](https://github.com/pragmatic-engineer/playbook). The repository allows squash merges only, so the earlier history is not copied here. Use `git log` and `git blame` in the playbook repository for anything before the first release; commit subjects there carry the pull request numbers.
+This code lived in its own repository, [pragmatic-engineer/playbook-telemetry](https://github.com/pragmatic-engineer/playbook-telemetry), until version 0.1.7. That repository is archived and keeps the earlier history and releases. From the next version on, releases are tagged `telemetry-vX.Y.Z` in the playbook repository.
 
 ## Develop
 
 ```sh
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo clippy --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
-cargo test
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
+cargo test -p playbook-telemetry
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution rules and [SECURITY.md](SECURITY.md) to report a vulnerability.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for the contribution rules and [SECURITY.md](../../SECURITY.md) to report a vulnerability.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](../../LICENSE).

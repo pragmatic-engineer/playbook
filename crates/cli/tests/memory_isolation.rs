@@ -35,6 +35,7 @@ fn shipped_files() -> Vec<PathBuf> {
         "crates/common/src",
         "crates/code/src",
         "crates/data/src",
+        "crates/telemetry/src",
         "commands",
         "skills",
         "agents",
@@ -81,6 +82,7 @@ fn no_rust_code_builds_a_path_into_claude_codes_project_memory() {
         "crates/common/src",
         "crates/code/src",
         "crates/data/src",
+        "crates/telemetry/src",
     ] {
         files_under(
             &Path::new(env!("PLAYBOOK_REPO_ROOT")).join(dir),

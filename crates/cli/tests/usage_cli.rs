@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn fixtures() -> PathBuf {
-    PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join("crates/cli/tests/fixtures/usage")
+    PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join("crates/telemetry/tests/fixtures/usage")
 }
 
 struct Home(PathBuf);
