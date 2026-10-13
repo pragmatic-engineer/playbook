@@ -43,7 +43,7 @@ On a match, the hook emits a prompt context message reminding Claude the session
 
 The reasoning is in [Why the pieces are shaped this way](../concepts/03-why-the-pieces-are-shaped-this-way.md).
 
-Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
+Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
 
 **Main session default.** The `playbook cc` and `playbook ccd` launchers add `--effort medium` to the `claude` command line when the session states no effort. Stating one turns it off: pass `--effort high` (or any level), set `effortLevel` in `~/.claude/settings.json`, or export `CLAUDE_CODE_EFFORT_LEVEL`. An effort ceiling still lowers the default. Playbook only shapes its own launcher command line and never writes Claude Code's settings or memory, so a session started without the launcher keeps the model default. See [ADR-0023](../adr/0023-commands-at-medium.md).
 
@@ -77,48 +77,7 @@ Dispatch granularity was benched with tools. `playbook eval bench --cases crates
 
 ### Policy table: every component
 
-This table lists every agent, command and skill with the model and effort in its file. The test `crates/cli/tests/policy_table.rs` reads the frontmatter of `agents/*.md`, `commands/*.md` and `skills/*/SKILL.md` and fails when this table is missing a component, lists one that does not exist, or shows a model or effort that differs from the file. A dash means the file sets none. Change a file and this table in the same PR. To compare a setting on real inputs, run `playbook eval bench` (see [Effort cap per model](#effort-cap-per-model)).
-
-<!-- policy-table:start -->
-| Kind | Name | Model | Effort | Reason |
-| :- | :- | :- | :- | :- |
-| agent | `analyst` | `haiku` | `medium` | Distills collector findings into memory facts. Round 2 bench: Haiku 45/45 at medium against Sonnet 15/15, at about a fourteenth of the cost; the user confirms facts in learn-project Phase 3. |
-| agent | `auditor` | `opus` | `high` | A read-only repo audit where a missed finding is the cost. |
-| agent | `cheap-checker` | `haiku` | `low` | One narrow concern from a named reference file. A full lens covers the rest. |
-| agent | `collector` | `haiku` | `low` | Gathers and compacts raw history. The analyst does the thinking. |
-| agent | `critic` | `sonnet` | `medium` | Adversarial review of plans and ADRs. Round 2 bench: medium 89/90, high 71/90 (false blocks on clean plans), so medium finds the seeded flaws at 39% lower cost. |
-| agent | `fact-checker` | `haiku` | `medium` | Three bench rounds: Haiku medium 134/138, high 137/138, at about a tenth of Sonnet's cost. The Haiku effort cap already held it at medium. |
-| agent | `git` | `haiku` | `xhigh` | Drafts commit and PR text. The commit type was right 42% of the time at low and 100% at xhigh. The one Haiku role allowed above medium (OPT_INS). |
-| agent | `implementer` | `sonnet` | `medium` | Writes and commits production logic. Round 2 bench on 20 repo tasks: Sonnet medium 200/200, high 198/200; Haiku stays under 92%. |
-| agent | `review-triage` | `haiku` | `low` | A three-way classifier. A bad or missing answer falls back to a full lens. |
-| agent | `reviewer` | `opus` | `medium` | Opus medium 199/200 against high 200/200 on the reviewer bench, 19% cheaper. Risky diffs go to `reviewer-xhigh` and small ones to `reviewer-low` (ADR-0021). |
-| agent | `test-reviewer` | `haiku` | `low` | Pilot (18 calls per cell): Haiku low, medium and high 18/18, Sonnet high 18/18, Sonnet low 16/18. |
-| command | `address-pr-comments` | `opus` | `medium` | Judgment on review threads and replies that go public. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `adr` | `opus` | `medium` | A hard-to-reverse decision record. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `commit-and-push` | - | - | Forks into the git agent, which sets the model and effort. |
-| command | `create-pull-request` | - | - | Forks into the git agent, which sets the model and effort. |
-| command | `deep-review` | `opus` | `medium` | Orchestrates the reviewer swarm. A missed finding is the cost. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `doctor` | `haiku` | `low` | Runs compiled helpers and prints the result. Mechanical. |
-| command | `fix` | `sonnet` | `medium` | Small, well understood bugs, with code changes. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `implement` | `sonnet` | `medium` | Executes an approved plan and delegates edits. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `learn-project` | `opus` | `medium` | Builds durable memory from a whole repo. Mistakes persist. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `plan` | `opus` | `medium` | Design work. A weak plan is expensive. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `quick-review` | `sonnet` | `medium` | One pass over a diff. Its reviewer runs on Opus at medium, the reviewer's own effort. |
-| command | `repo-audit` | - | - | Forks into the auditor agent, which sets the model and effort. |
-| command | `session-handoff` | `haiku` | `low` | Writes and saves a handoff using binary-supplied rules and facts. |
-| command | `session-start` | `haiku` | `low` | Loads a saved handoff. Mechanical. |
-| command | `setup` | `haiku` | `low` | Runs compiled helpers and asks questions. Mechanical. |
-| skill | `atlassian` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `delegating-subagents` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `engineering-standards-javascript` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `engineering-standards` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `finish-pull-request` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `grounding-research` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `grounding-review` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `playbook-usage` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `systematic-debugging` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-| skill | `writing-style` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
-<!-- policy-table:end -->
+The table of every agent, command and skill with the model and effort in its file, and why, now lives with the plugin files in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills/blob/main/docs/policy-table.md). A test there keeps it equal to the frontmatter.
 
 ### Effort cap per model
 

@@ -13,7 +13,7 @@ See the [justfile](justfile) for build and test commands (`just --list`).
 
 ### Repository layout
 
-This is a Cargo workspace. The Claude Code plugin files (`commands/`, `skills/`, `agents/`, `hooks/`, `output-styles/`, `prompts/`, `bin/`, `install.sh`, `.claude-plugin/`) stay at the repository root, which is the plugin root. The Rust code lives under `crates/`:
+This is a Cargo workspace. The hooks plugin files (`hooks/`, `prompts/`, `bin/`, `install.sh`, `.claude-plugin/`) stay at the repository root, which is the plugin root. The skills, commands and agents live in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills). The Rust code lives under `crates/`:
 
 | Folder | Package | What it holds |
 | --- | --- | --- |
@@ -31,14 +31,7 @@ Run `just test` for everything, or `cargo nextest run -p playbook-code --config-
 
 ## Editing agents
 
-Agents live in `agents/*.md`, and only the 11 base agents are files. Effort variants such as `reviewer-low` and `reviewer-xhigh` are not: the `Agent` tool has no per-call effort, so `playbook cc` and `playbook ccd` render the variants from the base files for one session and pass them to Claude Code with `--agents`. Committing them would put dozens of unused descriptions into every session.
-
-- Edit the base file, for example `agents/reviewer.md`. Its `effort:` line is the agent's own effort.
-- Every base agent needs an entry in the `VARIANTS` table in `crates/cli/src/agents/variants.rs`, with every tier. A tier equal to the agent's own effort renders nothing.
-- Run `playbook agents variants` to see what a session would get (add `--ceiling medium` or `--json`).
-- Run `playbook agents check` before you push. It fails on an agent with no `VARIANTS` entry, a tier that cannot render from its base, and any leftover generated variant file. CI runs it too.
-
-See [Authoring agents](docs/authoring/02-authoring-agents.md) for the frontmatter rules.
+The agent files live in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills) under `plugins/playbook/agents`. The binary renders effort variants such as `reviewer-low` from the base files for one session. Every base agent needs an entry in the `VARIANTS` table in `crates/cli/src/agents/variants.rs`, with every tier. Run `playbook agents variants` and `playbook agents check` against a checkout of the skills repo to see what a session would get.
 
 ## Project-Specific Code Style
 

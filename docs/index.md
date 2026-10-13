@@ -17,8 +17,8 @@ Why the foundations work the way they do.
 Task-oriented workflows.
 
 - [Install](guides/00-install.md): requirements, every install route, upgrade and uninstall.
-- [Plan and implement](guides/01-plan-and-implement.md): design with `/playbook:plan`, build with `/playbook:implement`, fix a small bug with `/playbook:fix`.
-- [Review and PR flow](guides/02-review-and-pr-flow.md): commit, review, and work through feedback.
+- [Plan and implement](https://github.com/pragmatic-engineer/skills/blob/main/docs/guides/01-plan-and-implement.md): design with `/playbook:plan`, build with `/playbook:implement`, fix a small bug with `/playbook:fix`.
+- [Review and PR flow](https://github.com/pragmatic-engineer/skills/blob/main/docs/guides/02-review-and-pr-flow.md): commit, review, and work through feedback.
 - [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/playbook:adr`, build project knowledge with `/playbook:learn-project`.
 - [Config keys](guides/04-config-keys.md): every `playbook config` key with its default, allowed values and what it does.
 - [Auto mode](guides/05-auto-mode.md): run commands without questions, with a spend cap.
@@ -31,8 +31,8 @@ Task-oriented workflows.
 
 Extend the config.
 
-- [Commands, skills, and hooks](authoring/01-commands-skills-hooks.md): templates for each extension point.
-- [Authoring agents](authoring/02-authoring-agents.md): the frontmatter schema, both binding mechanisms, and the parametrize or split rule.
+- [Commands, skills, and hooks](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/01-commands-skills-hooks.md): templates for each extension point.
+- [Authoring agents](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/02-authoring-agents.md): the frontmatter schema, both binding mechanisms, and the parametrize or split rule.
 
 ## Internals
 

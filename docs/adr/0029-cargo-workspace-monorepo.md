@@ -1,6 +1,6 @@
 # ADR-0029: Keep the Rust Crates in One Cargo Workspace
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0030 (the plugin root no longer holds the skills, commands and agents)
 - **Date created:** 2026-10-13
 - **Date modified:** 2026-10-13
 
