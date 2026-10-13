@@ -31,9 +31,23 @@ impl std::fmt::Display for PathError {
 impl std::error::Error for PathError {}
 
 /// The work tree root that contains `cwd`.
+///
+/// `gitfacts` answers `None` on purpose when it cannot be certain, such as
+/// when `GIT_CEILING_DIRECTORIES` is set. That means "ask git", so fall back
+/// to `git rev-parse --show-toplevel`, which honours the ceiling itself.
 pub fn repo_root(cwd: &Path) -> Result<PathBuf, String> {
     playbook_common::gitfacts::toplevel(cwd)
+        .or_else(|| git_toplevel(cwd))
         .ok_or_else(|| "not inside a git repository".to_string())
+}
+
+fn git_toplevel(cwd: &Path) -> Option<PathBuf> {
+    playbook_common::git::output_slow(cwd, &["rev-parse", "--show-toplevel"])
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        // A root with no `.git` entry means git was redirected (for example by
+        // `core.worktree`), which gitfacts refuses on purpose; keep refusing.
+        .filter(|top| top.join(".git").exists())
 }
 
 /// `<data dir>/code/<owner>/<repo>/<worktree-id>.db` for the current repo.
@@ -114,6 +128,48 @@ mod tests {
         let dir = scratch_dir(tag);
         fs::create_dir_all(&dir).expect("dir");
         dir.canonicalize().expect("canonical")
+    }
+
+    fn git_init(dir: &Path) {
+        let ok = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .arg(dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("run git")
+            .success();
+        assert!(ok, "git init");
+    }
+
+    #[test]
+    fn a_ceiling_directory_variable_still_finds_the_repo_and_still_fails_outside_one() {
+        // Arrange
+        // The ceiling only covers this test's scratch dir and is restored
+        // before the asserts; the lock is not crate-wide env isolation.
+        let _guard = playbook_common::test_support::lock_cwd();
+        let base = scratch("loc-ceiling");
+        let repo = base.join("repo");
+        let sub = repo.join("a/b");
+        let plain = base.join("plain");
+        fs::create_dir_all(&sub).expect("sub");
+        fs::create_dir_all(&plain).expect("plain");
+        git_init(&repo);
+        let previous = std::env::var_os("GIT_CEILING_DIRECTORIES");
+        std::env::set_var("GIT_CEILING_DIRECTORIES", &base);
+
+        // Act
+        let inside = repo_root(&sub);
+        let outside = repo_root(&plain);
+        match previous {
+            Some(v) => std::env::set_var("GIT_CEILING_DIRECTORIES", v),
+            None => std::env::remove_var("GIT_CEILING_DIRECTORIES"),
+        }
+
+        // Assert
+        assert_eq!(inside, Ok(repo));
+        assert_eq!(outside, Err("not inside a git repository".to_string()));
+        let _ = fs::remove_dir_all(base);
     }
 
     #[test]

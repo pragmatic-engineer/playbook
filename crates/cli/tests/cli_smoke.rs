@@ -45,6 +45,8 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// two working directories (a git repo and a plain folder).
 struct Env {
     root: PathBuf,
+    /// Run children with `GIT_CEILING_DIRECTORIES` set to the scratch root.
+    ceiling: bool,
 }
 
 impl Env {
@@ -64,7 +66,10 @@ impl Env {
         fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).expect("chmod stub");
         let git = which("git").expect("git must be on PATH");
         std::os::unix::fs::symlink(git, root.join("bin/git")).expect("git link");
-        let env = Self { root };
+        let env = Self {
+            root,
+            ceiling: false,
+        };
         if with_repo {
             fs::create_dir_all(env.repo()).expect("repo dir");
             for args in [
@@ -127,6 +132,9 @@ impl Env {
             "all_proxy",
         ] {
             p.env(k, proxy);
+        }
+        if self.ceiling {
+            p.env("GIT_CEILING_DIRECTORIES", r);
         }
         p
     }
@@ -286,6 +294,8 @@ struct Case {
     second: Option<(i32, String)>,
     /// Body of a stub `gh` placed on PATH.
     gh: Option<String>,
+    /// Set `GIT_CEILING_DIRECTORIES` to the parent of the repo.
+    ceiling: bool,
 }
 
 fn case(path: &str, args: &[&str]) -> Case {
@@ -304,10 +314,15 @@ fn case(path: &str, args: &[&str]) -> Case {
         grows: false,
         second: None,
         gh: None,
+        ceiling: false,
     }
 }
 
 impl Case {
+    fn ceiling(mut self) -> Self {
+        self.ceiling = true;
+        self
+    }
     fn code(mut self, c: i32) -> Self {
         self.code = c;
         self
@@ -565,6 +580,7 @@ fn table() -> Vec<Case> {
         case("gate snapshot", &["gate", "snapshot", "smoke", "design"]).code(1).err("does not exist"),
         case("gate check", &["gate", "check", "smoke", "plan"]).code(1).err("no phases specified"),
         case("code index", &["code", "index"]).out("indexed 0 files").grows(),
+        case("code index", &["code", "index"]).ceiling().out("indexed 0 files").grows(),
         case("code status", &["code", "status"]).out("missing"),
         case("code search", &["code", "search", "foo"]).code(1).err("no index yet"),
         case("code symbol", &["code", "symbol", "foo"]).code(1).err("no index yet"),
@@ -723,7 +739,8 @@ fn every_command_prints_help_and_exits_zero_with_no_stderr() {
 
 /// Run one row in its own fresh environment, twice, and return what is wrong.
 fn check(c: &Case) -> Vec<String> {
-    let env = Env::new(c.repo);
+    let mut env = Env::new(c.repo);
+    env.ceiling = c.ceiling;
     let mut bad = Vec::new();
     if let Some(script) = &c.gh {
         let gh = env.root.join("bin/gh");
