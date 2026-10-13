@@ -251,7 +251,7 @@ impl Status {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::testkit::{fx, pinned};
+    use crate::testkit::{fx, pinned};
 
     #[test]
     fn an_unchanged_repo_is_fresh() {
@@ -368,14 +368,14 @@ mod tests {
         // Arrange
         let f = fx("st-interrupted");
         f.write("a.rs", "fn a() {}\n");
-        let stop = crate::code::index::Options {
-            hooks: crate::code::index::Hooks {
+        let stop = crate::index::Options {
+            hooks: crate::index::Hooks {
                 after_batch_commit: Some(Box::new(|_| Err("stop".to_string()))),
                 before_file_insert: None,
             },
-            ..crate::code::index::Options::default()
+            ..crate::index::Options::default()
         };
-        let _ = crate::code::index::run(&f.root, &f.index, false, &stop);
+        let _ = crate::index::run(&f.root, &f.index, false, &stop);
 
         // Act
         let stopped = status(&f.conn(), &f.index, &f.root).expect("status");

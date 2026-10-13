@@ -228,7 +228,7 @@ pub fn read_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::testkit::{fx, pinned, Fx};
+    use crate::testkit::{fx, pinned, Fx};
 
     fn read(f: &Fx, path: &str, range: (usize, usize), caps: Caps) -> Result<Slice, String> {
         read_lines(&f.root, &f.root, path, range, caps)
@@ -353,7 +353,7 @@ mod tests {
         let _g = pinned();
         // Arrange
         let f = fx("src-link-out");
-        let outside = crate::common::test_support::scratch_dir("src-link-target");
+        let outside = playbook_common::test_support::scratch_dir("src-link-target");
         std::fs::create_dir_all(&outside).expect("dir");
         std::fs::write(outside.join("secret.txt"), "private\n").expect("write");
         std::os::unix::fs::symlink(outside.join("secret.txt"), f.root.join("link.txt"))

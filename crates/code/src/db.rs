@@ -6,7 +6,7 @@
 //! delete anything. Connection setup follows the usage store's ordering.
 
 use super::host;
-use crate::common::sqlite::{retry_busy, OPEN_BUDGET};
+use playbook_common::sqlite::{retry_busy, OPEN_BUDGET};
 use rusqlite::{Connection, ErrorCode};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -256,7 +256,7 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use playbook_common::test_support::scratch_dir;
 
     fn count(conn: &Connection, table: &str) -> i64 {
         conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))

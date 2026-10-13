@@ -31,7 +31,7 @@ pub struct Fx {
 
 pub fn fx(tag: &str) -> Fx {
     let root = init(tag);
-    let index = crate::common::test_support::scratch_dir(&format!("{tag}-idx"))
+    let index = playbook_common::test_support::scratch_dir(&format!("{tag}-idx"))
         .join("code")
         .join("index.sqlite3");
     Fx { root, index }

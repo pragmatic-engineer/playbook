@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/cli", "crates/common"]
+members = ["crates/cli", "crates/code", "crates/common"]
 
 [workspace.package]
 version = "0.25.0"

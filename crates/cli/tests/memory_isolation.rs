@@ -33,6 +33,7 @@ fn shipped_files() -> Vec<PathBuf> {
     for dir in [
         "crates/cli/src",
         "crates/common/src",
+        "crates/code/src",
         "commands",
         "skills",
         "agents",
@@ -74,7 +75,7 @@ fn nothing_shipped_sets_claude_codes_memory_settings() {
 #[test]
 fn no_rust_code_builds_a_path_into_claude_codes_project_memory() {
     let mut files = Vec::new();
-    for dir in ["crates/cli/src", "crates/common/src"] {
+    for dir in ["crates/cli/src", "crates/common/src", "crates/code/src"] {
         files_under(
             &Path::new(env!("PLAYBOOK_REPO_ROOT")).join(dir),
             &["rs"],

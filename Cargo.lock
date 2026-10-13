@@ -713,6 +713,7 @@ version = "0.25.0"
 dependencies = [
  "clap",
  "libc",
+ "playbook-code",
  "playbook-common",
  "playbook-telemetry",
  "ratatui",
@@ -721,12 +722,24 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "ureq",
+]
+
+[[package]]
+name = "playbook-code"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "playbook-common",
+ "rusqlite",
+ "serde_json",
+ "sha2",
  "tree-sitter",
  "tree-sitter-javascript",
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
- "ureq",
 ]
 
 [[package]]
