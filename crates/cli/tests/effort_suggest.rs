@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook effort suggest` end to end on a synthetic usage store (ADR-0022,
-//! stage 1),. Every id,
-//! session and repo name below is made up.
+//! stage 1). Every id, session and repo name below is made up.
 
 use playbook::usage::db::{insert_tool_event, open_db, upsert_usage_event};
 use playbook::usage::{ToolInvocationEvent, ToolKind, UsageEvent};
