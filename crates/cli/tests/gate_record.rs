@@ -601,3 +601,105 @@ fn no_old_database_means_no_leftovers() {
     assert!(!f.old_scoped_dir().join("state.db").exists());
     assert!(!f.old_scoped_dir().join("state.db.migrated").exists());
 }
+
+#[test]
+fn an_old_schema_state_db_moves_and_keeps_its_rows() {
+    // Arrange: the schema before source_hash and STUCK existed.
+    let f = Fixture::new("data-old-schema");
+    let old = f.old_scoped_dir().join("state.db");
+    fs::create_dir_all(old.parent().unwrap()).unwrap();
+    let raw = rusqlite::Connection::open(&old).unwrap();
+    raw.execute_batch(
+        "CREATE TABLE gate_phases (plan_slug TEXT NOT NULL, phase TEXT NOT NULL,
+           verdict TEXT NOT NULL CHECK(verdict IN ('PASS','FAIL','WARN','INCONCLUSIVE')),
+           evidence TEXT NOT NULL, command TEXT NOT NULL, recorded_at TEXT NOT NULL,
+           PRIMARY KEY (plan_slug, phase)) WITHOUT ROWID;
+         INSERT INTO gate_phases VALUES ('plan-old','spec','PASS','e','c','2026-01-01T00:00:00Z');",
+    )
+    .unwrap();
+    drop(raw);
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act
+    let out = f.run("plan-a", "spec-review", "spec", &input);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    let conn = db::open_db(&f.db_path()).expect("open");
+    let row = db::query_phase(&conn, "plan-old", "spec")
+        .unwrap()
+        .expect("old row");
+    assert_eq!(row.verdict, "PASS");
+    assert!(db::query_phase(&conn, "plan-a", "spec").unwrap().is_some());
+}
+
+#[test]
+fn a_pending_move_defers_to_the_old_file_and_a_later_call_merges_it() {
+    // Arrange: another process holds the migrate lock.
+    let f = Fixture::new("data-deferred");
+    let old = f.old_scoped_dir().join("state.db");
+    seed_row(&old, "plan-old", "PASS");
+    let lock = f.db_path().with_extension("db.migrate.lock");
+    fs::create_dir_all(&lock).unwrap();
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act
+    let busy = f.run("plan-a", "spec-review", "spec", &input);
+    fs::remove_dir(&lock).unwrap();
+    let later = f.run("plan-b", "spec-review", "spec", &input);
+
+    // Assert: the busy call used the old file, nothing was hidden.
+    assert_eq!(busy.status.code(), Some(0), "{}", stderr_of(&busy));
+    assert_eq!(later.status.code(), Some(0), "{}", stderr_of(&later));
+    assert!(!old.exists(), "moved by the later call");
+    let conn = db::open_db(&f.db_path()).expect("open");
+    for plan in ["plan-old", "plan-a", "plan-b"] {
+        assert!(
+            db::query_phase(&conn, plan, "spec").unwrap().is_some(),
+            "{plan}"
+        );
+    }
+}
+
+#[test]
+fn a_later_phase_row_in_the_old_file_wins_the_merge() {
+    // Arrange: an older playbook recorded a newer verdict at the old path.
+    let f = Fixture::new("data-newer");
+    let new_conn = db::open_db(&f.db_path()).expect("new");
+    db::upsert_phase(
+        &new_conn,
+        "shared",
+        "spec",
+        "PASS",
+        "e",
+        "c",
+        "2026-01-01T00:00:00Z",
+        "h",
+    )
+    .unwrap();
+    drop(new_conn);
+    let old = f.old_scoped_dir().join("state.db");
+    let old_conn = db::open_db(&old).expect("old");
+    db::upsert_phase(
+        &old_conn,
+        "shared",
+        "spec",
+        "FAIL",
+        "e",
+        "c",
+        "2026-02-01T00:00:00Z",
+        "h",
+    )
+    .unwrap();
+    drop(old_conn);
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act
+    let out = f.run("plan-a", "spec-review", "spec", &input);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    let conn = db::open_db(&f.db_path()).expect("open");
+    let row = db::query_phase(&conn, "shared", "spec").unwrap().unwrap();
+    assert_eq!(row.verdict, "FAIL");
+}

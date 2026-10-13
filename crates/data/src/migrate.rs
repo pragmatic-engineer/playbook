@@ -29,11 +29,28 @@ use std::time::Duration;
 /// How a step treats a new file that already exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Policy {
-    /// Merge these tables from the old file with `INSERT OR IGNORE`.
+    /// Merge these tables from the old file with `INSERT OR IGNORE`: a row
+    /// already in the new file wins.
     MergeTables(&'static [&'static str]),
+    /// Merge these tables, each with its own conflict rule.
+    Merge(&'static [(&'static str, Rule)]),
     /// The data is a rebuildable cache: keep the new file and set the old one
     /// aside.
     KeepNew,
+}
+
+/// How one merged table resolves a row that exists in both files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rule {
+    /// The row in the new file stays.
+    Ignore,
+    /// The row with the greater value in this column wins (an ISO timestamp
+    /// or a counter), so the older binary's later write is not lost.
+    Newer(&'static str),
+    /// Rows form series by these columns. A series that exists in the new
+    /// file stays whole; one that does not is copied whole. Never a mix of
+    /// two histories.
+    Series(&'static [&'static str]),
 }
 
 /// One database to move into the data folder.
@@ -226,7 +243,7 @@ fn remove_stale_tmp(new: &Path) {
     }
 }
 
-fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
+fn merge(step: &Move, rules: &[(&str, Rule)]) -> Result<u64, String> {
     let mut conn = Connection::open(&step.new).map_err(|e| e.to_string())?;
     conn.busy_timeout(Duration::from_millis(5000))
         .map_err(|e| e.to_string())?;
@@ -244,7 +261,7 @@ fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
     // Every non-empty old table must be listed, or it would be dropped when
     // the old file is set aside.
     for t in &old_tables {
-        if !tables_to_merge.contains(&t.as_str())
+        if !rules.iter().any(|(n, _)| n == t)
             && count(&tx, "old", t).map_err(|e| e.to_string())? > 0
         {
             return Err(format!(
@@ -253,7 +270,7 @@ fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
         }
     }
     let mut inserted = 0u64;
-    for table in tables_to_merge {
+    for (table, rule) in rules {
         if !old_tables.iter().any(|t| t == table) {
             continue;
         }
@@ -273,16 +290,78 @@ fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
             .map(|c| q(c))
             .collect();
         let list = common.join(", ");
-        let n = tx
-            .execute(
-                &format!(
-                    "INSERT OR IGNORE INTO main.{t} ({list}) SELECT {list} FROM old.{t}",
+        let pks = pk_columns(&tx, table)?;
+        let sql = match rule {
+            Rule::Ignore => format!(
+                "INSERT OR IGNORE INTO main.{t} ({list}) SELECT {list} FROM old.{t}",
+                t = q(table)
+            ),
+            Rule::Newer(col) => {
+                let sets: Vec<String> = common
+                    .iter()
+                    .filter(|c| !pks.iter().any(|p| &q(p) == *c))
+                    .map(|c| format!("{c} = excluded.{c}"))
+                    .collect();
+                if !common.contains(&q(col)) || sets.is_empty() {
+                    return Err(format!("table {table} cannot be merged by {col}"));
+                }
+                let key = pks.iter().map(|p| q(p)).collect::<Vec<_>>().join(", ");
+                format!(
+                    "INSERT INTO main.{t} ({list}) SELECT {list} FROM old.{t} WHERE true \
+                     ON CONFLICT ({key}) DO UPDATE SET {sets} \
+                     WHERE excluded.{c} > main.{t}.{c}",
+                    t = q(table),
+                    sets = sets.join(", "),
+                    c = q(col)
+                )
+            }
+            Rule::Series(group) => {
+                if group.iter().any(|g| !common.contains(&q(g))) {
+                    return Err(format!("table {table} lacks a series column"));
+                }
+                let on = group
+                    .iter()
+                    .map(|g| format!("n.{c} IS o.{c}", c = q(g)))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                let o_list = common
+                    .iter()
+                    .map(|c| format!("o.{c}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "INSERT OR IGNORE INTO main.{t} ({list}) SELECT {o_list} FROM old.{t} o \
+                     WHERE NOT EXISTS (SELECT 1 FROM main.{t} n WHERE {on})",
                     t = q(table)
-                ),
-                [],
-            )
-            .map_err(|e| e.to_string())?;
+                )
+            }
+        };
+        let n = tx.execute(&sql, []).map_err(|e| e.to_string())?;
         inserted += n as u64;
+        if let Rule::Series(group) = rule {
+            // Every old series must exist in the new file, whole or not.
+            let cols = group.iter().map(|g| q(g)).collect::<Vec<_>>().join(", ");
+            let on = group
+                .iter()
+                .map(|g| format!("n.{c} IS o.{c}", c = q(g)))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            let lost: i64 = tx
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM (SELECT DISTINCT {cols} FROM old.{t}) o \
+                         WHERE NOT EXISTS (SELECT 1 FROM main.{t} n WHERE {on})",
+                        t = q(table)
+                    ),
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if lost > 0 {
+                return Err(format!("{lost} series of {table} were not merged"));
+            }
+            continue;
+        }
         // Every old row must now exist in the new file, by the primary key.
         let missing: i64 = tx
             .query_row(
@@ -294,9 +373,8 @@ fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        // A row whose key exists with different content stays as the new
-        // file has it (the newer write wins), so only rows whose key is
-        // absent count as lost.
+        // A row whose key exists with different content stays as its rule
+        // says, so only rows whose key is absent count as lost.
         if missing > 0 {
             let lost = lost_rows(&tx, table, &common)?;
             if lost > 0 {
@@ -306,6 +384,21 @@ fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(inserted)
+}
+
+/// The primary key columns of `table` in `main`, in key order.
+fn pk_columns(conn: &Connection, table: &str) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA main.table_info({})", q(table)))
+        .map_err(|e| e.to_string())?;
+    let mut cols: Vec<(i64, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, i64>(5)?, r.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .filter(|(pk, _)| *pk > 0)
+        .collect();
+    cols.sort();
+    Ok(cols.into_iter().map(|(_, n)| n).collect())
 }
 
 fn has_primary_key(conn: &Connection, table: &str) -> Result<bool, String> {
@@ -389,8 +482,13 @@ fn run_locked(step: &Move) -> Result<Outcome, String> {
     } else {
         match step.policy {
             Policy::KeepNew => Outcome::SetAside,
-            Policy::MergeTables(list) => {
-                let inserted = merge(step, list)?;
+            Policy::MergeTables(_) | Policy::Merge(_) => {
+                let rules: Vec<(&str, Rule)> = match step.policy {
+                    Policy::MergeTables(list) => list.iter().map(|t| (*t, Rule::Ignore)).collect(),
+                    Policy::Merge(rules) => rules.to_vec(),
+                    _ => Vec::new(),
+                };
+                let inserted = merge(step, &rules)?;
                 drop(old_conn);
                 set_aside(&step.old)?;
                 drop(writer_lock);
@@ -685,6 +783,81 @@ mod tests {
         fs::write(&stale, b"partial").unwrap();
         migrate(&m).unwrap();
         assert!(!stale.exists());
+    }
+
+    fn make_log(path: &Path, rows: &[(i64, i64, &str, &str)]) {
+        let c = Connection::open(path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE IF NOT EXISTS ev (g INTEGER NOT NULL, n INTEGER NOT NULL, ts TEXT NOT NULL, v TEXT NOT NULL, PRIMARY KEY (g, n));",
+        )
+        .unwrap();
+        for (g, n, ts, v) in rows {
+            c.execute(
+                "INSERT OR REPLACE INTO ev VALUES (?1,?2,?3,?4)",
+                (g, n, ts, v),
+            )
+            .unwrap();
+        }
+    }
+
+    fn log(path: &Path) -> Vec<(i64, i64, String)> {
+        let c = Connection::open(path).unwrap();
+        let mut s = c.prepare("SELECT g, n, v FROM ev ORDER BY g, n").unwrap();
+        s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    static NEWER: &[(&str, Rule)] = &[("ev", Rule::Newer("ts"))];
+    static SERIES: &[(&str, Rule)] = &[("ev", Rule::Series(&["g"]))];
+
+    #[test]
+    fn newer_rule_keeps_the_later_write_from_either_file() {
+        let (m, _d) = step("dm-newer", Policy::Merge(NEWER));
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        make_log(
+            &m.new,
+            &[
+                (1, 1, "2026-01-02", "new-later"),
+                (2, 1, "2026-01-01", "new-older"),
+            ],
+        );
+        make_log(
+            &m.old,
+            &[
+                (1, 1, "2026-01-01", "old-older"),
+                (2, 1, "2026-01-02", "old-later"),
+                (3, 1, "2026-01-01", "only-old"),
+            ],
+        );
+        migrate(&m).unwrap();
+        let got: Vec<String> = log(&m.new).into_iter().map(|r| r.2).collect();
+        assert_eq!(got, vec!["new-later", "old-later", "only-old"]);
+    }
+
+    #[test]
+    fn series_rule_never_mixes_two_histories() {
+        let (m, _d) = step("dm-series", Policy::Merge(SERIES));
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        make_log(&m.new, &[(1, 1, "t", "new-1")]);
+        make_log(
+            &m.old,
+            &[
+                (1, 1, "t", "old-1"),
+                (1, 2, "t", "old-2"),
+                (2, 1, "t", "old-g2"),
+            ],
+        );
+        assert!(matches!(migrate(&m).unwrap(), Outcome::Merged { .. }));
+        assert_eq!(
+            log(&m.new),
+            vec![(1, 1, "new-1".into()), (2, 1, "old-g2".into())]
+        );
+        // Merging again changes nothing.
+        make_log(&m.old, &[(1, 1, "t", "old-1"), (1, 2, "t", "old-2")]);
+        migrate(&m).unwrap();
+        assert_eq!(log(&m.new).len(), 2);
     }
 
     #[test]
