@@ -1,7 +1,7 @@
 # Release channels
 
 A tagged release reaches users through three channels: the GitHub release assets
-(built by the `build` and `checksums` jobs), the Homebrew tap
+(built by the `build` and `checksums` jobs of `release.yml`), the Homebrew tap
 `pragmatic-engineer/homebrew-tap`, and the plugin marketplace
 `pragmatic-engineer/marketplace`. This repo does not push to the last two. Each
 of those repos runs its own daily `release` workflow that reads this repo's latest
@@ -16,6 +16,31 @@ release and updates itself:
 Both create their commit through the GitHub API, so GitHub signs it. A release
 can take up to a day to reach the tap and the marketplace. To update sooner, run
 the `release` workflow by hand in each repo.
+
+## One workflow, one tag prefix per tool
+
+`.github/workflows/release.yml` releases every tool. It runs on a pushed tag
+matching `v*`, `telemetry-v*` or `code-v*`. Its first job, `resolve`, maps the
+prefix to the package, the binaries, the archive shape, the version file and the
+Homebrew tool name, and fails on any other tag. `code-v*` is reserved and fails
+until `crates/code` has a binary.
+
+The jobs after `resolve` are shared. `verify-version` checks the tag against the
+tool's `Cargo.toml` (and, for `v*`, the hooks plugin manifest). `create-release`
+creates the GitHub release when it is missing, with `--latest=false` for every
+prefix except `v`, so the repository's latest release stays on the playbook
+line. `build` compiles the five targets, ad hoc signs the macOS binaries and
+uploads one asset per target. `checksums` writes `SHA256SUMS` and attests the
+assets. `plugin-archive` runs for `v*` only. `notify-tap` sends the tap a
+`tool-released` event with the tool name and tag prefix. It never fails the
+release, and it prints the HTTP status when the tap refuses it, because the
+workflow token may not be allowed to dispatch to another repository. The tap also
+checks daily.
+
+To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
+is always a dry run: it resolves, verifies and builds, and skips release
+creation, uploads, attestation and the tap notice. The tag's version must match
+the files on the ref you run it from.
 
 ## The plugin archive
 
