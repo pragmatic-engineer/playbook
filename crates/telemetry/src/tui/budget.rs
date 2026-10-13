@@ -167,11 +167,11 @@ fn limit_line(pal: &Palette, l: &Limit, now: i64, stale: bool, width: usize) -> 
     let (state, _) = state_seg(pal, l, now);
     segs.push(state);
     if let Some(h) = l.headroom(now) {
-        let dim = fg(pal, pal.fg);
+        let plain = fg(pal, pal.fg);
         segs.push(Seg::text(
             3,
             format!("left {}", amount(l.unit, h.remaining)),
-            dim,
+            plain,
         ));
         segs.push(Seg::text(
             4,
@@ -180,7 +180,7 @@ fn limit_line(pal: &Palette, l: &Limit, now: i64, stale: bool, width: usize) -> 
                 rate(l.unit, h.allowed_per_hour),
                 rate(l.unit, h.allowed_per_day)
             ),
-            dim,
+            plain,
         ));
         segs.push(Seg::text(
             5,
@@ -189,12 +189,12 @@ fn limit_line(pal: &Palette, l: &Limit, now: i64, stale: bool, width: usize) -> 
                 rate(l.unit, h.avg_per_hour),
                 rate(l.unit, h.avg_per_day)
             ),
-            dim,
+            plain,
         ));
         segs.push(Seg::text(
             6,
             format!("proj {}", rate(l.unit, h.projected)),
-            dim,
+            plain,
         ));
     }
     segs.push(Seg::text(

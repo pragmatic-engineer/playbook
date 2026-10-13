@@ -206,7 +206,7 @@ pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
         Constraint::Length(1),
     ])
     .areas(area);
-    let dim = Style::default().fg(pal.color(pal.fg));
+    let plain = Style::default().fg(pal.color(pal.fg));
     let box_ink = Style::default().fg(pal.color(pal.box_proc));
     let title = Line::from(vec![
         Span::styled("\u{256d}\u{2500}\u{2524}", box_ink),
@@ -220,7 +220,7 @@ pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
     ]);
     let note = Line::styled(
         format!("order: {}  {}", view.order.label(), crate::tz::short(now)),
-        dim,
+        plain,
     )
     .right_aligned();
     let block = Block::bordered()
@@ -245,7 +245,13 @@ pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
         let head = [
             "state", "session", "repo", "branch", "worktree", "link", "last", "ctx", "cost",
         ];
-        let header = Row::new(head.map(|h| Cell::from(h).style(dim)));
+        let header = Row::new(head.map(|h| {
+            Cell::from(h).style(
+                Style::default()
+                    .fg(pal.color(pal.title))
+                    .add_modifier(Modifier::BOLD),
+            )
+        }));
         let rows: Vec<Row> = view
             .records
             .iter()
@@ -296,14 +302,14 @@ pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
     };
     let style = match view.current() {
         Some(r) if r.needs_attention => Style::default().fg(pal.color(pal.error)),
-        _ => dim,
+        _ => plain,
     };
     frame.render_widget(
         Paragraph::new(vec![
             Line::styled(fit(&suggestion, usize::from(hint.width)), style),
             Line::styled(
                 " Suggestions only: nothing here closes, removes or stops anything.",
-                dim,
+                plain,
             ),
         ]),
         hint,
@@ -312,7 +318,7 @@ pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
 }
 
 fn footer_line(view: &SessionsView, pal: &Palette, now: i64) -> Line<'static> {
-    let dim = Style::default().fg(pal.color(pal.fg));
+    let plain = Style::default().fg(pal.color(pal.fg));
     let keys = Style::default()
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD);
@@ -325,7 +331,7 @@ fn footer_line(view: &SessionsView, pal: &Palette, now: i64) -> Line<'static> {
         ("q", "quit"),
     ] {
         spans.push(Span::styled(key, keys));
-        spans.push(Span::styled(format!(" {label} "), dim));
+        spans.push(Span::styled(format!(" {label} "), plain));
     }
     let status = match (&view.error, view.read_at) {
         (Some(e), _) => format!(" refresh failed: {e}"),
@@ -340,7 +346,7 @@ fn footer_line(view: &SessionsView, pal: &Palette, now: i64) -> Line<'static> {
     let style = if view.error.is_some() {
         Style::default().fg(pal.color(pal.error))
     } else {
-        dim
+        plain
     };
     spans.push(Span::styled(status, style));
     Line::from(spans)

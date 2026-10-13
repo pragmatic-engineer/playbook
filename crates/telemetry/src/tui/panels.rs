@@ -534,7 +534,7 @@ fn change_style(pal: &Palette, amount: f64) -> Style {
     } else if amount < 0.0 {
         fg(pal, pal.live)
     } else {
-        fg(pal, pal.fg)
+        Style::default()
     }
 }
 
@@ -614,7 +614,7 @@ pub fn models(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
                         let delta = cost_change(p);
                         let percent = Change::of(p.current.cost_usd, p.previous.cost_usd).percent;
                         cells.extend([
-                            num(money(p.previous.cost_usd)).style(fg(pal, pal.fg)),
+                            num(money(p.previous.cost_usd)).style(Style::default()),
                             change_cell(pal, signed_money(delta), delta),
                             change_cell(
                                 pal,
@@ -850,11 +850,15 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
                 .tools
                 .iter()
                 .map(|t| {
-                    let rate_color = if t.failures > 0 { pal.warn } else { pal.fg };
+                    let rate_style = if t.failures > 0 {
+                        fg(pal, pal.warn)
+                    } else {
+                        Style::default()
+                    };
                     let mut cells = vec![
                         Cell::from(fit(&t.name, w[0])),
                         num(t.calls.to_string()),
-                        num(percent(t.error_rate())).style(fg(pal, rate_color)),
+                        num(percent(t.error_rate())).style(rate_style),
                         num(duration_ms(t.avg_ms())),
                         num(duration_ms(t.max_ms as f64)),
                     ];
@@ -862,11 +866,11 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
                         Some(p) => {
                             let delta = t.avg_ms() - p.avg_ms();
                             let pct = Change::of(t.avg_ms(), p.avg_ms()).percent;
-                            cells.push(num(duration_ms(p.avg_ms())).style(fg(pal, pal.fg)));
+                            cells.push(num(duration_ms(p.avg_ms())).style(Style::default()));
                             cells.push(change_cell(pal, signed_percent(pct, t.calls > 0), delta));
                         }
                         None => {
-                            cells.push(num("-").style(fg(pal, pal.fg)));
+                            cells.push(num("-").style(Style::default()));
                             cells.push(change_cell(pal, "new".to_string(), 0.0));
                         }
                     }
@@ -1004,7 +1008,7 @@ fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) 
                         let pct = Change::of(f.now, b).percent;
                         // A rise reads as a warning unless a rise is the good news.
                         let tone = if f.better_up { -delta } else { delta };
-                        cells.push(num(text.clone()).style(fg(pal, pal.fg)));
+                        cells.push(num(text.clone()).style(Style::default()));
                         cells.push(change_cell(pal, signed_percent(pct, f.now > 0.0), tone));
                     }
                     cells

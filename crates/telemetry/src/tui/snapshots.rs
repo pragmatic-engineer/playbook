@@ -472,6 +472,21 @@ fn the_default_theme_paints_a_black_ground_and_gray_text() {
     assert_eq!(buf[(x, y)].fg, rgb(0xcc, 0xcc, 0xcc));
 }
 
+#[test]
+fn footer_and_header_text_use_the_main_text_color_not_the_dim_graph_color() {
+    let buf = buffer(&app(Theme::Standard), 100, 30);
+    let area = buf.area;
+    for y in [area.bottom() - 1, 1] {
+        for x in area.left()..area.right() {
+            let cell = &buf[(x, y)];
+            if cell.symbol().trim().is_empty() {
+                continue;
+            }
+            assert_ne!(cell.fg, rgb(0x60, 0x60, 0x60), "dim text at {x},{y}");
+        }
+    }
+}
+
 fn panels() -> crate::tui::view::Panels {
     crate::tui::view::layout(ratatui::layout::Rect::new(0, 0, 100, 30))
 }
