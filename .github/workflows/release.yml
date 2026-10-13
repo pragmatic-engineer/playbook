@@ -53,9 +53,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Fail before spending five build legs on a version mismatch. The manifest
-  # version is user-visible through `claude plugin details`, so a binary whose
-  # version contradicts the manifest must never publish.
+  # Fail before spending five build legs on a version mismatch. The hooks
+  # manifest version is user-visible through `claude plugin details`, so a
+  # binary whose version contradicts the manifest must never publish. The
+  # skills plugin has its own version line in pragmatic-engineer/skills.
   verify-version:
     runs-on: ubuntu-latest
     permissions:
@@ -73,23 +74,21 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Tag, Cargo.toml and both plugin manifests must agree
+      - name: Tag, Cargo.toml and the hooks plugin manifest must agree
         id: check
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           tag_version="${tag#v}"
           cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-          plugin_version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' .claude-plugin/plugin.json | head -1)"
           hooks_version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' .claude-plugin/hooks.plugin.json | head -1)"
 
           echo "tag:         $tag (version $tag_version)"
           echo "Cargo.toml:  $cargo_version"
-          echo "plugin.json: $plugin_version"
           echo "hooks.plugin.json: $hooks_version"
 
-          if [ "$tag_version" != "$cargo_version" ] || [ "$tag_version" != "$plugin_version" ] || [ "$tag_version" != "$hooks_version" ]; then
-            echo "::error::version mismatch: tag=$tag_version Cargo.toml=$cargo_version plugin.json=$plugin_version hooks.plugin.json=$hooks_version. All four must agree before publishing." >&2
+          if [ "$tag_version" != "$cargo_version" ] || [ "$tag_version" != "$hooks_version" ]; then
+            echo "::error::version mismatch: tag=$tag_version Cargo.toml=$cargo_version hooks.plugin.json=$hooks_version. All three must agree before publishing." >&2
             exit 1
           fi
           echo "version=$tag_version" >> "$GITHUB_OUTPUT"
@@ -267,13 +266,13 @@ jobs:
             dist/playbook-*
             dist/SHA256SUMS
 
-  # Builds the two trimmed plugin archives the marketplace points at (the
-  # `archive` source, Claude Code 2.1.224+). `playbook` holds the skills,
-  # commands and agents and has no hooks. `playbook-hooks` holds the hooks, the
-  # bin/ shim and the installer. Each file list is an allowlist that
-  # tests/plugin_archive.rs guards, and both zips are cut by the same script
-  # that test runs. Neither name matches the checksums job's
-  # `playbook-<version>-*` pattern, so that job still sees exactly five files.
+  # Builds the trimmed hooks plugin archive the marketplace points at (the
+  # `archive` source, Claude Code 2.1.224+). `playbook-hooks` holds the hooks,
+  # the bin/ shim and the installer. The file list is an allowlist that
+  # tests/plugin_archive.rs guards, and the zip is cut by the same script that
+  # test runs. The skills plugin is served from pragmatic-engineer/skills. The
+  # name does not match the checksums job's `playbook-<version>-*` pattern, so
+  # that job still sees exactly five files.
   plugin-archive:
     needs: verify-version
     runs-on: ubuntu-latest
@@ -302,7 +301,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build both archives from their allowlists
+      - name: Build the archive from its allowlist
         id: build
         env:
           VERSION: ${{ needs.verify-version.outputs.version }}
@@ -335,16 +334,9 @@ jobs:
             fi
             echo "$name files: $count, sha256: $(shasum -a 256 "$asset" | cut -d' ' -f1)"
           }
-          build playbook-plugin .claude-plugin/archive-files.txt
           build playbook-hooks-plugin .claude-plugin/archive-hooks-files.txt
-          # The skills plugin must stay free of hooks and of the binary.
-          if grep -qE '(^|/)hooks\.json$|^bin/|^install\.sh$' dist/playbook-plugin.files.txt; then
-            echo "::error::the playbook archive holds hooks or the binary shim:" >&2
-            grep -E '(^|/)hooks\.json$|^bin/|^install\.sh$' dist/playbook-plugin.files.txt >&2
-            exit 1
-          fi
 
-      - name: Upload the archives to the release
+      - name: Upload the archive to the release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.verify-version.outputs.version }}
@@ -355,14 +347,12 @@ jobs:
             exit 1
           }
           gh release upload "${GITHUB_REF_NAME}" \
-            "dist/playbook-plugin-${VERSION}.zip" \
             "dist/playbook-hooks-plugin-${VERSION}.zip" --clobber
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            dist/playbook-plugin-*.zip
             dist/playbook-hooks-plugin-*.zip
 
   # Fast path to Homebrew: tell the tap a release exists so the formula is
