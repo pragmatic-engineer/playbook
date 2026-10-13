@@ -47,6 +47,7 @@ How the machine works.
 - [Migrations](internals/07-migrations.md): how `playbook init` carries an install across breaking changes, the three migration kinds, and how edits to placed files are detected.
 - [State store](internals/08-state-store.md): where playbook keeps its internal state, how to inspect it with `playbook state list`, and the one-time import of the old files.
 - [Document conversion benchmark](internals/10-document-conversion-benchmark.md): the measurement behind the `docs.convert` default.
+- [Data folder](internals/11-data-folder.md): the one folder that holds every database, what each file is, how older files move in, and how to clean up.
 - [Sessions](internals/09-sessions.md): `playbook sessions`, the read only list of recent sessions with repo, branch, worktree, PR, state, context size and cost, and what it never does.
 
 ## Decisions

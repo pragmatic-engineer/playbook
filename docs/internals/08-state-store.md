@@ -1,6 +1,6 @@
 # State store
 
-Playbook keeps small bits of internal state in the `state` table of its SQLite store, `playbook.db`. This is the same file that holds your config. It replaces a set of loose files.
+Playbook keeps small bits of internal state in the `state` table of its SQLite store, `config.db` in the [data folder](11-data-folder.md) (earlier versions called it `playbook.db`). This is the same file that holds your config. It replaces a set of loose files.
 
 ## What lives there
 
@@ -20,7 +20,7 @@ playbook state list migrations/
 playbook state list --json
 ```
 
-`playbook config export` and `import` cover config only. To copy state to another machine, copy `playbook.db`.
+`playbook config export` and `import` cover config only. To copy state to another machine, copy `~/.config/playbook/data/config.db`.
 
 ## The one-time import
 
@@ -33,4 +33,4 @@ The import is one transaction. After it commits, each old file is renamed to `<n
 
 ## Safety
 
-The auto-mode guard already blocks agents from touching `playbook.db`, `playbook.db-wal` and `playbook.db-shm`, so the state is covered by the same rule as config.
+The auto-mode guard blocks agents from touching `config.db`, `memory.db`, their `-wal` and `-shm` files, the data folder and the old `playbook.db`, so the state is covered by the same rule as config.

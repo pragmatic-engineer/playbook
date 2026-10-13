@@ -76,7 +76,7 @@ pbtop
 
 The formula installs two commands that are the same program: the short `pbtop`, which is the one to type (`pbtop`, `pbtop --summary`, `pbtop --json`, `pbtop --range 30d`), and the long `playbook-telemetry`, which suits scripts. Release archives for macOS, Linux and Windows are on the [playbook-telemetry releases page](https://github.com/pragmatic-engineer/playbook-telemetry/releases/latest) (from version 0.1.8 on, tags named `telemetry-vX.Y.Z` in the playbook repository), and the [crate README](../../crates/telemetry/README.md) covers `cargo` builds. Everything stays on your machine.
 
-The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/config.json`. See [Config keys](04-config-keys.md).
+The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/data/config.db`. See [Config keys](04-config-keys.md).
 
 ### Coming: the standalone code index
 
@@ -208,7 +208,7 @@ playbook uninstall --yes       # remove it
 
 It removes only what playbook placed: the hook entries and status line in `settings.json`, the launcher block in your rc files, and the files under `~/.config/playbook` that playbook copied (such as the system prompt). Without `--yes` it lists the plan and exits with status 1.
 
-Everything else stays: the rest of `settings.json` and your rc files, `.settings.base.json`, `backups/`, memory and all runtime state. Each changed file is backed up first (`settings.json.bak.<epoch>`). A status line script or system prompt you edited by hand is kept. If `settings.json` cannot be edited, such as invalid JSON, the placed files and the binary stay too.
+Everything else stays: the rest of `settings.json` and your rc files, `.settings.base.json`, `backups/`, memory, the [data folder](../internals/11-data-folder.md) with every database, and all runtime state. Each changed file is backed up first (`settings.json.bak.<epoch>`). A status line script or system prompt you edited by hand is kept. If `settings.json` cannot be edited, such as invalid JSON, the placed files and the binary stay too.
 
 At the end it lists the manual steps that still apply, because playbook never changes Claude Code's plugins: `claude plugin uninstall playbook@pragmatic-engineer` while the plugin is installed, and `claude plugin marketplace remove pragmatic-engineer` while the marketplace is listed.
 

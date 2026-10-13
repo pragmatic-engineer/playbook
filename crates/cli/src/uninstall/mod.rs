@@ -7,8 +7,8 @@
 //! `init` wrote into `settings.json`, the managed launcher block in the rc
 //! files, the files `init` copies under `~/.config/playbook`, and the two
 //! installer scripts in `~/.claude`. The binary and its rc `PATH` block go
-//! only on request. Memory, settings the user owns, sessions, history and
-//! earlier backups are never touched.
+//! only on request. Memory, the data folder with every database, settings the
+//! user owns, sessions, history and earlier backups are never touched.
 
 pub mod style;
 
