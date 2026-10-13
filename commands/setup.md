@@ -87,12 +87,13 @@ non-interactive run would contradict what `--yes` says it does.
 `playbook init` always runs. This command has no terminal, so init does not ask its own questions and uses its defaults (hooks, settings and PATH on), plus the launcher and system prompt flags you built above. It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder. Then check the tools the plugin needs and install only the missing ones:
 
 ```bash
-test -n "$CLAUDE_PLUGIN_ROOT" || { echo "CLAUDE_PLUGIN_ROOT is unset; run setup from the plugin"; exit 1; }
-CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" playbook init [flags]
-playbook deps ensure "${CLAUDE_PLUGIN_ROOT}/Brewfile"
+playbook init [flags]
+playbook deps ensure --builtin
 ```
 
-If `playbook init` exits non-zero, still run the second command, then report which init steps failed. If it fails with "unexpected argument", the installed binary is older than the plugin: run `playbook init` again without that flag and tell the user to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`. If `playbook deps --help` fails the same way, skip the second command and say so.
+The binary carries its own settings template, system prompt and Brewfile, so neither command needs a plugin file.
+
+If `playbook init` exits non-zero, still run the second command, then report which init steps failed. If it fails with "unexpected argument", the installed binary is older than the plugin: run `playbook init` again without that flag and tell the user to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`. If init reports the settings step skipped with "no template shipped", the binary is also older than the plugin: give the same upgrade advice, because no guards were wired. If `playbook deps ensure --builtin` fails the same way, skip the second command and say so.
 
 ## Step 4: Report
 

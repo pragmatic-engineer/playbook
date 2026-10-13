@@ -1,0 +1,30 @@
+# Files shipped in playbook-hooks-plugin-<version>.zip, the `playbook-hooks`
+# plugin: everything that needs the playbook binary. One git pathspec per line.
+# An explicit allowlist: a file that is not listed here is NOT in the
+# marketplace install. tests/plugin_archive.rs keeps this list honest.
+#
+# The skills, commands and agents ship in the other plugin,
+# .claude-plugin/archive-files.txt. No path is listed in both, except the
+# licence and readme files.
+
+# The manifest. build-plugin-archive.sh renames it to .claude-plugin/plugin.json
+# inside the zip, because a plugin root holds one manifest.
+.claude-plugin/hooks.plugin.json
+
+# SessionStart, WorktreeCreate and WorktreeRemove hooks
+hooks/hooks.json
+
+# Bootstrap shim: Claude Code puts a plugin's bin/ on the Bash tool's PATH, so
+# `playbook` resolves with only this plugin installed. It runs install.sh when
+# the binary is missing, so the installer ships too.
+bin/playbook
+install.sh
+
+# Seed files for `playbook init`, which also embeds a copy of each
+settings.shared.json
+prompts/SYSTEM_PROMPT.md
+Brewfile
+
+LICENSE
+NOTICE
+README.md

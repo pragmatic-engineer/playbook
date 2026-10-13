@@ -428,6 +428,7 @@ Subcommands: `ensure`
 Keep each tool on PATH and install only the missing ones with Homebrew, from the `brew` and `tap` lines of a Brewfile
 
 - `<BREWFILE>`: Brewfile to read; defaults to `Brewfile` in the current directory
+- `--builtin`: Read the Brewfile built into this binary instead of a file
 
 ### `playbook doc`
 

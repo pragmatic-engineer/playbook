@@ -1754,7 +1754,11 @@ pub enum DepsCommand {
     /// Homebrew, from the `brew` and `tap` lines of a Brewfile.
     Ensure {
         /// Brewfile to read; defaults to `Brewfile` in the current directory.
+        #[arg(conflicts_with = "builtin")]
         brewfile: Option<PathBuf>,
+        /// Read the Brewfile built into this binary instead of a file.
+        #[arg(long)]
+        builtin: bool,
     },
 }
 

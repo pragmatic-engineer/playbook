@@ -187,3 +187,45 @@ fn a_missing_brewfile_is_a_clean_no_op() {
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("no Brewfile at"));
 }
+
+#[test]
+fn builtin_and_an_explicit_brewfile_are_mutually_exclusive() {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["deps", "ensure", "--builtin", "Brewfile"])
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot be used with"));
+}
+
+#[test]
+fn builtin_reads_the_brewfile_compiled_into_the_binary() {
+    let d = scratch("builtin");
+    let l = d.join("brew.log");
+    brew(&d, &l, "", 0);
+    let home = d.join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["deps", "ensure", "--builtin"])
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", d.display()))
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(!stderr.contains("no Brewfile at"), "{stderr}");
+    let embedded = home
+        .join(".config/playbook/embedded")
+        .join(env!("CARGO_PKG_VERSION"))
+        .join("Brewfile");
+    assert!(embedded.is_file(), "{} was not written", embedded.display());
+    assert!(
+        log(&l).contains("tap atlassian/acli"),
+        "the built-in Brewfile's tap line was not read: {}",
+        log(&l)
+    );
+}
