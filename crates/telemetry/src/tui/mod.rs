@@ -9,8 +9,8 @@ pub mod app;
 pub mod budget;
 pub mod chart;
 pub mod data;
-pub mod egg;
 pub mod fmt;
+pub mod icon;
 pub mod keys;
 pub mod notice;
 pub mod panels;
@@ -71,6 +71,17 @@ fn event_loop(
     // NO_COLOR counts when it is set to anything but empty.
     app.no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     app.theme = start_theme(app.no_color);
+    let env = |k: &str| std::env::var(k).ok();
+    app.icon = icon::Icon::detect(
+        app.no_color,
+        env("TERM").as_deref(),
+        [
+            env("LC_ALL").as_deref(),
+            env("LC_CTYPE").as_deref(),
+            env("LANG").as_deref(),
+        ],
+        env("PBTOP_ICON_WIDTH").as_deref(),
+    );
     app.depth = ColorDepth::detect(
         std::env::var("COLORTERM").ok().as_deref(),
         std::env::var("TERM").ok().as_deref(),
@@ -89,6 +100,7 @@ fn event_loop(
                 v,
                 &app.theme.palette(app.depth),
                 crate::util::time::now_secs(),
+                app.icon,
             ),
             None => view::render(frame, &app),
         })?;

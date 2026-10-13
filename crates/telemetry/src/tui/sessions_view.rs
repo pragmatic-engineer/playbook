@@ -196,7 +196,13 @@ fn state_ink(pal: &Palette, r: &Record) -> ratatui::style::Color {
 
 /// Draws the whole screen: a table, the suggestion for the selected session,
 /// and the footer with the keys.
-pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
+pub fn render(
+    frame: &mut Frame,
+    view: &SessionsView,
+    pal: &Palette,
+    now: i64,
+    icon: super::icon::Icon,
+) {
     let area = frame.area();
     let base = Style::default().fg(pal.color(pal.fg)).bg(pal.color(pal.bg));
     frame.buffer_mut().set_style(area, base);
@@ -210,6 +216,7 @@ pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
     let box_ink = Style::default().fg(pal.color(pal.box_proc));
     let title = Line::from(vec![
         Span::styled("\u{256d}\u{2500}\u{2524}", box_ink),
+        Span::styled(icon.prefix(), box_ink),
         Span::styled(
             "Sessions",
             Style::default()
@@ -350,6 +357,7 @@ fn footer_line(view: &SessionsView, pal: &Palette, now: i64) -> Line<'static> {
 mod tests {
     use super::*;
     use crate::session_view::{Place, Pr, PrKind};
+    use crate::tui::icon::Icon;
     use crate::tui::theme::{ColorDepth, Theme};
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::KeyEventKind;
@@ -401,7 +409,9 @@ mod tests {
     fn screen(view: &SessionsView, width: u16, height: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let pal = Theme::default().palette(ColorDepth::detect(None, None));
-        terminal.draw(|f| render(f, view, &pal, NOW)).unwrap();
+        terminal
+            .draw(|f| render(f, view, &pal, NOW, Icon::Off))
+            .unwrap();
         let buffer = terminal.backend().buffer().clone();
         (0..height)
             .map(|y| {

@@ -10,6 +10,7 @@
 use super::app::App;
 use super::data::Data;
 use super::data::LimitsView;
+use super::icon::Icon;
 use super::sort::Panel;
 use super::theme::{ColorDepth, Theme};
 use super::view::render;
@@ -811,4 +812,34 @@ fn the_tools_view_is_readable_at_the_minimum_size_and_without_a_comparison() {
         text.contains("API errors") && !text.contains("before"),
         "{text}"
     );
+}
+
+fn top_row(icon: Icon) -> String {
+    let mut a = app(Theme::Dark);
+    a.icon = icon;
+    draw(&a, 100, 30)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[test]
+fn the_header_title_starts_with_the_tv_in_both_width_modes() {
+    let wide = top_row(Icon::Wide);
+    // The buffer keeps a blank cell behind a two-cell emoji, so the wide row
+    // reads emoji, blank, one pad. The narrow row has two pads after the blank.
+    assert!(wide.contains("\u{2524}\u{1F4FA}  playbook usage"), "{wide}");
+    let narrow = top_row(Icon::Narrow);
+    assert!(
+        narrow.contains("\u{2524}\u{1F4FA}   playbook usage"),
+        "{narrow}"
+    );
+}
+
+#[test]
+fn the_header_has_no_icon_in_plain_text_mode() {
+    let plain = top_row(Icon::Off);
+    assert!(plain.contains("\u{2500}\u{2524}playbook usage"), "{plain}");
+    assert!(!plain.contains('\u{1F4FA}'));
 }
