@@ -152,6 +152,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         );
     }
     frame.render_widget(Paragraph::new(footer(app, &pal, area.width)), p.footer);
+    if app.egg.visible(std::time::Instant::now()) {
+        let dim = Style::default().fg(pal.color(pal.graph_text));
+        frame.render_widget(ratatui::widgets::Clear, p.footer);
+        frame.render_widget(
+            Paragraph::new(Line::styled(format!(" {}", super::egg::BANNER), dim)),
+            p.footer,
+        );
+    }
     if let Some(scroll) = app.help {
         render_help(frame, area, scroll, &pal);
     }

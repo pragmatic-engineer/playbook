@@ -151,6 +151,8 @@ pub struct App {
     pub telemetry: Option<crate::telemetry_status::Mode>,
     /// How often the snapshot is refreshed, shown in the footer.
     pub refresh_every: Duration,
+    /// The hidden banner; see `egg`.
+    pub egg: super::egg::Egg,
 }
 
 /// What the loop must do after a key.
@@ -189,6 +191,7 @@ impl App {
             sources: String::new(),
             telemetry: None,
             refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
+            egg: super::egg::Egg::default(),
         }
     }
 
@@ -394,8 +397,16 @@ impl App {
             return self.help_key(key.code, ctrl);
         }
         match keys::lookup(key.code, ctrl) {
-            Some(binding) => self.run(binding.cmd, key.code),
-            None => Effect::None,
+            Some(binding) => {
+                self.egg.reset();
+                self.run(binding.cmd, key.code)
+            }
+            None => {
+                if let (KeyCode::Char(ch), false) = (key.code, ctrl) {
+                    self.egg.feed(ch, std::time::Instant::now());
+                }
+                Effect::None
+            }
         }
     }
 
@@ -1190,6 +1201,26 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn typing_the_hidden_sequence_shows_the_banner_and_a_bound_key_cancels_it() {
+        let mut shown = charted(Range::LastDays(30), 30);
+        let mut cancelled = charted(Range::LastDays(30), 30);
+
+        for ch in "xyzzy".chars() {
+            shown.key(press(KeyCode::Char(ch)));
+        }
+        for ch in "xy".chars() {
+            cancelled.key(press(KeyCode::Char(ch)));
+        }
+        cancelled.key(press(KeyCode::Char('j')));
+        for ch in "zzy".chars() {
+            cancelled.key(press(KeyCode::Char(ch)));
+        }
+
+        assert!(shown.egg.visible(std::time::Instant::now()));
+        assert!(!cancelled.egg.visible(std::time::Instant::now()));
     }
 
     #[test]
