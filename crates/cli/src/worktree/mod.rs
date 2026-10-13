@@ -268,6 +268,20 @@ pub struct WorktreeEntry {
     pub lock_reason: Option<String>,
 }
 
+/// Removes the data folder databases of the worktree that was at `path`, once
+/// it is gone. Two paths can slugify to one worktree id, so nothing is
+/// removed while a still-registered worktree has the same id.
+fn remove_data_of(repo_root: &Path, home: &Path, repo_slug: Option<&str>, path: &Path) {
+    let (Some(slug), Some(live)) = (repo_slug, live_worktree_ids(repo_root)) else {
+        return;
+    };
+    let id = crate::common::paths::worktree_id_for(path);
+    if live.contains(&id) {
+        return;
+    }
+    crate::common::data::remove_worktree_dbs(&crate::common::data::data_dir_from(home), slug, &id);
+}
+
 /// The worktree ids of every worktree registered against `repo_root`, or
 /// `None` when git cannot say (so nothing is reported as orphaned).
 pub fn live_worktree_ids(repo_root: &Path) -> Option<Vec<String>> {
@@ -793,6 +807,7 @@ pub fn remove(
     let landed = is_landed(&entry, convention, &lock, &policy, &repo, now_epoch, 0);
     let report = decide_and_report(&entry, landed, &lock, repo_root, false);
     if report.ends_with(": removed") {
+        remove_data_of(repo_root, home, repo_slug, &entry.path);
         Ok(report)
     } else {
         Err(report.trim_start_matches("worktree ").to_string())
@@ -892,14 +907,7 @@ pub fn sweep(
             log_removal(home, now_epoch, &line);
         }
         if !dry_run && line.ends_with(": removed") {
-            // The worktree's databases in the data folder go with it.
-            if let Some(slug) = repo_slug {
-                crate::common::data::remove_worktree_dbs(
-                    &crate::common::data::data_dir_from(home),
-                    slug,
-                    &crate::common::paths::worktree_id_for(&entry.path),
-                );
-            }
+            remove_data_of(repo_root, home, repo_slug, &entry.path);
         }
         report.push(line);
     }

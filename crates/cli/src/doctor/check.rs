@@ -564,9 +564,9 @@ fn data_rows(env: &Env) -> Vec<Row> {
     rows
 }
 
-/// Databases in the data folder whose worktree no longer exists. They are
-/// safe to delete: the code index is a cache, and a removed worktree's gate
-/// records are finished.
+/// Databases in the data folder with no worktree of this clone. They belong
+/// to removed worktrees, or to another clone of the same repo, so the row
+/// only reports them.
 fn orphan_rows(env: &Env, data: &Path) -> Vec<Row> {
     let (Some(root), Some(slug)) = (&env.repo_root, &env.repo_slug) else {
         return Vec::new();
@@ -586,12 +586,12 @@ fn orphan_rows(env: &Env, data: &Path) -> Vec<Row> {
         "-",
         Level::Info,
         format!(
-            "{} database file(s) belong to removed worktrees of {slug}: {}",
+            "{} database file(s) of {slug} match no worktree of this clone (removed, or another clone): {}",
             orphans.len(),
             list.join(", ")
         ),
     )
-    .hint("they are safe to delete; `playbook worktree sweep` removes them with their worktree")]
+    .hint("the code index is a cache and safe to delete; check other clones before deleting gate records")]
 }
 
 fn migration_rows(env: &Env) -> Vec<Row> {
