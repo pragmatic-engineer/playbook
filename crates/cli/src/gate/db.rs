@@ -119,6 +119,32 @@ fn ensure_stuck_verdict(conn: &rusqlite::Connection) -> Result<(), String> {
     }
 }
 
+/// The gate tables the move into the data folder merges.
+const GATE_TABLES: &[&str] = &["gate_phases", "gate_rounds"];
+
+/// The gate database of the current worktree, inside the data folder. First
+/// completes the legacy repo-local move into `dest_base`, then moves
+/// `dest_base/state.db` (where earlier versions kept it) to
+/// `data/gate/<owner>/<repo>/<worktree-id>.db`. A failed or deferred move is
+/// not fatal: the new path is used and the next call merges what is left in
+/// the old file, which cannot double count because both tables have primary
+/// keys.
+pub fn resolve_db_path(repo_root: &Path, dest_base: &Path) -> Result<PathBuf, String> {
+    migrate_legacy_repo_local(repo_root, dest_base)?;
+    let new = crate::common::data::scoped_db("gate").ok_or_else(|| {
+        "could not resolve the gate database path; this repo needs a git 'origin' remote and a \
+         resolvable worktree toplevel"
+            .to_string()
+    })?;
+    let step = crate::common::data::migrate::Move {
+        old: dest_base.join("state.db"),
+        new: new.clone(),
+        policy: crate::common::data::migrate::Policy::MergeTables(GATE_TABLES),
+    };
+    let _ = crate::common::data::migrate::migrate_with_notice(&step, "gate");
+    Ok(new)
+}
+
 /// Open (creating if missing) the SQLite database at `path`, ensuring the
 /// `gate_phases` schema and pragmas are in place.
 pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {

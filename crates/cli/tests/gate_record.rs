@@ -126,7 +126,8 @@ impl Fixture {
             .expect("playbook binary should spawn")
     }
 
-    fn db_path(&self) -> PathBuf {
+    /// Where earlier versions kept the gate database.
+    fn old_scoped_dir(&self) -> PathBuf {
         self.home
             .join(".config")
             .join("playbook")
@@ -134,7 +135,17 @@ impl Fixture {
             .join("test-owner")
             .join("test-repo")
             .join(worktree_id(&self.repo))
-            .join("state.db")
+    }
+
+    fn db_path(&self) -> PathBuf {
+        self.home
+            .join(".config")
+            .join("playbook")
+            .join("data")
+            .join("gate")
+            .join("test-owner")
+            .join("test-repo")
+            .join(format!("{}.db", worktree_id(&self.repo)))
     }
 }
 
@@ -260,7 +271,7 @@ fn state_db_resolves_under_the_new_repo_and_worktree_scoped_path() {
     );
     assert!(
         f.db_path().is_file(),
-        "expected state.db at the worktree-scoped path {:?}",
+        "expected the gate database in the data folder at {:?}",
         f.db_path()
     );
 }
@@ -326,7 +337,7 @@ fn legacy_claude_state_db_migrates_on_first_gate_record_call() {
         "the legacy state.db should have been moved, not left behind"
     );
     assert_eq!(
-        fs::read_to_string(f.db_path().parent().unwrap().join("plans").join("x.md")).unwrap(),
+        fs::read_to_string(f.old_scoped_dir().join("plans").join("x.md")).unwrap(),
         "plan content",
         "plans/ content must survive the migration"
     );
@@ -486,4 +497,107 @@ fn stuck_flag_stores_stuck_and_rounds_count_up_to_it() {
         .unwrap()
         .unwrap();
     assert_eq!(row.verdict, "STUCK");
+}
+
+fn seed_row(path: &Path, plan: &str, verdict: &str) {
+    let conn = db::open_db(path).expect("seed db");
+    db::upsert_phase(
+        &conn,
+        plan,
+        "spec",
+        verdict,
+        "e",
+        "c",
+        "2026-01-01T00:00:00Z",
+        "h",
+    )
+    .expect("seed row");
+}
+
+#[test]
+fn an_old_worktree_state_db_moves_into_the_data_folder() {
+    // Arrange
+    let f = Fixture::new("data-move");
+    let old = f.old_scoped_dir().join("state.db");
+    seed_row(&old, "plan-old", "PASS");
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act
+    let out = f.run("plan-a", "spec-review", "spec", &input);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    assert!(!old.exists(), "the old file is set aside");
+    assert!(old.with_file_name("state.db.migrated").exists());
+    let conn = db::open_db(&f.db_path()).expect("open new");
+    assert!(db::query_phase(&conn, "plan-old", "spec")
+        .unwrap()
+        .is_some());
+    assert!(db::query_phase(&conn, "plan-a", "spec").unwrap().is_some());
+}
+
+#[test]
+fn old_and_new_gate_databases_merge_without_double_counting() {
+    // Arrange: a database in both places, one shared key.
+    let f = Fixture::new("data-merge");
+    seed_row(&f.db_path(), "shared", "PASS");
+    seed_row(&f.db_path(), "only-new", "PASS");
+    let old = f.old_scoped_dir().join("state.db");
+    seed_row(&old, "shared", "FAIL");
+    seed_row(&old, "only-old", "WARN");
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act: twice, the second must change nothing.
+    let first = f.run("plan-a", "spec-review", "spec", &input);
+    let second = f.run("plan-a", "spec-review", "spec", &input);
+
+    // Assert
+    assert_eq!(first.status.code(), Some(0), "{}", stderr_of(&first));
+    assert_eq!(second.status.code(), Some(0), "{}", stderr_of(&second));
+    let conn = db::open_db(&f.db_path()).expect("open");
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM gate_phases", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 4, "shared, only-new, only-old and plan-a");
+    assert_eq!(
+        db::query_phase(&conn, "shared", "spec")
+            .unwrap()
+            .unwrap()
+            .verdict,
+        "PASS",
+        "the row already in the data folder wins"
+    );
+}
+
+#[test]
+fn a_corrupt_old_state_db_is_left_in_place_and_recording_still_works() {
+    // Arrange
+    let f = Fixture::new("data-corrupt");
+    let old = f.old_scoped_dir().join("state.db");
+    fs::create_dir_all(old.parent().unwrap()).unwrap();
+    fs::write(&old, vec![b'x'; 4096]).unwrap();
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act
+    let out = f.run("plan-a", "spec-review", "spec", &input);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    assert!(old.exists(), "a corrupt file is never touched");
+    assert!(f.db_path().is_file());
+}
+
+#[test]
+fn no_old_database_means_no_leftovers() {
+    // Arrange
+    let f = Fixture::new("data-none");
+    let input = f.write_input("report.md", "VERDICT: PASS");
+
+    // Act
+    let out = f.run("plan-a", "spec-review", "spec", &input);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    assert!(!f.old_scoped_dir().join("state.db").exists());
+    assert!(!f.old_scoped_dir().join("state.db.migrated").exists());
 }

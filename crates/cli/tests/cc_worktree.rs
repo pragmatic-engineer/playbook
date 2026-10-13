@@ -2025,11 +2025,12 @@ mod gate_worktree_scoping {
             let repos_root = home
                 .join(".config")
                 .join("playbook")
-                .join("repos")
+                .join("data")
+                .join("gate")
                 .join("collision-owner")
                 .join("collision-repo");
-            let db_path_a = repos_root.join(worktree_id(&wt_a)).join("state.db");
-            let db_path_b = repos_root.join(worktree_id(&wt_b)).join("state.db");
+            let db_path_a = repos_root.join(format!("{}.db", worktree_id(&wt_a)));
+            let db_path_b = repos_root.join(format!("{}.db", worktree_id(&wt_b)));
             assert_ne!(
                 db_path_a, db_path_b,
                 "the two worktrees must resolve to distinct db files"
