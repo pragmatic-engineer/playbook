@@ -51,5 +51,6 @@ fn check_passes_when_the_map_is_within_budget() {
 fn json_and_check_cannot_be_combined() {
     let out = map(&["--json", "--check"]);
 
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot be used with"));
 }

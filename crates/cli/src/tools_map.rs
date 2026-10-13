@@ -17,13 +17,16 @@ pub const TOKEN_BUDGET: usize = 400;
 
 /// One intent and the command that serves it.
 pub struct Tool {
-    /// Stable id the skills and the CI test use, for example `pr-reply`.
+    /// Stable id for the JSON output and the CI test, for example `pr-reply`.
+    /// Skills name an intent in prose and mark it with this id for the test;
+    /// the text map does not print ids.
     pub intent: &'static str,
     /// The command words before the verb, for example `pr` or `worktree review`.
     pub group: &'static str,
     /// The subcommand or argument that picks the tool, for example `reply`.
     pub verb: &'static str,
-    /// Mandatory flags and placeholders, shown after the verb.
+    /// Flags and placeholders shown after the merged verbs of a line. Not the
+    /// full required set: `playbook <line> --help` and `sample` give that.
     pub args: &'static str,
     /// A real invocation, parsed by clap in a test. Starts with `group verb`.
     pub sample: &'static str,
@@ -312,7 +315,15 @@ pub fn render() -> String {
 pub fn render_json() -> String {
     let rows: Vec<serde_json::Value> = TOOLS
         .iter()
-        .map(|tool| serde_json::json!({ "intent": tool.intent, "command": tool.command() }))
+        .map(|tool| {
+            serde_json::json!({
+                "intent": tool.intent,
+                "command": tool.command(),
+                "group": tool.group,
+                "verb": tool.verb,
+                "args": tool.args,
+            })
+        })
         .collect();
     serde_json::to_string_pretty(&rows).unwrap_or_default()
 }
@@ -360,6 +371,20 @@ mod tests {
     }
 
     #[test]
+    fn every_shown_flag_is_in_the_sample() {
+        for tool in TOOLS {
+            for flag in tool.args.split_whitespace().filter(|w| w.starts_with("--")) {
+                assert!(
+                    tool.sample.split_whitespace().any(|w| w == flag),
+                    "{}: `{flag}` is shown but not in the sample `{}`",
+                    tool.intent,
+                    tool.sample
+                );
+            }
+        }
+    }
+
+    #[test]
     fn intent_ids_are_unique_lowercase_kebab_case() {
         let mut seen = BTreeSet::new();
         for tool in TOOLS {
@@ -400,5 +425,8 @@ mod tests {
         assert_eq!(rows.len(), TOOLS.len());
         assert_eq!(rows[0]["intent"], "plans-dir");
         assert_eq!(rows[0]["command"], "playbook path plans --create");
+        assert_eq!(rows[0]["group"], "path");
+        assert_eq!(rows[0]["verb"], "plans");
+        assert_eq!(rows[0]["args"], "--create");
     }
 }
