@@ -27,7 +27,7 @@ Run `just test` for everything, or `cargo nextest run -p playbook-code --config-
 
 ### Releases
 
-`vX.Y.Z` releases `playbook`. `telemetry-vX.Y.Z` releases `playbook-telemetry`. Pushing the signed tag is enough: `release.yml` creates the release if it is missing (with `--latest=false` for every prefix except `v`, so GitHub's latest release stays on the `v` line), builds and uploads the assets, and stops. The Homebrew tap checks for new releases every 30 minutes and updates its formula. To rehearse, run the `release` workflow by hand with a `tag` such as `v0.25.0` or `telemetry-v0.2.0`: a manual run is always a dry run that builds without publishing.
+`vX.Y.Z` releases `playbook`. `telemetry-vX.Y.Z` releases `playbook-telemetry`. Pushing the signed tag is enough: `release.yml` creates the release if it is missing (with `--latest=false` for every prefix except `v`, so GitHub's latest release stays on the `v` line), builds and uploads the assets, and stops. The Homebrew tap checks for new releases every 30 minutes and updates the matching formula. To rehearse, run the `release` workflow by hand with a `tag` such as `v0.25.0` or `telemetry-v0.2.0`: a manual run is always a dry run that builds without publishing.
 
 ## Editing agents
 

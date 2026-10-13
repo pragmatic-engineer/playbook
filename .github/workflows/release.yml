@@ -7,7 +7,7 @@
 #   telemetry-vX.Y.Z  playbook-telemetry  .tar.gz holding playbook-telemetry and pbtop
 #   code-vX.Y.Z       playbook-code       reserved, fails until crates/code has a binary
 # The first job, `resolve`, maps the prefix to the package, binaries, archive
-# shape and Homebrew tool name and fails on any other tag.
+# shape and tool name and fails on any other tag.
 #
 # The workflow creates the GitHub release for the tag when it does not exist,
 # then builds, ad hoc codesigns and uploads the artefacts plus SHA256SUMS, and
@@ -78,7 +78,6 @@ jobs:
       archive: ${{ steps.map.outputs.archive }}
       cargo_toml: ${{ steps.map.outputs.cargo_toml }}
       tool: ${{ steps.map.outputs.tool }}
-      tag_prefix: ${{ steps.map.outputs.tag_prefix }}
       latest_flag: ${{ steps.map.outputs.latest_flag }}
       is_playbook: ${{ steps.map.outputs.is_playbook }}
       dry_run: ${{ steps.map.outputs.dry_run }}
@@ -147,7 +146,6 @@ jobs:
             echo "archive=${archive}"
             echo "cargo_toml=${cargo_toml}"
             echo "tool=${tool}"
-            echo "tag_prefix=${prefix}"
             echo "latest_flag=${latest_flag}"
             echo "is_playbook=${is_playbook}"
             echo "dry_run=${dry_run}"
