@@ -8,7 +8,7 @@ The quickest route is one command. This page covers every route, requirements, h
 
 | Mode | Commands, in order | You get | You lack |
 |---|---|---|---|
-| Skills only (plugin) | `claude plugin marketplace add pragmatic-engineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer`. Or the install script with `--skills-only`, which does the same and nothing else | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
+| Skills only (plugin) | `claude plugin marketplace add pragmatic-engineer/skills`, then `claude plugin install playbook@pragmatic-engineer`. Or the install script with `--skills-only`, which does the same and nothing else | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
 | Skills plus binary (recommended) | Pick one. Install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash` (installs both plugins). Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init`. Plugins: `claude plugin install playbook@pragmatic-engineer` and `claude plugin install playbook-hooks@pragmatic-engineer`, then `/playbook:setup` | Everything: slash commands, guards, hooks, status line, memory, usage | Nothing |
 
 There are two plugins. `playbook` holds the skills, commands and agents and has no hooks. `playbook-hooks` holds the worktree hooks and the installer shim, and needs the binary. If you installed `playbook` before the split, add the second one with `claude plugin install playbook-hooks@pragmatic-engineer`. `playbook init` and `/playbook:doctor` tell you when it is missing, and playbook never installs a plugin for you.
@@ -90,7 +90,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 **Plugin, then `/playbook:setup`.**
 
 ```bash
-claude plugin marketplace add pragmatic-engineer/marketplace
+claude plugin marketplace add pragmatic-engineer/skills
 claude plugin install playbook@pragmatic-engineer
 claude plugin install playbook-hooks@pragmatic-engineer
 ```

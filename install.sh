@@ -25,7 +25,7 @@
 set -euo pipefail
 
 PLUGIN_REPO="pragmatic-engineer/playbook"
-MARKETPLACE="pragmatic-engineer/marketplace"
+MARKETPLACE="pragmatic-engineer/skills"
 MARKETPLACE_NAME="pragmatic-engineer"
 PLUGIN="playbook@pragmatic-engineer"
 PLUGIN_HOOKS="playbook-hooks@pragmatic-engineer"
