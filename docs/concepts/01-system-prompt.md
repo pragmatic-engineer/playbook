@@ -1,18 +1,18 @@
 # The Custom System Prompt
 
-`prompts/SYSTEM_PROMPT.md` loads at the start of every `ccc` session and sets the persona, output rules, and operating constraints Claude follows from the first token. Without it, Claude starts from its training defaults: generally helpful, but uncalibrated to this workflow. This prompt closes that gap.
+`prompts/SYSTEM_PROMPT.md` loads at the start of every `playbook cc` session and sets the persona, output rules, and operating constraints Claude follows from the first token. Without it, Claude starts from its training defaults: generally helpful, but uncalibrated to this workflow. This prompt closes that gap.
 
 ## How it loads
 
-The `ccc` launcher (`playbook cc launch`, run by the functions `playbook shell-init` prints) passes the file to `claude` via `--system-prompt-file`:
+The `playbook cc` launcher (`playbook cc launch`) passes the file to `claude` via `--system-prompt-file`:
 
 ```sh
 claude --system-prompt-file "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md" ...
 ```
 
-Both `ccc` and `ccd` carry the flag. `ccd` adds `--dangerously-skip-permissions` for unattended work; otherwise they're identical. If you invoke `claude` directly (bypassing `ccc`), the system prompt won't load.
+Both `playbook cc` and `playbook ccd` carry the flag. `playbook ccd` adds `--dangerously-skip-permissions` for unattended work; otherwise they're identical. If you invoke `claude` directly (bypassing `playbook cc`), the system prompt won't load.
 
-The prompt locks in once, at the start of a fresh session. Resumed sessions inherit whatever was loaded when they started. That's the main tradeoff: changes to `SYSTEM_PROMPT.md` don't take effect until you start fresh. Use `ccc fresh` to open a new session, or `ccc clean` to fork the current conversation history into a new one with config reloaded.
+The prompt locks in once, at the start of a fresh session. Resumed sessions inherit whatever was loaded when they started. That's the main tradeoff: changes to `SYSTEM_PROMPT.md` don't take effect until you start fresh. Use `playbook cc fresh` to open a new session, or `playbook cc clean` to fork the current conversation history into a new one with config reloaded.
 
 ## What it defines
 
@@ -48,7 +48,7 @@ The default session starts blank, so you would repeat your preferences every tim
 
 A system prompt is instructions, not enforcement. The model will still drift mid-session, especially on long threads. Hooks (in `hooks/`) are the enforced layer: PreToolUse and PostToolUse callbacks run outside the model's control and don't bend to conversational pressure. The prompt and the hooks are complementary; neither is sufficient alone.
 
-Prompt changes don't apply to resumed sessions. Start fresh with `ccc fresh` or `ccc clean` to pick them up.
+Prompt changes don't apply to resumed sessions. Start fresh with `playbook cc fresh` or `playbook cc clean` to pick them up.
 
 ## See also
 

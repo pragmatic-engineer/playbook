@@ -20,7 +20,7 @@ A plugin with no binary is not a working install. The first `playbook` call from
 | Tool | Status | Why |
 |---|---|---|
 | `claude` v2.1.224 or later | recommended | The marketplace serves a trimmed plugin archive that older versions cannot install. Below that, or missing, `install.sh` skips the plugin step with a hint. The binary, hooks, guards and settings still install. |
-| `bash` or `zsh` | required | The `ccc` and `ccd` shell functions work in both. |
+| `bash` or `zsh` | required | The `playbook` shell wrapper works in both. |
 | `git`, `shasum` | required | Used by hooks and the installer. |
 | `gh` | optional | Status line PR and CI info, and the build attestation check. |
 | `agent-browser` | optional | Browser automation `/playbook:plan` uses for web-only tickets. |
@@ -41,9 +41,9 @@ Pass `--yes` to accept every default. Flags go after `-s --` when piping:
 |---|---|
 | `--yes`, `-y` | Accept every default. |
 | `--skip-plugin`, `--no-setup` | Skip the plugin. Guards, settings and shell wiring still run. |
-| `--aliases` | Install `ccc` and `ccd` without asking. |
+| `--aliases` | Add the `playbook` cd wrapper to your rc file without asking. |
 | `--claude-override` | Make a plain `claude` load the playbook system prompt (needs the launcher line from `--aliases`). |
-| `--short-name` | Add `pb` as a short name for `playbook`, only when `pb` is free (needs the launcher line from `--aliases`). |
+| `--short-name` (`playbook init`) | Define a `pb` shell function for `playbook`, only when `pb` is free. install.sh also links `pb` to `playbook` when the name is free. |
 | `--system-prompt` | Install the system prompt without asking (implies `--aliases`). |
 | `--binary-only` | Binary, `PATH`, guards and settings only. No plugin, launcher, system prompt or prompts. |
 | `--ref <ref>` | Source ref, same as `PLAYBOOK_REF`. |
@@ -168,8 +168,8 @@ Every route ends with `playbook` on `PATH` for each shell start.
 Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a hook runs in a non-interactive `bash -c` with exactly the `PATH` of the process that started Claude Code. So:
 
 - **Started from a terminal:** the inherited `PATH` has the block's directory. Hooks find `playbook`.
-- **Started with `ccc` or `ccd`:** the launcher adds the binary's directory when it is missing.
-- **Started from a desktop app or IDE:** hooks find `playbook` only if its directory is already on that `PATH`. Use `ccc`, or install with `PLAYBOOK_BIN_DIR` set to a directory that environment has.
+- **Started with `playbook cc` or `playbook ccd`:** the launcher adds the binary's directory when it is missing.
+- **Started from a desktop app or IDE:** hooks find `playbook` only if its directory is already on that `PATH`. Use `playbook cc`, or install with `PLAYBOOK_BIN_DIR` set to a directory that environment has.
 
 ## Plugin only and the binary
 
@@ -216,7 +216,7 @@ At the end it lists the manual steps that still apply, because playbook never ch
 
 ## Notes
 
-Edits to `settings.json` or hooks take effect in a fresh session only. Run `ccc fresh` or plain `claude` after changing them. `ccc` warns when a resumed session runs on stale config.
+Edits to `settings.json` or hooks take effect in a fresh session only. Run `playbook cc fresh` or plain `claude` after changing them. `playbook cc` warns when a resumed session runs on stale config.
 
 ## See also
 

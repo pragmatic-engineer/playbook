@@ -41,7 +41,7 @@ The rule is: spend on judgment, save on routine.
 - **Haiku** runs `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer` and `analyst`. The first five apply a decision someone else already made, or classify with a safe fallback, and a wrong answer is cheap to detect and rerun. The last three ran on Haiku after the same bench showed no meaningful loss on real playbook code.
 - **Opus** runs design (`/playbook:plan`, `/playbook:adr`), every `reviewer`, and the `auditor`. A missed finding in a review, or a weak design, costs far more than the extra tokens.
 
-Plugin files name only the alias. `ccc` resolves each to the 5.5 model and passes the previous generation as a fallback. The table, the overrides (`models.<alias>`) and the routing details, including the hook that nudges design prompts toward Opus, are in [Model routing and memory](../internals/02-model-routing-and-memory.md).
+Plugin files name only the alias. `playbook cc` resolves each to the 5.5 model and passes the previous generation as a fallback. The table, the overrides (`models.<alias>`) and the routing details, including the hook that nudges design prompts toward Opus, are in [Model routing and memory](../internals/02-model-routing-and-memory.md).
 
 ## Why effort is a second dial
 
@@ -58,7 +58,7 @@ The rule that produced the current values: **lower effort where the work is mech
 
 The `Agent` tool takes a `model` on each call but has no per-call effort. An agent's effort is fixed by its file. When one role needs two efforts (a quick review of a small diff and a deep one of a risky diff), the role needs two agent definitions.
 
-The variants are not files. Twelve agents times four more tiers would add dozens of descriptions to every session. So `ccc` and `ccd` render only the variants a session can use, from the base agents, into a throwaway session plugin. Nothing is committed, and `agents.variants` (`auto`, `all`, `off`) controls the set. `playbook agents variants` shows what a session would get, and `playbook agents check` fails CI when an agent has no `VARIANTS` entry or a tier cannot render. The orchestrator asks `playbook effort resolve` which agent to spawn, because the user's effort ceilings decide it, then picks by diff size and risk, following the `delegating-subagents` skill.
+The variants are not files. Twelve agents times four more tiers would add dozens of descriptions to every session. So `playbook cc` and `playbook ccd` render only the variants a session can use, from the base agents, into a throwaway session plugin. Nothing is committed, and `agents.variants` (`auto`, `all`, `off`) controls the set. `playbook agents variants` shows what a session would get, and `playbook agents check` fails CI when an agent has no `VARIANTS` entry or a tier cannot render. The orchestrator asks `playbook effort resolve` which agent to spawn, because the user's effort ceilings decide it, then picks by diff size and risk, following the `delegating-subagents` skill.
 
 ### Who decides the effort
 
@@ -71,7 +71,7 @@ Playbook has its own ceiling, the config key `maxEffortLevel` (same name and val
 - Playbook `auto` (the default): playbook adds no ceiling, and Claude Code's applies if it has one.
 - A ceiling never raises anything. An agent that ships at `low` still runs at `low`.
 
-Playbook only reads Claude Code's `maxEffortLevel` (from the user, project and local settings files) and never writes it. When playbook's ceiling is the lower one, the launcher (`ccc` or `ccd`) passes it to that one session with `--settings`, and Claude Code applies it to command, skill and agent effort alike. A session started without the launcher gets no playbook ceiling. `playbook effort` with no level shows both values and the winner, and `--json` prints the same for scripts. Claude Code's own `/effort` and `--effort` still work below the ceiling, and the setting needs Claude Code 2.1.267 or later.
+Playbook only reads Claude Code's `maxEffortLevel` (from the user, project and local settings files) and never writes it. When playbook's ceiling is the lower one, the launcher (`playbook cc` or `playbook ccd`) passes it to that one session with `--settings`, and Claude Code applies it to command, skill and agent effort alike. A session started without the launcher gets no playbook ceiling. `playbook effort` with no level shows both values and the winner, and `--json` prints the same for scripts. Claude Code's own `/effort` and `--effort` still work below the ceiling, and the setting needs Claude Code 2.1.267 or later.
 
 Two more rules sit on top of the ceiling:
 
