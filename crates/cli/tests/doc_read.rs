@@ -272,7 +272,7 @@ fn a_converter_that_runs_too_long_is_stopped_and_cleaned_up() {
 fn a_converter_that_uses_too_much_memory_is_stopped() {
     // Arrange
     let env = Env::new("mem");
-    env.fake("python3 -c \"b = bytearray(300*1024*1024); import time; time.sleep(30)\"");
+    env.fake("python3 -c \"b = b'x' * (300*1024*1024); import time; time.sleep(30)\"");
     env.config("docs.maxMemoryMb", Value::from(64));
     let doc = env.doc("big.pdf", b"%PDF-1.4");
 

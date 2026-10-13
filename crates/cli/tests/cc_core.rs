@@ -67,13 +67,26 @@ fn exists(p: &Path) -> bool {
     p.exists()
 }
 
-/// Sets mtime by writing then backdating through a filetime-free trick: files
-/// are created oldest first with a real sleep, since the port ranks on mtime
-/// and a fabricated ordering would not exercise that.
+/// Pins a file's mtime to `millis` past a fixed whole-second base, so ordering
+/// never depends on the wall clock or on which second a write lands in.
+fn set_mtime_ms(path: &Path, millis: u64) {
+    let when = std::time::UNIX_EPOCH + Duration::from_millis(1_700_000_000_000 + millis);
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .expect("open")
+        .set_modified(when)
+        .expect("set mtime");
+}
+
+fn set_mtime(path: &Path, secs: u64) {
+    set_mtime_ms(path, secs * 1000);
+}
+
 fn age_apart(paths: &[PathBuf]) {
-    for p in paths {
+    for (i, p) in paths.iter().enumerate() {
         fs::write(p, "x").expect("write");
-        std::thread::sleep(Duration::from_millis(10));
+        set_mtime(p, i as u64 * 10);
     }
 }
 
@@ -493,17 +506,18 @@ mod sessions_tests {
     const UUID_A: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     const UUID_B: &str = "11111111-2222-3333-4444-555555555555";
 
-    /// Transcripts one whole second apart, since the shell ranks and
+    /// Transcripts pinned ten whole seconds apart, since the shell ranks and
     /// deduplicates on whole-second mtimes.
     fn seed(sb: &Sandbox, entries: &[(&str, &str)]) -> PathBuf {
         let dir = sb.mkdir("projects/proj");
-        for (sid, title) in entries {
+        for (i, (sid, title)) in entries.iter().enumerate() {
+            let path = dir.join(format!("{sid}.jsonl"));
             fs::write(
-                dir.join(format!("{sid}.jsonl")),
+                &path,
                 format!("{{\"type\":\"summary\",\"customTitle\":\"{title}\"}}\n"),
             )
             .expect("write");
-            std::thread::sleep(Duration::from_millis(1100));
+            set_mtime(&path, i as u64 * 10);
         }
         dir
     }
@@ -547,18 +561,30 @@ mod sessions_tests {
     fn same_second_transcripts_collapse_to_one() {
         let sb = Sandbox::new("dedup");
         let dir = sb.mkdir("projects/proj");
-        for sid in [UUID_A, UUID_B] {
-            fs::write(
-                dir.join(format!("{sid}.jsonl")),
-                "{\"customTitle\":\"x\"}\n",
-            )
-            .expect("write");
+        for (i, sid) in [UUID_A, UUID_B].into_iter().enumerate() {
+            let path = dir.join(format!("{sid}.jsonl"));
+            fs::write(&path, "{\"customTitle\":\"x\"}\n").expect("write");
+            // Same whole second, different sub-second times, so the test
+            // pins the truncation and never straddles a second boundary.
+            set_mtime_ms(&path, i as u64 * 500);
         }
         assert_eq!(
             sessions::enumerate(&dir).len(),
             1,
             "the shell drops all but one per whole-second mtime"
         );
+    }
+
+    #[test]
+    fn transcripts_in_different_seconds_are_both_listed() {
+        let sb = Sandbox::new("twosec");
+        let dir = sb.mkdir("projects/proj");
+        for (i, sid) in [UUID_A, UUID_B].into_iter().enumerate() {
+            let path = dir.join(format!("{sid}.jsonl"));
+            fs::write(&path, "{\"customTitle\":\"x\"}\n").expect("write");
+            set_mtime(&path, i as u64);
+        }
+        assert_eq!(sessions::enumerate(&dir).len(), 2);
     }
 
     #[test]
