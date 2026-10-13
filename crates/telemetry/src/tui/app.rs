@@ -151,6 +151,8 @@ pub struct App {
     pub telemetry: Option<crate::telemetry_status::Mode>,
     /// How often the snapshot is refreshed, shown in the footer.
     pub refresh_every: Duration,
+    /// The hidden banner; see `egg`.
+    pub egg: super::egg::Egg,
 }
 
 /// What the loop must do after a key.
@@ -189,6 +191,7 @@ impl App {
             sources: String::new(),
             telemetry: None,
             refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
+            egg: super::egg::Egg::default(),
         }
     }
 
@@ -394,8 +397,16 @@ impl App {
             return self.help_key(key.code, ctrl);
         }
         match keys::lookup(key.code, ctrl) {
-            Some(binding) => self.run(binding.cmd, key.code),
-            None => Effect::None,
+            Some(binding) => {
+                self.egg.reset();
+                self.run(binding.cmd, key.code)
+            }
+            None => {
+                if let (KeyCode::Char(ch), false) = (key.code, ctrl) {
+                    self.egg.feed(ch, std::time::Instant::now());
+                }
+                Effect::None
+            }
         }
     }
 

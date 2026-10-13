@@ -9,6 +9,7 @@ pub mod app;
 pub mod budget;
 pub mod chart;
 pub mod data;
+pub mod egg;
 pub mod fmt;
 pub mod keys;
 pub mod notice;
