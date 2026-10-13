@@ -66,7 +66,7 @@ Reviewers (`reviewer`, `cheap-checker`) used to spend about 14 messages per run 
 
 The lens, the output shape and the voice rules stay exactly as the command specifies. The limit narrows where the reviewer looks for evidence, never what it must look for: every lens still covers its whole scope, and a reviewer that needs a caller or a test still reads it.
 
-Measured on the seeded-defect fixture (`tests/fixtures/bench/reviewer-real-diffs.json`, 7 seeded bugs and 3 clean cases, 3 repeats each, Opus medium, tools on, checkout present): recall 21 of 21 before and after, clean cases 9 of 9 before and after, 3.4 to 2.2 turns per run, $0.0447 to $0.0395 per run. The fixture files are small, so the saving on a real diff is larger.
+Measured on the seeded-defect fixture (`crates/cli/tests/fixtures/bench/reviewer-real-diffs.json`, 7 seeded bugs and 3 clean cases, 3 repeats each, Opus medium, tools on, checkout present): recall 21 of 21 before and after, clean cases 9 of 9 before and after, 3.4 to 2.2 turns per run, $0.0447 to $0.0395 per run. The fixture files are small, so the saving on a real diff is larger.
 
 ## Implementer brief builder
 

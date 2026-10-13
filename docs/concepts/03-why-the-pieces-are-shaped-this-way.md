@@ -9,7 +9,7 @@ This page explains the reasoning behind playbook's building blocks: commands, sk
 | Command | `commands/*.md` | You type `/playbook:<name>`, or ask in plain words | A multi-step procedure with a clear start and end |
 | Skill | `skills/<name>/SKILL.md` | A command, an agent or Claude decides it is relevant | Knowledge or discipline that many procedures share |
 | Agent | `agents/*.md` | A command or the orchestrator spawns it | A role that needs its own model, effort or tool limits |
-| Hook | `src/hooks/`, wired in `settings.json` | A tool call, a prompt or a session event | A rule that must hold even when nobody remembers it |
+| Hook | `crates/cli/src/hooks/`, wired in `settings.json` | A tool call, a prompt or a session event | A rule that must hold even when nobody remembers it |
 | Output style | `output-styles/*.md` | You select it | How replies read, not what work gets done |
 
 The split follows one question: who has to remember to do it?
