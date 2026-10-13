@@ -74,13 +74,13 @@ brew install pragmatic-engineer/tap/playbook-telemetry
 pbtop
 ```
 
-The formula installs two commands that are the same program: the short `pbtop`, which is the one to type (`pbtop`, `pbtop --summary`, `pbtop --json`, `pbtop --range 30d`), and the long `playbook-telemetry`, which suits scripts. Release archives for macOS, Linux and Windows are on the [playbook-telemetry releases page](https://github.com/pragmatic-engineer/playbook-telemetry/releases/latest) (from version 0.1.8 on, tags named `telemetry-vX.Y.Z` in the playbook repository), and the [crate README](../../crates/telemetry/README.md) covers `cargo` builds. Everything stays on your machine.
+The formula installs two commands that are the same program: the short `pbtop`, which is the one to type (`pbtop`, `pbtop --summary`, `pbtop --json`, `pbtop --range 30d`), and the long `playbook-telemetry`, which suits scripts. Release archives for macOS, Linux and Windows are on the [playbook releases page](https://github.com/pragmatic-engineer/playbook/releases) (the telemetry ones are tagged `telemetry-vX.Y.Z`, starting at 0.2.0), and the [crate README](../../crates/telemetry/README.md) covers `cargo` builds. Everything stays on your machine.
 
 The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/data/config.db`. See [Config keys](04-config-keys.md).
 
 ### Coming: the standalone code index
 
-`playbook code` will also get a standalone tool, [playbook-code](https://github.com/pragmatic-engineer/playbook-code), with the short alias `pbcode`. It has no release yet, so there is nothing to install. Use `playbook code` today.
+`playbook code` will also get a standalone tool, [playbook-code](../../crates/code), with the short alias `pbcode`. It has no release yet, so there is nothing to install. Use `playbook code` today.
 
 ### Without `curl | bash`
 

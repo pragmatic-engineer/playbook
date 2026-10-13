@@ -30,11 +30,11 @@ brew install pragmatic-engineer/tap/playbook-telemetry
 pbtop
 ```
 
-Or download the archive for your platform from the [latest release](https://github.com/pragmatic-engineer/playbook-telemetry/releases/latest). Releases carry `playbook-telemetry-<version>-<target>.tar.gz` for macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) and Windows (x86_64), each holding both `playbook-telemetry` and `pbtop`, plus a `SHA256SUMS` file with build provenance attestations.
+Or download the archive for your platform from the [latest `telemetry-v` release](https://github.com/pragmatic-engineer/playbook/releases?q=telemetry-v). Releases carry `playbook-telemetry-<version>-<target>.tar.gz` for macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) and Windows (x86_64), each holding both `playbook-telemetry` and `pbtop`, plus a `SHA256SUMS` file with build provenance attestations.
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
-gh attestation verify playbook-telemetry-<version>-<target>.tar.gz --repo pragmatic-engineer/playbook-telemetry
+gh attestation verify playbook-telemetry-<version>-<target>.tar.gz --repo pragmatic-engineer/playbook
 tar -xzf playbook-telemetry-<version>-<target>.tar.gz -C ~/.local/bin
 ```
 
