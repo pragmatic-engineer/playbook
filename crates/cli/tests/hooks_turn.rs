@@ -1798,7 +1798,7 @@ mod memory_capture {
             })
             .collect();
         let graph = serde_json::json!({"nodes": nodes, "edges": edges, "version": 1});
-        playbook::testing::write_graph_fixture(&mem_dir, &serde_json::to_string(&graph).unwrap());
+        playbook::testing::write_graph_fixture(mem_dir, &serde_json::to_string(&graph).unwrap());
         for id in node_ids {
             fs::write(mem_dir.join(format!("{id}.md")), "a".repeat(body_bytes)).unwrap();
         }

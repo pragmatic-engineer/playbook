@@ -2180,7 +2180,7 @@ fn ranked_world(tag: &str, graph: &str, signals: Option<&str>) -> (PathBuf, Path
     let home = work.join("home");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    playbook::testing::write_graph_fixture(&memory_dir, &graph);
+    playbook::testing::write_graph_fixture(&memory_dir, graph);
     if let Some(signals) = signals {
         fs::write(memory_dir.join("memory.signals.json"), signals).unwrap();
     }
