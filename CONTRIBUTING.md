@@ -23,7 +23,7 @@ This is a Cargo workspace. The Claude Code plugin files (`commands/`, `skills/`,
 | `crates/telemetry` | `playbook-telemetry` | the usage dashboard, with the `playbook-telemetry` and `pbtop` binaries |
 | `crates/data` | `playbook-data` | shared storage (data folder, `config.db`, `memory.db`) |
 
-Run `cargo test --workspace` for everything, or `cargo test -p playbook-telemetry` for one crate. Tests that read plugin files use `env!("PLAYBOOK_REPO_ROOT")`, set in `.cargo/config.toml`, instead of `CARGO_MANIFEST_DIR`. Regenerate the reference docs with `UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs`. See [ADR-0029](docs/adr/0029-cargo-workspace-monorepo.md) for the layout and the release tags.
+Run `just test` for everything, or `cargo nextest run -p playbook-code --config-file .github/nextest.toml` for one crate (nextest, because some tests share ports and plain `cargo test` runs them in one process). Doc tests run with `cargo test --workspace --doc`. Tests that read plugin files use `env!("PLAYBOOK_REPO_ROOT")`, set in `.cargo/config.toml`, instead of `CARGO_MANIFEST_DIR`. Regenerate the reference docs with `UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs`. See [ADR-0029](docs/adr/0029-cargo-workspace-monorepo.md) for the layout and the release tags.
 
 ### Releases
 

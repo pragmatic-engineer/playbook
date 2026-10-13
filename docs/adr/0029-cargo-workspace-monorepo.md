@@ -29,8 +29,8 @@ The binary grew a code index and a usage dashboard that other tools should reuse
 
 - **Keep separate repositories with tag pins.** Rejected: each change needs a release and a bump pull request.
 - **Git submodules.** Rejected: they hide the code from the same checkout and the same lock file.
-- **One crate with modules.** Rejected for telemetry and code: they ship their own binaries and need their own release cadence.
-- **Publish the crates on crates.io.** Rejected for now: short package names such as `code` and `data` would clash, and the API is still settling.
+- **One crate with modules.** Rejected for telemetry, which ships its own binaries on its own release cadence. The code index may follow with a `pbcode` binary and `code-v` releases.
+- **Publish the crates on crates.io.** Rejected for now: the API is still settling, and the internal crates set `publish = false`.
 
 ## Consequences
 
