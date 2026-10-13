@@ -1,0 +1,162 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
+//! The `playbook usage` commands' shared steps: resolve where the local data
+//! lives, ingest incrementally, render.
+
+use super::account::{account_label, UNKNOWN_ACCOUNT};
+use super::backfill;
+use super::claude_code::ClaudeCodeSource;
+use super::codex::CodexSource;
+use super::db::{load_tool_events, load_usage_events, open_db};
+use super::ingest::{ingest, ingest_claude, IngestStats};
+use super::limits::LimitPeriod;
+use super::limits_source;
+use super::query::Range;
+use super::summary;
+use super::UsageEvent;
+use rusqlite::Connection;
+use std::path::{Path, PathBuf};
+
+/// Where Claude Code's and Codex's data and playbook's usage store live for one home.
+#[derive(Clone)]
+pub struct Paths {
+    pub claude_projects: PathBuf,
+    pub claude_json: PathBuf,
+    pub codex_sessions: PathBuf,
+    pub db: PathBuf,
+}
+
+impl Paths {
+    pub fn from_home(home: &Path) -> Self {
+        Self {
+            claude_projects: home.join(".claude").join("projects"),
+            claude_json: home.join(".claude.json"),
+            codex_sessions: home.join(".codex").join("sessions"),
+            db: super::host::state_dir_from(home).join("usage.db"),
+        }
+    }
+
+    pub fn real() -> Self {
+        let mut paths = Self::from_home(&super::host::home_dir());
+        paths.db = super::host::state_dir().join("usage.db");
+        let config = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty());
+        paths.with_claude_dir(config.map(PathBuf::from).as_deref())
+    }
+
+    /// Reads Claude Code history from `dir` when it is set: Claude Code keeps
+    /// its history there instead of in `~/.claude` under `CLAUDE_CONFIG_DIR`.
+    pub fn with_claude_dir(mut self, dir: Option<&Path>) -> Self {
+        if let Some(dir) = dir {
+            self.claude_projects = dir.join("projects");
+            self.claude_json = dir.join(".claude.json");
+        }
+        self
+    }
+}
+
+/// Ingests new transcript events into the store and returns what was added.
+/// Blocks until done. A first read of a large history that runs past two
+/// seconds says how far it is on stderr, as a file count.
+pub fn ingest_new(paths: &Paths) -> Result<(Connection, IngestStats), String> {
+    let conn = open_db(&paths.db)?;
+    let started = std::time::Instant::now();
+    let mut shown = false;
+    let stats = ingest_into(paths, &conn, &mut |done, total| {
+        if started.elapsed() >= std::time::Duration::from_secs(2)
+            && total > 0
+            && !crate::say::is_held()
+        {
+            eprint!("\rindexing {done}/{total} files");
+            shown = true;
+        }
+        true
+    })?;
+    if shown {
+        eprintln!();
+    }
+    Ok((conn, stats))
+}
+
+/// The steps of `ingest_new` on an open store. `on_batch(done, total)` reports
+/// the first-run backfill after each committed batch.
+pub fn ingest_into(
+    paths: &Paths,
+    conn: &Connection,
+    on_batch: &mut dyn FnMut(usize, usize) -> bool,
+) -> Result<IngestStats, String> {
+    let source = ClaudeCodeSource::new(paths.claude_projects.clone());
+    backfill::run_once(&source, conn)?;
+    let account = account_label(&paths.claude_json);
+    let mut stats = ingest_claude(&source, &account, conn, on_batch)?;
+    if paths.codex_sessions.is_dir() {
+        let codex = CodexSource::new(paths.codex_sessions.clone());
+        let more = ingest(&codex, UNKNOWN_ACCOUNT, conn)?;
+        stats.usage_inserted += more.usage_inserted;
+        stats.usage_updated += more.usage_updated;
+        stats.tools_inserted += more.tools_inserted;
+        stats.duplicates_skipped += more.duplicates_skipped;
+    }
+    // Telemetry never changes the totals; a failure here leaves transcripts as the source.
+    let _ = super::reconcile::reconcile(conn, crate::util::time::now_secs());
+    Ok(stats)
+}
+
+/// Bare `playbook usage`: ingest, then render.
+/// The text report. `range` is `None` for every recorded session.
+pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<String, String> {
+    let (conn, _) = ingest_new(paths)?;
+    let usage = load_usage_events(&conn)?;
+    let tools = load_tool_events(&conn)?;
+    let mut text = match range {
+        Some(range) => summary::render_range(&usage, &tools, range, now),
+        None => summary::render(&usage, &tools),
+    };
+    if !usage.is_empty() {
+        let (snapshot, budgets) = limit_inputs(paths);
+        text.push_str(&limits_source::summary_section(
+            snapshot.as_ref(),
+            &budgets,
+            &usage,
+            now,
+            super::entry::configured_week_start(),
+        ));
+    }
+    Ok(text)
+}
+
+/// The stored plan limits and the manual budgets from the config.
+fn limit_inputs(paths: &Paths) -> (Option<limits_source::Snapshot>, Vec<(LimitPeriod, f64)>) {
+    let snapshot = paths.db.parent().and_then(limits_source::load);
+    let budgets = limits_source::manual_budgets(&super::host::home_dir());
+    (snapshot, budgets)
+}
+
+/// The `limits` object of `--json`. `events` must reach back to
+/// `limits_source::events_since`.
+pub fn limits_json(paths: &Paths, events: &[UsageEvent], now: i64) -> serde_json::Value {
+    let (snapshot, budgets) = limit_inputs(paths);
+    limits_source::report_json(
+        snapshot.as_ref(),
+        &budgets,
+        events,
+        now,
+        super::entry::configured_week_start(),
+    )
+}
+
+#[cfg(test)]
+mod claude_dir_tests {
+    use super::*;
+
+    #[test]
+    fn a_claude_config_dir_moves_the_transcripts_and_the_account_file() {
+        let base = Paths::from_home(Path::new("/fake/home"));
+        let moved = base.clone().with_claude_dir(Some(Path::new("/fake/cfg")));
+        assert_eq!(moved.claude_projects, Path::new("/fake/cfg/projects"));
+        assert_eq!(moved.claude_json, Path::new("/fake/cfg/.claude.json"));
+        assert_eq!(moved.db, base.db);
+        let same = base.clone().with_claude_dir(None);
+        assert_eq!(same.claude_projects, base.claude_projects);
+    }
+}

@@ -132,7 +132,7 @@ The theme comes from the `usage.theme` config key (`default`, `dark`, `light`, `
 
 Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the `default` values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither it goes to the nearest of the 16 basic colors. The values are adapted from a third party theme under the Apache License 2.0, like playbook, and the attribution is in `NOTICE`.
 
-The usage code lives in the [playbook-telemetry](https://github.com/pragmatic-engineer/playbook-telemetry) repository, which playbook depends on by an exact tag; the paths below are relative to that repository. The terminal view is in `src/tui/`. `data.rs` builds one immutable snapshot from the store, `worker.rs` refreshes it on a thread so a slow read never blocks a key, `app.rs` holds the state and the keys, `view.rs` and `panels.rs` draw (`chart.rs` is the bar chart with its axes and cursor, `scale.rs` the round axis values, `sort.rs` the panel list and the row sorts), and `theme.rs` holds the colors. The numbers come from `src/query.rs`, the same layer the web JSON uses, so the same range gives the same totals in both. The reasons for ratatui and the measured binary cost are in [ADR-0020](../adr/0020-usage-terminal-ui.md).
+The usage code lives in `crates/telemetry` (package `playbook-telemetry`), which playbook depends on by path; the paths below are relative to that folder.
 
 ## Where the data comes from
 
@@ -147,7 +147,7 @@ Four details are worth knowing:
 
 ## Storage
 
-One SQLite database at `~/.config/playbook/data/usage.db`, not tied to any repo, because spend only makes sense as a total. The standalone [playbook-telemetry](https://github.com/pragmatic-engineer/playbook-telemetry) tool (`playbook-telemetry`, short alias `pbtop`) reads and writes the same file, so both show the same numbers. The first run moves an older database from `~/.config/playbook/usage.db`, `~/.config/playbook/usage/usage.db` or `~/.local/state/playbook-usage/usage.db` into place and renames the old file to `usage.db.migrated`. Events stay there after Claude Code or `ccc` prunes old sessions. Connection setup follows `src/gate/db.rs`: `busy_timeout` first, then WAL mode, because a refresh reads while `ingest` writes from other processes.
+One SQLite database at `~/.config/playbook/data/usage.db`, not tied to any repo, because spend only makes sense as a total. The standalone [playbook-telemetry](../../crates/telemetry/README.md) tool (`playbook-telemetry`, short alias `pbtop`) reads and writes the same file, so both show the same numbers. The first run moves an older database from `~/.config/playbook/usage.db`, `~/.config/playbook/usage/usage.db` or `~/.local/state/playbook-usage/usage.db` into place and renames the old file to `usage.db.migrated`. Events stay there after Claude Code or `ccc` prunes old sessions. Connection setup follows `src/gate/db.rs`: `busy_timeout` first, then WAL mode, because a refresh reads while `ingest` writes from other processes.
 
 The first ingest after upgrading from an older version runs a one-time repair (`src/backfill.rs`): it rescans the transcripts and corrects the repo and the cache lifetime split on rows stored earlier. A row whose transcript is gone keeps its old repo and is priced as five minute cache.
 

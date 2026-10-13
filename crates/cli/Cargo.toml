@@ -14,7 +14,7 @@ libc = "=0.2.189"
 playbook-code = { path = "../code" }
 playbook-common = { path = "../common" }
 playbook-data = { path = "../data" }
-playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook-telemetry", tag = "v0.1.6" }
+playbook-telemetry = { path = "../telemetry" }
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
 regex = "=1.13.1"
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
