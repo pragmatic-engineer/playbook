@@ -8,7 +8,7 @@
 
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn function_text() -> String {
@@ -21,7 +21,7 @@ fn function_text() -> String {
 }
 
 /// Runs the function with `bin` as the install dir and `path_dirs` on PATH.
-fn run(bin: &PathBuf, path_dirs: &[&PathBuf]) -> String {
+fn run(bin: &Path, path_dirs: &[&Path]) -> String {
     let path: Vec<String> = path_dirs.iter().map(|d| d.display().to_string()).collect();
     let program = format!(
         "log() {{ printf '%s\\n' \"$*\"; }}\nPLAYBOOK_BIN_DIR='{}'\n{}\ninstall_pb_alias",
