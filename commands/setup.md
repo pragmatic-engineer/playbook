@@ -9,7 +9,7 @@ effort: low
 # Setup
 
 Wire the always-on safety guards and seed or merge settings.json. Optionally
-install the shell launchers (ccc/ccd) and the custom system prompt. Each step
+install the shell launchers (`playbook cc` and `playbook ccd`) and the custom system prompt. Each step
 is idempotent; re-running /playbook:setup is safe and only changes what is missing.
 
 ## Step 0: Read the run mode
@@ -46,10 +46,10 @@ with these two questions:
 **Question 1**
 
 - header: "Aliases"
-- question: "Install the ccc and ccd shell launchers?"
+- question: "Add the playbook shell wrapper for playbook cc and playbook ccd?"
 - options:
   - label: "Yes (Recommended)"
-    description: "Adds cc/ccd to your shell (session resume, model routing, transcript prune). Bash and zsh both supported."
+    description: "Adds a playbook shell function so playbook cc can leave you in a new worktree. Bash and zsh both supported."
   - label: "No"
     description: "Skip the launchers; run claude directly. Skills, commands, and hooks still work."
 
@@ -59,7 +59,7 @@ with these two questions:
 - question: "Install the custom system prompt?"
 - options:
   - label: "Yes (Recommended)"
-    description: "Installs the senior-engineer persona and rules; ccc loads it each session. Recommended for the full experience."
+    description: "Installs the senior-engineer persona and rules; playbook cc loads it each session. Recommended for the full experience."
   - label: "No"
     description: "Skip the persona. The plugin content still works without it."
 

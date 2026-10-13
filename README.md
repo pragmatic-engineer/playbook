@@ -47,19 +47,19 @@ For a small bug, `/playbook:fix` goes from a failing test to one pull request. F
 
 ## The launcher
 
-`ccc` starts Claude Code with the playbook system prompt, the right model chain and your effort ceiling. `ccd` is the same with permission prompts skipped. The name is `ccc` because `cc` is the C compiler. Install both with `playbook init --aliases`.
+`playbook cc` starts Claude Code with the playbook system prompt, the right model chain and your effort ceiling. `playbook ccd` is the same with permission prompts skipped. `pb` is a short alias for `playbook` (`pb cc`, `pb ccd`), installed next to the binary when the name is free. The old `ccc` and `ccd` shell functions are gone; `playbook doctor` finds leftovers and names the replacement. Add the cd wrapper, which lets `playbook cc launch worktree` leave you in the new worktree, with `playbook init --aliases`.
 
 ```bash
-ccc                     # resume this directory's last session, or start fresh
-ccc fresh               # new session, no history
-ccc list                # recent sessions for this directory
-ccc worktree <branch>   # create or enter a git worktree, then start a session there
-ccc clean               # resume with /model, /effort and similar settings stripped
-ccc raw [id]            # resume verbatim, no fork or cleanup
-ccc prune               # prune old transcripts now
+playbook cc                     # resume this directory's last session, or start fresh
+playbook cc fresh               # new session, no history
+playbook cc list                # recent sessions for this directory
+playbook cc launch worktree <branch>   # create or enter a git worktree, then start a session there
+playbook cc clean               # resume with /model, /effort and similar settings stripped
+playbook cc raw [id]            # resume verbatim, no fork or cleanup
+playbook cc prune               # prune old transcripts now
 ```
 
-`ccc` and `ccd` are two small shell functions printed by `playbook shell-init`. The work happens in the binary (`playbook cc launch`), so bash and zsh behave the same. Worktrees land in `<repo-parent>/.worktrees/<repo>/<folder>`. See [worktrees](docs/internals/03-worktree.md) and [the launcher](docs/internals/01-launcher-and-hooks.md).
+The work happens in the binary, so bash and zsh behave the same. `playbook shell-init` prints one small `playbook` shell function that only adds the `cd` into a worktree after a session. Worktrees land in `<repo-parent>/.worktrees/<repo>/<folder>`. See [worktrees](docs/internals/03-worktree.md) and [the launcher](docs/internals/01-launcher-and-hooks.md).
 
 ## Commands
 
@@ -116,10 +116,10 @@ Each command and agent names its model and effort in its own frontmatter. Spend 
 | Sonnet | `claude-sonnet-5-5` | `claude-sonnet-5` | Session default, implementer, critic |
 | Haiku | `claude-haiku-5-5` | `claude-haiku-4-5` | Mechanical agents: git, collector, fact-checker, triage |
 
-Plugin files name only the alias, and `ccc` passes the fallback chain. Run `playbook doctor models` to see the table, your overrides and the chain in force.
+Plugin files name only the alias, and `playbook cc` passes the fallback chain. Run `playbook doctor models` to see the table, your overrides and the chain in force.
 
 - **Effort ceiling.** `playbook effort <auto|low|medium|high|xhigh|max>` sets `maxEffortLevel`. The lower of this and Claude Code's own `maxEffortLevel` wins, and playbook never changes Claude Code's setting. Override one component with `effort.agents.<name>`, `effort.commands.<name>` or `effort.skills.<name>`.
-- **Variants.** The `Agent` tool has no per-call effort, so `ccc` renders effort variants of the agents for each session (`reviewer-low`, `reviewer-xhigh`). Nothing is committed. `agents.variants` is `auto`, `all` or `off`, and `playbook agents variants` shows what a session gets.
+- **Variants.** The `Agent` tool has no per-call effort, so `playbook cc` renders effort variants of the agents for each session (`reviewer-low`, `reviewer-xhigh`). Nothing is committed. `agents.variants` is `auto`, `all` or `off`, and `playbook agents variants` shows what a session gets.
 - **Routing.** `playbook route <kind>` says which model, effort and agent a task goes to, and when you must approve first.
 - **Measure.** `playbook eval bench` compares roles across models and efforts on real cases, with a cost cap.
 
@@ -137,7 +137,7 @@ One markdown store at `~/.config/playbook/memory/`, global and per project, loca
 |---|---|
 | 1. Plugin content | Skills, commands and subagents. Writes nothing to `~/.claude`. |
 | 2. Guards and settings | Safety guards and hooks wired into `settings.json`. |
-| 3. Launchers | `ccc` and `ccd` in your shell rc file. Opt in. |
+| 3. Shell wrapper | A `playbook` function in your shell rc file that follows `playbook cc` into a worktree. Opt in. |
 | 4. System prompt | `prompts/SYSTEM_PROMPT.md`, copied to `~/.config/playbook/prompts/`. Opt in. |
 | 5. Status line | `playbook statusline`, pointed at by `statusLine.command`. |
 | 6. The binary | Every hook is a bare `playbook hook <name>`, so without it the hooks do nothing. |

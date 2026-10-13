@@ -43,7 +43,7 @@ File delivery needs `Write` or `Bash`. The read-only agents have neither on purp
 
 **Always pass the `playbook:` prefix** from the second column. These are plugin agents, and a bare `subagent_type: critic` resolves to the wrong agent or none (fixed repo-wide in #284). Elsewhere, the bare name is only a label for talking about the agent. `crates/cli/tests/delegating_subagents_roster.rs` keeps this table in sync with `agents/*.md`.
 
-Effort variants such as `reviewer-low` and `reviewer-xhigh` are not files and not in the table. `ccc` and `ccd` render them for one session into a throwaway plugin, with the base agent's `tools`, `model` and body and a different `effort`. Their `subagent_type` is `playbook-variants:<name>`: spawn the exact type `playbook effort resolve` returns. A session started without the launcher has the base agents only (rules in `crates/cli/src/agents/variants.rs`).
+Effort variants such as `reviewer-low` and `reviewer-xhigh` are not files and not in the table. `playbook cc` and `playbook ccd` render them for one session into a throwaway plugin, with the base agent's `tools`, `model` and body and a different `effort`. Their `subagent_type` is `playbook-variants:<name>`: spawn the exact type `playbook effort resolve` returns. A session started without the launcher has the base agents only (rules in `crates/cli/src/agents/variants.rs`).
 
 **For the read-only agents, variants included:**
 

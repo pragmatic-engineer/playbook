@@ -69,7 +69,7 @@ These never fail the check and carry no fix hint:
   `pr.draft` values, each as `key: value (source: tier)`.
 - Worktrees that `playbook worktree sweep --dry-run` reports (read the
   convention from the path: `.claude/worktrees/agent-*` is the Agent tool,
-  `.worktrees/<repo>/` is the `ccc worktree` launcher, `review-worktrees/` is
+  `.worktrees/<repo>/` is the `playbook cc launch worktree` launcher, `review-worktrees/` is
   the PR review, `repos/<owner>/<repo>/*/worktrees/` is a `/playbook:implement`
   Work Unit), or "no stale worktrees found".
 - Files you edited after playbook placed them, as `migration <id>: <message>`.

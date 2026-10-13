@@ -1,6 +1,6 @@
 # Worktree engine
 
-`ccc worktree <branch>` creates or enters a git worktree, rebases it onto the base branch, and starts a session there. The engine is Rust: `playbook cc worktree` (`crates/cli/src/cc/worktree_run.rs`, `crates/cli/src/cc/worktree.rs`). Slow upkeep runs afterward in a detached process, so the session starts at once.
+`playbook cc launch worktree <branch>` creates or enters a git worktree, rebases it onto the base branch, and starts a session there. The engine is Rust: `playbook cc worktree` (`crates/cli/src/cc/worktree_run.rs`, `crates/cli/src/cc/worktree.rs`). Slow upkeep runs afterward in a detached process, so the session starts at once.
 
 ## What it does
 
@@ -53,5 +53,5 @@ If anything fails, the hook says why on stderr and falls back to `<repo>/.claude
 
 ## See also
 
-- [Launcher and hooks](01-launcher-and-hooks.md): the `ccc` launcher that sets up the worktree.
+- [Launcher and hooks](01-launcher-and-hooks.md): the `playbook cc` launcher that sets up the worktree.
 - [Docs index](../index.md)

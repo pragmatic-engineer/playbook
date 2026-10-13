@@ -145,7 +145,7 @@ What it does:
     and functional hooks;
   - installs the always-on safety guards (rm, background-await, dash guards) and
     the other local configs (settings.json, statusline, deps);
-  - optionally installs the shell launchers (ccc/ccd) and the custom system prompt.
+  - optionally installs the shell launchers (a `playbook` shell function that follows `playbook cc` into a worktree) and the custom system prompt.
 
 Env:
   PLAYBOOK_REF=<tag|branch|sha>  source ref (default: latest release, else main)
@@ -157,7 +157,7 @@ Flags:
   --yes              non-interactive: accept every step's default
   --skip-plugin      don't add the marketplace or install the plugin
   --skip-deps        accepted, ignored: `playbook init` installs no deps itself
-  --aliases          install the shell launchers (ccc/ccd) without prompting
+  --aliases          add the `playbook` cd wrapper to your rc file without prompting
   --system-prompt    install the custom system prompt without prompting (implies --aliases)
   --binary-only      binary, PATH, guards and settings only: no plugin, no launcher, no system prompt, no prompts
   --no-setup         skip the plugin only: guards, settings, and shell wiring still run
@@ -414,6 +414,7 @@ install_release_binary() {
     chmod 0755 "$bin_tmp"
     mv -f "$bin_tmp" "$PLAYBOOK_BIN_DIR/playbook"
     log "Installed playbook $version to $PLAYBOOK_BIN_DIR/playbook"
+    install_pb_alias
 
     rm -rf "$STAGE"
     STAGE=""
@@ -429,6 +430,30 @@ warn_if_shadowed() {
     [ -n "$first" ] || return 0
     [ "$first" -ef "$PLAYBOOK_BIN_DIR/playbook" ] && return 0
     warn "$first runs before the new $PLAYBOOK_BIN_DIR/playbook on PATH, so hooks keep using the old binary; remove it (Homebrew: brew uninstall playbook) or put $PLAYBOOK_BIN_DIR first on PATH"
+}
+
+# Links `pb` to `playbook` as a short alias. Never replaces a different `pb`:
+# a file we did not make, or another `pb` earlier on PATH, is left alone and
+# one line says so. A `pb` link we made before is refreshed.
+install_pb_alias() {
+    local link="$PLAYBOOK_BIN_DIR/pb" other
+    if [ -L "$link" ] && [ "$(readlink "$link")" = "playbook" ]; then
+        return 0
+    fi
+    if [ -e "$link" ] || [ -L "$link" ]; then
+        log "Left $link alone: it is not the playbook alias. Use playbook instead of pb."
+        return 0
+    fi
+    other="$(command -v pb 2>/dev/null || true)"
+    if [ -n "$other" ]; then
+        log "Left pb alone: $other is already a command. Use playbook instead of pb."
+        return 0
+    fi
+    if ln -s playbook "$link" 2>/dev/null; then
+        log "Linked $link to playbook (short alias: pb cc, pb ccd)"
+    else
+        log "Could not create $link; use playbook instead of pb."
+    fi
 }
 
 # Puts $PLAYBOOK_BIN_DIR on PATH for future shells, mirroring the `path` step of
@@ -551,7 +576,7 @@ done
 #
 # Interactive prompts for the opt-in layers (skip when --yes or no tty):
 if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_ALIASES" -eq 0 ]; then
-    if ask "Install the shell launchers (ccc/ccd)? Bash and zsh both supported." Y; then
+    if ask "Add the playbook shell wrapper, so playbook cc can leave you in a new worktree? Bash and zsh both supported." Y; then
         OPT_ALIASES=1
     fi
 fi
@@ -695,7 +720,7 @@ else
 fi
 printf '  - Safety guards (rm, background-await, dash) are always on via settings.json.\n'
 if [ "$OPT_ALIASES" -eq 1 ]; then
-    printf '  - Shell launchers installed. Open a new terminal or source the rc file to activate ccc/ccd.\n'
+    printf '  - Shell wrapper installed. Open a new terminal or source the rc file; start sessions with playbook cc or playbook ccd.\n'
 fi
 
 # Drop into a fresh login shell so the new config is active immediately.

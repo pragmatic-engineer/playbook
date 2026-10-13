@@ -58,7 +58,7 @@ Before this wizard, `init` printed a flat plan and one yes or no question per pa
 - Playbook stores everything on your machine, under `~/.config/playbook/` and the files named below.
 - Playbook sends nothing anywhere. No hook, and no part of `init`, makes a network call. The only commands that reach the network are `playbook update` (it downloads a release from GitHub) and the status line, which calls the `gh` tool you already have to show PR and CI state.
 - No hook reads a secret value. `precommit-check` looks at file names only, to flag names that look like credentials.
-- `playbook usage` reads local Claude Code history. With `usage.telemetry` on `auto`, `ccc` points a session at a receiver on your own machine, and `init --telemetry` can do the same for plain `claude`, the IDE and the desktop app. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy).
+- `playbook usage` reads local Claude Code history. With `usage.telemetry` on `auto`, `playbook cc` points a session at a receiver on your own machine, and `init --telemetry` can do the same for plain `claude`, the IDE and the desktop app. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy).
 - Claude Code's own settings are yours. Playbook edits `~/.claude/settings.json` only when you agree to it in `init`, and takes a timestamped backup first.
 
 ## The parts
@@ -71,7 +71,7 @@ Each part has a flag pair. With no flag, `init` asks in a terminal and uses the 
 | Status line | on | `--statusline`, `--no-statusline` | `~/.claude/settings.json` |
 | Security defaults | off | `--security`, `--no-security` | `~/.claude/settings.json` |
 | PATH block | on | `--path`, `--no-path` | your shell startup files |
-| Launcher shortcuts `ccc` and `ccd` | off | `--aliases`, `--no-aliases` | your shell rc file |
+| Shell wrapper for `playbook cc` and `playbook ccd` | off | `--aliases`, `--no-aliases` | your shell rc file |
 | System prompt | off | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md` |
 | Usage telemetry | off, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
 | `pb` short name | off, asked | `--short-name`, `--no-short-name` | `~/.config/playbook` (the `launcher.shortName` key) |
@@ -115,11 +115,11 @@ Init adds a block that starts with `# playbook binary` to your shell startup fil
 
 ### Launcher shortcuts and shell-init
 
-`--aliases` adds one line to your `.zshrc` or `.bashrc`: `eval "$(playbook shell-init)"`. That command prints two small shell functions, `ccc` and `ccd`, and nothing else. Both call `playbook cc launch`, which starts Claude Code with the playbook system prompt, the model chain and your effort ceiling. `ccd` also skips permission prompts, so use it only where you would use `--dangerously-skip-permissions`. The functions use a temp file to move your shell into a worktree after a session. Older installs that sourced a script from the rc file get that line replaced with the `eval` line. See [the launcher](../internals/01-launcher-and-hooks.md).
+`--aliases` adds one line to your `.zshrc` or `.bashrc`: `eval "$(playbook shell-init)"`. That command prints one small `playbook` shell function and nothing else. For `playbook cc` and `playbook ccd` it calls `playbook cc launch`, which starts Claude Code with the playbook system prompt, the model chain and your effort ceiling. `playbook ccd` also skips permission prompts, so use it only where you would use `--dangerously-skip-permissions`. The functions use a temp file to move your shell into a worktree after a session. Older installs that sourced a script from the rc file get that line replaced with the `eval` line. See [the launcher](../internals/01-launcher-and-hooks.md).
 
 ### System prompt
 
-`--system-prompt` copies `SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/`. Claude Code uses it only when you start it through `ccc` or `ccd`. If you already have a copy, init refreshes it on every run, unless you edited it, in which case your copy stays. Without the flag and without an existing copy, nothing is placed.
+`--system-prompt` copies `SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/`. Claude Code uses it only when you start it through `playbook cc` or `playbook ccd`. If you already have a copy, init refreshes it on every run, unless you edited it, in which case your copy stays. Without the flag and without an existing copy, nothing is placed.
 
 `--telemetry` writes the OpenTelemetry variables that point Claude Code at a collector on 127.0.0.1 into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage` too. Init first reads whether telemetry is on, off or not set, from your environment and every Claude Code settings file (user, project, local, managed). When it is already on, set up by you, or switched off by something init will not change, init says so in one line and asks nothing. When it is not set, or switched off by a lone off switch in `~/.claude/settings.json`, init suggests turning it on as a yes or no question, and nothing is written without a yes. It writes nothing when your environment or any Claude Code settings file already names a telemetry variable, with one exception: a yes replaces an off switch that stands alone in `~/.claude/settings.json`. Any other setting you made, including values beside an off switch or in another file, is never overridden. Prompt text, tool content, emails and tokens are not sent, and the account id stays out of the metrics. `playbook uninstall` removes exactly the keys init wrote, unless you changed them, and puts back an off switch that a yes replaced. See [telemetry by default](../internals/04-usage-dashboard.md#telemetry-by-default).
 
