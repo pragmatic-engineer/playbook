@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Helpers shared by the playbook crates: the playbook paths (the data folder
-//! logic lives in [`paths`]), git, sqlite, atomic file writes, process runs.
+//! Helpers shared by the playbook crates: the playbook paths,
+//! git, sqlite, atomic file writes, process runs. The usage data folder stays in
+//! `playbook`'s own `common::paths`, because it needs the usage crate.
 //! `playbook` re-exports these under `playbook::common`.
 
 pub mod atomic;
@@ -14,6 +15,7 @@ pub mod proc;
 pub mod repo;
 pub mod session;
 pub mod sqlite;
+#[doc(hidden)]
 pub mod testing;
 
 /// Scratch space for unit tests of this crate and of crates that depend on it.

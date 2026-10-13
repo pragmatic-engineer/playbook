@@ -18,7 +18,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// `classify` calls `repo_slug()`, which shells out against the process's
 /// current directory, so any test that relies on it must serialize on cwd
-/// like `src/common/paths.rs`'s own tests do.
+/// like `crates/common/src/paths.rs`'s own tests do.
 static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn lock_cwd() -> std::sync::MutexGuard<'static, ()> {
     CWD_LOCK
