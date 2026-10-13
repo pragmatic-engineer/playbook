@@ -202,6 +202,13 @@ pub const TOOLS: &[Tool] = &[
         "plan checkpoint slug",
     ),
     t(
+        "plan-cleanup",
+        "plan",
+        "cleanup",
+        "",
+        "plan cleanup my-topic --dry-run",
+    ),
+    t(
         "work-unit-briefs",
         "plan",
         "brief",
