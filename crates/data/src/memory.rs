@@ -277,6 +277,19 @@ mod tests {
     use super::*;
     use playbook_common::test_support::scratch_dir;
 
+    #[cfg(unix)]
+    #[test]
+    fn a_new_graph_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch_dir("memory-private-db");
+        let db = db_in(&dir.join("data"));
+
+        write_graph(&db, &[], &[]).unwrap();
+
+        let mode = std::fs::metadata(&db).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
     fn node(id: &str) -> NodeRow {
         NodeRow {
             id: id.into(),

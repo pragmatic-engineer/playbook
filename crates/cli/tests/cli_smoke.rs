@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as Proc, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -52,6 +53,8 @@ impl Env {
         let base = std::env::temp_dir().canonicalize().expect("temp dir");
         let root = base.join(format!("pb-smoke-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&base).expect("temp base");
+        fs::create_dir(&root).expect("scratch root must be new");
         for d in ["home", "state", "data", "tmp", "bin", "plain"] {
             fs::create_dir_all(root.join(d)).expect("scratch dir");
         }
@@ -103,7 +106,7 @@ impl Env {
         let mut p = Proc::new(program);
         p.env_clear()
             .current_dir(self.cwd())
-            .env("PATH", format!("{}:/usr/bin:/bin", r.join("bin").display()))
+            .env("PATH", r.join("bin"))
             .env("HOME", r.join("home"))
             .env("XDG_CONFIG_HOME", r.join("home/.config"))
             .env("XDG_STATE_HOME", r.join("state"))
@@ -142,6 +145,7 @@ impl Env {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .process_group(0)
             .spawn()
             .expect("spawn playbook");
         let mut sin = child.stdin.take().expect("stdin");
@@ -167,6 +171,11 @@ impl Env {
                 break s;
             }
             if start.elapsed() >= TIMEOUT {
+                // Kill the whole group so a grandchild cannot keep the pipes open.
+                // SAFETY: kill(2) on our own child's process group, no memory involved.
+                unsafe {
+                    libc::kill(-(child.id() as i32), libc::SIGKILL);
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 break std::process::ExitStatus::default();
@@ -204,7 +213,13 @@ impl Env {
 
 impl Drop for Env {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        // A detached child (cc housekeep) may still be writing; retry briefly.
+        for _ in 0..20 {
+            if fs::remove_dir_all(&self.root).is_ok() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 }
 
@@ -228,7 +243,10 @@ fn walk(dir: &Path, map: &mut BTreeMap<PathBuf, u64>) {
         if e.file_name() == ".git" {
             continue;
         }
-        if p.is_dir() {
+        let kind = e.file_type().expect("file type");
+        if kind.is_symlink() {
+            map.insert(p, 1);
+        } else if kind.is_dir() {
             map.insert(p.clone(), 0);
             walk(&p, map);
         } else {
@@ -451,6 +469,9 @@ fn table() -> Vec<Case> {
         case("uninstall", &["uninstall", "--yes"]).pre(&["init", "--yes"]).writes(),
         case("shell-init", &["shell-init"]).out("_playbook_cc").plain(),
         case("update", &["update", "--check"]).code(1).err("could not read the release list"),
+        case("effort", &["effort"]).writes(),
+        case("effort", &["effort", "high"]).writes(),
+        case("usage", &["usage", "--summary"]).writes(),
         case("version", &["version"]).out("playbook ").plain(),
         case("deps ensure", &["deps", "ensure", "{ROOT}/Brewfile"]).err("no Brewfile"),
         case("doc read", &["doc", "read", "{ROOT}/notes.xyz"]).file("notes.xyz", "x").code(1).err("unsupported file type"),
@@ -486,6 +507,7 @@ fn table() -> Vec<Case> {
         case("effort list", &["effort", "list"]).out("no plugin root"),
         case("route", &["route", "review"]).out("review:"),
         // launchers (a stub claude stands in for the real one)
+        case("cc", &["cc"]).writes(),
         case("cc clean", &["cc", "clean"]),
         case("cc fresh", &["cc", "fresh"]).writes(),
         case("cc raw", &["cc", "raw"]),
@@ -501,6 +523,7 @@ fn table() -> Vec<Case> {
         case("usage warm", &["usage", "warm"]).writes(),
         case("usage ingest", &["usage", "ingest"]).code(1).err("was removed").writes(),
         case("usage prune", &["usage", "prune"]).out("removed 0").writes(),
+        case("sessions", &["sessions"]).writes().out("No recent sessions"),
         case("sessions list", &["sessions", "list"]).out("No recent sessions").writes(),
         // network or repo-bound tools, failing fast with a message
         case("eval review-triage", &["eval", "review-triage"]).code(1).err("gh is required"),
@@ -512,9 +535,9 @@ fn table() -> Vec<Case> {
         case("pr comments", &["pr", "comments"]).code(1).err("no PR"),
         case( "pr reply", &[ "pr", "reply", "--pr", "1", "--body-file", "{ROOT}/b.md", "--thread", "1", ], ).file("b.md", "body").code(1).err("gh repo view"),
         case("pr stack", &["pr", "stack"]).code(1).err("gh repo view"),
-        case( "pr ci-wait", &["pr", "ci-wait", "1", "--timeout", "1", "--interval", "1"], ).out("CI_VERDICT="),
+        case( "pr ci-wait", &["pr", "ci-wait", "1", "--timeout", "1", "--interval", "1"], ).out("CI_VERDICT=NONE"),
         case( "pr land-wait", &["pr", "land-wait", "1", "--timeout", "1", "--interval", "1"], ).out("LAND_VERDICT=TIMEOUT"),
-        case("pr merge", &["pr", "merge", "1"]).out("merge_rc="),
+        case("pr merge", &["pr", "merge", "1"]).out("merge_rc=-1"),
         // worktrees and memory
         case("worktree sweep", &["worktree", "sweep"]),
         case("worktree remove", &["worktree", "remove", "{ROOT}/none"]).code(1).err("not a registered git worktree"),
@@ -599,6 +622,10 @@ fn leaves() -> Vec<String> {
             .get_subcommands()
             .filter(|s| s.get_name() != "help")
             .collect();
+        // A group whose subcommand is optional also runs on its own.
+        if !subs.is_empty() && !cmd.is_subcommand_required_set() && !path.is_empty() {
+            out.push(path.to_string());
+        }
         if subs.is_empty() {
             let values = cmd
                 .get_positionals()
@@ -861,13 +888,9 @@ fn doctor_on_a_fresh_home_reports_only_known_not_installed_failures() {
         );
         if line.starts_with("FAIL") {
             let documented = [
-                "not installed",
-                "wired 0/",
-                "not wired",
-                "missing",
-                "not found",
-                "no ",
-                "not ",
+                "safety guards wired 0/",
+                "playbook binary not on PATH",
+                "plugin not installed",
             ];
             assert!(
                 documented.iter().any(|d| line.contains(d)),

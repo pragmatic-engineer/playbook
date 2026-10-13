@@ -97,7 +97,14 @@ pub fn open(root: &Path) -> Result<Connection, ConfigError> {
     crate::common::atomic::ensure_private_dir(&data)
         .map_err(|_| ConfigError::DirectoryUnwritable(data.clone()))?;
     move_legacy_db(root);
-    let conn = init_connection(root).map_err(broken(root))?;
+    let conn = init_connection(root).map_err(|e| match e {
+        // Securing or opening the file failed (permissions, read-only
+        // volume): say so, rather than calling the store malformed.
+        rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::CannotOpen => {
+            ConfigError::DirectoryUnwritable(data.clone())
+        }
+        other => broken(root)(other),
+    })?;
     import_legacy_once(&conn, root)?;
     Ok(conn)
 }
