@@ -800,7 +800,7 @@ Example: `playbook init --no-hooks --aliases`
 - `--no-aliases`: Do not install the launcher
 - `--system-prompt`: Install the playbook system prompt (an existing copy is refreshed either way)
 - `--no-system-prompt`: Do not install the system prompt
-- `--telemetry`: Write the OpenTelemetry variables for the local usage collector into settings.json (only when you have no telemetry set up)
+- `--telemetry`: Write the OpenTelemetry variables for the local usage collector into settings.json (asked only when telemetry is off or not set)
 - `--no-telemetry`: Do not write telemetry variables into settings.json
 - `--claude-override`: Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
 - `--no-claude-override`: Do not turn on the `claude` shell function

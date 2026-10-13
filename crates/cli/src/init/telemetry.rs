@@ -67,6 +67,62 @@ fn already_written(home: &Path, settings_path: &Path) -> bool {
         .all(|(k, v)| env.is_some_and(|e| e.get(k) == Some(v)))
 }
 
+/// Whether Claude Code telemetry is on, off or not mentioned, as the process
+/// environment and every Claude Code settings file read together say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum State {
+    /// Telemetry variables are set and not switched off.
+    Enabled,
+    /// `CLAUDE_CODE_ENABLE_TELEMETRY` is set to an off value.
+    Disabled,
+    /// No telemetry variable anywhere.
+    Unset,
+}
+
+/// The current telemetry state. `cwd` is where project settings are looked up.
+/// `with_process` also reads the process environment; tests pass false so the
+/// machine they run on cannot change the answer.
+pub fn state(home: &Path, cwd: &Path, with_process: bool) -> State {
+    use crate::cc::telemetry::Configured;
+    let found = if with_process {
+        crate::cc::telemetry::configured(home, cwd, None)
+    } else {
+        crate::usage::telemetry_detect::configured_from_files(home, cwd, None)
+    };
+    match found {
+        Configured::Nothing => State::Unset,
+        Configured::Disabled => State::Disabled,
+        Configured::Playbook | Configured::Other => State::Enabled,
+    }
+}
+
+/// The one line init prints when telemetry is already on and so asks nothing.
+pub const ENABLED_LINE: &str =
+    "telemetry: already enabled in your environment or Claude Code settings, so nothing to ask";
+
+/// Whether the only telemetry variable in `settings_path`'s env block is an
+/// off `CLAUDE_CODE_ENABLE_TELEMETRY`, the one case where a yes may replace a
+/// value the user set (it is the exact thing they were asked about).
+fn only_an_off_switch(settings_path: &Path) -> bool {
+    let Ok(root) = load(settings_path) else {
+        return false;
+    };
+    let Some(env) = root.get("env").and_then(Value::as_object) else {
+        return false;
+    };
+    let off = env.get("CLAUDE_CODE_ENABLE_TELEMETRY").is_some_and(|v| {
+        matches!(
+            v.as_str().map(|s| s.trim().to_ascii_lowercase()).as_deref(),
+            Some("" | "0" | "false")
+        )
+    });
+    off && env
+        .keys()
+        .filter(|k| *k == "CLAUDE_CODE_ENABLE_TELEMETRY" || k.starts_with("OTEL_"))
+        .count()
+        == 1
+}
+
 /// The init step. `cwd` is where project settings are looked up.
 pub fn apply(
     home: &Path,
@@ -88,7 +144,13 @@ pub fn apply(
             "the variables init wrote are still in place",
         );
     }
-    if process_configured || crate::cc::telemetry::files_configured(home, cwd) {
+    // A yes to "turn it on" may replace an off switch that lives alone in the
+    // user's own settings.json. Any other existing setup is left as it is.
+    let switch_off_here = !process_configured
+        && state(home, cwd, false) == State::Disabled
+        && only_an_off_switch(&claude_home.join("settings.json"));
+    if !switch_off_here && (process_configured || crate::cc::telemetry::files_configured(home, cwd))
+    {
         return StepReport::skipped(
             "telemetry",
             "you already have telemetry configured, left as it is (`playbook usage status` shows how it is read)",
@@ -232,6 +294,35 @@ mod tests {
     }
 
     #[test]
+    fn state_reads_unset_disabled_and_enabled_from_the_settings_files() {
+        let (home, _claude, cwd) = setup("init-tel-state-unset", "{}");
+        assert_eq!(state(&home, &cwd, false), State::Unset);
+        let (home, _claude, cwd) = setup(
+            "init-tel-state-off",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#,
+        );
+        assert_eq!(state(&home, &cwd, false), State::Disabled);
+        let (home, _claude, cwd) = setup(
+            "init-tel-state-on",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1"}}"#,
+        );
+        assert_eq!(state(&home, &cwd, false), State::Enabled);
+    }
+
+    #[test]
+    fn a_yes_replaces_an_off_switch_that_stands_alone_in_user_settings() {
+        let (home, claude, cwd) = setup(
+            "init-tel-flip",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","FOO":"1"}}"#,
+        );
+        let step = apply(&home, &claude, &cwd, 5, false);
+        let env = env_of(&claude);
+        assert_eq!(step.status, crate::init::run::StepStatus::Wired);
+        assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+        assert_eq!(env["FOO"], "1");
+    }
+
+    #[test]
     fn a_second_run_reports_no_change_instead_of_calling_it_your_setup() {
         let (home, claude, cwd) = setup("init-tel-twice", "{}");
         apply(&home, &claude, &cwd, 1, false);
@@ -267,7 +358,7 @@ mod tests {
 
     #[test]
     fn an_existing_telemetry_setting_is_never_overridden() {
-        let original = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#;
+        let original = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","OTEL_EXPORTER_OTLP_ENDPOINT":"https://x"}}"#;
         let (home, claude, cwd) = setup("init-tel-keep", original);
         let step = apply(&home, &claude, &cwd, 1, false);
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);

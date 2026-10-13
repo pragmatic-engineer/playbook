@@ -128,6 +128,15 @@ pub fn configured(home: &Path, cwd: &Path, ours: Option<u16>) -> Configured {
     }
 }
 
+/// Like [`configured`] but reading only the settings files, not the process
+/// environment.
+pub fn configured_from_files(home: &Path, cwd: &Path, ours: Option<u16>) -> Configured {
+    match collect_vars(std::iter::empty(), &settings_files(home, cwd)) {
+        Ok(vars) => classify(&vars, ours),
+        Err(()) => Configured::Other,
+    }
+}
+
 /// Whether the process environment names a telemetry variable.
 pub fn process_configured() -> bool {
     std::env::vars_os()
