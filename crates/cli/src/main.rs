@@ -8,13 +8,13 @@ use playbook::init::shim::ShellKind;
 use playbook::{
     adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
     effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
-    plan_cleanup, planning, pr, review, sanitize, settings, statusline, trust, update, usage,
-    worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli, Command, CommitCommand,
-    ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand, GateCommand,
+    plan_cleanup, planning, pr, review, sanitize, settings, statusline, tools_map, trust, update,
+    usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli, Command,
+    CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand, GateCommand,
     GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand,
     ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand, ReviewWorktreeCommand,
     SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand, SettingsCommand,
-    SkillCommand, WorktreeCommand,
+    SkillCommand, ToolsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -1420,6 +1420,25 @@ fn main() {
                 std::process::exit(1);
             }
             println!("{}", path.display());
+        }
+        Command::Tools {
+            sub: ToolsCommand::Map { json, check },
+        } => {
+            if json {
+                println!("{}", tools_map::render_json());
+            } else if check {
+                let text = tools_map::render();
+                let cost = tools_map::tokens(&text);
+                println!(
+                    "tool map: about {cost} tokens, budget {}",
+                    tools_map::TOKEN_BUDGET
+                );
+                if cost > tools_map::TOKEN_BUDGET {
+                    std::process::exit(1);
+                }
+            } else {
+                print!("{}", tools_map::render());
+            }
         }
         Command::Adr {
             sub: AdrCommand::Next,

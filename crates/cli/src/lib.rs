@@ -72,6 +72,7 @@ pub mod state;
 pub mod statusline;
 #[doc(hidden)]
 pub mod testing;
+pub mod tools_map;
 pub mod trust;
 pub mod ui;
 pub mod uninstall;
@@ -677,6 +678,11 @@ pub enum Command {
     Skill {
         #[command(subcommand)]
         sub: SkillCommand,
+    },
+    /// List the commands a session can use for each task
+    Tools {
+        #[command(subcommand)]
+        sub: ToolsCommand,
     },
     /// ADR helpers
     Adr {
@@ -1745,6 +1751,21 @@ pub enum DocCommand {
     },
     /// Say whether the anydoc converter is installed and how to get it
     Status,
+}
+
+/// `playbook tools` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ToolsCommand {
+    /// Print the map from each task to the command that does it. The session
+    /// start hook injects this text, so skills can ask for a task by name.
+    Map {
+        /// Print `[{"intent", "command"}]` as JSON
+        #[arg(long, conflicts_with = "check")]
+        json: bool,
+        /// Exit 1 when the map costs more than its token budget
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 /// `playbook deps` subcommands.

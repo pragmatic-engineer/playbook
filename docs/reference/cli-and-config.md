@@ -75,7 +75,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -1334,6 +1334,19 @@ Print the state rows, sorted by key
 Print the Claude Code status line
 
 Claude Code runs this to draw the line at the bottom of a session.
+
+### `playbook tools`
+
+List the commands a session can use for each task
+
+Subcommands: `map`
+
+### `playbook tools map`
+
+Print the map from each task to the command that does it. The session start hook injects this text, so skills can ask for a task by name
+
+- `--json`: Print `[{"intent", "command"}]` as JSON
+- `--check`: Exit 1 when the map costs more than its token budget
 
 ### `playbook trust`
 
