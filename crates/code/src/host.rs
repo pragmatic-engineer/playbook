@@ -16,8 +16,8 @@ pub fn tool_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// The state folder for the current worktree, where the index cache lives
-/// (`code/index.sqlite3` goes inside it). Fails with an actionable message
+/// The state folder for the current worktree, where earlier versions kept the
+/// index cache (`code/index.sqlite3`). Fails with an actionable message
 /// when the repo has no way to name itself.
 pub fn state_dir() -> Result<PathBuf, String> {
     playbook_common::paths::repo_scoped_dir(playbook_common::paths::RepoScope::Worktree).ok_or_else(
@@ -27,6 +27,24 @@ pub fn state_dir() -> Result<PathBuf, String> {
                 .to_string()
         },
     )
+}
+
+/// The code index of the current worktree inside the data folder, after
+/// moving the one earlier versions kept under the worktree state folder. A
+/// failed move is not an error: the index is a cache and is rebuilt. A repo
+/// whose name has no safe data folder path keeps its index at the old path.
+pub fn index_db() -> Result<PathBuf, String> {
+    let old = state_dir()?.join("code").join("index.sqlite3");
+    let Some(new) = playbook_data::scoped_db("code") else {
+        return Ok(old);
+    };
+    let step = playbook_data::migrate::Move {
+        old,
+        new: new.clone(),
+        policy: playbook_data::migrate::Policy::Cache,
+    };
+    let _ = playbook_data::migrate::migrate_with_notice(&step, "code index");
+    Ok(new)
 }
 
 /// A stable identity for the current worktree.

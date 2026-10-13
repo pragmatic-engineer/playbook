@@ -36,9 +36,10 @@ pub fn repo_root(cwd: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| "not inside a git repository".to_string())
 }
 
-/// `<worktree state dir>/code/index.sqlite3` for the current repo.
+/// `<data dir>/code/<owner>/<repo>/<worktree-id>.db` for the current repo.
+/// Moves an index kept at the old worktree state path on first use.
 pub fn index_path() -> Result<PathBuf, String> {
-    host::state_dir().map(|dir| dir.join("code").join("index.sqlite3"))
+    host::index_db()
 }
 
 /// Replaces `\` with `/`. Pure, so it is tested on strings on every platform.

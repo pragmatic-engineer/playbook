@@ -174,6 +174,7 @@ fn the_index_lands_under_the_home_state_dir_and_not_in_the_repo() {
         "{path}"
     );
     assert!(path.contains("test-owner/test-repo"), "{path}");
+    assert!(path.contains("/data/code/"), "{path}");
     assert!(Path::new(&path).is_file());
     let listing = fs::read_dir(&fx.repo)
         .expect("repo")
@@ -461,4 +462,72 @@ fn context_prints_snippets_and_a_stable_json_document() {
     assert_eq!(doc["results"]["snippets"][0]["path"], "pay.ts");
     assert!(String::from_utf8_lossy(&text.stdout).contains("== pay.ts:1-3"));
     assert!(!small.status.success());
+}
+
+#[test]
+fn an_index_at_the_old_state_path_moves_into_the_data_folder() {
+    // Arrange: build an index, then put it back where earlier versions kept it.
+    let fx = Fixture::new("old-index", true);
+    fx.write("a.rs", "fn a() {}\n");
+    let doc = json_of(&fx.playbook(&["code", "index", "--json"]));
+    let new_path = PathBuf::from(doc["index"]["path"].as_str().expect("path"));
+    let worktree_id = new_path
+        .file_stem()
+        .expect("stem")
+        .to_string_lossy()
+        .into_owned();
+    let old_dir = fx
+        .home
+        .join(".config/playbook/repos/test-owner/test-repo")
+        .join(worktree_id)
+        .join("code");
+    fs::create_dir_all(&old_dir).expect("old dir");
+    let old = old_dir.join("index.sqlite3");
+    fs::rename(&new_path, &old).expect("put the index back at the old path");
+
+    // Act
+    let out = fx.playbook(&["code", "status", "--json"]);
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(new_path.is_file(), "moved into the data folder");
+    assert!(!old.exists(), "the old file is gone from its old name");
+    assert_eq!(json_of(&out)["index"]["state"], "fresh");
+}
+
+#[test]
+fn a_corrupt_old_index_does_not_stop_a_fresh_build() {
+    // Arrange
+    let fx = Fixture::new("old-index-junk", true);
+    fx.write("a.rs", "fn a() {}\n");
+    let probe = json_of(&fx.playbook(&["code", "index", "--json"]));
+    let new_path = PathBuf::from(probe["index"]["path"].as_str().expect("path"));
+    fs::remove_file(&new_path).expect("drop the new index");
+    let worktree_id = new_path
+        .file_stem()
+        .expect("stem")
+        .to_string_lossy()
+        .into_owned();
+    let old_dir = fx
+        .home
+        .join(".config/playbook/repos/test-owner/test-repo")
+        .join(worktree_id)
+        .join("code");
+    fs::create_dir_all(&old_dir).expect("old dir");
+    fs::write(old_dir.join("index.sqlite3"), vec![b'x'; 4096]).expect("junk");
+
+    // Act
+    let out = fx.playbook(&["code", "index", "--json"]);
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(new_path.is_file());
 }
