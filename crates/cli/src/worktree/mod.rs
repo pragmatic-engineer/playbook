@@ -268,6 +268,18 @@ pub struct WorktreeEntry {
     pub lock_reason: Option<String>,
 }
 
+/// The worktree ids of every worktree registered against `repo_root`, or
+/// `None` when git cannot say (so nothing is reported as orphaned).
+pub fn live_worktree_ids(repo_root: &Path) -> Option<Vec<String>> {
+    let entries = list_worktrees(repo_root).ok()?;
+    Some(
+        entries
+            .iter()
+            .map(|e| crate::common::paths::worktree_id_for(&e.path))
+            .collect(),
+    )
+}
+
 /// Lists every worktree registered against `repo_root`. Aborts rather than
 /// treating a failed or unparseable command as "nothing to sweep": a broken
 /// `.git` state must stop the sweep, not proceed as if no worktrees existed.
@@ -878,6 +890,16 @@ pub fn sweep(
         let line = decide_and_report(entry, landed, &lock, repo_root, dry_run);
         if !dry_run && (line.ends_with(": removed") || line.contains(": failed to remove")) {
             log_removal(home, now_epoch, &line);
+        }
+        if !dry_run && line.ends_with(": removed") {
+            // The worktree's databases in the data folder go with it.
+            if let Some(slug) = repo_slug {
+                crate::common::data::remove_worktree_dbs(
+                    &crate::common::data::data_dir_from(home),
+                    slug,
+                    &crate::common::paths::worktree_id_for(&entry.path),
+                );
+            }
         }
         report.push(line);
     }

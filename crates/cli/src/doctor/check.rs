@@ -559,7 +559,39 @@ fn data_rows(env: &Env) -> Vec<Row> {
     if !left.is_empty() {
         msg.push_str(&format!(", migrated leftovers: {}", left.join(", ")));
     }
-    vec![Row::new("-", Level::Info, msg)]
+    let mut rows = vec![Row::new("-", Level::Info, msg)];
+    rows.extend(orphan_rows(env, &dir));
+    rows
+}
+
+/// Databases in the data folder whose worktree no longer exists. They are
+/// safe to delete: the code index is a cache, and a removed worktree's gate
+/// records are finished.
+fn orphan_rows(env: &Env, data: &Path) -> Vec<Row> {
+    let (Some(root), Some(slug)) = (&env.repo_root, &env.repo_slug) else {
+        return Vec::new();
+    };
+    let Some(live) = crate::worktree::live_worktree_ids(root) else {
+        return Vec::new();
+    };
+    let orphans = crate::common::data::orphan_dbs(data, slug, &live);
+    if orphans.is_empty() {
+        return Vec::new();
+    }
+    let list: Vec<String> = orphans
+        .iter()
+        .map(|(kind, p)| format!("{kind}: {}", p.display()))
+        .collect();
+    vec![Row::new(
+        "-",
+        Level::Info,
+        format!(
+            "{} database file(s) belong to removed worktrees of {slug}: {}",
+            orphans.len(),
+            list.join(", ")
+        ),
+    )
+    .hint("they are safe to delete; `playbook worktree sweep` removes them with their worktree")]
 }
 
 fn migration_rows(env: &Env) -> Vec<Row> {

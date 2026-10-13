@@ -214,6 +214,48 @@ fn a_merged_branch_with_its_own_commits_is_removed_and_logged() {
 }
 
 #[test]
+fn removing_a_worktree_removes_its_databases_from_the_data_folder() {
+    let f = fixture("data-files");
+    let wt = agent_worktree(&f, "agent-data");
+    commit_in(&wt, "feature.txt");
+    git_ok(&f.repo, &["merge", "-q", "--ff-only", "agent-data"]);
+    let head = String::from_utf8_lossy(&git(&f.repo, &["rev-parse", "HEAD"]).stdout)
+        .trim()
+        .to_string();
+    git_ok(&f.repo, &["update-ref", "refs/remotes/origin/main", &head]);
+    age(&wt, 1);
+    let id: String = wt
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let data = f.home.join(".config/playbook/data");
+    let db = |kind: &str, name: &str| {
+        data.join(kind)
+            .join("acme/widgets")
+            .join(format!("{name}.db"))
+    };
+    for p in [
+        db("gate", &id),
+        db("code", &id),
+        db("gate", "other-worktree"),
+    ] {
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, "x").unwrap();
+    }
+
+    let out = sweep(&f);
+
+    assert!(!wt.exists(), "{out}");
+    assert!(!db("gate", &id).exists() && !db("code", &id).exists());
+    assert!(
+        db("gate", "other-worktree").exists(),
+        "other worktrees keep theirs"
+    );
+    cleanup(&f);
+}
+
+#[test]
 fn a_just_merged_branch_is_protected_while_its_worktree_is_new() {
     let f = fixture("merged-new");
     let wt = agent_worktree(&f, "agent-merged-new");
