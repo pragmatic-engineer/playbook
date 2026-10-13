@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Whether the user switched the playbook plugin off in Claude Code.
+//! Whether the user switched the playbook plugin off in Claude Code, and
+//! which of the two plugins (`playbook`, `playbook-hooks`) are installed.
 //!
 //! `playbook init` writes user-level hook entries and a status line into
 //! `~/.claude/settings.json`. Disabling the plugin in Claude Code sets
@@ -62,14 +63,62 @@ pub fn seen_marker(home: &Path) -> std::path::PathBuf {
     crate::common::paths::playbook_root_from(home).join("plugin-seen")
 }
 
-/// Whether Claude Code lists the plugin as installed, or `None` when
-/// `installed_plugins.json` is missing or cannot be parsed.
-pub fn installed_in(home: &Path) -> Option<bool> {
+/// The hooks plugin's key. It carries the worktree hooks and the installer
+/// shim, and ships separately from the `playbook` plugin.
+pub const HOOKS_PLUGIN_KEY: &str = "playbook-hooks@pragmatic-engineer";
+
+/// The hint shown to someone who has the `playbook` plugin but not the hooks
+/// plugin, which is how every install looked before the two were split.
+pub const HOOKS_MISSING_HINT: &str = "the playbook-hooks plugin is not installed, so the worktree hooks are off. Add it with: claude plugin install playbook-hooks@pragmatic-engineer";
+
+fn installed_entry(home: &Path, key: &str) -> Option<Option<serde_json::Value>> {
     let path = home.join(".claude/plugins/installed_plugins.json");
     let value: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-    let listed = |v: &serde_json::Value| v.get(PLUGIN_KEY).is_some_and(|e| !e.is_null());
-    Some(value.get("plugins").is_some_and(listed) || listed(&value))
+    let find = |v: &serde_json::Value| v.get(key).filter(|e| !e.is_null()).cloned();
+    Some(value.get("plugins").and_then(find).or_else(|| find(&value)))
+}
+
+/// Whether Claude Code lists `key` as installed, or `None` when
+/// `installed_plugins.json` is missing or cannot be parsed.
+pub fn listed_in(home: &Path, key: &str) -> Option<bool> {
+    installed_entry(home, key).map(|entry| entry.is_some())
+}
+
+/// The version Claude Code recorded for `key`, when it lists one.
+pub fn version_in(home: &Path, key: &str) -> Option<String> {
+    let entry = installed_entry(home, key)??;
+    let first = entry.as_array().and_then(|a| a.first()).unwrap_or(&entry);
+    first
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
+/// Whether Claude Code lists the plugin as installed, or `None` when
+/// `installed_plugins.json` is missing or cannot be parsed.
+pub fn installed_in(home: &Path) -> Option<bool> {
+    listed_in(home, PLUGIN_KEY)
+}
+
+/// True when the `playbook` plugin is installed and the hooks plugin is not.
+/// A machine with neither (a Homebrew-only install) is not told anything: its
+/// hooks come from `settings.json`.
+pub fn hooks_plugin_missing(home: &Path) -> bool {
+    installed_in(home) == Some(true) && listed_in(home, HOOKS_PLUGIN_KEY) == Some(false)
+}
+
+/// `HOOKS_MISSING_HINT` when it applies and the user has not turned plugin
+/// hints off with `hints.pluginRemoved`.
+pub fn hooks_missing_hint(home: &Path) -> Option<&'static str> {
+    (hooks_plugin_missing(home) && !hints_off(home)).then_some(HOOKS_MISSING_HINT)
+}
+
+fn hints_off(home: &Path) -> bool {
+    crate::config::resolve(HINT_KEY, home, None)
+        .ok()
+        .and_then(|(v, _)| v.as_bool())
+        == Some(false)
 }
 
 /// Whether the marketplace is listed in `known_marketplaces.json`.
@@ -106,14 +155,7 @@ pub fn removed(home: &Path) -> bool {
 /// The hint to show, or `None` when the plugin was not removed or the user
 /// turned the hint off with `hints.pluginRemoved`.
 pub fn removed_hint(home: &Path) -> Option<&'static str> {
-    if !removed(home) {
-        return None;
-    }
-    let off = crate::config::resolve(HINT_KEY, home, None)
-        .ok()
-        .and_then(|(v, _)| v.as_bool())
-        == Some(false);
-    (!off).then_some(REMOVED_HINT)
+    (removed(home) && !hints_off(home)).then_some(REMOVED_HINT)
 }
 
 #[cfg(test)]
@@ -235,6 +277,50 @@ mod tests {
         assert!(!removed(&home));
         let _ = std::fs::remove_file(home.join(".claude/plugins/installed_plugins.json"));
         assert!(!removed(&home));
+    }
+
+    const BOTH: &str = r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"version":"0.25.0"}],"playbook-hooks@pragmatic-engineer":[{"version":"0.25.1"}]}}"#;
+
+    #[test]
+    fn the_hooks_plugin_is_missing_only_when_the_skills_plugin_is_installed() {
+        let skills_only = home_with(None);
+        write_installed(&skills_only, LISTED);
+        assert!(hooks_plugin_missing(&skills_only));
+        assert_eq!(hooks_missing_hint(&skills_only), Some(HOOKS_MISSING_HINT));
+        let both = home_with(None);
+        write_installed(&both, BOTH);
+        assert!(!hooks_plugin_missing(&both));
+        let neither = home_with(None);
+        write_installed(&neither, EMPTY);
+        assert!(!hooks_plugin_missing(&neither));
+        assert!(!hooks_plugin_missing(&home_with(None)));
+    }
+
+    #[test]
+    fn versions_come_from_the_first_recorded_entry() {
+        let home = home_with(None);
+        write_installed(&home, BOTH);
+        assert_eq!(version_in(&home, PLUGIN_KEY).as_deref(), Some("0.25.0"));
+        assert_eq!(
+            version_in(&home, HOOKS_PLUGIN_KEY).as_deref(),
+            Some("0.25.1")
+        );
+        assert_eq!(version_in(&home, "other@x"), None);
+    }
+
+    #[test]
+    fn the_config_key_turns_the_hooks_hint_off_too() {
+        let home = home_with(None);
+        write_installed(&home, LISTED);
+        crate::config::write::set(
+            crate::config::write::Tier::Global,
+            HINT_KEY,
+            serde_json::Value::Bool(false),
+            &home,
+            None,
+        )
+        .unwrap();
+        assert_eq!(hooks_missing_hint(&home), None);
     }
 
     #[test]

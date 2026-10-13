@@ -8,12 +8,14 @@ The quickest route is one command. This page covers every route, requirements, h
 
 | Mode | Commands, in order | You get | You lack |
 |---|---|---|---|
-| Skills only (plugin) | `claude plugin marketplace add pragmatic-engineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer` | Skills and subagent text you can read and follow | Safety guards, status line, hooks, usage, and every command that calls `playbook ...` |
-| Skills plus binary (recommended) | Pick one. Install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash`. Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init`. Plugin: the two plugin commands above, then `/playbook:setup` | Everything: slash commands, guards, hooks, status line, memory, usage | Nothing |
+| Skills only (plugin) | `claude plugin marketplace add pragmatic-engineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer`. Or the install script with `--skills-only`, which does the same and nothing else | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
+| Skills plus binary (recommended) | Pick one. Install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash` (installs both plugins). Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init`. Plugins: `claude plugin install playbook@pragmatic-engineer` and `claude plugin install playbook-hooks@pragmatic-engineer`, then `/playbook:setup` | Everything: slash commands, guards, hooks, status line, memory, usage | Nothing |
+
+There are two plugins. `playbook` holds the skills, commands and agents and has no hooks. `playbook-hooks` holds the worktree hooks and the installer shim, and needs the binary. If you installed `playbook` before the split, add the second one with `claude plugin install playbook-hooks@pragmatic-engineer`. `playbook init` and `/playbook:doctor` tell you when it is missing, and playbook never installs a plugin for you.
 
 Which one? Choose skills only if you want to read the skills and nothing else runs on your machine. Choose skills plus binary for everything else. The binary is a hard dependency of the commands, hooks, guards, status line and usage. Only the skill text works without it.
 
-A plugin with no binary is not a working install. The first `playbook` call from a command runs the shipped installer once, and prints a notice first. See [Plugin only](#plugin-only-and-the-binary).
+Some commands call the `playbook` binary. With only the `playbook` plugin they fall back to plain git, gh and file steps where they can. With `playbook-hooks` installed, the first `playbook` call installs the binary once and prints a notice first. See [Plugin only](#plugin-only-and-the-binary).
 
 ## Requirements
 
@@ -46,6 +48,7 @@ Pass `--yes` to accept every default. Flags go after `-s --` when piping:
 | `--short-name` (`playbook init`) | Define a `pb` shell function for `playbook`, only when `pb` is free. install.sh also links `pb` to `playbook` when the name is free. |
 | `--system-prompt` | Install the system prompt without asking (implies `--aliases`). |
 | `--binary-only` | Binary, `PATH`, guards and settings only. No plugin, launcher, system prompt or prompts. |
+| `--skills-only` | Install only the `playbook` plugin. No binary, no hooks plugin, no `settings.json` change. Cannot be combined with `--binary-only`. |
 | `--ref <ref>` | Source ref, same as `PLAYBOOK_REF`. |
 
 Pin a version with `PLAYBOOK_REF`:
@@ -89,11 +92,12 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 ```bash
 claude plugin marketplace add pragmatic-engineer/marketplace
 claude plugin install playbook@pragmatic-engineer
+claude plugin install playbook-hooks@pragmatic-engineer
 ```
 
 Then run `/playbook:setup` in a Claude Code session. It installs the release binary (checksum verified) when none is on `PATH`, wires the guards and settings, and offers the launchers and system prompt.
 
-The plugin alone gives you skills, commands and subagents, and nothing else. Without the binary every hook is dead, so `/playbook:doctor` reports the binary, guards and status line as missing. The plugin ships a `bin/playbook` shim, and the first `playbook` call installs the binary once (binary and `PATH` only).
+The `playbook` plugin alone gives you skills, commands and subagents, and nothing else. Without the binary every hook is dead, so `/playbook:doctor` reports the binary, guards and status line as missing. The `playbook-hooks` plugin ships a `bin/playbook` shim, and the first `playbook` call installs the binary once (binary and `PATH` only).
 
 **Fully manual.**
 
@@ -175,9 +179,9 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 `playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. Hooks, status line and `PATH` are on by default, the permissions rules (`--security`), launcher and system prompt are off.
 
-With the plugin alone, the guards and status line are not wired, and `/playbook:doctor` reports them as missing. Run `/playbook:setup` to finish. The first session after a plugin-only install also prints one line: "playbook is installed as a plugin only. Run /playbook:setup to install the binary and guards." It goes away once the hooks are wired, and Homebrew and install script users never see it after `playbook init`.
+With the plugins alone, the guards and status line are not wired, and `/playbook:doctor` reports them as missing. Run `/playbook:setup` to finish. The first session after a plugin-only install also prints one line: "playbook is installed as a plugin only. Run /playbook:setup to install the binary and guards." It goes away once the hooks are wired, and Homebrew and install script users never see it after `playbook init`.
 
-When no binary exists, the first bare `playbook` call from a command runs the plugin's installer once. It prints what it does first: it downloads the release, checks its SHA256, adds the install directory to your shell `PATH` and wires hooks in `settings.json`. To stop that, set `PLAYBOOK_NO_AUTO_INSTALL=1`, or create the file `~/.config/playbook/no-auto-install`. The shim then exits with the manual install command and installs nothing.
+When no binary exists and `playbook-hooks` is installed, the first bare `playbook` call from a command runs that plugin's installer once. It prints what it does first: it downloads the release, checks its SHA256, adds the install directory to your shell `PATH` and wires hooks in `settings.json`. To stop that, set `PLAYBOOK_NO_AUTO_INSTALL=1`, or create the file `~/.config/playbook/no-auto-install`. The shim then exits with the manual install command and installs nothing.
 
 ## Settings merge
 
@@ -210,7 +214,7 @@ It removes only what playbook placed: the hook entries and status line in `setti
 
 Everything else stays: the rest of `settings.json` and your rc files, `.settings.base.json`, `backups/`, memory, the [data folder](../internals/11-data-folder.md) with every database, and all runtime state. Each changed file is backed up first (`settings.json.bak.<epoch>`). A status line script or system prompt you edited by hand is kept. If `settings.json` cannot be edited, such as invalid JSON, the placed files and the binary stay too.
 
-At the end it lists the manual steps that still apply, because playbook never changes Claude Code's plugins: `claude plugin uninstall playbook@pragmatic-engineer` while the plugin is installed, and `claude plugin marketplace remove pragmatic-engineer` while the marketplace is listed.
+At the end it lists the manual steps that still apply, because playbook never changes Claude Code's plugins: `claude plugin uninstall playbook@pragmatic-engineer` and `claude plugin uninstall playbook-hooks@pragmatic-engineer` while each is installed, and `claude plugin marketplace remove pragmatic-engineer` while the marketplace is listed.
 
 `--remove-binary` also removes the binary, its `.bak` backups and the `PATH` block the installer added.
 
